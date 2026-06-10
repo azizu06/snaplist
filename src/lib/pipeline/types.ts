@@ -60,6 +60,33 @@ export const listingCopySchema = z.object({
 
 export type ListingCopy = z.infer<typeof listingCopySchema>;
 
+/**
+ * "What we think it is" — the identification surfaced to the user BEFORE pricing
+ * (issue #6 acceptance: identification surfaced for confirmation; ambiguous /
+ * low-evidence ids are FLAGGED, not silently guessed).
+ *
+ * `confident` is derived from how many STRONG identifiers the vision step resolved
+ * (brand, model, decoded barcode/ISBN/UPC, an unambiguous category) — never from
+ * raw model self-report (mirrors the confidence composite's signal-based stance).
+ * When evidence is thin or the model signals uncertainty, `confident` is false and
+ * `reason` explains why; `candidates` may list plausible alternatives so the user
+ * can disambiguate rather than the system guessing.
+ */
+export const identificationSchema = z.object({
+  /** Best-guess human label for the item (e.g. "Sony WH-1000XM4 Headphones"). */
+  label: z.string(),
+  /** True only when enough strong identifiers resolved AND the model wasn't uncertain. */
+  confident: z.boolean(),
+  /** How many strong identifiers (brand/model/barcode/category) resolved, in [0,1]. */
+  evidence: z.number().min(0).max(1),
+  /** Human-readable "why we're unsure" when `confident` is false. */
+  reason: z.string().optional(),
+  /** Plausible alternatives surfaced for disambiguation instead of guessing. */
+  candidates: z.array(z.string()).optional(),
+});
+
+export type Identification = z.infer<typeof identificationSchema>;
+
 /** What the pipeline is handed: the stored photo paths + the autopilot toggle. */
 export interface PipelineInput {
   /** Storage object paths (under the private `photos` bucket), scoped by user_id. */
@@ -86,6 +113,11 @@ export const pipelineResultSchema = z.object({
   listing: listingCopySchema,
   /** The model id used for the run (stubbed here). Logged for evaluation. */
   model: z.string(),
+  /**
+   * "What we think it is", surfaced before pricing. OPTIONAL so the walking-skeleton
+   * stub (which predates the real vision slice) still satisfies the contract.
+   */
+  identification: identificationSchema.optional(),
 });
 
 export type PipelineResult = {
@@ -94,6 +126,11 @@ export type PipelineResult = {
   confidence: ConfidenceResult;
   listing: ListingCopy;
   model: string;
+  /**
+   * "What we think it is" for user confirmation before pricing. OPTIONAL: the stub
+   * does not produce it, so its existing return still type-checks (issue #6 rule).
+   */
+  identification?: Identification;
 };
 
 /**

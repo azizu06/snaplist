@@ -1,15 +1,21 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { extractedAttributesSchema } from "@/lib/pipeline/types";
+import { deriveIdentification } from "@/lib/vision";
 
 /**
  * Review page — reads the persisted item + its listing + the prediction log back
  * through the USER-SCOPED server client (so RLS proves the row belongs to the
- * caller; another user's id 404s). Renders the stub pipeline's output: extracted
- * attributes, price recommendation (suggested + range + confidence band), and the
- * generated listing copy. Skeleton-level UI.
+ * caller; another user's id 404s). Renders the real pipeline's output: the
+ * identification ("what we think it is", surfaced BEFORE pricing for confirmation),
+ * extracted attributes, price recommendation, and the generated listing copy.
  *
- * This closes the loop the issue requires: "rendered on a review page".
+ * The identification is RE-DERIVED from the persisted, Zod-validated attributes using
+ * the same evidence logic the pipeline used, so ambiguous / low-evidence items are
+ * FLAGGED here rather than presented as a confident guess (issue #6 acceptance).
+ *
+ * This closes the loop the issue requires: "identification surfaced before pricing".
  */
 export default async function ReviewPage({
   params,
@@ -59,6 +65,15 @@ export default async function ReviewPage({
   }
 
   const attrs = (item.attributes ?? {}) as Record<string, unknown>;
+
+  // "What we think it is" — re-derived from the persisted, validated attributes with
+  // the SAME evidence logic the pipeline used, so a thin/generic item is flagged for
+  // confirmation rather than shown as a confident guess. Surfaced BEFORE pricing.
+  const parsedAttrs = extractedAttributesSchema.safeParse(item.attributes ?? {});
+  const identification = parsedAttrs.success
+    ? deriveIdentification(parsedAttrs.data, {})
+    : null;
+
   const range = (log?.price_range ?? null) as { low?: number; high?: number } | null;
   const confidence = typeof log?.confidence === "number" ? log.confidence : null;
   const band = confidence == null ? null : confidence >= 0.75 ? "high" : confidence >= 0.5 ? "medium" : "low";
@@ -82,6 +97,41 @@ export default async function ReviewPage({
           alt="Uploaded item"
           className="max-h-64 w-auto self-start rounded-md border border-zinc-200 object-contain"
         />
+      ) : null}
+
+      {identification ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
+            What we think it is
+          </h2>
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-semibold">{identification.label}</span>
+            {identification.confident ? (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
+                identified
+              </span>
+            ) : (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                needs confirmation
+              </span>
+            )}
+          </div>
+          {!identification.confident && identification.reason ? (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {identification.reason} Please confirm or correct before pricing.
+            </p>
+          ) : null}
+          {identification.candidates && identification.candidates.length > 0 ? (
+            <p className="text-sm text-zinc-500">
+              Possible matches: {identification.candidates.join(", ")}
+            </p>
+          ) : (
+            <p className="text-xs text-zinc-400">
+              Identification confidence: {(identification.evidence * 100).toFixed(0)}%
+              of strong identifiers resolved
+            </p>
+          )}
+        </section>
       ) : null}
 
       <section className="flex flex-col gap-2">
