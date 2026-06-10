@@ -1,0 +1,11 @@
+-- SnapList — local seed (runs on `pnpm supabase db reset`, per config.toml db.seed).
+--
+-- The PRD calls for a seeded pgvector reference corpus from day one. That corpus is
+-- owned by the service role (not a normal tenant) and its rows carry a user_id, so
+-- meaningful seeding happens once auth users exist (a later slice provides the seed
+-- script + embeddings). Keeping this file present and valid means `db reset` runs
+-- clean today; corpus INSERTs land here when the embedding pipeline exists.
+--
+-- Intentionally a no-op for now: a bare SELECT keeps the file syntactically valid
+-- without inserting rows that would violate the auth.users FK before any user exists.
+select 'snaplist seed placeholder — reference corpus seeding lands with the embeddings slice' as note;
