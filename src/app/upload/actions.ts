@@ -19,12 +19,15 @@ import { createVisionPipeline } from "@/lib/vision";
  * seam is unchanged; only the pipeline behind it became real.
  */
 
+// OpenAI vision input only accepts PNG, JPEG, WEBP, and (non-animated) GIF — NOT
+// HEIC/HEIF. Since the upload now feeds the photo straight to the real vision call,
+// accepting HEIC/HEIF would store the file and then fail at extraction (the common
+// iPhone-default case). Gate to the vision-supported set here; server-side HEIC
+// transcoding is a deliberate follow-up.
 const ACCEPTED = new Set([
   "image/png",
   "image/jpeg",
   "image/webp",
-  "image/heic",
-  "image/heif",
 ]);
 
 export async function uploadAndProcess(formData: FormData) {
@@ -41,7 +44,7 @@ export async function uploadAndProcess(formData: FormData) {
   const photo = file as File;
   if (!ACCEPTED.has(photo.type)) {
     redirect(
-      `/upload?error=${encodeURIComponent("Unsupported file type. Use PNG, JPEG, WEBP, or HEIC.")}`,
+      `/upload?error=${encodeURIComponent("Unsupported file type. Use PNG, JPEG, or WEBP (convert HEIC photos first).")}`,
     );
   }
 

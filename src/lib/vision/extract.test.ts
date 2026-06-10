@@ -118,6 +118,39 @@ describe("vision/extract — schema validation + retry", () => {
     expect(attributes.model).toBe("WH-1000XM4");
   });
 
+  it("retries when the model call THROWS (real generateObject throws, not returns, on invalid output)", async () => {
+    // The real `generateObject` validates internally and THROWS (NoObjectGeneratedError)
+    // on a bad response rather than returning an invalid object. The retry loop must
+    // treat a throw as a failed attempt, not let it bypass `maxRetries`.
+    const attempts: number[] = [];
+    let n = 0;
+    const generate: VisionGenerate = async (args) => {
+      attempts.push(args.attempt);
+      n += 1;
+      if (n === 1) throw new Error("NoObjectGeneratedError: could not parse response");
+      return STRONG;
+    };
+    const { attributes } = await extractItemAttributes({
+      images: ["x"],
+      generate,
+      maxRetries: 2,
+    });
+    expect(attempts).toEqual([0, 1]); // threw on attempt 0, retried attempt 1
+    expect(attributes.model).toBe("WH-1000XM4");
+  });
+
+  it("throws after exhausting retries when the model call ALWAYS throws", async () => {
+    let n = 0;
+    const generate: VisionGenerate = async () => {
+      n += 1;
+      throw new Error("NoObjectGeneratedError: persistent failure");
+    };
+    await expect(
+      extractItemAttributes({ images: ["x"], generate, maxRetries: 2 }),
+    ).rejects.toThrow(/valid|schema|extract|attempt/i);
+    expect(n).toBe(3); // 1 initial + 2 retries
+  });
+
   it("throws a clear error after exhausting retries on persistent invalid output", async () => {
     const invalid = { specs: 123 } as unknown as VisionGenerateResult;
     const gen = scriptedGenerate([invalid]);

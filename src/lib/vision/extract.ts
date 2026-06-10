@@ -207,7 +207,18 @@ export async function extractItemAttributes(
   const attempts = maxRetries + 1;
   let lastIssues = "";
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const raw = await generate({ model, images, attempt });
+    let raw: VisionGenerateResult;
+    try {
+      raw = await generate({ model, images, attempt });
+    } catch (err) {
+      // The real `generateObject` validates internally and THROWS
+      // (NoObjectGeneratedError) on a parse/schema failure rather than returning an
+      // invalid object. A throw here is a FAILED ATTEMPT, not a fatal error — record
+      // it and retry; only give up once all attempts are exhausted. (Without this
+      // catch the first invalid real response would bypass `maxRetries` entirely.)
+      lastIssues = err instanceof Error ? err.message : String(err);
+      continue;
+    }
     const parsed = extractedAttributesSchema.safeParse(raw);
     if (parsed.success) {
       const attributes = parsed.data;
@@ -237,24 +248,55 @@ export async function extractItemAttributes(
  * The schema handed to `generateObject` on the real path. A SUPERSET of the
  * attribute contract: it adds the model's self-reported uncertainty signals so they
  * survive structured decoding (a bare `extractedAttributesSchema` would strip them).
- * `extractItemAttributes` re-validates the attribute SUBSET against the canonical
- * `extractedAttributesSchema`, so the contract is still the gate; this just lets the
- * model also TELL us when it's unsure.
+ *
+ * OpenAI structured outputs (strict) require EVERY property to be present in
+ * `required` and express "no value" as `null` — an `.optional()` key is rejected
+ * (NoObjectGeneratedError). So the provider-facing schema declares every field
+ * REQUIRED + `.nullable()`; `nullsToUndefined` maps nulls back to `undefined` before
+ * returning, and `extractItemAttributes` re-validates the attribute SUBSET against
+ * the canonical (optional) `extractedAttributesSchema`. The contract is still the
+ * gate; this just makes the single real call actually succeed and lets the model
+ * also TELL us when it's unsure.
  */
-const visionResponseSchema = extractedAttributesSchema.extend({
+const visionResponseSchema = z.object({
+  brand: z.string().nullable(),
+  model: z.string().nullable(),
+  category: z.string().nullable(),
+  condition: z
+    .string()
+    .nullable()
+    .describe("Assessed wear state, e.g. new / like-new / good / fair."),
+  isbn: z
+    .string()
+    .nullable()
+    .describe("Decoded ISBN read from the image (books/media), else null."),
+  upc: z.string().nullable().describe("Decoded UPC read from the image, else null."),
+  specs: z.array(z.string()).nullable().describe("Key specs visible on the item."),
+  title: z.string().nullable().describe("A short human title for the item."),
   ambiguous: z
     .boolean()
-    .optional()
+    .nullable()
     .describe("True if you cannot confidently identify the item from the photos."),
   uncertaintyReason: z
     .string()
-    .optional()
+    .nullable()
     .describe("Short reason you are unsure (e.g. blurry photo, no visible brand)."),
   candidates: z
     .array(z.string())
-    .optional()
+    .nullable()
     .describe("Plausible alternative identities when unsure, instead of guessing one."),
 });
+
+/**
+ * Normalize provider `null`s → `undefined` so the optional attribute contract
+ * (`extractedAttributesSchema`) validates cleanly and the identification hints read
+ * as absent rather than literal null.
+ */
+function nullsToUndefined(obj: Record<string, unknown>): VisionGenerateResult {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) out[k] = v === null ? undefined : v;
+  return out as VisionGenerateResult;
+}
 
 /** System guidance: extract faithfully, READ barcodes visually, and flag uncertainty. */
 const EXTRACTION_SYSTEM_PROMPT =
@@ -303,6 +345,6 @@ export function createOpenAIVisionGenerate(
         },
       ],
     });
-    return object as VisionGenerateResult;
+    return nullsToUndefined(object as Record<string, unknown>);
   };
 }
