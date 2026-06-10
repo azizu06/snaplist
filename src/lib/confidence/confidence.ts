@@ -121,7 +121,7 @@ export interface ConfidenceOptions {
 /**
  * Band cutoffs. `high` begins at the default autopilot threshold so the two
  * concepts line up by default; `medium` is the "review recommended but credible"
- * middle; below `LOW_MAX` is honestly low-confidence (generic / LLM-only).
+ * middle; below `MEDIUM_MIN` is honestly low-confidence (generic / LLM-only).
  */
 const HIGH_MIN = 0.75;
 const MEDIUM_MIN = 0.5;
@@ -140,16 +140,18 @@ const WEIGHT_TIER = 0.6;
 const WEIGHT_IDENTIFICATION = 0.25;
 const WEIGHT_COMP_AGREEMENT = 0.15;
 
-/** Fraction of the four identification fields that are resolved, in [0,1]. */
+/**
+ * Fraction of the four identification fields that are resolved, in [0,1].
+ * Counts booleans directly (no array allocation) to honor the alloc-light
+ * intent of `computeConfidence`.
+ */
 function identificationScore(id: IdentificationSignals): number {
-  const fields = [
-    id.brandResolved,
-    id.modelResolved,
-    id.barcodeDecoded,
-    id.categoryUnambiguous,
-  ];
-  const resolved = fields.filter(Boolean).length;
-  return resolved / fields.length;
+  let resolved = 0;
+  if (id.brandResolved) resolved += 1;
+  if (id.modelResolved) resolved += 1;
+  if (id.barcodeDecoded) resolved += 1;
+  if (id.categoryUnambiguous) resolved += 1;
+  return resolved / 4;
 }
 
 function bandFor(score: number): ConfidenceBand {
@@ -187,6 +189,16 @@ export function computeConfidence(
   options: ConfidenceOptions = {},
 ): ConfidenceResult {
   const { autopilotEnabled = true, threshold = DEFAULT_THRESHOLD } = options;
+
+  // The threshold gates auto-posting, so a malformed value is a safety bug, not a
+  // stylistic one: a negative threshold would make every result (even llm_only)
+  // eligible, and a non-finite / >1 value silently disables the gate. TypeScript's
+  // `number` can't catch these at runtime (config, JSON), so fail loud.
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error(
+      `Invalid autopilot threshold ${threshold}: must be a finite number in [0, 1].`,
+    );
+  }
 
   const score =
     WEIGHT_TIER * TIER_BASE[signals.tier] +

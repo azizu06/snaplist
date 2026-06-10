@@ -186,3 +186,22 @@ describe("parseSignals — input validation", () => {
     expect(() => parseSignals({ ...ideal, tier: "auction" })).toThrow();
   });
 });
+
+describe("computeConfidence — threshold validation (autopilot safety gate)", () => {
+  it("throws on a negative threshold (would make everything eligible)", () => {
+    expect(() => computeConfidence(ideal, { threshold: -0.1 })).toThrow();
+  });
+
+  it("throws on a threshold above 1 (would silently disable the gate)", () => {
+    expect(() => computeConfidence(ideal, { threshold: 1.5 })).toThrow();
+  });
+
+  it("throws on a non-finite threshold (NaN)", () => {
+    expect(() => computeConfidence(ideal, { threshold: NaN })).toThrow();
+  });
+
+  it("accepts the boundary thresholds 0 and 1", () => {
+    expect(() => computeConfidence(ideal, { threshold: 0 })).not.toThrow();
+    expect(() => computeConfidence(ideal, { threshold: 1 })).not.toThrow();
+  });
+});
