@@ -3,18 +3,20 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { runPipelineAndPersist } from "@/lib/pipeline";
+import { createVisionPipeline } from "@/lib/vision";
 
 /**
- * Upload server action — the walking-skeleton spine wired to the request:
+ * Upload server action — the spine wired to the request:
  *   1. Require an authenticated user (defense in depth on top of middleware).
  *   2. Store the photo in Supabase Storage under a USER-SCOPED path (`{uid}/...`),
  *      which the storage RLS policy requires.
- *   3. Run the (stubbed) pipeline and persist item + listing + prediction_log via
- *      the user-scoped server client (RLS enforced).
+ *   3. Run the REAL vision pipeline (single multimodal extraction → Zod-validated
+ *      attributes + flagged identification) and persist item + listing +
+ *      prediction_log via the user-scoped server client (RLS enforced).
  *   4. Redirect to the review page for the created item.
  *
- * All AI is stubbed behind `runPipelineAndPersist`'s injected pipeline; this action
- * does not change when the real pipeline lands.
+ * The pipeline is injected into `runPipelineAndPersist` (issue #6): the persistence
+ * seam is unchanged; only the pipeline behind it became real.
  */
 
 const ACCEPTED = new Set([
@@ -56,10 +58,17 @@ export async function uploadAndProcess(formData: FormData) {
 
   let itemId: string;
   try {
-    const res = await runPipelineAndPersist(supabase, {
-      userId: user.id,
-      photos: [path],
-    });
+    // Real vision pipeline: the user-scoped server client signs the private photo
+    // URLs and the same client persists every row under RLS.
+    const pipeline = createVisionPipeline({ supabase });
+    const res = await runPipelineAndPersist(
+      supabase,
+      {
+        userId: user.id,
+        photos: [path],
+      },
+      pipeline,
+    );
     itemId = res.itemId;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed.";
