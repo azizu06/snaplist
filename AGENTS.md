@@ -54,3 +54,17 @@ shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, 
 ## Item domain
 Hero domain (books/media via ISBN, electronics, board games, branded gear) works well; generic items
 flow through but honestly show low confidence. Don't chase universal coverage.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as GitHub issues in `azizu06/snaplist` (use the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, default names: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
