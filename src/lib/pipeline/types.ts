@@ -111,8 +111,14 @@ export const pipelineResultSchema = z.object({
     autopilotEligible: z.boolean(),
   }),
   listing: listingCopySchema,
-  /** The model id used for the run (stubbed here). Logged for evaluation. */
+  /** The model id used for the run (the vision/identification model). Logged for evaluation. */
   model: z.string(),
+  /**
+   * The model that produced the LISTING copy, logged for provenance. OPTIONAL: the stub
+   * and any vision-only path don't set it, and it may equal `model` when one model serves
+   * the whole run. Kept distinct so listing experiments stay attributable (#32).
+   */
+  listingModel: z.string().optional(),
   /**
    * "What we think it is", surfaced before pricing. OPTIONAL so the walking-skeleton
    * stub (which predates the real vision slice) still satisfies the contract.
@@ -126,6 +132,8 @@ export type PipelineResult = {
   confidence: ConfidenceResult;
   listing: ListingCopy;
   model: string;
+  /** The model that produced the listing copy, logged for provenance (#32). OPTIONAL. */
+  listingModel?: string;
   /**
    * "What we think it is" for user confirmation before pricing. OPTIONAL: the stub
    * does not produce it, so its existing return still type-checks (issue #6 rule).

@@ -57,11 +57,14 @@ export interface CreateVisionPipelineOptions {
   priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
   /**
    * Generate the listing copy from the attribute core. Defaults to the REAL grounded
-   * eBay generator (`generateEbayListing` + rag few-shot). Injected in tests.
+   * eBay generator (`generateEbayListing` + rag few-shot). Returns the copy AND the
+   * model that produced it — the listing model is logged for provenance (it may differ
+   * from the vision model via `LISTING_MODEL`), so it must not be dropped (#32 review).
+   * Injected in tests.
    */
   generateListing?: (args: {
     attributes: ExtractedAttributes;
-  }) => Promise<ListingCopy>;
+  }) => Promise<{ copy: ListingCopy; model: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,16 +102,21 @@ function createDefaultPricer(): (signal: ItemSignal) => Promise<PriceResult> {
   return (signal) => router.price(signal);
 }
 
-/** The default real listing generator: grounded eBay generation (#9) → `ListingCopy`. */
+/**
+ * The default real listing generator: grounded eBay generation (#9) → `ListingCopy`
+ * PLUS the model id that produced it. The listing model is carried out (not dropped)
+ * so the run can log it for provenance — it may differ from the vision model via
+ * `LISTING_MODEL` (#32 review).
+ */
 function createDefaultListingGenerator(): (args: {
   attributes: ExtractedAttributes;
-}) => Promise<ListingCopy> {
+}) => Promise<{ copy: ListingCopy; model: string }> {
   return async ({ attributes }) => {
-    const { copy } = await generateEbayListing({
+    const { copy, model } = await generateEbayListing({
       attributes,
       retrieve: createRealFewShotRetrieval(),
     });
-    return copy;
+    return { copy, model };
   };
 }
 
@@ -127,6 +135,13 @@ function hasSoldComp(price: PriceResult): boolean {
  * priced off new-retail therefore can't reach the autopilot-eligible band on identity
  * alone; the ISBN identity still feeds the identification signals. A future sold-comp
  * source (web tier) restores the high `isbn` trust.
+ *
+ * #32 calibration (same principle, web tier): the pricing contract permits `branded-web`
+ * to cite asking-only / scattered sources, so it does NOT automatically deserve the tight
+ * (high-trust) `web_tight` tier. Earn `web_tight` ONLY with a real sold comp; otherwise
+ * map to `web_wide`. Without this, a fully-identified branded item with a single asking
+ * comp scores 0.6·0.8 + 0.25·1 + 0.15·0.4 = 0.79 and clears the 0.75 autopilot gate with
+ * no sold comp or demonstrated clustering; `web_wide` lands it at 0.67, safely sub-gate.
  */
 function pricingTierToConfidenceTier(
   price: PriceResult,
@@ -137,7 +152,7 @@ function pricingTierToConfidenceTier(
     case "upc-aided-web":
       return "web_wide";
     case "branded-web":
-      return "web_tight";
+      return hasSoldComp(price) ? "web_tight" : "web_wide";
     case "depreciation":
       return "depreciation";
     case "llm-only":
@@ -207,10 +222,14 @@ export function createVisionPipeline(
       });
       const { attributes, identification } = extraction;
 
-      // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation.
+      // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation. The
+      //    listing carries its own model id (may differ from the vision model), logged
+      //    for provenance so listing experiments stay attributable (#32).
       const signal = attributesToSignal(attributes);
       const price = await priceItem(signal);
-      const listing = await generateListing({ attributes });
+      const { copy: listing, model: listingModel } = await generateListing({
+        attributes,
+      });
 
       // 4. REAL confidence composite over deterministic signals (tier #31-calibrated;
       //    the model's self-reported ambiguity stays out of the score — it only flags
@@ -226,6 +245,9 @@ export function createVisionPipeline(
         confidence,
         listing,
         model: extraction.model,
+        // The listing model is logged separately so a prediction's listing copy stays
+        // attributable even when LISTING_MODEL differs from the vision model (#32).
+        listingModel,
         identification,
       };
     },

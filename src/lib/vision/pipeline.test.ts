@@ -73,6 +73,8 @@ const STUB_LISTING: ListingCopy = {
   description: "A description.",
   fields: { itemSpecifics: { Brand: "Sony" }, tags: ["sony"] },
 };
+/** The listing generator now returns its own model id (logged for provenance, #32). */
+const STUB_LISTING_MODEL = "test-listing-model";
 
 /** Build a pipeline with all real deps replaced by offline fakes; override per test. */
 function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
@@ -80,7 +82,7 @@ function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
     supabase: fakeSignerClient(),
     extract: fakeExtract(STRONG_EXTRACTION),
     priceItem: async () => STUB_PRICE,
-    generateListing: async () => STUB_LISTING,
+    generateListing: async () => ({ copy: STUB_LISTING, model: STUB_LISTING_MODEL }),
     ...overrides,
   });
 }
@@ -108,7 +110,10 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
 
   it("prices via the injected pricer and lists via the injected generator", async () => {
     const priceItem = vi.fn(async () => STUB_PRICE);
-    const generateListing = vi.fn(async () => STUB_LISTING);
+    const generateListing = vi.fn(async () => ({
+      copy: STUB_LISTING,
+      model: STUB_LISTING_MODEL,
+    }));
     const result = await makePipeline({ priceItem, generateListing }).run({
       photos: ["u/a.jpg"],
     });
@@ -116,6 +121,17 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(generateListing).toHaveBeenCalledOnce();
     expect(result.price).toEqual(STUB_PRICE);
     expect(result.listing).toEqual(STUB_LISTING);
+  });
+
+  it("surfaces the listing model separately from the vision model (#32 provenance)", async () => {
+    // The result carries the vision model in `model` and the listing generator's own
+    // model in `listingModel`, so a prediction's listing copy is attributable even when
+    // LISTING_MODEL differs from the vision model. The pipeline must not collapse them.
+    const result = await makePipeline({
+      generateListing: async () => ({ copy: STUB_LISTING, model: "listing-gpt-5.5-mini" }),
+    }).run({ photos: ["u/a.jpg"] });
+    expect(result.model).toBe("test-vision-model");
+    expect(result.listingModel).toBe("listing-gpt-5.5-mini");
   });
 
   it("routes the attribute-derived ItemSignal (incl. ISBN) to the pricer", async () => {
@@ -248,6 +264,56 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(retail.confidence.autopilotEligible).toBe(false);
     // The pricing tier logged is still the ISBN tier in both cases (identity is exact).
     expect(retail.price.tier).toBe("isbn-lookup");
+  });
+
+  it("#32: a branded-web price with only an asking comp is not autopilot-eligible", async () => {
+    // Same fully-identified branded item; the ONLY difference is the price's evidence:
+    // an asking-only comp vs a real sold comp. The pricing contract lets `branded-web`
+    // cite asking-only/scattered sources, so without a sold comp it must NOT clear the
+    // autopilot gate on identity alone — a sold comp earns the tight tier and outscores it.
+    const brandedItem: ExtractItemAttributesResult = {
+      attributes: {
+        brand: "Sony",
+        model: "WH-1000XM4",
+        category: "electronics",
+        condition: "good",
+        upc: "027242920866",
+        title: "Sony WH-1000XM4 Headphones",
+      },
+      identification: { label: "Sony WH-1000XM4", confident: true, evidence: 1 },
+      model: "m",
+    };
+    const askingOnly = priceResultSchema.parse({
+      suggested: 180,
+      range: { min: 150, max: 210 },
+      confidence: 0.7,
+      sources: [
+        { url: "https://example.com/ask/x", title: "Asking comp", kind: "asking-comp" },
+      ],
+      tier: "branded-web",
+    });
+    const soldComped = priceResultSchema.parse({
+      suggested: 180,
+      range: { min: 150, max: 210 },
+      confidence: 0.7,
+      sources: [{ url: "https://example.com/sold/x", title: "Sold comp", kind: "sold-comp" }],
+      tier: "branded-web",
+    });
+
+    const asking = await makePipeline({
+      extract: fakeExtract(brandedItem),
+      priceItem: async () => askingOnly,
+    }).run({ photos: ["u/a.jpg"] });
+    const sold = await makePipeline({
+      extract: fakeExtract(brandedItem),
+      priceItem: async () => soldComped,
+    }).run({ photos: ["u/a.jpg"] });
+
+    // Asking-only branded-web evidence cannot auto-post on identification alone (#32)...
+    expect(asking.confidence.autopilotEligible).toBe(false);
+    // ...while a real sold comp earns the tight tier, scores strictly higher, and IS eligible.
+    expect(sold.confidence.score).toBeGreaterThan(asking.confidence.score);
+    expect(sold.confidence.autopilotEligible).toBe(true);
   });
 
   it("throws when given no photos", async () => {
