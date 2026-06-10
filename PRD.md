@@ -1,0 +1,227 @@
+# SnapList — Product Requirements Document
+
+> Status: **Ready for build.** Supersedes the decision-open parts of `PROJECT_BRIEF.md`.
+> The brief remains the narrative/origin record; this PRD is the source of truth for what we build.
+> Working name; idea origin: Ideabrowser "Home Sale Helper" #1613.
+
+---
+
+## Problem Statement
+
+Selling used household items is a repetitive time sink. For each item a seller must: photograph
+it, research what it's actually worth used (not retail), write a competent platform-appropriate
+listing, post it, and then answer the same buyer questions over and over. That's ~20–30 minutes of
+low-value labor per item, and the pricing research in particular is tedious and error-prone — real
+*sold* prices are hard to find and retail prices are misleading for used goods.
+
+(Framing note: this is built as a **production-real AI-engineering showcase**. The primary success
+metric is demonstrating the full AI stack end-to-end in a polished, deployed app — not user growth.
+Market saturation is explicitly irrelevant.)
+
+## Solution
+
+SnapList turns a **photo of a used item** into a **priced, ready-to-post listing**, and later drafts
+buyer-message replies — collapsing the per-item work into a photo plus a couple of approvals.
+
+The seller snaps 1–4 photos. The system identifies the item (brand, model, category, condition,
+specs, and any barcode/ISBN), researches a defensible used-price range with cited sources, generates
+platform-specific listing copy, and shows it for review/edit. High-confidence items can post
+automatically (confidence-gated autopilot); low-confidence ones queue for human review. Listings post
+to eBay (real, behind an adapter) and generate copy-paste export packs for Facebook Marketplace and
+Mercari. A buyer-Q&A agent drafts grounded replies the seller approves before sending.
+
+SnapList is a **seller's control surface**, not a marketplace — payment, checkout, and shipping stay
+on eBay. Buyers never see SnapList.
+
+## User Stories
+
+**Capture & identification**
+1. As a seller, I want to snap a single photo of an item, so that I can start a listing with minimal effort.
+2. As a seller, I want to add up to ~4 photos from different angles, so that condition and damage are assessed accurately.
+3. As a seller, I want the system to read a visible barcode/ISBN, so that identifiable items are priced more precisely.
+4. As a seller, I want the system to extract brand, model, category, condition, and key specs as structured data, so that the listing and price are grounded in real attributes.
+5. As a seller, I want to see what the system *thinks* the item is before it prices it, so that I can catch misidentification early.
+6. As a seller, I want misidentified or ambiguous items flagged rather than silently guessed, so that I trust the output.
+
+**Pricing**
+7. As a seller, I want a suggested price for the item, so that I don't have to research it myself.
+8. As a seller, I want a price *range* and a *confidence* level, not just a single number, so that I understand how reliable the suggestion is.
+9. As a seller, I want to see the *sources* behind the price, so that I can verify and trust it.
+10. As a seller, I want pricing to reflect *used/resale* value rather than retail, so that my listing is realistic.
+11. As a seller, I want books/media priced from an exact ISBN lookup, so that those listings are highly accurate.
+12. As a seller, I want branded/recognizable items priced from real web comps, so that valuable items are priced well.
+13. As a seller, I want generic items to get a rough estimate clearly labeled low-confidence, so that I'm not misled by false precision.
+14. As a seller, I want to override the suggested price, so that I retain final control.
+
+**Listing generation**
+15. As a seller, I want a generated eBay listing (title, item specifics, description, tags), so that I can post without writing copy.
+16. As a seller, I want copy-paste export packs for Facebook Marketplace and Mercari, so that I can list cross-platform without re-typing.
+17. As a seller, I want each platform's copy to follow that platform's conventions (title length, tone, hashtags, structure), so that listings look native.
+18. As a seller, I want the generated copy grounded in real similar listings, so that it reads like a competent human wrote it, not generic filler.
+19. As a seller, I want to edit any generated field before it's used, so that I control the final listing.
+
+**Review, approval & autopilot**
+20. As a seller, I want to review and approve a listing before it posts, so that nothing goes live without my consent.
+21. As a seller, I want high-confidence items to be eligible for automatic posting, so that I save time on the easy cases.
+22. As a seller, I want low-confidence items to queue for my review instead of auto-posting, so that mistakes don't go live.
+23. As a seller, I want to see *why* an item was auto-posted or queued (the confidence signals), so that the autopilot is transparent.
+24. As a seller, I want to turn autopilot off entirely, so that I can keep a human in the loop for everything.
+
+**Posting & export**
+25. As a seller, I want to publish a listing to eBay, so that it's actually for sale.
+26. As a seller, I want my eBay listings persisted in SnapList with their status, so that I can track what I've posted.
+27. As a seller, I want export packs as clean copy-paste blocks, so that pasting into other apps is frictionless.
+
+**Buyer messaging (later phase)**
+28. As a seller, I want incoming buyer questions to appear in a live inbox, so that I don't have to refresh.
+29. As a seller, I want the system to draft a reply grounded in the item's attributes/listing, so that I answer accurately and fast.
+30. As a seller, I want to approve or edit a drafted reply before it sends, so that I control what the buyer sees.
+31. As a seller, I want replies delivered into the buyer's eBay inbox, so that the buyer never needs to leave eBay.
+32. As a seller (demo), I want to simulate an incoming buyer question, so that the messaging flow is demonstrable without real buyer traffic.
+
+**Account, trust & security**
+33. As a seller, I want to sign up and sign in, so that my items are private to me.
+34. As a seller, I want my items, listings, and messages isolated from other users' data, so that my data is secure.
+35. As a seller, I want my photos stored privately, so that they aren't exposed to others.
+36. As a seller, I want to connect my own eBay account (production), so that listings post under my identity.
+37. As a seller, I want my credentials/tokens handled securely, so that my account isn't compromised.
+
+**Showcase/operator stories (project-as-portfolio)**
+38. As the builder, I want every pipeline run's predictions (attributes, price, confidence, tier) logged, so that I can evaluate quality later.
+39. As the builder, I want an eval harness over a fixed gold set, so that I can report ID accuracy, pricing sanity, and confidence calibration.
+40. As the builder, I want the pricing source behind a swappable interface, so that I can add/replace pricing strategies without rewrites.
+41. As the builder, I want sandbox→production to be a credential flip, not a rewrite, so that going live is low-risk.
+
+## Implementation Decisions
+
+### Framing & architecture
+- **AI pipeline is the product; eBay is a real but adapter-isolated integration.** eBay (posting + messaging) is genuinely intended and will be wired to real accounts in the final version, but it lives behind a clean interface and is **not on the Phase 1 critical path**. "Production-real" attaches to the AI app being deployed and live.
+- **Env-configurable throughout.** Sandbox→production is a credential/`EBAY_BASE_URL` flip. No hardcoded providers or endpoints.
+
+### Tenancy & data
+- **Multi-tenant from day one.** Supabase Auth; every domain table carries `user_id`; **Postgres row-level security** enforces per-user isolation. This is a primary Security-skill surface.
+- **Postgres + pgvector** (Supabase) holds items, listings, messages, embeddings, and prediction logs.
+- **Photos** in Supabase Storage, paths scoped by `user_id`, access governed by RLS/storage policies.
+- Schema (conceptual, not final): `items` (user_id, attributes JSON, condition, photos[], created_at), `listings` (item_id, platform, generated copy, status), `messages` (item_id/listing_id, direction, body, draft_reply, status), `embeddings`/corpus (vector, source ref, metadata), `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
+
+### Models & LLM access
+- **OpenAI via the Vercel AI SDK.** Strong multimodal model for vision + structured attribute extraction; a cheaper model for lighter text generation. Exact model IDs confirmed against current OpenAI docs at build time.
+- **Structured outputs** via the AI SDK's `generateObject` + **Zod** schemas (attributes, listing, price recommendation). Validation + retry on schema mismatch.
+- **Cost-aware model routing:** cheap model for easy/high-confidence work, escalate to the strong model for hard/low-confidence items. Routing is itself a showcased technique and feeds the confidence story.
+- Provider stays swappable behind the SDK (config flip).
+
+### Pricing pipeline (behind a `PricingProvider` interface; routing pipeline, not one source)
+Routing by item signal, each result always `{ suggested, range, confidence, sources[] }`, always user-editable:
+1. **ISBN present** → true structured lookup (Open Library + Google Books, free). Highest confidence.
+2. **UPC present** → decode as a strong **identification/query aid** (not a price oracle — no reliable free UPC price API). Feed decoded code + resolved product name into the web-search agent; price comes from comps.
+3. **Recognizable branded item** → **bounded tool-calling web-search pricing agent** (see below).
+4. **Generic, only retail found** → retail × condition-based depreciation factor, labeled low-confidence estimate.
+5. **Ultimate fallback** → LLM-only estimate, lowest confidence.
+- eBay **Browse** API dropped; eBay **Marketplace Insights** (true sold prices) is gated/unavailable to solo devs — not used. Open-web comps are mostly *asking* prices; the agent seeks resale/sold signals and **down-weights confidence when only asking prices are found**. Honest ceiling: a *smart suggestion*, not an oracle.
+
+### Pricing research agent
+- **Genuine but bounded tool-calling loop:** formulate targeted queries (e.g. `"{brand} {model} used resale price sold"`) → search → judge coverage/agreement → optionally refine **once** → synthesize a **cited** range. Capped at ~2–3 search iterations for cost/latency.
+- **Search providers:** Tavily primary (clean LLM-ready content), Exa secondary (neural search). Both keys already held.
+- Handles the "found nothing useful" path by falling through to the depreciation / LLM-only tier.
+
+### Confidence (signature feature: confidence-gated autopilot)
+- **Signal-based composite, NOT LLM self-report.** Inputs:
+  - which pricing tier fired (ISBN > tight web comps > wide web comps > depreciation > LLM-only),
+  - **comp agreement** (variance/dispersion of found prices — tight cluster = confident),
+  - **identification completeness** (brand + model resolved? barcode decoded cleanly? category unambiguous?).
+- Autopilot gate = threshold on the composite. High → eligible to auto-post; low → queue for review. Autopilot is toggleable off. The signals are surfaced to the user for transparency.
+
+### Vision / identification
+- **1 photo required, up to ~4 accepted.** All provided images fed to a **single** structured-extraction vision call → attributes + condition + barcode/ISBN. More angles → better condition assessment → higher ID confidence.
+- Output is Zod-validated against the attribute schema.
+
+### Listing generation (per-platform)
+- **One Zod-validated attribute core → many surface renderings** via per-platform prompt + template.
+- v1 targets: **eBay** (structured item-specifics, keyword title, category — the real adapter target), **Facebook Marketplace** (casual, local, short), **Mercari** (short title, hashtags, shipping-oriented). Poshmark optional if branded-apparel slice is added.
+- Generation is **grounded** by pgvector retrieval of similar past/seed listings (few-shot).
+
+### RAG (pgvector)
+- **Seeded reference corpus from day one** (hero-domain-weighted; curated or realistic-synthetic, with prices + good copy). Avoids cold-start.
+- Two live jobs: (a) **ground pricing** as a corroborating signal feeding confidence; (b) **few-shot the listing generator**.
+- README discloses honestly if the corpus is synthetic.
+
+### Item domain
+- **Hero domain + graceful degradation.** Excels at books/media (ISBN), consumer electronics, board games, branded gear. Generic items still flow through but honestly show low confidence. Demo arc: exact barcode → researched comps → correctly-flagged generic.
+
+### eBay adapter (real, built behind interface, later phase)
+- **Posting:** eBay Sell API publish (sandbox first → production).
+- **Messaging (final version):** backend poller calls `GetMyMessages` (~60s; polling because eBay doesn't reliably push member messages) → writes to DB; **Supabase Realtime** pushes inbox updates to the frontend; approved replies delivered via `AddMemberMessageRTQ`.
+- **v1 messaging:** seeded/simulated buyer messages in our DB → real Realtime inbox → agent drafts grounded reply → delivery stubbed (logged/no-op in sandbox).
+- **Account-deletion notification endpoint:** route stubbed from day one; fully implemented only at the production flip (required before first production call since we persist data).
+- **Secrets:** app-level eBay creds in v1 (sandbox); **per-user encrypted OAuth tokens** when the real adapter lands.
+
+### Eval & observability
+- **Log every run's predictions from day one** (extracted attributes, chosen price, range, confidence, tier fired, model). Prerequisite for evaluation.
+- **Lightweight-but-real eval harness** over a fixed gold set (~30–50 hero-domain items): ID field accuracy, pricing-within-band (median error + % within band), **confidence calibration** (reliability bucketing), and **listing quality** via a *validated* LLM-judge rubric. Script first; CI later (Phase 4). Gold set doubles as demo set and overlaps the seed corpus.
+
+### Deploy
+- **Vercel** (Next.js App Router + TypeScript). Docker/CI/observability layered in Phase 4 as Boot.dev coursework lands.
+
+## Testing Decisions
+
+**Methodology:** **Tracer-bullet development with TDD.** Each feature is a thin end-to-end thread —
+one or two backend pieces + a minimal frontend to exercise them + tests — proven working before the
+next. No full-backend-then-frontend; no layer-by-layer build. Tight feedback loop; integration seams
+exist and are tested continuously.
+
+**What makes a good test here:** assert **external behavior at a seam**, not implementation details.
+Because LLM/web outputs are non-deterministic, deterministic logic and I/O boundaries are tested
+directly, while model calls are tested against **contracts** (schema validity, invariants) and
+exercised for quality by the **eval harness** rather than brittle exact-match unit tests.
+
+**Proposed seams (highest-level first; confirm before building):**
+- **`PricingProvider` interface** — the primary seam. Each tier (ISBN lookup, web-search agent,
+  depreciation, LLM fallback) is a provider; the **router** is tested with stubbed providers to
+  assert correct tier selection per input signal. Tier implementations are tested against contracts.
+- **Vision extraction boundary** — given image input(s), output **must validate** against the Zod
+  attribute schema (contract test); quality measured by eval harness, not unit assertions.
+- **Confidence function** — pure, deterministic given its signal inputs. **Unit-tested directly**
+  with crafted signal sets (tight comps → high, wide comps → low, ISBN → high, etc.). This is the
+  most important pure-logic test target.
+- **Listing generators** — per-platform output validated against platform constraints (e.g. eBay
+  title length, required fields present, no attributes hallucinated beyond the validated core).
+  Contract + rubric, not exact text.
+- **RLS / tenancy** — integration tests asserting a user cannot read/write another user's
+  items/listings/messages/photos. Security-critical; tested at the data-access seam.
+- **eBay adapter** — tested against a **stub/mock adapter** (the interface), not live eBay, so the
+  pipeline is testable offline and the sandbox↔production flip is a config concern.
+- **Eval harness** — itself validated: the LLM-judge is checked against a small human-labeled subset
+  so we're not trusting an unvalidated judge.
+
+**Prior art:** none yet (greenfield). Establish the patterns above as the reference for later tests.
+
+## Out of Scope
+
+- Auto-posting to Poshmark / Mercari / Facebook / OfferUp (no public write APIs → **export packs**; never scraping).
+- Cross-platform unified inbox / order tracking (no APIs → eBay-only for live messaging).
+- True sold-price data (gated eBay Marketplace Insights) and eBay **Browse** API (dropped).
+- Real users / growth / marketing as a success metric (showcase first).
+- Payment, checkout, shipping (these stay on eBay).
+- A universal "price anything" guarantee — accuracy concentrates on the hero domain; generics are honestly low-confidence.
+
+## Further Notes
+
+- **Brief reconciliation:** `PROJECT_BRIEF.md` predates this PRD and still reflects pre-decision
+  defaults (single-source-leaning eBay framing, "any household item", `gpt-4o` default, etc.). This
+  PRD overrides those. Keep the brief as origin/narrative context.
+- **Skills-on-display map** (for README + interview narrative): multimodal vision (extraction),
+  agents + tool calling (pricing agent, buyer-Q&A agent), RAG/synthesis (cited price range, similar-item
+  grounding), structured Zod outputs, prompt/context engineering (per-platform generation,
+  used-vs-new disambiguation), pgvector, security (Auth + RLS + secret handling + input validation +
+  account-deletion endpoint), cost-aware model routing, evals + calibration, Docker/CI/observability (Phase 4).
+- **Coherence to emphasize:** the *pricing tier that fired* → *confidence score* → *eval calibration*
+  is one spine seen three ways. Lead with that in interviews.
+- **Honesty as a selling point:** UPC isn't a free price oracle; asking-prices ≠ sold-prices; synthetic
+  corpus disclosed. Being able to state the system's accuracy ceiling is a differentiator.
+
+### Phase sequencing (tracer-bullet, not rigid)
+- **Phase 0 — setup:** repo, Next.js + TS, Supabase (Auth + Postgres + pgvector + Storage), env-config, secrets, OpenAI + Tavily/Exa keys, eBay sandbox keys.
+- **Phase 1 — core demo (centerpiece):** photo → vision identify + attributes → pricing (start with most-reliable tier, widen) → generated listing → review/edit UI → persist. Behind Auth + RLS, deployed early.
+- **Phase 2 — agentic:** confidence-gated autopilot; buyer-Q&A agent on simulated messages + Realtime inbox.
+- **Phase 3 — posting + export:** eBay Sell API publish (sandbox); FB Marketplace + Mercari export packs.
+- **Phase 4 — go real + polish:** production checklist (account-deletion endpoint, per-user OAuth, credential flip), pgvector eval polish, eval harness in CI, Docker/observability (as Boot.dev lands), README.
