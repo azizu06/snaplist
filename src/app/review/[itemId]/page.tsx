@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { extractedAttributesSchema } from "@/lib/pipeline/types";
+import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
 import { deriveIdentification } from "@/lib/vision";
 
 /**
@@ -11,9 +11,11 @@ import { deriveIdentification } from "@/lib/vision";
  * identification ("what we think it is", surfaced BEFORE pricing for confirmation),
  * extracted attributes, price recommendation, and the generated listing copy.
  *
- * The identification is RE-DERIVED from the persisted, Zod-validated attributes using
- * the same evidence logic the pipeline used, so ambiguous / low-evidence items are
- * FLAGGED here rather than presented as a confident guess (issue #6 acceptance).
+ * The identification is the PERSISTED one the pipeline produced (the model's actual
+ * decision, including a model-signalled ambiguity with its reason/candidates), so an
+ * explicitly-uncertain item is FLAGGED here rather than presented as a confident guess
+ * (issues #6 + #27). Legacy/stub rows without a persisted identification fall back to
+ * re-deriving it from the validated attributes.
  *
  * This closes the loop the issue requires: "identification surfaced before pricing".
  */
@@ -33,7 +35,7 @@ export default async function ReviewPage({
   // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
     .from("items")
-    .select("id, photos, attributes, condition, created_at")
+    .select("id, photos, attributes, condition, identification, created_at")
     .eq("id", itemId)
     .single();
   if (!item) notFound();
@@ -66,13 +68,18 @@ export default async function ReviewPage({
 
   const attrs = (item.attributes ?? {}) as Record<string, unknown>;
 
-  // "What we think it is" — re-derived from the persisted, validated attributes with
-  // the SAME evidence logic the pipeline used, so a thin/generic item is flagged for
-  // confirmation rather than shown as a confident guess. Surfaced BEFORE pricing.
+  // "What we think it is" — surfaced BEFORE pricing. Prefer the PERSISTED
+  // identification: it carries the model's actual decision, including a model-signalled
+  // ambiguity (and its reason/candidates) that a strong attribute set would otherwise
+  // mask. Only fall back to re-deriving from the validated attributes for legacy/stub
+  // rows that have no persisted identification (issue #27).
+  const persistedId = identificationSchema.safeParse(item.identification);
   const parsedAttrs = extractedAttributesSchema.safeParse(item.attributes ?? {});
-  const identification = parsedAttrs.success
-    ? deriveIdentification(parsedAttrs.data, {})
-    : null;
+  const identification = persistedId.success
+    ? persistedId.data
+    : parsedAttrs.success
+      ? deriveIdentification(parsedAttrs.data, {})
+      : null;
 
   const range = (log?.price_range ?? null) as { low?: number; high?: number } | null;
   const confidence = typeof log?.confidence === "number" ? log.confidence : null;

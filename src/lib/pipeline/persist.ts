@@ -65,12 +65,17 @@ export async function runPipelineAndPersist(
     autopilotEnabled: input.autopilotEnabled,
   });
 
-  // 3. Backfill the extracted attributes + condition onto the item.
+  // 3. Backfill the extracted attributes + condition + identification onto the item.
+  //    Persisting `identification` lets the review page render the MODEL's actual
+  //    decision (incl. its ambiguity flag/reason/candidates) instead of re-deriving
+  //    it from attributes alone (issue #27). Null when the pipeline produced none
+  //    (the stub pipeline) — the review page falls back to re-derivation then.
   const { error: updErr } = await supabase
     .from("items")
     .update({
       attributes: result.attributes,
       condition: result.attributes.condition ?? null,
+      identification: result.identification ?? null,
     })
     .eq("id", itemId);
   if (updErr) {

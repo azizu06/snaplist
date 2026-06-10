@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { StubPipeline } from "./stub";
 import { runPipelineAndPersist } from "./persist";
 import { readPredictionLogs } from "./prediction-log";
+import type { Pipeline } from "./types";
 
 /**
  * Walking-skeleton end-to-end seam test (issue #19). Exercises the real spine with
@@ -228,5 +229,82 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
         new StubPipeline(),
       ),
     ).rejects.toThrow();
+  });
+
+  it("persists the pipeline's identification and reads it back under RLS (issue #27)", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+    // A pipeline that produces a MODEL-FLAGGED-AMBIGUOUS identification despite strong
+    // identifiers — exactly the case re-deriving from attributes alone would mask.
+    const idPipeline: Pipeline = {
+      async run() {
+        return {
+          attributes: {
+            brand: "Generic",
+            model: "X1",
+            category: "electronics",
+            condition: "good",
+          },
+          price: {
+            suggested: 12,
+            range: { min: 8, max: 16 },
+            confidence: 0.4,
+            sources: [],
+            tier: "llm-only",
+          },
+          confidence: { score: 0.4, band: "low", autopilotEligible: false },
+          listing: { platform: "ebay", title: "Item", description: "desc", fields: {} },
+          model: "test-id-pipeline",
+          identification: {
+            label: "Possibly a knock-off speaker",
+            confident: false,
+            evidence: 0.75,
+            reason: "Model flagged this identification as uncertain.",
+            candidates: ["JBL Flip", "Anker Soundcore"],
+          },
+        };
+      },
+    };
+
+    const { itemId } = await runPipelineAndPersist(
+      userA.client,
+      { userId: userA.id, photos: [photoPath] },
+      idPipeline,
+    );
+
+    const { data: item, error } = await userA.client
+      .from("items")
+      .select("identification")
+      .eq("id", itemId)
+      .single();
+    expect(error).toBeNull();
+    const id = item?.identification as {
+      confident?: boolean;
+      reason?: string;
+      candidates?: string[];
+    } | null;
+    expect(id).toBeTruthy();
+    // The MODEL's decision survives — not a re-derived "confident" from strong fields.
+    expect(id?.confident).toBe(false);
+    expect(id?.reason).toMatch(/uncertain/i);
+    expect(id?.candidates).toEqual(["JBL Flip", "Anker Soundcore"]);
+  });
+
+  it("leaves identification null when the pipeline produces none (review falls back to re-derivation)", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+    const { itemId } = await runPipelineAndPersist(
+      userA.client,
+      { userId: userA.id, photos: [photoPath] },
+      new StubPipeline(),
+    );
+    const { data: item } = await userA.client
+      .from("items")
+      .select("identification")
+      .eq("id", itemId)
+      .single();
+    expect(item?.identification ?? null).toBeNull();
   });
 });
