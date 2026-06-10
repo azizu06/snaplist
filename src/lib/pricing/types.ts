@@ -1,0 +1,144 @@
+import { z } from "zod";
+
+/**
+ * Pricing pipeline contracts (see PRD "Pricing pipeline (behind a PricingProvider
+ * interface)" and CONTEXT.md: Tier, Comp, Price recommendation, PricingProvider).
+ *
+ * Pricing is a *routing pipeline*, not a single source: an `ItemSignal` is routed
+ * through ordered `PricingProvider`s; the first one that handles it wins. This
+ * module defines only the seam (signal in, price recommendation out) — the real
+ * tier implementations land in later slices.
+ */
+
+/**
+ * The pricing tiers in PRD priority order. Each is one PricingProvider strategy
+ * in the routing pipeline; "which tier fired" is a confidence-bearing fact that
+ * the (separately built) confidence composite consumes.
+ *
+ *  1. isbn-lookup   — books/media via ISBN → true structured lookup. Highest confidence.
+ *  2. upc-aided-web — UPC decoded as an identification/query AID into the web-search
+ *                     agent (never a price oracle; the barcode-tier split).
+ *  3. branded-web   — recognizable branded item priced from real web comps.
+ *  4. depreciation  — only retail found → retail × condition depreciation. Low confidence.
+ *  5. llm-only      — ultimate fallback, LLM estimate. Lowest confidence.
+ */
+export const PRICING_TIERS = [
+  "isbn-lookup",
+  "upc-aided-web",
+  "branded-web",
+  "depreciation",
+  "llm-only",
+] as const;
+
+/** A tier identifier — one strategy in the routing pipeline. */
+export type PricingTier = (typeof PRICING_TIERS)[number];
+
+export const pricingTierSchema = z.enum(PRICING_TIERS);
+
+/**
+ * The minimal router input: the signals extracted from an Item that decide which
+ * tier should price it. Deliberately small and provider-agnostic — providers read
+ * what they need and DECLINE (return null) when they can't handle a signal.
+ */
+export interface ItemSignal {
+  /** Decoded ISBN (books/media). Routes to the structured ISBN lookup tier. */
+  isbn?: string;
+  /** Decoded UPC. An identification/query aid for the web-search tier, not a price source. */
+  upc?: string;
+  /** Resolved brand, e.g. "Sony". Brand + model implies a recognizable branded item. */
+  brand?: string;
+  /** Resolved model, e.g. "WH-1000XM4". */
+  model?: string;
+  /** Category, e.g. "electronics" / "books". Helps disambiguate tier and query. */
+  category?: string;
+  /** Whether condition was assessed at all. */
+  conditionKnown?: boolean;
+  /**
+   * Assessed condition grade (e.g. "new" | "like-new" | "good" | "fair" | "poor")
+   * when known. The depreciation tier applies a condition-specific factor to it.
+   */
+  condition?: string;
+  /**
+   * A retail price discovered for the item (e.g. surfaced by the web-search tier
+   * when only retail — not resale — comps were found). Carried in the routing
+   * context so the depreciation tier can compute retail × condition factor without
+   * repeating the search. (The fuller "a declining provider passes its discovered
+   * evidence forward" chaining is deferred to the web-search / depreciation tier slices.)
+   */
+  retailPrice?: number;
+  /** Free-form resolved product name (e.g. UPC-resolved title) to seed search queries. */
+  resolvedName?: string;
+}
+
+/** A comparable price point / citation behind a price recommendation. */
+export const priceSourceSchema = z.object({
+  /** Canonical link to the comp or lookup record. Required — a source must be checkable. */
+  url: z.string().min(1),
+  /** Human-readable label (listing/page title). */
+  title: z.string().optional(),
+  /** What kind of source this is, e.g. "isbn-lookup" | "sold-comp" | "asking-comp". */
+  kind: z.string().optional(),
+});
+
+export type PriceSource = z.infer<typeof priceSourceSchema>;
+
+/**
+ * A price recommendation. Always `{ suggested, range, confidence, sources[] }`
+ * (never a bare number) and always user-editable. Carries the firing `tier` and
+ * its `sources` as raw signal so the confidence composite (tier fired + comp
+ * agreement + ID completeness) can be computed downstream WITHOUT this module
+ * importing the confidence module.
+ */
+export const priceResultSchema = z
+  .object({
+    /** The single suggested price (the seller can override). */
+    suggested: z.number().nonnegative(),
+    /** The defensible used-price band. */
+    range: z.object({
+      min: z.number().nonnegative(),
+      max: z.number().nonnegative(),
+    }),
+    /**
+     * Composite-ready confidence in [0, 1]. A provider may emit a provisional
+     * value; the canonical autopilot gate recomputes it from signals later.
+     */
+    confidence: z.number().min(0).max(1),
+    /** Cited comps / lookup records. May be empty for the LLM-only fallback. */
+    sources: z.array(priceSourceSchema),
+    /** Which tier produced this — a logged, confidence-bearing fact. */
+    tier: pricingTierSchema,
+  })
+  .refine((r) => r.range.min <= r.range.max, {
+    message: "range.min must be <= range.max",
+    path: ["range"],
+  })
+  .refine((r) => r.range.min <= r.suggested && r.suggested <= r.range.max, {
+    message: "suggested must be within [range.min, range.max]",
+    path: ["suggested"],
+  })
+  .refine((r) => r.tier === "llm-only" || r.sources.length > 0, {
+    // Every tier except the LLM-only fallback must cite checkable evidence — a
+    // high-confidence ISBN/web result with no sources violates the pricing contract.
+    message: "sources must be non-empty for every tier except llm-only",
+    path: ["sources"],
+  });
+
+export type PriceResult = z.infer<typeof priceResultSchema>;
+
+/**
+ * The interface every pricing strategy implements. A provider declares its `tier`
+ * and either HANDLES an `ItemSignal` (returns a `PriceResult`) or DECLINES
+ * (returns `null`) so the router falls through to the next provider.
+ *
+ * `canHandle` is an optional cheap pre-check; the router does not require it —
+ * declining via a `null` from `price` is sufficient. Throwing from `price` is a
+ * hard error (upstream failure), NOT a decline.
+ */
+export interface PricingProvider {
+  /** The tier this provider implements. */
+  readonly tier: PricingTier;
+  /** Optional cheap guard; the router still treats a `null` from `price` as decline. */
+  canHandle?(signal: ItemSignal): boolean;
+  /** Price the signal, or return `null` to decline and let the router fall through. */
+  price(signal: ItemSignal): Promise<PriceResult | null>;
+}
