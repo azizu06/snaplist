@@ -68,3 +68,17 @@ Five canonical roles, default names: `needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Build tracking
+
+Work is decomposed into vertical-slice (tracer-bullet) issues on the **GitHub Project "SnapList Build"**
+(project #2 — <https://github.com/users/azizu06/projects/2>). View it as a Kanban board grouped by the
+**`Lane`** field (Backlog · Ready · Blocked · In progress · In review · Done); a **`Phase`** field (0–4)
+gives a second cut. Dependencies are encoded as `Blocked by #N` in each issue body — together the
+`Blocked by` edges + the `Lane` field model the dependency DAG.
+
+Rules:
+- **Start only from `Lane = Ready`** (in-degree-0). Never start a `Blocked` issue before its blockers close.
+- When a blocker closes, its dependents' in-degree drops — move them **Blocked → Ready** and pick up the
+  next parallel wave. Unblocked, independent slices can be worked **in parallel**.
+- Move a slice's lane to reflect reality: Ready → In progress → In review → Done.

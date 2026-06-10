@@ -21,6 +21,11 @@ const envSchema = z.object({
 
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),
+  // eBay Marketplace Account Deletion endpoint (production flip only). Catalogued here
+  // for discoverability; the route reads them directly so the endpoint isn't coupled to
+  // unrelated required vars (OPENAI/Supabase) at request time.
+  EBAY_VERIFICATION_TOKEN: z.string().min(1).optional(),
+  EBAY_DELETION_ENDPOINT_URL: z.string().min(1).optional(),
 
   NODE_ENV: z
     .enum(["development", "test", "production"])
