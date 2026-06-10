@@ -1,0 +1,21 @@
+/**
+ * Pipeline public surface — the seam where real vision/pricing/listing swap in.
+ * The walking skeleton ships the stub; later slices replace `StubPipeline`
+ * without changing this barrel, the `Pipeline` contract, or `runPipelineAndPersist`.
+ */
+export {
+  extractedAttributesSchema,
+  listingCopySchema,
+  pipelineResultSchema,
+  type ExtractedAttributes,
+  type ListingCopy,
+  type Pipeline,
+  type PipelineInput,
+  type PipelineResult,
+} from "./types";
+export { StubPipeline, attributesToSignal, pipeline } from "./stub";
+export {
+  runPipelineAndPersist,
+  type RunAndPersistInput,
+  type RunAndPersistResult,
+} from "./persist";
