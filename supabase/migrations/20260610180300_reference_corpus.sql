@@ -33,6 +33,10 @@ create table public.reference_corpus (
   metadata    jsonb not null default '{}'::jsonb,
   -- Same dimensionality as public.embeddings (text-embedding-3-small = 1536).
   embedding   extensions.vector(1536),
+  -- The embedder identity (e.g. "text-embedding-3-small" | "synthetic-fnv1a-bow") used
+  -- to produce `embedding`. Persisted so a query embedded by a DIFFERENT model can be
+  -- rejected rather than silently cosine-comparing across incompatible vector spaces.
+  embedding_model text not null,
   created_at  timestamptz not null default now()
 );
 
@@ -82,10 +86,11 @@ returns table (
   category    text,
   brand       text,
   model       text,
-  price       numeric,
-  content     text,
-  metadata    jsonb,
-  similarity  double precision
+  price           numeric,
+  content         text,
+  metadata        jsonb,
+  embedding_model text,
+  similarity      double precision
 )
 language sql
 stable
@@ -101,10 +106,13 @@ as $$
     rc.price,
     rc.content,
     rc.metadata,
+    rc.embedding_model,
     1 - (rc.embedding <=> query_embedding) as similarity
   from public.reference_corpus rc
   where rc.embedding is not null
     and (filter_category is null or rc.category = filter_category)
   order by rc.embedding <=> query_embedding
-  limit greatest(match_count, 1);
+  -- Clamp the caller-supplied count to a sane window (>=1, <=50) so a huge LIMIT
+  -- can't become a performance / bulk-exfiltration footgun as the corpus grows.
+  limit least(greatest(match_count, 1), 50);
 $$;

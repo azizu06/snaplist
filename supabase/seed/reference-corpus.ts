@@ -35,6 +35,7 @@ export interface SeedRow {
   price: number;
   content: string;
   metadata: Record<string, unknown>;
+  embedding_model: string;
   embedding: string;
 }
 
@@ -42,6 +43,7 @@ export interface SeedRow {
 export function buildSeedRows(
   items: ReferenceItem[],
   vectors: number[][],
+  embeddingModel: string,
 ): SeedRow[] {
   return items.map((item, i) => ({
     source_ref: item.sourceRef,
@@ -51,6 +53,7 @@ export function buildSeedRows(
     price: item.price,
     content: item.content,
     metadata: item.metadata,
+    embedding_model: embeddingModel,
     embedding: `[${vectors[i].join(",")}]`,
   }));
 }
@@ -65,7 +68,7 @@ export async function seedReferenceCorpus(
   items: ReferenceItem[] = REFERENCE_CORPUS,
 ): Promise<SeedRow[]> {
   const vectors = await embedder.embed(items.map(corpusEmbeddingText));
-  const rows = buildSeedRows(items, vectors);
+  const rows = buildSeedRows(items, vectors, embedder.model);
   const { error } = await client
     .from("reference_corpus")
     .upsert(rows, { onConflict: "source_ref" });
@@ -96,11 +99,13 @@ async function main() {
   });
 
   const rows = await seedReferenceCorpus(admin, embedder);
-  const { count } = await admin
+  const { count, error: countErr } = await admin
     .from("reference_corpus")
     .select("*", { count: "exact", head: true });
+  if (countErr) console.warn(`[seed] corpus count query failed: ${countErr.message}`);
+  const sizeStr = countErr || count == null ? "unknown" : String(count);
   console.log(
-    `[seed] upserted ${rows.length} reference rows. Corpus size now: ${count}.`,
+    `[seed] upserted ${rows.length} reference rows. Corpus size now: ${sizeStr}.`,
   );
 }
 

@@ -143,6 +143,18 @@ describe("rag pricing corroboration (consumer a, pure)", () => {
     expect(c.priceRange).toBeNull();
     expect(c.dispersion).toBeNull();
   });
+
+  it("excludes below-floor (unrelated) matches from the price signal", () => {
+    const matches = [
+      { sourceRef: "a", category: "c", price: 100, content: "x", metadata: {}, similarity: 0.05 },
+      { sourceRef: "b", category: "c", price: 9999, content: "y", metadata: {}, similarity: 0.02 },
+    ];
+    // Both are well below the relevance floor → honest "no corroboration", not a
+    // fabricated median from arbitrary products.
+    const c = pricingCorroboration(matches);
+    expect(c.priceCount).toBe(0);
+    expect(c.medianPrice).toBeNull();
+  });
 });
 
 describe("rag few-shot examples (consumer b, pure)", () => {
@@ -252,9 +264,9 @@ describe("rag/retrieve against pgvector (integration; skips if stack down)", () 
     const anon = createClient(SUPABASE_URL, ANON_KEY!, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    // Note: `anon` role here; the RLS policy grants SELECT to `authenticated`. The
-    // local stack's anon key reaches the RPC; the security property we assert is that
-    // a NON-service client cannot WRITE (below). Read of global reference data is open.
+    // Note: `anon` role here. The migration grants SELECT to BOTH `authenticated` and
+    // `anon` (global reference data is open to read), so this read is allowed; the
+    // security property we assert is that a NON-service client cannot WRITE (below).
     const { error } = await anon.rpc("match_reference_corpus", {
       query_embedding: `[${syntheticEmbed("Sony headphones").join(",")}]`,
       match_count: 3,

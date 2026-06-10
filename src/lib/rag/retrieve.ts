@@ -92,6 +92,7 @@ interface MatchRow {
   price: number | string;
   content: string;
   metadata: Record<string, unknown> | null;
+  embedding_model: string;
   similarity: number;
 }
 
@@ -144,7 +145,18 @@ export async function retrieveReferences(
     throw new Error(`match_reference_corpus RPC failed: ${error.message}`);
   }
 
-  return (data as MatchRow[])
+  const rows = data as MatchRow[];
+  // Guard the embedding space: the corpus stores the embedder it was seeded with.
+  // Cosine-comparing a query embedded by a DIFFERENT model is meaningless, so reject
+  // it loudly instead of returning arbitrary "matches".
+  if (rows.length > 0 && rows[0].embedding_model !== embedder.model) {
+    throw new Error(
+      `Embedding-space mismatch: corpus seeded with "${rows[0].embedding_model}" but ` +
+        `query embedder is "${embedder.model}". Reseed the corpus with the active embedder.`,
+    );
+  }
+
+  return rows
     .map(rowToMatch)
     .filter((m) => m.similarity >= minSimilarity);
 }
@@ -162,20 +174,32 @@ function median(nums: number[]): number {
 }
 
 /**
+ * Default cosine-similarity floor below which a retrieved row is treated as unrelated
+ * and MUST NOT contribute a price comp. Without it, the synthetic embedder over a
+ * nonempty corpus still returns `matchCount` rows for a disjoint query — often at
+ * similarity ~0 — which would fabricate a median/range from arbitrary products and
+ * inflate confidence. Mirrors the offline test's "unrelated < 0.3" expectation.
+ */
+export const DEFAULT_CORROBORATION_MIN_SIMILARITY = 0.3;
+
+/**
  * Summarize matches into a pricing-corroboration signal for the confidence composite.
- * Pure: matches in, signal out. `priceCount === 0` (e.g. nothing retrieved) is the
- * honest "no corroboration" case the confidence step should treat as low.
+ * Pure: matches in, signal out. Only matches at/above `minSimilarity` count as comps,
+ * so an irrelevant retrieval yields `priceCount === 0` — the honest "no corroboration"
+ * case the confidence step should treat as low.
  */
 export function pricingCorroboration(
   matches: ReferenceMatch[],
+  minSimilarity: number = DEFAULT_CORROBORATION_MIN_SIMILARITY,
 ): PricingCorroboration {
-  const prices = matches
+  const relevant = matches.filter((m) => m.similarity >= minSimilarity);
+  const prices = relevant
     .map((m) => m.price)
     .filter((p): p is number => typeof p === "number" && p > 0);
 
   if (prices.length === 0) {
     return {
-      matches,
+      matches: relevant,
       priceCount: 0,
       medianPrice: null,
       priceRange: null,
@@ -186,7 +210,7 @@ export function pricingCorroboration(
   const min = Math.min(...prices);
   const max = Math.max(...prices);
   return {
-    matches,
+    matches: relevant,
     priceCount: prices.length,
     medianPrice: median(prices),
     priceRange: { min, max },
