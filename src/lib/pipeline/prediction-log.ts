@@ -50,8 +50,14 @@ export interface PredictionLogRow {
   confidence: number;
   /** Which pricing tier produced the recommendation (a confidence-bearing fact). */
   tier_fired: string;
-  /** The model id used for the run. */
+  /** The model id used for the run (the vision/identification model). */
   model: string;
+  /**
+   * The model that produced the listing copy. Distinct from `model` so listing
+   * evaluations/experiments stay attributable even when LISTING_MODEL differs from the
+   * vision model; falls back to `model` when a single model served the whole run (#32).
+   */
+  listing_model: string;
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
 }
@@ -69,6 +75,7 @@ export interface PredictionLogRow {
  *   confidence.score  → confidence
  *   price.tier        → tier_fired
  *   model             → model
+ *   listingModel      → listing_model  (falls back to model when the run had one model)
  *   price.sources     → sources
  */
 export function buildPredictionLogRow(
@@ -85,6 +92,9 @@ export function buildPredictionLogRow(
     confidence: result.confidence.score,
     tier_fired: result.price.tier,
     model: result.model,
+    // The listing's own model when the pipeline produced one; otherwise the run's
+    // single model (the stub / vision-only path) so provenance is never null (#32).
+    listing_model: result.listingModel ?? result.model,
     // Persist the cited comps so the {suggested, range, confidence, sources[]}
     // contract is complete — rendered for verification, consumed by the eval harness.
     sources: result.price.sources,
@@ -127,7 +137,7 @@ export async function readPredictionLogs(
   let query = supabase
     .from("prediction_logs")
     .select(
-      "user_id, item_id, extracted_attrs, price, price_range, confidence, tier_fired, model, sources",
+      "user_id, item_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources",
     );
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);
