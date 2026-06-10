@@ -7,8 +7,10 @@ import type { FewShotExamples } from "../rag";
 import {
   EBAY_PLATFORM,
   EBAY_TITLE_MAX_LENGTH,
+  ebayListingRawSchema,
   ebayListingSchema,
   type EbayListing,
+  type RawEbayListing,
 } from "./schema";
 
 /**
@@ -53,7 +55,7 @@ export type ListingGenerate = (args: {
   attributes: ExtractedAttributes;
   fewShot: FewShotExamples;
   attempt: number;
-}) => Promise<EbayListing>;
+}) => Promise<RawEbayListing>;
 
 /**
  * Injectable few-shot retrieval. Returns the grounding exemplars for these
@@ -93,10 +95,12 @@ export interface GenerateEbayListingResult {
 }
 
 // ---------------------------------------------------------------------------
-// No-hallucination guard: every fact in the generated listing must trace back to
-// the validated attribute core. We reconcile the STRUCTURED fields (item specifics,
-// brand/model) — the load-bearing facts an eBay buyer filters on — and reject a
-// listing whose structured brand/model contradicts the core.
+// No-hallucination guard: every STRUCTURED fact in the generated listing must trace
+// back to the validated attribute core. The returned item specifics are WHITELISTED to
+// exactly the core-backed set, so the model cannot introduce a specific (Color, Storage
+// Capacity, Manufacturer, a contradicting Brand/Model, …) the core never established.
+// `listingHallucinatesAttributes` additionally lets us nudge the model to self-correct
+// via a retry before the deterministic whitelist guarantees a clean result.
 // ---------------------------------------------------------------------------
 
 /**
@@ -141,32 +145,18 @@ export function listingHallucinatesAttributes(
 }
 
 /**
- * Reconcile the listing's STRUCTURED specifics back onto the validated core: drop any
- * `Brand`/`Model` specific not backed by the core, and ensure the core's known
- * specifics are present. This is the deterministic "never invent attributes" enforcement
- * applied before we accept a candidate. (Free-text description/tags are stylistic and not
- * load-bearing identity claims; the structured specifics are what a buyer filters on.)
+ * Reconcile the listing's STRUCTURED specifics to ONLY what the validated core backs.
+ * eBay item specifics are the load-bearing, buyer-filterable facts, so the
+ * "no attributes beyond the validated core" rule is enforced deterministically here:
+ * the returned specifics are EXACTLY the core-backed set (`coreSpecifics`). Any specific
+ * the model emitted under a key the core never established — `Color`, `Storage Capacity`,
+ * `Manufacturer`, a contradicting `Brand`/`Model`, … — is an invented attribute and is
+ * dropped (not just brand/model). Free-text title/description/tags stay stylistic; the
+ * prompt forbids invented facts there and they are not buyer-filterable structured claims.
  */
-function reconcileSpecifics(
-  listing: EbayListing,
-  attrs: ExtractedAttributes,
-): Record<string, string> {
-  const core = coreSpecifics(attrs);
-  const reconciled: Record<string, string> = { ...listing.itemSpecifics };
-
-  // Remove identity specifics the core does not back.
-  for (const key of ["Brand", "Model"] as const) {
-    const emitted = reconciled[key];
-    const coreValue = key === "Brand" ? attrs.brand : attrs.model;
-    if (emitted != null && (!coreValue || norm(coreValue) !== norm(emitted))) {
-      delete reconciled[key];
-    }
-  }
-  // Ensure every known core specific is present (authoritative values win).
-  for (const [k, v] of Object.entries(core)) {
-    reconciled[k] = v;
-  }
-  return reconciled;
+function reconcileSpecifics(attrs: ExtractedAttributes): Record<string, string> {
+  // Whitelist: the core is the ONLY source of truth for structured specifics.
+  return coreSpecifics(attrs);
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +233,7 @@ export async function generateEbayListing(
   let lastReconciled: EbayListing | null = null;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
-    let raw: EbayListing;
+    let raw: RawEbayListing;
     try {
       raw = await generate({ model, attributes, fewShot, attempt });
     } catch (err) {
@@ -260,7 +250,7 @@ export async function generateEbayListing(
     const reconciled: EbayListing = {
       ...raw,
       title: enforceTitleLength(raw.title),
-      itemSpecifics: reconcileSpecifics(raw, attributes),
+      itemSpecifics: reconcileSpecifics(attributes),
     };
 
     const parsed = ebayListingSchema.safeParse(reconciled);
@@ -401,12 +391,16 @@ export function createOpenAIListingGenerate(
         ? `Write an eBay listing for this item.\n\nValidated attributes (the ONLY allowed facts):\n${facts}\n\nGrounding example listings:\n${examples}`
         : `Your previous response violated the eBay constraints (title length ≤ ${EBAY_TITLE_MAX_LENGTH}, no attributes beyond the validated core). Regenerate strictly using only these facts:\n${facts}`;
 
+    // Generate against the PERMISSIVE schema so a merely over-long title or empty
+    // specifics is RETURNED (not thrown by the SDK) and reaches the deterministic
+    // repair/whitelist; the repaired candidate is then validated against the strict
+    // `ebayListingSchema` in `generateEbayListing`.
     const { object } = await generateObject({
       model: openai.chat(model),
-      schema: ebayListingSchema,
+      schema: ebayListingRawSchema,
       system: LISTING_SYSTEM_PROMPT,
       prompt: instruction,
     });
-    return object as EbayListing;
+    return object as RawEbayListing;
   };
 }

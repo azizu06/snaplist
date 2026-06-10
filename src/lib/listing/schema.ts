@@ -54,3 +54,22 @@ export const ebayListingSchema = z.object({
 });
 
 export type EbayListing = z.infer<typeof ebayListingSchema>;
+
+/**
+ * PERMISSIVE schema handed to `generateObject` on the real path. It relaxes exactly
+ * the two DETERMINISTICALLY-REPAIRABLE constraints — the title length cap and the
+ * "≥ 1 item specific" rule — so the model's output is ACCEPTED by the SDK (which
+ * validates against the supplied schema and throws otherwise) and reaches the
+ * repair/reconcile step. The repaired candidate is then validated against the strict
+ * `ebayListingSchema`. Without this, a merely over-long title or empty specifics would
+ * throw inside `generateObject` before the repair could run, so the advertised
+ * deterministic repair would never apply in production.
+ */
+export const ebayListingRawSchema = z.object({
+  title: z.string().min(1, "eBay title is required"),
+  itemSpecifics: z.record(z.string(), z.string()),
+  description: z.string().min(1, "eBay description is required"),
+  tags: z.array(z.string()),
+});
+
+export type RawEbayListing = z.infer<typeof ebayListingRawSchema>;

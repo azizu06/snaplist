@@ -266,6 +266,39 @@ describe("listing/generate — no attributes invented beyond the validated core"
     expect(listing.itemSpecifics.Brand).toBe("Sony");
     expect(listingHallucinatesAttributes(listing, CORE)).toBe(false);
   });
+
+  it("drops item specifics not backed by the core (Color, Storage, Manufacturer, …)", async () => {
+    // The model emits valid Brand/Model but ALSO invents non-identity specifics the core
+    // never established. Reconciliation whitelists to the core-backed set, so the invented
+    // specifics never reach the returned listing — enforcing "no attributes beyond the
+    // validated core" for ALL keys, not just brand/model.
+    const withInvented: EbayListing = {
+      ...GOOD_LISTING,
+      itemSpecifics: {
+        ...GOOD_LISTING.itemSpecifics,
+        Color: "Red",
+        "Storage Capacity": "1 TB",
+        Manufacturer: "Definitely Not Sony",
+      },
+    };
+    const { generate } = scriptedGenerate([withInvented]);
+    const { listing } = await generateEbayListing({
+      attributes: CORE,
+      fewShot: EXEMPLARS,
+      generate,
+      maxRetries: 0,
+    });
+    // Only the core-backed specifics survive; every invented key is gone.
+    expect(listing.itemSpecifics).toEqual({
+      Brand: "Sony",
+      Model: "WH-1000XM4",
+      Type: "electronics",
+      Condition: "good",
+    });
+    expect(listing.itemSpecifics.Color).toBeUndefined();
+    expect(listing.itemSpecifics["Storage Capacity"]).toBeUndefined();
+    expect(listing.itemSpecifics.Manufacturer).toBeUndefined();
+  });
 });
 
 describe("listing/generate — grounded by injected few-shot retrieval", () => {
