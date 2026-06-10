@@ -13,7 +13,6 @@ import type {
 } from "../pipeline/types";
 import {
   extractItemAttributes,
-  type ExtractItemAttributesResult,
   type VisionGenerate,
   type VisionImageInput,
 } from "./extract";
@@ -95,14 +94,16 @@ function pricingTierToConfidenceTier(): ConfidenceSignals["tier"] {
 }
 
 /**
- * Build the confidence input from the REAL extraction signals. The identification
- * booleans read the SAME resolved fields the `Identification` did, so "what we think
- * it is" and the composite score stay consistent (no second source of truth).
+ * Build the confidence input from DETERMINISTIC extracted evidence only. Every signal
+ * is a fact about the resolved fields — never the model's self-reported `ambiguous`
+ * flag. Keeping LLM self-report out of the composite preserves the "signal-based"
+ * guarantee (issue #3): the score and autopilot gate depend on evidence, not on the
+ * model's mood. The model's ambiguity is reserved for the USER-FACING identification
+ * warning (`Identification.confident`), surfaced on the review page — not the score.
  */
 function confidenceSignalsFor(
-  extraction: ExtractItemAttributesResult,
+  attributes: ExtractedAttributes,
 ): ConfidenceSignals {
-  const { attributes } = extraction;
   return {
     tier: pricingTierToConfidenceTier(),
     // No comp set yet (placeholder price) → a neutral, lightly-weighted value.
@@ -111,8 +112,7 @@ function confidenceSignalsFor(
       brandResolved: attributes.brand != null,
       modelResolved: attributes.model != null,
       barcodeDecoded: attributes.upc != null || attributes.isbn != null,
-      categoryUnambiguous:
-        attributes.category != null && extraction.identification.confident,
+      categoryUnambiguous: attributes.category != null,
     },
   };
 }
@@ -149,8 +149,10 @@ export function createVisionPipeline(
       const price = placeholderPrice();
       const listing = placeholderListing(attributes, identification.label);
 
-      // 4. REAL confidence composite over the real identification signals.
-      const confidence = computeConfidence(confidenceSignalsFor(extraction), {
+      // 4. REAL confidence composite over DETERMINISTIC extracted evidence (the model's
+      //    self-reported ambiguity stays out of the score — it only flags the user-facing
+      //    identification below).
+      const confidence = computeConfidence(confidenceSignalsFor(attributes), {
         autopilotEnabled: input.autopilotEnabled ?? true,
       });
 

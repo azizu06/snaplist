@@ -48,7 +48,7 @@ export default async function UploadPage({
         <input
           type="file"
           name="photo"
-          accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+          accept="image/png,image/jpeg,image/webp"
           required
           className="block w-full text-sm text-zinc-700 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-zinc-700"
         />

@@ -120,6 +120,47 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(result.confidence.autopilotEligible).toBe(false);
   });
 
+  it("keeps the model's self-reported ambiguity OUT of the confidence score (signal-based)", async () => {
+    // Identical extracted evidence; only the model's self-report differs. The
+    // user-facing identification flag must change, but the deterministic confidence
+    // score must NOT — the composite depends on evidence, not LLM self-report (#3).
+    const attributes = {
+      brand: "Sony",
+      model: "WH-1000XM4",
+      category: "electronics",
+      condition: "good",
+      upc: "027242920866",
+    };
+    const confidentExtraction: ExtractItemAttributesResult = {
+      attributes,
+      identification: { label: "Sony WH-1000XM4", confident: true, evidence: 1 },
+      model: "m",
+    };
+    const modelUnsureExtraction: ExtractItemAttributesResult = {
+      attributes,
+      identification: {
+        label: "Sony WH-1000XM4",
+        confident: false,
+        evidence: 1,
+        reason: "Model flagged this identification as uncertain.",
+      },
+      model: "m",
+    };
+    const run = (e: ExtractItemAttributesResult) =>
+      createVisionPipeline({ supabase: fakeSignerClient(), extract: fakeExtract(e) }).run({
+        photos: ["u/a.jpg"],
+      });
+
+    const a = await run(confidentExtraction);
+    const b = await run(modelUnsureExtraction);
+
+    // Same evidence → same score (decoupled from the model flag)...
+    expect(b.confidence.score).toBe(a.confidence.score);
+    // ...but the user-facing identification still reflects the model's uncertainty.
+    expect(a.identification?.confident).toBe(true);
+    expect(b.identification?.confident).toBe(false);
+  });
+
   it("throws when given no photos", async () => {
     const pipeline = createVisionPipeline({
       supabase: fakeSignerClient(),
