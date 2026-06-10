@@ -1,12 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
-import { priceResultSchema } from "../pricing";
-import { pipelineResultSchema } from "../pipeline/types";
-import { createVisionPipeline } from "./pipeline";
+import { priceResultSchema, type ItemSignal, type PriceResult } from "../pricing";
+import { pipelineResultSchema, type ListingCopy } from "../pipeline/types";
+import {
+  createVisionPipeline,
+  type CreateVisionPipelineOptions,
+} from "./pipeline";
 import type {
   ExtractItemAttributesInput,
   ExtractItemAttributesResult,
 } from "./extract";
 import type { SignedUrlClient } from "./photos";
+
+/**
+ * `createVisionPipeline` tests (offline). Extraction, pricing, listing generation, and
+ * storage signing are ALL injected, so this exercises the real composition — photos →
+ * signed URLs → extraction → pricing → listing → #31-calibrated confidence — without
+ * network or DB. The integration wires #8 (pricing) + #9 (listing) behind the seam.
+ */
 
 /** A typed fake for the injected extraction (so `.mock.calls[0][0]` is well-typed). */
 function fakeExtract(result: ExtractItemAttributesResult) {
@@ -17,12 +27,6 @@ function fakeExtract(result: ExtractItemAttributesResult) {
     },
   );
 }
-
-/**
- * `createVisionPipeline` tests (offline). The model call AND extraction are injected,
- * and storage is a fake signer, so this exercises the real composition — photos →
- * signed URLs → extraction → confidence — without network or DB.
- */
 
 function fakeSignerClient(): SignedUrlClient {
   return {
@@ -55,17 +59,36 @@ const STRONG_EXTRACTION: ExtractItemAttributesResult = {
   model: "test-vision-model",
 };
 
+/** Canned offline price + listing so the wired pricer/generator never touch the network. */
+const STUB_PRICE: PriceResult = priceResultSchema.parse({
+  suggested: 50,
+  range: { min: 40, max: 60 },
+  confidence: 0.5,
+  sources: [],
+  tier: "llm-only",
+});
+const STUB_LISTING: ListingCopy = {
+  platform: "ebay",
+  title: "Sony WH-1000XM4 Headphones",
+  description: "A description.",
+  fields: { itemSpecifics: { Brand: "Sony" }, tags: ["sony"] },
+};
+
+/** Build a pipeline with all real deps replaced by offline fakes; override per test. */
+function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
+  return createVisionPipeline({
+    supabase: fakeSignerClient(),
+    extract: fakeExtract(STRONG_EXTRACTION),
+    priceItem: async () => STUB_PRICE,
+    generateListing: async () => STUB_LISTING,
+    ...overrides,
+  });
+}
+
 describe("vision/pipeline — createVisionPipeline.run", () => {
-  it("signs photos, extracts, and returns a schema-valid PipelineResult", async () => {
-    const extract = fakeExtract(STRONG_EXTRACTION);
-    const pipeline = createVisionPipeline({
-      supabase: fakeSignerClient(),
-      extract,
-    });
+  it("signs photos, extracts, prices, lists, and returns a schema-valid PipelineResult", async () => {
+    const result = await makePipeline().run({ photos: ["u/a.jpg", "u/b.jpg"] });
 
-    const result = await pipeline.run({ photos: ["u/a.jpg", "u/b.jpg"] });
-
-    // The full result validates against the real pipeline contract.
     expect(pipelineResultSchema.safeParse(result).success).toBe(true);
     expect(priceResultSchema.safeParse(result.price).success).toBe(true);
     expect(result.attributes.model).toBe("WH-1000XM4");
@@ -74,12 +97,7 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
 
   it("passes the SIGNED image URLs (all of them) to extraction", async () => {
     const extract = fakeExtract(STRONG_EXTRACTION);
-    const pipeline = createVisionPipeline({
-      supabase: fakeSignerClient(),
-      extract,
-    });
-
-    await pipeline.run({ photos: ["u/a.jpg", "u/b.jpg"] });
+    await makePipeline({ extract }).run({ photos: ["u/a.jpg", "u/b.jpg"] });
 
     expect(extract).toHaveBeenCalledOnce();
     expect(extract.mock.calls[0][0].images).toEqual([
@@ -88,13 +106,41 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     ]);
   });
 
-  it("surfaces the identification on the result (before pricing, for confirmation)", async () => {
-    const extract = fakeExtract(STRONG_EXTRACTION);
-    const pipeline = createVisionPipeline({
-      supabase: fakeSignerClient(),
-      extract,
+  it("prices via the injected pricer and lists via the injected generator", async () => {
+    const priceItem = vi.fn(async () => STUB_PRICE);
+    const generateListing = vi.fn(async () => STUB_LISTING);
+    const result = await makePipeline({ priceItem, generateListing }).run({
+      photos: ["u/a.jpg"],
     });
-    const result = await pipeline.run({ photos: ["u/a.jpg"] });
+    expect(priceItem).toHaveBeenCalledOnce();
+    expect(generateListing).toHaveBeenCalledOnce();
+    expect(result.price).toEqual(STUB_PRICE);
+    expect(result.listing).toEqual(STUB_LISTING);
+  });
+
+  it("routes the attribute-derived ItemSignal (incl. ISBN) to the pricer", async () => {
+    const isbnExtraction: ExtractItemAttributesResult = {
+      attributes: {
+        isbn: "9780131103627",
+        category: "books",
+        title: "The C Programming Language",
+      },
+      identification: {
+        label: "The C Programming Language",
+        confident: true,
+        evidence: 0.5,
+      },
+      model: "m",
+    };
+    const priceItem = vi.fn(async (_signal: ItemSignal) => STUB_PRICE);
+    await makePipeline({ extract: fakeExtract(isbnExtraction), priceItem }).run({
+      photos: ["u/a.jpg"],
+    });
+    expect(priceItem.mock.calls[0]?.[0].isbn).toBe("9780131103627");
+  });
+
+  it("surfaces the identification on the result (before pricing, for confirmation)", async () => {
+    const result = await makePipeline().run({ photos: ["u/a.jpg"] });
     expect(result.identification?.confident).toBe(true);
     expect(result.identification?.label).toMatch(/Sony/);
   });
@@ -110,20 +156,18 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
       },
       model: "test-vision-model",
     };
-    const pipeline = createVisionPipeline({
-      supabase: fakeSignerClient(),
-      extract: fakeExtract(weak),
+    const result = await makePipeline({ extract: fakeExtract(weak) }).run({
+      photos: ["u/a.jpg"],
     });
-    const result = await pipeline.run({ photos: ["u/a.jpg"] });
     expect(result.identification?.confident).toBe(false);
     expect(result.confidence.band).toBe("low");
     expect(result.confidence.autopilotEligible).toBe(false);
   });
 
   it("keeps the model's self-reported ambiguity OUT of the confidence score (signal-based)", async () => {
-    // Identical extracted evidence; only the model's self-report differs. The
-    // user-facing identification flag must change, but the deterministic confidence
-    // score must NOT — the composite depends on evidence, not LLM self-report (#3).
+    // Identical extracted evidence + identical price; only the model's self-report
+    // differs. The user-facing identification flag must change, but the deterministic
+    // confidence score must NOT — the composite depends on evidence, not LLM self-report.
     const attributes = {
       brand: "Sony",
       model: "WH-1000XM4",
@@ -147,25 +191,68 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
       model: "m",
     };
     const run = (e: ExtractItemAttributesResult) =>
-      createVisionPipeline({ supabase: fakeSignerClient(), extract: fakeExtract(e) }).run({
-        photos: ["u/a.jpg"],
-      });
+      makePipeline({ extract: fakeExtract(e) }).run({ photos: ["u/a.jpg"] });
 
     const a = await run(confidentExtraction);
     const b = await run(modelUnsureExtraction);
 
-    // Same evidence → same score (decoupled from the model flag)...
     expect(b.confidence.score).toBe(a.confidence.score);
-    // ...but the user-facing identification still reflects the model's uncertainty.
     expect(a.identification?.confident).toBe(true);
     expect(b.identification?.confident).toBe(false);
   });
 
-  it("throws when given no photos", async () => {
-    const pipeline = createVisionPipeline({
-      supabase: fakeSignerClient(),
-      extract: fakeExtract(STRONG_EXTRACTION),
+  it("#31: a retail-derived ISBN price (no sold comp) is trusted at depreciation, not isbn", async () => {
+    // Same strongly-identified book; the ONLY difference is the price's evidence: a
+    // catalog lookup (retail-derived) vs a real sold comp. The retail-derived one must
+    // NOT earn the top ISBN trust, so it scores lower and is not autopilot-eligible.
+    const strongBook: ExtractItemAttributesResult = {
+      attributes: {
+        brand: "Prentice Hall",
+        model: "2nd Edition",
+        category: "books",
+        isbn: "9780131103627",
+        title: "The C Programming Language",
+      },
+      identification: { label: "K&R C", confident: true, evidence: 1 },
+      model: "m",
+    };
+    const isbnRetail = priceResultSchema.parse({
+      suggested: 12,
+      range: { min: 8, max: 16 },
+      confidence: 0.9,
+      sources: [
+        { url: "https://openlibrary.org/isbn/x.json", title: "Open Library", kind: "isbn-lookup" },
+      ],
+      tier: "isbn-lookup",
     });
-    await expect(pipeline.run({ photos: [] })).rejects.toThrow(/at least one photo/i);
+    const isbnComped = priceResultSchema.parse({
+      suggested: 12,
+      range: { min: 8, max: 16 },
+      confidence: 0.9,
+      sources: [{ url: "https://example.com/sold/x", title: "Sold comp", kind: "sold-comp" }],
+      tier: "isbn-lookup",
+    });
+
+    const retail = await makePipeline({
+      extract: fakeExtract(strongBook),
+      priceItem: async () => isbnRetail,
+    }).run({ photos: ["u/a.jpg"] });
+    const comped = await makePipeline({
+      extract: fakeExtract(strongBook),
+      priceItem: async () => isbnComped,
+    }).run({ photos: ["u/a.jpg"] });
+
+    // A real sold comp earns the top ISBN trust; the retail-derived estimate does not.
+    expect(comped.confidence.score).toBeGreaterThan(retail.confidence.score);
+    // And a retail-derived ISBN price is NOT autopilot-eligible on identity alone (#31).
+    expect(retail.confidence.autopilotEligible).toBe(false);
+    // The pricing tier logged is still the ISBN tier in both cases (identity is exact).
+    expect(retail.price.tier).toBe("isbn-lookup");
+  });
+
+  it("throws when given no photos", async () => {
+    await expect(makePipeline().run({ photos: [] })).rejects.toThrow(
+      /at least one photo/i,
+    );
   });
 });

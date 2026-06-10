@@ -3,7 +3,15 @@ import {
   computeConfidence,
   type ConfidenceSignals,
 } from "../confidence/confidence";
-import { priceResultSchema, type PriceResult } from "../pricing";
+import {
+  PriceRouter,
+  createIsbnPricingProvider,
+  priceResultSchema,
+  type ItemSignal,
+  type PriceResult,
+  type PricingProvider,
+} from "../pricing";
+import { generateEbayListing, createRealFewShotRetrieval } from "../listing";
 import type {
   ExtractedAttributes,
   ListingCopy,
@@ -11,6 +19,7 @@ import type {
   PipelineInput,
   PipelineResult,
 } from "../pipeline/types";
+import { attributesToSignal } from "../pipeline/stub";
 import {
   extractItemAttributes,
   type VisionGenerate,
@@ -19,18 +28,17 @@ import {
 import { resolvePhotoImages, type SignedUrlClient } from "./photos";
 
 /**
- * The real vision pipeline (issue #6). Implements the SAME `Pipeline` seam as the
- * walking-skeleton stub, so it drops into `runPipelineAndPersist` as the injected
- * 3rd arg with zero changes to the persistence layer or callers.
+ * The real vision pipeline (issue #6, integrated with #8 pricing + #9 listing).
+ * Implements the SAME `Pipeline` seam as the walking-skeleton stub, so it drops into
+ * `runPipelineAndPersist` as the injected 3rd arg with zero changes to the persistence
+ * layer or callers.
  *
  *   photos[] → (signed URLs) → SINGLE multimodal extraction → attributes + flagged
- *   identification → [price + listing stubs] → REAL confidence composite → result.
+ *   identification → REAL pricing (PriceRouter: ISBN tier + interim fallback) → REAL
+ *   grounded eBay listing → REAL, #31-calibrated confidence composite → result.
  *
- * Price and listing are LATER slices (#? pricing router, #? listing generator). This
- * slice does NOT import the private stub functions (another agent owns stub.ts);
- * instead it re-implements minimal, schema-valid `PriceResult` / `ListingCopy` locally
- * so the end-to-end thread is provable now and the real tiers swap in later. Only the
- * VISION half and the REAL confidence composite are wired for real here.
+ * Every model/network dependency (extraction, pricing, listing, retrieval) is injectable
+ * so the contract tests run fully offline; the defaults are the real implementations.
  */
 
 export interface CreateVisionPipelineOptions {
@@ -42,72 +50,121 @@ export interface CreateVisionPipelineOptions {
   generate?: VisionGenerate;
   /** Model id override forwarded to extraction (else env / default). */
   model?: string;
+  /**
+   * Price an item signal. Defaults to the REAL `PriceRouter` (ISBN tier + an interim
+   * llm-only catch-all). Injected in tests so pricing runs offline.
+   */
+  priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
+  /**
+   * Generate the listing copy from the attribute core. Defaults to the REAL grounded
+   * eBay generator (`generateEbayListing` + rag few-shot). Injected in tests.
+   */
+  generateListing?: (args: {
+    attributes: ExtractedAttributes;
+  }) => Promise<ListingCopy>;
 }
+
+// ---------------------------------------------------------------------------
+// Real pricing + listing wiring (#8 ISBN tier + #9 grounded listing integrated;
+// #31 confidence calibration for retail-derived ISBN prices).
+// ---------------------------------------------------------------------------
 
 /**
- * Minimal, schema-valid price placeholder until the pricing-router slice lands. It is
- * validated against the REAL `priceResultSchema` so it can never drift from the seam,
- * and is honestly the lowest-trust tier so confidence reflects "not yet priced for
- * real". The real `PriceRouter` replaces this without changing this file's shape.
+ * Interim catch-all pricing provider: when no real tier handles the signal (e.g. a
+ * non-ISBN item, before the web/depreciation tiers land), yield an honest llm-only
+ * price-0 placeholder so the router always produces a schema-valid price. This is NOT
+ * the real LLM-only pricing tier (#11) — just a placeholder until #10/#11 add real tiers.
  */
-function placeholderPrice(): PriceResult {
-  return priceResultSchema.parse({
-    suggested: 0,
-    range: { min: 0, max: 0 },
-    confidence: 0.2,
-    sources: [],
-    tier: "llm-only",
-  } satisfies PriceResult);
-}
-
-/** Minimal listing copy from the validated attributes (real generator lands later). */
-function placeholderListing(
-  attributes: ExtractedAttributes,
-  identificationLabel: string,
-): ListingCopy {
-  const title = attributes.title ?? identificationLabel;
-  const condition = attributes.condition ?? "used";
-  const specs = attributes.specs ?? [];
+function interimFallbackProvider(): PricingProvider {
   return {
-    platform: "ebay",
-    title,
-    description:
-      `${title} in ${condition} condition.` +
-      (specs.length > 0 ? ` Features: ${specs.join(", ")}.` : ""),
-    fields: {
-      brand: attributes.brand,
-      model: attributes.model,
-      category: attributes.category,
-      condition: attributes.condition,
-      tags: specs,
-    },
+    tier: "llm-only",
+    canHandle: () => true,
+    price: async () =>
+      priceResultSchema.parse({
+        suggested: 0,
+        range: { min: 0, max: 0 },
+        confidence: 0.2,
+        sources: [],
+        tier: "llm-only",
+      } satisfies PriceResult),
   };
 }
 
-/**
- * Map the firing pricing tier onto the confidence vocabulary. The placeholder price
- * is the LLM-only fallback, so confidence is driven mostly by identification here —
- * exactly the honest story for a not-yet-priced item.
- */
-function pricingTierToConfidenceTier(): ConfidenceSignals["tier"] {
-  return "llm_only";
+/** The default real pricer: ISBN tier first, interim llm-only catch-all last. */
+function createDefaultPricer(): (signal: ItemSignal) => Promise<PriceResult> {
+  const router = new PriceRouter([
+    createIsbnPricingProvider(),
+    interimFallbackProvider(),
+  ]);
+  return (signal) => router.price(signal);
+}
+
+/** The default real listing generator: grounded eBay generation (#9) → `ListingCopy`. */
+function createDefaultListingGenerator(): (args: {
+  attributes: ExtractedAttributes;
+}) => Promise<ListingCopy> {
+  return async ({ attributes }) => {
+    const { copy } = await generateEbayListing({
+      attributes,
+      retrieve: createRealFewShotRetrieval(),
+    });
+    return copy;
+  };
+}
+
+/** Does this price cite a real SOLD comp (vs only catalog/asking lookups)? */
+function hasSoldComp(price: PriceResult): boolean {
+  return price.sources.some((s) => s.kind === "sold-comp");
 }
 
 /**
- * Build the confidence input from DETERMINISTIC extracted evidence only. Every signal
- * is a fact about the resolved fields — never the model's self-reported `ambiguous`
- * flag. Keeping LLM self-report out of the composite preserves the "signal-based"
- * guarantee (issue #3): the score and autopilot gate depend on evidence, not on the
- * model's mood. The model's ambiguity is reserved for the USER-FACING identification
- * warning (`Identification.confident`), surfaced on the review page — not the score.
+ * Map the firing PRICING tier onto the CONFIDENCE vocabulary — they are distinct sets
+ * (`isbn-lookup`/`branded-web`/… vs `isbn`/`web_tight`/…); this bridges them.
+ *
+ * #31 calibration: an `isbn-lookup` price backed ONLY by catalog lookups (Open Library /
+ * Google Books — no sold comp) is a retail-DERIVED estimate, not a comped price, so we
+ * trust it at the `depreciation` level (0.4), NOT the top `isbn` tier (0.95). A book
+ * priced off new-retail therefore can't reach the autopilot-eligible band on identity
+ * alone; the ISBN identity still feeds the identification signals. A future sold-comp
+ * source (web tier) restores the high `isbn` trust.
+ */
+function pricingTierToConfidenceTier(
+  price: PriceResult,
+): ConfidenceSignals["tier"] {
+  switch (price.tier) {
+    case "isbn-lookup":
+      return hasSoldComp(price) ? "isbn" : "depreciation";
+    case "upc-aided-web":
+      return "web_wide";
+    case "branded-web":
+      return "web_tight";
+    case "depreciation":
+      return "depreciation";
+    case "llm-only":
+    default:
+      return "llm_only";
+  }
+}
+
+/** Conservative comp-agreement signal from the price's sources (real clustering TBD). */
+function compAgreementFor(price: PriceResult): number {
+  if (hasSoldComp(price)) return 0.7;
+  return price.sources.length > 0 ? 0.4 : 0.3;
+}
+
+/**
+ * Build the confidence input from DETERMINISTIC signals: the firing tier (mapped +
+ * #31-calibrated), a conservative comp-agreement, and extracted-evidence identification
+ * booleans. NEVER the model's self-reported `ambiguous` flag — that stays a user-facing
+ * identification warning, not a score input (issue #3, signal-based composite).
  */
 function confidenceSignalsFor(
   attributes: ExtractedAttributes,
+  price: PriceResult,
 ): ConfidenceSignals {
   return {
-    tier: pricingTierToConfidenceTier(),
-    // No comp set yet (placeholder price) → a neutral, lightly-weighted value.
-    compAgreement: 0.5,
+    tier: pricingTierToConfidenceTier(price),
+    compAgreement: compAgreementFor(price),
     identification: {
       brandResolved: attributes.brand != null,
       modelResolved: attributes.model != null,
@@ -118,14 +175,19 @@ function confidenceSignalsFor(
 }
 
 /**
- * Construct a `Pipeline` whose `run` performs real vision extraction. `supabase` signs
- * the private photo URLs; `extract`/`generate`/`model` are injectable for offline tests.
+ * Construct a `Pipeline` whose `run` performs real vision extraction, real pricing
+ * (PriceRouter: ISBN tier + interim fallback), and real grounded eBay listing
+ * generation. `supabase` signs the private photo URLs; all model/network deps are
+ * injectable for offline tests, defaulting to the real implementations.
  */
 export function createVisionPipeline(
   options: CreateVisionPipelineOptions,
 ): Pipeline {
   const { supabase, model } = options;
   const extract = options.extract ?? extractItemAttributes;
+  const priceItem = options.priceItem ?? createDefaultPricer();
+  const generateListing =
+    options.generateListing ?? createDefaultListingGenerator();
 
   return {
     async run(input: PipelineInput): Promise<PipelineResult> {
@@ -145,16 +207,18 @@ export function createVisionPipeline(
       });
       const { attributes, identification } = extraction;
 
-      // 3. Price + listing placeholders (later slices replace these; shapes are real).
-      const price = placeholderPrice();
-      const listing = placeholderListing(attributes, identification.label);
+      // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation.
+      const signal = attributesToSignal(attributes);
+      const price = await priceItem(signal);
+      const listing = await generateListing({ attributes });
 
-      // 4. REAL confidence composite over DETERMINISTIC extracted evidence (the model's
-      //    self-reported ambiguity stays out of the score — it only flags the user-facing
-      //    identification below).
-      const confidence = computeConfidence(confidenceSignalsFor(attributes), {
-        autopilotEnabled: input.autopilotEnabled ?? true,
-      });
+      // 4. REAL confidence composite over deterministic signals (tier #31-calibrated;
+      //    the model's self-reported ambiguity stays out of the score — it only flags
+      //    the user-facing identification).
+      const confidence = computeConfidence(
+        confidenceSignalsFor(attributes, price),
+        { autopilotEnabled: input.autopilotEnabled ?? true },
+      );
 
       return {
         attributes,
