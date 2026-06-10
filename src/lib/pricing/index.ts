@@ -14,3 +14,9 @@ export {
   type PricingProvider,
 } from "./types";
 export { PriceRouter } from "./router";
+export {
+  createIsbnPricingProvider,
+  USED_PRICE_FRACTION,
+  type FetchJson,
+  type IsbnPricingProviderOptions,
+} from "./providers/isbn";
