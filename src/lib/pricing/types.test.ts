@@ -46,6 +46,16 @@ describe("PriceResult contract", () => {
     expect(() => priceResultSchema.parse({ ...valid, tier: "not-a-tier" })).toThrow();
   });
 
+  it("requires the suggested price to fall within [range.min, range.max]", () => {
+    expect(() => priceResultSchema.parse({ ...valid, suggested: 100 })).toThrow();
+  });
+
+  it("rejects empty sources for a non-LLM tier", () => {
+    expect(() =>
+      priceResultSchema.parse({ ...valid, sources: [], tier: "isbn-lookup" }),
+    ).toThrow();
+  });
+
   it("exposes the tiers in PRD priority order", () => {
     expect(PRICING_TIERS).toEqual([
       "isbn-lookup",

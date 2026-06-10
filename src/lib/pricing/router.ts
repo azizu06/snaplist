@@ -36,7 +36,16 @@ export class PriceRouter {
       if (provider.canHandle && !provider.canHandle(signal)) continue;
 
       const result = await provider.price(signal);
-      if (result !== null) return result;
+      if (result !== null) {
+        // A provider must stamp its own tier; a mismatch would corrupt downstream
+        // logging/confidence ("which tier fired"), so fail loud rather than trust it.
+        if (result.tier !== provider.tier) {
+          throw new Error(
+            `PricingProvider for tier "${provider.tier}" returned a result tagged "${result.tier}"`,
+          );
+        }
+        return result;
+      }
     }
 
     throw new Error("No PricingProvider handled the item signal");

@@ -51,8 +51,21 @@ export interface ItemSignal {
   model?: string;
   /** Category, e.g. "electronics" / "books". Helps disambiguate tier and query. */
   category?: string;
-  /** Whether condition was assessed — depreciation needs it to apply a factor. */
+  /** Whether condition was assessed at all. */
   conditionKnown?: boolean;
+  /**
+   * Assessed condition grade (e.g. "new" | "like-new" | "good" | "fair" | "poor")
+   * when known. The depreciation tier applies a condition-specific factor to it.
+   */
+  condition?: string;
+  /**
+   * A retail price discovered for the item (e.g. surfaced by the web-search tier
+   * when only retail — not resale — comps were found). Carried in the routing
+   * context so the depreciation tier can compute retail × condition factor without
+   * repeating the search. (The fuller "a declining provider passes its discovered
+   * evidence forward" chaining is deferred to the web-search / depreciation tier slices.)
+   */
+  retailPrice?: number;
   /** Free-form resolved product name (e.g. UPC-resolved title) to seed search queries. */
   resolvedName?: string;
 }
@@ -98,6 +111,16 @@ export const priceResultSchema = z
   .refine((r) => r.range.min <= r.range.max, {
     message: "range.min must be <= range.max",
     path: ["range"],
+  })
+  .refine((r) => r.range.min <= r.suggested && r.suggested <= r.range.max, {
+    message: "suggested must be within [range.min, range.max]",
+    path: ["suggested"],
+  })
+  .refine((r) => r.tier === "llm-only" || r.sources.length > 0, {
+    // Every tier except the LLM-only fallback must cite checkable evidence — a
+    // high-confidence ISBN/web result with no sources violates the pricing contract.
+    message: "sources must be non-empty for every tier except llm-only",
+    path: ["sources"],
   });
 
 export type PriceResult = z.infer<typeof priceResultSchema>;

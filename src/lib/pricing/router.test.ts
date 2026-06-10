@@ -1,7 +1,31 @@
 import { describe, it, expect, vi } from "vitest";
 import { PriceRouter } from "./router";
 import { priceResultSchema, type ItemSignal, type PriceResult, type PricingProvider, type PricingTier } from "./types";
-import { makeStubProvider } from "./providers/stubs";
+
+/**
+ * Test-only stub provider for exercising the router seam. Kept inline in the test
+ * file (not under src/lib) so test scaffolding can never leak into a runtime
+ * bundle. Builds a provider that HANDLES the signal (canned PriceResult stamped
+ * with its tier) or DECLINES (null) so the router falls through.
+ */
+function makeStubProvider(
+  tier: PricingTier,
+  handles: (signal: ItemSignal) => boolean,
+): PricingProvider {
+  return {
+    tier,
+    price: async (signal: ItemSignal): Promise<PriceResult | null> => {
+      if (!handles(signal)) return null;
+      return {
+        suggested: 10,
+        range: { min: 5, max: 15 },
+        confidence: 0.5,
+        sources: [{ url: `https://stub.example/${tier}`, kind: tier }],
+        tier,
+      };
+    },
+  };
+}
 
 /**
  * Router behaviour is the primary pricing seam (PRD Testing Decisions): with
@@ -70,28 +94,25 @@ describe("PriceRouter tier selection", () => {
 describe("PriceRouter fallthrough", () => {
   it("tries providers in the injected order and returns the first non-null", async () => {
     const calls: PricingTier[] = [];
-    const spy =
-      (tier: PricingTier, handles: boolean) =>
-      (signal: ItemSignal): PricingProvider => {
-        const p = makeStubProvider(tier, () => handles);
-        const original = p.price.bind(p);
-        return {
-          tier,
-          price: async (s) => {
-            calls.push(tier);
-            return original(s);
-          },
-        };
+    const spy = (tier: PricingTier, handles: boolean): PricingProvider => {
+      const base = makeStubProvider(tier, () => handles);
+      return {
+        tier,
+        price: async (s) => {
+          calls.push(tier);
+          return base.price(s);
+        },
       };
+    };
 
     // isbn declines, upc-aided declines, branded handles -> branded wins,
     // and the lower tiers must NOT be consulted.
     const router = new PriceRouter([
-      spy("isbn-lookup", false)(brandedSignal),
-      spy("upc-aided-web", false)(brandedSignal),
-      spy("branded-web", true)(brandedSignal),
-      spy("depreciation", true)(brandedSignal),
-      spy("llm-only", true)(brandedSignal),
+      spy("isbn-lookup", false),
+      spy("upc-aided-web", false),
+      spy("branded-web", true),
+      spy("depreciation", true),
+      spy("llm-only", true),
     ]);
 
     const result = await router.price(brandedSignal);
@@ -157,5 +178,20 @@ describe("PriceRouter contract & extensibility", () => {
     };
     const router = new PriceRouter([boom, makeStubProvider("llm-only", () => true)]);
     await expect(router.price(isbnSignal)).rejects.toThrow(/isbn API down/);
+  });
+
+  it("throws if a provider returns a result stamped with a different tier", async () => {
+    const mislabeled: PricingProvider = {
+      tier: "isbn-lookup",
+      price: async () => ({
+        suggested: 10,
+        range: { min: 5, max: 15 },
+        confidence: 0.5,
+        sources: [{ url: "https://x.example" }],
+        tier: "branded-web",
+      }),
+    };
+    const router = new PriceRouter([mislabeled]);
+    await expect(router.price(isbnSignal)).rejects.toThrow(/tier/);
   });
 });
