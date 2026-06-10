@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signIn, signUp } from "./actions";
+import { safeNext } from "./safe-next";
 
 /**
  * Minimal sign-in / sign-up page. Skeleton-level UI (functional Tailwind, no design
@@ -19,7 +20,8 @@ export default async function LoginPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user) redirect(next ?? "/upload");
+  // Validate `next` here too — this signed-in branch must not become an open redirect.
+  if (user) redirect(safeNext(next));
 
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-6 py-16">

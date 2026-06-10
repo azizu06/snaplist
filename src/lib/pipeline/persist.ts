@@ -107,6 +107,9 @@ export async function runPipelineAndPersist(
     confidence: result.confidence.score,
     tier_fired: result.price.tier,
     model: result.model,
+    // Persist the cited comps so the {suggested,range,confidence,sources[]} contract is
+    // complete — they're rendered for verification and consumed by the eval harness.
+    sources: result.price.sources,
   });
   if (logErr) {
     // Logging is required by the PRD, so a failure is a real error, not a swallow.

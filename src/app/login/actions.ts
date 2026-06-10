@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { safeNext } from "./safe-next";
 
 /**
  * Minimal email/password auth server actions (User Story 33: "sign up and sign
@@ -11,13 +12,8 @@ import { createClient } from "@/lib/supabase/server";
  *
  * On success we redirect to `next` (defaulting to /upload). On failure we redirect
  * back to /login?error=... so the page can render the message without client JS.
+ * Same-origin `next` validation lives in ./safe-next (shared with the page).
  */
-
-function safeNext(raw: FormDataEntryValue | null): string {
-  const next = typeof raw === "string" ? raw : "";
-  // Only allow same-origin absolute paths to avoid open-redirects.
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/upload";
-}
 
 export async function signIn(formData: FormData) {
   const email = String(formData.get("email") ?? "");
