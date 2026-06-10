@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Pipeline, PipelineResult } from "./types";
 import { pipeline as defaultPipeline } from "./stub";
+import { logPrediction } from "./prediction-log";
 
 /**
  * Persistence layer for one pipeline run — the end-to-end spine the walking
@@ -98,23 +99,9 @@ export async function runPipelineAndPersist(
   const listingId = listing.id as string;
 
   // 5. Log the prediction for the eval harness (PRD non-negotiable: log every run).
-  const { error: logErr } = await supabase.from("prediction_logs").insert({
-    user_id: input.userId,
-    item_id: itemId,
-    extracted_attrs: result.attributes,
-    price: result.price.suggested,
-    price_range: { low: result.price.range.min, high: result.price.range.max },
-    confidence: result.confidence.score,
-    tier_fired: result.price.tier,
-    model: result.model,
-    // Persist the cited comps so the {suggested,range,confidence,sources[]} contract is
-    // complete — they're rendered for verification and consumed by the eval harness.
-    sources: result.price.sources,
-  });
-  if (logErr) {
-    // Logging is required by the PRD, so a failure is a real error, not a swallow.
-    throw new Error(`Failed to write prediction log: ${logErr.message}`);
-  }
+  //    Delegated to the dedicated prediction-log module, the single source of truth
+  //    for the row shape; it throws on error (logging is never swallowed).
+  await logPrediction(supabase, input.userId, itemId, result);
 
   return { itemId, listingId, result };
 }

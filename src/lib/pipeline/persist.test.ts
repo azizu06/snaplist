@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { StubPipeline } from "./stub";
 import { runPipelineAndPersist } from "./persist";
+import { readPredictionLogs } from "./prediction-log";
 
 /**
  * Walking-skeleton end-to-end seam test (issue #19). Exercises the real spine with
@@ -162,14 +163,28 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
     expect(listing?.platform).toBe(result.listing.platform);
     expect(listing?.status).toBe("draft");
 
-    // A prediction_log was written (eval-harness prerequisite).
-    const { data: logs } = await userA.client
-      .from("prediction_logs")
-      .select("item_id, tier_fired, model, confidence")
-      .eq("item_id", itemId);
-    expect(logs ?? []).toHaveLength(1);
-    expect(logs?.[0]?.tier_fired).toBe(result.price.tier);
-    expect(logs?.[0]?.model).toBe(result.model);
+    // A prediction_log was written (eval-harness prerequisite) — assert the FULL
+    // row contract, read back through the same user-scoped helper the eval harness
+    // will use, so the persisted shape can never silently drift from the mapping.
+    const logs = await readPredictionLogs(userA.client, { itemId });
+    expect(logs).toHaveLength(1);
+    const log = logs[0]!;
+    expect(log.user_id).toBe(userA.id);
+    expect(log.item_id).toBe(itemId);
+    // extracted_attrs round-trips the exact attributes the run produced.
+    expect(log.extracted_attrs).toEqual(result.attributes);
+    // price == suggested; range low/high == range.min/max (numeric column comes
+    // back as a number string in some drivers, so compare numerically).
+    expect(Number(log.price)).toBe(result.price.suggested);
+    expect(Number(log.price_range.low)).toBe(result.price.range.min);
+    expect(Number(log.price_range.high)).toBe(result.price.range.max);
+    // confidence == the composite score.
+    expect(Number(log.confidence)).toBe(result.confidence.score);
+    expect(log.tier_fired).toBe(result.price.tier);
+    expect(log.model).toBe(result.model);
+    // sources are persisted (the cited comps behind the price).
+    expect(log.sources).toEqual(result.price.sources);
+    expect(log.sources.length).toBeGreaterThan(0);
   });
 
   it("RLS holds: user B cannot read user A's persisted item or listing", async () => {
