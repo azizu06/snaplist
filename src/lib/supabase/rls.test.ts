@@ -170,12 +170,17 @@ describe("RLS tenancy isolation", () => {
       direction: "inbound",
       body: "B message",
     });
-    await userB.client.from("prediction_logs").insert({
+    // prediction_logs.listing_model is NOT NULL (model provenance, #32). Provide it AND
+    // assert the insert SUCCEEDS — a rejected insert would leave B with no prediction log,
+    // so the isolation assertion below would pass WITHOUT ever testing prediction-log RLS.
+    const { error: bLogErr } = await userB.client.from("prediction_logs").insert({
       user_id: userB.id,
       item_id: bItem!.id,
       tier_fired: "isbn",
       model: "test",
+      listing_model: "test",
     });
+    expect(bLogErr).toBeNull();
 
     // A queries each table broadly; RLS must filter B's rows out entirely.
     for (const table of [
