@@ -19,3 +19,11 @@ export {
   type RunAndPersistInput,
   type RunAndPersistResult,
 } from "./persist";
+export {
+  buildPredictionLogRow,
+  logPrediction,
+  readPredictionLogs,
+  type PredictionLogRow,
+  type PredictionLogPriceRange,
+  type ReadPredictionLogsFilter,
+} from "./prediction-log";
