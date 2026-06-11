@@ -272,7 +272,12 @@ export function buildSearchQueries(
   tier: Extract<PricingTier, "upc-aided-web" | "branded-web">,
 ): string[] {
   const branded = [signal.brand, signal.model].filter(Boolean).join(" ").trim();
-  const name = branded || signal.resolvedName?.trim() || "";
+  const resolved = signal.resolvedName?.trim() ?? "";
+  // Brand+model is the most precise identity. Without a model, a resolved
+  // product name ("Nike Air Max 90 Men's Shoes") identifies the item far
+  // better than a bare brand ("Nike"), so prefer it when available.
+  const fullyBranded = signal.brand && signal.model ? branded : "";
+  const name = fullyBranded || resolved || branded;
   const category = signal.category?.trim();
 
   const queries: string[] = [];
@@ -381,9 +386,12 @@ function synthesize(
   const sources: PriceSource[] = j.basis.map((c) => ({
     url: c.url,
     title: c.title,
-    // The load-bearing kind vocabulary: ONLY a real sold comp may say
-    // "sold-comp" — the pipeline's web_tight/web_wide gate keys off it.
-    kind: c.kind === "sold" ? "sold-comp" : "asking-comp",
+    // The load-bearing kind vocabulary: "sold-comp" may only appear when the
+    // synthesized price is actually sold-grounded (j.soldBasis — and then the
+    // basis is sold comps only). A lone sold entry inside a mixed asking-basis
+    // set must NOT leak "sold-comp", or the pipeline's web_tight mapping would
+    // grant autopilot-grade confidence to an asking-priced result.
+    kind: j.soldBasis ? "sold-comp" : "asking-comp",
   }));
 
   return {

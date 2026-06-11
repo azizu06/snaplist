@@ -119,6 +119,23 @@ describe("query formulation", () => {
   it("returns no queries for an unidentifiable signal", () => {
     expect(buildSearchQueries({}, "branded-web")).toEqual([]);
   });
+
+  it("prefers the resolved product name over a bare brand when no model exists", () => {
+    const queries = buildSearchQueries(
+      { brand: "Nike", resolvedName: "Nike Air Max 90 Men's Shoes" },
+      "branded-web",
+    );
+    // "Nike used sold price" would be hopelessly broad; the resolved name
+    // pins the exact product.
+    expect(queries[0]).toContain("Nike Air Max 90");
+    // Brand+model stays authoritative when both exist.
+    const branded = buildSearchQueries(
+      { ...BRANDED_SIGNAL, resolvedName: "Some Other Name" },
+      "branded-web",
+    );
+    expect(branded[0]).toContain("WH-1000XM4");
+    expect(branded[0]).not.toContain("Some Other Name");
+  });
 });
 
 describe("branded-web pricing agent", () => {
@@ -264,6 +281,27 @@ describe("branded-web pricing agent", () => {
     expect(asking.sources.some((s) => s.kind === "sold-comp")).toBe(false);
     // And the provisional confidence is itself down-weighted vs sold grounding.
     expect(asking.confidence).toBeLessThan(sold.confidence);
+  });
+
+  it("a lone sold comp inside a mixed asking-basis set never leaks sold-comp sources", async () => {
+    // One sold comp (< MIN_USEFUL_COMPS) + asking comps → the price is
+    // synthesized on the MIXED basis at asking-level confidence, so no source
+    // may claim "sold-comp" — otherwise the pipeline's branded-web mapping
+    // would grant web_tight (autopilot-grade) confidence to an asking result.
+    const mixed: WebComp[] = [
+      { url: "https://www.ebay.com/itm/q1-1", price: 180, kind: "sold" },
+      { url: "https://www.ebay.com/itm/q1-2", price: 185, kind: "asking" },
+      { url: "https://www.mercari.com/us/item/q1-3", price: 190, kind: "asking" },
+    ];
+    const provider = createBrandedWebPricingProvider({
+      searchClient: fakeSearch(),
+      extractComps: fakeExtractor([mixed]),
+    });
+    const result = await provider.price(BRANDED_SIGNAL);
+    expect(result).not.toBeNull();
+    expect(result!.sources.length).toBeGreaterThan(0);
+    expect(result!.sources.every((s) => s.kind === "asking-comp")).toBe(true);
+    expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(false);
   });
 
   it("confidence reflects comp agreement: a tight cluster beats a wide scatter", async () => {
