@@ -1,0 +1,197 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_REPLY_MODEL,
+  draftBuyerReply,
+  fallbackBuyerReply,
+  groundingCorpus,
+  replyAssertsUngroundedNumbers,
+  type ReplyGenerate,
+} from "./reply";
+import type { ReplyGrounding } from "./types";
+
+/**
+ * Offline tests for the buyer-Q&A reply agent (issue #13 acceptance: "offline
+ * tests with injected fake LLM proving grounding inputs are used and nothing is
+ * hallucinated outside them"). NO network, NO Realtime: the model call is always
+ * an injected fake.
+ */
+
+const grounding: ReplyGrounding = {
+  attributes: {
+    brand: "Sony",
+    model: "WH-1000XM4",
+    category: "electronics",
+    condition: "good",
+    specs: ["wireless", "noise-cancelling", "30 hour battery"],
+    title: "Sony WH-1000XM4 Wireless Headphones",
+  },
+  listing: {
+    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Good",
+    description:
+      "Lightly used WH-1000XM4 in good condition. Priced at $180. Ships from a smoke-free home.",
+  },
+};
+
+const question = "Does the battery still hold a charge well?";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("groundingCorpus", () => {
+  it("contains EXACTLY the allowed grounding inputs: attributes, listing copy, and the question", () => {
+    const corpus = groundingCorpus(question, grounding);
+    // Attribute facts (string + array values).
+    expect(corpus).toContain("sony");
+    expect(corpus).toContain("wh-1000xm4");
+    expect(corpus).toContain("30 hour battery");
+    // Listing copy.
+    expect(corpus).toContain("priced at $180");
+    // The buyer's own question.
+    expect(corpus).toContain("hold a charge");
+  });
+
+  it("works without a listing (attributes-only grounding)", () => {
+    const corpus = groundingCorpus("q", { attributes: { brand: "Acme" }, listing: null });
+    expect(corpus).toContain("acme");
+  });
+});
+
+describe("replyAssertsUngroundedNumbers", () => {
+  it("accepts replies whose numbers all trace to the grounding or the question", () => {
+    const reply =
+      "Yes — the WH-1000XM4 still gets the rated 30 hour battery life, and it's $180 as listed.";
+    expect(replyAssertsUngroundedNumbers(reply, question, grounding)).toBe(false);
+  });
+
+  it("rejects a reply that invents a number found nowhere in the grounding", () => {
+    const reply = "It retails for $349 new, so $180 is a great deal.";
+    expect(replyAssertsUngroundedNumbers(reply, question, grounding)).toBe(true);
+  });
+
+  it("rejects invented shipping timings", () => {
+    const reply = "I can ship within 2 days of purchase.";
+    expect(replyAssertsUngroundedNumbers(reply, question, grounding)).toBe(true);
+  });
+
+  it("allows echoing a number the buyer used in the question", () => {
+    const q = "Would you take $150 for it?";
+    const reply = "Sorry, I can't do $150 — the listing price stands.";
+    expect(replyAssertsUngroundedNumbers(reply, q, grounding)).toBe(false);
+  });
+});
+
+describe("draftBuyerReply", () => {
+  it("passes the question and the FULL grounding to the injected model call", async () => {
+    const calls: Parameters<ReplyGenerate>[0][] = [];
+    const generate: ReplyGenerate = async (args) => {
+      calls.push(args);
+      return { reply: "Yes, the battery is still strong.", answerable: true };
+    };
+
+    const result = await draftBuyerReply({ question, grounding, generate });
+
+    expect(calls).toHaveLength(1);
+    // The grounding inputs ARE what the agent reasons over — attributes + listing.
+    expect(calls[0].question).toBe(question);
+    expect(calls[0].grounding).toEqual(grounding);
+    expect(calls[0].model).toBe(DEFAULT_REPLY_MODEL);
+    expect(result).toEqual({
+      reply: "Yes, the battery is still strong.",
+      model: DEFAULT_REPLY_MODEL,
+      usedFallback: false,
+    });
+  });
+
+  it("retries when the model asserts an ungrounded number, then accepts a clean retry", async () => {
+    const replies = [
+      { reply: "It retails for $349 new!", answerable: true }, // invented number
+      { reply: "It's in good condition and priced at $180 as listed.", answerable: true },
+    ];
+    let attempt = 0;
+    const generate: ReplyGenerate = async (args) => {
+      expect(args.attempt).toBe(attempt);
+      return replies[attempt++];
+    };
+
+    const result = await draftBuyerReply({ question, grounding, generate });
+    expect(attempt).toBe(2);
+    expect(result.usedFallback).toBe(false);
+    expect(result.reply).toContain("$180");
+  });
+
+  it("falls back to the deterministic grounded reply when every attempt hallucinates", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "Ships in 2 days, retails for $349.",
+      answerable: true,
+    });
+
+    const result = await draftBuyerReply({ question, grounding, generate, maxRetries: 1 });
+    expect(result.usedFallback).toBe(true);
+    expect(result.reply).toBe(fallbackBuyerReply(grounding));
+    // The fallback itself only states grounded facts.
+    expect(replyAssertsUngroundedNumbers(result.reply, question, grounding)).toBe(false);
+    expect(result.reply).toContain("Sony WH-1000XM4");
+    expect(result.reply).toContain("good condition");
+  });
+
+  it("uses the fallback (without retrying) when the model says the question is unanswerable from the grounding", async () => {
+    let calls = 0;
+    const generate: ReplyGenerate = async () => {
+      calls++;
+      return { reply: "The battery was replaced last year.", answerable: false };
+    };
+
+    const result = await draftBuyerReply({ question, grounding, generate, maxRetries: 3 });
+    expect(calls).toBe(1);
+    expect(result.usedFallback).toBe(true);
+    expect(result.reply).toBe(fallbackBuyerReply(grounding));
+  });
+
+  it("never throws when the model call fails — the fallback always answers", async () => {
+    const generate: ReplyGenerate = async () => {
+      throw new Error("model unavailable");
+    };
+
+    const result = await draftBuyerReply({ question, grounding, generate });
+    expect(result.usedFallback).toBe(true);
+    expect(result.reply).toBe(fallbackBuyerReply(grounding));
+  });
+
+  it("retries on an empty reply", async () => {
+    const replies = [
+      { reply: "   ", answerable: true },
+      { reply: "Battery health is good.", answerable: true },
+    ];
+    let i = 0;
+    const generate: ReplyGenerate = async () => replies[i++];
+
+    const result = await draftBuyerReply({ question, grounding, generate });
+    expect(result.reply).toBe("Battery health is good.");
+    expect(result.usedFallback).toBe(false);
+  });
+
+  it("resolves the model id: explicit > REPLY_MODEL env > default", async () => {
+    const seen: string[] = [];
+    const generate: ReplyGenerate = async ({ model }) => {
+      seen.push(model);
+      return { reply: "ok", answerable: true };
+    };
+
+    await draftBuyerReply({ question, grounding, generate, model: "explicit-model" });
+    vi.stubEnv("REPLY_MODEL", "env-model");
+    await draftBuyerReply({ question, grounding, generate });
+    vi.unstubAllEnvs();
+    await draftBuyerReply({ question, grounding, generate });
+
+    expect(seen).toEqual(["explicit-model", "env-model", DEFAULT_REPLY_MODEL]);
+  });
+});
+
+describe("fallbackBuyerReply", () => {
+  it("omits the condition line when the grounding has no condition", () => {
+    const reply = fallbackBuyerReply({ attributes: { brand: "Acme" }, listing: null });
+    expect(reply).toContain("Acme");
+    expect(reply).not.toContain("condition");
+  });
+});
