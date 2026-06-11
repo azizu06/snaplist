@@ -1,0 +1,51 @@
+# CI (issue #18): typecheck → unit/contract tests → offline eval → build.
+# Runs with NO secrets: no API keys, no database. Each gate is offline by
+# construction (see the per-step comments).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm version comes from package.json's `packageManager` field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # vitest does NOT typecheck — tsc is a separate, mandatory gate.
+      - run: pnpm typecheck
+
+      # DB-gated integration tests (the RLS tenancy suite) probe for a local
+      # Supabase stack and skip gracefully when it's absent — by design; they
+      # run locally via `pnpm supabase start`. Everything else is offline.
+      - run: pnpm test
+
+      # Eval harness, OFFLINE path: checked-in sample predictions scored
+      # against the gold set with the deterministic heuristic judge. The
+      # --db / --real-judge flags are for local runs only — never CI.
+      - run: pnpm eval
+
+      # The production build must succeed without secrets (env validation is
+      # lazy) — the same property the Docker image build relies on.
+      - run: pnpm build
+
+  # Proves the Dockerfile end-to-end (deps → standalone build → runner stage)
+  # on every PR — also with zero secrets, since the image build injects none.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t snaplist:ci .

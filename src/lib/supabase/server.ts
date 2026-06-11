@@ -17,8 +17,12 @@ import { getEnv } from "@/lib/env";
  * instead. This is the documented pattern.
  */
 export async function createClient() {
-  const env = getEnv();
+  // Read the request cookie store BEFORE touching env: during `next build`'s
+  // prerender pass, `cookies()` is what bails a route out to dynamic rendering.
+  // Validating env first would throw inside the prerender worker on secret-less
+  // builds (CI, Docker image build) before that bailout can happen.
   const cookieStore = await cookies();
+  const env = getEnv();
 
   return createServerClient(
     env.NEXT_PUBLIC_SUPABASE_URL,
