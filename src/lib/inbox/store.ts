@@ -92,6 +92,26 @@ export async function attachDraftReply(
 }
 
 /**
+ * Mark an inbound message whose draft generation crashed (status `new` →
+ * `draft_failed`) so the inbox renders a retryable failure instead of
+ * "drafting…" forever. Guarded on the CURRENT status being `new`: a
+ * concurrent draft that already attached (or a sent reply) is never
+ * downgraded. Best-effort by contract — callers invoke it from a failure
+ * path and must not let it mask the original error.
+ */
+export async function markDraftFailed(
+  supabase: SupabaseClient,
+  messageId: string,
+): Promise<void> {
+  await supabase
+    .from("messages")
+    .update({ status: "draft_failed" })
+    .eq("id", messageId)
+    .eq("status", "new")
+    .then(undefined, () => undefined);
+}
+
+/**
  * The delivery seam. v1 is sandbox-only: the default implementation LOGS and
  * does nothing. The real eBay send (issue #14) replaces the default without
  * touching `approveAndSendReply` or its callers.

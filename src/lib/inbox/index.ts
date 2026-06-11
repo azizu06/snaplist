@@ -36,6 +36,7 @@ export {
   approveAndSendReply,
   attachDraftReply,
   createBuyerMessage,
+  markDraftFailed,
   retryReplyDelivery,
   stubDeliverReply,
   type ApproveAndSendReplyInput,

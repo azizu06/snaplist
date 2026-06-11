@@ -287,4 +287,21 @@ describe("fallbackBuyerReply", () => {
     expect(reply).toContain("Acme");
     expect(reply).not.toContain("condition");
   });
+
+  it("never claims a listing exists when the grounding has none", () => {
+    // Items can be in the inbox before any listing exists; "as described in
+    // the listing" would itself be a hallucinated fact then.
+    const noListing = fallbackBuyerReply({
+      attributes: { brand: "Acme", condition: "good" },
+      listing: null,
+    });
+    expect(noListing).toContain("good condition");
+    expect(noListing).not.toContain("listing");
+
+    const withListing = fallbackBuyerReply({
+      attributes: { brand: "Acme", condition: "good" },
+      listing: { title: "Acme widget", description: "A widget." },
+    });
+    expect(withListing).toContain("as described in the listing");
+  });
 });

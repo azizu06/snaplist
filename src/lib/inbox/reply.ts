@@ -245,13 +245,18 @@ export function replyAssertsUngroundedNumbers(
 /**
  * The deterministic, provably-grounded fallback. EVERY fact in it traces to the
  * grounding object: the item label (brand/model/title) and, when known, the
- * condition. Anything the grounding cannot answer is deferred, never invented.
+ * condition. Anything the grounding cannot answer is deferred, never invented —
+ * including the EXISTENCE of a listing: "as described in the listing" is only
+ * said when `grounding.listing` actually exists (the inbox covers all items,
+ * listed or not, and a false listing reference would itself be a hallucination).
  */
 export function fallbackBuyerReply(grounding: ReplyGrounding): string {
   const label = itemLabel(grounding);
   const condition = grounding.attributes.condition;
   const conditionLine = condition
-    ? ` It is in ${condition} condition, as described in the listing.`
+    ? grounding.listing
+      ? ` It is in ${condition} condition, as described in the listing.`
+      : ` It is in ${condition} condition.`
     : "";
   return (
     `Thanks for your interest in ${label}!${conditionLine} ` +

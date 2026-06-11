@@ -199,6 +199,32 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
     }
   }
 
+  // Recovery for a question whose DRAFT crashed after the insert (status
+  // `draft_failed` — or stuck `new` after a serverless interrupt): re-run
+  // drafting for the SAME row via the simulate endpoint's messageId form.
+  // Idempotent — a 409 means a concurrent draft already attached.
+  async function retryDraft(message: MessageRow) {
+    if (!message.item_id) return;
+    setBusy(`redraft:${message.id}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/inbox/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: message.item_id, messageId: message.id }),
+      });
+      if (!res.ok && res.status !== 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Draft retry failed (${res.status})`);
+      }
+      // The drafted row arrives over Realtime.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Draft retry failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const inbound = messages.filter((m) => m.direction === "inbound");
   const repliesByQuestion = new Map<string, MessageRow>();
   for (const m of messages) {
@@ -304,7 +330,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   <span className="text-sm font-medium text-zinc-500">Buyer</span>
                   <span
                     className={
-                      undelivered
+                      undelivered || message.status === "draft_failed"
                         ? "rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
                         : message.status === "sent"
                           ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700"
@@ -321,7 +347,9 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                           : "replied"
                         : message.status === "drafted"
                           ? "draft ready"
-                          : "drafting…"}
+                          : message.status === "draft_failed"
+                            ? "draft failed"
+                            : "drafting…"}
                   </span>
                 </div>
                 <p className="text-sm">{message.body}</p>
@@ -344,6 +372,22 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
                       >
                         {busy === `retry:${message.id}` ? "Retrying…" : "Retry delivery"}
+                      </button>
+                    </div>
+                  </div>
+                ) : message.status === "draft_failed" ? (
+                  <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-red-700">
+                      Draft failed — the agent could not draft a reply
+                    </p>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => retryDraft(message)}
+                        disabled={busy === `redraft:${message.id}`}
+                        className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                      >
+                        {busy === `redraft:${message.id}` ? "Retrying…" : "Retry draft"}
                       </button>
                     </div>
                   </div>

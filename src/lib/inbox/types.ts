@@ -19,10 +19,20 @@ export type MessageDirection = z.infer<typeof messageDirectionSchema>;
 /**
  * `messages.status` lifecycle (app-validated; the column is free text).
  * Inbound rows walk new → drafted → sent; outbound rows are born `sent`.
- * `approved` is reserved for a future split of "approve" from "send" — today the
- * seller's approve action sends immediately, so it is never persisted.
+ * `draft_failed` is the explicit terminal-until-retried state for an inbound
+ * row whose draft generation crashed AFTER the insert (serverless interrupt,
+ * model/database error) — without it the row would render "drafting…" forever
+ * with no recovery path. `approved` is reserved for a future split of
+ * "approve" from "send" — today the seller's approve action sends
+ * immediately, so it is never persisted.
  */
-export const messageStatusSchema = z.enum(["new", "drafted", "approved", "sent"]);
+export const messageStatusSchema = z.enum([
+  "new",
+  "drafted",
+  "draft_failed",
+  "approved",
+  "sent",
+]);
 export type MessageStatus = z.infer<typeof messageStatusSchema>;
 
 /**
