@@ -31,6 +31,7 @@ export {
   MAX_SEARCH_ITERATIONS,
   MIN_USEFUL_COMPS,
   DEFAULT_PRICING_MODEL,
+  resolvePricingModel,
   type SearchClient,
   type SearchResult,
   type WebComp,

@@ -258,6 +258,10 @@ export function createVisionPipeline(
         // The listing model is logged separately so a prediction's listing copy stays
         // attributable even when LISTING_MODEL differs from the vision model (#32).
         listingModel,
+        // Pricing-model provenance (same precedent): the web tiers resolve their own
+        // PRICING_MODEL for comp extraction and stamp it on the price result; a
+        // deterministic tier (ISBN lookup) leaves it unset → logged as null (#10 review).
+        pricingModel: price.model,
         identification,
       };
     },

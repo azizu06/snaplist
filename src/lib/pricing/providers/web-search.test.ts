@@ -150,6 +150,66 @@ describe("branded-web pricing agent", () => {
     expect(provider.canHandle?.({})).toBe(false);
   });
 
+  it("declines a bare-brand signal: brand with neither model nor resolved name", async () => {
+    // "Sony" alone does not identify a product. The broad queries it would
+    // produce ("Sony used sold price") can surface two arbitrary same-brand
+    // comps that satisfy MIN_USEFUL_COMPS and confidently price an
+    // UNIDENTIFIED item — so the tier must decline (router falls through to
+    // the estimate tiers) without spending any searches.
+    const search = fakeSearch();
+    const provider = createBrandedWebPricingProvider({
+      searchClient: search,
+      extractComps: fakeExtractor([soldComps()]),
+    });
+    const bareBrand: ItemSignal = { brand: "Sony", category: "electronics" };
+    expect(provider.canHandle?.(bareBrand)).toBe(false);
+    expect(await provider.price(bareBrand)).toBeNull();
+    expect(search.queries.length).toBe(0); // declined before any search spend
+    // Whitespace-only identifiers don't count as identification either.
+    expect(provider.canHandle?.({ brand: "Sony", model: "  " })).toBe(false);
+    expect(provider.canHandle?.({ brand: "Sony", resolvedName: " " })).toBe(false);
+  });
+
+  it("handles brand + resolved name (no model), composing with the resolved-name query preference", async () => {
+    const search = fakeSearch();
+    const provider = createBrandedWebPricingProvider({
+      searchClient: search,
+      extractComps: fakeExtractor([soldComps()]),
+    });
+    const signal: ItemSignal = {
+      brand: "Nike",
+      resolvedName: "Nike Air Max 90 Men's Shoes",
+    };
+    expect(provider.canHandle?.(signal)).toBe(true);
+    const result = await provider.price(signal);
+    expect(result).not.toBeNull();
+    expect(result!.tier).toBe("branded-web");
+    // The resolved name (not the bare brand) shaped the search.
+    expect(search.queries[0]).toContain("Nike Air Max 90");
+  });
+
+  it("stamps the resolved pricing model on the result for prediction-log provenance", async () => {
+    // PRICING_MODEL may differ from the vision/listing models; the web tier
+    // must carry the model that actually extracted the comps (#10 review).
+    vi.stubEnv("PRICING_MODEL", "pricing-gpt-env");
+    const branded = createBrandedWebPricingProvider({
+      searchClient: fakeSearch(),
+      extractComps: fakeExtractor([soldComps()]),
+    });
+    const result = await branded.price(BRANDED_SIGNAL);
+    expect(result!.model).toBe("pricing-gpt-env");
+    expect(() => priceResultSchema.parse(result)).not.toThrow();
+
+    // An explicit option override beats the env, on both web tiers.
+    const upc = createUpcWebPricingProvider({
+      searchClient: fakeSearch(),
+      extractComps: fakeExtractor([soldComps()]),
+      model: "pricing-gpt-override",
+    });
+    const upcResult = await upc.price(UPC_SIGNAL);
+    expect(upcResult!.model).toBe("pricing-gpt-override");
+  });
+
   it("the search budget is shared across the web tiers: no branded re-run after a UPC decline", async () => {
     // A signal with BOTH a UPC and a brand/model is owned by the upc-aided
     // tier (whose query sequence subsumes the branded queries under one

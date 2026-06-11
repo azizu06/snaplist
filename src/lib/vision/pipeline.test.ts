@@ -134,6 +134,20 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(result.listingModel).toBe("listing-gpt-5.5-mini");
   });
 
+  it("surfaces the pricing model from the price result (#10 provenance), unset when deterministic", async () => {
+    // A web-tier price stamps the comp-extraction model on the result; the pipeline
+    // must thread it through as `pricingModel` so the prediction log can record it.
+    const webPriced = await makePipeline({
+      priceItem: async () => ({ ...STUB_PRICE, model: "pricing-gpt-5.5" }),
+    }).run({ photos: ["u/a.jpg"] });
+    expect(webPriced.pricingModel).toBe("pricing-gpt-5.5");
+    // A deterministic tier (no pricing LLM) leaves it unset — logged as null, not faked.
+    const deterministic = await makePipeline({
+      priceItem: async () => STUB_PRICE,
+    }).run({ photos: ["u/a.jpg"] });
+    expect(deterministic.pricingModel).toBeUndefined();
+  });
+
   it("routes the attribute-derived ItemSignal (incl. ISBN) to the pricer", async () => {
     const isbnExtraction: ExtractItemAttributesResult = {
       attributes: {

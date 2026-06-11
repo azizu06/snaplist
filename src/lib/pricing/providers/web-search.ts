@@ -198,6 +198,19 @@ export type ExtractComps = (args: {
  */
 export const DEFAULT_PRICING_MODEL = "gpt-5.5";
 
+/**
+ * Resolve the pricing model id (override → `PRICING_MODEL` env → default).
+ * Read lazily at call time, never at import — same rule as the search keys.
+ * This is the single resolution used BOTH by the default extractor and for the
+ * `PriceResult.model` provenance, so the logged model can never drift from the
+ * one that actually extracted the comps.
+ */
+export function resolvePricingModel(model?: string): string {
+  return (
+    model?.trim() || process.env.PRICING_MODEL?.trim() || DEFAULT_PRICING_MODEL
+  );
+}
+
 const EXTRACT_SYSTEM_PROMPT =
   "You extract comparable resale prices for a SPECIFIC second-hand item from web " +
   "search results. Return only comps that clearly refer to the same product " +
@@ -222,10 +235,7 @@ export function createOpenAICompExtractor(
       import("@ai-sdk/openai"),
     ]);
     const openai = createOpenAI(apiKey ? { apiKey } : {});
-    const modelId =
-      model?.trim() ||
-      process.env.PRICING_MODEL?.trim() ||
-      DEFAULT_PRICING_MODEL;
+    const modelId = resolvePricingModel(model);
 
     const identity = JSON.stringify(
       {
@@ -369,6 +379,7 @@ function sufficient(j: CompJudgement): boolean {
 function synthesize(
   comps: readonly WebComp[],
   tier: Extract<PricingTier, "upc-aided-web" | "branded-web">,
+  model: string,
 ): PriceResult {
   const j = judgeComps(comps);
   const prices = j.basis.map((c) => c.price).sort((a, b) => a - b);
@@ -400,6 +411,9 @@ function synthesize(
     confidence,
     sources,
     tier,
+    // Provenance: the LLM comp extractor ran for every web-tier price, so the
+    // resolved pricing model rides on the result into prediction_logs.
+    model,
   };
 }
 
@@ -424,10 +438,13 @@ interface ResolvedDeps {
   maxIterations: number;
   /** When true (default deps from env), decline instead of searching keyless. */
   requireEnvKeys: boolean;
+  /** Raw model override; resolved lazily (env read at price time) for provenance. */
+  model?: string;
 }
 
 function resolveDeps(options: WebSearchPricingProviderOptions): ResolvedDeps {
   return {
+    model: options.model,
     searchClient: options.searchClient ?? createDefaultSearchClient(),
     extractComps:
       options.extractComps ??
@@ -489,7 +506,7 @@ async function priceViaWebAgent(
   // "Nothing useful" → decline so the router falls through to lower tiers.
   if (comps.length < MIN_USEFUL_COMPS) return null;
 
-  return synthesize(comps, tier);
+  return synthesize(comps, tier, resolvePricingModel(deps.model));
 }
 
 /**
@@ -514,7 +531,12 @@ export function createUpcWebPricingProvider(
 
 /**
  * Tier 3 — `branded-web`: a recognizable branded item priced from real web
- * comps. Requires at least a brand on the signal — and NO UPC: a UPC-bearing
+ * comps. Requires a brand AND a model or resolved product name — a bare brand
+ * ("Sony" alone) does not identify a product, and its hopelessly broad queries
+ * ("Sony used sold price") can surface two arbitrary same-brand comps that
+ * satisfy MIN_USEFUL_COMPS and confidently price an UNIDENTIFIED item. With
+ * only a brand the tier declines so the router falls through to the estimate
+ * tiers. Also requires NO UPC: a UPC-bearing
  * signal is owned by the upc-aided tier, whose query sequence already contains
  * these branded queries as refinements under the SAME iteration budget. If the
  * UPC tier declined, re-running the identical branded queries here would only
@@ -528,17 +550,19 @@ export function createBrandedWebPricingProvider(
   const deps = resolveDeps(options);
   const ownedByUpcTier = (signal: ItemSignal): boolean =>
     typeof signal.upc === "string" && signal.upc.trim().length > 0;
+  // Brand alone is NOT an identified product: require a model or a resolved
+  // product name alongside it (these compose with the query preference —
+  // brand+model first, else the resolved name).
+  const identified = (signal: ItemSignal): boolean =>
+    Boolean(signal.brand?.trim()) &&
+    Boolean(signal.model?.trim() || signal.resolvedName?.trim());
   return {
     tier: "branded-web",
     canHandle(signal: ItemSignal): boolean {
-      return (
-        typeof signal.brand === "string" &&
-        signal.brand.trim().length > 0 &&
-        !ownedByUpcTier(signal)
-      );
+      return identified(signal) && !ownedByUpcTier(signal);
     },
     async price(signal: ItemSignal): Promise<PriceResult | null> {
-      if (!signal.brand?.trim() || ownedByUpcTier(signal)) return null;
+      if (!identified(signal) || ownedByUpcTier(signal)) return null;
       return priceViaWebAgent("branded-web", signal, deps);
     },
   };

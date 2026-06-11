@@ -107,6 +107,14 @@ export const priceResultSchema = z
     sources: z.array(priceSourceSchema),
     /** Which tier produced this — a logged, confidence-bearing fact. */
     tier: pricingTierSchema,
+    /**
+     * The LLM model id that produced/extracted this price, when an LLM was
+     * involved (e.g. the web tiers' comp extractor, resolved from
+     * `PRICING_MODEL`). Deterministic tiers (isbn-lookup) leave it unset.
+     * Logged for provenance (`prediction_logs.pricing_model`), mirroring the
+     * listing_model precedent (#32).
+     */
+    model: z.string().optional(),
   })
   .refine((r) => r.range.min <= r.range.max, {
     message: "range.min must be <= range.max",
