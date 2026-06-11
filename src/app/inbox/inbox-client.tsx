@@ -16,6 +16,11 @@ import { messageRowSchema, type MessageRow } from "@/lib/inbox";
  *
  * The simulate response is deliberately NOT merged into local state: the new
  * message must arrive via Realtime, which is exactly the acceptance criterion.
+ * Two safeguards close the "INSERT lands before the listener is active" gap
+ * (PR #35 review): simulation is disabled until the channel reports SUBSCRIBED,
+ * and every time the subscription (re)reaches SUBSCRIBED the messages are
+ * refetched and reconciled — Realtime stays the primary arrival path, the
+ * refetch is the robustness backstop (e.g. rows written while reconnecting).
  */
 
 export interface ItemOption {
@@ -33,6 +38,22 @@ function sortNewestFirst(messages: MessageRow[]): MessageRow[] {
   return [...messages].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
+/**
+ * Merge a freshly fetched snapshot with the current state. The snapshot wins by
+ * default; a local row only survives when it is missing from the snapshot or
+ * strictly newer (a Realtime event that landed after the snapshot was taken).
+ */
+function reconcileMessages(prev: MessageRow[], fetched: MessageRow[]): MessageRow[] {
+  const byId = new Map(fetched.map((m) => [m.id, m] as const));
+  for (const m of prev) {
+    const snapshot = byId.get(m.id);
+    if (!snapshot || snapshot.updated_at.localeCompare(m.updated_at) < 0) {
+      byId.set(m.id, m);
+    }
+  }
+  return sortNewestFirst([...byId.values()]);
+}
+
 export function InboxClient({ userId, initialMessages, items }: InboxClientProps) {
   const supabase = useMemo(() => createClient(), []);
   const [messages, setMessages] = useState<MessageRow[]>(() =>
@@ -46,6 +67,24 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   const [live, setLive] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
+    // Refetch-on-SUBSCRIBED: anything inserted/updated before the listener was
+    // active (or while the connection was down) is reconciled in here, so a
+    // simulated question can never stay invisible until a page refresh.
+    const refetch = async () => {
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("user_id", userId);
+      if (cancelled || !data) return;
+      const rows = data
+        .map((raw) => messageRowSchema.safeParse(raw))
+        .filter((p) => p.success)
+        .map((p) => p.data);
+      setMessages((prev) => reconcileMessages(prev, rows));
+    };
+
     const upsert = (raw: unknown) => {
       const parsed = messageRowSchema.safeParse(raw);
       if (!parsed.success) return;
@@ -77,9 +116,14 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
         },
         (payload) => upsert(payload.new),
       )
-      .subscribe((status) => setLive(status === "SUBSCRIBED"));
+      .subscribe((status) => {
+        const subscribed = status === "SUBSCRIBED";
+        setLive(subscribed);
+        if (subscribed) void refetch();
+      });
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
     };
   }, [supabase, userId]);
@@ -179,10 +223,18 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
             <button
               type="button"
               onClick={simulate}
-              disabled={busy === "simulate"}
+              // Disabled until the Realtime subscription is live: simulating
+              // before SUBSCRIBED could let the INSERT land before the listener
+              // is active, leaving the question invisible until refresh.
+              disabled={busy === "simulate" || !live}
+              title={live ? undefined : "Waiting for the live connection…"}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
             >
-              {busy === "simulate" ? "Asking…" : "Simulate buyer question"}
+              {busy === "simulate"
+                ? "Asking…"
+                : live
+                  ? "Simulate buyer question"
+                  : "Connecting…"}
             </button>
           </div>
         )}

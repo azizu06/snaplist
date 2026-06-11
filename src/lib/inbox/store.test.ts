@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  ReplySendConflictError,
   approveAndSendReply,
   attachDraftReply,
   createBuyerMessage,
@@ -40,7 +41,10 @@ function row(overrides: Partial<MessageRow> = {}): MessageRow {
   };
 }
 
-type PlannedResult = { data: unknown; error: { message: string } | null };
+type PlannedResult = {
+  data: unknown;
+  error: { message: string; code?: string } | null;
+};
 
 interface RecordedInsert {
   table: string;
@@ -49,16 +53,21 @@ interface RecordedInsert {
 interface RecordedUpdate {
   table: string;
   payload: Record<string, unknown>;
-  eq?: [string, unknown];
+  eqs: [string, unknown][];
 }
 
 /**
  * Minimal chainable fake for the query shapes the store uses:
  *   from().insert().select().single()
  *   from().update().eq().select().single()
- *   from().update().eq()              (awaited directly — thenable)
+ *   from().update().eq().eq().select()   (awaited directly — the CAS claim)
+ * Planned update results may be functions, letting a test compute the result at
+ * claim time (e.g. exactly one concurrent CAS winner).
  */
-function fakeSupabase(plan: { inserts?: PlannedResult[]; updates?: PlannedResult[] }) {
+function fakeSupabase(plan: {
+  inserts?: PlannedResult[];
+  updates?: (PlannedResult | (() => PlannedResult))[];
+}) {
   const inserts: RecordedInsert[] = [];
   const updates: RecordedUpdate[] = [];
   const plannedInserts = [...(plan.inserts ?? [])];
@@ -75,25 +84,35 @@ function fakeSupabase(plan: { inserts?: PlannedResult[]; updates?: PlannedResult
           return { select: () => ({ single: async () => res }) };
         },
         update(payload: Record<string, unknown>) {
-          const entry: RecordedUpdate = { table, payload };
+          const entry: RecordedUpdate = { table, payload, eqs: [] };
           updates.push(entry);
-          const res =
+          const planned =
             plannedUpdates.shift() ?? ({ data: null, error: null } as PlannedResult);
-          return {
+          const res = typeof planned === "function" ? planned() : planned;
+          const builder = {
             eq(column: string, value: unknown) {
-              entry.eq = [column, value];
-              return {
-                select: () => ({ single: async () => res }),
-                // The builder is awaited directly for the inbound status update.
-                then(
-                  onFulfilled: (v: PlannedResult) => unknown,
-                  onRejected?: (reason: unknown) => unknown,
-                ) {
-                  return Promise.resolve(res).then(onFulfilled, onRejected);
-                },
-              };
+              entry.eqs.push([column, value]);
+              return builder;
+            },
+            select: () => ({
+              single: async () => res,
+              // `.select("id")` is awaited directly by the CAS claim.
+              then(
+                onFulfilled: (v: PlannedResult) => unknown,
+                onRejected?: (reason: unknown) => unknown,
+              ) {
+                return Promise.resolve(res).then(onFulfilled, onRejected);
+              },
+            }),
+            // The builder is awaited directly for plain updates.
+            then(
+              onFulfilled: (v: PlannedResult) => unknown,
+              onRejected?: (reason: unknown) => unknown,
+            ) {
+              return Promise.resolve(res).then(onFulfilled, onRejected);
             },
           };
+          return builder;
         },
       };
     },
@@ -172,7 +191,7 @@ describe("attachDraftReply", () => {
       draft_model: "gpt-5.5",
       status: "drafted",
     });
-    expect(updates[0].eq).toEqual(["id", MESSAGE_ID]);
+    expect(updates[0].eqs).toEqual([["id", MESSAGE_ID]]);
     expect(result.status).toBe("drafted");
   });
 
@@ -188,8 +207,12 @@ describe("attachDraftReply", () => {
 
 describe("approveAndSendReply", () => {
   const inbound = row({ status: "drafted", draft_reply: "Draft" });
+  /** A successful CAS claim returns the claimed row's id. */
+  const claimWon: PlannedResult = { data: [{ id: MESSAGE_ID }], error: null };
+  /** A lost CAS (already sent / concurrent winner) matches 0 rows. */
+  const claimLost: PlannedResult = { data: [], error: null };
 
-  it("delivers via the seam, persists the threaded outbound row, and closes the question", async () => {
+  it("claims via CAS, delivers, then persists the threaded outbound row", async () => {
     const outboundRow = row({
       id: OUTBOUND_ID,
       direction: "outbound",
@@ -200,6 +223,7 @@ describe("approveAndSendReply", () => {
     });
     const { client, inserts, updates } = fakeSupabase({
       inserts: [{ data: outboundRow, error: null }],
+      updates: [claimWon],
     });
     const delivered: { messageId: string; reply: string }[] = [];
 
@@ -209,14 +233,25 @@ describe("approveAndSendReply", () => {
       reply: "  Edited reply  ", // seller-edited; trimmed before persisting
       deliver: async (args) => {
         delivered.push(args);
-        // Delivery happens BEFORE anything is persisted as sent.
+        // Crash-safety ordering: the CAS claim has ALREADY happened (so a retry
+        // cannot re-deliver), and the outbound insert has NOT yet.
+        expect(updates).toHaveLength(1);
         expect(inserts).toHaveLength(0);
       },
     });
 
     expect(delivered).toEqual([{ messageId: MESSAGE_ID, reply: "Edited reply" }]);
 
-    // Outbound row: threaded, stamped, owned by the seller.
+    // The claim is a compare-and-set: id AND status='drafted'.
+    expect(updates).toHaveLength(1);
+    expect(updates[0].eqs).toEqual([
+      ["id", MESSAGE_ID],
+      ["status", "drafted"],
+    ]);
+    const sentAt = updates[0].payload.sent_at;
+    expect(updates[0].payload).toEqual({ status: "sent", sent_at: sentAt });
+
+    // Outbound row: threaded, stamped with the SAME timestamp, seller-owned.
     expect(inserts).toHaveLength(1);
     const payload = inserts[0].payload;
     expect(payload.user_id).toBe(USER_ID);
@@ -226,12 +261,7 @@ describe("approveAndSendReply", () => {
     expect(payload.body).toBe("Edited reply");
     expect(payload.status).toBe("sent");
     expect(payload.reply_to).toBe(MESSAGE_ID);
-    expect(typeof payload.sent_at).toBe("string");
-
-    // Inbound question closed out with the SAME timestamp.
-    expect(updates).toHaveLength(1);
-    expect(updates[0].payload).toEqual({ status: "sent", sent_at: payload.sent_at });
-    expect(updates[0].eq).toEqual(["id", MESSAGE_ID]);
+    expect(payload.sent_at).toBe(sentAt);
 
     expect(result.outbound.id).toBe(OUTBOUND_ID);
   });
@@ -248,8 +278,80 @@ describe("approveAndSendReply", () => {
     expect(updates).toHaveLength(0);
   });
 
-  it("persists nothing when delivery fails", async () => {
-    const { client, inserts, updates } = fakeSupabase({});
+  it("double-send: a question that is no longer `drafted` is a conflict — delivery never runs", async () => {
+    const { client, inserts } = fakeSupabase({ updates: [claimLost] });
+    const deliver = vi.fn(async () => {});
+
+    await expect(
+      approveAndSendReply(client, { userId: USER_ID, message: inbound, reply: "R", deliver }),
+    ).rejects.toThrow(ReplySendConflictError);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("CAS prevents concurrent double-claim: exactly one of two racing sends delivers", async () => {
+    // Model the database's row lock: the first UPDATE to reach the row matches
+    // it (status drafted → sent); the second matches 0 rows.
+    let claimedOnce = false;
+    const casClaim = (): PlannedResult => {
+      if (claimedOnce) return claimLost;
+      claimedOnce = true;
+      return claimWon;
+    };
+    const outboundRow = row({
+      id: OUTBOUND_ID,
+      direction: "outbound",
+      body: "R",
+      status: "sent",
+      reply_to: MESSAGE_ID,
+      sent_at: "2026-06-10T19:10:00.000Z",
+    });
+    const { client } = fakeSupabase({
+      inserts: [{ data: outboundRow, error: null }],
+      updates: [casClaim, casClaim],
+    });
+    const deliver = vi.fn(async () => {});
+
+    const send = () =>
+      approveAndSendReply(client, { userId: USER_ID, message: inbound, reply: "R", deliver });
+    const [a, b] = await Promise.allSettled([send(), send()]);
+
+    const outcomes = [a, b];
+    expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find((o) => o.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(ReplySendConflictError);
+    // The non-idempotent delivery ran exactly once.
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a reply_to unique violation on the outbound insert as an idempotent conflict", async () => {
+    // Backstop for anything that slips past the CAS: the partial unique index
+    // on messages(reply_to) (20260611004000) guarantees at most one reply row.
+    const { client } = fakeSupabase({
+      inserts: [
+        {
+          data: null,
+          error: {
+            message: 'duplicate key value violates unique constraint "messages_reply_to_unique"',
+            code: "23505",
+          },
+        },
+      ],
+      updates: [claimWon],
+    });
+
+    await expect(
+      approveAndSendReply(client, {
+        userId: USER_ID,
+        message: inbound,
+        reply: "R",
+        deliver: async () => {},
+      }),
+    ).rejects.toThrow(ReplySendConflictError);
+  });
+
+  it("crash semantics: a delivery failure AFTER the claim leaves the question non-resendable (no double delivery)", async () => {
+    const { client, inserts, updates } = fakeSupabase({ updates: [claimWon] });
     await expect(
       approveAndSendReply(client, {
         userId: USER_ID,
@@ -260,8 +362,12 @@ describe("approveAndSendReply", () => {
         },
       }),
     ).rejects.toThrow(/adapter down/);
+    // The claim already flipped drafted → sent (chosen semantics: prefer a
+    // visibly-stuck question over a retried, double-delivered reply)…
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload.status).toBe("sent");
+    // …and no outbound row was persisted.
     expect(inserts).toHaveLength(0);
-    expect(updates).toHaveLength(0);
   });
 });
 

@@ -39,45 +39,46 @@ afterEach(() => {
 });
 
 describe("groundingCorpus", () => {
-  it("contains EXACTLY the allowed grounding inputs: attributes, listing copy, and the question", () => {
-    const corpus = groundingCorpus(question, grounding);
+  it("contains EXACTLY the allowed grounding inputs: attributes and listing copy — NOT the question", () => {
+    const corpus = groundingCorpus(grounding);
     // Attribute facts (string + array values).
     expect(corpus).toContain("sony");
     expect(corpus).toContain("wh-1000xm4");
     expect(corpus).toContain("30 hour battery");
-    // Listing copy.
+    // Listing copy (carries the stored price).
     expect(corpus).toContain("priced at $180");
-    // The buyer's own question.
-    expect(corpus).toContain("hold a charge");
+    // The buyer's question is NOT part of the grounding.
+    expect(corpus).not.toContain("hold a charge");
   });
 
   it("works without a listing (attributes-only grounding)", () => {
-    const corpus = groundingCorpus("q", { attributes: { brand: "Acme" }, listing: null });
+    const corpus = groundingCorpus({ attributes: { brand: "Acme" }, listing: null });
     expect(corpus).toContain("acme");
   });
 });
 
 describe("replyAssertsUngroundedNumbers", () => {
-  it("accepts replies whose numbers all trace to the grounding or the question", () => {
+  it("accepts replies whose numbers all trace to the grounding", () => {
     const reply =
       "Yes — the WH-1000XM4 still gets the rated 30 hour battery life, and it's $180 as listed.";
-    expect(replyAssertsUngroundedNumbers(reply, question, grounding)).toBe(false);
+    expect(replyAssertsUngroundedNumbers(reply, grounding)).toBe(false);
   });
 
   it("rejects a reply that invents a number found nowhere in the grounding", () => {
     const reply = "It retails for $349 new, so $180 is a great deal.";
-    expect(replyAssertsUngroundedNumbers(reply, question, grounding)).toBe(true);
+    expect(replyAssertsUngroundedNumbers(reply, grounding)).toBe(true);
   });
 
   it("rejects invented shipping timings", () => {
     const reply = "I can ship within 2 days of purchase.";
-    expect(replyAssertsUngroundedNumbers(reply, question, grounding)).toBe(true);
+    expect(replyAssertsUngroundedNumbers(reply, grounding)).toBe(true);
   });
 
-  it("allows echoing a number the buyer used in the question", () => {
-    const q = "Would you take $150 for it?";
-    const reply = "Sorry, I can't do $150 — the listing price stands.";
-    expect(replyAssertsUngroundedNumbers(reply, q, grounding)).toBe(false);
+  it("rejects asserting a number that only the buyer's question introduced (unverified premise)", () => {
+    // "Can you ship in 2 days?" → "Yes, I can ship in 2 days" must NOT pass: the
+    // 2 came from the buyer, not from any grounded fact.
+    const reply = "Yes, I can ship in 2 days.";
+    expect(replyAssertsUngroundedNumbers(reply, grounding)).toBe(true);
   });
 });
 
@@ -130,9 +131,26 @@ describe("draftBuyerReply", () => {
     expect(result.usedFallback).toBe(true);
     expect(result.reply).toBe(fallbackBuyerReply(grounding));
     // The fallback itself only states grounded facts.
-    expect(replyAssertsUngroundedNumbers(result.reply, question, grounding)).toBe(false);
+    expect(replyAssertsUngroundedNumbers(result.reply, grounding)).toBe(false);
     expect(result.reply).toContain("Sony WH-1000XM4");
     expect(result.reply).toContain("good condition");
+  });
+
+  it("forces retry → grounded fallback when the model asserts a number taken from the buyer's question", async () => {
+    // The classic unverified-premise laundering: the buyer supplies "2 days", the
+    // model agrees. Question-derived numbers are NOT grounded, so every attempt
+    // fails the guard and the deterministic fallback answers instead.
+    const q = "Can you ship in 2 days?";
+    let calls = 0;
+    const generate: ReplyGenerate = async () => {
+      calls++;
+      return { reply: "Yes, I can ship in 2 days.", answerable: true };
+    };
+
+    const result = await draftBuyerReply({ question: q, grounding, generate, maxRetries: 1 });
+    expect(calls).toBe(2); // initial attempt + one retry, both rejected
+    expect(result.usedFallback).toBe(true);
+    expect(result.reply).toBe(fallbackBuyerReply(grounding));
   });
 
   it("uses the fallback (without retrying) when the model says the question is unanswerable from the grounding", async () => {

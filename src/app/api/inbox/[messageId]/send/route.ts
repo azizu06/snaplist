@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { approveAndSendReply } from "@/lib/inbox";
+import { ReplySendConflictError, approveAndSendReply } from "@/lib/inbox";
 
 /**
  * POST /api/inbox/[messageId]/send — the seller approved (or edited) the drafted
@@ -58,6 +58,9 @@ export async function POST(
   if (!message) {
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
+  // Fast-path duplicate check only — the AUTHORITATIVE guard is the
+  // compare-and-set claim inside approveAndSendReply (drafted → sent), which
+  // concurrent requests cannot both win.
   if (message.status === "sent") {
     return NextResponse.json(
       { error: "A reply was already sent for this message" },
@@ -78,6 +81,10 @@ export async function POST(
     });
     return NextResponse.json({ outboundId: outbound.id, status: "sent" });
   } catch (err) {
+    // Lost the CAS race / duplicate reply row → idempotent conflict, not a 500.
+    if (err instanceof ReplySendConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     const msg = err instanceof Error ? err.message : "Send failed";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

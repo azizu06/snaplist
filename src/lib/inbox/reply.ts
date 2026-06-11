@@ -13,7 +13,7 @@ import { itemLabel } from "./simulate";
  *    everything"), defaulting like LISTING_MODEL does;
  *  - the prompt forbids invented facts AND a deterministic code-side guard
  *    (`replyAssertsUngroundedNumbers`) rejects replies that assert numeric claims
- *    (prices, counts, timings, measurements) absent from the grounding + question;
+ *    (prices, counts, timings, measurements) absent from the grounding itself;
  *  - the agent NEVER throws on model failure: after retries it falls back to a
  *    deterministic reply built ONLY from the grounding, so the inbox flow always
  *    produces a safe draft for the seller to edit.
@@ -76,12 +76,14 @@ export interface DraftBuyerReplyResult {
 
 /**
  * Flatten EVERYTHING the reply is allowed to reference into one searchable string:
- * the validated attribute values + the listing title/description + the buyer's own
- * question (a reply may legitimately echo a number the buyer used).
+ * the validated attribute values + the listing title/description (which carries
+ * the stored price). The buyer's question is deliberately EXCLUDED: a number the
+ * buyer introduced is an unverified premise, not a grounded fact — "Can you ship
+ * in 2 days?" must never license "Yes, I can ship in 2 days."
  */
-export function groundingCorpus(question: string, grounding: ReplyGrounding): string {
+export function groundingCorpus(grounding: ReplyGrounding): string {
   const { attributes, listing } = grounding;
-  const parts: string[] = [question];
+  const parts: string[] = [];
   for (const value of Object.values(attributes)) {
     if (typeof value === "string") parts.push(value);
     else if (Array.isArray(value)) parts.push(...value);
@@ -100,15 +102,16 @@ function numericTokens(text: string): string[] {
  * measurement) that appears nowhere in the grounding corpus? Numbers are the
  * highest-risk hallucination class for marketplace replies ("I'll ship in 2 days",
  * "it retails for $349") and — unlike prose — are deterministically checkable.
+ * Only numbers present in the item attributes / listing copy (incl. the stored
+ * price) are permitted; numbers the BUYER used are not grounded facts, so a reply
+ * echoing them as assertions is rejected (→ retry, then deterministic fallback).
  * Free-text wording stays the prompt's job; the fallback covers the rest.
  */
 export function replyAssertsUngroundedNumbers(
   reply: string,
-  question: string,
   grounding: ReplyGrounding,
 ): boolean {
-  const corpus = numericTokens(groundingCorpus(question, grounding));
-  const allowed = new Set(corpus);
+  const allowed = new Set(numericTokens(groundingCorpus(grounding)));
   return numericTokens(reply).some((token) => !allowed.has(token));
 }
 
@@ -174,9 +177,10 @@ export async function draftBuyerReply(
     const reply = parsed.data.reply.trim();
     if (reply === "") continue;
 
-    // Deterministic guard: an asserted number that traces to neither the grounding
-    // nor the buyer's own question is an invented fact → retry / fall back.
-    if (replyAssertsUngroundedNumbers(reply, question, grounding)) continue;
+    // Deterministic guard: an asserted number that does not trace to the grounding
+    // (attributes + listing copy) is an invented/unverified fact → retry / fall
+    // back. Numbers from the buyer's question are NOT allowed — see the guard doc.
+    if (replyAssertsUngroundedNumbers(reply, grounding)) continue;
 
     return { reply, model, usedFallback: false };
   }
@@ -198,8 +202,9 @@ const REPLY_SYSTEM_PROMPT =
   "You draft a seller's reply to a buyer question about a used-item marketplace " +
   "listing. Use ONLY the supplied item facts and listing copy — NEVER invent a " +
   "price, shipping time, dimension, accessory, or any spec that is not given. Do " +
-  "not state any number that does not appear in the facts, the listing, or the " +
-  "buyer's question. If the supplied facts cannot answer the question, set " +
+  "not state any number that does not appear in the facts or the listing — a " +
+  "number the buyer used in their question is NOT a verified fact and must not " +
+  "be asserted back. If the supplied facts cannot answer the question, set " +
   "answerable to false instead of guessing. Keep the reply friendly, concise " +
   "(under 120 words), and ready to send as-is.";
 

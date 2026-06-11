@@ -127,11 +127,40 @@ export interface ApproveAndSendReplyResult {
 }
 
 /**
- * Seller approved (or edited) the reply → "send" it:
- *   1. deliver via the injectable seam (stub logs; real send is issue #14);
- *   2. persist the outbound reply row (direction `outbound`, status `sent`,
- *      `reply_to` threading it to the question, `sent_at` stamped);
- *   3. mark the inbound question `sent` so the inbox stops offering the draft.
+ * The reply for this question was already claimed/sent (by a retry or a
+ * concurrent request). Routes map this to HTTP 409 — it is an idempotent
+ * "already done" signal, never a server error.
+ */
+export class ReplySendConflictError extends Error {
+  constructor(message = "A reply was already sent for this message") {
+    super(message);
+    this.name = "ReplySendConflictError";
+  }
+}
+
+/** Postgres unique_violation — the messages(reply_to) partial unique index. */
+const PG_UNIQUE_VIOLATION = "23505";
+
+/**
+ * Seller approved (or edited) the reply → "send" it. Ordering is chosen so that
+ * NO crash point leaves the question in a re-deliverable state (the delivery
+ * adapter is non-idempotent, so double delivery is the failure we must rule out):
+ *
+ *   1. CLAIM the inbound question via compare-and-set: UPDATE → `sent` only
+ *      WHERE status = 'drafted'. 0 rows → someone already claimed it →
+ *      `ReplySendConflictError` (409). Concurrent sends race on this CAS and
+ *      exactly one wins; the claim happens BEFORE the non-idempotent delivery.
+ *   2. DELIVER via the injectable seam (stub logs; real send is issue #14).
+ *   3. PERSIST the outbound reply row (threaded via `reply_to`, `sent_at`
+ *      stamped). The partial unique index on messages(reply_to)
+ *      (20260611004000) is the backstop: a unique violation means the reply
+ *      already exists → treated as an idempotent conflict, not a 500.
+ *
+ * Crash semantics (deliberate): a crash AFTER the CAS claim but BEFORE delivery
+ * (or before the outbound insert) leaves the question marked `sent` with no
+ * outbound row — the seller may need to re-send manually, but a retry can never
+ * deliver the same reply twice. We prefer "possibly undelivered, visibly stuck"
+ * over "silently delivered twice".
  * Both writes ride Realtime to the live inbox.
  */
 export async function approveAndSendReply(
@@ -145,10 +174,26 @@ export async function approveAndSendReply(
   const deliver = input.deliver ?? stubDeliverReply;
   const sentAt = new Date().toISOString();
 
-  // 1. "Deliver" first: if a real sender ever fails, nothing is persisted as sent.
+  // 1. Compare-and-set claim: only the request that flips drafted → sent may
+  //    deliver. RLS still scopes the update to the owner's rows.
+  const { data: claimed, error: claimErr } = await supabase
+    .from("messages")
+    .update({ status: "sent", sent_at: sentAt })
+    .eq("id", input.message.id)
+    .eq("status", "drafted")
+    .select("id");
+  if (claimErr) {
+    throw new Error(`Failed to claim question for sending: ${claimErr.message}`);
+  }
+  if (!claimed || claimed.length === 0) {
+    throw new ReplySendConflictError();
+  }
+
+  // 2. Deliver — only ever reached by the single CAS winner.
   await deliver({ messageId: input.message.id, reply });
 
-  // 2. The outbound reply row.
+  // 3. The outbound reply row. reply_to is uniquely indexed (partial), so a
+  //    duplicate insert surfaces as an idempotent conflict.
   const { data: outbound, error: outboundErr } = await supabase
     .from("messages")
     .insert({
@@ -164,18 +209,14 @@ export async function approveAndSendReply(
     .select("*")
     .single();
   if (outboundErr || !outbound) {
+    if (outboundErr?.code === PG_UNIQUE_VIOLATION) {
+      throw new ReplySendConflictError(
+        "A reply row already exists for this message",
+      );
+    }
     throw new Error(
       `Failed to persist outbound reply: ${outboundErr?.message ?? "no row returned"}`,
     );
-  }
-
-  // 3. Close out the inbound question.
-  const { error: updateErr } = await supabase
-    .from("messages")
-    .update({ status: "sent", sent_at: sentAt })
-    .eq("id", input.message.id);
-  if (updateErr) {
-    throw new Error(`Failed to mark question as sent: ${updateErr.message}`);
   }
 
   return { outbound: messageRowSchema.parse(outbound) };
