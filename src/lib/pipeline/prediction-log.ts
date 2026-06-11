@@ -68,12 +68,32 @@ export interface PredictionLogRow {
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
   /**
+   * The master autopilot switch value THIS run consumed — the review page's
+   * evidence for "autopilot was off when this ran" (the live setting may have
+   * been flipped since). Null on legacy rows that predate the setting.
+   */
+  autopilot_enabled: boolean | null;
+  /** The gate's output for this run (enabled AND score >= threshold). */
+  autopilot_eligible: boolean | null;
+  /**
    * The pipeline run this row belongs to — the SAME id is stamped on the
    * listing the run persisted, so the eval harness pairs a prediction with
    * exactly its own listing (never a neighboring run's). Null only on legacy
    * rows written before run pairing existed.
    */
   run_id: string | null;
+}
+
+/**
+ * Run-scoped context that rides alongside the PipelineResult into the log row:
+ * facts the RUN consumed/produced that aren't part of the model's output —
+ * the autopilot switch value and the listing-pairing run id.
+ */
+export interface PredictionLogContext {
+  /** The master autopilot switch value this run consumed. */
+  autopilotEnabled?: boolean;
+  /** The run id stamped on both the listing and this log row. */
+  runId?: string;
 }
 
 /**
@@ -97,13 +117,17 @@ export function buildPredictionLogRow(
   userId: string,
   itemId: string,
   result: PipelineResult,
-  runId?: string,
+  context: PredictionLogContext = {},
 ): PredictionLogRow {
   return {
     user_id: userId,
     item_id: itemId,
-    run_id: runId ?? null,
+    run_id: context.runId ?? null,
     extracted_attrs: result.attributes,
+    // The gate decision as the run saw it — run-time facts for the review
+    // page's disposition explanation; never re-derivable from live settings.
+    autopilot_enabled: context.autopilotEnabled ?? null,
+    autopilot_eligible: result.confidence.autopilotEligible ?? null,
     price: result.price.suggested,
     price_range: { low: result.price.range.min, high: result.price.range.max },
     confidence: result.confidence.score,
@@ -131,9 +155,9 @@ export async function logPrediction(
   userId: string,
   itemId: string,
   result: PipelineResult,
-  runId?: string,
+  context: PredictionLogContext = {},
 ): Promise<void> {
-  const row = buildPredictionLogRow(userId, itemId, result, runId);
+  const row = buildPredictionLogRow(userId, itemId, result, context);
   const { error } = await supabase.from("prediction_logs").insert(row);
   if (error) {
     throw new Error(`Failed to write prediction log: ${error.message}`);
@@ -186,7 +210,7 @@ export async function readPredictionLogs(
   let query = supabase
     .from("prediction_logs")
     .select(
-      "user_id, item_id, run_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, pricing_model, sources, created_at",
+      "user_id, item_id, run_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, pricing_model, sources, autopilot_enabled, autopilot_eligible, created_at",
     );
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);

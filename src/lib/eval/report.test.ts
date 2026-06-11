@@ -139,6 +139,8 @@ describe("predictionFromLogRow", () => {
     listing_model: "gpt-5.5",
     pricing_model: null,
     run_id: null,
+    autopilot_enabled: null,
+    autopilot_eligible: null,
     sources: [],
   };
 

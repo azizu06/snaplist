@@ -85,18 +85,34 @@ describe("buildPredictionLogRow", () => {
       // No pricingModel on this result → null (no LLM was involved in pricing).
       pricing_model: null,
       sources: result.price.sources,
+      // No switch value supplied → null (legacy shape); eligibility comes from
+      // the run's confidence gate output.
+      autopilot_enabled: null,
+      autopilot_eligible: result.confidence.autopilotEligible ?? null,
       // No runId supplied → null (legacy shape), never undefined.
       run_id: null,
     });
   });
 
+  it("records the run-time autopilot switch + gate decision when supplied", () => {
+    // The review page explains dispositions from THESE persisted facts —
+    // a high-confidence draft is only attributable to "autopilot was off"
+    // when the run actually recorded the switch as off.
+    const row = buildPredictionLogRow("u", "i", makeResult(), {
+      autopilotEnabled: false,
+    });
+    expect(row.autopilot_enabled).toBe(false);
+
+    const enabled = buildPredictionLogRow("u", "i", makeResult(), {
+      autopilotEnabled: true,
+    });
+    expect(enabled.autopilot_enabled).toBe(true);
+  });
+
   it("stamps the run id when supplied — the listing/prediction pairing key", () => {
-    const row = buildPredictionLogRow(
-      "user-1",
-      "item-1",
-      makeResult(),
-      "00000000-0000-4000-8000-000000000001",
-    );
+    const row = buildPredictionLogRow("user-1", "item-1", makeResult(), {
+      runId: "00000000-0000-4000-8000-000000000001",
+    });
     expect(row.run_id).toBe("00000000-0000-4000-8000-000000000001");
   });
 
@@ -239,6 +255,8 @@ function makeReadRow(
     listing_model: "stub-pipeline-v1",
     pricing_model: null,
     run_id: null,
+    autopilot_enabled: null,
+    autopilot_eligible: null,
     sources: [],
     created_at: createdAt,
   };
