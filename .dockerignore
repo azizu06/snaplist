@@ -1,0 +1,23 @@
+# Keep the build context to what `next build` needs. Secrets NEVER enter the
+# image: .env* is excluded and runtime config is injected via `docker run`.
+.git
+.github
+node_modules
+.next
+out
+build
+dist
+.env
+.env*.local
+*.pem
+.vercel
+supabase/.branches
+supabase/.temp
+docs
+*.md
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+Dockerfile
+.dockerignore

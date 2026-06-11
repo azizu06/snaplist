@@ -3,6 +3,7 @@ import type { Pipeline, PipelineResult } from "./types";
 import { pipeline as defaultPipeline } from "./stub";
 import { logPrediction } from "./prediction-log";
 import { initialListingStatus } from "./autopilot";
+import { logEvent, timed } from "../observability";
 
 /**
  * Persistence layer for one pipeline run — the end-to-end spine the walking
@@ -67,10 +68,18 @@ export async function runPipelineAndPersist(
   const itemId = item.id as string;
 
   // 2. Run the pipeline (stubbed AI). photos → attributes + price + confidence + listing.
-  const result = await pipeline.run({
-    photos: input.photos,
-    autopilotEnabled: input.autopilotEnabled,
-  });
+  //    `timed` (issue #18) emits ONE structured line with duration + outcome — the
+  //    pipeline is the slow, model-bound step worth watching — and rethrows on
+  //    failure, so the error contract here is unchanged.
+  const result = await timed(
+    "pipeline.run",
+    { runId, itemId, photoCount: input.photos.length },
+    () =>
+      pipeline.run({
+        photos: input.photos,
+        autopilotEnabled: input.autopilotEnabled,
+      }),
+  );
 
   // 3. Backfill the extracted attributes + condition + identification onto the item.
   //    Persisting `identification` lets the review page render the MODEL's actual
@@ -104,6 +113,7 @@ export async function runPipelineAndPersist(
   //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
   //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
   //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
+  const status = initialListingStatus(result.confidence);
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .insert({
@@ -113,7 +123,7 @@ export async function runPipelineAndPersist(
       title: result.listing.title,
       description: result.listing.description,
       copy: result.listing.fields,
-      status: initialListingStatus(result.confidence),
+      status,
       run_id: runId,
     })
     .select("id")
@@ -124,6 +134,19 @@ export async function runPipelineAndPersist(
     );
   }
   const listingId = listing.id as string;
+
+  // One summary line per successful run: the ids + the confidence-spine signals
+  // (tier fired → score/band → gated status). Identifiers and signals only —
+  // never listing copy or photo contents.
+  logEvent("pipeline.persisted", {
+    runId,
+    itemId,
+    listingId,
+    tier: result.price.tier,
+    confidence: result.confidence.score,
+    band: result.confidence.band,
+    status,
+  });
 
   return { itemId, listingId, result };
 }

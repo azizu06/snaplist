@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Standalone output is what the Dockerfile's runtime stage copies (a
+  // self-contained server.js + pruned node_modules). Gated behind an env flag
+  // set by the Docker build so the Vercel deploy path keeps Next's default
+  // output untouched.
+  output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
   experimental: {
     serverActions: {
       // Phone photos routinely exceed Next's 1 MB Server Action body default, which
