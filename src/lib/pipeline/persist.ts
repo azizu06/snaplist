@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Pipeline, PipelineResult } from "./types";
 import { pipeline as defaultPipeline } from "./stub";
 import { logPrediction } from "./prediction-log";
+import { initialListingStatus } from "./autopilot";
 
 /**
  * Persistence layer for one pipeline run — the end-to-end spine the walking
@@ -82,7 +83,10 @@ export async function runPipelineAndPersist(
     throw new Error(`Failed to update item attributes: ${updErr.message}`);
   }
 
-  // 4. Persist the generated listing.
+  // 4. Persist the generated listing. The initial status is the confidence-gated
+  //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
+  //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
+  //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .insert({
@@ -92,7 +96,7 @@ export async function runPipelineAndPersist(
       title: result.listing.title,
       description: result.listing.description,
       copy: result.listing.fields,
-      status: "draft",
+      status: initialListingStatus(result.confidence),
     })
     .select("id")
     .single();

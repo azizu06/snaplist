@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { uploadAndProcess } from "./actions";
+import { getAutopilotEnabled } from "@/lib/settings/user-settings";
+import { setAutopilotSetting, uploadAndProcess } from "./actions";
 
 /**
  * Upload page — pick one photo, submit, get a persisted review page. Skeleton-level
@@ -18,6 +19,9 @@ export default async function UploadPage({
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/upload");
+
+  // Master autopilot switch (issue #12). Read per-user; missing row = enabled.
+  const autopilotEnabled = await getAutopilotEnabled(supabase, user.id);
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-6 px-6 py-12">
@@ -59,6 +63,34 @@ export default async function UploadPage({
           Process photo
         </button>
       </form>
+
+      <section className="flex items-center justify-between rounded-md border border-zinc-200 px-4 py-3">
+        <div>
+          <h2 className="text-sm font-medium">Autopilot</h2>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            {autopilotEnabled
+              ? "On — high-confidence items are queued for auto-posting."
+              : "Off — every item queues for your review before posting."}
+          </p>
+        </div>
+        <form action={setAutopilotSetting}>
+          <input
+            type="hidden"
+            name="enabled"
+            value={autopilotEnabled ? "false" : "true"}
+          />
+          <button
+            type="submit"
+            className={
+              autopilotEnabled
+                ? "rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+                : "rounded-md bg-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-300"
+            }
+          >
+            {autopilotEnabled ? "Turn off" : "Turn on"}
+          </button>
+        </form>
+      </section>
 
       <p className="text-xs text-zinc-400">
         Walking skeleton: identification, pricing, and listing copy are stubbed —
