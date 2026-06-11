@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  marketplaceCurrency,
   toEbayAspects,
   toEbayCondition,
   toEbayPrice,
@@ -109,5 +110,21 @@ describe("toEbayPublishRequest", () => {
     expect(() => toEbayPublishRequest({ ...base, description: "" })).toThrowError(
       /title or description/,
     );
+  });
+});
+
+describe("marketplaceCurrency", () => {
+  it("maps the configured marketplace to its currency (never an unconditional USD)", () => {
+    expect(marketplaceCurrency("EBAY_US")).toBe("USD");
+    expect(marketplaceCurrency("EBAY_GB")).toBe("GBP");
+    expect(marketplaceCurrency("EBAY_DE")).toBe("EUR");
+    expect(marketplaceCurrency("EBAY_CA")).toBe("CAD");
+  });
+
+  it("honors the EBAY_CURRENCY override and falls back to USD for unknown ids", () => {
+    expect(marketplaceCurrency("EBAY_GB", "usd")).toBe("USD");
+    expect(marketplaceCurrency("EBAY_XX")).toBe("USD");
+    expect(marketplaceCurrency(undefined)).toBe("USD");
+    expect(marketplaceCurrency("EBAY_GB", "  ")).toBe("GBP"); // blank override ignored
   });
 });

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayAdapter } from "./types";
-import { toEbayPublishRequest } from "./map";
+import { marketplaceCurrency, toEbayPublishRequest } from "./map";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -149,6 +149,9 @@ export async function publishListingToEbay(
     price,
     imageUrls,
     categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
+    // Offer currency follows the configured marketplace (EBAY_GB → GBP, ...),
+    // overridable via EBAY_CURRENCY — never an unconditional USD.
+    currency: marketplaceCurrency(env.EBAY_MARKETPLACE_ID, env.EBAY_CURRENCY),
   });
 
   // 6. Publish through the adapter. An ADAPTER failure is persisted as

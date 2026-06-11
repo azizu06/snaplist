@@ -36,6 +36,8 @@ const envSchema = z.object({
   // Marketplace + business policies the offer is created against. Policy ids come
   // from the seller's sandbox account (Seller Hub or the Account API).
   EBAY_MARKETPLACE_ID: z.string().min(1).default("EBAY_US"),
+  // Offer currency override; when unset the marketplace id determines it.
+  EBAY_CURRENCY: z.string().min(1).optional(),
   EBAY_FULFILLMENT_POLICY_ID: z.string().min(1).optional(),
   EBAY_PAYMENT_POLICY_ID: z.string().min(1).optional(),
   EBAY_RETURN_POLICY_ID: z.string().min(1).optional(),

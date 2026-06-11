@@ -63,6 +63,39 @@ export function toEbayAspects(copy: Record<string, unknown>): Record<string, str
   return aspects;
 }
 
+/**
+ * Marketplace id → offer currency. eBay requires the offer to be priced in
+ * the marketplace's currency, so a configured `EBAY_MARKETPLACE_ID` must not
+ * silently price in USD. `EBAY_CURRENCY` overrides for marketplaces not in
+ * the map (which falls back to USD).
+ */
+const MARKETPLACE_CURRENCY: Record<string, string> = {
+  EBAY_US: "USD",
+  EBAY_MOTORS_US: "USD",
+  EBAY_CA: "CAD",
+  EBAY_GB: "GBP",
+  EBAY_AU: "AUD",
+  EBAY_DE: "EUR",
+  EBAY_FR: "EUR",
+  EBAY_IT: "EUR",
+  EBAY_ES: "EUR",
+  EBAY_IE: "EUR",
+  EBAY_AT: "EUR",
+  EBAY_BE: "EUR",
+  EBAY_NL: "EUR",
+  EBAY_CH: "CHF",
+  EBAY_PL: "PLN",
+};
+
+export function marketplaceCurrency(
+  marketplaceId: string | undefined,
+  override?: string,
+): string {
+  const o = override?.trim();
+  if (o) return o.toUpperCase();
+  return MARKETPLACE_CURRENCY[marketplaceId?.trim() ?? ""] ?? "USD";
+}
+
 /** Format a price for the Sell API money type (decimal string, 2 places). */
 export function toEbayPrice(price: number, currency = "USD"): { value: string; currency: string } {
   if (!Number.isFinite(price) || price <= 0) {
