@@ -95,16 +95,29 @@ export async function attachDraftReply(
  * The delivery seam. v1 is sandbox-only: the default implementation LOGS and
  * does nothing. The real eBay send (issue #14) replaces the default without
  * touching `approveAndSendReply` or its callers.
+ *
+ * IDEMPOTENCY CONTRACT: `idempotencyKey` is stable across send + every retry
+ * of the same inbound question (it is the inbound message id). A real adapter
+ * MUST deduplicate on it (e.g. pass it as the marketplace idempotency token),
+ * because recovery can re-invoke delivery after a crash that lost the
+ * outbound row — the unique DB index deduplicates the ROW, only this key can
+ * deduplicate the external side effect.
  */
 export type DeliverReply = (args: {
   messageId: string;
   reply: string;
+  /** Stable per-inbound-question key; identical on send and every retry. */
+  idempotencyKey: string;
 }) => Promise<void>;
 
 /** Stubbed delivery: logged no-op (PRD: messaging simulated until the adapter). */
-export const stubDeliverReply: DeliverReply = async ({ messageId, reply }) => {
+export const stubDeliverReply: DeliverReply = async ({
+  messageId,
+  reply,
+  idempotencyKey,
+}) => {
   console.info(
-    `[inbox] STUBBED delivery for message ${messageId} (sandbox — real send arrives with the eBay adapter, issue #14): ${JSON.stringify(
+    `[inbox] STUBBED delivery for message ${messageId} (idempotency key ${idempotencyKey}; sandbox — real send arrives with the eBay adapter, issue #14): ${JSON.stringify(
       reply,
     )}`,
   );
@@ -196,7 +209,12 @@ export async function approveAndSendReply(
   }
 
   // 2. Deliver — only ever reached by the single CAS winner.
-  await deliver({ messageId: input.message.id, reply });
+  await deliver({
+    messageId: input.message.id,
+    reply,
+    // Stable across this send AND any later retry of the same question.
+    idempotencyKey: input.message.id,
+  });
 
   // 3. The outbound reply row. reply_to is uniquely indexed (partial), so a
   //    duplicate insert surfaces as an idempotent conflict.
@@ -295,7 +313,13 @@ export async function retryReplyDelivery(
   }
 
   // 2. Re-attempt the delivery that previously failed.
-  await deliver({ messageId: input.message.id, reply });
+  await deliver({
+    messageId: input.message.id,
+    reply,
+    // SAME key as the original send: the adapter's dedupe is what makes
+    // recovery safe when the outbound row was lost after a real delivery.
+    idempotencyKey: input.message.id,
+  });
 
   // 3. Persist the outbound row — the unique reply_to index collapses a
   //    concurrent double-retry to one row (23505 → idempotent conflict).

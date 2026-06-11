@@ -271,7 +271,11 @@ describe("approveAndSendReply", () => {
       },
     });
 
-    expect(delivered).toEqual([{ messageId: MESSAGE_ID, reply: "Edited reply" }]);
+    // The idempotency key is the inbound id — stable across send and retry,
+    // so a real adapter can dedupe the external side effect.
+    expect(delivered).toEqual([
+      { messageId: MESSAGE_ID, reply: "Edited reply", idempotencyKey: MESSAGE_ID },
+    ]);
 
     // The claim is a compare-and-set: id AND status='drafted'.
     expect(updates).toHaveLength(1);
@@ -455,7 +459,10 @@ describe("retryReplyDelivery", () => {
       },
     });
 
-    expect(delivered).toEqual([{ messageId: MESSAGE_ID, reply: "Draft reply" }]);
+    // SAME idempotency key as the original send — the retry is dedupable.
+    expect(delivered).toEqual([
+      { messageId: MESSAGE_ID, reply: "Draft reply", idempotencyKey: MESSAGE_ID },
+    ]);
     // The claim is "no outbound row references this question".
     expect(selects[0].eqs).toEqual([
       ["reply_to", MESSAGE_ID],
