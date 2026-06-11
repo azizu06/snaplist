@@ -325,6 +325,20 @@ const SUFFICIENT_COMPS = 3;
 /** Relative spread ((max−min)/median) at or under this counts as tight agreement. */
 const TIGHT_SPREAD = 0.5;
 
+/**
+ * Map a judged relative spread onto the 0–1 comp-agreement scale the
+ * confidence composite consumes: `agreement = clamp01(1 - spread)`. Lockstep
+ * comps (spread 0) → 1; spread at TIGHT_SPREAD (0.5) → 0.5; anything spread
+ * ≥ 1 → 0. By construction `agreement >= TIGHT_AGREEMENT_MIN` is exactly the
+ * provider's own tight-agreement judgement (`spread <= TIGHT_SPREAD`), so the
+ * pipeline's web_tight gate and this provider can never disagree.
+ */
+export const TIGHT_AGREEMENT_MIN = 1 - TIGHT_SPREAD;
+
+export function spreadToAgreement(spread: number): number {
+  return Math.min(1, Math.max(0, 1 - spread));
+}
+
 function median(sorted: readonly number[]): number {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1
@@ -411,6 +425,9 @@ function synthesize(
     confidence,
     sources,
     tier,
+    // The judged tightness rides downstream: the confidence composite must
+    // see a scattered sold set as scattered, not as a fixed-trust constant.
+    compAgreement: spreadToAgreement(j.spread),
     // Provenance: stamped only when the extractor's model is actually KNOWN —
     // the default extractor's resolved id, or an explicit options.model for an
     // injected extractor. An injected extractor without a declared model logs

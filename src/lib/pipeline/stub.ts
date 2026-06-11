@@ -55,7 +55,11 @@ export function attributesToSignal(attrs: ExtractedAttributes): ItemSignal {
     category: attrs.category,
     condition: attrs.condition,
     conditionKnown: attrs.condition != null,
-    resolvedName: attrs.title,
+    // attrs.title is the model-GENERATED display title — the vision prompt
+    // produces one even for generic/ambiguous items ("Nike running shoes"),
+    // so it is NOT identification and must not enable the branded web tier.
+    // signal.resolvedName is reserved for externally resolved identities
+    // (e.g. a future UPC-catalog lookup).
   };
 }
 

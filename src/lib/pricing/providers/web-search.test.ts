@@ -3,8 +3,10 @@ import {
   DEFAULT_PRICING_MODEL,
   MAX_SEARCH_ITERATIONS,
   MIN_USEFUL_COMPS,
+  TIGHT_AGREEMENT_MIN,
   buildSearchQueries,
   resolvePricingModel,
+  spreadToAgreement,
   createBrandedWebPricingProvider,
   createUpcWebPricingProvider,
   type ExtractComps,
@@ -561,5 +563,33 @@ describe("web tiers wired into the PriceRouter", () => {
     const result = await router.price({ ...BRANDED_SIGNAL, upc: "027242920569" });
     expect(result.tier).toBe("llm-only");
     expect(search.queries.length).toBeLessThanOrEqual(MAX_SEARCH_ITERATIONS);
+  });
+});
+
+describe("judged comp agreement on the result (#10 round-4)", () => {
+  it("stamps compAgreement from the judged spread: tight cluster high, scatter low", async () => {
+    const priceWith = async (comps: WebComp[]) => {
+      const provider = createBrandedWebPricingProvider({
+        searchClient: fakeSearch(),
+        extractComps: fakeExtractor([comps]),
+      });
+      return (await provider.price(BRANDED_SIGNAL))!;
+    };
+    const tight = await priceWith([
+      { url: "https://www.ebay.com/itm/q1-1", price: 178, kind: "sold" },
+      { url: "https://www.ebay.com/itm/q1-2", price: 185.5, kind: "sold" },
+      { url: "https://www.mercari.com/us/item/q1-3", price: 199.99, kind: "sold" },
+    ]);
+    const scattered = await priceWith([
+      { url: "https://www.ebay.com/itm/q1-1", price: 60, kind: "sold" },
+      { url: "https://www.ebay.com/itm/q1-2", price: 185, kind: "sold" },
+      { url: "https://www.mercari.com/us/item/q1-3", price: 420, kind: "sold" },
+    ]);
+    expect(tight.compAgreement).toBeGreaterThanOrEqual(TIGHT_AGREEMENT_MIN);
+    expect(scattered.compAgreement).toBeLessThan(TIGHT_AGREEMENT_MIN);
+    expect(scattered.compAgreement).toBe(0); // spread 1.95 clamps to 0
+    // The mapping is the provider's own tightness judgement, on the result.
+    expect(spreadToAgreement(0)).toBe(1);
+    expect(spreadToAgreement(0.5)).toBe(TIGHT_AGREEMENT_MIN);
   });
 });

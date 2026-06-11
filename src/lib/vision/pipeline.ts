@@ -22,6 +22,7 @@ import type {
   PipelineResult,
 } from "../pipeline/types";
 import { attributesToSignal } from "../pipeline/stub";
+import { TIGHT_AGREEMENT_MIN } from "../pricing/providers/web-search";
 import {
   extractItemAttributes,
   type VisionGenerate,
@@ -162,7 +163,15 @@ function pricingTierToConfidenceTier(
     case "upc-aided-web":
       return "web_wide";
     case "branded-web":
-      return hasSoldComp(price) ? "web_tight" : "web_wide";
+      // #10 round-4 calibration: web_tight needs BOTH sold grounding AND the
+      // provider's judged tight agreement. A scattered sold set ($60/$185/$420)
+      // is real evidence of *a* market but not of a defensible tight price —
+      // it stays web_wide and cannot ride the sold-comp label past the
+      // autopilot gate. Providers that don't report agreement (e.g. injected
+      // test pricers) keep the sold-comp-only behavior.
+      return hasSoldComp(price) && tightAgreement(price)
+        ? "web_tight"
+        : "web_wide";
     case "depreciation":
       return "depreciation";
     case "llm-only":
@@ -171,8 +180,18 @@ function pricingTierToConfidenceTier(
   }
 }
 
-/** Conservative comp-agreement signal from the price's sources (real clustering TBD). */
+/** Did the provider judge its comp cluster tight? (Unreported = no objection.) */
+function tightAgreement(price: PriceResult): boolean {
+  return price.compAgreement == null || price.compAgreement >= TIGHT_AGREEMENT_MIN;
+}
+
+/**
+ * Comp-agreement signal for the confidence composite: the provider's own
+ * judged agreement when reported (the web tiers measure relative spread),
+ * else the conservative constants for providers without a comp cluster.
+ */
 function compAgreementFor(price: PriceResult): number {
+  if (price.compAgreement != null) return price.compAgreement;
   if (hasSoldComp(price)) return 0.7;
   return price.sources.length > 0 ? 0.4 : 0.3;
 }

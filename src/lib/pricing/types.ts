@@ -115,6 +115,14 @@ export const priceResultSchema = z
      * listing_model precedent (#32).
      */
     model: z.string().optional(),
+    /**
+     * Judged comp agreement in [0, 1] (1 = comps in lockstep), reported by
+     * comp-based tiers from their measured relative spread. The pipeline's
+     * confidence composite consumes this so a SCATTERED sold set cannot ride
+     * the sold-comp label into the tight (autopilot-grade) confidence tier.
+     * Tiers with no comp set leave it unset.
+     */
+    compAgreement: z.number().min(0).max(1).optional(),
   })
   .refine((r) => r.range.min <= r.range.max, {
     message: "range.min must be <= range.max",
