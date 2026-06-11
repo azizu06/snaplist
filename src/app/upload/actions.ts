@@ -1,9 +1,11 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { runPipelineAndPersist } from "@/lib/pipeline";
 import { createVisionPipeline } from "@/lib/vision";
+import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
 
 /**
  * Upload server action — the spine wired to the request:
@@ -61,6 +63,11 @@ export async function uploadAndProcess(formData: FormData) {
 
   let itemId: string;
   try {
+    // The user's MASTER autopilot switch (issue #12): forwarded into the pipeline's
+    // confidence gate, so when it is off NOTHING is autopilot-eligible and every
+    // listing queues as a draft for review.
+    const autopilotEnabled = await getAutopilotEnabled(supabase, user.id);
+
     // Real vision pipeline: the user-scoped server client signs the private photo
     // URLs and the same client persists every row under RLS.
     const pipeline = createVisionPipeline({ supabase });
@@ -69,6 +76,7 @@ export async function uploadAndProcess(formData: FormData) {
       {
         userId: user.id,
         photos: [path],
+        autopilotEnabled,
       },
       pipeline,
     );
@@ -79,4 +87,29 @@ export async function uploadAndProcess(formData: FormData) {
   }
 
   redirect(`/review/${itemId}`);
+}
+
+/**
+ * Toggle the master autopilot switch (issue #12: "autopilot can be turned off
+ * entirely"). A plain form action: the form posts `enabled` = "true" | "false";
+ * the setting persists per-user in `user_settings` (RLS-scoped upsert) and is
+ * read back on every upload before the pipeline runs.
+ */
+export async function setAutopilotSetting(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login?next=/upload");
+
+  const enabled = formData.get("enabled") === "true";
+  try {
+    await setAutopilotEnabled(supabase, user.id, enabled);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to update autopilot.";
+    redirect(`/upload?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/upload");
+  redirect("/upload");
 }

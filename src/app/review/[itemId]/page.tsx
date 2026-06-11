@@ -2,7 +2,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
+import { effectivePrice } from "@/lib/pipeline";
+import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification } from "@/lib/vision";
+import { overridePrice } from "./actions";
 
 /**
  * Review page — reads the persisted item + its listing + the prediction log back
@@ -21,10 +24,13 @@ import { deriveIdentification } from "@/lib/vision";
  */
 export default async function ReviewPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ itemId: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { itemId } = await params;
+  const { error: actionError } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -35,15 +41,14 @@ export default async function ReviewPage({
   // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
     .from("items")
-    .select("id, photos, attributes, condition, identification, created_at")
+    .select("id, photos, attributes, condition, identification, price_override, created_at")
     .eq("id", itemId)
     .single();
   if (!item) notFound();
 
-  // This page reviews the SALE listing. Export packs persist as facebook/
-  // mercari rows in the SAME table with newer timestamps, so the query must
-  // pin the canonical platform — otherwise visiting Export and returning here
-  // would show a pack instead of the eBay draft.
+  // This page reviews the SALE listing. Export packs (#15) persist as
+  // 'facebook'/'mercari' listings rows for the same item, so pin the platform
+  // or the newest export pack would shadow the eBay draft here.
   const { data: listing } = await supabase
     .from("listings")
     .select("platform, title, description, copy, status")
@@ -55,7 +60,9 @@ export default async function ReviewPage({
 
   const { data: log } = await supabase
     .from("prediction_logs")
-    .select("price, price_range, confidence, tier_fired, model")
+    .select(
+      "price, price_range, confidence, tier_fired, model, autopilot_enabled, autopilot_eligible",
+    )
     .eq("item_id", itemId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -90,6 +97,87 @@ export default async function ReviewPage({
   const confidence = typeof log?.confidence === "number" ? log.confidence : null;
   const band = confidence == null ? null : confidence >= 0.75 ? "high" : confidence >= 0.5 ? "medium" : "low";
 
+  // Seller price override (issue #12): the persisted override wins over the
+  // suggestion for EVERY consumer of the price; here it drives the displayed price.
+  const suggested = log?.price != null ? Number(log.price) : null;
+  const override = item.price_override != null ? Number(item.price_override) : null;
+  const displayPrice =
+    suggested != null ? effectivePrice(suggested, override) : override;
+
+  // Disposition transparency (issue #12): a queued listing was confidence-gated
+  // into the auto-post path; a DRAFT is awaiting review — either because the
+  // confidence fell short or because autopilot was off entirely. The
+  // explanation derives from the RUN-TIME facts (persisted status + logged
+  // confidence), never the live setting: flipping the master switch later
+  // must not rewrite history about why this listing queued. Terminal lifecycle
+  // states (published / failed) are rendered as themselves — they must never
+  // be misattributed to confidence or autopilot.
+  const confidenceFellShort =
+    confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
+  // The run-time switch value, persisted WITH the prediction (round-7 review):
+  // boolean = recorded evidence; null/undefined = legacy row, keep the neutral
+  // wording rather than inventing history.
+  const runAutopilotEnabled =
+    typeof log?.autopilot_enabled === "boolean" ? log.autopilot_enabled : null;
+  const banner = (() => {
+    switch (listing?.status) {
+      case "queued":
+        return {
+          tone: "emerald" as const,
+          title: "Queued for auto-posting",
+          detail:
+            "High confidence and autopilot was on — this listing is eligible to post without manual approval.",
+        };
+      case "draft":
+        return {
+          tone: "amber" as const,
+          title: "Queued for your review",
+          // Explanation precedence, all from PERSISTED run-time facts:
+          // recorded switch-off beats the confidence story (a high-confidence
+          // draft is exactly the switch-off case); then below-threshold; then
+          // neutral for legacy rows with no recorded decision.
+          detail:
+            runAutopilotEnabled === false
+              ? "Autopilot was off when this listing was generated, so it waits for you."
+              : confidenceFellShort
+                ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
+                : "Autopilot didn't auto-post this listing — it waits for your approval.",
+        };
+      case "published":
+        return {
+          tone: "emerald" as const,
+          title: "Published",
+          detail: "This listing is live on the marketplace.",
+        };
+      case "failed":
+        return {
+          tone: "red" as const,
+          title: "Publish failed",
+          detail:
+            "The marketplace rejected or errored on this listing — review it and retry.",
+        };
+      default:
+        return null;
+    }
+  })();
+  const bannerStyles = {
+    emerald: {
+      section: "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3",
+      title: "text-sm font-medium text-emerald-800",
+      detail: "mt-0.5 text-xs text-emerald-700",
+    },
+    amber: {
+      section: "rounded-md border border-amber-200 bg-amber-50 px-4 py-3",
+      title: "text-sm font-medium text-amber-800",
+      detail: "mt-0.5 text-xs text-amber-700",
+    },
+    red: {
+      section: "rounded-md border border-red-200 bg-red-50 px-4 py-3",
+      title: "text-sm font-medium text-red-800",
+      detail: "mt-0.5 text-xs text-red-700",
+    },
+  } as const;
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
       <header className="flex items-center justify-between">
@@ -111,6 +199,19 @@ export default async function ReviewPage({
           </Link>
         </nav>
       </header>
+
+      {actionError ? (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+          {actionError}
+        </p>
+      ) : null}
+
+      {banner ? (
+        <section className={bannerStyles[banner.tone].section}>
+          <p className={bannerStyles[banner.tone].title}>{banner.title}</p>
+          <p className={bannerStyles[banner.tone].detail}>{banner.detail}</p>
+        </section>
+      ) : null}
 
       {photoUrl ? (
         // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL, not a static asset; next/image optimization isn't wanted here
@@ -178,18 +279,50 @@ export default async function ReviewPage({
 
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-          Price recommendation
+          Price{override != null ? " (your override)" : " recommendation"}
         </h2>
         <div className="flex items-baseline gap-3">
           <span className="text-3xl font-semibold">
-            {typeof log?.price === "number" ? `$${log.price}` : "—"}
+            {displayPrice != null ? `$${displayPrice}` : "—"}
           </span>
+          {override != null && suggested != null ? (
+            <span className="text-sm text-zinc-400 line-through">
+              suggested ${suggested}
+            </span>
+          ) : null}
           {range?.low != null && range?.high != null ? (
             <span className="text-sm text-zinc-500">
               range ${range.low}–${range.high}
             </span>
           ) : null}
         </div>
+        <form
+          action={overridePrice}
+          className="mt-1 flex items-center gap-2"
+        >
+          <input type="hidden" name="itemId" value={itemId} />
+          <input
+            type="number"
+            name="price"
+            step="0.01"
+            min="0.01"
+            defaultValue={override ?? undefined}
+            placeholder={suggested != null ? String(suggested) : "0.00"}
+            aria-label="Override price (USD)"
+            className="w-32 rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+          />
+          <button
+            type="submit"
+            className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
+          >
+            {override != null ? "Update price" : "Set my price"}
+          </button>
+          {override != null ? (
+            <span className="text-xs text-zinc-400">
+              leave blank and save to use the suggestion again
+            </span>
+          ) : null}
+        </form>
         <div className="flex items-center gap-2 text-sm">
           {band ? (
             <span

@@ -126,8 +126,12 @@ export interface ConfidenceOptions {
 const HIGH_MIN = 0.75;
 const MEDIUM_MIN = 0.5;
 
-/** Default autopilot threshold; see ConfidenceOptions.threshold. */
-const DEFAULT_THRESHOLD = HIGH_MIN;
+/**
+ * Default autopilot threshold; see ConfidenceOptions.threshold. Exported so
+ * UI surfaces can explain a persisted disposition from the logged confidence
+ * (the run-time gate) instead of re-checking the live autopilot setting.
+ */
+export const DEFAULT_AUTOPILOT_THRESHOLD = HIGH_MIN;
 
 /**
  * Composite weights. Tier dominates (it encodes the structural reliability of
@@ -188,7 +192,7 @@ export function computeConfidence(
   signals: ConfidenceSignals,
   options: ConfidenceOptions = {},
 ): ConfidenceResult {
-  const { autopilotEnabled = true, threshold = DEFAULT_THRESHOLD } = options;
+  const { autopilotEnabled = true, threshold = DEFAULT_AUTOPILOT_THRESHOLD } = options;
 
   // The threshold gates auto-posting, so a malformed value is a safety bug, not a
   // stylistic one: a negative threshold would make every result (even llm_only)
