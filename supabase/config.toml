@@ -364,8 +364,8 @@ enabled = false
 # The DB-gated test suites do NOT need this: they mint local HS256 JWTs signed
 # with the stack's own secret (see src/lib/supabase/test-users.ts).
 [auth.third_party.clerk]
-enabled = false
-# domain = "your-instance.clerk.accounts.dev"
+enabled = true
+domain = "witty-walrus-27.clerk.accounts.dev"
 
 # OAuth server configuration
 [auth.oauth_server]
