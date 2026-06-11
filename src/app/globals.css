@@ -20,17 +20,28 @@
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", "JetBrains Mono",
     Menlo, Consolas, monospace;
 
-  /* Neutrals (cool gray, software-native) */
-  --color-bg:            oklch(98.5% 0.002 255);
+  /* Neutrals — Shopify-admin chrome (issue #40 round 2): gray canvas so the
+     white cards read as surfaces, a near-black top bar, and a near-black
+     primary button. Reference: Shopify admin product/index screens (Mobbin). */
+  --color-bg:            oklch(96.5% 0.002 255); /* canvas — Shopify ~#f1f1f1 */
   --color-surface:       oklch(100%  0     0);
   --color-surface-2:     oklch(97%   0.003 255);
-  --color-surface-3:     oklch(94.5% 0.004 255);
+  --color-surface-3:     oklch(94%   0.004 255);
   --color-fg:            oklch(24%   0.012 260);
   --color-fg-strong:     oklch(18%   0.013 260);
   --color-muted:         oklch(50%   0.012 260);
   --color-faint:         oklch(62%   0.010 260);
   --color-border:        oklch(91%   0.004 260);
   --color-border-strong: oklch(84%   0.006 260);
+
+  /* Admin chrome */
+  --color-topbar:        oklch(21% 0.005 260);   /* near-black app bar        */
+  --color-topbar-fg:     oklch(92% 0.003 260);
+  --color-topbar-muted:  oklch(65% 0.006 260);
+  --color-topbar-pill:   oklch(30% 0.006 260);   /* search pill on the bar    */
+  --color-primary:       oklch(25% 0.01  260);   /* near-black primary button */
+  --color-primary-hover: oklch(33% 0.01  260);
+  --color-primary-fg:    oklch(99% 0     0);
 
   /* Accent — one only */
   --color-accent:         oklch(52% 0.16 255);
@@ -151,6 +162,14 @@
     --color-info-soft:    oklch(30% 0.04 250);
     --color-info-soft-fg: oklch(83% 0.08 255);
     --color-info-border:  oklch(42% 0.05 250);
+
+    --color-topbar:        oklch(13% 0.005 260);
+    --color-topbar-fg:     oklch(92% 0.003 260);
+    --color-topbar-muted:  oklch(60% 0.006 260);
+    --color-topbar-pill:   oklch(24% 0.006 260);
+    --color-primary:       oklch(90% 0.003 260);
+    --color-primary-hover: oklch(82% 0.004 260);
+    --color-primary-fg:    oklch(15% 0.01  260);
 
     --shadow-xs: 0 1px 2px 0 oklch(0% 0 0 / 0.30);
     --shadow-sm: 0 1px 2px 0 oklch(0% 0 0 / 0.40);

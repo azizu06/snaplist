@@ -17,7 +17,9 @@ import { NextResponse, type NextRequest } from "next/server";
  * causes random sign-outs (documented Supabase footgun). The proxy runtime is
  * nodejs (Next 16 proxy does not support edge), which is fine here.
  */
-const PUBLIC_PATHS = ["/login", "/auth", "/api/health"];
+// /dev is the screenshot preview harness — its pages hard-404 in production
+// (see src/app/dev/preview), so whitelisting it here is dev-only in effect.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/health", "/dev"];
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
