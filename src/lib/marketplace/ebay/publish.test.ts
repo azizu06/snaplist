@@ -1,0 +1,290 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { StubPipeline } from "../../pipeline/stub";
+import { runPipelineAndPersist } from "../../pipeline/persist";
+import { MockEbayAdapter } from "./mock";
+import { publishListingToEbay } from "./publish";
+import { toEbayCondition } from "./map";
+
+/**
+ * eBay publish seam test (issue #14): persisted listing -> adapter ->
+ * ebay_listing_id + ebay_status written back, all under RLS against the running
+ * local Postgres. Uses the OFFLINE MockEbayAdapter exclusively — NO live eBay
+ * call (the acceptance criterion); the HTTP adapter has its own fake-fetch
+ * contract tests (http.test.ts).
+ *
+ * Follows persist.test.ts: ephemeral confirmed users via the service role, each
+ * acting through its OWN anon client so RLS sees a real session; cleaned up in
+ * afterAll. Skips (never fakes a pass) if the stack is unreachable.
+ */
+
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ??
+  process.env.NEXT_PUBLIC_SUPABASE_URL ??
+  "http://127.0.0.1:54321";
+const ANON_KEY =
+  process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+async function stackReachable(): Promise<boolean> {
+  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
+      headers: { apikey: ANON_KEY },
+      signal: AbortSignal.timeout(2000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+type TestUser = { id: string; email: string; client: SupabaseClient };
+
+let reachable = false;
+let admin: SupabaseClient;
+let userA: TestUser;
+let userB: TestUser;
+const createdUserIds: string[] = [];
+
+async function provisionUser(label: string): Promise<TestUser> {
+  const email = `ebay-pub-${label}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}@example.com`;
+  const password = "test-password-123!";
+
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+  if (createErr || !created.user) {
+    throw new Error(`createUser failed for ${label}: ${createErr?.message}`);
+  }
+  createdUserIds.push(created.user.id);
+
+  const client = createClient(SUPABASE_URL, ANON_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { error: signInErr } = await client.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (signInErr) throw new Error(`signIn failed for ${label}: ${signInErr.message}`);
+
+  return { id: created.user.id, email, client };
+}
+
+/** Upload a tiny PNG to the user-scoped path, as the upload route would. */
+async function uploadPhoto(user: TestUser): Promise<string> {
+  const pngBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const bytes = Buffer.from(pngBase64, "base64");
+  const path = `${user.id}/${Date.now()}-ebay-pub.png`;
+  const { error } = await user.client.storage
+    .from("photos")
+    .upload(path, bytes, { contentType: "image/png", upsert: true });
+  if (error) throw new Error(`upload failed: ${error.message}`);
+  return path;
+}
+
+/** Run the stub pipeline end-to-end so a real listings row + price log exist. */
+async function persistedRun(user: TestUser) {
+  const photoPath = await uploadPhoto(user);
+  return runPipelineAndPersist(
+    user.client,
+    { userId: user.id, photos: [photoPath] },
+    new StubPipeline(),
+  );
+}
+
+beforeAll(async () => {
+  reachable = await stackReachable();
+  if (!reachable) return;
+  admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  [userA, userB] = await Promise.all([provisionUser("a"), provisionUser("b")]);
+});
+
+afterAll(async () => {
+  if (!reachable || !admin) return;
+  await Promise.all(createdUserIds.map((id) => admin.auth.admin.deleteUser(id)));
+});
+
+describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", () => {
+  it("requires a running local Supabase stack (skips otherwise, never fakes a pass)", () => {
+    if (!reachable) {
+      console.warn(
+        "[ebay publish.test] Local Supabase stack unreachable — skipping. " +
+          "Get keys with `pnpm supabase status -o env` and map them into the env.",
+      );
+    }
+    expect(true).toBe(true);
+  });
+
+  it("publishes via the adapter and persists ebay_listing_id + ebay_status on the row", async () => {
+    if (!reachable) return;
+
+    const { listingId, result } = await persistedRun(userA);
+    const adapter = new MockEbayAdapter();
+
+    const outcome = await publishListingToEbay(userA.client, listingId, adapter);
+
+    expect(outcome).toEqual({
+      listingId,
+      ebayListingId: `MOCK-EBAY-LISTING-${listingId}`,
+      ebayOfferId: `MOCK-EBAY-OFFER-${listingId}`,
+      ebayStatus: "published",
+      alreadyPublished: false,
+    });
+
+    // The adapter saw EXACTLY the persisted run's listing, price, and condition.
+    expect(adapter.requests).toHaveLength(1);
+    const sent = adapter.requests[0]!;
+    expect(sent.sku).toBe(listingId);
+    expect(sent.title).toBe(result.listing.title);
+    expect(sent.description).toBe(result.listing.description);
+    expect(sent.price).toEqual({
+      value: result.price.suggested.toFixed(2),
+      currency: "USD",
+    });
+    expect(sent.condition).toBe(toEbayCondition(result.attributes.condition));
+    expect(sent.quantity).toBe(1);
+    // The private photo was signed into a fetchable URL for eBay.
+    expect(sent.imageUrls.length).toBeGreaterThan(0);
+    expect(sent.imageUrls[0]).toContain("/photos/");
+
+    // Persisted state, read back AS THE OWNER (the acceptance seam).
+    const { data: row } = await userA.client
+      .from("listings")
+      .select("status, ebay_listing_id, ebay_offer_id, ebay_status")
+      .eq("id", listingId)
+      .single();
+    expect(row?.ebay_listing_id).toBe(`MOCK-EBAY-LISTING-${listingId}`);
+    expect(row?.ebay_offer_id).toBe(`MOCK-EBAY-OFFER-${listingId}`);
+    expect(row?.ebay_status).toBe("published");
+    expect(row?.status).toBe("published");
+  });
+
+  it("is idempotent: an already-published listing returns the stored result without another eBay call", async () => {
+    if (!reachable) return;
+
+    const { listingId } = await persistedRun(userA);
+    const adapter = new MockEbayAdapter();
+
+    const first = await publishListingToEbay(userA.client, listingId, adapter);
+    const second = await publishListingToEbay(userA.client, listingId, adapter);
+
+    expect(adapter.requests).toHaveLength(1); // no second adapter call
+    expect(second.alreadyPublished).toBe(true);
+    expect(second.ebayListingId).toBe(first.ebayListingId);
+  });
+
+  it("persists ebay_status='failed' (and rethrows) when the adapter fails", async () => {
+    if (!reachable) return;
+
+    const { listingId } = await persistedRun(userA);
+    const adapter = new MockEbayAdapter();
+    adapter.failWith = new Error("eBay sandbox rejected the offer");
+
+    await expect(
+      publishListingToEbay(userA.client, listingId, adapter),
+    ).rejects.toThrowError(/sandbox rejected/);
+
+    const { data: row } = await userA.client
+      .from("listings")
+      .select("status, ebay_listing_id, ebay_status")
+      .eq("id", listingId)
+      .single();
+    expect(row?.ebay_status).toBe("failed");
+    expect(row?.status).toBe("failed");
+    expect(row?.ebay_listing_id).toBeNull();
+
+    // The failed publish is RETRYABLE: clearing the failure publishes cleanly.
+    adapter.failWith = undefined;
+    const retried = await publishListingToEbay(userA.client, listingId, adapter);
+    expect(retried.ebayStatus).toBe("published");
+    const { data: after } = await userA.client
+      .from("listings")
+      .select("ebay_status, ebay_listing_id")
+      .eq("id", listingId)
+      .single();
+    expect(after?.ebay_status).toBe("published");
+    expect(after?.ebay_listing_id).toBe(retried.ebayListingId);
+  });
+
+  it("RLS holds: user B cannot publish user A's listing (indistinguishable from missing)", async () => {
+    if (!reachable) return;
+
+    const { listingId } = await persistedRun(userA);
+    const adapter = new MockEbayAdapter();
+
+    await expect(
+      publishListingToEbay(userB.client, listingId, adapter),
+    ).rejects.toThrowError(/not found/i);
+    expect(adapter.requests).toHaveLength(0);
+
+    // And A's row was NOT marked failed by B's attempt.
+    const { data: row } = await userA.client
+      .from("listings")
+      .select("ebay_status")
+      .eq("id", listingId)
+      .single();
+    expect(row?.ebay_status).toBeNull();
+  });
+
+  it("refuses to publish a non-eBay listing", async () => {
+    if (!reachable) return;
+
+    const { itemId } = await persistedRun(userA);
+    const { data: fb, error } = await userA.client
+      .from("listings")
+      .insert({
+        user_id: userA.id,
+        item_id: itemId,
+        platform: "facebook",
+        title: "FB draft",
+        description: "desc",
+        copy: {},
+      })
+      .select("id")
+      .single();
+    expect(error).toBeNull();
+
+    const adapter = new MockEbayAdapter();
+    await expect(
+      publishListingToEbay(userA.client, fb!.id as string, adapter),
+    ).rejects.toThrowError(/not eBay/);
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it("refuses to publish when no usable price exists for the item", async () => {
+    if (!reachable) return;
+
+    // Hand-built item + listing with NO prediction_logs row (no pipeline run).
+    const { data: item } = await userA.client
+      .from("items")
+      .insert({ user_id: userA.id, photos: [], attributes: {} })
+      .select("id")
+      .single();
+    const { data: listing } = await userA.client
+      .from("listings")
+      .insert({
+        user_id: userA.id,
+        item_id: item!.id as string,
+        platform: "ebay",
+        title: "Priceless thing",
+        description: "No price was ever computed.",
+        copy: { itemSpecifics: { Brand: "X" } },
+      })
+      .select("id")
+      .single();
+
+    const adapter = new MockEbayAdapter();
+    await expect(
+      publishListingToEbay(userA.client, listing!.id as string, adapter),
+    ).rejects.toThrowError(/no usable price/i);
+    expect(adapter.requests).toHaveLength(0);
+  });
+});
