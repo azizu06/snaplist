@@ -1,13 +1,19 @@
 import { createHash } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { logEvent } from "@/lib/observability";
+import { eraseEbayUserData } from "@/lib/marketplace/ebay";
+import {
+  ACCOUNT_DELETION_TOPIC,
+  fetchNotificationPublicKey,
+  parseDeletionNotice,
+  parseSignatureHeader,
+  verifyNotificationSignature,
+} from "@/lib/marketplace/ebay/deletion";
 
 /**
- * eBay Marketplace Account Deletion / Closure notification endpoint.
- *
- * Stubbed from day one (PRD: "route stubbed from day one; fully implemented only at
- * the production flip"). It implements the *challenge-code verification* fully (eBay
- * requires this to even save the endpoint) but only STUBS the actual deletion
- * handling — no user data is deleted yet.
+ * eBay Marketplace Account Deletion / Closure notification endpoint —
+ * implemented for real at the production flip (issue #17).
  *
  * --- GET: endpoint verification (challenge-response) ---
  * eBay calls `GET <endpoint>?challenge_code=...`. We must respond with
@@ -18,9 +24,13 @@ import { NextResponse, type NextRequest } from "next/server";
  * Ref: https://developer.ebay.com/marketplace-account-deletion
  *
  * --- POST: deletion notification ---
- * eBay POSTs a signed JSON notification when a user closes their account or requests
- * deletion. Production must verify the message signature and erase that user's data.
- * Stubbed here: we acknowledge (HTTP 200, as eBay requires) and TODO the deletion.
+ * eBay POSTs a signed JSON notice when an eBay user closes their account. The
+ * x-ebay-signature header is verified against eBay's notification public key
+ * BEFORE anything is acted on; an unverifiable notice is answered 412 so eBay
+ * retries/alerts instead of counting a dropped deletion as delivered. A
+ * verified notice erases everything held about that eBay user (their stored
+ * OAuth connection — the only eBay-user-keyed data SnapList persists) on the
+ * service-role client, and the erasure is logged for compliance.
  */
 
 const EBAY_VERIFICATION_TOKEN = process.env.EBAY_VERIFICATION_TOKEN;
@@ -80,18 +90,70 @@ export function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  // TODO(production flip): before going live we MUST
-  //   1. Verify the notification signature using eBay's public key
-  //      (x-ebay-signature header + the Notification API key endpoint) so we only
-  //      act on genuine eBay notifications.
-  //   2. Parse the payload { metadata, notification: { data: { username, userId,
-  //      eiasToken } } } and, using the service-role client, erase that user's
-  //      items, listings, messages, embeddings, prediction_logs, and photos
-  //      (Storage objects under their `{user_id}/` prefix), or anonymize as policy
-  //      requires.
-  //   3. Record the deletion for compliance/audit.
-  // For now we only acknowledge so the endpoint is reachable and well-formed.
-  await request.text().catch(() => undefined); // drain body; ignore contents in the stub
+  const rawBody = await request.text().catch(() => "");
+
+  // 1. Verify the signature BEFORE trusting a byte of the payload.
+  const header = request.headers.get("x-ebay-signature");
+  const parsedHeader = header ? parseSignatureHeader(header) : null;
+  if (!parsedHeader) {
+    return NextResponse.json(
+      { error: "Missing or malformed x-ebay-signature header." },
+      { status: 412 },
+    );
+  }
+
+  let verified = false;
+  try {
+    const publicKeyPem = await fetchNotificationPublicKey(parsedHeader.kid);
+    verified = verifyNotificationSignature(
+      rawBody,
+      parsedHeader.signature,
+      publicKeyPem,
+    );
+  } catch (err) {
+    logEvent("ebay.account_deletion.verify_error", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(
+      { error: "Could not verify notification signature." },
+      { status: 412 },
+    );
+  }
+  if (!verified) {
+    return NextResponse.json(
+      { error: "Signature verification failed." },
+      { status: 412 },
+    );
+  }
+
+  // 2. Parse the verified notice; non-deletion topics are acknowledged untouched.
+  const notice = parseDeletionNotice(rawBody);
+  if (!notice) {
+    return NextResponse.json({ error: "Unparseable payload." }, { status: 412 });
+  }
+  if (notice.topic !== ACCOUNT_DELETION_TOPIC) {
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
+  // 3. Erase what we hold about this eBay user + record it for compliance.
+  try {
+    const erased = await eraseEbayUserData(
+      createAdminClient(),
+      notice.userId,
+      notice.username,
+    );
+    logEvent("ebay.account_deletion", {
+      ebayUserId: notice.userId ?? "",
+      erasedConnections: erased,
+    });
+  } catch (err) {
+    // 500 (not 200) — eBay retries, so a transient DB failure can't silently
+    // count as a completed deletion.
+    logEvent("ebay.account_deletion.erase_error", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json({ error: "Erasure failed." }, { status: 500 });
+  }
 
   return NextResponse.json({ received: true }, { status: 200 });
 }

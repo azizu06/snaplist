@@ -2,10 +2,13 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserEmail, getUserId } from "@/lib/auth";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
+import { getEbayConnectionStatus } from "@/lib/marketplace/ebay";
 import { setAutopilotSetting } from "@/app/upload/actions";
+import { disconnectEbay } from "./actions";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PendingButton } from "@/components/ui/button";
+import { buttonClasses } from "@/components/ui/button-styles";
 import { AppSignOutButton } from "@/components/sign-out-button";
 import { StatusBadge } from "@/components/ui/badge";
 
@@ -17,15 +20,16 @@ import { StatusBadge } from "@/components/ui/badge";
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; ebay?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, ebay } = await searchParams;
 
   const supabase = await createClient();
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/settings");
 
   const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
+  const ebayConnection = await getEbayConnectionStatus(supabase);
   const email = await getUserEmail();
 
   return (
@@ -42,6 +46,12 @@ export default async function SettingsPage({
       {error ? (
         <Banner variant="error" title="Couldn’t save that">
           {error}
+        </Banner>
+      ) : null}
+
+      {ebay === "connected" ? (
+        <Banner variant="success" title="eBay connected">
+          Listings now publish under your own eBay account.
         </Banner>
       ) : null}
 
@@ -81,6 +91,51 @@ export default async function SettingsPage({
             Changing this affects new uploads — it never rewrites why a past
             listing was queued or held.
           </p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="eBay account"
+          aside={
+            <StatusBadge
+              label={ebayConnection.connected ? "Connected" : "Not connected"}
+              tone={ebayConnection.connected ? "success" : "neutral"}
+            />
+          }
+        />
+        <CardBody className="flex flex-col gap-4">
+          {ebayConnection.connected ? (
+            <>
+              <p className="text-sm leading-relaxed text-muted">
+                Connected as{" "}
+                <strong className="font-medium text-fg">
+                  {ebayConnection.ebayUsername ?? "your eBay account"}
+                </strong>
+                . Listings publish under this account. Your tokens are stored
+                encrypted and you can disconnect at any time.
+              </p>
+              <form action={disconnectEbay}>
+                <PendingButton pendingLabel="Disconnecting…" variant="secondary">
+                  Disconnect eBay
+                </PendingButton>
+              </form>
+            </>
+          ) : (
+            <>
+              <p className="text-sm leading-relaxed text-muted">
+                Connect your eBay account to publish listings under your own
+                identity. You approve access on eBay’s consent screen — SnapList
+                never sees your eBay password.
+              </p>
+              <a
+                href="/api/ebay/connect"
+                className={buttonClasses("primary", "md")}
+              >
+                Connect eBay
+              </a>
+            </>
+          )}
         </CardBody>
       </Card>
 

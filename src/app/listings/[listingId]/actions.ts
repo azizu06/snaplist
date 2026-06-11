@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { createEbayAdapter, publishListingToEbay } from "@/lib/marketplace/ebay";
+import {
+  createEbayAdapterForUser,
+  publishListingToEbay,
+} from "@/lib/marketplace/ebay";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -24,7 +27,13 @@ export async function publishToEbay(formData: FormData) {
   if (!userId) redirect(`/login?next=/listings/${listingId}`);
 
   try {
-    await publishListingToEbay(supabase, listingId, createEbayAdapter());
+    // Per-user tokens when the seller connected eBay (issue #17), env sandbox
+    // credentials otherwise.
+    await publishListingToEbay(
+      supabase,
+      listingId,
+      await createEbayAdapterForUser(supabase),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Publish failed.";
     revalidatePath(`/listings/${listingId}`);
