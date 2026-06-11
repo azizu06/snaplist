@@ -5,6 +5,10 @@ import {
 } from "@/app/dashboard-view";
 import { ReviewView, type ReviewData } from "@/app/review/[itemId]/review-view";
 import { UploadView } from "@/app/upload/upload-form";
+import {
+  PublishView,
+  type PublishData,
+} from "@/app/listings/[listingId]/publish-view";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -102,6 +106,20 @@ const FIXTURE_REVIEW: ReviewData = {
   actionError: null,
 };
 
+const FIXTURE_PUBLISH: PublishData = {
+  listingId: "l-1",
+  itemId: "fx-1",
+  platform: "ebay",
+  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+  description:
+    "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+  status: "draft",
+  published: false,
+  failed: false,
+  ebayListingId: null,
+  actionError: null,
+};
+
 export default async function PreviewPage({
   params,
 }: {
@@ -131,6 +149,27 @@ export default async function PreviewPage({
       return <ReviewView data={FIXTURE_REVIEW} overrideAction={noopAction} />;
     case "upload":
       return <UploadView action={noopAction} actionError={null} />;
+    case "publish":
+      return <PublishView data={FIXTURE_PUBLISH} publishAction={noopAction} />;
+    case "publish-live":
+      return (
+        <PublishView
+          data={{
+            ...FIXTURE_PUBLISH,
+            status: "published",
+            published: true,
+            ebayListingId: "110586744102",
+          }}
+          publishAction={noopAction}
+        />
+      );
+    case "publish-failed":
+      return (
+        <PublishView
+          data={{ ...FIXTURE_PUBLISH, status: "failed", failed: true }}
+          publishAction={noopAction}
+        />
+      );
     case "review-uncertain":
       return (
         <ReviewView

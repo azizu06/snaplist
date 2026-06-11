@@ -12,7 +12,7 @@ export function Card({
 }) {
   return (
     <section
-      className={`rounded-lg border border-border bg-surface shadow-xs ${className}`}
+      className={`rounded-xl border border-border bg-surface shadow-xs ${className}`}
     >
       {children}
     </section>
@@ -28,7 +28,7 @@ export function CardHeader({
 }) {
   return (
     <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
-      <h2 className="text-sm font-semibold text-fg-strong">{title}</h2>
+      <h2 className="text-[13px] font-semibold text-fg-strong">{title}</h2>
       {aside ? <div className="flex items-center gap-2">{aside}</div> : null}
     </header>
   );

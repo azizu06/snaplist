@@ -47,12 +47,12 @@ export default async function InboxPage() {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
+        <h1 className="text-lg font-bold tracking-tight text-fg-strong">
           Buyer inbox
         </h1>
-        <p className="mt-1 text-sm text-muted">
+        <p className="mt-0.5 text-[13px] text-muted">
           Questions from buyers appear here live. We draft a reply from the
           listing — you approve or edit before anything sends.
         </p>

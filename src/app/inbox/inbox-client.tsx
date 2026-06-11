@@ -235,9 +235,9 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs sm:p-5">
+      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-fg-strong">
+          <h2 className="text-[13px] font-semibold text-fg-strong">
             Simulate a buyer question
           </h2>
           <span
@@ -264,7 +264,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
             <select
               value={selectedItem}
               onChange={(e) => setSelectedItem(e.target.value)}
-              className="rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
+              className="rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
               aria-label="Item to ask about"
             >
               {items.map((item) => (
@@ -281,7 +281,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               // is active, leaving the question invisible until refresh.
               disabled={busy === "simulate" || !live}
               title={live ? undefined : "Waiting for the live connection…"}
-              className="rounded-md bg-accent-solid px-4 py-2 text-sm font-medium text-accent-fg shadow-xs transition-colors hover:bg-accent-hover disabled:pointer-events-none disabled:opacity-60"
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
             >
               {busy === "simulate"
                 ? "Asking…"
@@ -307,9 +307,9 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
       ) : null}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-fg-strong">Messages</h2>
+        <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
         {inbound.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
             <p className="text-base font-semibold text-fg-strong">
               No buyer questions yet
             </p>
@@ -337,7 +337,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
             return (
               <article
                 key={message.id}
-                className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs sm:p-5"
+                className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5"
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-medium text-muted">Buyer asked</span>
@@ -382,7 +382,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => retryDelivery(message)}
                         disabled={busy === `retry:${message.id}`}
-                        className="rounded-md bg-danger-solid px-4 py-2 text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-lg bg-danger-solid px-4 py-2 text-sm font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `retry:${message.id}` ? "Retrying…" : "Retry delivery"}
                       </button>
@@ -398,7 +398,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => retryDraft(message)}
                         disabled={busy === `redraft:${message.id}`}
-                        className="rounded-md bg-danger-solid px-4 py-2 text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-lg bg-danger-solid px-4 py-2 text-sm font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `redraft:${message.id}` ? "Retrying…" : "Retry draft"}
                       </button>
@@ -429,14 +429,14 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         setEdits((prev) => ({ ...prev, [message.id]: e.target.value }))
                       }
                       rows={3}
-                      className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
+                      className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
                     />
                     <div>
                       <button
                         type="button"
                         onClick={() => approveAndSend(message)}
                         disabled={busy === `send:${message.id}`}
-                        className="rounded-md bg-accent-solid px-4 py-2 text-sm font-medium text-accent-fg shadow-xs transition-colors hover:bg-accent-hover disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `send:${message.id}` ? "Sending…" : "Approve & send"}
                       </button>
