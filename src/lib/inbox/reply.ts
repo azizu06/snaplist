@@ -92,9 +92,26 @@ export function groundingCorpus(grounding: ReplyGrounding): string {
   return parts.join("\n").toLowerCase();
 }
 
-/** Extract normalized numeric tokens (commas stripped) from free text. */
-function numericTokens(text: string): string[] {
-  return (text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((t) => t.replace(/,/g, ""));
+/**
+ * Whole alphanumeric tokens, lowercased. Hyphens/dots/commas join a token only
+ * when alphanumerics sit on BOTH sides, so `WH-1000XM4` → `wh-1000xm4`,
+ * `1,000` → `1,000`, but a trailing period or a comma before a space never
+ * glues words together.
+ */
+const TOKEN_RE = /[a-z0-9]+(?:[-.,][a-z0-9]+)*/g;
+
+function tokenize(text: string): string[] {
+  return text.toLowerCase().match(TOKEN_RE) ?? [];
+}
+
+/** A token that is a number on its own (digits, optional commas/decimal). */
+function isStandaloneNumber(token: string): boolean {
+  return /^\d[\d,]*(?:\.\d+)?$/.test(token);
+}
+
+/** Normalize a standalone number for comparison (commas stripped). */
+function normalizeNumber(token: string): string {
+  return token.replace(/,/g, "");
 }
 
 /**
@@ -102,17 +119,38 @@ function numericTokens(text: string): string[] {
  * measurement) that appears nowhere in the grounding corpus? Numbers are the
  * highest-risk hallucination class for marketplace replies ("I'll ship in 2 days",
  * "it retails for $349") and — unlike prose — are deterministically checkable.
- * Only numbers present in the item attributes / listing copy (incl. the stored
- * price) are permitted; numbers the BUYER used are not grounded facts, so a reply
- * echoing them as assertions is rejected (→ retry, then deterministic fallback).
- * Free-text wording stays the prompt's job; the fallback covers the rest.
+ *
+ * Grounding is CONTEXTUAL at token boundaries — digits are never treated as a
+ * global allowlist. A digit-bearing token in the reply is grounded ONLY when:
+ *
+ *  (a) it is an alphanumeric token (`wh-1000xm4`, `128gb`) that appears as a
+ *      WHOLE token (case-insensitive) in the corpus; or
+ *  (b) it is a STANDALONE number that appears as a standalone number in the
+ *      corpus (e.g. the `45` in listing copy "Asking $45").
+ *
+ * Digits mined out of identifiers never license standalone numbers: a grounding
+ * `WH-1000XM4` does NOT make "I can ship in 4 days" pass. Numbers the BUYER used
+ * are still not grounded facts (the question is excluded from the corpus), so a
+ * reply echoing them as assertions is rejected (→ retry, then deterministic
+ * fallback). Free-text wording stays the prompt's job; the fallback covers the
+ * rest.
  */
 export function replyAssertsUngroundedNumbers(
   reply: string,
   grounding: ReplyGrounding,
 ): boolean {
-  const allowed = new Set(numericTokens(groundingCorpus(grounding)));
-  return numericTokens(reply).some((token) => !allowed.has(token));
+  const corpusTokens = tokenize(groundingCorpus(grounding));
+  const allowedTokens = new Set(corpusTokens);
+  const allowedNumbers = new Set(
+    corpusTokens.filter(isStandaloneNumber).map(normalizeNumber),
+  );
+  return tokenize(reply).some((token) => {
+    if (!/\d/.test(token)) return false; // no numeric claim in this token
+    if (isStandaloneNumber(token)) {
+      return !allowedNumbers.has(normalizeNumber(token));
+    }
+    return !allowedTokens.has(token);
+  });
 }
 
 /**

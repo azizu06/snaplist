@@ -158,9 +158,11 @@ const PG_UNIQUE_VIOLATION = "23505";
  *
  * Crash semantics (deliberate): a crash AFTER the CAS claim but BEFORE delivery
  * (or before the outbound insert) leaves the question marked `sent` with no
- * outbound row — the seller may need to re-send manually, but a retry can never
- * deliver the same reply twice. We prefer "possibly undelivered, visibly stuck"
- * over "silently delivered twice".
+ * outbound row. That state is detectable (inbound `sent` + no outbound row
+ * referencing it), the inbox renders it as "not delivered", and it is
+ * RECOVERABLE via `retryReplyDelivery` — an intentional, seller-initiated
+ * retry, never an automatic re-send of this function. We prefer "possibly
+ * undelivered, visibly recoverable" over "silently delivered twice".
  * Both writes ride Realtime to the live inbox.
  */
 export async function approveAndSendReply(
@@ -194,6 +196,105 @@ export async function approveAndSendReply(
 
   // 3. The outbound reply row. reply_to is uniquely indexed (partial), so a
   //    duplicate insert surfaces as an idempotent conflict.
+  const { data: outbound, error: outboundErr } = await supabase
+    .from("messages")
+    .insert({
+      user_id: input.userId,
+      item_id: input.message.item_id,
+      listing_id: input.message.listing_id,
+      direction: "outbound",
+      body: reply,
+      status: "sent",
+      reply_to: input.message.id,
+      sent_at: sentAt,
+    })
+    .select("*")
+    .single();
+  if (outboundErr || !outbound) {
+    if (outboundErr?.code === PG_UNIQUE_VIOLATION) {
+      throw new ReplySendConflictError(
+        "A reply row already exists for this message",
+      );
+    }
+    throw new Error(
+      `Failed to persist outbound reply: ${outboundErr?.message ?? "no row returned"}`,
+    );
+  }
+
+  return { outbound: messageRowSchema.parse(outbound) };
+}
+
+export interface RetryReplyDeliveryInput {
+  /** The owning seller (must equal the client's auth.uid()). */
+  userId: string;
+  /** The claimed-but-undelivered inbound question (already loaded under RLS). */
+  message: Pick<MessageRow, "id" | "item_id" | "listing_id">;
+  /** The reply text to (re)deliver — the persisted draft the claim was for. */
+  reply: string;
+  /** Injectable delivery; defaults to the logged no-op stub. */
+  deliver?: DeliverReply;
+}
+
+/**
+ * Recovery path for the send flow's documented crash gap: the inbound question
+ * is `sent` (the CAS claim won) but delivery failed / the process crashed
+ * before the outbound row was inserted. The seller sees "not delivered" in the
+ * inbox and explicitly retries.
+ *
+ *   1. VERIFY the claim: no outbound row references this question via
+ *      `reply_to`. An existing row means the reply was already delivered →
+ *      `ReplySendConflictError` (409, idempotent "already done").
+ *   2. RE-DELIVER via the injectable seam.
+ *   3. INSERT the outbound row. The partial unique index on messages(reply_to)
+ *      (20260611004000) is the authoritative dedupe: a 23505 means a concurrent
+ *      retry already persisted the reply → idempotent conflict, not a 500.
+ *
+ * Honest concurrency semantics: unlike the send path, the existence check in
+ * step 1 is a plain read, NOT a compare-and-set — two truly concurrent retries
+ * can both pass it and both reach delivery. The unique index then collapses
+ * them to exactly ONE outbound row (the loser gets 23505 → conflict), but
+ * delivery itself may at worst run twice on that race. This mirrors the send
+ * path's reasoning (the index dedupes the row, not the side effect); the
+ * window is acceptable here because retry is an explicit human action on an
+ * already-failed delivery, never an automated loop.
+ *
+ * The caller (the retry route) verifies the inbound row is `sent` under RLS
+ * before invoking — no status CAS is re-run here.
+ */
+export async function retryReplyDelivery(
+  supabase: SupabaseClient,
+  input: RetryReplyDeliveryInput,
+): Promise<ApproveAndSendReplyResult> {
+  const reply = input.reply.trim();
+  if (reply === "") {
+    throw new Error("retryReplyDelivery requires a non-empty reply");
+  }
+  const deliver = input.deliver ?? stubDeliverReply;
+  const sentAt = new Date().toISOString();
+
+  // 1. The claim: no outbound row may already reference this question.
+  const { data: existing, error: existingErr } = await supabase
+    .from("messages")
+    .select("id")
+    .eq("reply_to", input.message.id)
+    .eq("direction", "outbound")
+    .limit(1);
+  if (existingErr) {
+    throw new Error(
+      `Failed to check for an existing reply: ${existingErr.message}`,
+    );
+  }
+  if (existing && existing.length > 0) {
+    throw new ReplySendConflictError(
+      "A reply was already delivered for this message",
+    );
+  }
+
+  // 2. Re-attempt the delivery that previously failed.
+  await deliver({ messageId: input.message.id, reply });
+
+  // 3. Persist the outbound row — the unique reply_to index collapses a
+  //    concurrent double-retry to one row (23505 → idempotent conflict).
   const { data: outbound, error: outboundErr } = await supabase
     .from("messages")
     .insert({

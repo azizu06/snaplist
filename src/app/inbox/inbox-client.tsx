@@ -62,7 +62,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   // Seller edits keyed by message id; absent → show the agent's draft as-is.
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
-  const [busy, setBusy] = useState<string | null>(null); // "simulate" | messageId
+  const [busy, setBusy] = useState<string | null>(null); // "simulate" | "send:<id>" | "retry:<id>"
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
 
@@ -156,7 +156,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
       setError("Reply cannot be empty.");
       return;
     }
-    setBusy(message.id);
+    setBusy(`send:${message.id}`);
     setError(null);
     try {
       const res = await fetch(`/api/inbox/${message.id}/send`, {
@@ -171,6 +171,29 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
       // Status flips + the outbound row arrive over Realtime.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Recovery for the claimed-but-undelivered state: the question is `sent` but
+  // no outbound row exists (delivery failed / crashed after the CAS claim).
+  // The endpoint is idempotent — a 409 means the reply was already delivered
+  // (e.g. a concurrent retry won), so it is treated as success: the outbound
+  // row arrives over Realtime either way.
+  async function retryDelivery(message: MessageRow) {
+    setBusy(`retry:${message.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/inbox/${message.id}/retry-delivery`, {
+        method: "POST",
+      });
+      if (!res.ok && res.status !== 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `Retry failed (${res.status})`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
     } finally {
       setBusy(null);
     }
@@ -260,6 +283,18 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
           inbound.map((message) => {
             const sentReply = repliesByQuestion.get(message.id);
             const draftValue = edits[message.id] ?? message.draft_reply ?? "";
+            // Claimed-but-undelivered (PR #35 review): the inbound row is
+            // `sent` but no outbound row references it — delivery failed (or
+            // the process crashed) after the CAS claim, before the outbound
+            // insert. While OUR send request is in flight (busy) the two
+            // Realtime events (UPDATE then INSERT) may arrive split, so that
+            // window renders as "sending", not as a delivery failure.
+            const sending =
+              message.status === "sent" &&
+              !sentReply &&
+              busy === `send:${message.id}`;
+            const undelivered =
+              message.status === "sent" && !sentReply && !sending;
             return (
               <article
                 key={message.id}
@@ -269,23 +304,50 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   <span className="text-sm font-medium text-zinc-500">Buyer</span>
                   <span
                     className={
-                      message.status === "sent"
-                        ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700"
-                        : message.status === "drafted"
-                          ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
-                          : "rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600"
+                      undelivered
+                        ? "rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
+                        : message.status === "sent"
+                          ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700"
+                          : message.status === "drafted"
+                            ? "rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                            : "rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600"
                     }
                   >
-                    {message.status === "sent"
-                      ? "replied"
-                      : message.status === "drafted"
-                        ? "draft ready"
-                        : "drafting…"}
+                    {undelivered
+                      ? "not delivered"
+                      : message.status === "sent"
+                        ? sending
+                          ? "sending…"
+                          : "replied"
+                        : message.status === "drafted"
+                          ? "draft ready"
+                          : "drafting…"}
                   </span>
                 </div>
                 <p className="text-sm">{message.body}</p>
 
-                {message.status === "sent" ? (
+                {undelivered ? (
+                  <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-red-700">
+                      Reply not delivered — delivery failed after approval
+                    </p>
+                    {message.draft_reply ? (
+                      <p className="whitespace-pre-wrap text-sm text-zinc-700">
+                        {message.draft_reply}
+                      </p>
+                    ) : null}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => retryDelivery(message)}
+                        disabled={busy === `retry:${message.id}`}
+                        className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                      >
+                        {busy === `retry:${message.id}` ? "Retrying…" : "Retry delivery"}
+                      </button>
+                    </div>
+                  </div>
+                ) : message.status === "sent" ? (
                   <div className="rounded-md bg-zinc-50 p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                       Your reply{sentReply?.sent_at ? " · sent (stubbed delivery)" : ""}
@@ -316,10 +378,10 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                       <button
                         type="button"
                         onClick={() => approveAndSend(message)}
-                        disabled={busy === message.id}
+                        disabled={busy === `send:${message.id}`}
                         className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
                       >
-                        {busy === message.id ? "Sending…" : "Approve & send"}
+                        {busy === `send:${message.id}` ? "Sending…" : "Approve & send"}
                       </button>
                     </div>
                   </div>

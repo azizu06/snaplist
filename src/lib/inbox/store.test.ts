@@ -5,6 +5,7 @@ import {
   approveAndSendReply,
   attachDraftReply,
   createBuyerMessage,
+  retryReplyDelivery,
   stubDeliverReply,
 } from "./store";
 import type { MessageRow } from "./types";
@@ -55,33 +56,63 @@ interface RecordedUpdate {
   payload: Record<string, unknown>;
   eqs: [string, unknown][];
 }
+interface RecordedSelect {
+  table: string;
+  columns: string;
+  eqs: [string, unknown][];
+}
 
 /**
  * Minimal chainable fake for the query shapes the store uses:
  *   from().insert().select().single()
  *   from().update().eq().select().single()
  *   from().update().eq().eq().select()   (awaited directly — the CAS claim)
- * Planned update results may be functions, letting a test compute the result at
- * claim time (e.g. exactly one concurrent CAS winner).
+ *   from().select().eq().eq().limit()    (awaited directly — the retry claim)
+ * Planned update/insert results may be functions, letting a test compute the
+ * result at claim time (e.g. exactly one concurrent CAS winner).
  */
 function fakeSupabase(plan: {
-  inserts?: PlannedResult[];
+  inserts?: (PlannedResult | (() => PlannedResult))[];
   updates?: (PlannedResult | (() => PlannedResult))[];
+  selects?: PlannedResult[];
 }) {
   const inserts: RecordedInsert[] = [];
   const updates: RecordedUpdate[] = [];
+  const selects: RecordedSelect[] = [];
   const plannedInserts = [...(plan.inserts ?? [])];
   const plannedUpdates = [...(plan.updates ?? [])];
+  const plannedSelects = [...(plan.selects ?? [])];
 
   const client = {
     from(table: string) {
       return {
         insert(payload: Record<string, unknown>) {
           inserts.push({ table, payload });
-          const res =
+          const planned =
             plannedInserts.shift() ??
             ({ data: null, error: { message: "unplanned insert" } } as PlannedResult);
+          const res = typeof planned === "function" ? planned() : planned;
           return { select: () => ({ single: async () => res }) };
+        },
+        select(columns: string) {
+          const entry: RecordedSelect = { table, columns, eqs: [] };
+          selects.push(entry);
+          const res =
+            plannedSelects.shift() ?? ({ data: [], error: null } as PlannedResult);
+          const builder = {
+            eq(column: string, value: unknown) {
+              entry.eqs.push([column, value]);
+              return builder;
+            },
+            limit: () => builder,
+            then(
+              onFulfilled: (v: PlannedResult) => unknown,
+              onRejected?: (reason: unknown) => unknown,
+            ) {
+              return Promise.resolve(res).then(onFulfilled, onRejected);
+            },
+          };
+          return builder;
         },
         update(payload: Record<string, unknown>) {
           const entry: RecordedUpdate = { table, payload, eqs: [] };
@@ -118,7 +149,7 @@ function fakeSupabase(plan: {
     },
   };
 
-  return { client: client as unknown as SupabaseClient, inserts, updates };
+  return { client: client as unknown as SupabaseClient, inserts, updates, selects };
 }
 
 describe("createBuyerMessage", () => {
@@ -350,7 +381,7 @@ describe("approveAndSendReply", () => {
     ).rejects.toThrow(ReplySendConflictError);
   });
 
-  it("crash semantics: a delivery failure AFTER the claim leaves the question non-resendable (no double delivery)", async () => {
+  it("crash semantics: a delivery failure AFTER the claim leaves the question `sent` with no outbound row (recoverable only via retryReplyDelivery)", async () => {
     const { client, inserts, updates } = fakeSupabase({ updates: [claimWon] });
     await expect(
       approveAndSendReply(client, {
@@ -362,11 +393,144 @@ describe("approveAndSendReply", () => {
         },
       }),
     ).rejects.toThrow(/adapter down/);
-    // The claim already flipped drafted → sent (chosen semantics: prefer a
-    // visibly-stuck question over a retried, double-delivered reply)…
+    // The claim already flipped drafted → sent (chosen semantics: the send path
+    // itself can never re-deliver; recovery is the explicit retry path)…
     expect(updates).toHaveLength(1);
     expect(updates[0].payload.status).toBe("sent");
-    // …and no outbound row was persisted.
+    // …and no outbound row was persisted — exactly the detectable
+    // "sent-but-undelivered" state the inbox renders as "not delivered".
+    expect(inserts).toHaveLength(0);
+  });
+});
+
+describe("retryReplyDelivery", () => {
+  const inbound = row({ status: "sent", draft_reply: "Draft reply" });
+  /** Retry claim passes: no outbound row references the question yet. */
+  const noOutbound: PlannedResult = { data: [], error: null };
+  /** Retry claim fails: a reply row already exists. */
+  const hasOutbound: PlannedResult = { data: [{ id: OUTBOUND_ID }], error: null };
+  const uniqueViolation: PlannedResult = {
+    data: null,
+    error: {
+      message: 'duplicate key value violates unique constraint "messages_reply_to_unique"',
+      code: "23505",
+    },
+  };
+
+  function outboundRow() {
+    return row({
+      id: OUTBOUND_ID,
+      direction: "outbound",
+      body: "Draft reply",
+      status: "sent",
+      reply_to: MESSAGE_ID,
+      sent_at: "2026-06-11T09:00:00.000Z",
+    });
+  }
+
+  it("retry on an undelivered sent question: delivers once and inserts exactly one threaded outbound row", async () => {
+    const { client, inserts, selects, updates } = fakeSupabase({
+      selects: [noOutbound],
+      inserts: [{ data: outboundRow(), error: null }],
+    });
+    const delivered: { messageId: string; reply: string }[] = [];
+
+    const result = await retryReplyDelivery(client, {
+      userId: USER_ID,
+      message: inbound,
+      reply: "Draft reply",
+      deliver: async (args) => {
+        delivered.push(args);
+        // Ordering: the existence check (the claim) has already run, the
+        // outbound insert has not.
+        expect(selects).toHaveLength(1);
+        expect(inserts).toHaveLength(0);
+      },
+    });
+
+    expect(delivered).toEqual([{ messageId: MESSAGE_ID, reply: "Draft reply" }]);
+    // The claim is "no outbound row references this question".
+    expect(selects[0].eqs).toEqual([
+      ["reply_to", MESSAGE_ID],
+      ["direction", "outbound"],
+    ]);
+    // No status CAS is re-run — the inbound row is already terminally `sent`.
+    expect(updates).toHaveLength(0);
+    // Exactly one outbound row, threaded like the send path's.
+    expect(inserts).toHaveLength(1);
+    const payload = inserts[0].payload;
+    expect(payload.user_id).toBe(USER_ID);
+    expect(payload.direction).toBe("outbound");
+    expect(payload.body).toBe("Draft reply");
+    expect(payload.status).toBe("sent");
+    expect(payload.reply_to).toBe(MESSAGE_ID);
+    expect(result.outbound.id).toBe(OUTBOUND_ID);
+  });
+
+  it("retry when an outbound row already exists is an idempotent conflict — NO second delivery, no insert", async () => {
+    const { client, inserts } = fakeSupabase({ selects: [hasOutbound] });
+    const deliver = vi.fn(async () => {});
+
+    await expect(
+      retryReplyDelivery(client, {
+        userId: USER_ID,
+        message: inbound,
+        reply: "Draft reply",
+        deliver,
+      }),
+    ).rejects.toThrow(ReplySendConflictError);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("concurrent double-retry collapses to ONE outbound row; delivery may at worst double on the true race", async () => {
+    // Both retries pass the existence check before either inserts (the worst
+    // case: the claim is a plain read, not a CAS). The partial unique index on
+    // messages(reply_to) is what the code can actually guarantee: the second
+    // insert gets 23505 → idempotent conflict, so exactly one outbound row
+    // exists. Delivery itself ran twice — that is the honest, documented
+    // semantics of the retry path (mirrors the send path's reasoning: the
+    // index dedupes the ROW, not the side effect).
+    let insertedOnce = false;
+    const racingInsert = (): PlannedResult => {
+      if (insertedOnce) return uniqueViolation;
+      insertedOnce = true;
+      return { data: outboundRow(), error: null };
+    };
+    const { client, inserts } = fakeSupabase({
+      selects: [noOutbound, noOutbound],
+      inserts: [racingInsert, racingInsert],
+    });
+    const deliver = vi.fn(async () => {});
+
+    const retry = () =>
+      retryReplyDelivery(client, {
+        userId: USER_ID,
+        message: inbound,
+        reply: "Draft reply",
+        deliver,
+      });
+    const outcomes = await Promise.allSettled([retry(), retry()]);
+
+    // Exactly one retry persisted the reply; the loser saw the unique index.
+    expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find((o) => o.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(ReplySendConflictError);
+    // Both raced past the read-claim → both delivered (at-worst-double).
+    expect(deliver).toHaveBeenCalledTimes(2);
+    // But the unique index collapsed persistence to one row: two attempts,
+    // one success + one 23505.
+    expect(inserts).toHaveLength(2);
+  });
+
+  it("rejects an empty reply without checking, delivering, or inserting", async () => {
+    const { client, inserts, selects } = fakeSupabase({});
+    const deliver = vi.fn(async () => {});
+    await expect(
+      retryReplyDelivery(client, { userId: USER_ID, message: inbound, reply: " ", deliver }),
+    ).rejects.toThrow(/non-empty reply/);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(selects).toHaveLength(0);
     expect(inserts).toHaveLength(0);
   });
 });

@@ -80,6 +80,41 @@ describe("replyAssertsUngroundedNumbers", () => {
     const reply = "Yes, I can ship in 2 days.";
     expect(replyAssertsUngroundedNumbers(reply, grounding)).toBe(true);
   });
+
+  it("does NOT let digits mined out of an identifier license standalone numbers", () => {
+    // The corpus contains WH-1000XM4 — its 4 (and 1000) are bound to that
+    // token's factual context, not free-floating grounded numbers.
+    const identifierOnly: ReplyGrounding = {
+      attributes: { model: "WH-1000XM4" },
+      listing: null,
+    };
+    expect(
+      replyAssertsUngroundedNumbers("I can ship in 4 days.", identifierOnly),
+    ).toBe(true);
+    expect(
+      replyAssertsUngroundedNumbers("They cost 1000 new.", identifierOnly),
+    ).toBe(true);
+    // The identifier itself, as a whole token, IS grounded (case-insensitive).
+    expect(
+      replyAssertsUngroundedNumbers("Yes, this is the WH-1000XM4.", identifierOnly),
+    ).toBe(false);
+  });
+
+  it("rejects a digit-bearing token that is only a FRAGMENT of a corpus token", () => {
+    // "1000xm4" appears inside "wh-1000xm4" but never as a whole token.
+    expect(replyAssertsUngroundedNumbers("It's the 1000XM4.", grounding)).toBe(true);
+  });
+
+  it("grounds a standalone number only when the corpus carries it as a standalone number", () => {
+    const priced: ReplyGrounding = {
+      attributes: { model: "WH-1000XM4" },
+      listing: { title: "Sony headphones", description: "Asking $45, firm." },
+    };
+    // 45 appears standalone in the listing copy → an asserted 45 is grounded.
+    expect(replyAssertsUngroundedNumbers("I'm asking $45 for them.", priced)).toBe(false);
+    // …but it does not license other numbers.
+    expect(replyAssertsUngroundedNumbers("I'm asking $40 for them.", priced)).toBe(true);
+  });
 });
 
 describe("draftBuyerReply", () => {
@@ -148,6 +183,27 @@ describe("draftBuyerReply", () => {
     };
 
     const result = await draftBuyerReply({ question: q, grounding, generate, maxRetries: 1 });
+    expect(calls).toBe(2); // initial attempt + one retry, both rejected
+    expect(result.usedFallback).toBe(true);
+    expect(result.reply).toBe(fallbackBuyerReply(grounding));
+  });
+
+  it("forces retry → grounded fallback when the model launders a standalone number out of an identifier", async () => {
+    // The corpus has WH-1000XM4 (so "4" exists inside an identifier) but no
+    // standalone 4: "ship in 4 days" is a contextual-grounding violation on
+    // every attempt → deterministic fallback.
+    let calls = 0;
+    const generate: ReplyGenerate = async () => {
+      calls++;
+      return { reply: "I can ship in 4 days.", answerable: true };
+    };
+
+    const result = await draftBuyerReply({
+      question: "How fast can you ship?",
+      grounding,
+      generate,
+      maxRetries: 1,
+    });
     expect(calls).toBe(2); // initial attempt + one retry, both rejected
     expect(result.usedFallback).toBe(true);
     expect(result.reply).toBe(fallbackBuyerReply(grounding));

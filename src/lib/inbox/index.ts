@@ -36,10 +36,12 @@ export {
   approveAndSendReply,
   attachDraftReply,
   createBuyerMessage,
+  retryReplyDelivery,
   stubDeliverReply,
   type ApproveAndSendReplyInput,
   type ApproveAndSendReplyResult,
   type AttachDraftReplyInput,
   type CreateBuyerMessageInput,
   type DeliverReply,
+  type RetryReplyDeliveryInput,
 } from "./store";
