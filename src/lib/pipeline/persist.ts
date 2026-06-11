@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Pipeline, PipelineResult } from "./types";
 import { pipeline as defaultPipeline } from "./stub";
 import { logPrediction } from "./prediction-log";
+import { initialListingStatus } from "./autopilot";
 
 /**
  * Persistence layer for one pipeline run — the end-to-end spine the walking
@@ -41,6 +42,12 @@ export async function runPipelineAndPersist(
   if (input.photos.length === 0) {
     throw new Error("runPipelineAndPersist requires at least one photo path");
   }
+
+  // One id for this run, stamped on BOTH the listing and the prediction log so
+  // downstream consumers (the eval harness) can pair them by identity instead
+  // of by created_at coincidence — independent "newest row" lookups can mix
+  // rows from different runs under concurrency or partial failures.
+  const runId = crypto.randomUUID();
 
   // 1. Create the items row FIRST (so the run is anchored to a persisted item
   //    even if a later step fails). RLS pins ownership via WITH CHECK.
@@ -82,7 +89,21 @@ export async function runPipelineAndPersist(
     throw new Error(`Failed to update item attributes: ${updErr.message}`);
   }
 
-  // 4. Persist the generated listing.
+  // 4. Log the prediction for the eval harness (PRD non-negotiable: log every
+  //    run) BEFORE any listing becomes queued: these two writes are not
+  //    transactional, and the failure modes are asymmetric. A log row without
+  //    a listing is inert; a QUEUED listing without its mandatory evaluation
+  //    record is a publishable run the upload request reported as failed —
+  //    a queue consumer could post it, and a retried upload could duplicate it.
+  await logPrediction(supabase, input.userId, itemId, result, {
+    autopilotEnabled: input.autopilotEnabled,
+    runId,
+  });
+
+  // 5. Persist the generated listing. The initial status is the confidence-gated
+  //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
+  //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
+  //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .insert({
@@ -92,7 +113,8 @@ export async function runPipelineAndPersist(
       title: result.listing.title,
       description: result.listing.description,
       copy: result.listing.fields,
-      status: "draft",
+      status: initialListingStatus(result.confidence),
+      run_id: runId,
     })
     .select("id")
     .single();
@@ -102,11 +124,6 @@ export async function runPipelineAndPersist(
     );
   }
   const listingId = listing.id as string;
-
-  // 5. Log the prediction for the eval harness (PRD non-negotiable: log every run).
-  //    Delegated to the dedicated prediction-log module, the single source of truth
-  //    for the row shape; it throws on error (logging is never swallowed).
-  await logPrediction(supabase, input.userId, itemId, result);
 
   return { itemId, listingId, result };
 }

@@ -3,7 +3,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { StubPipeline } from "./stub";
 import { runPipelineAndPersist } from "./persist";
 import { readPredictionLogs } from "./prediction-log";
-import type { Pipeline } from "./types";
+import { effectivePrice } from "./autopilot";
+import type { Pipeline, PipelineResult } from "./types";
 
 /**
  * Walking-skeleton end-to-end seam test (issue #19). Exercises the real spine with
@@ -306,5 +307,146 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
       .eq("id", itemId)
       .single();
     expect(item?.identification ?? null).toBeNull();
+  });
+});
+
+/** A minimal schema-valid pipeline whose confidence (and so disposition) is injectable. */
+function pipelineWithConfidence(
+  confidence: PipelineResult["confidence"],
+): Pipeline {
+  return {
+    async run() {
+      return {
+        attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
+        price: {
+          suggested: 180,
+          range: { min: 150, max: 210 },
+          confidence: confidence.score,
+          sources: [],
+          tier: "isbn-lookup",
+        },
+        confidence,
+        listing: { platform: "ebay", title: "Item", description: "desc", fields: {} },
+        model: "test-gate-pipeline",
+      };
+    },
+  };
+}
+
+describe("confidence-gated autopilot + price override (issue #12)", () => {
+  it("an autopilot-ELIGIBLE run persists its listing QUEUED for auto-post", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+    const { listingId } = await runPipelineAndPersist(
+      userA.client,
+      { userId: userA.id, photos: [photoPath] },
+      pipelineWithConfidence({ score: 0.92, band: "high", autopilotEligible: true }),
+    );
+
+    const { data: listing } = await userA.client
+      .from("listings")
+      .select("status")
+      .eq("id", listingId)
+      .single();
+    expect(listing?.status).toBe("queued");
+  });
+
+  it("a NON-eligible run (low confidence, or autopilot off) persists its listing as a review DRAFT", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+    // autopilotEligible false covers both causes: the gate already folded in the
+    // master switch and the threshold (computeConfidence owns that rule).
+    const { listingId } = await runPipelineAndPersist(
+      userA.client,
+      { userId: userA.id, photos: [photoPath] },
+      pipelineWithConfidence({ score: 0.92, band: "high", autopilotEligible: false }),
+    );
+
+    const { data: listing } = await userA.client
+      .from("listings")
+      .select("status")
+      .eq("id", listingId)
+      .single();
+    expect(listing?.status).toBe("draft");
+  });
+
+  it("the seller's price override persists on the item and wins downstream via effectivePrice", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+    const { itemId, result } = await runPipelineAndPersist(
+      userA.client,
+      { userId: userA.id, photos: [photoPath] },
+      new StubPipeline(),
+    );
+
+    // No override yet → downstream price IS the suggestion.
+    const { data: fresh } = await userA.client
+      .from("items")
+      .select("price_override")
+      .eq("id", itemId)
+      .single();
+    expect(fresh?.price_override ?? null).toBeNull();
+    expect(effectivePrice(result.price.suggested, fresh?.price_override)).toBe(
+      result.price.suggested,
+    );
+
+    // Seller overrides → persists, reads back, and wins downstream.
+    const { data: updated, error: updErr } = await userA.client
+      .from("items")
+      .update({ price_override: 142.5 })
+      .eq("id", itemId)
+      .select("price_override");
+    expect(updErr).toBeNull();
+    expect(updated).toHaveLength(1);
+
+    const { data: after } = await userA.client
+      .from("items")
+      .select("price_override")
+      .eq("id", itemId)
+      .single();
+    expect(Number(after?.price_override)).toBe(142.5);
+    expect(effectivePrice(result.price.suggested, after?.price_override)).toBe(142.5);
+
+    // Clearing the override restores the suggestion downstream.
+    await userA.client
+      .from("items")
+      .update({ price_override: null })
+      .eq("id", itemId);
+    const { data: cleared } = await userA.client
+      .from("items")
+      .select("price_override")
+      .eq("id", itemId)
+      .single();
+    expect(effectivePrice(result.price.suggested, cleared?.price_override)).toBe(
+      result.price.suggested,
+    );
+  });
+
+  it("RLS: user B cannot set a price override on user A's item", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+    const { itemId } = await runPipelineAndPersist(
+      userA.client,
+      { userId: userA.id, photos: [photoPath] },
+      new StubPipeline(),
+    );
+
+    const { data: hijacked } = await userB.client
+      .from("items")
+      .update({ price_override: 1 })
+      .eq("id", itemId)
+      .select();
+    expect(hijacked ?? []).toHaveLength(0);
+
+    const { data: intact } = await userA.client
+      .from("items")
+      .select("price_override")
+      .eq("id", itemId)
+      .single();
+    expect(intact?.price_override ?? null).toBeNull();
   });
 });

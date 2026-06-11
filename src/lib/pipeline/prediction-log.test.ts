@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { buildPredictionLogRow } from "./prediction-log";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  buildPredictionLogRow,
+  readPredictionLogs,
+  type PredictionLogReadRow,
+} from "./prediction-log";
 import type { PipelineResult } from "./types";
 import type { PriceResult } from "../pricing";
 import type { ConfidenceResult } from "../confidence/confidence";
+import { matchPredictions } from "../eval/metrics";
+import { predictionFromLogRow, type GoldItem } from "../eval/types";
 
 /**
  * Pure unit tests for `buildPredictionLogRow` — the single source of truth for the
  * `prediction_logs` row shape. NO database: this asserts the result → row mapping
  * and its edge cases directly, so the write (logPrediction) and the eval-harness
  * read can never drift from the contract.
+ *
+ * Plus mock-client tests for `readPredictionLogs`'s ORDERING CONTRACT
+ * (`created_at` ascending) — the property the eval harness's keep-last dedup
+ * depends on to score the newest run per item. NO live API calls: the Supabase
+ * client is a minimal in-memory stub that emulates PostgREST `order`/`eq`.
  */
 
 /** A fully-populated, schema-shaped PipelineResult for the happy path. */
@@ -70,8 +82,38 @@ describe("buildPredictionLogRow", () => {
       model: "stub-pipeline-v1",
       // No distinct listingModel on this result → provenance falls back to `model`.
       listing_model: "stub-pipeline-v1",
+      // No pricingModel on this result → null (no LLM was involved in pricing).
+      pricing_model: null,
       sources: result.price.sources,
+      // No switch value supplied → null (legacy shape); eligibility comes from
+      // the run's confidence gate output.
+      autopilot_enabled: null,
+      autopilot_eligible: result.confidence.autopilotEligible ?? null,
+      // No runId supplied → null (legacy shape), never undefined.
+      run_id: null,
     });
+  });
+
+  it("records the run-time autopilot switch + gate decision when supplied", () => {
+    // The review page explains dispositions from THESE persisted facts —
+    // a high-confidence draft is only attributable to "autopilot was off"
+    // when the run actually recorded the switch as off.
+    const row = buildPredictionLogRow("u", "i", makeResult(), {
+      autopilotEnabled: false,
+    });
+    expect(row.autopilot_enabled).toBe(false);
+
+    const enabled = buildPredictionLogRow("u", "i", makeResult(), {
+      autopilotEnabled: true,
+    });
+    expect(enabled.autopilot_enabled).toBe(true);
+  });
+
+  it("stamps the run id when supplied — the listing/prediction pairing key", () => {
+    const row = buildPredictionLogRow("user-1", "item-1", makeResult(), {
+      runId: "00000000-0000-4000-8000-000000000001",
+    });
+    expect(row.run_id).toBe("00000000-0000-4000-8000-000000000001");
   });
 
   it("records the listing model distinctly when it differs from the run model (#32)", () => {
@@ -85,6 +127,41 @@ describe("buildPredictionLogRow", () => {
     );
     expect(row.model).toBe("vision-gpt-5.5");
     expect(row.listing_model).toBe("listing-gpt-5.5-mini");
+  });
+
+  it("propagates the pricing model into the log row for a web-tier result (#10 review)", () => {
+    // The web tiers resolve their own PRICING_MODEL for comp extraction; that
+    // provenance must reach the prediction log, distinct from the vision and
+    // listing models, so pricing evaluations stay attributable.
+    const row = buildPredictionLogRow(
+      "u",
+      "i",
+      makeResult({
+        model: "vision-gpt-5.5",
+        listingModel: "listing-gpt-5.5-mini",
+        pricingModel: "pricing-gpt-5.5",
+      }),
+    );
+    expect(row.pricing_model).toBe("pricing-gpt-5.5");
+    expect(row.model).toBe("vision-gpt-5.5");
+    expect(row.listing_model).toBe("listing-gpt-5.5-mini");
+  });
+
+  it("logs pricing_model as NULL for a deterministic ISBN result (no pricing LLM ran)", () => {
+    // Null is a meaningful value here — "no LLM was involved in pricing" — never
+    // backfilled or coerced to the run model.
+    const result = makeResult({
+      price: {
+        suggested: 12,
+        range: { min: 10, max: 14 },
+        confidence: 0.9,
+        sources: [{ url: "https://openlibrary.org/isbn/9780140328721", kind: "isbn-lookup" }],
+        tier: "isbn-lookup",
+      },
+    });
+    const row = buildPredictionLogRow("u", "i", result);
+    expect(row.tier_fired).toBe("isbn-lookup");
+    expect(row.pricing_model).toBeNull();
   });
 
   it("pins the user_id and item_id passed in (RLS ownership), not anything from result", () => {
@@ -153,5 +230,195 @@ describe("buildPredictionLogRow", () => {
     expect(row.price).toBe(0);
     expect(row.price_range).toEqual({ low: 0, high: 0 });
     expect(row.confidence).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readPredictionLogs ordering contract (newest-run dedup prerequisite)
+// ---------------------------------------------------------------------------
+
+/** A minimal read-back row for a given item/run. */
+function makeReadRow(
+  itemId: string,
+  createdAt: string,
+  price: number,
+): PredictionLogReadRow {
+  return {
+    user_id: "user-1",
+    item_id: itemId,
+    extracted_attrs: { category: "electronics" },
+    price,
+    price_range: { low: price - 10, high: price + 10 },
+    confidence: 0.5,
+    tier_fired: "llm-only",
+    model: "stub-pipeline-v1",
+    listing_model: "stub-pipeline-v1",
+    pricing_model: null,
+    run_id: null,
+    autopilot_enabled: null,
+    autopilot_eligible: null,
+    sources: [],
+    created_at: createdAt,
+  };
+}
+
+/**
+ * In-memory stand-in for the Supabase client emulating the PostgREST behavior
+ * `readPredictionLogs` relies on: WITHOUT `order` rows come back in arbitrary
+ * (here: insertion/fixture) order; WITH `order` they are sorted. Records the
+ * query calls so tests can assert the ordering is actually requested.
+ */
+function makeMockSupabase(rows: PredictionLogReadRow[]) {
+  const calls: {
+    table?: string;
+    select?: string;
+    eq?: [string, unknown];
+    order?: [string, { ascending: boolean }];
+    limit?: number;
+  } = {};
+  const builder = {
+    eq(column: string, value: unknown) {
+      calls.eq = [column, value];
+      return builder;
+    },
+    order(column: string, opts: { ascending: boolean }) {
+      calls.order = [column, opts];
+      let result = rows;
+      if (calls.eq !== undefined) {
+        const [col, val] = calls.eq;
+        result = result.filter(
+          (r) => (r as unknown as Record<string, unknown>)[col] === val,
+        );
+      }
+      const key = column as keyof PredictionLogReadRow;
+      result = [...result].sort((a, b) => {
+        const cmp = String(a[key]).localeCompare(String(b[key]));
+        return opts.ascending ? cmp : -cmp;
+      });
+      // PostgREST chains `.limit()` AFTER `.order()` — the mock mirrors that
+      // shape (a thenable that also exposes limit) so the `--db` path's
+      // `limit: 1` read has real offline coverage.
+      return {
+        limit(n: number) {
+          calls.limit = n;
+          return Promise.resolve({ data: result.slice(0, n), error: null });
+        },
+        then(
+          onFulfilled: (v: { data: PredictionLogReadRow[]; error: null }) => unknown,
+          onRejected?: (reason: unknown) => unknown,
+        ) {
+          return Promise.resolve({ data: result, error: null }).then(
+            onFulfilled,
+            onRejected,
+          );
+        },
+      };
+    },
+  };
+  const client = {
+    from(table: string) {
+      calls.table = table;
+      return {
+        select(columns: string) {
+          calls.select = columns;
+          return builder;
+        },
+      };
+    },
+  };
+  return { client: client as unknown as SupabaseClient, calls };
+}
+
+describe("readPredictionLogs ordering contract", () => {
+  it("selects created_at and orders rows by it ascending (oldest first)", async () => {
+    // Fixture deliberately NEWEST-first: PostgREST guarantees no order without
+    // an explicit `order`, so the helper must impose one itself.
+    const { client, calls } = makeMockSupabase([
+      makeReadRow("item-1", "2026-06-10T12:00:00Z", 200),
+      makeReadRow("item-2", "2026-06-09T12:00:00Z", 90),
+      makeReadRow("item-1", "2026-06-08T12:00:00Z", 100),
+    ]);
+
+    const logs = await readPredictionLogs(client);
+
+    expect(calls.table).toBe("prediction_logs");
+    expect(calls.select).toContain("created_at");
+    expect(calls.order).toEqual(["created_at", { ascending: true }]);
+    expect(logs.map((l) => l.created_at)).toEqual([
+      "2026-06-08T12:00:00Z",
+      "2026-06-09T12:00:00Z",
+      "2026-06-10T12:00:00Z",
+    ]);
+  });
+
+  it("keeps the ordering when filtering to one item", async () => {
+    const { client, calls } = makeMockSupabase([
+      makeReadRow("item-1", "2026-06-10T12:00:00Z", 200),
+      makeReadRow("item-2", "2026-06-09T12:00:00Z", 90),
+      makeReadRow("item-1", "2026-06-08T12:00:00Z", 100),
+    ]);
+
+    const logs = await readPredictionLogs(client, { itemId: "item-1" });
+
+    expect(calls.eq).toEqual(["item_id", "item-1"]);
+    expect(logs).toHaveLength(2);
+    expect(logs.map((l) => l.price)).toEqual([100, 200]);
+  });
+
+  it("newest-first + limit 1 returns exactly the single newest row (the --db read shape)", async () => {
+    // This is the linchpin of the api.max_rows immunity: the --db path reads
+    // ONE newest row per gold item instead of an unbounded ascending scan
+    // whose newest rows a row cap would silently clip.
+    const { client, calls } = makeMockSupabase([
+      makeReadRow("item-1", "2026-06-08T12:00:00Z", 100),
+      makeReadRow("item-1", "2026-06-10T12:00:00Z", 200),
+      makeReadRow("item-2", "2026-06-09T12:00:00Z", 90),
+    ]);
+
+    const logs = await readPredictionLogs(client, {
+      itemId: "item-1",
+      ascending: false,
+      limit: 1,
+    });
+
+    expect(calls.order).toEqual(["created_at", { ascending: false }]);
+    expect(calls.limit).toBe(1);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.price).toBe(200);
+  });
+
+  it("scores the NEWEST run when an item has duplicate predictions in non-chronological input order", async () => {
+    // Two logged runs for the SAME item, stubbed newest-first (the order an
+    // unordered PostgREST read could legally return). The full --db dedup path
+    // — readPredictionLogs → predictionFromLogRow → matchPredictions keep-last
+    // — must score the newer run (price 200), not the stale one (price 100).
+    const newest = makeReadRow("item-1", "2026-06-10T12:00:00Z", 200);
+    const stale = makeReadRow("item-1", "2026-06-08T12:00:00Z", 100);
+    const { client } = makeMockSupabase([newest, stale]);
+
+    const gold: GoldItem[] = [
+      {
+        id: "gold-1",
+        itemId: "item-1",
+        truth: { category: "electronics" },
+        priceBand: { low: 150, high: 250 },
+      },
+    ];
+    const goldIdByItemId = new Map([["item-1", "gold-1"]]);
+
+    const rows = await readPredictionLogs(client);
+    const predictions = rows
+      .map((row) => predictionFromLogRow(row, goldIdByItemId))
+      .filter((p) => p !== null);
+
+    const { pairs, missingGoldIds, unmatchedGoldIds } = matchPredictions(
+      gold,
+      predictions,
+    );
+
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]!.prediction.price).toBe(200); // the newest run, never the stale one
+    expect(missingGoldIds).toEqual([]);
+    expect(unmatchedGoldIds).toEqual([]);
   });
 });

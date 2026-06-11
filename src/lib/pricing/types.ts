@@ -107,6 +107,22 @@ export const priceResultSchema = z
     sources: z.array(priceSourceSchema),
     /** Which tier produced this — a logged, confidence-bearing fact. */
     tier: pricingTierSchema,
+    /**
+     * The LLM model id that produced/extracted this price, when an LLM was
+     * involved (e.g. the web tiers' comp extractor, resolved from
+     * `PRICING_MODEL`). Deterministic tiers (isbn-lookup) leave it unset.
+     * Logged for provenance (`prediction_logs.pricing_model`), mirroring the
+     * listing_model precedent (#32).
+     */
+    model: z.string().optional(),
+    /**
+     * Judged comp agreement in [0, 1] (1 = comps in lockstep), reported by
+     * comp-based tiers from their measured relative spread. The pipeline's
+     * confidence composite consumes this so a SCATTERED sold set cannot ride
+     * the sold-comp label into the tight (autopilot-grade) confidence tier.
+     * Tiers with no comp set leave it unset.
+     */
+    compAgreement: z.number().min(0).max(1).optional(),
   })
   .refine((r) => r.range.min <= r.range.max, {
     message: "range.min must be <= range.max",
