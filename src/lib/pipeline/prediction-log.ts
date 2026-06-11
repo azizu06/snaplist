@@ -123,6 +123,16 @@ export async function logPrediction(
 export interface ReadPredictionLogsFilter {
   /** Narrow to a single item's run(s). */
   itemId?: string;
+  /**
+   * Sort direction on `created_at`; defaults to ascending (oldest first).
+   * Newest-first + `limit: 1` is how a caller selects "the latest run"
+   * without reading the whole history — important because PostgREST caps
+   * responses at `api.max_rows` (1000 locally), so an unbounded ascending
+   * read of a large table silently returns only the OLDEST page.
+   */
+  ascending?: boolean;
+  /** Cap the number of rows returned (applied after ordering). */
+  limit?: number;
 }
 
 /**
@@ -160,7 +170,13 @@ export async function readPredictionLogs(
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);
   }
-  const { data, error } = await query.order("created_at", { ascending: true });
+  let ordered = query.order("created_at", {
+    ascending: filter.ascending ?? true,
+  });
+  if (filter.limit !== undefined) {
+    ordered = ordered.limit(filter.limit);
+  }
+  const { data, error } = await ordered;
   if (error) {
     throw new Error(`Failed to read prediction logs: ${error.message}`);
   }

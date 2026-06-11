@@ -141,6 +141,22 @@ export function collectJudgedListings(
   return byItem;
 }
 
+/**
+ * The fail-fast guard for the `--db` path: zero gold-matched prediction rows
+ * means stale/mistyped GoldItem.itemId mappings, missing runs, or a
+ * credentials/RLS problem — never print a normal-looking report scored over
+ * nothing. Exported for tests.
+ */
+export function ensureGoldMatchedRows(count: number): void {
+  if (count === 0) {
+    throw new Error(
+      "--db: 0 prediction logs matched the gold set's itemIds — check " +
+        "GoldItem.itemId mappings, credentials/RLS, and that pipeline runs " +
+        "exist for the gold items.",
+    );
+  }
+}
+
 async function loadPredictionsFromDb(): Promise<EvalPrediction[]> {
   const { url, key } = requireDbCredentials();
   const [{ createClient }, { readPredictionLogs }] = await Promise.all([
@@ -162,18 +178,23 @@ async function loadPredictionsFromDb(): Promise<EvalPrediction[]> {
     );
   }
 
-  const rows = await readPredictionLogs(client);
-  if (rows.length === 0) {
-    // Never score a normal-looking report over nothing — zero rows means a
-    // credentials/RLS problem or no logged runs, and the user must know which.
-    throw new Error(
-      "--db: 0 prediction logs matched — check credentials/RLS and that " +
-        "pipeline runs exist for the gold items.",
-    );
-  }
-  const itemIds = rows
-    .map((r) => r.item_id)
-    .filter((id) => goldIdByItemId.has(id));
+  // ONE newest-first, limit-1 query per gold item: this is what makes the
+  // selection immune to PostgREST's `api.max_rows` cap (1000 locally) — an
+  // unbounded ascending read of a large table silently returns only the
+  // OLDEST page, so "keep last" would score stale runs while claiming the
+  // newest. Per-item limit-1 reads cannot be clipped.
+  const rows = (
+    await Promise.all(
+      [...goldIdByItemId.keys()].map((itemId) =>
+        readPredictionLogs(client, { itemId, ascending: false, limit: 1 }),
+      ),
+    )
+  ).flat();
+  // Never score a normal-looking report over nothing: the credentials may be
+  // fine while every configured GoldItem.itemId is stale/mistyped — that must
+  // be an error, not a report with evaluated: 0.
+  ensureGoldMatchedRows(rows.length);
+  const itemIds = rows.map((r) => r.item_id);
 
   // Join listing copy for the judged surface (prediction_logs carries no copy).
   // DETERMINISTIC ASSOCIATION: items accrue many listings rows (reruns insert
@@ -181,18 +202,26 @@ async function loadPredictionsFromDb(): Promise<EvalPrediction[]> {
   // same table), so the judged surface is pinned to the NEWEST EBAY listing
   // per item — consistent with the newest-prediction dedup above. The query
   // orders ascending and the map keeps the last row per item.
+  // Same per-item newest-first pattern for the judged listing: a single
+  // capped bulk read could clip the newest rows once enough reruns accrue.
   let listingByItemId = new Map<string, JudgedListing>();
   if (itemIds.length > 0) {
-    const { data, error } = await client
-      .from("listings")
-      .select("item_id, title, description, copy, created_at")
-      .in("item_id", itemIds)
-      .eq("platform", "ebay")
-      .order("created_at", { ascending: true });
-    if (error) {
-      throw new Error(`Failed to read listings for eval: ${error.message}`);
-    }
-    listingByItemId = collectJudgedListings(data ?? []);
+    const perItem = await Promise.all(
+      itemIds.map(async (itemId) => {
+        const { data, error } = await client
+          .from("listings")
+          .select("item_id, title, description, copy, created_at")
+          .eq("item_id", itemId)
+          .eq("platform", "ebay")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (error) {
+          throw new Error(`Failed to read listings for eval: ${error.message}`);
+        }
+        return data ?? [];
+      }),
+    );
+    listingByItemId = collectJudgedListings(perItem.flat());
   }
 
   const predictions: EvalPrediction[] = [];

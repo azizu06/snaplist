@@ -51,3 +51,11 @@ describe("collectJudgedListings (newest-eBay-listing association)", () => {
     expect(map.get("item-1")!.title).toBe("Valid title");
   });
 });
+
+describe("ensureGoldMatchedRows (--db zero-match guard)", () => {
+  it("throws on zero gold-matched rows instead of reporting over nothing", async () => {
+    const { ensureGoldMatchedRows } = await import("./run");
+    expect(() => ensureGoldMatchedRows(0)).toThrow(/0 prediction logs matched/);
+    expect(() => ensureGoldMatchedRows(3)).not.toThrow();
+  });
+});
