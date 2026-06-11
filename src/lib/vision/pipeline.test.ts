@@ -306,6 +306,10 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
         { url: "https://example.com/ask/x", title: "Asking comp", kind: "asking-comp" },
       ],
       tier: "branded-web",
+      // Even a LOCKSTEP asking cluster (judged agreement 1) must not clear the
+      // gate: tight asking prices prove sellers agree on what to ask, not what
+      // buyers pay (#10 round-5).
+      compAgreement: 1,
     });
     const soldComped = priceResultSchema.parse({
       suggested: 180,

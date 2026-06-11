@@ -186,12 +186,27 @@ function tightAgreement(price: PriceResult): boolean {
 }
 
 /**
+ * Without sold grounding, judged agreement is capped here: a tight cluster of
+ * ASKING prices proves sellers agree on what to ask, not what buyers pay, so
+ * it must not push a no-sold-comp item over the autopilot gate (full-id
+ * asking-only would otherwise score 0.6·0.6 + 0.25·1 + 0.15·1 = 0.76 ≥ 0.75).
+ * 0.4 matches the conservative no-sold constant below: full-id asking-only
+ * tops out at 0.67, safely sub-gate.
+ */
+const ASKING_AGREEMENT_CAP = 0.4;
+
+/**
  * Comp-agreement signal for the confidence composite: the provider's own
- * judged agreement when reported (the web tiers measure relative spread),
- * else the conservative constants for providers without a comp cluster.
+ * judged agreement when reported (the web tiers measure relative spread) —
+ * capped without sold grounding — else the conservative constants for
+ * providers without a comp cluster.
  */
 function compAgreementFor(price: PriceResult): number {
-  if (price.compAgreement != null) return price.compAgreement;
+  if (price.compAgreement != null) {
+    return hasSoldComp(price)
+      ? price.compAgreement
+      : Math.min(price.compAgreement, ASKING_AGREEMENT_CAP);
+  }
   if (hasSoldComp(price)) return 0.7;
   return price.sources.length > 0 ? 0.4 : 0.3;
 }
