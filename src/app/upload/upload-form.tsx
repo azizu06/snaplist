@@ -287,7 +287,9 @@ export function UploadForm({
   // Mirror of `previews` for the unmount cleanup: a state closure in the
   // unmount effect would capture the INITIAL (empty) array and revoke nothing.
   const previewsRef = useRef(previews);
-  previewsRef.current = previews;
+  useEffect(() => {
+    previewsRef.current = previews;
+  }, [previews]);
 
   // Revoke object URLs we replace/remove; revoke whatever is left on unmount.
   const setPreview = (slot: number, url: string | null) => {
