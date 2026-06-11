@@ -83,7 +83,15 @@ export async function runPipelineAndPersist(
     throw new Error(`Failed to update item attributes: ${updErr.message}`);
   }
 
-  // 4. Persist the generated listing. The initial status is the confidence-gated
+  // 4. Log the prediction for the eval harness (PRD non-negotiable: log every
+  //    run) BEFORE any listing becomes queued: these two writes are not
+  //    transactional, and the failure modes are asymmetric. A log row without
+  //    a listing is inert; a QUEUED listing without its mandatory evaluation
+  //    record is a publishable run the upload request reported as failed —
+  //    a queue consumer could post it, and a retried upload could duplicate it.
+  await logPrediction(supabase, input.userId, itemId, result);
+
+  // 5. Persist the generated listing. The initial status is the confidence-gated
   //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
   //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
   //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
@@ -106,11 +114,6 @@ export async function runPipelineAndPersist(
     );
   }
   const listingId = listing.id as string;
-
-  // 5. Log the prediction for the eval harness (PRD non-negotiable: log every run).
-  //    Delegated to the dedicated prediction-log module, the single source of truth
-  //    for the row shape; it throws on error (logging is never swallowed).
-  await logPrediction(supabase, input.userId, itemId, result);
 
   return { itemId, listingId, result };
 }

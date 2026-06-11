@@ -171,12 +171,22 @@ export default async function ReviewPage({
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Review listing</h1>
-        <Link
-          href="/upload"
-          className="text-sm text-zinc-500 underline hover:text-zinc-800"
-        >
-          New listing
-        </Link>
+        <nav className="flex items-center gap-4">
+          {/* Cross-platform export packs (issue #15) are otherwise unreachable
+              from the normal upload → review flow. */}
+          <Link
+            href={`/export/${itemId}`}
+            className="text-sm text-zinc-500 underline hover:text-zinc-800"
+          >
+            Export packs
+          </Link>
+          <Link
+            href="/upload"
+            className="text-sm text-zinc-500 underline hover:text-zinc-800"
+          >
+            New listing
+          </Link>
+        </nav>
       </header>
 
       {actionError ? (

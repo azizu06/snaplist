@@ -94,7 +94,7 @@ export function parsePriceOverride(raw: unknown): number | null {
  * caller still applies.
  */
 function roundToCents(text: string): number {
-  const m = /^([0-9]+)(?:\.([0-9]+))?$/.exec(text);
+  const m = /^([0-9]+)(?:\.([0-9]+))?$/.exec(expandExponent(text));
   if (!m) {
     const n = Number(text);
     return Math.round(n * 100) / 100;
@@ -105,4 +105,24 @@ function roundToCents(text: string): number {
   let centsInt = Number(whole) * 100 + Number(frac.slice(0, 2));
   if (Number(frac.slice(2, 3)) >= 5) centsInt += 1;
   return centsInt / 100;
+}
+
+/**
+ * Expand exponent notation ("1.005e0", "2.5e2") into a plain decimal string
+ * by shifting the decimal point textually, so accepted exponent inputs get
+ * the same literal-digit half-up rounding instead of the binary-float
+ * fallback. Non-exponent (or unexpandable) input is returned unchanged.
+ */
+function expandExponent(text: string): string {
+  const m = /^([0-9]+)(?:\.([0-9]+))?[eE]([+-]?[0-9]+)$/.exec(text);
+  if (!m) return text;
+  const exp = Number(m[3]);
+  // Out-of-range exponents fall back to numeric rounding; the caller's
+  // finiteness check still rejects overflow.
+  if (!Number.isInteger(exp) || Math.abs(exp) > 320) return text;
+  let digits = m[1] + (m[2] ?? "");
+  let point = m[1].length + exp; // index of the decimal point within digits
+  if (point <= 0) digits = "0".repeat(1 - point) + digits, (point = 1);
+  if (point >= digits.length) digits = digits.padEnd(point, "0");
+  return `${digits.slice(0, point)}.${digits.slice(point)}`;
 }

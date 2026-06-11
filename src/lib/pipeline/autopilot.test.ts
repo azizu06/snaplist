@@ -146,3 +146,11 @@ describe("parsePriceOverride — decimal rounding and overflow", () => {
     expect(() => parsePriceOverride("1e307")).toThrow(/finite/);
   });
 });
+
+describe("parsePriceOverride — exponent notation", () => {
+  it("applies the same literal-digit half-up rounding to exponent strings", () => {
+    expect(parsePriceOverride("1.005e0")).toBe(1.01); // binary fallback gave 1.00
+    expect(parsePriceOverride("1005e-3")).toBe(1.01);
+    expect(parsePriceOverride("2.5e2")).toBe(250);
+  });
+});
