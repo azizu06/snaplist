@@ -1,7 +1,21 @@
 [
   {
     "id": "label-sony-wh1000xm4-strong",
-    "attributes": { "brand": "Sony", "model": "WH-1000XM4", "category": "electronics", "condition": "good" },
+    "attributes": {
+      "brand": "Sony",
+      "model": "WH-1000XM4",
+      "category": "electronics",
+      "condition": "good",
+      "specs": [
+        "black",
+        "industry-leading ANC",
+        "30-hour battery",
+        "multipoint Bluetooth",
+        "includes case and both cables",
+        "fully tested and factory reset",
+        "light wear on the ear cushions, no scratches on the cups"
+      ]
+    },
     "listing": {
       "title": "Sony WH-1000XM4 Wireless Noise Cancelling Headphones Black Tested",
       "description": "Sony WH-1000XM4 over-ear headphones in good used condition. Light wear on the ear cushions, no scratches on the cups. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes case and both cables. Fully tested and factory reset.",
@@ -12,7 +26,12 @@
   },
   {
     "id": "label-generic-mug-hallucinated-brand",
-    "attributes": { "category": "generic", "condition": "good", "title": "Ceramic coffee mug" },
+    "attributes": {
+      "category": "generic",
+      "condition": "good",
+      "title": "Ceramic coffee mug",
+      "specs": ["white ceramic", "12 oz", "dishwasher safe", "no chips or cracks"]
+    },
     "listing": {
       "title": "Starbucks Ceramic Coffee Mug 12oz White Kitchen",
       "description": "White ceramic mug, 12 oz. Clean, no chips or cracks. Dishwasher safe.",
@@ -23,7 +42,13 @@
   },
   {
     "id": "label-catan-overlong-title",
-    "attributes": { "brand": "Catan Studio", "model": "Catan (Base Game)", "category": "board-games", "condition": "good" },
+    "attributes": {
+      "brand": "Catan Studio",
+      "model": "Catan (Base Game)",
+      "category": "board-games",
+      "condition": "good",
+      "specs": ["5th edition", "complete and counted", "light shelf wear on the box"]
+    },
     "listing": {
       "title": "Catan Studio Catan Base Game 5th Edition Complete Board Game Settlers Strategy Family Night Fun",
       "description": "Complete and counted Catan base game in good condition. Light shelf wear on the box.",
@@ -34,7 +59,13 @@
   },
   {
     "id": "label-yeti-thin-description",
-    "attributes": { "brand": "YETI", "model": "Rambler 20oz Tumbler", "category": "branded-gear", "condition": "good" },
+    "attributes": {
+      "brand": "YETI",
+      "model": "Rambler 20oz Tumbler",
+      "category": "branded-gear",
+      "condition": "good",
+      "specs": ["stainless steel"]
+    },
     "listing": {
       "title": "YETI Rambler 20oz Stainless Steel Tumbler",
       "description": "Used tumbler.",
@@ -45,7 +76,20 @@
   },
   {
     "id": "label-garmin-no-identity-title",
-    "attributes": { "brand": "Garmin", "model": "Forerunner 245", "category": "electronics", "condition": "good" },
+    "attributes": {
+      "brand": "Garmin",
+      "model": "Forerunner 245",
+      "category": "electronics",
+      "condition": "good",
+      "specs": [
+        "GPS",
+        "heart-rate tracking",
+        "training metrics",
+        "about a week of battery life",
+        "includes the original charging cable",
+        "screen clean with no scratches, light wear on the band"
+      ]
+    },
     "listing": {
       "title": "GPS Running Watch With Heart Rate",
       "description": "GPS running watch in good condition with heart-rate tracking, training metrics, and a week of battery life. Includes the original charging cable. Screen is clean with no scratches; band shows light wear.",
@@ -56,7 +100,19 @@
   },
   {
     "id": "label-ddia-strong-book",
-    "attributes": { "brand": "O'Reilly", "model": "Designing Data-Intensive Applications", "category": "books", "condition": "very-good", "isbn": "9781449373320" },
+    "attributes": {
+      "brand": "O'Reilly",
+      "model": "Designing Data-Intensive Applications",
+      "category": "books",
+      "condition": "very-good",
+      "isbn": "9781449373320",
+      "specs": [
+        "by Martin Kleppmann",
+        "paperback",
+        "clean pages, no highlighting",
+        "tight binding, light shelf wear on the cover"
+      ]
+    },
     "listing": {
       "title": "Designing Data-Intensive Applications Kleppmann Paperback O'Reilly",
       "description": "Designing Data-Intensive Applications by Martin Kleppmann, O'Reilly paperback in very-good condition. Clean pages, no highlighting, tight binding with light shelf wear on the cover. ISBN 9781449373320. Ships fast, well packed.",
@@ -67,7 +123,13 @@
   },
   {
     "id": "label-bose-wrong-model-specific",
-    "attributes": { "brand": "Bose", "model": "QuietComfort 35 II", "category": "electronics", "condition": "good" },
+    "attributes": {
+      "brand": "Bose",
+      "model": "QuietComfort 35 II",
+      "category": "electronics",
+      "condition": "good",
+      "specs": ["noise cancelling", "includes the case"]
+    },
     "listing": {
       "title": "Bose QuietComfort 45 Noise Cancelling Headphones",
       "description": "Bose noise cancelling headphones, comfortable fit and strong ANC. Comes with the case.",
@@ -78,7 +140,17 @@
   },
   {
     "id": "label-generic-lamp-short-title",
-    "attributes": { "category": "generic", "condition": "good", "title": "LED desk lamp" },
+    "attributes": {
+      "category": "generic",
+      "condition": "good",
+      "title": "LED desk lamp",
+      "specs": [
+        "adjustable gooseneck arm",
+        "USB powered",
+        "three brightness levels",
+        "light wear on the base"
+      ]
+    },
     "listing": {
       "title": "Desk Lamp",
       "description": "Adjustable LED desk lamp with a gooseneck arm, USB powered, three brightness levels. Works perfectly, light wear on the base — good used condition overall. Great for a home office or dorm desk setup.",

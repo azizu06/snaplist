@@ -194,25 +194,29 @@ async function loadPredictionsFromDb(): Promise<EvalPrediction[]> {
   // fine while every configured GoldItem.itemId is stale/mistyped — that must
   // be an error, not a report with evaluated: 0.
   ensureGoldMatchedRows(rows.length);
-  const itemIds = rows.map((r) => r.item_id);
 
   // Join listing copy for the judged surface (prediction_logs carries no copy).
-  // DETERMINISTIC ASSOCIATION: items accrue many listings rows (reruns insert
-  // a new one each time; #15 persists facebook/mercari export packs in the
-  // same table), so the judged surface is pinned to the NEWEST EBAY listing
-  // per item — consistent with the newest-prediction dedup above. The query
-  // orders ascending and the map keeps the last row per item.
-  // Same per-item newest-first pattern for the judged listing: a single
-  // capped bulk read could clip the newest rows once enough reruns accrue.
+  // EXACT-RUN ASSOCIATION: when the selected prediction carries a `run_id`,
+  // the judged listing is the one stamped with THAT id — never an
+  // independently-selected "newest" row, which can belong to a DIFFERENT run
+  // (a concurrent rerun, or a run that persisted its listing but failed
+  // before logging the prediction). Legacy predictions (run_id null, written
+  // before run pairing) fall back to the newest eBay listing per item; if a
+  // paired listing doesn't exist, the prediction is judged without listing
+  // copy rather than against another run's copy.
   let listingByItemId = new Map<string, JudgedListing>();
-  if (itemIds.length > 0) {
+  if (rows.length > 0) {
     const perItem = await Promise.all(
-      itemIds.map(async (itemId) => {
-        const { data, error } = await client
+      rows.map(async (row) => {
+        let query = client
           .from("listings")
           .select("item_id, title, description, copy, created_at")
-          .eq("item_id", itemId)
-          .eq("platform", "ebay")
+          .eq("item_id", row.item_id)
+          .eq("platform", "ebay");
+        if (row.run_id != null) query = query.eq("run_id", row.run_id);
+        const { data, error } = await query
+          // Per-item limit-1 keeps the read immune to the api.max_rows cap;
+          // with a run_id pin at most one row matches anyway.
           .order("created_at", { ascending: false })
           .limit(1);
         if (error) {

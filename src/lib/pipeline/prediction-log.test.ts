@@ -83,7 +83,19 @@ describe("buildPredictionLogRow", () => {
       // No distinct listingModel on this result → provenance falls back to `model`.
       listing_model: "stub-pipeline-v1",
       sources: result.price.sources,
+      // No runId supplied → null (legacy shape), never undefined.
+      run_id: null,
     });
+  });
+
+  it("stamps the run id when supplied — the listing/prediction pairing key", () => {
+    const row = buildPredictionLogRow(
+      "user-1",
+      "item-1",
+      makeResult(),
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(row.run_id).toBe("00000000-0000-4000-8000-000000000001");
   });
 
   it("records the listing model distinctly when it differs from the run model (#32)", () => {

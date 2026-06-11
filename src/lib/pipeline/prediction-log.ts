@@ -60,6 +60,13 @@ export interface PredictionLogRow {
   listing_model: string;
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
+  /**
+   * The pipeline run this row belongs to — the SAME id is stamped on the
+   * listing the run persisted, so the eval harness pairs a prediction with
+   * exactly its own listing (never a neighboring run's). Null only on legacy
+   * rows written before run pairing existed.
+   */
+  run_id: string | null;
 }
 
 /**
@@ -82,10 +89,12 @@ export function buildPredictionLogRow(
   userId: string,
   itemId: string,
   result: PipelineResult,
+  runId?: string,
 ): PredictionLogRow {
   return {
     user_id: userId,
     item_id: itemId,
+    run_id: runId ?? null,
     extracted_attrs: result.attributes,
     price: result.price.suggested,
     price_range: { low: result.price.range.min, high: result.price.range.max },
@@ -111,8 +120,9 @@ export async function logPrediction(
   userId: string,
   itemId: string,
   result: PipelineResult,
+  runId?: string,
 ): Promise<void> {
-  const row = buildPredictionLogRow(userId, itemId, result);
+  const row = buildPredictionLogRow(userId, itemId, result, runId);
   const { error } = await supabase.from("prediction_logs").insert(row);
   if (error) {
     throw new Error(`Failed to write prediction log: ${error.message}`);
@@ -165,7 +175,7 @@ export async function readPredictionLogs(
   let query = supabase
     .from("prediction_logs")
     .select(
-      "user_id, item_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources, created_at",
+      "user_id, item_id, run_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources, created_at",
     );
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);
