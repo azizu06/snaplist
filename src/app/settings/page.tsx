@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserEmail, getUserId } from "@/lib/auth";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { setAutopilotSetting } from "@/app/upload/actions";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PendingButton } from "@/components/ui/button";
+import { AppSignOutButton } from "@/components/sign-out-button";
 import { StatusBadge } from "@/components/ui/badge";
 
 /**
@@ -20,12 +22,11 @@ export default async function SettingsPage({
   const { error } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/settings");
+  const userId = await getUserId();
+  if (!userId) redirect("/login?next=/settings");
 
-  const autopilotEnabled = await getAutopilotEnabled(supabase, user.id);
+  const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
+  const email = await getUserEmail();
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
@@ -33,7 +34,9 @@ export default async function SettingsPage({
         <h1 className="text-lg font-bold tracking-tight text-fg-strong">
           Settings
         </h1>
-        <p className="mt-0.5 text-[13px] text-muted">Signed in as {user.email}</p>
+        <p className="mt-0.5 text-[13px] text-muted">
+          Signed in as {email ?? "your account"}
+        </p>
       </header>
 
       {error ? (
@@ -84,11 +87,8 @@ export default async function SettingsPage({
       <Card>
         <CardHeader title="Account" />
         <CardBody>
-          <form action="/auth/signout" method="post">
-            <PendingButton pendingLabel="Signing out…" variant="secondary">
-              Sign out
-            </PendingButton>
-          </form>
+          {/* Clerk sign-out (issue #41) — the /auth/signout route is gone. */}
+          <AppSignOutButton className="inline-flex items-center justify-center gap-2 rounded-md border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg shadow-xs transition-colors hover:bg-surface-2" />
         </CardBody>
       </Card>
     </main>

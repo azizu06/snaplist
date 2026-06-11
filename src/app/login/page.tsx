@@ -1,32 +1,31 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { Banner } from "@/components/ui/banner";
-import { signIn, signUp } from "./actions";
+import { SignIn } from "@clerk/nextjs";
+import { getUserId } from "@/lib/auth";
 import { safeNext } from "./safe-next";
-import { LoginForm } from "./login-form";
 
 /**
- * Sign-in / sign-up (issue #40 skin: L-1…L-4). Segmented modes live in the
- * client form; the server actions are unchanged. If already signed in, bounce
- * to the validated `next`.
+ * Sign-in / sign-up — Clerk era (issue #41). Clerk's prebuilt <SignIn />
+ * handles both modes (it links to sign-up), email verification, password
+ * reset, and OAuth — all the account UX the hand-rolled form deliberately
+ * skipped. Hash routing keeps everything on this one route.
+ *
+ * `next` is still validated through safeNext on BOTH paths (the already-
+ * signed-in bounce and Clerk's post-auth redirect) so it can't become an open
+ * redirect.
  */
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; notice?: string; next?: string }>;
+  searchParams: Promise<{ next?: string }>;
 }) {
-  const { error, notice, next } = await searchParams;
+  const { next } = await searchParams;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  // Validate `next` here too — this signed-in branch must not become an open redirect.
-  if (user) redirect(safeNext(next));
+  const userId = await getUserId();
+  if (userId) redirect(safeNext(next));
 
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-6 py-16">
-      <div>
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-6 px-6 py-16">
+      <div className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
           Welcome to SnapList
         </h1>
@@ -35,17 +34,11 @@ export default async function LoginPage({
           with sources, and write the listing.
         </p>
       </div>
-
-      {error ? (
-        <Banner variant="error" title="Couldn’t sign you in">
-          {error}
-        </Banner>
-      ) : null}
-      {notice ? (
-        <Banner variant="success" title={notice} />
-      ) : null}
-
-      <LoginForm next={next} signIn={signIn} signUp={signUp} />
+      <SignIn
+        routing="hash"
+        fallbackRedirectUrl={safeNext(next)}
+        signUpFallbackRedirectUrl={safeNext(next)}
+      />
     </main>
   );
 }

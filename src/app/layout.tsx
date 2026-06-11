@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { createClient } from "@/lib/supabase/server";
+import { ClerkProvider } from "@clerk/nextjs";
+import { getUserId } from "@/lib/auth";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
@@ -25,12 +26,9 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   // Auth state drives the shell (X-2): signed-in users get the persistent nav
-  // everywhere; signed-out visitors get a logo-only header. Reading cookies
-  // here keeps rendering dynamic, which every surface already required.
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // everywhere; signed-out visitors get a logo-only header. getUserId() reads
+  // cookies first, keeping secret-less builds prerender-safe (issue #41).
+  const userId = await getUserId();
 
   // Dev-only: the screenshot preview harness (src/app/dev/preview) needs the
   // signed-in chrome without a running auth stack. Never true in production.
@@ -39,13 +37,17 @@ export default async function RootLayout({
     process.env.PREVIEW_SIGNED_IN === "1";
 
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full">
-        <AppShell signedIn={user != null || previewSignedIn}>{children}</AppShell>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html
+        lang="en"
+        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      >
+        <body className="min-h-full">
+          <AppShell signedIn={userId != null || previewSignedIn}>
+            {children}
+          </AppShell>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  cleanupClerkTestUsers,
+  provisionClerkTestUser,
+  type ClerkTestUser,
+} from "./test-users";
 
 /**
  * RLS / tenancy integration test — the primary security seam (PRD Testing Decisions,
@@ -42,49 +47,16 @@ async function stackReachable(): Promise<boolean> {
   }
 }
 
-type TestUser = {
-  id: string;
-  email: string;
-  password: string;
-  client: SupabaseClient;
-};
-
 let reachable = false;
 let admin: SupabaseClient;
-let userA: TestUser;
-let userB: TestUser;
-const createdUserIds: string[] = [];
+let userA: ClerkTestUser;
+let userB: ClerkTestUser;
 
-async function provisionUser(label: string): Promise<TestUser> {
-  const email = `rls-${label}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}@example.com`;
-  const password = "test-password-123!";
-
-  // Service role creates a confirmed user (no email round-trip).
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
-  if (createErr || !created.user) {
-    throw new Error(`createUser failed for ${label}: ${createErr?.message}`);
-  }
-  createdUserIds.push(created.user.id);
-
-  // A fresh anon client that signs in as this user — its session is what RLS sees.
-  const client = createClient(SUPABASE_URL, ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error: signInErr } = await client.auth.signInWithPassword({
-    email,
-    password,
-  });
-  if (signInErr) {
-    throw new Error(`signIn failed for ${label}: ${signInErr.message}`);
-  }
-
-  return { id: created.user.id, email, password, client };
+// Clerk-era provisioning (issue #41): identities are minted JWTs with text
+// subs — no auth.users rows. See test-users.ts for why this still exercises
+// the real policies.
+async function provisionUser(label: string): Promise<ClerkTestUser> {
+  return provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, `rls_${label}`);
 }
 
 beforeAll(async () => {
@@ -103,10 +75,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!reachable || !admin) return;
-  // Cascade-cleans every owned row in all domain tables via on delete cascade.
-  await Promise.all(
-    createdUserIds.map((id) => admin.auth.admin.deleteUser(id)),
-  );
+  // No auth.users cascade anymore (Clerk migration dropped those FKs) —
+  // delete owned domain rows explicitly.
+  await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
 });
 
 describe("RLS tenancy isolation", () => {
@@ -120,13 +91,20 @@ describe("RLS tenancy isolation", () => {
     expect(true).toBe(true);
   });
 
-  it("auth sign-up + sign-in yields a session bound to the correct user", async () => {
+  it("a minted token binds queries to the correct Clerk identity", async () => {
     if (!reachable) return;
-    const { data } = await userA.client.auth.getUser();
-    expect(data.user?.id).toBe(userA.id);
-    const { data: dataB } = await userB.client.auth.getUser();
-    expect(dataB.user?.id).toBe(userB.id);
+    // supabase.auth.* is disabled with the accessToken option (Clerk era), so
+    // identity binding is proven through the data path: a row inserted as A
+    // must come back stamped with A's sub — i.e. the JWT, not the payload's
+    // claim, is what RLS trusted.
     expect(userA.id).not.toBe(userB.id);
+    const { data, error } = await userA.client
+      .from("items")
+      .insert({ user_id: userA.id, condition: "good", attributes: { brand: "JwtBind" } })
+      .select("user_id")
+      .single();
+    expect(error).toBeNull();
+    expect(data?.user_id).toBe(userA.id);
   });
 
   it("a user can insert and read back their OWN item", async () => {

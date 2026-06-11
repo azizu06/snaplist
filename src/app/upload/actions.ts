@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { runPipelineAndPersist } from "@/lib/pipeline";
 import { createVisionPipeline } from "@/lib/vision";
 import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
@@ -34,10 +35,8 @@ const ACCEPTED = new Set([
 
 export async function uploadAndProcess(formData: FormData) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/upload");
+  const userId = await getUserId();
+  if (!userId) redirect("/login?next=/upload");
 
   // 1–4 photos (issue #40, Mercari-style slots; PRD: "1 photo required, up to
   // ~4 accepted"). Empty slot inputs submit zero-byte entries — filtered here,
@@ -63,7 +62,7 @@ export async function uploadAndProcess(formData: FormData) {
   const paths: string[] = [];
   for (const photo of photos) {
     const ext = photo.name.split(".").pop() ?? "bin";
-    const path = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+    const path = `${userId}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
     const { error: uploadErr } = await supabase.storage
       .from("photos")
       .upload(path, photo, { contentType: photo.type, upsert: false });
@@ -80,7 +79,7 @@ export async function uploadAndProcess(formData: FormData) {
     // The user's MASTER autopilot switch (issue #12): forwarded into the pipeline's
     // confidence gate, so when it is off NOTHING is autopilot-eligible and every
     // listing queues as a draft for review.
-    const autopilotEnabled = await getAutopilotEnabled(supabase, user.id);
+    const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
 
     // Real vision pipeline: the user-scoped server client signs the private photo
     // URLs and the same client persists every row under RLS.
@@ -88,7 +87,7 @@ export async function uploadAndProcess(formData: FormData) {
     const res = await runPipelineAndPersist(
       supabase,
       {
-        userId: user.id,
+        userId: userId,
         photos: paths,
         autopilotEnabled,
       },
@@ -111,14 +110,12 @@ export async function uploadAndProcess(formData: FormData) {
  */
 export async function setAutopilotSetting(formData: FormData) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/settings");
+  const userId = await getUserId();
+  if (!userId) redirect("/login?next=/settings");
 
   const enabled = formData.get("enabled") === "true";
   try {
-    await setAutopilotEnabled(supabase, user.id, enabled);
+    await setAutopilotEnabled(supabase, userId, enabled);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update autopilot.";
     redirect(`/settings?error=${encodeURIComponent(message)}`);

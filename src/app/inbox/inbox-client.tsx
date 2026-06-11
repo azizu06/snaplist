@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
+import { useSupabaseClient } from "@/lib/supabase/client";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 
 /**
@@ -55,7 +55,9 @@ function reconcileMessages(prev: MessageRow[], fetched: MessageRow[]): MessageRo
 }
 
 export function InboxClient({ userId, initialMessages, items }: InboxClientProps) {
-  const supabase = useMemo(() => createClient(), []);
+  // Clerk era (issue #41): the hook injects the Clerk session token per
+  // request, so Realtime + reads stay RLS-scoped to the signed-in user.
+  const supabase = useSupabaseClient();
   const [messages, setMessages] = useState<MessageRow[]>(() =>
     sortNewestFirst(initialMessages),
   );

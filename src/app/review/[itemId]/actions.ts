@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { parsePriceOverride } from "@/lib/pipeline";
 
 /**
@@ -29,10 +30,8 @@ export async function overridePrice(formData: FormData) {
   const id = itemId as string;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/review/${id}`);
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=/review/${id}`);
 
   // Validate at the boundary: blank clears, junk is rejected loudly (a typo must
   // not silently clear an existing override).

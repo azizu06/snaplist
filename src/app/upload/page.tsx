@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { uploadAndProcess } from "./actions";
 import { UploadView } from "./upload-form";
 
@@ -15,11 +15,8 @@ export default async function UploadPage({
 }) {
   const { error } = await searchParams;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/upload");
+  const userId = await getUserId();
+  if (!userId) redirect("/login?next=/upload");
 
   return <UploadView action={uploadAndProcess} actionError={error ?? null} />;
 }

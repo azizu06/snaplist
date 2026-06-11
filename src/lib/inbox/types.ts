@@ -41,7 +41,9 @@ export type MessageStatus = z.infer<typeof messageStatusSchema>;
  */
 export const messageRowSchema = z.object({
   id: z.uuid(),
-  user_id: z.uuid(),
+  // Clerk user ids are text ("user_…"), not uuids (issue #41 migration) — a
+  // uuid validator here would silently drop every row in the inbox.
+  user_id: z.string().min(1),
   item_id: z.uuid().nullable(),
   listing_id: z.uuid().nullable(),
   direction: messageDirectionSchema,

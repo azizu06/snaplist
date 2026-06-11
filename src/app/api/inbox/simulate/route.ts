@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import {
   DraftAttachConflictError,
@@ -40,10 +41,8 @@ const bodySchema = z.object({
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const userId = await getUserId();
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -150,7 +149,7 @@ export async function POST(request: Request) {
   let message;
   try {
     message = await createBuyerMessage(supabase, {
-      userId: user.id,
+      userId: userId,
       itemId,
       listingId: listing?.id ?? null,
       body: question,
