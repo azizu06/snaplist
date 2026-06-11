@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { createEbayAdapter, publishListingToEbay } from "@/lib/marketplace/ebay";
+import {
+  createEbayAdapterForUser,
+  publishListingToEbay,
+} from "@/lib/marketplace/ebay";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -35,10 +38,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Per-user tokens when the seller connected eBay in Settings (issue #17);
+    // app-level env credentials otherwise (the sandbox loop).
     const outcome = await publishListingToEbay(
       supabase,
       listingId,
-      createEbayAdapter(),
+      await createEbayAdapterForUser(supabase),
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {
