@@ -14,7 +14,8 @@ import { marketplaceCurrency, toEbayPublishRequest } from "./map";
  *
  * Idempotent: a listing that already published returns its stored result
  * without another eBay call. A FAILED publish persists ebay_status='failed'
- * (status='failed' too — the PRD lifecycle) and rethrows; re-running retries
+ * ONLY — the local `status` lifecycle (draft/queued) is untouched, so review
+ * and draft flows keep seeing the listing — and rethrows; re-running retries
  * cleanly because the adapter's SKU/offer steps are themselves idempotent.
  */
 
@@ -46,6 +47,14 @@ export interface PublishOptions {
 const GENERIC_CATEGORY_ID = "88433";
 
 const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * The currency every persisted price is denominated in: the pricing pipeline's
+ * comps (sold/asking lookups, depreciation tables) are USD. `prediction_logs`
+ * stores a bare numeric, so this constant is the read-side's currency claim —
+ * publishing under a different currency must reprice, never relabel.
+ */
+const PRICING_CURRENCY = "USD";
 
 export async function publishListingToEbay(
   supabase: SupabaseClient,
@@ -139,6 +148,23 @@ export async function publishListingToEbay(
     );
   }
 
+  // The persisted price is a currency-less numeric produced by the pricing
+  // pipeline, whose comps are USD. Publishing it under another marketplace's
+  // currency would RELABEL the amount (100 USD listed as 100 GBP), materially
+  // mispricing the live listing — so a non-USD marketplace is rejected unless
+  // the operator explicitly declares the pricing currency via EBAY_CURRENCY
+  // (the escape hatch for a future repricing flow whose numerics genuinely
+  // are in that currency).
+  const currency = marketplaceCurrency(env.EBAY_MARKETPLACE_ID, env.EBAY_CURRENCY);
+  if (!env.EBAY_CURRENCY && currency !== PRICING_CURRENCY) {
+    throw new Error(
+      `Listing ${listingId} cannot publish to ${env.EBAY_MARKETPLACE_ID}: its price ` +
+        `was computed in ${PRICING_CURRENCY}, and relabeling the amount as ${currency} ` +
+        "would misprice the live listing. Reprice for the target marketplace, or set " +
+        "EBAY_CURRENCY explicitly if the persisted prices really are in that currency.",
+    );
+  }
+
   // 5. Map onto the provider shape (pure; throws on unpublishable input).
   const request = toEbayPublishRequest({
     listingId,
@@ -149,9 +175,7 @@ export async function publishListingToEbay(
     price,
     imageUrls,
     categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
-    // Offer currency follows the configured marketplace (EBAY_GB → GBP, ...),
-    // overridable via EBAY_CURRENCY — never an unconditional USD.
-    currency: marketplaceCurrency(env.EBAY_MARKETPLACE_ID, env.EBAY_CURRENCY),
+    currency,
   });
 
   // 6. Publish through the adapter. An ADAPTER failure is persisted as
@@ -192,15 +216,26 @@ export async function publishListingToEbay(
   };
 }
 
-/** Best-effort failed-publish marker; never masks the error being thrown. */
+/**
+ * Best-effort failed-publish marker; never masks the error being thrown.
+ *
+ * Writes ONLY `ebay_status` — that column exists precisely so an eBay failure
+ * can be shown without destroying the local listing lifecycle (`status` stays
+ * draft/queued and review/draft flows keep seeing the row). The update is also
+ * conditional on the row not already being published: when two publish calls
+ * overlap, the loser's eBay error must not downgrade the winner's live
+ * listing to 'failed' (which would disable the stored-result fast path and
+ * make every retry call eBay again).
+ */
 async function markPublishFailed(
   supabase: SupabaseClient,
   listingId: string,
 ): Promise<void> {
   await supabase
     .from("listings")
-    .update({ ebay_status: "failed", status: "failed" })
+    .update({ ebay_status: "failed" })
     .eq("id", listingId)
+    .or("ebay_status.is.null,ebay_status.neq.published")
     .then(undefined, () => undefined);
 }
 

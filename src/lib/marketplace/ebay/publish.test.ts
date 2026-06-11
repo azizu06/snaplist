@@ -167,6 +167,32 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     expect(row?.status).toBe("published");
   });
 
+  it("rejects publishing to a non-USD marketplace instead of relabeling the USD price", async () => {
+    if (!reachable) return;
+
+    const { listingId } = await persistedRun(userA);
+    const adapter = new MockEbayAdapter();
+
+    // Prices come from the USD pricing pipeline; 100 (USD) published as 100 GBP
+    // would misprice the live listing — so EBAY_GB without an explicit currency
+    // declaration must refuse BEFORE any eBay call.
+    await expect(
+      publishListingToEbay(userA.client, listingId, adapter, {
+        env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_GB" }),
+      }),
+    ).rejects.toThrowError(/relabeling|computed in USD/i);
+    expect(adapter.requests).toHaveLength(0);
+
+    // An explicit EBAY_CURRENCY is the operator's declaration that persisted
+    // prices ARE in that currency — then the publish proceeds with it.
+    const declared = await publishListingToEbay(userA.client, listingId, adapter, {
+      env: () => ({ EBAY_MARKETPLACE_ID: "EBAY_GB", EBAY_CURRENCY: "GBP" }),
+    });
+    expect(declared.ebayStatus).toBe("published");
+    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests[0]!.price.currency).toBe("GBP");
+  });
+
   it("is idempotent: an already-published listing returns the stored result without another eBay call", async () => {
     if (!reachable) return;
 
@@ -181,7 +207,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     expect(second.ebayListingId).toBe(first.ebayListingId);
   });
 
-  it("persists ebay_status='failed' (and rethrows) when the adapter fails", async () => {
+  it("persists ebay_status='failed' (and rethrows) when the adapter fails — local status untouched", async () => {
     if (!reachable) return;
 
     const { listingId } = await persistedRun(userA);
@@ -198,7 +224,9 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       .eq("id", listingId)
       .single();
     expect(row?.ebay_status).toBe("failed");
-    expect(row?.status).toBe("failed");
+    // The eBay failure lives in ebay_status ONLY — the local lifecycle keeps
+    // the listing visible to review/draft flows.
+    expect(row?.status).toBe("draft");
     expect(row?.ebay_listing_id).toBeNull();
 
     // The failed publish is RETRYABLE: clearing the failure publishes cleanly.
@@ -292,14 +320,15 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     ).rejects.toThrowError(/has no photos/i);
     expect(adapter.requests).toHaveLength(0); // never reached eBay
 
-    // Reported through the existing failed-publish path.
+    // Reported through the existing failed-publish path (ebay_status only —
+    // the local lifecycle is not destroyed).
     const { data: row } = await userA.client
       .from("listings")
       .select("status, ebay_status, ebay_listing_id")
       .eq("id", listing!.id as string)
       .single();
     expect(row?.ebay_status).toBe("failed");
-    expect(row?.status).toBe("failed");
+    expect(row?.status).toBe("draft");
     expect(row?.ebay_listing_id).toBeNull();
   });
 
@@ -345,7 +374,7 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       .eq("id", listing!.id as string)
       .single();
     expect(row?.ebay_status).toBe("failed");
-    expect(row?.status).toBe("failed");
+    expect(row?.status).toBe("draft");
     expect(row?.ebay_listing_id).toBeNull();
   });
 
