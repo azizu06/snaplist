@@ -311,14 +311,45 @@ export function findUngroundedNumbers(
  * repair), so a mutated identifier like "WH-1000XM5" must be caught here, not
  * only in descriptions.
  */
+/**
+ * Digit-free connectives a title may use freely: pure function words and
+ * marketplace filler that cannot assert a product fact. Everything else in a
+ * generated title must be a token of the validated core (which includes the
+ * vision-validated display title, so grounded phrasing keeps its latitude).
+ */
+const TITLE_CONNECTIVES = new Set([
+  "a", "an", "the", "and", "or", "for", "with", "of", "in", "on", "by", "to",
+]);
+
+/**
+ * Every grounding violation in one generated TITLE: ungrounded numeric/price
+ * claims (same rules as free text) PLUS any digit-free token that is neither
+ * a core token nor a connective — "Includes Charger" or "Waterproof" is a
+ * violation even though it carries no digits. Titles are the one remaining
+ * model-authored published surface, so they get the strictest guard.
+ */
+export function titleViolations(
+  title: string,
+  grounding: NumericGrounding,
+): string[] {
+  const violations = [...findUngroundedNumbers(title, grounding)];
+  for (const token of tokenize(title)) {
+    if (/\d/.test(token)) continue; // numeric/alphanumeric handled above
+    if (grounding.coreTokens.has(token)) continue;
+    if (TITLE_CONNECTIVES.has(token)) continue;
+    violations.push(token);
+  }
+  return violations;
+}
+
 export function titlesViolateGrounding(
   raw: RawExportPacks,
   attrs: ExtractedAttributes,
 ): boolean {
   const grounding = buildNumericGrounding(attrs);
   return (
-    findUngroundedNumbers(raw.facebook.title, grounding).length > 0 ||
-    findUngroundedNumbers(raw.mercari.title, grounding).length > 0
+    titleViolations(raw.facebook.title, grounding).length > 0 ||
+    titleViolations(raw.mercari.title, grounding).length > 0
   );
 }
 

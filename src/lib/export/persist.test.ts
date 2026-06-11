@@ -61,6 +61,9 @@ const CORE: ExtractedAttributes = {
   model: "WH-1000XM4",
   category: "electronics",
   condition: "good",
+  // The vision-validated display title grounds the word "headphones" — the
+  // title guard (round 5) rejects any title token outside the core.
+  title: "Sony WH-1000XM4 Headphones",
 };
 
 const RAW: RawExportPacks = {

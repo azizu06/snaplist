@@ -32,6 +32,7 @@ import {
   repairMercariDescription,
   titlesViolateGrounding,
   type ExportPackGenerate,
+  titleViolations,
 } from "./generate";
 
 /**
@@ -719,5 +720,44 @@ describe("hashtag helpers (unit)", () => {
     expect(repairMercariDescription("Already ships with tracking.")).toBe(
       "Already ships with tracking.",
     );
+  });
+});
+
+describe("title guard rejects digit-free invented claims (#15 round 5)", () => {
+  const attrs = {
+    brand: "Sony",
+    model: "WH-1000XM4",
+    category: "electronics",
+    condition: "good",
+    title: "Sony WH-1000XM4 Wireless Headphones",
+  };
+
+  it("flags 'Includes Charger' / 'Waterproof' style tokens that no core value backs", () => {
+    const grounding = buildNumericGrounding(attrs);
+    expect(titleViolations("Sony WH-1000XM4 Includes Charger", grounding)).toContain("includes");
+    expect(titleViolations("Sony WH-1000XM4 Waterproof Headphones", grounding)).toContain("waterproof");
+    // Connectives and core-grounded words (incl. the vision title's) pass.
+    expect(titleViolations("Sony WH-1000XM4 Wireless Headphones for electronics", grounding)).toEqual([]);
+  });
+
+  it("an invented digit-free title claim drives retry then the deterministic fallback", async () => {
+    let calls = 0;
+    const generate = async () => {
+      calls += 1;
+      return {
+        facebook: { title: "Sony WH-1000XM4 Includes Charger", description: "" },
+        mercari: {
+          title: "Sony WH-1000XM4 Waterproof",
+          description: "",
+          hashtags: ["#sony"],
+        },
+      };
+    };
+    const packs = await generateExportPacks({ attributes: attrs, price: 120, generate });
+    expect(calls).toBe(2); // one self-correction retry
+    expect(packs.facebook.pack.title).not.toMatch(/charger/i);
+    expect(packs.mercari.pack.title).not.toMatch(/waterproof/i);
+    expect(packs.facebook.copyBlock).not.toMatch(/charger/i);
+    expect(packs.mercari.copyBlock).not.toMatch(/waterproof/i);
   });
 });
