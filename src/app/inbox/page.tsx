@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
@@ -48,15 +47,15 @@ export default async function InboxPage() {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Buyer inbox</h1>
-        <Link
-          href="/upload"
-          className="text-sm text-zinc-500 underline hover:text-zinc-800"
-        >
-          New listing
-        </Link>
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
+          Buyer inbox
+        </h1>
+        <p className="mt-1 text-sm text-muted">
+          Questions from buyers appear here live. We draft a reply from the
+          listing — you approve or edit before anything sends.
+        </p>
       </header>
 
       <InboxClient

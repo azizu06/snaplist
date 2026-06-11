@@ -25,10 +25,14 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
     <button
       type="button"
       onClick={copy}
-      className="rounded-md border border-zinc-300 px-3 py-1 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+      className={
+        copied
+          ? "rounded-md border border-success-border bg-success-soft px-3 py-1.5 text-xs font-medium text-success-soft-fg"
+          : "rounded-md border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg shadow-xs transition-colors hover:bg-surface-2"
+      }
       aria-label={label}
     >
-      {copied ? "Copied!" : "Copy"}
+      {copied ? "Copied ✓" : "Copy"}
     </button>
   );
 }

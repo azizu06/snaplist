@@ -6,17 +6,19 @@ import {
   loadOrGenerateExportPacks,
   type ExportPackView,
 } from "@/lib/export";
+import { Banner } from "@/components/ui/banner";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { CopyButton } from "./copy-button";
 
 /**
- * Export page (issue #15) — Facebook Marketplace + Mercari copy-paste packs for
- * one item, each rendered as a single clean block with a copy button.
+ * Export page (issue #15; #40 skin) — Facebook Marketplace + Mercari copy-paste
+ * packs for one item. Per-channel cards with copy feedback (E-1) plus the
+ * numbered how-to-post steps a first-time casual seller actually needs (E-2):
+ * these platforms have no listing APIs, so the pack is pasted by hand and the
+ * photos are re-attached from the phone — say so plainly.
  *
- * Reads the item through the USER-SCOPED server client (RLS proves ownership;
- * another user's id 404s), takes the price the item record carries today (the
- * latest prediction log's recommendation — rendered verbatim, never invented),
- * and serves the packs through the load-or-generate seam: generated once,
- * persisted as 'facebook' / 'mercari' listings rows, then reused.
+ * Data path unchanged: RLS-scoped reads, the load-or-generate seam, the latest
+ * logged price rendered verbatim.
  */
 export default async function ExportPage({
   params,
@@ -73,41 +75,55 @@ export default async function ExportPage({
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Export packs</h1>
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6 sm:py-10">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
+          Cross-post your listing
+        </h1>
         <Link
           href={`/review/${itemId}`}
-          className="text-sm text-zinc-500 underline hover:text-zinc-800"
+          className="text-sm text-muted hover:text-fg"
         >
-          Back to review
+          ← Back to review
         </Link>
       </header>
 
-      <p className="text-sm text-zinc-500">
-        Copy-paste blocks for cross-posting. Each block follows its platform’s
-        conventions and uses only the verified item details
+      <p className="text-sm text-muted">
+        Facebook Marketplace and Mercari don&apos;t allow apps to post for you,
+        so SnapList prepares a ready-to-paste pack for each — written in that
+        platform&apos;s style, using only your verified item details
         {price != null ? " and your stored price" : ""}.
       </p>
 
       {error ? (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          Couldn’t prepare the export packs: {error}
-        </p>
+        <Banner variant="error" title="Couldn’t prepare the export packs">
+          {error} — reload the page to try again.
+        </Banner>
       ) : packs ? (
         <>
-          <PackSection
+          <PackCard
             heading="Facebook Marketplace"
             note="Casual and short, framed for local pickup."
+            steps={[
+              "Copy the pack below.",
+              "In the Facebook app: Marketplace → Sell → Item.",
+              "Add your photos from your camera roll (photos can't ride the clipboard).",
+              "Paste — first line is the title, the rest is the description — and set the price.",
+            ]}
             pack={packs.facebook}
           />
-          <PackSection
+          <PackCard
             heading="Mercari"
             note="Short title, shipping-oriented description, hashtags."
+            steps={[
+              "Copy the pack below.",
+              "In the Mercari app: Sell → take or add your photos.",
+              "Paste the title and description, then set the price and shipping.",
+            ]}
             pack={packs.mercari}
           />
           {packs.model ? (
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-faint">
               Logged for evaluation · model: {packs.model}
             </p>
           ) : null}
@@ -117,29 +133,34 @@ export default async function ExportPage({
   );
 }
 
-function PackSection({
+function PackCard({
   heading,
   note,
+  steps,
   pack,
 }: {
   heading: string;
   note: string;
+  steps: string[];
   pack: ExportPackView;
 }) {
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-            {heading}
-          </h2>
-          <p className="text-xs text-zinc-400">{note}</p>
-        </div>
-        <CopyButton text={pack.copyBlock} label={`Copy the ${heading} pack`} />
-      </div>
-      <pre className="whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-4 font-sans text-sm text-zinc-800">
-        {pack.copyBlock}
-      </pre>
-    </section>
+    <Card>
+      <CardHeader
+        title={heading}
+        aside={<CopyButton text={pack.copyBlock} label={`Copy the ${heading} pack`} />}
+      />
+      <CardBody className="flex flex-col gap-3">
+        <p className="text-xs text-muted">{note}</p>
+        <pre className="whitespace-pre-wrap rounded-md border border-border bg-surface-2 p-4 font-sans text-sm leading-relaxed text-fg">
+          {pack.copyBlock}
+        </pre>
+        <ol className="flex list-decimal flex-col gap-1 pl-5 text-xs text-muted">
+          {steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      </CardBody>
+    </Card>
   );
 }

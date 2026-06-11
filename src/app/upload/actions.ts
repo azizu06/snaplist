@@ -39,26 +39,40 @@ export async function uploadAndProcess(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login?next=/upload");
 
-  const file = formData.get("photo");
-  if (!(file instanceof File) || file.size === 0) {
+  // 1–4 photos (issue #40, Mercari-style slots; PRD: "1 photo required, up to
+  // ~4 accepted"). Empty slot inputs submit zero-byte entries — filtered here,
+  // so the single-photo path behaves exactly as before.
+  const photos = formData
+    .getAll("photo")
+    .filter((f): f is File => f instanceof File && f.size > 0);
+  if (photos.length === 0) {
     redirect(`/upload?error=${encodeURIComponent("Choose a photo to upload.")}`);
   }
-  const photo = file as File;
-  if (!ACCEPTED.has(photo.type)) {
-    redirect(
-      `/upload?error=${encodeURIComponent("Unsupported file type. Use PNG, JPEG, or WEBP (convert HEIC photos first).")}`,
-    );
+  if (photos.length > 4) {
+    redirect(`/upload?error=${encodeURIComponent("Up to 4 photos per item.")}`);
+  }
+  for (const photo of photos) {
+    if (!ACCEPTED.has(photo.type)) {
+      redirect(
+        `/upload?error=${encodeURIComponent("Unsupported file type. Use PNG, JPEG, or WEBP (convert HEIC photos first).")}`,
+      );
+    }
   }
 
-  // User-scoped object path: first segment MUST be the user's id (storage policy).
-  const ext = photo.name.split(".").pop() ?? "bin";
-  const path = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-
-  const { error: uploadErr } = await supabase.storage
-    .from("photos")
-    .upload(path, photo, { contentType: photo.type, upsert: false });
-  if (uploadErr) {
-    redirect(`/upload?error=${encodeURIComponent(`Upload failed: ${uploadErr.message}`)}`);
+  // User-scoped object paths: first segment MUST be the user's id (storage policy).
+  const paths: string[] = [];
+  for (const photo of photos) {
+    const ext = photo.name.split(".").pop() ?? "bin";
+    const path = `${user.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage
+      .from("photos")
+      .upload(path, photo, { contentType: photo.type, upsert: false });
+    if (uploadErr) {
+      redirect(
+        `/upload?error=${encodeURIComponent(`Upload failed: ${uploadErr.message}`)}`,
+      );
+    }
+    paths.push(path);
   }
 
   let itemId: string;
@@ -75,7 +89,7 @@ export async function uploadAndProcess(formData: FormData) {
       supabase,
       {
         userId: user.id,
-        photos: [path],
+        photos: paths,
         autopilotEnabled,
       },
       pipeline,
@@ -100,16 +114,18 @@ export async function setAutopilotSetting(formData: FormData) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/upload");
+  if (!user) redirect("/login?next=/settings");
 
   const enabled = formData.get("enabled") === "true";
   try {
     await setAutopilotEnabled(supabase, user.id, enabled);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update autopilot.";
-    redirect(`/upload?error=${encodeURIComponent(message)}`);
+    redirect(`/settings?error=${encodeURIComponent(message)}`);
   }
 
-  revalidatePath("/upload");
-  redirect("/upload");
+  // The switch lives on the Settings surface (issue #40, X-11 — moved out of
+  // the upload footer so the auto-publish consequence can be explained).
+  revalidatePath("/settings");
+  redirect("/settings");
 }
