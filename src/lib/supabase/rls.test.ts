@@ -249,4 +249,44 @@ describe("RLS tenancy isolation", () => {
     expect(error).not.toBeNull();
     expect(data ?? []).toHaveLength(0);
   });
+
+  it("user A CANNOT thread reply_to onto user B's message (tenant-aware composite FK)", async () => {
+    if (!reachable) return;
+
+    // B has an inbound question awaiting B's reply.
+    const { data: bMessage, error: bMsgErr } = await userB.client
+      .from("messages")
+      .insert({ user_id: userB.id, direction: "inbound", body: "B question" })
+      .select("id")
+      .single();
+    expect(bMsgErr).toBeNull();
+
+    // Referential-integrity checks BYPASS RLS, so without the composite FK
+    // user A could insert their OWN row whose reply_to points at B's message,
+    // letting the global reply_to unique index reserve B's slot (cross-tenant
+    // denial of B's reply delivery). The (reply_to, user_id) -> (id, user_id)
+    // FK must reject the foreign reference outright.
+    const { data: hijack, error: hijackErr } = await userA.client
+      .from("messages")
+      .insert({
+        user_id: userA.id,
+        direction: "outbound",
+        body: "squatting on B's slot",
+        status: "sent",
+        reply_to: bMessage!.id,
+      })
+      .select();
+    expect(hijackErr).not.toBeNull();
+    expect(hijack ?? []).toHaveLength(0);
+
+    // B's own reply to B's own message still threads fine.
+    const { error: legitErr } = await userB.client.from("messages").insert({
+      user_id: userB.id,
+      direction: "outbound",
+      body: "B's actual reply",
+      status: "sent",
+      reply_to: bMessage!.id,
+    });
+    expect(legitErr).toBeNull();
+  });
 });
