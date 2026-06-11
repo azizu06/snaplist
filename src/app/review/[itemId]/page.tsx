@@ -125,11 +125,12 @@ export default async function ReviewPage({
         return {
           tone: "amber" as const,
           title: "Queued for your review",
+          // Neutral when confidence met the bar: the run-time autopilot
+          // decision is not persisted, and legacy drafts predate the setting
+          // entirely — never claim "autopilot was off" without evidence.
           detail: confidenceFellShort
             ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
-            : confidence != null
-              ? "Autopilot was off when this listing was generated — it waits for your approval."
-              : "This listing waits for your approval.",
+            : "Autopilot didn't auto-post this listing — it waits for your approval.",
         };
       case "published":
         return {
