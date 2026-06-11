@@ -81,6 +81,21 @@ interface ExaResponse {
 
 const SEARCH_RESULT_LIMIT = 8;
 
+/**
+ * Hard cap on each result's snippet text. Exa's `contents.text` returns FULL
+ * page text (a long page or PDF can be hundreds of KB), and up to
+ * SEARCH_RESULT_LIMIT results feed the extraction prompt on each of up to
+ * MAX_SEARCH_ITERATIONS iterations — unbounded, a single upload could blow
+ * the model context window (and the token bill). Comps are short price lines;
+ * this is plenty of signal per result.
+ */
+const SNIPPET_MAX_CHARS = 1500;
+
+function truncateSnippet(text: string | undefined): string | undefined {
+  if (text == null || text.length <= SNIPPET_MAX_CHARS) return text;
+  return text.slice(0, SNIPPET_MAX_CHARS);
+}
+
 async function tavilySearch(
   apiKey: string,
   query: string,
@@ -101,7 +116,7 @@ async function tavilySearch(
     .filter((r): r is { url: string; title?: string; content?: string } =>
       typeof r.url === "string" && r.url.length > 0,
     )
-    .map((r) => ({ url: r.url, title: r.title, snippet: r.content }));
+    .map((r) => ({ url: r.url, title: r.title, snippet: truncateSnippet(r.content) }));
 }
 
 async function exaSearch(
@@ -117,7 +132,9 @@ async function exaSearch(
     body: JSON.stringify({
       query,
       numResults: SEARCH_RESULT_LIMIT,
-      contents: { text: true },
+      // Ask Exa for BOUNDED text up front (full page text can be hundreds of
+      // KB); the map below re-truncates defensively either way.
+      contents: { text: { maxCharacters: SNIPPET_MAX_CHARS } },
     }),
   });
   if (!res.ok) {
@@ -128,7 +145,7 @@ async function exaSearch(
     .filter((r): r is { url: string; title?: string; text?: string } =>
       typeof r.url === "string" && r.url.length > 0,
     )
-    .map((r) => ({ url: r.url, title: r.title, snippet: r.text }));
+    .map((r) => ({ url: r.url, title: r.title, snippet: truncateSnippet(r.text) }));
 }
 
 /**
@@ -249,10 +266,13 @@ export function createOpenAICompExtractor(
       null,
       2,
     );
+    // Re-truncate at the prompt boundary too: injected SearchClients bypass
+    // the default providers' caps, and the context window is THIS call's
+    // budget to protect.
     const hits = results
       .map(
         (r, i) =>
-          `Result ${i + 1}:\nurl: ${r.url}\ntitle: ${r.title ?? ""}\nsnippet: ${r.snippet ?? ""}`,
+          `Result ${i + 1}:\nurl: ${r.url}\ntitle: ${r.title ?? ""}\nsnippet: ${truncateSnippet(r.snippet) ?? ""}`,
       )
       .join("\n\n");
 
