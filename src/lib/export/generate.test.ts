@@ -17,7 +17,13 @@ import {
   MERCARI_SHIPPING_SUFFIX,
   derivableHashtagBodies,
   deriveDefaultHashtags,
+  descriptionsViolateGrounding,
+  fallbackDescription,
+  fallbackFacebookDescription,
+  fallbackMercariDescription,
+  findUngroundedNumbers,
   formatPrice,
+  groundedNumericTokens,
   generateExportPacks,
   normalizeHashtag,
   packsHallucinateAttributes,
@@ -364,6 +370,144 @@ describe("retry + failure behavior", () => {
     expect(calls.length).toBe(2);
     expect(res.mercari.pack.hashtags).toContain("#sony");
     expect(res.mercari.pack.hashtags).not.toContain("#bose");
+  });
+});
+
+describe("description grounding: no ungrounded numbers or prices in free text", () => {
+  /** Helper: every digit run in `text` is grounded in CORE (+ optional price). */
+  function ungrounded(text: string, price?: number): string[] {
+    return findUngroundedNumbers(text, groundedNumericTokens(CORE, price));
+  }
+
+  it("a model-written '$50' in the FB description triggers retry, then the deterministic fallback", async () => {
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: {
+        ...GOOD_RAW.facebook,
+        description: "Great Sony headphones, asking $50 or best offer.",
+      },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+
+    // One self-correction retry happened before settling on the fallback.
+    expect(calls.length).toBe(2);
+    // The claim is NOT published: deterministic core-only fallback instead.
+    expect(res.facebook.pack.description).toBe(fallbackFacebookDescription(CORE));
+    expect(res.facebook.pack.description).not.toContain("$");
+    expect(res.facebook.pack.description).not.toContain("50");
+    expect(facebookPackSchema.safeParse(res.facebook.pack).success).toBe(true);
+    // The Mercari description was clean and survives untouched.
+    expect(res.mercari.pack.description).toBe(GOOD_RAW.mercari.description);
+  });
+
+  it("an unsupported number in the Mercari description triggers retry, then the deterministic fallback", async () => {
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      mercari: {
+        ...GOOD_RAW.mercari,
+        description:
+          "Sony WH-1000XM4 headphones, includes a 25W charger. Ships fast.",
+      },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+
+    expect(calls.length).toBe(2);
+    expect(res.mercari.pack.description).toBe(fallbackMercariDescription(CORE));
+    expect(res.mercari.pack.description).not.toContain("25");
+    // The fallback still honors the Mercari shipping convention and schema.
+    expect(res.mercari.pack.description).toMatch(/ship/i);
+    expect(mercariPackSchema.safeParse(res.mercari.pack).success).toBe(true);
+    // The FB description was clean and survives untouched.
+    expect(res.facebook.pack.description).toBe(GOOD_RAW.facebook.description);
+  });
+
+  it("a successful self-correction retry publishes the model's clean copy, not the fallback", async () => {
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: { ...GOOD_RAW.facebook, description: "Asking 50 dollars, like new." },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, GOOD_RAW]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+    expect(calls.length).toBe(2);
+    expect(res.facebook.pack.description).toBe(GOOD_RAW.facebook.description);
+  });
+
+  it("grounded numbers from the core pass without a retry (e.g. 'WH-1000XM4', '128GB')", async () => {
+    const core: ExtractedAttributes = { ...CORE, specs: [...CORE.specs!, "128GB case"] };
+    const raw: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: {
+        ...GOOD_RAW.facebook,
+        description:
+          "Sony WH-1000XM4 headphones with the 128GB case, good condition.",
+      },
+    };
+    const { generate, calls } = scriptedGenerate([raw]);
+    const res = await generateExportPacks({ attributes: core, generate });
+    expect(calls.length).toBe(1);
+    expect(res.facebook.pack.description).toBe(raw.facebook.description);
+  });
+
+  it("the deterministic fallback satisfies both strict schemas and contains no ungrounded numbers", () => {
+    const fb = fallbackFacebookDescription(CORE);
+    const mercari = fallbackMercariDescription(CORE);
+    expect(
+      facebookPackSchema.safeParse({ title: "t", description: fb }).success,
+    ).toBe(true);
+    expect(
+      mercariPackSchema.safeParse({ title: "t", description: mercari, hashtags: [] })
+        .success,
+    ).toBe(true);
+    expect(ungrounded(fb)).toEqual([]);
+    expect(ungrounded(mercari)).toEqual([]);
+    // A bare core still yields non-empty, schema-valid fallback text.
+    expect(fallbackDescription({}).length).toBeGreaterThan(0);
+    expect(ungrounded(fallbackFacebookDescription({}))).toEqual([]);
+  });
+
+  it("groundedNumericTokens covers core digit runs and the stored price", () => {
+    const tokens = groundedNumericTokens(CORE, 49.99);
+    expect(tokens.has("1000")).toBe(true); // from WH-1000XM4
+    expect(tokens.has("4")).toBe(true);
+    expect(tokens.has("49")).toBe(true); // from the stored price
+    expect(tokens.has("99")).toBe(true);
+    expect(tokens.has("50")).toBe(false);
+  });
+
+  it("findUngroundedNumbers flags currency-like spans even when the digits are grounded", () => {
+    // "120" is allowlisted via the stored price, but writing it AS A PRICE is
+    // still a violation — the price line is appended deterministically.
+    expect(ungrounded("Asking $120 firm.", 120).length).toBeGreaterThan(0);
+    expect(ungrounded("Asking 120 dollars.", 120).length).toBeGreaterThan(0);
+    // A bare grounded number (a spec-like mention) passes.
+    expect(ungrounded("The 1000XM4 model.", 120)).toEqual([]);
+  });
+
+  it("packsHallucinateAttributes now covers descriptions, not just hashtags", () => {
+    expect(packsHallucinateAttributes(GOOD_RAW, CORE)).toBe(false);
+    expect(
+      packsHallucinateAttributes(
+        {
+          ...GOOD_RAW,
+          facebook: { ...GOOD_RAW.facebook, description: "Asking $50." },
+        },
+        CORE,
+      ),
+    ).toBe(true);
+    expect(
+      packsHallucinateAttributes(
+        {
+          ...GOOD_RAW,
+          mercari: { ...GOOD_RAW.mercari, description: "Includes 3 cables. Ships." },
+        },
+        CORE,
+      ),
+    ).toBe(true);
+    expect(
+      descriptionsViolateGrounding(GOOD_RAW, CORE, 49.99),
+    ).toBe(false);
   });
 });
 

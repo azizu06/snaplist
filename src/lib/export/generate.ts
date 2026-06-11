@@ -179,20 +179,102 @@ export function reconcileHashtags(
   return out.length > 0 ? out : deriveDefaultHashtags(attrs);
 }
 
+// ---------------------------------------------------------------------------
+// No-hallucination guard for the FREE-TEXT surface: both descriptions. The
+// model can smuggle an unsupported fact or price into free text just as easily
+// as into a hashtag, so the same allowlist stance applies: every numeric token
+// in either description must be derivable from the validated core (or the
+// caller-passed stored price), and currency-like spans ("$50", "50 dollars")
+// are ALWAYS violations — the model is never allowed to write a price, because
+// the stored price is appended deterministically by `facebookCopyBlock`.
+// ---------------------------------------------------------------------------
+
 /**
- * Did the RAW model output invent hashtag attributes beyond the validated core?
- * Used (like `listingHallucinatesAttributes`) to prefer a self-correcting retry;
- * the deterministic whitelist guarantees a clean result regardless.
+ * The deterministic allowlist of GROUNDED numeric tokens: every digit run that
+ * appears in a validated core field (brand, model, category, condition, isbn,
+ * upc, specs, title) plus the digit runs of the caller-passed stored price.
+ * "WH-1000XM4" grounds "1000" and "4"; "128GB" grounds "128"; price 49.99
+ * grounds "49" and "99". This is the COMPLETE vocabulary of numbers the model
+ * may write in free text; anything else is an invented claim.
+ */
+export function groundedNumericTokens(
+  attrs: ExtractedAttributes,
+  price?: number,
+): Set<string> {
+  const tokens = new Set<string>();
+  const sources = [
+    attrs.brand,
+    attrs.model,
+    attrs.category,
+    attrs.condition,
+    attrs.isbn,
+    attrs.upc,
+    attrs.title,
+    ...(attrs.specs ?? []),
+  ].filter((s): s is string => typeof s === "string" && s.length > 0);
+  if (price != null) sources.push(String(price));
+  for (const source of sources) {
+    for (const run of source.match(/\d+/g) ?? []) tokens.add(run);
+  }
+  return tokens;
+}
+
+/** Currency-like spans the model must NEVER write: "$50", "50 dollars", "50 usd"… */
+const CURRENCY_PATTERN =
+  /\$\s*\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|bucks?|usd)\b/gi;
+
+/**
+ * Every grounding violation in one free-text string: currency-like spans
+ * (always violations — prices are appended deterministically, never written by
+ * the model) plus any digit run not in the grounded allowlist. Empty array ⇔
+ * the text makes no ungrounded numeric/price claim.
+ */
+export function findUngroundedNumbers(
+  text: string,
+  allowed: Set<string>,
+): string[] {
+  const violations: string[] = [];
+  violations.push(...(text.match(CURRENCY_PATTERN) ?? []));
+  for (const run of text.match(/\d+/g) ?? []) {
+    if (!allowed.has(run)) violations.push(run);
+  }
+  return violations;
+}
+
+/**
+ * Does either free-text description (Facebook OR Mercari) make a numeric/price
+ * claim the validated core + stored price never established?
+ */
+export function descriptionsViolateGrounding(
+  raw: RawExportPacks,
+  attrs: ExtractedAttributes,
+  price?: number,
+): boolean {
+  const allowed = groundedNumericTokens(attrs, price);
+  return (
+    findUngroundedNumbers(raw.facebook.description, allowed).length > 0 ||
+    findUngroundedNumbers(raw.mercari.description, allowed).length > 0
+  );
+}
+
+/**
+ * Did the RAW model output invent attributes beyond the validated core — an
+ * underivable Mercari hashtag OR an ungrounded number/price in either
+ * description? Used (like `listingHallucinatesAttributes`) to prefer a
+ * self-correcting retry; the deterministic whitelist + description fallback
+ * guarantee a clean result regardless.
  */
 export function packsHallucinateAttributes(
   raw: RawExportPacks,
   attrs: ExtractedAttributes,
+  price?: number,
 ): boolean {
   const allowed = derivableHashtagBodies(attrs);
-  return raw.mercari.hashtags.some((candidate) => {
+  const badHashtag = raw.mercari.hashtags.some((candidate) => {
     const tag = normalizeHashtag(candidate);
     return tag != null && !allowed.has(tag.slice(1));
   });
+  return badHashtag || descriptionsViolateGrounding(raw, attrs, price);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +302,42 @@ export function repairMercariDescription(raw: string): string {
   const cut = enforceTitleLength(trimmed, budget);
   if (/ship/i.test(cut)) return cut;
   return cut.length > 0 ? `${cut} ${MERCARI_SHIPPING_SUFFIX}` : MERCARI_SHIPPING_SUFFIX;
+}
+
+/**
+ * Deterministic description built ONLY from the validated core — the fallback
+ * published when the model's free text makes an ungrounded numeric/price claim
+ * on its final attempt. Every word traces to a core field, so it is grounded
+ * by construction (any digits it contains came from the core itself).
+ */
+export function fallbackDescription(attrs: ExtractedAttributes): string {
+  const name =
+    [attrs.brand, attrs.model].filter(Boolean).join(" ") ||
+    attrs.title ||
+    attrs.category ||
+    "this item";
+  const sentences = [`For sale: ${name}.`];
+  if (attrs.condition) sentences.push(`Condition: ${attrs.condition}.`);
+  if (attrs.specs && attrs.specs.length > 0) {
+    sentences.push(`Details: ${attrs.specs.join(", ")}.`);
+  }
+  return sentences.join(" ");
+}
+
+/**
+ * The Facebook-shaped deterministic fallback: the core-only description capped
+ * at the FB structural limit (word-boundary truncation, same repair as titles).
+ */
+export function fallbackFacebookDescription(attrs: ExtractedAttributes): string {
+  return enforceTitleLength(fallbackDescription(attrs), FACEBOOK_DESCRIPTION_MAX_LENGTH);
+}
+
+/**
+ * The Mercari-shaped deterministic fallback: the core-only description routed
+ * through the standard Mercari repair, so it is ≤ the cap AND shipping-oriented.
+ */
+export function fallbackMercariDescription(attrs: ExtractedAttributes): string {
+  return repairMercariDescription(fallbackDescription(attrs));
 }
 
 /** Render a stored price for the block ("$45" / "$49.99"). */
@@ -303,22 +421,35 @@ interface ReconciledPacks {
   mercari: MercariPack;
 }
 
-/** Deterministic constraint repair: after this, both packs provably satisfy their schemas. */
+/**
+ * Deterministic constraint repair: after this, both packs provably satisfy
+ * their schemas AND make no ungrounded numeric/price claim. Length caps are
+ * repaired by truncation; hashtags are whitelisted; a description carrying a
+ * number/price the core + stored price never established is REPLACED with the
+ * deterministic core-only fallback (truncation alone would publish the claim).
+ */
 function reconcilePacks(
   raw: RawExportPacks,
   attributes: ExtractedAttributes,
+  price?: number,
 ): ReconciledPacks {
+  const allowed = groundedNumericTokens(attributes, price);
+  const fbGrounded =
+    findUngroundedNumbers(raw.facebook.description, allowed).length === 0;
+  const mercariGrounded =
+    findUngroundedNumbers(raw.mercari.description, allowed).length === 0;
   return {
     facebook: {
       title: enforceTitleLength(raw.facebook.title, FACEBOOK_TITLE_MAX_LENGTH),
-      description: enforceTitleLength(
-        raw.facebook.description,
-        FACEBOOK_DESCRIPTION_MAX_LENGTH,
-      ),
+      description: fbGrounded
+        ? enforceTitleLength(raw.facebook.description, FACEBOOK_DESCRIPTION_MAX_LENGTH)
+        : fallbackFacebookDescription(attributes),
     },
     mercari: {
       title: enforceTitleLength(raw.mercari.title, MERCARI_TITLE_MAX_LENGTH),
-      description: repairMercariDescription(raw.mercari.description),
+      description: mercariGrounded
+        ? repairMercariDescription(raw.mercari.description)
+        : fallbackMercariDescription(attributes),
       hashtags: reconcileHashtags(raw.mercari.hashtags, attributes),
     },
   };
@@ -354,9 +485,11 @@ function assembleResult(
  *
  * Flow per attempt (mirrors `generateEbayListing`): call the injected
  * `generate`, deterministically repair lengths / shipping orientation /
- * hashtags, validate against the strict pack schemas. If the RAW output
- * hallucinated hashtag attributes, retry so the model can self-correct; the
- * reconciled candidate is kept as the guaranteed-clean fallback.
+ * hashtags / ungrounded description numbers (replaced with the core-only
+ * fallback), validate against the strict pack schemas. If the RAW output
+ * hallucinated attributes (hashtags OR description numbers/prices), retry so
+ * the model can self-correct; the reconciled candidate is kept as the
+ * guaranteed-clean fallback.
  */
 export async function generateExportPacks(
   input: GenerateExportPacksInput,
@@ -380,7 +513,7 @@ export async function generateExportPacks(
       continue;
     }
 
-    const reconciled = reconcilePacks(raw, attributes);
+    const reconciled = reconcilePacks(raw, attributes, input.price);
 
     const fbParsed = facebookPackSchema.safeParse(reconciled.facebook);
     const mercariParsed = mercariPackSchema.safeParse(reconciled.mercari);
@@ -395,12 +528,13 @@ export async function generateExportPacks(
     }
     lastReconciled = { facebook: fbParsed.data, mercari: mercariParsed.data };
 
-    // If the RAW output invented hashtag attributes, prefer a retry so the model
-    // can self-correct; the reconciled candidate is already clean and is kept as
-    // the fallback for the final attempt.
-    if (packsHallucinateAttributes(raw, attributes) && attempt < attempts - 1) {
+    // If the RAW output invented attributes (an underivable hashtag OR an
+    // ungrounded number/price in either description), prefer a retry so the
+    // model can self-correct; the reconciled candidate is already clean and is
+    // kept as the fallback for the final attempt.
+    if (packsHallucinateAttributes(raw, attributes, input.price) && attempt < attempts - 1) {
       lastError =
-        "generated packs introduced hashtag attributes beyond the validated core";
+        "generated packs introduced attributes beyond the validated core (hashtag or description number/price)";
       continue;
     }
 
@@ -458,7 +592,7 @@ export function createOpenAIExportPackGenerate(
     const instruction =
       attempt === 0
         ? `Write the Facebook Marketplace pack and the Mercari pack for this item.\n\nValidated attributes (the ONLY allowed facts):\n${facts}`
-        : `Your previous response violated the platform constraints (Facebook title ≤ ${FACEBOOK_TITLE_MAX_LENGTH}, Mercari title ≤ ${MERCARI_TITLE_MAX_LENGTH}, ≤ ${MERCARI_MAX_HASHTAGS} hashtags drawn only from the given facts, no attributes beyond the validated core). Regenerate strictly using only these facts:\n${facts}`;
+        : `Your previous response violated the platform constraints (Facebook title ≤ ${FACEBOOK_TITLE_MAX_LENGTH}, Mercari title ≤ ${MERCARI_TITLE_MAX_LENGTH}, ≤ ${MERCARI_MAX_HASHTAGS} hashtags drawn only from the given facts, no attributes beyond the validated core, NO prices and NO numbers that do not appear in the given facts). Regenerate strictly using only these facts:\n${facts}`;
 
     const { object } = await generateObject({
       model: openai.chat(model),
