@@ -102,6 +102,40 @@ describe("HttpEbayAdapter.publishListing", () => {
     }
   });
 
+  it("derives Content-Language from the configured marketplace (and honors the override)", async () => {
+    const respond = (url: string) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/offer")) return json(201, { offerId: "o" });
+      return json(200, { listingId: "l" });
+    };
+
+    // The sandbox→production/marketplace flip is env-only: EBAY_DE must speak de-DE.
+    const de = fakeFetch(respond);
+    await new HttpEbayAdapter({
+      fetch: de.fetch,
+      tokenProvider,
+      env: () => ({ ...sellerEnv, EBAY_MARKETPLACE_ID: "EBAY_DE" }),
+    }).publishListing(request);
+    for (const call of de.calls) {
+      expect((call.init.headers as Record<string, string>)["content-language"]).toBe("de-DE");
+    }
+
+    // Explicit override for multi-language marketplaces (EBAY_BE defaults fr-BE).
+    const be = fakeFetch(respond);
+    await new HttpEbayAdapter({
+      fetch: be.fetch,
+      tokenProvider,
+      env: () => ({
+        ...sellerEnv,
+        EBAY_MARKETPLACE_ID: "EBAY_BE",
+        EBAY_CONTENT_LANGUAGE: "nl-BE",
+      }),
+    }).publishListing(request);
+    for (const call of be.calls) {
+      expect((call.init.headers as Record<string, string>)["content-language"]).toBe("nl-BE");
+    }
+  });
+
   it("maps the request onto the inventory-item and offer payloads (incl. env policies)", async () => {
     const { fetch, calls } = fakeFetch((url) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
@@ -208,6 +242,60 @@ describe("HttpEbayAdapter.publishListing", () => {
     // The recovered offer's update-in-place carries the required duration too.
     const updateBody = JSON.parse(String(calls[2]!.init.body));
     expect(updateBody.listingDuration).toBe("GTC");
+  });
+
+  it("recovers via getOffers-by-SKU when the 25002 conflict carries NO offerId parameter", async () => {
+    // eBay documents offerId only on successful createOffer responses — the
+    // error parameter is not a contract. Without it the adapter must fall back
+    // to GET /offer?sku=... or the listing is permanently stuck on retry.
+    const { fetch, calls } = fakeFetch((url, init) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/sell/inventory/v1/offer") && init.method === "POST") {
+        return json(400, {
+          errors: [{ errorId: 25002, message: "Offer entity already exists." }],
+        });
+      }
+      if (url.includes("/sell/inventory/v1/offer?sku=") && init.method === "GET") {
+        return json(200, {
+          offers: [
+            { offerId: "offer-other", marketplaceId: "EBAY_GB" },
+            { offerId: "offer-found", marketplaceId: "EBAY_US" },
+          ],
+        });
+      }
+      if (url.endsWith("/offer/offer-found") && init.method === "PUT") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/offer/offer-found/publish")) return json(200, { listingId: "L-3" });
+      throw new Error(`unexpected call: ${url}`);
+    });
+    const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => sellerEnv });
+
+    const result = await adapter.publishListing(request);
+    // The lookup filters to OUR marketplace's offer, then updates + publishes it.
+    expect(result).toEqual({ listingId: "L-3", offerId: "offer-found", status: "published" });
+    const lookup = calls.find((c) => c.init.method === "GET");
+    expect(lookup?.url).toContain("sku=listing-uuid-1");
+    expect(lookup?.url).toContain("marketplace_id=EBAY_US");
+    expect(lookup?.init.body).toBeUndefined();
+  });
+
+  it("rethrows the ORIGINAL 25002 conflict when the getOffers fallback also finds nothing", async () => {
+    const { fetch } = fakeFetch((url, init) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/sell/inventory/v1/offer") && init.method === "POST") {
+        return json(400, {
+          errors: [{ errorId: 25002, message: "Offer entity already exists." }],
+        });
+      }
+      if (init.method === "GET") return json(200, { offers: [] });
+      throw new Error(`unexpected call: ${url}`);
+    });
+    const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => sellerEnv });
+
+    const err = await adapter.publishListing(request).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EbayApiError);
+    expect((err as EbayApiError).message).toMatch(/offer/i);
   });
 
   it("propagates other eBay errors as EbayApiError with status + payload", async () => {

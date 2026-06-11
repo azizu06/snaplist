@@ -96,6 +96,41 @@ export function marketplaceCurrency(
   return MARKETPLACE_CURRENCY[marketplaceId?.trim() ?? ""] ?? "USD";
 }
 
+/**
+ * Marketplace id → the `Content-Language` locale the Sell Inventory API
+ * requires on create/update calls. eBay documents marketplace-specific
+ * locales (en-GB, de-DE, fr-FR, …); sending en-US to a non-US marketplace can
+ * reject the publish or mislabel localized fields. `EBAY_CONTENT_LANGUAGE`
+ * overrides for multi-language marketplaces (e.g. nl-BE on EBAY_BE) or ids
+ * not in the map (which falls back to en-US).
+ */
+const MARKETPLACE_LOCALE: Record<string, string> = {
+  EBAY_US: "en-US",
+  EBAY_MOTORS_US: "en-US",
+  EBAY_CA: "en-CA",
+  EBAY_GB: "en-GB",
+  EBAY_AU: "en-AU",
+  EBAY_DE: "de-DE",
+  EBAY_FR: "fr-FR",
+  EBAY_IT: "it-IT",
+  EBAY_ES: "es-ES",
+  EBAY_IE: "en-IE",
+  EBAY_AT: "de-AT",
+  EBAY_BE: "fr-BE",
+  EBAY_NL: "nl-NL",
+  EBAY_CH: "de-CH",
+  EBAY_PL: "pl-PL",
+};
+
+export function marketplaceContentLanguage(
+  marketplaceId: string | undefined,
+  override?: string,
+): string {
+  const o = override?.trim();
+  if (o) return o;
+  return MARKETPLACE_LOCALE[marketplaceId?.trim() ?? ""] ?? "en-US";
+}
+
 /** Format a price for the Sell API money type (decimal string, 2 places). */
 export function toEbayPrice(price: number, currency = "USD"): { value: string; currency: string } {
   if (!Number.isFinite(price) || price <= 0) {

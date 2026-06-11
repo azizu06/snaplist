@@ -38,6 +38,9 @@ const envSchema = z.object({
   EBAY_MARKETPLACE_ID: z.string().min(1).default("EBAY_US"),
   // Offer currency override; when unset the marketplace id determines it.
   EBAY_CURRENCY: z.string().min(1).optional(),
+  // Content-Language locale override (e.g. nl-BE); when unset the marketplace
+  // id determines it (EBAY_DE -> de-DE).
+  EBAY_CONTENT_LANGUAGE: z.string().min(1).optional(),
   EBAY_FULFILLMENT_POLICY_ID: z.string().min(1).optional(),
   EBAY_PAYMENT_POLICY_ID: z.string().min(1).optional(),
   EBAY_RETURN_POLICY_ID: z.string().min(1).optional(),

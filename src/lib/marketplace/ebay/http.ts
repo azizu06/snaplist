@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import { EbayApiError } from "./types";
 import { EnvTokenProvider } from "./auth";
+import { marketplaceContentLanguage } from "./map";
 
 /**
  * The REAL eBay Sell API adapter (issue #14): publishes a listing with the
@@ -68,6 +69,13 @@ export class HttpEbayAdapter implements EbayAdapter {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
+    // The Sell Inventory API requires Content-Language on create/update calls
+    // and documents marketplace-specific locales — en-US against EBAY_DE can
+    // reject the publish, so the locale must follow the marketplace flip.
+    const contentLanguage = marketplaceContentLanguage(
+      marketplaceId,
+      env.EBAY_CONTENT_LANGUAGE,
+    );
 
     // Fail fast, readably, on missing seller config (sandbox business policies).
     const missing = [
@@ -113,6 +121,7 @@ export class HttpEbayAdapter implements EbayAdapter {
           shipToLocationAvailability: { quantity: request.quantity },
         },
       },
+      contentLanguage,
     );
 
     // --- 2. Create (or recover + update) the offer. ---------------------------
@@ -142,22 +151,38 @@ export class HttpEbayAdapter implements EbayAdapter {
         "POST",
         `${baseUrl}/sell/inventory/v1/offer`,
         offerBody,
+        contentLanguage,
       );
       if (!created?.offerId) {
         throw new EbayApiError("eBay offer create returned no offerId", 200, created);
       }
       offerId = created.offerId;
     } catch (err) {
-      const existing = existingOfferIdFrom(err);
-      if (!existing) throw err;
+      if (!isOfferConflict(err)) throw err;
       // Offer already exists for this SKU (e.g. an earlier publish failed after
-      // step 2). Update it in place so price/description are current, then publish.
+      // step 2). eBay documents `offerId` as returned only by a successful
+      // createOffer — the conflict error's parameters are NOT a contract — so
+      // the canonical recovery is getOffers by SKU. The error parameter is
+      // kept as a fast path when present.
+      const existing =
+        existingOfferIdFrom(err) ??
+        (await this.findOfferIdBySku(
+          token,
+          baseUrl,
+          request.sku,
+          marketplaceId,
+          contentLanguage,
+        ));
+      if (!existing) throw err;
+      // Update the recovered offer in place so price/description are current,
+      // then publish.
       offerId = existing;
       await this.call(
         token,
         "PUT",
         `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
         offerBody,
+        contentLanguage,
       );
     }
 
@@ -167,6 +192,7 @@ export class HttpEbayAdapter implements EbayAdapter {
       "POST",
       `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`,
       {},
+      contentLanguage,
     );
     if (!published?.listingId) {
       throw new EbayApiError("eBay publish returned no listingId", 200, published);
@@ -175,23 +201,61 @@ export class HttpEbayAdapter implements EbayAdapter {
     return { listingId: published.listingId, offerId, status: "published" };
   }
 
+  /**
+   * Recover an existing offer id for a SKU via `GET /sell/inventory/v1/offer`
+   * — eBay's documented way to retrieve offers after a createOffer conflict.
+   * Returns undefined (caller rethrows the original conflict) when the lookup
+   * itself fails or finds nothing, so recovery never masks the root error.
+   */
+  private async findOfferIdBySku(
+    token: string,
+    baseUrl: string,
+    sku: string,
+    marketplaceId: string,
+    contentLanguage: string,
+  ): Promise<string | undefined> {
+    try {
+      const found = await this.call<{
+        offers?: Array<{ offerId?: string; marketplaceId?: string }>;
+      }>(
+        token,
+        "GET",
+        `${baseUrl}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&marketplace_id=${encodeURIComponent(marketplaceId)}`,
+        undefined,
+        contentLanguage,
+      );
+      const offers = found?.offers ?? [];
+      // Prefer the offer on OUR marketplace; a SKU can carry offers on others.
+      const match =
+        offers.find((o) => o.marketplaceId === marketplaceId) ?? offers[0];
+      return match?.offerId || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** One authenticated Sell API call; throws EbayApiError on any non-2xx. */
   private async call<T = unknown>(
     token: string,
-    method: "PUT" | "POST",
+    method: "GET" | "PUT" | "POST",
     url: string,
     body: unknown,
+    contentLanguage: string,
   ): Promise<T | undefined> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${token}`,
+      accept: "application/json",
+    };
+    if (method !== "GET") {
+      headers["content-type"] = "application/json";
+      // Required by the Sell Inventory API on create/update calls; locale
+      // must match the target marketplace (derived in publishListing).
+      headers["content-language"] = contentLanguage;
+    }
     const res = await this.fetchImpl(url, {
       method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        // Required by the Sell Inventory API on create/update calls.
-        "content-language": "en-US",
-        accept: "application/json",
-      },
-      body: JSON.stringify(body),
+      headers,
+      body: method === "GET" ? undefined : JSON.stringify(body),
     });
 
     const text = await res.text();
@@ -221,10 +285,17 @@ function firstErrorMessage(body: unknown): string | undefined {
   return (body as EbayErrorPayload | undefined)?.errors?.[0]?.message;
 }
 
+/** Is the error eBay's "offer already exists" createOffer conflict (25002)? */
+function isOfferConflict(err: unknown): boolean {
+  if (!(err instanceof EbayApiError)) return false;
+  const errors = (err.body as EbayErrorPayload | undefined)?.errors ?? [];
+  return errors.some((e) => e.errorId === OFFER_ALREADY_EXISTS);
+}
+
 /**
- * If the error is eBay's "offer already exists" (25002), pull the existing
- * offerId out of the error parameters so the caller can recover instead of
- * failing a re-publish.
+ * FAST PATH only: some 25002 payloads carry the existing offerId as an error
+ * parameter, but eBay does not document this as a contract — when absent, the
+ * caller falls back to the documented getOffers-by-SKU lookup.
  */
 function existingOfferIdFrom(err: unknown): string | undefined {
   if (!(err instanceof EbayApiError)) return undefined;
