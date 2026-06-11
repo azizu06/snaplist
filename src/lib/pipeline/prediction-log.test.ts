@@ -217,6 +217,7 @@ function makeMockSupabase(rows: PredictionLogReadRow[]) {
     select?: string;
     eq?: [string, unknown];
     order?: [string, { ascending: boolean }];
+    limit?: number;
   } = {};
   const builder = {
     eq(column: string, value: unknown) {
@@ -237,7 +238,24 @@ function makeMockSupabase(rows: PredictionLogReadRow[]) {
         const cmp = String(a[key]).localeCompare(String(b[key]));
         return opts.ascending ? cmp : -cmp;
       });
-      return Promise.resolve({ data: result, error: null });
+      // PostgREST chains `.limit()` AFTER `.order()` — the mock mirrors that
+      // shape (a thenable that also exposes limit) so the `--db` path's
+      // `limit: 1` read has real offline coverage.
+      return {
+        limit(n: number) {
+          calls.limit = n;
+          return Promise.resolve({ data: result.slice(0, n), error: null });
+        },
+        then(
+          onFulfilled: (v: { data: PredictionLogReadRow[]; error: null }) => unknown,
+          onRejected?: (reason: unknown) => unknown,
+        ) {
+          return Promise.resolve({ data: result, error: null }).then(
+            onFulfilled,
+            onRejected,
+          );
+        },
+      };
     },
   };
   const client = {
@@ -288,6 +306,28 @@ describe("readPredictionLogs ordering contract", () => {
     expect(calls.eq).toEqual(["item_id", "item-1"]);
     expect(logs).toHaveLength(2);
     expect(logs.map((l) => l.price)).toEqual([100, 200]);
+  });
+
+  it("newest-first + limit 1 returns exactly the single newest row (the --db read shape)", async () => {
+    // This is the linchpin of the api.max_rows immunity: the --db path reads
+    // ONE newest row per gold item instead of an unbounded ascending scan
+    // whose newest rows a row cap would silently clip.
+    const { client, calls } = makeMockSupabase([
+      makeReadRow("item-1", "2026-06-08T12:00:00Z", 100),
+      makeReadRow("item-1", "2026-06-10T12:00:00Z", 200),
+      makeReadRow("item-2", "2026-06-09T12:00:00Z", 90),
+    ]);
+
+    const logs = await readPredictionLogs(client, {
+      itemId: "item-1",
+      ascending: false,
+      limit: 1,
+    });
+
+    expect(calls.order).toEqual(["created_at", { ascending: false }]);
+    expect(calls.limit).toBe(1);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.price).toBe(200);
   });
 
   it("scores the NEWEST run when an item has duplicate predictions in non-chronological input order", async () => {

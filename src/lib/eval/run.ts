@@ -116,11 +116,12 @@ export function requireDbCredentials(
 }
 
 /**
- * Fold chronologically-ascending eBay listing rows into a newest-listing-per-
- * item map (later rows overwrite earlier ones). The caller's query supplies
- * the ordering + platform='ebay' filter; this keeps the LAST valid row, so
- * the judged surface is always the newest eBay listing — never a stale rerun
- * or an export-pack row. Exported for tests.
+ * Fold eBay listing rows into a listing-per-item map (later rows overwrite
+ * earlier ones). The caller's per-prediction queries each return AT MOST ONE
+ * row (run_id-pinned, or newest-first `limit: 1` for legacy predictions), so
+ * keep-last is a safety net rather than the dedup mechanism; the platform
+ * filter lives in the query. Invalid rows (schema mismatch / empty title)
+ * fall out instead of being judged. Exported for tests.
  */
 export function collectJudgedListings(
   rows: ReadonlyArray<Record<string, unknown>>,

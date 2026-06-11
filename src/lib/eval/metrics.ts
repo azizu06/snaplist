@@ -284,9 +284,10 @@ export interface MatchResult {
  * when multiple predictions target the same gold item the LAST one wins (the
  * most recent run), which is documented behavior rather than an error so a
  * re-run log can be evaluated directly. Keep-last only means "newest" when the
- * input is chronologically ordered — the `--db` path satisfies this because
- * `readPredictionLogs` orders rows by `created_at` ascending (its documented
- * ordering contract); file-based predictions are scored in file order.
+ * input is chronologically ordered — load-bearing for file-based predictions
+ * (scored in file order); the `--db` path already yields exactly ONE newest
+ * row per gold item (per-item newest-first `limit: 1` reads), so keep-last is
+ * a no-op safety net there.
  */
 export function matchPredictions(
   gold: readonly GoldItem[],
