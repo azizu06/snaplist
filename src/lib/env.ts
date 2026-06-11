@@ -21,6 +21,32 @@ const envSchema = z.object({
 
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),
+  // eBay Sell API credentials (issue #14). ALL OPTIONAL: the adapter reads them
+  // lazily at call time and fails with a readable error if publishing is attempted
+  // without them, so the rest of the app (and the offline test suite, which uses
+  // the mock adapter) never needs them. App-level auth for the sandbox; per-user
+  // OAuth replaces the token provider in #17 without touching the adapter.
+  EBAY_CLIENT_ID: z.string().min(1).optional(),
+  EBAY_CLIENT_SECRET: z.string().min(1).optional(),
+  // A user refresh token (minted once via the authorization-code flow) exchanged
+  // for short-lived access tokens; OR a pre-minted user access token for quick
+  // sandbox testing. Either unlocks the Sell Inventory API.
+  EBAY_REFRESH_TOKEN: z.string().min(1).optional(),
+  EBAY_OAUTH_TOKEN: z.string().min(1).optional(),
+  // Marketplace + business policies the offer is created against. Policy ids come
+  // from the seller's sandbox account (Seller Hub or the Account API).
+  EBAY_MARKETPLACE_ID: z.string().min(1).default("EBAY_US"),
+  // Offer currency override; when unset the marketplace id determines it.
+  EBAY_CURRENCY: z.string().min(1).optional(),
+  // Content-Language locale override (e.g. nl-BE); when unset the marketplace
+  // id determines it (EBAY_DE -> de-DE).
+  EBAY_CONTENT_LANGUAGE: z.string().min(1).optional(),
+  EBAY_FULFILLMENT_POLICY_ID: z.string().min(1).optional(),
+  EBAY_PAYMENT_POLICY_ID: z.string().min(1).optional(),
+  EBAY_RETURN_POLICY_ID: z.string().min(1).optional(),
+  EBAY_MERCHANT_LOCATION_KEY: z.string().min(1).optional(),
+  // Default leaf category for offers when the pipeline hasn't resolved one.
+  EBAY_DEFAULT_CATEGORY_ID: z.string().min(1).optional(),
   // eBay Marketplace Account Deletion endpoint (production flip only). Catalogued here
   // for discoverability; the route reads them directly so the endpoint isn't coupled to
   // unrelated required vars (OPENAI/Supabase) at request time.
