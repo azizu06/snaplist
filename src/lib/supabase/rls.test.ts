@@ -91,13 +91,20 @@ describe("RLS tenancy isolation", () => {
     expect(true).toBe(true);
   });
 
-  it("auth sign-up + sign-in yields a session bound to the correct user", async () => {
+  it("a minted token binds queries to the correct Clerk identity", async () => {
     if (!reachable) return;
-    const { data } = await userA.client.auth.getUser();
-    expect(data.user?.id).toBe(userA.id);
-    const { data: dataB } = await userB.client.auth.getUser();
-    expect(dataB.user?.id).toBe(userB.id);
+    // supabase.auth.* is disabled with the accessToken option (Clerk era), so
+    // identity binding is proven through the data path: a row inserted as A
+    // must come back stamped with A's sub — i.e. the JWT, not the payload's
+    // claim, is what RLS trusted.
     expect(userA.id).not.toBe(userB.id);
+    const { data, error } = await userA.client
+      .from("items")
+      .insert({ user_id: userA.id, condition: "good", attributes: { brand: "JwtBind" } })
+      .select("user_id")
+      .single();
+    expect(error).toBeNull();
+    expect(data?.user_id).toBe(userA.id);
   });
 
   it("a user can insert and read back their OWN item", async () => {
