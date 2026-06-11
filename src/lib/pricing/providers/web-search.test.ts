@@ -150,6 +150,32 @@ describe("branded-web pricing agent", () => {
     expect(provider.canHandle?.({})).toBe(false);
   });
 
+  it("the search budget is shared across the web tiers: no branded re-run after a UPC decline", async () => {
+    // A signal with BOTH a UPC and a brand/model is owned by the upc-aided
+    // tier (whose query sequence subsumes the branded queries under one
+    // budget). When it declines, the branded tier must decline too — never
+    // re-spending searches on the identical queries.
+    const signal: ItemSignal = { ...BRANDED_SIGNAL, upc: "027242920569" };
+    const search = fakeSearch([cannedResults("q1")]);
+    const neverEnough = fakeExtractor([[]]); // no usable comps, ever
+    const upc = createUpcWebPricingProvider({
+      searchClient: search,
+      extractComps: neverEnough,
+    });
+    const branded = createBrandedWebPricingProvider({
+      searchClient: search,
+      extractComps: neverEnough,
+    });
+
+    expect(await upc.price(signal)).toBeNull(); // consumes the full budget
+    expect(branded.canHandle?.(signal)).toBe(false); // router skips it
+    expect(await branded.price(signal)).toBeNull(); // defensive: declines even if called
+    // Total spend for the whole pricing request stays within the single cap.
+    expect(search.queries.length).toBeLessThanOrEqual(MAX_SEARCH_ITERATIONS);
+    // A UPC-less branded signal is still handled by the branded tier.
+    expect(branded.canHandle?.(BRANDED_SIGNAL)).toBe(true);
+  });
+
   it("prices a branded item with a cited range from web comps (URLs from the search results)", async () => {
     const search = fakeSearch();
     const provider = createBrandedWebPricingProvider({
@@ -445,17 +471,23 @@ describe("web tiers wired into the PriceRouter", () => {
     expect(result.tier).toBe("upc-aided-web");
   });
 
-  it("falls through upc-aided → branded when the UPC search finds nothing useful", async () => {
+  it("falls through upc-aided → estimate tiers (NOT a branded re-run) when the UPC search finds nothing useful", async () => {
+    // The UPC tier's query sequence already includes the branded refinements
+    // under its single budget. When even that finds nothing, re-running the
+    // identical branded queries would double the search spend for the same
+    // evidence — so the router skips branded and lands on the estimate tier.
+    const search = fakeSearch();
     const upc = createUpcWebPricingProvider({
-      searchClient: fakeSearch(),
-      extractComps: fakeExtractor([[]]), // UPC route: nothing useful
+      searchClient: search,
+      extractComps: fakeExtractor([[]]), // full web route: nothing useful
     });
     const branded = createBrandedWebPricingProvider({
-      searchClient: fakeSearch(),
+      searchClient: search,
       extractComps: fakeExtractor([soldComps()]),
     });
     const router = new PriceRouter([upc, branded, fallback]);
     const result = await router.price({ ...BRANDED_SIGNAL, upc: "027242920569" });
-    expect(result.tier).toBe("branded-web");
+    expect(result.tier).toBe("llm-only");
+    expect(search.queries.length).toBeLessThanOrEqual(MAX_SEARCH_ITERATIONS);
   });
 });

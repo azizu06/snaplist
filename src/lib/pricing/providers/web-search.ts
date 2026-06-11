@@ -514,19 +514,31 @@ export function createUpcWebPricingProvider(
 
 /**
  * Tier 3 — `branded-web`: a recognizable branded item priced from real web
- * comps. Requires at least a brand on the signal.
+ * comps. Requires at least a brand on the signal — and NO UPC: a UPC-bearing
+ * signal is owned by the upc-aided tier, whose query sequence already contains
+ * these branded queries as refinements under the SAME iteration budget. If the
+ * UPC tier declined, re-running the identical branded queries here would only
+ * double the search/extraction spend (up to 5 calls for one pricing request)
+ * for the same evidence, so this tier declines too and the router falls
+ * through to the estimate tiers.
  */
 export function createBrandedWebPricingProvider(
   options: WebSearchPricingProviderOptions = {},
 ): PricingProvider {
   const deps = resolveDeps(options);
+  const ownedByUpcTier = (signal: ItemSignal): boolean =>
+    typeof signal.upc === "string" && signal.upc.trim().length > 0;
   return {
     tier: "branded-web",
     canHandle(signal: ItemSignal): boolean {
-      return typeof signal.brand === "string" && signal.brand.trim().length > 0;
+      return (
+        typeof signal.brand === "string" &&
+        signal.brand.trim().length > 0 &&
+        !ownedByUpcTier(signal)
+      );
     },
     async price(signal: ItemSignal): Promise<PriceResult | null> {
-      if (!signal.brand?.trim()) return null;
+      if (!signal.brand?.trim() || ownedByUpcTier(signal)) return null;
       return priceViaWebAgent("branded-web", signal, deps);
     },
   };
