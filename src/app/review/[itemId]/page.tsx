@@ -60,7 +60,9 @@ export default async function ReviewPage({
 
   const { data: log } = await supabase
     .from("prediction_logs")
-    .select("price, price_range, confidence, tier_fired, model")
+    .select(
+      "price, price_range, confidence, tier_fired, model, autopilot_enabled, autopilot_eligible",
+    )
     .eq("item_id", itemId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -112,6 +114,11 @@ export default async function ReviewPage({
   // be misattributed to confidence or autopilot.
   const confidenceFellShort =
     confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
+  // The run-time switch value, persisted WITH the prediction (round-7 review):
+  // boolean = recorded evidence; null/undefined = legacy row, keep the neutral
+  // wording rather than inventing history.
+  const runAutopilotEnabled =
+    typeof log?.autopilot_enabled === "boolean" ? log.autopilot_enabled : null;
   const banner = (() => {
     switch (listing?.status) {
       case "queued":
@@ -125,12 +132,16 @@ export default async function ReviewPage({
         return {
           tone: "amber" as const,
           title: "Queued for your review",
-          // Neutral when confidence met the bar: the run-time autopilot
-          // decision is not persisted, and legacy drafts predate the setting
-          // entirely — never claim "autopilot was off" without evidence.
-          detail: confidenceFellShort
-            ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
-            : "Autopilot didn't auto-post this listing — it waits for your approval.",
+          // Explanation precedence, all from PERSISTED run-time facts:
+          // recorded switch-off beats the confidence story (a high-confidence
+          // draft is exactly the switch-off case); then below-threshold; then
+          // neutral for legacy rows with no recorded decision.
+          detail:
+            runAutopilotEnabled === false
+              ? "Autopilot was off when this listing was generated, so it waits for you."
+              : confidenceFellShort
+                ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
+                : "Autopilot didn't auto-post this listing — it waits for your approval.",
         };
       case "published":
         return {

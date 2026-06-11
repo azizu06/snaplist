@@ -71,7 +71,22 @@ describe("buildPredictionLogRow", () => {
       // No distinct listingModel on this result → provenance falls back to `model`.
       listing_model: "stub-pipeline-v1",
       sources: result.price.sources,
+      // No switch value supplied → null (legacy shape); eligibility comes from
+      // the run's confidence gate output.
+      autopilot_enabled: null,
+      autopilot_eligible: result.confidence.autopilotEligible ?? null,
     });
+  });
+
+  it("records the run-time autopilot switch + gate decision when supplied", () => {
+    // The review page explains dispositions from THESE persisted facts —
+    // a high-confidence draft is only attributable to "autopilot was off"
+    // when the run actually recorded the switch as off.
+    const row = buildPredictionLogRow("u", "i", makeResult(), false);
+    expect(row.autopilot_enabled).toBe(false);
+
+    const enabled = buildPredictionLogRow("u", "i", makeResult(), true);
+    expect(enabled.autopilot_enabled).toBe(true);
   });
 
   it("records the listing model distinctly when it differs from the run model (#32)", () => {

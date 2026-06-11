@@ -89,7 +89,7 @@ export async function runPipelineAndPersist(
   //    a listing is inert; a QUEUED listing without its mandatory evaluation
   //    record is a publishable run the upload request reported as failed —
   //    a queue consumer could post it, and a retried upload could duplicate it.
-  await logPrediction(supabase, input.userId, itemId, result);
+  await logPrediction(supabase, input.userId, itemId, result, input.autopilotEnabled);
 
   // 5. Persist the generated listing. The initial status is the confidence-gated
   //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON

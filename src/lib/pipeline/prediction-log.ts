@@ -60,6 +60,14 @@ export interface PredictionLogRow {
   listing_model: string;
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
+  /**
+   * The master autopilot switch value THIS run consumed — the review page's
+   * evidence for "autopilot was off when this ran" (the live setting may have
+   * been flipped since). Null on legacy rows that predate the setting.
+   */
+  autopilot_enabled: boolean | null;
+  /** The gate's output for this run (enabled AND score >= threshold). */
+  autopilot_eligible: boolean | null;
 }
 
 /**
@@ -82,11 +90,16 @@ export function buildPredictionLogRow(
   userId: string,
   itemId: string,
   result: PipelineResult,
+  autopilotEnabled?: boolean,
 ): PredictionLogRow {
   return {
     user_id: userId,
     item_id: itemId,
     extracted_attrs: result.attributes,
+    // The gate decision as the run saw it — run-time facts for the review
+    // page's disposition explanation; never re-derivable from live settings.
+    autopilot_enabled: autopilotEnabled ?? null,
+    autopilot_eligible: result.confidence.autopilotEligible ?? null,
     price: result.price.suggested,
     price_range: { low: result.price.range.min, high: result.price.range.max },
     confidence: result.confidence.score,
@@ -111,8 +124,9 @@ export async function logPrediction(
   userId: string,
   itemId: string,
   result: PipelineResult,
+  autopilotEnabled?: boolean,
 ): Promise<void> {
-  const row = buildPredictionLogRow(userId, itemId, result);
+  const row = buildPredictionLogRow(userId, itemId, result, autopilotEnabled);
   const { error } = await supabase.from("prediction_logs").insert(row);
   if (error) {
     throw new Error(`Failed to write prediction log: ${error.message}`);
