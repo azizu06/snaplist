@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
-import { getAutopilotEnabled } from "@/lib/settings/user-settings";
+import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification } from "@/lib/vision";
 import { overridePrice } from "./actions";
 
@@ -46,13 +46,14 @@ export default async function ReviewPage({
     .single();
   if (!item) notFound();
 
-  // Master autopilot switch — shown so the queue/auto-post status is explainable.
-  const autopilotEnabled = await getAutopilotEnabled(supabase, user.id);
-
+  // This page reviews the SALE listing. Export packs (#15) persist as
+  // 'facebook'/'mercari' listings rows for the same item, so pin the platform
+  // or the newest export pack would shadow the eBay draft here.
   const { data: listing } = await supabase
     .from("listings")
     .select("platform, title, description, copy, status")
     .eq("item_id", itemId)
+    .eq("platform", "ebay")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -103,8 +104,13 @@ export default async function ReviewPage({
 
   // Disposition transparency (issue #12): a queued listing was confidence-gated
   // into the auto-post path; a draft is awaiting review — either because the
-  // confidence fell short or because autopilot is off entirely.
+  // confidence fell short or because autopilot was off entirely. The
+  // explanation derives from the RUN-TIME facts (persisted status + logged
+  // confidence), never the live setting: flipping the master switch later
+  // must not rewrite history about why this listing queued.
   const queuedForAutopost = listing?.status === "queued";
+  const confidenceFellShort =
+    confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
@@ -151,10 +157,12 @@ export default async function ReviewPage({
             }
           >
             {queuedForAutopost
-              ? "High confidence and autopilot is on — this listing is eligible to post without manual approval."
-              : autopilotEnabled
-                ? "Confidence is below the autopilot threshold, so this listing waits for you."
-                : "Autopilot is off — every listing waits for your approval."}
+              ? "High confidence and autopilot was on — this listing is eligible to post without manual approval."
+              : confidenceFellShort
+                ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
+                : confidence != null
+                  ? "Autopilot was off when this listing was generated — it waits for your approval."
+                  : "This listing waits for your approval."}
           </p>
         </section>
       ) : null}
