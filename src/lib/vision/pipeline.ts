@@ -6,6 +6,8 @@ import {
 import {
   PriceRouter,
   createIsbnPricingProvider,
+  createUpcWebPricingProvider,
+  createBrandedWebPricingProvider,
   priceResultSchema,
   type ItemSignal,
   type PriceResult,
@@ -73,10 +75,11 @@ export interface CreateVisionPipelineOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Interim catch-all pricing provider: when no real tier handles the signal (e.g. a
- * non-ISBN item, before the web/depreciation tiers land), yield an honest llm-only
- * price-0 placeholder so the router always produces a schema-valid price. This is NOT
- * the real LLM-only pricing tier (#11) — just a placeholder until #10/#11 add real tiers.
+ * Interim catch-all pricing provider: when no real tier handles the signal (e.g. an
+ * unbranded item the web tiers decline, before the depreciation tier lands), yield an
+ * honest llm-only price-0 placeholder so the router always produces a schema-valid
+ * price. This is NOT the real LLM-only pricing tier (#11) — just a placeholder until
+ * #11 adds the real fallback.
  */
 function interimFallbackProvider(): PricingProvider {
   return {
@@ -93,10 +96,17 @@ function interimFallbackProvider(): PricingProvider {
   };
 }
 
-/** The default real pricer: ISBN tier first, interim llm-only catch-all last. */
+/**
+ * The default real pricer in PRD priority order: ISBN structured lookup, then the
+ * #10 web-search agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction,
+ * env-key gated — a keyless deployment makes those tiers decline gracefully), then
+ * the interim llm-only catch-all.
+ */
 function createDefaultPricer(): (signal: ItemSignal) => Promise<PriceResult> {
   const router = new PriceRouter([
     createIsbnPricingProvider(),
+    createUpcWebPricingProvider(),
+    createBrandedWebPricingProvider(),
     interimFallbackProvider(),
   ]);
   return (signal) => router.price(signal);

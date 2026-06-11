@@ -20,3 +20,20 @@ export {
   type FetchJson,
   type IsbnPricingProviderOptions,
 } from "./providers/isbn";
+export {
+  createUpcWebPricingProvider,
+  createBrandedWebPricingProvider,
+  createDefaultSearchClient,
+  createOpenAICompExtractor,
+  buildSearchQueries,
+  webSearchConfigured,
+  webCompSchema,
+  MAX_SEARCH_ITERATIONS,
+  MIN_USEFUL_COMPS,
+  DEFAULT_PRICING_MODEL,
+  type SearchClient,
+  type SearchResult,
+  type WebComp,
+  type ExtractComps,
+  type WebSearchPricingProviderOptions,
+} from "./providers/web-search";
