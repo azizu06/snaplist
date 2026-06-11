@@ -5,6 +5,11 @@ import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification } from "@/lib/vision";
+import { StatusBadge } from "@/components/ui/badge";
+import { Banner } from "@/components/ui/banner";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { PendingButton, buttonClasses } from "@/components/ui/button";
+import { confidenceLabel, lifecycleLabel, tierLabel } from "@/lib/ui/status";
 import { overridePrice } from "./actions";
 
 /**
@@ -20,7 +25,9 @@ import { overridePrice } from "./actions";
  * (issues #6 + #27). Legacy/stub rows without a persisted identification fall back to
  * re-deriving it from the validated attributes.
  *
- * This closes the loop the issue requires: "identification surfaced before pricing".
+ * Issue #40: same data spine, end-user skin — Shopify-style cards + status
+ * sidebar, the X-4 vocabulary for status/confidence/tier (no raw keys), and
+ * pending states on both forms. Server actions and reads are unchanged.
  */
 export default async function ReviewPage({
   params,
@@ -49,8 +56,7 @@ export default async function ReviewPage({
   // This page reviews the SALE listing. Export packs (#15) persist as
   // 'facebook'/'mercari' listings rows for the same item, so pin the platform
   // or the newest export pack would shadow the eBay draft here. `id` feeds the
-  // link to the publish page (/listings/{id}) — without it the "Publish to
-  // eBay" flow is unreachable from the normal upload → review path.
+  // link to the publish page (/listings/{id}).
   const { data: listing } = await supabase
     .from("listings")
     .select("id, platform, title, description, copy, status")
@@ -83,10 +89,8 @@ export default async function ReviewPage({
   const attrs = (item.attributes ?? {}) as Record<string, unknown>;
 
   // "What we think it is" — surfaced BEFORE pricing. Prefer the PERSISTED
-  // identification: it carries the model's actual decision, including a model-signalled
-  // ambiguity (and its reason/candidates) that a strong attribute set would otherwise
-  // mask. Only fall back to re-deriving from the validated attributes for legacy/stub
-  // rows that have no persisted identification (issue #27).
+  // identification (the model's actual decision, including signalled ambiguity);
+  // fall back to re-deriving only for legacy/stub rows (issue #27).
   const persistedId = identificationSchema.safeParse(item.identification);
   const parsedAttrs = extractedAttributesSchema.safeParse(item.attributes ?? {});
   const identification = persistedId.success
@@ -97,7 +101,8 @@ export default async function ReviewPage({
 
   const range = (log?.price_range ?? null) as { low?: number; high?: number } | null;
   const confidence = typeof log?.confidence === "number" ? log.confidence : null;
-  const band = confidence == null ? null : confidence >= 0.75 ? "high" : confidence >= 0.5 ? "medium" : "low";
+  const confidenceChip = confidenceLabel(confidence);
+  const tier = tierLabel(log?.tier_fired as string | null | undefined);
 
   // Seller price override (issue #12): the persisted override wins over the
   // suggestion for EVERY consumer of the price; here it drives the displayed price.
@@ -106,38 +111,27 @@ export default async function ReviewPage({
   const displayPrice =
     suggested != null ? effectivePrice(suggested, override) : override;
 
-  // Disposition transparency (issue #12): a queued listing was confidence-gated
-  // into the auto-post path; a DRAFT is awaiting review — either because the
-  // confidence fell short or because autopilot was off entirely. The
-  // explanation derives from the RUN-TIME facts (persisted status + logged
-  // confidence), never the live setting: flipping the master switch later
-  // must not rewrite history about why this listing queued. Terminal lifecycle
-  // states (published / failed) are rendered as themselves — they must never
-  // be misattributed to confidence or autopilot.
+  // Disposition transparency (issue #12): the explanation derives from the
+  // RUN-TIME facts (persisted status + logged confidence + the switch value
+  // persisted WITH the prediction), never the live setting — flipping the
+  // master switch later must not rewrite history about why this listing queued.
   const confidenceFellShort =
     confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
-  // The run-time switch value, persisted WITH the prediction (round-7 review):
-  // boolean = recorded evidence; null/undefined = legacy row, keep the neutral
-  // wording rather than inventing history.
   const runAutopilotEnabled =
     typeof log?.autopilot_enabled === "boolean" ? log.autopilot_enabled : null;
   const banner = (() => {
     switch (listing?.status) {
       case "queued":
         return {
-          tone: "emerald" as const,
-          title: "Queued for auto-posting",
+          variant: "success" as const,
+          title: "Queued — autopilot will post",
           detail:
             "High confidence and autopilot was on — this listing is eligible to post without manual approval.",
         };
       case "draft":
         return {
-          tone: "amber" as const,
-          title: "Queued for your review",
-          // Explanation precedence, all from PERSISTED run-time facts:
-          // recorded switch-off beats the confidence story (a high-confidence
-          // draft is exactly the switch-off case); then below-threshold; then
-          // neutral for legacy rows with no recorded decision.
+          variant: "warning" as const,
+          title: "Waiting for your review",
           detail:
             runAutopilotEnabled === false
               ? "Autopilot was off when this listing was generated, so it waits for you."
@@ -147,236 +141,249 @@ export default async function ReviewPage({
         };
       case "published":
         return {
-          tone: "emerald" as const,
-          title: "Published",
+          variant: "success" as const,
+          title: "Live",
           detail: "This listing is live on the marketplace.",
         };
       case "failed":
         return {
-          tone: "red" as const,
+          variant: "error" as const,
           title: "Publish failed",
           detail:
-            "The marketplace rejected or errored on this listing — review it and retry.",
+            "The marketplace rejected or errored on this listing — review it and retry from the publish page.",
         };
       default:
         return null;
     }
   })();
-  const bannerStyles = {
-    emerald: {
-      section: "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3",
-      title: "text-sm font-medium text-emerald-800",
-      detail: "mt-0.5 text-xs text-emerald-700",
-    },
-    amber: {
-      section: "rounded-md border border-amber-200 bg-amber-50 px-4 py-3",
-      title: "text-sm font-medium text-amber-800",
-      detail: "mt-0.5 text-xs text-amber-700",
-    },
-    red: {
-      section: "rounded-md border border-red-200 bg-red-50 px-4 py-3",
-      title: "text-sm font-medium text-red-800",
-      detail: "mt-0.5 text-xs text-red-700",
-    },
-  } as const;
+
+  const statusChip = lifecycleLabel(listing?.status ?? null);
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Review listing</h1>
-        <nav className="flex items-center gap-4">
-          {/* Cross-platform export packs are otherwise unreachable from the
-              normal upload → review flow. */}
-          <Link
-            href={`/export/${itemId}`}
-            className="text-sm text-zinc-500 underline hover:text-zinc-800"
-          >
-            Export packs
-          </Link>
-          <Link
-            href="/upload"
-            className="text-sm text-zinc-500 underline hover:text-zinc-800"
-          >
-            New listing
-          </Link>
-        </nav>
+    <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6 sm:py-10">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
+            Review listing
+          </h1>
+          {statusChip ? (
+            <StatusBadge label={statusChip.label} tone={statusChip.tone} />
+          ) : null}
+        </div>
+        <Link href="/" className="text-sm text-muted hover:text-fg">
+          ← Dashboard
+        </Link>
       </header>
 
       {actionError ? (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Banner variant="error" title="Couldn’t save that">
           {actionError}
-        </p>
+        </Banner>
       ) : null}
 
       {banner ? (
-        <section className={bannerStyles[banner.tone].section}>
-          <p className={bannerStyles[banner.tone].title}>{banner.title}</p>
-          <p className={bannerStyles[banner.tone].detail}>{banner.detail}</p>
-        </section>
+        <Banner variant={banner.variant} title={banner.title}>
+          {banner.detail}
+        </Banner>
       ) : null}
 
-      {photoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL, not a static asset; next/image optimization isn't wanted here
-        <img
-          src={photoUrl}
-          alt="Uploaded item"
-          className="max-h-64 w-auto self-start rounded-md border border-zinc-200 object-contain"
-        />
-      ) : null}
-
-      {identification ? (
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-            What we think it is
-          </h2>
-          <div className="flex items-center gap-3">
-            <span className="text-lg font-semibold">{identification.label}</span>
-            {identification.confident ? (
-              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
-                identified
-              </span>
-            ) : (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                needs confirmation
-              </span>
-            )}
-          </div>
-          {!identification.confident && identification.reason ? (
-            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              {identification.reason} Please confirm or correct before pricing.
-            </p>
-          ) : null}
-          {identification.candidates && identification.candidates.length > 0 ? (
-            <p className="text-sm text-zinc-500">
-              Possible matches: {identification.candidates.join(", ")}
-            </p>
-          ) : (
-            <p className="text-xs text-zinc-400">
-              Identification confidence: {(identification.evidence * 100).toFixed(0)}%
-              of strong identifiers resolved
-            </p>
-          )}
-        </section>
-      ) : null}
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-          Attributes
-        </h2>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-          {(["brand", "model", "category", "condition", "upc", "isbn"] as const).map(
-            (k) => {
-              const value = k === "condition" ? (item.condition ?? attrs[k]) : attrs[k];
-              if (value == null) return null;
-              return (
-                <div key={k} className="contents">
-                  <dt className="text-zinc-500 capitalize">{k}</dt>
-                  <dd className="font-medium">{String(value)}</dd>
+      <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
+        {/* ----- main column ----- */}
+        <div className="flex min-w-0 flex-col gap-5">
+          {identification ? (
+            <Card>
+              <CardHeader
+                title="What we think it is"
+                aside={
+                  identification.confident ? (
+                    <StatusBadge label="Identified" tone="success" />
+                  ) : (
+                    <StatusBadge label="Needs confirmation" tone="warning" />
+                  )
+                }
+              />
+              <CardBody className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-start gap-4">
+                  {photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL, not a static asset
+                    <img
+                      src={photoUrl}
+                      alt="Your item"
+                      className="size-24 shrink-0 rounded-xl border border-border object-cover"
+                    />
+                  ) : null}
+                  <div className="min-w-0">
+                    <p className="text-lg font-semibold text-fg-strong">
+                      {identification.label}
+                    </p>
+                    {identification.candidates &&
+                    identification.candidates.length > 0 ? (
+                      <p className="mt-1 text-sm text-muted">
+                        Possible matches: {identification.candidates.join(", ")}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-faint">
+                        {(identification.evidence * 100).toFixed(0)}% of strong
+                        identifiers resolved
+                      </p>
+                    )}
+                  </div>
                 </div>
-              );
-            },
-          )}
-        </dl>
-      </section>
+                {!identification.confident ? (
+                  <Banner variant="warning" title="Is this right?">
+                    {identification.reason ??
+                      "We couldn't identify this with certainty."}{" "}
+                    Check the details below and fix your price before
+                    publishing — the price research is only as good as the
+                    identification.
+                  </Banner>
+                ) : null}
+              </CardBody>
+            </Card>
+          ) : null}
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-          Price{override != null ? " (your override)" : " recommendation"}
-        </h2>
-        <div className="flex items-baseline gap-3">
-          <span className="text-3xl font-semibold">
-            {displayPrice != null ? `$${displayPrice}` : "—"}
-          </span>
-          {override != null && suggested != null ? (
-            <span className="text-sm text-zinc-400 line-through">
-              suggested ${suggested}
-            </span>
-          ) : null}
-          {range?.low != null && range?.high != null ? (
-            <span className="text-sm text-zinc-500">
-              range ${range.low}–${range.high}
-            </span>
-          ) : null}
-        </div>
-        <form
-          action={overridePrice}
-          className="mt-1 flex items-center gap-2"
-        >
-          <input type="hidden" name="itemId" value={itemId} />
-          <input
-            type="number"
-            name="price"
-            step="0.01"
-            min="0.01"
-            defaultValue={override ?? undefined}
-            placeholder={suggested != null ? String(suggested) : "0.00"}
-            aria-label="Override price (USD)"
-            className="w-32 rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
-          >
-            {override != null ? "Update price" : "Set my price"}
-          </button>
-          {override != null ? (
-            <span className="text-xs text-zinc-400">
-              leave blank and save to use the suggestion again
-            </span>
-          ) : null}
-        </form>
-        <div className="flex items-center gap-2 text-sm">
-          {band ? (
-            <span
-              className={
-                band === "high"
-                  ? "rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700"
-                  : band === "medium"
-                    ? "rounded-full bg-amber-100 px-2 py-0.5 text-amber-700"
-                    : "rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-600"
+          <Card>
+            <CardHeader title="Details" />
+            <CardBody>
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
+                {(["brand", "model", "category", "condition", "upc", "isbn"] as const).map(
+                  (k) => {
+                    const value =
+                      k === "condition" ? (item.condition ?? attrs[k]) : attrs[k];
+                    return (
+                      <div key={k} className="contents">
+                        <dt className="capitalize text-muted">{k}</dt>
+                        <dd className="font-medium text-fg">
+                          {value == null ? (
+                            <span className="text-faint">— not detected</span>
+                          ) : (
+                            String(value)
+                          )}
+                        </dd>
+                      </div>
+                    );
+                  },
+                )}
+              </dl>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title={override != null ? "Price — your override" : "Price recommendation"}
+              aside={tier ? <span className="text-xs text-muted">{tier}</span> : null}
+            />
+            <CardBody className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-baseline gap-3">
+                <span className="text-3xl font-semibold text-fg-strong" data-nums>
+                  {displayPrice != null ? `$${displayPrice}` : "—"}
+                </span>
+                {override != null && suggested != null ? (
+                  <span className="text-sm text-faint line-through" data-nums>
+                    suggested ${suggested}
+                  </span>
+                ) : null}
+                {range?.low != null && range?.high != null ? (
+                  <span className="text-sm text-muted" data-nums>
+                    typical range ${range.low}–${range.high}
+                  </span>
+                ) : null}
+              </div>
+
+              {confidenceChip ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <StatusBadge
+                    label={confidenceChip.label}
+                    tone={confidenceChip.tone}
+                  />
+                  <span className="text-xs text-muted">{confidenceChip.detail}</span>
+                </div>
+              ) : null}
+
+              <form action={overridePrice} className="flex flex-wrap items-center gap-2">
+                <input type="hidden" name="itemId" value={itemId} />
+                <input
+                  type="number"
+                  name="price"
+                  step="0.01"
+                  min="0.01"
+                  defaultValue={override ?? undefined}
+                  placeholder={suggested != null ? String(suggested) : "0.00"}
+                  aria-label="Override price (USD)"
+                  className="w-32 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg"
+                  data-nums
+                />
+                <PendingButton pendingLabel="Saving…" variant="secondary" size="sm">
+                  {override != null ? "Update price" : "Set my price"}
+                </PendingButton>
+                {override != null ? (
+                  <span className="text-xs text-faint">
+                    leave blank and save to use the suggestion again
+                  </span>
+                ) : null}
+              </form>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Generated listing"
+              aside={
+                listing?.platform ? (
+                  <span className="text-xs uppercase tracking-wide text-faint">
+                    {listing.platform}
+                  </span>
+                ) : null
               }
-            >
-              {band} confidence ({(confidence! * 100).toFixed(0)}%)
-            </span>
-          ) : null}
-          {log?.tier_fired ? (
-            <span className="text-zinc-400">tier: {log.tier_fired}</span>
+            />
+            <CardBody>
+              {listing ? (
+                <article>
+                  <h3 className="font-medium text-fg-strong">{listing.title}</h3>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">
+                    {listing.description}
+                  </p>
+                </article>
+              ) : (
+                <p className="text-sm text-muted">No listing generated.</p>
+              )}
+            </CardBody>
+          </Card>
+
+          {log?.model ? (
+            <p className="text-xs text-faint">
+              Logged for evaluation · model: {log.model}
+            </p>
           ) : null}
         </div>
-      </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-400">
-          Generated listing{listing?.platform ? ` · ${listing.platform}` : ""}
-        </h2>
-        {listing ? (
-          <article className="rounded-md border border-zinc-200 p-4">
-            <h3 className="font-medium">{listing.title}</h3>
-            <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600">
-              {listing.description}
-            </p>
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <p className="text-xs text-zinc-400">status: {listing.status}</p>
-              {listing.platform === "ebay" ? (
+        {/* ----- sidebar: actions ----- */}
+        <aside className="flex flex-col gap-3 lg:sticky lg:top-20 lg:self-start">
+          <Card>
+            <CardBody className="flex flex-col gap-2.5">
+              {listing && listing.platform === "ebay" ? (
                 <Link
                   href={`/listings/${listing.id}`}
-                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
+                  className={buttonClasses("primary")}
                 >
-                  Publish to eBay
+                  {listing.status === "published"
+                    ? "View publish status"
+                    : "Publish to eBay"}
                 </Link>
               ) : null}
-            </div>
-          </article>
-        ) : (
-          <p className="text-sm text-zinc-500">No listing generated.</p>
-        )}
-      </section>
-
-      {log?.model ? (
-        <p className="text-xs text-zinc-400">
-          Logged for evaluation · model: {log.model}
-        </p>
-      ) : null}
+              <Link
+                href={`/export/${itemId}`}
+                className={buttonClasses("secondary")}
+              >
+                Export for Facebook &amp; Mercari
+              </Link>
+              <Link href="/upload" className={buttonClasses("ghost")}>
+                Start another listing
+              </Link>
+            </CardBody>
+          </Card>
+        </aside>
+      </div>
     </main>
   );
 }
