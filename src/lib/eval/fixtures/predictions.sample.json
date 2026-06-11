@@ -1,0 +1,361 @@
+[
+  {
+    "goldId": "gold-books-pragmatic-programmer",
+    "attrs": { "brand": "Addison-Wesley", "model": "The Pragmatic Programmer 20th Anniversary", "category": "books", "condition": "like-new", "isbn": "9780135957059" },
+    "price": 28, "confidence": 0.92, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "The Pragmatic Programmer 20th Anniversary Hardcover Hunt Thomas Like New",
+      "description": "The Pragmatic Programmer, 20th Anniversary Edition in like-new condition. No markings, tight binding, clean pages. ISBN 9780135957059. Ships fast.",
+      "itemSpecifics": { "Brand": "Addison-Wesley", "Model": "The Pragmatic Programmer 20th Anniversary" }
+    }
+  },
+  {
+    "goldId": "gold-books-clean-code",
+    "attrs": { "brand": "Prentice Hall", "model": "Clean Code", "category": "books", "condition": "good", "isbn": "9780132350884" },
+    "price": 21, "confidence": 0.91, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "Clean Code Robert C Martin Paperback Agile Software Craftsmanship",
+      "description": "Clean Code by Robert C. Martin, paperback in good condition. Light cover wear, no highlighting inside. ISBN 9780132350884.",
+      "itemSpecifics": { "Brand": "Prentice Hall", "Model": "Clean Code" }
+    }
+  },
+  {
+    "goldId": "gold-books-dune",
+    "attrs": { "brand": "Ace", "model": "Dune", "category": "books", "condition": "good", "isbn": "9780441172719" },
+    "price": 11, "confidence": 0.9, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "Dune Frank Herbert Mass Market Paperback Classic Science Fiction",
+      "description": "Dune by Frank Herbert, mass market paperback reading copy in good condition. Creased spine, all pages intact. ISBN 9780441172719.",
+      "itemSpecifics": { "Brand": "Ace", "Model": "Dune" }
+    }
+  },
+  {
+    "goldId": "gold-books-ddia",
+    "attrs": { "brand": "O'Reilly", "model": "Designing Data-Intensive Applications", "category": "books", "condition": "very-good", "isbn": "9781449373320" },
+    "price": 34, "confidence": 0.93, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "Designing Data-Intensive Applications Kleppmann O'Reilly Paperback",
+      "description": "DDIA by Martin Kleppmann in very-good condition. Clean pages, no highlighting, light shelf wear. ISBN 9781449373320.",
+      "itemSpecifics": { "Brand": "O'Reilly", "Model": "Designing Data-Intensive Applications" }
+    }
+  },
+  {
+    "goldId": "gold-books-ctci",
+    "attrs": { "brand": "CareerCup", "model": "Cracking the Coding Interview 6th Edition", "category": "books", "condition": "good", "isbn": "9780984782857" },
+    "price": 41, "confidence": 0.88, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "Cracking the Coding Interview 6th Edition McDowell 189 Questions",
+      "description": "CTCI 6th edition in good condition. Cover wear, clean interior. ISBN 9780984782857. The classic interview prep book.",
+      "itemSpecifics": { "Brand": "CareerCup", "Model": "Cracking the Coding Interview 6th Edition" }
+    }
+  },
+  {
+    "goldId": "gold-books-atomic-habits",
+    "attrs": { "brand": "Avery", "model": "Atomic Habits", "category": "books", "condition": "like-new", "isbn": "9780735211292" },
+    "price": 13, "confidence": 0.9, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "Atomic Habits James Clear Hardcover Like New Habit Building",
+      "description": "Atomic Habits by James Clear, hardcover in like-new condition with dust jacket. ISBN 9780735211292.",
+      "itemSpecifics": { "Brand": "Avery", "Model": "Atomic Habits" }
+    }
+  },
+  {
+    "goldId": "gold-books-clrs-3rd",
+    "attrs": { "brand": "MIT Press", "model": "Introduction to Algorithms 3rd Edition", "category": "books", "condition": "good", "isbn": "9780262033848" },
+    "price": 45, "confidence": 0.92, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "Introduction to Algorithms 3rd Edition CLRS MIT Press Hardcover",
+      "description": "CLRS Introduction to Algorithms, 3rd edition hardcover in good condition. Solid binding, light edge wear. ISBN 9780262033848.",
+      "itemSpecifics": { "Brand": "MIT Press", "Model": "Introduction to Algorithms 3rd Edition" }
+    }
+  },
+  {
+    "goldId": "gold-books-hobbit",
+    "attrs": { "brand": "Houghton Mifflin", "model": "The Hobbit", "category": "books", "condition": "good" },
+    "price": 9, "confidence": 0.89, "tierFired": "isbn-lookup", "model": "gpt-5.5",
+    "listing": {
+      "title": "The Hobbit J.R.R. Tolkien Paperback Fantasy Classic",
+      "description": "The Hobbit by J.R.R. Tolkien, paperback in good condition. Reading copy with creased spine, all pages clean.",
+      "itemSpecifics": { "Brand": "Houghton Mifflin", "Model": "The Hobbit" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-sony-wh1000xm4",
+    "attrs": { "brand": "Sony", "model": "WH-1000XM4", "category": "electronics", "condition": "good" },
+    "price": 165, "confidence": 0.84, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Sony WH-1000XM4 Wireless Noise Cancelling Headphones Black Tested",
+      "description": "Sony WH-1000XM4 in good used condition. Light ear-cushion wear, no scratches. 30-hour battery, multipoint Bluetooth. Includes case and cables.",
+      "itemSpecifics": { "Brand": "Sony", "Model": "WH-1000XM4" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-bose-qc35ii",
+    "attrs": { "brand": "Bose", "model": "QuietComfort 35 II", "category": "electronics", "condition": "good" },
+    "price": 105, "confidence": 0.82, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Bose QuietComfort 35 II Noise Cancelling Headphones Silver",
+      "description": "Bose QC35 II in good condition with minor headband wear. Strong ANC, all-day comfort. Includes case and audio cable.",
+      "itemSpecifics": { "Brand": "Bose", "Model": "QuietComfort 35 II" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-apple-airpodspro2",
+    "attrs": { "brand": "Apple", "model": "AirPods Pro 2", "category": "electronics", "condition": "like-new" },
+    "price": 139, "confidence": 0.83, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Apple AirPods Pro 2nd Generation MagSafe USB-C Case Like New",
+      "description": "AirPods Pro 2 in like-new condition, sanitized with fresh ear tips. ANC and Adaptive Transparency. Serial verified.",
+      "itemSpecifics": { "Brand": "Apple", "Model": "AirPods Pro 2" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-nintendo-switch-oled",
+    "attrs": { "brand": "Nintendo", "model": "Switch OLED", "category": "electronics", "condition": "good" },
+    "price": 240, "confidence": 0.85, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Nintendo Switch OLED White Console Bundle Dock Joy-Cons Drift Free",
+      "description": "Switch OLED in good condition, screen protector since day one, no dead pixels, drift-free Joy-Cons. Includes dock, HDMI, AC adapter.",
+      "itemSpecifics": { "Brand": "Nintendo", "Model": "Switch OLED" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-kindle-paperwhite",
+    "attrs": { "brand": "Amazon", "model": "Kindle Paperwhite", "category": "electronics", "condition": "good" },
+    "price": 70, "confidence": 0.78, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Amazon Kindle Paperwhite 11th Gen 8GB Waterproof eReader",
+      "description": "Kindle Paperwhite in good condition, flawless screen, light wear on back. De-registered and factory reset.",
+      "itemSpecifics": { "Brand": "Amazon", "Model": "Kindle Paperwhite" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-apple-ipad-9",
+    "attrs": { "brand": "Apple", "model": "iPad 9th Generation", "category": "electronics", "condition": "good" },
+    "price": 245, "confidence": 0.76, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Apple iPad 9th Generation 64GB WiFi Space Gray Good Condition",
+      "description": "iPad 9th gen in good condition. Screen clean, light scuffs on the back. Battery health strong. iCloud signed out.",
+      "itemSpecifics": { "Brand": "Apple", "Model": "iPad 9th Generation" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-jbl-flip6",
+    "attrs": { "brand": "JBL", "model": "Flip 6", "category": "electronics", "condition": "very-good" },
+    "price": 72, "confidence": 0.8, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "JBL Flip 6 Portable Bluetooth Speaker Black Waterproof",
+      "description": "JBL Flip 6 in very-good condition, barely used. Punchy bass, IP67 waterproof, 12-hour battery.",
+      "itemSpecifics": { "Brand": "JBL", "Model": "Flip 6" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-sony-dualsense",
+    "attrs": { "brand": "Sony", "model": "DualShock 4", "category": "electronics", "condition": "good" },
+    "price": 45, "confidence": 0.77, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Sony PlayStation Wireless Controller White Tested Working",
+      "description": "Sony wireless controller in good condition. Sticks are responsive with no drift, all buttons tested.",
+      "itemSpecifics": { "Brand": "Sony", "Model": "DualShock 4" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-garmin-forerunner245",
+    "attrs": { "brand": "Garmin", "model": "Forerunner 245", "category": "electronics", "condition": "good" },
+    "price": 118, "confidence": 0.79, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Garmin Forerunner 245 GPS Running Watch Black",
+      "description": "Garmin Forerunner 245 in good condition. Screen clean, band shows light wear. Includes charging cable.",
+      "itemSpecifics": { "Brand": "Garmin", "Model": "Forerunner 245" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-apple-watch-se2",
+    "attrs": { "brand": "Apple", "model": "Watch SE 2nd Generation", "category": "electronics", "condition": "very-good" },
+    "price": 150, "confidence": 0.81, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Apple Watch SE 2nd Gen 40mm GPS Midnight Aluminum Very Good",
+      "description": "Apple Watch SE 2 in very-good condition, screen flawless, battery health 96%. Includes sport band and charger. iCloud unlocked.",
+      "itemSpecifics": { "Brand": "Apple", "Model": "Watch SE 2nd Generation" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-anker-powercore10000",
+    "attrs": { "brand": "Anker", "model": "PowerCore 10000", "category": "electronics", "condition": "good" },
+    "price": 18, "confidence": 0.74, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Anker PowerCore 10000 Portable Charger Compact Power Bank Black",
+      "description": "Anker PowerCore 10000 in good working condition. Holds full charge, both ports tested. Light cosmetic wear.",
+      "itemSpecifics": { "Brand": "Anker", "Model": "PowerCore 10000" }
+    }
+  },
+  {
+    "goldId": "gold-electronics-logitech-mxmaster3",
+    "attrs": { "brand": "Logitech", "model": "MX Master 3", "category": "electronics", "condition": "good" },
+    "price": 55, "confidence": 0.82, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Logitech MX Master 3 Wireless Mouse Graphite USB-C",
+      "description": "MX Master 3 in good condition. Scroll wheel smooth, all buttons work, battery lasts weeks. Includes USB-C cable.",
+      "itemSpecifics": { "Brand": "Logitech", "Model": "MX Master 3" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-catan",
+    "attrs": { "brand": "Catan Studio", "model": "Catan (Base Game)", "category": "board-games", "condition": "good" },
+    "price": 30, "confidence": 0.72, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Catan Base Game 5th Edition Complete Board Game",
+      "description": "Catan base game, complete and counted, in good condition. Light shelf wear on box. Smoke-free home.",
+      "itemSpecifics": { "Brand": "Catan Studio", "Model": "Catan (Base Game)" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-ticket-to-ride",
+    "attrs": { "brand": "Days of Wonder", "model": "Ticket to Ride", "category": "board-games", "condition": "very-good" },
+    "price": 34, "confidence": 0.7, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Ticket to Ride USA Edition Days of Wonder Complete Board Game",
+      "description": "Ticket to Ride in very-good condition, complete with all 240 train cars and tickets, pieces bagged.",
+      "itemSpecifics": { "Brand": "Days of Wonder", "Model": "Ticket to Ride" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-wingspan",
+    "attrs": { "brand": "Stonemaier Games", "model": "Wingspan", "category": "board-games", "condition": "like-new" },
+    "price": 42, "confidence": 0.71, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Wingspan Stonemaier Games Engine Building Board Game Like New",
+      "description": "Wingspan in like-new condition, complete with bird cards, egg miniatures, and dice tower. Organized insert.",
+      "itemSpecifics": { "Brand": "Stonemaier Games", "Model": "Wingspan" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-pandemic",
+    "attrs": { "brand": "Z-Man Games", "model": "Pandemic", "category": "board-games", "condition": "good" },
+    "price": 39, "confidence": 0.62, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Pandemic Cooperative Board Game Z-Man Games Complete",
+      "description": "Pandemic co-op board game in good condition, complete with all cubes, cards, and role cards.",
+      "itemSpecifics": { "Brand": "Z-Man Games", "Model": "Pandemic" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-azul",
+    "attrs": { "brand": "Next Move Games", "model": "Azul", "category": "board-games", "condition": "very-good" },
+    "price": 26, "confidence": 0.66, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Azul Board Game Next Move Games Tile Drafting Complete",
+      "description": "Azul in very-good condition, all tiles and boards present, bagged and organized.",
+      "itemSpecifics": { "Brand": "Next Move Games", "Model": "Azul" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-codenames",
+    "attrs": { "model": "Codenames", "category": "board-games", "condition": "good" },
+    "price": 12, "confidence": 0.58, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Codenames Party Word Game Complete Good Condition",
+      "description": "Codenames word game in good condition, all cards present. Great party game for 4+ players.",
+      "itemSpecifics": { "Model": "Codenames" }
+    }
+  },
+  {
+    "goldId": "gold-boardgames-7wonders",
+    "attrs": { "brand": "Repos Production", "model": "7 Wonders", "category": "board-games", "condition": "good" },
+    "price": 30, "confidence": 0.64, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "7 Wonders Board Game Repos Production Card Drafting Complete",
+      "description": "7 Wonders in good condition, complete and sorted. Civilization card-drafting classic for 3-7 players.",
+      "itemSpecifics": { "Brand": "Repos Production", "Model": "7 Wonders" }
+    }
+  },
+  {
+    "goldId": "gold-gear-patagonia-nano-puff",
+    "attrs": { "brand": "Patagonia", "model": "Nano Puff Jacket", "category": "branded-gear", "condition": "good" },
+    "price": 92, "confidence": 0.73, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Patagonia Nano Puff Insulated Jacket Mens Medium Black",
+      "description": "Patagonia Nano Puff in good condition, no rips or stains, zipper smooth. PrimaLoft Gold insulation, packable.",
+      "itemSpecifics": { "Brand": "Patagonia", "Model": "Nano Puff Jacket" }
+    }
+  },
+  {
+    "goldId": "gold-gear-yeti-rambler",
+    "attrs": { "brand": "YETI", "model": "Rambler 20oz Tumbler", "category": "branded-gear", "condition": "good" },
+    "price": 22, "confidence": 0.69, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "YETI Rambler 20oz Stainless Steel Tumbler MagSlider Lid",
+      "description": "Authentic YETI Rambler in good condition, minor surface scuffs, no dents. Keeps drinks cold for hours.",
+      "itemSpecifics": { "Brand": "YETI", "Model": "Rambler 20oz Tumbler" }
+    }
+  },
+  {
+    "goldId": "gold-gear-stanley-quencher",
+    "attrs": { "brand": "Stanley", "model": "Quencher H2.0 40oz", "category": "branded-gear", "condition": "good" },
+    "price": 27, "confidence": 0.68, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Stanley Quencher H2.0 FlowState Tumbler 40oz Charcoal",
+      "description": "Stanley Quencher 40 oz in good condition, lightly used, no odors. Includes straw and lid.",
+      "itemSpecifics": { "Brand": "Stanley", "Model": "Quencher H2.0 40oz" }
+    }
+  },
+  {
+    "goldId": "gold-gear-northface-borealis",
+    "attrs": { "brand": "The North Face", "model": "Borealis Backpack", "category": "branded-gear", "condition": "good" },
+    "price": 78, "confidence": 0.61, "tierFired": "depreciation", "model": "gpt-5.5",
+    "listing": {
+      "title": "The North Face Borealis Backpack Black Laptop Daypack",
+      "description": "North Face Borealis in good condition, zippers smooth, straps intact, interior clean. Padded laptop sleeve.",
+      "itemSpecifics": { "Brand": "The North Face", "Model": "Borealis Backpack" }
+    }
+  },
+  {
+    "goldId": "gold-gear-hydroflask-32oz",
+    "attrs": { "brand": "Hydro Flask", "model": "Wide Mouth 32oz", "category": "branded-gear", "condition": "good" },
+    "price": 21, "confidence": 0.65, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Hydro Flask Wide Mouth 32oz Insulated Water Bottle",
+      "description": "Hydro Flask 32 oz in good condition with light scratches, no dents. Flex cap included, no leaks.",
+      "itemSpecifics": { "Brand": "Hydro Flask", "Model": "Wide Mouth 32oz" }
+    }
+  },
+  {
+    "goldId": "gold-gear-carhartt-detroit",
+    "attrs": { "brand": "Carhartt", "model": "Duck Jacket", "category": "branded-gear", "condition": "good" },
+    "price": 85, "confidence": 0.59, "tierFired": "depreciation", "model": "gpt-5.5",
+    "listing": {
+      "title": "Carhartt Duck Work Jacket Mens Large Brown Blanket Lined",
+      "description": "Carhartt jacket in good broken-in condition, no rips, hardware intact. Classic workwear.",
+      "itemSpecifics": { "Brand": "Carhartt", "Model": "Duck Jacket" }
+    }
+  },
+  {
+    "goldId": "gold-gear-lululemon-define",
+    "attrs": { "brand": "Lululemon", "model": "Define Jacket", "category": "branded-gear", "condition": "very-good" },
+    "price": 70, "confidence": 0.67, "tierFired": "branded-web", "model": "gpt-5.5",
+    "listing": {
+      "title": "Lululemon Define Jacket Womens Size 6 Black Full Zip",
+      "description": "Lululemon Define jacket in very-good condition, no pilling or snags. Thumbholes intact, zipper smooth.",
+      "itemSpecifics": { "Brand": "Lululemon", "Model": "Define Jacket" }
+    }
+  },
+  {
+    "goldId": "gold-generic-ceramic-mug",
+    "attrs": { "category": "kitchen", "condition": "good", "title": "Ceramic coffee mug" },
+    "price": 12, "confidence": 0.3, "tierFired": "llm-only", "model": "gpt-5.5",
+    "listing": {
+      "title": "Starbucks Ceramic Coffee Mug 12oz White",
+      "description": "White ceramic mug, 12 oz, no chips or cracks. Microwave and dishwasher safe.",
+      "itemSpecifics": { "Brand": "Starbucks" }
+    }
+  },
+  {
+    "goldId": "gold-generic-desk-lamp",
+    "attrs": { "category": "generic", "condition": "good", "title": "LED desk lamp" },
+    "price": 14, "confidence": 0.42, "tierFired": "depreciation", "model": "gpt-5.5",
+    "listing": {
+      "title": "Adjustable LED Desk Lamp Gooseneck USB Powered Three Brightness Levels",
+      "description": "Adjustable LED desk lamp in good working condition, light wear on base. USB powered with three brightness levels."
+    }
+  }
+]
