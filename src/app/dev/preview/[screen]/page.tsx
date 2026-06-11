@@ -4,6 +4,7 @@ import {
   type DashboardRow,
 } from "@/app/dashboard-view";
 import { ReviewView, type ReviewData } from "@/app/review/[itemId]/review-view";
+import { UploadView } from "@/app/upload/upload-form";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -128,6 +129,8 @@ export default async function PreviewPage({
       );
     case "review":
       return <ReviewView data={FIXTURE_REVIEW} overrideAction={noopAction} />;
+    case "upload":
+      return <UploadView action={noopAction} actionError={null} />;
     case "review-uncertain":
       return (
         <ReviewView
