@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  DEFAULT_PRICING_MODEL,
   MAX_SEARCH_ITERATIONS,
   MIN_USEFUL_COMPS,
   buildSearchQueries,
+  resolvePricingModel,
   createBrandedWebPricingProvider,
   createUpcWebPricingProvider,
   type ExtractComps,
@@ -188,19 +190,22 @@ describe("branded-web pricing agent", () => {
     expect(search.queries[0]).toContain("Nike Air Max 90");
   });
 
-  it("stamps the resolved pricing model on the result for prediction-log provenance", async () => {
-    // PRICING_MODEL may differ from the vision/listing models; the web tier
-    // must carry the model that actually extracted the comps (#10 review).
+  it("claims pricing-model provenance only when the extractor's model is KNOWN", async () => {
+    // A custom extractor may use a different model — or no LLM at all — so
+    // env/default resolution must never be claimed for it (#10 review). With
+    // an injected extractor and no declared model, the result carries NO
+    // model claim (→ pricing_model NULL in the log), even when PRICING_MODEL
+    // is set in the environment.
     vi.stubEnv("PRICING_MODEL", "pricing-gpt-env");
     const branded = createBrandedWebPricingProvider({
       searchClient: fakeSearch(),
       extractComps: fakeExtractor([soldComps()]),
     });
     const result = await branded.price(BRANDED_SIGNAL);
-    expect(result!.model).toBe("pricing-gpt-env");
+    expect(result!.model).toBeUndefined();
     expect(() => priceResultSchema.parse(result)).not.toThrow();
 
-    // An explicit option override beats the env, on both web tiers.
+    // An explicitly declared model IS valid provenance for a custom extractor.
     const upc = createUpcWebPricingProvider({
       searchClient: fakeSearch(),
       extractComps: fakeExtractor([soldComps()]),
@@ -208,6 +213,13 @@ describe("branded-web pricing agent", () => {
     });
     const upcResult = await upc.price(UPC_SIGNAL);
     expect(upcResult!.model).toBe("pricing-gpt-override");
+
+    // The env/default resolution path (used by the DEFAULT extractor) still
+    // resolves override → env → default.
+    expect(resolvePricingModel("explicit")).toBe("explicit");
+    expect(resolvePricingModel()).toBe("pricing-gpt-env");
+    vi.unstubAllEnvs();
+    expect(resolvePricingModel()).toBe(DEFAULT_PRICING_MODEL);
   });
 
   it("the search budget is shared across the web tiers: no branded re-run after a UPC decline", async () => {

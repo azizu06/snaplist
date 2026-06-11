@@ -379,7 +379,7 @@ function sufficient(j: CompJudgement): boolean {
 function synthesize(
   comps: readonly WebComp[],
   tier: Extract<PricingTier, "upc-aided-web" | "branded-web">,
-  model: string,
+  model: string | undefined,
 ): PriceResult {
   const j = judgeComps(comps);
   const prices = j.basis.map((c) => c.price).sort((a, b) => a - b);
@@ -411,9 +411,11 @@ function synthesize(
     confidence,
     sources,
     tier,
-    // Provenance: the LLM comp extractor ran for every web-tier price, so the
-    // resolved pricing model rides on the result into prediction_logs.
-    model,
+    // Provenance: stamped only when the extractor's model is actually KNOWN —
+    // the default extractor's resolved id, or an explicit options.model for an
+    // injected extractor. An injected extractor without a declared model logs
+    // no claim (undefined → pricing_model NULL) rather than a wrong one.
+    ...(model ? { model } : {}),
   };
 }
 
@@ -440,11 +442,14 @@ interface ResolvedDeps {
   requireEnvKeys: boolean;
   /** Raw model override; resolved lazily (env read at price time) for provenance. */
   model?: string;
+  /** Was a custom extractor injected? Then options.model is the ONLY valid provenance. */
+  customExtractor: boolean;
 }
 
 function resolveDeps(options: WebSearchPricingProviderOptions): ResolvedDeps {
   return {
     model: options.model,
+    customExtractor: options.extractComps != null,
     searchClient: options.searchClient ?? createDefaultSearchClient(),
     extractComps:
       options.extractComps ??
@@ -506,7 +511,13 @@ async function priceViaWebAgent(
   // "Nothing useful" → decline so the router falls through to lower tiers.
   if (comps.length < MIN_USEFUL_COMPS) return null;
 
-  return synthesize(comps, tier, resolvePricingModel(deps.model));
+  // Provenance honesty: a custom extractor may use a different model — or no
+  // LLM at all — so only its explicitly declared options.model may be claimed.
+  // The env/default resolution applies solely to the default extractor.
+  const provenance = deps.customExtractor
+    ? deps.model?.trim() || undefined
+    : resolvePricingModel(deps.model);
+  return synthesize(comps, tier, provenance);
 }
 
 /**
