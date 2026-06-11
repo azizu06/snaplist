@@ -65,9 +65,16 @@ export interface AttachDraftReplyInput {
 }
 
 /**
- * Attach the agent's draft to the inbound message (status `new` → `drafted`).
- * The update is pushed over Realtime, so the inbox shows the draft appearing
- * under the question without a refresh.
+ * Attach the agent's draft to the inbound message (status `new`/`draft_failed`
+ * → `drafted`). The update is pushed over Realtime, so the inbox shows the
+ * draft appearing under the question without a refresh.
+ *
+ * COMPARE-AND-SET: the update is guarded on the message still AWAITING a
+ * draft. A redraft is slow (a model call), so by the time it returns a
+ * concurrent draft may have attached — and been approved and SENT. An
+ * unguarded write would downgrade that delivered reply back to an editable
+ * draft. 0 rows matched → DraftAttachConflictError (the caller treats it as
+ * an idempotent 409; the winning draft is already on the row).
  */
 export async function attachDraftReply(
   supabase: SupabaseClient,
@@ -81,14 +88,26 @@ export async function attachDraftReply(
       status: "drafted",
     })
     .eq("id", input.messageId)
+    .in("status", ["new", "draft_failed"])
     .select("*")
-    .single();
-  if (error || !data) {
-    throw new Error(
-      `Failed to attach draft reply: ${error?.message ?? "message not found"}`,
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to attach draft reply: ${error.message}`);
+  }
+  if (!data) {
+    throw new DraftAttachConflictError(
+      "Message is not awaiting a draft (already drafted or sent).",
     );
   }
   return messageRowSchema.parse(data);
+}
+
+/** Thrown when a draft attach loses the race — the row already moved on. */
+export class DraftAttachConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DraftAttachConflictError";
+  }
 }
 
 /**

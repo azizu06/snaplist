@@ -135,6 +135,16 @@ function tokenInfos(text: string): TokenInfo[] {
 /** How many tokens on each side of a number count as its claim context. */
 const NUMBER_CONTEXT_WINDOW = 2;
 
+/**
+ * Split text into sentences so context windows can never straddle a sentence
+ * boundary. Without this, "Priced at $180. Ships from a smoke-free home."
+ * binds `180` to "ships" and the guard would accept "It ships in 180." —
+ * laundering the price into a shipping claim.
+ */
+function sentences(text: string): string[] {
+  return text.split(/[.!?]+(?:\s+|$)/).filter((s) => s.length > 0);
+}
+
 /** What the grounding licenses each standalone number to be used FOR. */
 interface NumberGrounding {
   /** Numbers the corpus carries with a currency marker ("$180"). */
@@ -149,16 +159,17 @@ interface NumberGrounding {
 }
 
 /**
- * Collect, per grounding PART (parts never share a sentence, so windows must
- * not cross part boundaries), the context tokens around every standalone
- * number plus the set of currency-marked numbers.
+ * Collect, per grounding SENTENCE (windows must cross neither part nor
+ * sentence boundaries — a number's claim context is its own sentence), the
+ * context tokens around every standalone number plus the set of
+ * currency-marked numbers.
  */
 function collectNumberGrounding(parts: readonly string[]): NumberGrounding {
   const currencyNumbers = new Set<string>();
   const contexts = new Map<string, Set<string>>();
   const contextFree = new Set<string>();
-  for (const part of parts) {
-    const infos = tokenInfos(part);
+  for (const sentence of parts.flatMap(sentences)) {
+    const infos = tokenInfos(sentence);
     infos.forEach((info, i) => {
       if (!isStandaloneNumber(info.token)) return;
       const key = normalizeNumber(info.token);
@@ -220,25 +231,29 @@ export function replyAssertsUngroundedNumbers(
   const allowedTokens = new Set(parts.flatMap(tokenize));
   const numbers = collectNumberGrounding(parts);
 
-  const replyInfos = tokenInfos(reply);
-  return replyInfos.some((info, i) => {
-    if (!/\d/.test(info.token)) return false; // no numeric claim in this token
-    if (!isStandaloneNumber(info.token)) return !allowedTokens.has(info.token);
+  // The reply is windowed per SENTENCE too — symmetry with the corpus side:
+  // a number's claim is its own sentence on both ends of the comparison.
+  return sentences(reply).some((sentence) => {
+    const infos = tokenInfos(sentence);
+    return infos.some((info, i) => {
+      if (!/\d/.test(info.token)) return false; // no numeric claim in this token
+      if (!isStandaloneNumber(info.token)) return !allowedTokens.has(info.token);
 
-    const key = normalizeNumber(info.token);
-    if (info.currency && numbers.currencyNumbers.has(key)) return false;
-    if (numbers.contextFree.has(key)) return false;
-    const corpusCtx = numbers.contexts.get(key);
-    if (!corpusCtx) return true; // number absent from the grounding entirely
-    for (
-      let j = Math.max(0, i - NUMBER_CONTEXT_WINDOW);
-      j <= Math.min(replyInfos.length - 1, i + NUMBER_CONTEXT_WINDOW);
-      j++
-    ) {
-      if (j === i) continue;
-      if (corpusCtx.has(replyInfos[j].token)) return false; // same claim context
-    }
-    return true;
+      const key = normalizeNumber(info.token);
+      if (info.currency && numbers.currencyNumbers.has(key)) return false;
+      if (numbers.contextFree.has(key)) return false;
+      const corpusCtx = numbers.contexts.get(key);
+      if (!corpusCtx) return true; // number absent from the grounding entirely
+      for (
+        let j = Math.max(0, i - NUMBER_CONTEXT_WINDOW);
+        j <= Math.min(infos.length - 1, i + NUMBER_CONTEXT_WINDOW);
+        j++
+      ) {
+        if (j === i) continue;
+        if (corpusCtx.has(infos[j].token)) return false; // same claim context
+      }
+      return true;
+    });
   });
 }
 

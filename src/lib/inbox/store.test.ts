@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  DraftAttachConflictError,
   ReplySendConflictError,
   approveAndSendReply,
   attachDraftReply,
@@ -55,6 +56,7 @@ interface RecordedUpdate {
   table: string;
   payload: Record<string, unknown>;
   eqs: [string, unknown][];
+  ins: [string, unknown[]][];
 }
 interface RecordedSelect {
   table: string;
@@ -115,7 +117,7 @@ function fakeSupabase(plan: {
           return builder;
         },
         update(payload: Record<string, unknown>) {
-          const entry: RecordedUpdate = { table, payload, eqs: [] };
+          const entry: RecordedUpdate = { table, payload, eqs: [], ins: [] };
           updates.push(entry);
           const planned =
             plannedUpdates.shift() ?? ({ data: null, error: null } as PlannedResult);
@@ -125,8 +127,13 @@ function fakeSupabase(plan: {
               entry.eqs.push([column, value]);
               return builder;
             },
+            in(column: string, values: unknown[]) {
+              entry.ins.push([column, values]);
+              return builder;
+            },
             select: () => ({
               single: async () => res,
+              maybeSingle: async () => res,
               // `.select("id")` is awaited directly by the CAS claim.
               then(
                 onFulfilled: (v: PlannedResult) => unknown,
@@ -223,16 +230,30 @@ describe("attachDraftReply", () => {
       status: "drafted",
     });
     expect(updates[0].eqs).toEqual([["id", MESSAGE_ID]]);
+    // The attach is a CAS: only a message still AWAITING a draft may take it.
+    expect(updates[0].ins).toEqual([["status", ["new", "draft_failed"]]]);
     expect(result.status).toBe("drafted");
   });
 
-  it("throws when the message is missing (RLS-filtered or deleted)", async () => {
+  it("throws when the update itself errors", async () => {
     const { client } = fakeSupabase({
-      updates: [{ data: null, error: { message: "0 rows" } }],
+      updates: [{ data: null, error: { message: "boom" } }],
     });
     await expect(
       attachDraftReply(client, { messageId: MESSAGE_ID, draft: "d", model: "m" }),
     ).rejects.toThrow(/Failed to attach draft reply/);
+  });
+
+  it("throws DraftAttachConflictError when the row already moved on (lost race)", async () => {
+    // A slow redraft returning AFTER a concurrent draft was attached — and
+    // possibly approved and SENT — must not downgrade the row: the guarded
+    // update matches 0 rows and surfaces as an idempotent conflict.
+    const { client } = fakeSupabase({
+      updates: [{ data: null, error: null }],
+    });
+    await expect(
+      attachDraftReply(client, { messageId: MESSAGE_ID, draft: "d", model: "m" }),
+    ).rejects.toThrow(DraftAttachConflictError);
   });
 });
 

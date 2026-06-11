@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import {
+  DraftAttachConflictError,
   attachDraftReply,
   createBuyerMessage,
   draftBuyerReply,
@@ -125,6 +126,15 @@ export async function POST(request: Request) {
         { status: 200 },
       );
     } catch (err) {
+      // Lost the race to a concurrent draft (possibly already approved and
+      // sent) — the row moved on, so this is an idempotent conflict, NOT a
+      // failure to mark: the winning draft must not be flagged failed.
+      if (err instanceof DraftAttachConflictError) {
+        return NextResponse.json(
+          { messageId: existing.id, error: err.message },
+          { status: 409 },
+        );
+      }
       await markDraftFailed(supabase, existing.id);
       const message = err instanceof Error ? err.message : "Draft failed";
       return NextResponse.json(

@@ -116,6 +116,31 @@ describe("replyAssertsUngroundedNumbers", () => {
     expect(replyAssertsUngroundedNumbers("I'm asking $40 for them.", priced)).toBe(true);
   });
 
+  it("never lets context windows cross sentence boundaries — a price cannot launder into a shipping claim", () => {
+    // "Priced at $180. Ships from a smoke-free home." — `180`'s claim context
+    // is its OWN sentence; the adjacent sentence's "ships" must not vouch for
+    // "It ships in 180."
+    expect(replyAssertsUngroundedNumbers("It ships in 180.", grounding)).toBe(true);
+
+    const twoSentence: ReplyGrounding = {
+      attributes: { title: "Game console" },
+      listing: {
+        title: "Console",
+        description: "Battery lasts 30 hours. Ships in 2 boxes.",
+      },
+    };
+    // Cross-sentence laundering rejected; same-sentence claims still pass.
+    expect(
+      replyAssertsUngroundedNumbers("Ships in 30 days.", twoSentence),
+    ).toBe(true);
+    expect(
+      replyAssertsUngroundedNumbers("The battery lasts 30 hours.", twoSentence),
+    ).toBe(false);
+    expect(replyAssertsUngroundedNumbers("Ships in 2 boxes.", twoSentence)).toBe(
+      false,
+    );
+  });
+
   it("binds a grounded number to its claim context — a count cannot be repurposed as a timing", () => {
     const bundle: ReplyGrounding = {
       attributes: { title: "PS5 console bundle" },

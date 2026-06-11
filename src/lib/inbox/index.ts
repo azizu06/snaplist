@@ -32,6 +32,7 @@ export {
   type ReplyGenerate,
 } from "./reply";
 export {
+  DraftAttachConflictError,
   ReplySendConflictError,
   approveAndSendReply,
   attachDraftReply,
