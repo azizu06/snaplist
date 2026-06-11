@@ -91,7 +91,8 @@ const SEARCH_RESULT_LIMIT = 8;
  */
 const SNIPPET_MAX_CHARS = 1500;
 
-function truncateSnippet(text: string | undefined): string | undefined {
+/** Exported for the depreciation tier's retail extractor — same budget rationale. */
+export function truncateSnippet(text: string | undefined): string | undefined {
   if (text == null || text.length <= SNIPPET_MAX_CHARS) return text;
   return text.slice(0, SNIPPET_MAX_CHARS);
 }

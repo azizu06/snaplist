@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { priceResultSchema, type ItemSignal, type PriceResult } from "../pricing";
+import {
+  priceResultSchema,
+  type ItemSignal,
+  type PriceResult,
+  type RetailFinding,
+  type SearchClient,
+} from "../pricing";
 import { pipelineResultSchema, type ListingCopy } from "../pipeline/types";
 import {
+  createDefaultPricer,
   createVisionPipeline,
   type CreateVisionPipelineOptions,
 } from "./pipeline";
@@ -409,5 +416,203 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     await expect(makePipeline().run({ photos: [] })).rejects.toThrow(
       /at least one photo/i,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #11 — depreciation + llm-only fallback tiers, end-to-end through the REAL
+// default pricer (every tier's network/model dep replaced by an offline fake).
+// ---------------------------------------------------------------------------
+
+describe("#11 — createDefaultPricer fallthrough (offline fakes)", () => {
+  /** Per-call labels pushed by every fake, so the TIER ORDER itself is assertable. */
+  function instrumentedPricer(args: {
+    calls: string[];
+    /** Retail findings the depreciation extractor returns ([] = tier declines). */
+    retailFindings: RetailFinding[];
+  }) {
+    const { calls, retailFindings } = args;
+    const emptyWebSearch: SearchClient = {
+      async search() {
+        calls.push("web-search");
+        return []; // No comps anywhere → tiers 2/3 decline.
+      },
+    };
+    const retailSearch: SearchClient = {
+      async search() {
+        calls.push("retail-search");
+        return [{ url: "https://www.walmart.com/ip/r1", title: "new", snippet: "$100.00" }];
+      },
+    };
+    return createDefaultPricer({
+      isbn: {
+        fetchJson: async () => {
+          calls.push("isbn-lookup");
+          return null; // Neither catalog API matches → tier 1 declines.
+        },
+      },
+      webSearch: { searchClient: emptyWebSearch },
+      depreciation: {
+        searchClient: retailSearch,
+        extractRetail: async () => retailFindings,
+        model: "test-retail-model",
+      },
+      llmOnly: {
+        estimatePrice: async () => {
+          calls.push("llm-estimate");
+          return { suggested: 22, min: 12, max: 40 };
+        },
+        model: "test-estimator-model",
+      },
+    });
+  }
+
+  /** Carries signals for EVERY tier, so the whole chain is exercised in order. */
+  const fullSignal: ItemSignal = {
+    isbn: "9780131103627",
+    upc: "027242920866",
+    brand: "Sony",
+    model: "WH-1000XM4",
+    category: "electronics",
+    condition: "good",
+    conditionKnown: true,
+  };
+
+  it("falls through every tier IN PRD ORDER and ends at llm-only when all decline", async () => {
+    const calls: string[] = [];
+    const price = instrumentedPricer({ calls, retailFindings: [] });
+
+    const result = await price(fullSignal);
+
+    expect(result.tier).toBe("llm-only");
+    expect(result.suggested).toBe(22);
+    expect(priceResultSchema.safeParse(result).success).toBe(true);
+    // The tiers were consulted in PRD priority order, each one only after the
+    // previous declined. (branded-web is correctly SKIPPED: a UPC-bearing
+    // signal is owned by the upc-aided tier — no duplicate web spend.)
+    const order = calls.filter((label, i) => calls.indexOf(label) === i);
+    expect(order).toEqual([
+      "isbn-lookup",
+      "web-search",
+      "retail-search",
+      "llm-estimate",
+    ]);
+  });
+
+  it("depreciation fires BEFORE llm-only when a cited retail anchor exists", async () => {
+    const calls: string[] = [];
+    const price = instrumentedPricer({
+      calls,
+      retailFindings: [{ url: "https://www.walmart.com/ip/r1", title: "new", price: 100 }],
+    });
+
+    const result = await price(fullSignal);
+
+    expect(result.tier).toBe("depreciation");
+    // $100 retail × good (0.5) — deterministic math over the cited anchor.
+    expect(result.suggested).toBe(50);
+    expect(result.sources).toEqual([
+      { url: "https://www.walmart.com/ip/r1", title: "new", kind: "retail-price" },
+    ]);
+    // The retail anchor came from LLM extraction → its model is the provenance.
+    expect(result.model).toBe("test-retail-model");
+    // The floor was never consulted — llm-only fires LAST, and only last.
+    expect(calls).not.toContain("llm-estimate");
+  });
+
+  it("a GENERIC item lands a clearly low-confidence depreciation estimate end-to-end", async () => {
+    // Acceptance: generic brand+category item (no model/UPC/ISBN, so tiers 1-3
+    // decline by canHandle) where only a RETAIL price can be found → priced at
+    // retail × condition factor, labeled LOW confidence, never autopilot.
+    const calls: string[] = [];
+    const generic: ExtractItemAttributesResult = {
+      attributes: {
+        brand: "Hamilton Beach",
+        category: "kitchen",
+        condition: "fair",
+        title: "Hamilton Beach blender",
+      },
+      identification: {
+        label: "Hamilton Beach blender",
+        confident: false,
+        evidence: 0.5,
+        reason: "No model number visible.",
+      },
+      model: "test-vision-model",
+    };
+    const result = await makePipeline({
+      extract: fakeExtract(generic),
+      priceItem: instrumentedPricer({
+        calls,
+        retailFindings: [{ url: "https://www.walmart.com/ip/r1", price: 100 }],
+      }),
+    }).run({ photos: ["u/a.jpg"] });
+
+    expect(result.price.tier).toBe("depreciation");
+    expect(result.price.suggested).toBe(35); // $100 retail × fair (0.35).
+    // Clearly labeled low confidence: the review page derives its band from
+    // this persisted score, so "low" here is what the user sees.
+    expect(result.confidence.band).toBe("low");
+    expect(result.confidence.autopilotEligible).toBe(false);
+    // Provenance flows to the prediction log: the retail EXTRACTION model.
+    expect(result.pricingModel).toBe("test-retail-model");
+  });
+
+  it("an UNIDENTIFIABLE item ends at the llm-only floor, lowest confidence, end-to-end", async () => {
+    // Acceptance: nothing searchable at all → every evidence tier declines and
+    // the LLM-only floor fires LAST, with the lowest confidence band.
+    const calls: string[] = [];
+    const unidentifiable: ExtractItemAttributesResult = {
+      attributes: { category: "home goods", condition: "good", title: "Unbranded item" },
+      identification: {
+        label: "Unidentified home goods item",
+        confident: false,
+        evidence: 0.25,
+        reason: "Not enough strong identifiers.",
+      },
+      model: "test-vision-model",
+    };
+    const result = await makePipeline({
+      extract: fakeExtract(unidentifiable),
+      priceItem: instrumentedPricer({ calls, retailFindings: [] }),
+    }).run({ photos: ["u/a.jpg"] });
+
+    expect(result.price.tier).toBe("llm-only");
+    expect(result.price.sources).toEqual([]); // No evidence is claimed.
+    expect(result.confidence.band).toBe("low");
+    expect(result.confidence.autopilotEligible).toBe(false);
+    expect(result.pricingModel).toBe("test-estimator-model");
+    // With no identity there was nothing to search — the floor caught it directly.
+    expect(calls).toEqual(["llm-estimate"]);
+  });
+
+  it("the fallback tiers stay sub-gate even with PERFECT identification (no autopilot bypass)", async () => {
+    // The composite arithmetic guarantees it (0.6·tierBase + 0.25·id +
+    // 0.15·agreement: depreciation ≤ 0.64, llm-only ≤ 0.52, both < 0.75); this
+    // pins the guarantee through the REAL pipeline mapping, with the strongest
+    // possible extraction.
+    const depreciationPrice = priceResultSchema.parse({
+      suggested: 50,
+      range: { min: 35, max: 65 },
+      confidence: 0.35,
+      sources: [{ url: "https://www.walmart.com/ip/r1", kind: "retail-price" }],
+      tier: "depreciation",
+    });
+    const llmOnlyPrice = priceResultSchema.parse({
+      suggested: 22,
+      range: { min: 12, max: 40 },
+      confidence: 0.2,
+      sources: [],
+      tier: "llm-only",
+    });
+
+    for (const price of [depreciationPrice, llmOnlyPrice]) {
+      const result = await makePipeline({ priceItem: async () => price }).run({
+        photos: ["u/a.jpg"],
+      });
+      expect(result.confidence.score).toBeLessThan(0.75);
+      expect(result.confidence.band).not.toBe("high");
+      expect(result.confidence.autopilotEligible).toBe(false);
+    }
   });
 });

@@ -38,3 +38,25 @@ export {
   type ExtractComps,
   type WebSearchPricingProviderOptions,
 } from "./providers/web-search";
+export {
+  createDepreciationPricingProvider,
+  createOpenAIRetailExtractor,
+  buildRetailQueries,
+  retailFindingSchema,
+  DEPRECIATION_FACTORS,
+  DEFAULT_DEPRECIATION_FACTOR,
+  DEPRECIATION_CONFIDENCE,
+  MAX_RETAIL_SEARCHES,
+  type RetailFinding,
+  type ExtractRetail,
+  type DepreciationPricingProviderOptions,
+} from "./providers/depreciation";
+export {
+  createLlmOnlyPricingProvider,
+  createOpenAIPriceEstimator,
+  llmPriceEstimateSchema,
+  LLM_ONLY_CONFIDENCE,
+  type LlmPriceEstimate,
+  type EstimatePrice,
+  type LlmOnlyPricingProviderOptions,
+} from "./providers/llm-only";

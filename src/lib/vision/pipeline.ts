@@ -8,10 +8,14 @@ import {
   createIsbnPricingProvider,
   createUpcWebPricingProvider,
   createBrandedWebPricingProvider,
-  priceResultSchema,
+  createDepreciationPricingProvider,
+  createLlmOnlyPricingProvider,
+  type DepreciationPricingProviderOptions,
+  type IsbnPricingProviderOptions,
   type ItemSignal,
+  type LlmOnlyPricingProviderOptions,
   type PriceResult,
-  type PricingProvider,
+  type WebSearchPricingProviderOptions,
 } from "../pricing";
 import { generateEbayListing, createRealFewShotRetrieval } from "../listing";
 import type {
@@ -37,7 +41,7 @@ import { resolvePhotoImages, type SignedUrlClient } from "./photos";
  * layer or callers.
  *
  *   photos[] → (signed URLs) → SINGLE multimodal extraction → attributes + flagged
- *   identification → REAL pricing (PriceRouter: ISBN tier + interim fallback) → REAL
+ *   identification → REAL pricing (PriceRouter: all five PRD tiers) → REAL
  *   grounded eBay listing → REAL, #31-calibrated confidence composite → result.
  *
  * Every model/network dependency (extraction, pricing, listing, retrieval) is injectable
@@ -54,8 +58,8 @@ export interface CreateVisionPipelineOptions {
   /** Model id override forwarded to extraction (else env / default). */
   model?: string;
   /**
-   * Price an item signal. Defaults to the REAL `PriceRouter` (ISBN tier + an interim
-   * llm-only catch-all). Injected in tests so pricing runs offline.
+   * Price an item signal. Defaults to the REAL `PriceRouter` over all five PRD
+   * tiers (`createDefaultPricer`). Injected in tests so pricing runs offline.
    */
   priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
   /**
@@ -72,43 +76,43 @@ export interface CreateVisionPipelineOptions {
 
 // ---------------------------------------------------------------------------
 // Real pricing + listing wiring (#8 ISBN tier + #9 grounded listing integrated;
-// #31 confidence calibration for retail-derived ISBN prices).
+// #31 confidence calibration for retail-derived ISBN prices; #11 fallback tiers).
 // ---------------------------------------------------------------------------
 
 /**
- * Interim catch-all pricing provider: when no real tier handles the signal (e.g. an
- * unbranded item the web tiers decline, before the depreciation tier lands), yield an
- * honest llm-only price-0 placeholder so the router always produces a schema-valid
- * price. This is NOT the real LLM-only pricing tier (#11) — just a placeholder until
- * #11 adds the real fallback.
+ * Per-tier dependency overrides for `createDefaultPricer`. Production passes
+ * nothing (every tier defaults to its real network/model deps); tests inject
+ * fakes per tier so the FULL PRD-order fallthrough runs offline.
  */
-function interimFallbackProvider(): PricingProvider {
-  return {
-    tier: "llm-only",
-    canHandle: () => true,
-    price: async () =>
-      priceResultSchema.parse({
-        suggested: 0,
-        range: { min: 0, max: 0 },
-        confidence: 0.2,
-        sources: [],
-        tier: "llm-only",
-      } satisfies PriceResult),
-  };
+export interface CreateDefaultPricerOptions {
+  /** Tier-1 ISBN lookup deps (offline tests inject `fetchJson`). */
+  isbn?: IsbnPricingProviderOptions;
+  /** Tier-2/3 web-search agent deps (shared by the UPC-aided and branded tiers). */
+  webSearch?: WebSearchPricingProviderOptions;
+  /** Tier-4 depreciation deps (retail search + extraction). */
+  depreciation?: DepreciationPricingProviderOptions;
+  /** Tier-5 LLM-only estimator deps. */
+  llmOnly?: LlmOnlyPricingProviderOptions;
 }
 
 /**
  * The default real pricer in PRD priority order: ISBN structured lookup, then the
  * #10 web-search agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction,
  * env-key gated — a keyless deployment makes those tiers decline gracefully), then
- * the interim llm-only catch-all.
+ * the #11 fallback tiers: depreciation (retail anchor × condition factor, low
+ * confidence) and last the LLM-only floor, which never declines — so the router
+ * always returns a schema-valid price. Exported so the fallthrough ORDER itself
+ * is testable end-to-end with injected fakes.
  */
-function createDefaultPricer(): (signal: ItemSignal) => Promise<PriceResult> {
+export function createDefaultPricer(
+  options: CreateDefaultPricerOptions = {},
+): (signal: ItemSignal) => Promise<PriceResult> {
   const router = new PriceRouter([
-    createIsbnPricingProvider(),
-    createUpcWebPricingProvider(),
-    createBrandedWebPricingProvider(),
-    interimFallbackProvider(),
+    createIsbnPricingProvider(options.isbn),
+    createUpcWebPricingProvider(options.webSearch),
+    createBrandedWebPricingProvider(options.webSearch),
+    createDepreciationPricingProvider(options.depreciation),
+    createLlmOnlyPricingProvider(options.llmOnly),
   ]);
   return (signal) => router.price(signal);
 }
@@ -235,9 +239,10 @@ function confidenceSignalsFor(
 
 /**
  * Construct a `Pipeline` whose `run` performs real vision extraction, real pricing
- * (PriceRouter: ISBN tier + interim fallback), and real grounded eBay listing
- * generation. `supabase` signs the private photo URLs; all model/network deps are
- * injectable for offline tests, defaulting to the real implementations.
+ * (PriceRouter: all five PRD tiers via `createDefaultPricer`), and real grounded
+ * eBay listing generation. `supabase` signs the private photo URLs; all
+ * model/network deps are injectable for offline tests, defaulting to the real
+ * implementations.
  */
 export function createVisionPipeline(
   options: CreateVisionPipelineOptions,

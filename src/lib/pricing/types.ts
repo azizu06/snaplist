@@ -62,8 +62,10 @@ export interface ItemSignal {
    * A retail price discovered for the item (e.g. surfaced by the web-search tier
    * when only retail — not resale — comps were found). Carried in the routing
    * context so the depreciation tier can compute retail × condition factor without
-   * repeating the search. (The fuller "a declining provider passes its discovered
-   * evidence forward" chaining is deferred to the web-search / depreciation tier slices.)
+   * repeating the search. NOT consumed yet: nothing produces it, and it carries no
+   * citation URL while depreciation results must cite checkable evidence (the
+   * `sources` refine below) — so the tier runs its own bounded retail search until
+   * the producer slice forwards the discovering source alongside the price.
    */
   retailPrice?: number;
   /** Free-form resolved product name (e.g. UPC-resolved title) to seed search queries. */
