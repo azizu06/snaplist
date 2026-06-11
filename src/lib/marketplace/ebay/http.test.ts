@@ -208,7 +208,7 @@ describe("HttpEbayAdapter.publishListing", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("recovers from 'offer already exists' (25002) by updating + publishing the existing offer", async () => {
+  it("recovers from 'offer already exists' (25002) by updating + publishing the existing UNPUBLISHED offer", async () => {
     const { fetch, calls } = fakeFetch((url, init) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
       if (url.endsWith("/sell/inventory/v1/offer") && init.method === "POST") {
@@ -222,6 +222,13 @@ describe("HttpEbayAdapter.publishListing", () => {
           ],
         });
       }
+      if (url.includes("/sell/inventory/v1/offer?sku=") && init.method === "GET") {
+        return json(200, {
+          offers: [
+            { offerId: "offer-old", marketplaceId: "EBAY_US", status: "UNPUBLISHED" },
+          ],
+        });
+      }
       if (url.endsWith("/offer/offer-old") && init.method === "PUT") {
         return new Response(null, { status: 204 });
       }
@@ -232,16 +239,60 @@ describe("HttpEbayAdapter.publishListing", () => {
 
     const result = await adapter.publishListing(request);
     expect(result).toEqual({ listingId: "L-2", offerId: "offer-old", status: "published" });
-    // create attempt -> update-in-place -> publish (re-publish after a half-failed run).
+    // create attempt -> getOffers recovery -> update-in-place -> publish.
     expect(calls.map((c) => `${c.init.method} ${c.url.slice(BASE.length)}`)).toEqual([
       "PUT /sell/inventory/v1/inventory_item/listing-uuid-1",
       "POST /sell/inventory/v1/offer",
+      "GET /sell/inventory/v1/offer?sku=listing-uuid-1&marketplace_id=EBAY_US",
       "PUT /sell/inventory/v1/offer/offer-old",
       "POST /sell/inventory/v1/offer/offer-old/publish",
     ]);
     // The recovered offer's update-in-place carries the required duration too.
-    const updateBody = JSON.parse(String(calls[2]!.init.body));
+    const updateBody = JSON.parse(String(calls[3]!.init.body));
     expect(updateBody.listingDuration).toBe("GTC");
+  });
+
+  it("returns the live listingId — WITHOUT republishing — when the recovered offer is already PUBLISHED", async () => {
+    // A prior run published on eBay but crashed before persisting locally.
+    // publishOffer only converts an UNPUBLISHED offer into a listing, so the
+    // retry must hand back the existing listingId for local repair instead of
+    // updating + republishing the live offer.
+    const { fetch, calls } = fakeFetch((url, init) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/sell/inventory/v1/offer") && init.method === "POST") {
+        return json(400, {
+          errors: [{ errorId: 25002, message: "Offer entity already exists." }],
+        });
+      }
+      if (url.includes("/sell/inventory/v1/offer?sku=") && init.method === "GET") {
+        return json(200, {
+          offers: [
+            {
+              offerId: "offer-live",
+              marketplaceId: "EBAY_US",
+              status: "PUBLISHED",
+              listing: { listingId: "L-LIVE" },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected call: ${url}`);
+    });
+    const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => sellerEnv });
+
+    const result = await adapter.publishListing(request);
+    expect(result).toEqual({
+      listingId: "L-LIVE",
+      offerId: "offer-live",
+      status: "published",
+    });
+    // No offer update, no publish call — the listing is already live.
+    const mutations = calls.filter(
+      (c) => c.init.method !== "GET" && !c.url.includes("/inventory_item/"),
+    );
+    expect(mutations.map((c) => `${c.init.method} ${c.url.slice(BASE.length)}`)).toEqual([
+      "POST /sell/inventory/v1/offer",
+    ]);
   });
 
   it("recovers via getOffers-by-SKU when the 25002 conflict carries NO offerId parameter", async () => {

@@ -40,9 +40,11 @@ export default async function ReviewPage({
     .single();
   if (!item) notFound();
 
+  // `id` feeds the link to the publish page (/listings/{id}) — without it the
+  // "Publish to eBay" flow is unreachable from the normal upload → review path.
   const { data: listing } = await supabase
     .from("listings")
-    .select("platform, title, description, copy, status")
+    .select("id, platform, title, description, copy, status")
     .eq("item_id", itemId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -205,7 +207,17 @@ export default async function ReviewPage({
             <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600">
               {listing.description}
             </p>
-            <p className="mt-3 text-xs text-zinc-400">status: {listing.status}</p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-zinc-400">status: {listing.status}</p>
+              {listing.platform === "ebay" ? (
+                <Link
+                  href={`/listings/${listing.id}`}
+                  className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
+                >
+                  Publish to eBay
+                </Link>
+              ) : null}
+            </div>
           </article>
         ) : (
           <p className="text-sm text-zinc-500">No listing generated.</p>

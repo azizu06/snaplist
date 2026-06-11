@@ -160,22 +160,32 @@ export class HttpEbayAdapter implements EbayAdapter {
     } catch (err) {
       if (!isOfferConflict(err)) throw err;
       // Offer already exists for this SKU (e.g. an earlier publish failed after
-      // step 2). eBay documents `offerId` as returned only by a successful
-      // createOffer — the conflict error's parameters are NOT a contract — so
-      // the canonical recovery is getOffers by SKU. The error parameter is
-      // kept as a fast path when present.
-      const existing =
-        existingOfferIdFrom(err) ??
-        (await this.findOfferIdBySku(
-          token,
-          baseUrl,
-          request.sku,
-          marketplaceId,
-          contentLanguage,
-        ));
+      // step 2 — or AFTER a successful publish whose local persistence failed).
+      // eBay documents `offerId` as returned only by a successful createOffer —
+      // the conflict error's parameters are NOT a contract — so the canonical
+      // recovery is getOffers by SKU. The error parameter is kept as a fast
+      // path, but a recovered offer that is ALREADY PUBLISHED short-circuits:
+      // publishOffer converts an unpublished offer into a listing, so calling
+      // it again would leave the live listing untracked — return its existing
+      // listingId instead so the caller can repair local state.
+      const recovered = await this.findOfferBySku(
+        token,
+        baseUrl,
+        request.sku,
+        marketplaceId,
+        contentLanguage,
+      );
+      if (recovered?.listingId) {
+        return {
+          listingId: recovered.listingId,
+          offerId: recovered.offerId,
+          status: "published",
+        };
+      }
+      const existing = recovered?.offerId ?? existingOfferIdFrom(err);
       if (!existing) throw err;
-      // Update the recovered offer in place so price/description are current,
-      // then publish.
+      // Update the recovered (unpublished) offer in place so price/description
+      // are current, then publish.
       offerId = existing;
       await this.call(
         token,
@@ -202,21 +212,29 @@ export class HttpEbayAdapter implements EbayAdapter {
   }
 
   /**
-   * Recover an existing offer id for a SKU via `GET /sell/inventory/v1/offer`
-   * — eBay's documented way to retrieve offers after a createOffer conflict.
-   * Returns undefined (caller rethrows the original conflict) when the lookup
-   * itself fails or finds nothing, so recovery never masks the root error.
+   * Recover an existing offer for a SKU via `GET /sell/inventory/v1/offer` —
+   * eBay's documented way to retrieve offers after a createOffer conflict.
+   * Returns the offer id PLUS, when the offer is already PUBLISHED, its live
+   * listingId (getOffers exposes `status` and `listing.listingId`) — the
+   * caller must NOT republish a published offer. Returns undefined (caller
+   * rethrows the original conflict) when the lookup itself fails or finds
+   * nothing, so recovery never masks the root error.
    */
-  private async findOfferIdBySku(
+  private async findOfferBySku(
     token: string,
     baseUrl: string,
     sku: string,
     marketplaceId: string,
     contentLanguage: string,
-  ): Promise<string | undefined> {
+  ): Promise<{ offerId: string; listingId?: string } | undefined> {
     try {
       const found = await this.call<{
-        offers?: Array<{ offerId?: string; marketplaceId?: string }>;
+        offers?: Array<{
+          offerId?: string;
+          marketplaceId?: string;
+          status?: string;
+          listing?: { listingId?: string };
+        }>;
       }>(
         token,
         "GET",
@@ -228,7 +246,12 @@ export class HttpEbayAdapter implements EbayAdapter {
       // Prefer the offer on OUR marketplace; a SKU can carry offers on others.
       const match =
         offers.find((o) => o.marketplaceId === marketplaceId) ?? offers[0];
-      return match?.offerId || undefined;
+      if (!match?.offerId) return undefined;
+      const listingId =
+        match.status === "PUBLISHED" && match.listing?.listingId
+          ? match.listing.listingId
+          : undefined;
+      return { offerId: match.offerId, listingId };
     } catch {
       return undefined;
     }

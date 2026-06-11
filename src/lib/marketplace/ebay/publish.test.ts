@@ -311,7 +311,14 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       .single();
     const { error: logErr } = await userA.client
       .from("prediction_logs")
-      .insert({ user_id: userA.id, item_id: item!.id as string, price: 25 });
+      .insert({
+        user_id: userA.id,
+        item_id: item!.id as string,
+        price: 25,
+        // listing_model is NOT NULL (provenance, #32) — required even for
+        // hand-built fixture rows that bypass logPrediction.
+        listing_model: "test-fixture",
+      });
     expect(logErr).toBeNull();
 
     const adapter = new MockEbayAdapter();
@@ -359,7 +366,14 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
       .single();
     const { error: logErr } = await userA.client
       .from("prediction_logs")
-      .insert({ user_id: userA.id, item_id: item!.id as string, price: 25 });
+      .insert({
+        user_id: userA.id,
+        item_id: item!.id as string,
+        price: 25,
+        // listing_model is NOT NULL (provenance, #32) — required even for
+        // hand-built fixture rows that bypass logPrediction.
+        listing_model: "test-fixture",
+      });
     expect(logErr).toBeNull();
 
     const adapter = new MockEbayAdapter();
