@@ -25,5 +25,7 @@ export {
 } from "./photos";
 export {
   createVisionPipeline,
+  createDefaultPricer,
   type CreateVisionPipelineOptions,
+  type CreateDefaultPricerOptions,
 } from "./pipeline";
