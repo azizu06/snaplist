@@ -183,6 +183,14 @@ export default async function ReviewPage({
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Review listing</h1>
         <nav className="flex items-center gap-4">
+          {/* Cross-platform export packs are otherwise unreachable from the
+              normal upload → review flow. */}
+          <Link
+            href={`/export/${itemId}`}
+            className="text-sm text-zinc-500 underline hover:text-zinc-800"
+          >
+            Export packs
+          </Link>
           <Link
             href="/upload"
             className="text-sm text-zinc-500 underline hover:text-zinc-800"
