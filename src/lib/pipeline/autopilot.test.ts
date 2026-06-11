@@ -121,3 +121,15 @@ describe("parsePriceOverride", () => {
     expect(() => parsePriceOverride("Infinity")).toThrow(/positive number/);
   });
 });
+
+describe("parsePriceOverride — sub-cent inputs", () => {
+  it("rejects values that round down to zero instead of persisting a broken override", () => {
+    expect(() => parsePriceOverride(0.004)).toThrow(/at least 0.01/);
+    expect(() => parsePriceOverride("0.004")).toThrow(/at least 0.01/);
+  });
+
+  it("accepts values that round to a valid cent amount", () => {
+    expect(parsePriceOverride(0.006)).toBe(0.01);
+    expect(parsePriceOverride("12.345")).toBe(12.35);
+  });
+});

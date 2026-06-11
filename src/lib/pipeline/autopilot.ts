@@ -69,6 +69,14 @@ export function parsePriceOverride(raw: unknown): number | null {
     );
   }
   // Normalize to cents — eBay-style marketplaces don't take sub-cent prices,
-  // and it keeps the numeric column tidy.
-  return Math.round(n * 100) / 100;
+  // and it keeps the numeric column tidy. Validate the ROUNDED value: a
+  // sub-cent input like 0.004 would otherwise persist a 0 override that
+  // effectivePrice() rejects while the UI still labels it "your override".
+  const cents = Math.round(n * 100) / 100;
+  if (cents < 0.01) {
+    throw new Error(
+      `Invalid price override ${JSON.stringify(raw)}: must be at least 0.01.`,
+    );
+  }
+  return cents;
 }
