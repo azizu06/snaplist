@@ -216,8 +216,12 @@ export function UploadForm({
     Array(SLOT_COUNT).fill(null),
   );
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  // Mirror of `previews` for the unmount cleanup: a state closure in the
+  // unmount effect would capture the INITIAL (empty) array and revoke nothing.
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
 
-  // Revoke object URLs we replace/remove; revoke all on unmount.
+  // Revoke object URLs we replace/remove; revoke whatever is left on unmount.
   const setPreview = (slot: number, url: string | null) => {
     setPreviews((prev) => {
       const old = prev[slot];
@@ -229,9 +233,8 @@ export function UploadForm({
   };
   useEffect(() => {
     return () => {
-      previews.forEach((p) => p && URL.revokeObjectURL(p));
+      previewsRef.current.forEach((p) => p && URL.revokeObjectURL(p));
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only cleanup
   }, []);
 
   return (

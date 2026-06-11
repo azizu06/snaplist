@@ -105,10 +105,21 @@ export default async function Home({
   const itemsById = new Map(
     (items ?? []).map((item) => [item.id as string, item] as const),
   );
-  const listedItemIds = new Set((listings ?? []).map((l) => l.item_id as string));
+
+  // One row per item: keep only the NEWEST eBay listing per item_id (the query
+  // is created_at desc, so first occurrence wins). Today the pipeline writes
+  // exactly one eBay listing per item, but a future relist must not make an
+  // item appear twice — the review page already guards this with limit(1).
+  const newestPerItem = new Map<string, NonNullable<typeof listings>[number]>();
+  for (const l of listings ?? []) {
+    if (!newestPerItem.has(l.item_id as string)) {
+      newestPerItem.set(l.item_id as string, l);
+    }
+  }
+  const listedItemIds = new Set(newestPerItem.keys());
 
   const rows: DashboardRow[] = [
-    ...(listings ?? []).map((l) => {
+    ...[...newestPerItem.values()].map((l) => {
       const item = itemsById.get(l.item_id as string);
       return {
         itemId: l.item_id as string,

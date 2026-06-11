@@ -12,6 +12,8 @@
  * warning (amber) · danger (red) · neutral (gray).
  */
 
+import { DEFAULT_AUTOPILOT_THRESHOLD } from "../confidence/confidence";
+
 export type StatusTone = "success" | "success-solid" | "warning" | "danger" | "neutral";
 
 export interface StatusLabel {
@@ -41,13 +43,19 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
 
 export type ConfidenceBand = "high" | "medium" | "low";
 
-/** Bands mirror the autopilot gate: high ≥ 0.75 (eligible), medium ≥ 0.5, else low. */
+const MEDIUM_MIN = 0.5;
+
+/**
+ * Bands mirror the autopilot gate: high = autopilot-eligible (the SAME
+ * threshold the pipeline gates on, imported so they can't drift), medium ≥ 0.5,
+ * else low.
+ */
 export function confidenceBand(
   confidence: number | null | undefined,
 ): ConfidenceBand | null {
   if (confidence == null) return null;
-  if (confidence >= 0.75) return "high";
-  if (confidence >= 0.5) return "medium";
+  if (confidence >= DEFAULT_AUTOPILOT_THRESHOLD) return "high";
+  if (confidence >= MEDIUM_MIN) return "medium";
   return "low";
 }
 
