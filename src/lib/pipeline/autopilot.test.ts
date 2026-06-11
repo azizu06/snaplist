@@ -115,10 +115,21 @@ describe("parsePriceOverride", () => {
   });
 
   it("rejects non-numeric and non-positive values loudly (a typo must not clear an override)", () => {
-    expect(() => parsePriceOverride("abc")).toThrow(/positive number/);
+    expect(() => parsePriceOverride("abc")).toThrow(/plain decimal/);
     expect(() => parsePriceOverride("0")).toThrow(/positive number/);
     expect(() => parsePriceOverride(-3)).toThrow(/positive number/);
-    expect(() => parsePriceOverride("Infinity")).toThrow(/positive number/);
+    expect(() => parsePriceOverride("Infinity")).toThrow(/plain decimal/);
+  });
+
+  it("rejects strings Number() would reinterpret away from their literal digits", () => {
+    // Number("0x10") is 16 and Number("+12") is 12 — accepting them would
+    // persist a price that doesn't correspond to what was typed.
+    expect(() => parsePriceOverride("0x10")).toThrow(/plain decimal/);
+    expect(() => parsePriceOverride("+12")).toThrow(/plain decimal/);
+    expect(() => parsePriceOverride("1,000")).toThrow(/plain decimal/);
+    // Plain decimal shapes still pass, including dot-led and dot-trailed.
+    expect(parsePriceOverride(".5")).toBe(0.5);
+    expect(parsePriceOverride("12.")).toBe(12);
   });
 });
 
@@ -144,6 +155,15 @@ describe("parsePriceOverride — decimal rounding and overflow", () => {
   it("rejects values whose cent normalization overflows to Infinity", () => {
     expect(() => parsePriceOverride(1e307)).toThrow(/finite/);
     expect(() => parsePriceOverride("1e307")).toThrow(/finite/);
+  });
+
+  it("rejects magnitudes that would silently break the exact integer cent math", () => {
+    // Number(whole) * 100 past MAX_SAFE_INTEGER misrounds the literal digits
+    // ("999999999999999.99" would round UP a full cent) — reject, never lie.
+    expect(() => parsePriceOverride("999999999999999.99")).toThrow(/finite/);
+    expect(() => parsePriceOverride("99999999999999.99")).toThrow(/finite/);
+    // The largest in-range magnitude still rounds exactly.
+    expect(parsePriceOverride("9999999999999.99")).toBe(9999999999999.99);
   });
 });
 

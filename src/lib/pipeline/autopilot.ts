@@ -62,6 +62,14 @@ export function parsePriceOverride(raw: unknown): number | null {
   if (raw == null) return null;
   const text = typeof raw === "string" ? raw.trim() : raw;
   if (text === "") return null;
+  // Strings must LOOK like a plain decimal (optional exponent) before
+  // Number() is trusted: Number("0x10") is 16 and Number("+12") is 12, which
+  // would silently accept values that don't correspond to the typed digits.
+  if (typeof text === "string" && !PRICE_SHAPE.test(text)) {
+    throw new Error(
+      `Invalid price override ${JSON.stringify(raw)}: must be a plain decimal number.`,
+    );
+  }
   const n = typeof text === "number" ? text : Number(text);
   if (!Number.isFinite(n) || n <= 0) {
     throw new Error(
@@ -88,10 +96,27 @@ export function parsePriceOverride(raw: unknown): number | null {
 }
 
 /**
+ * The string shapes a price override may take: plain decimal digits with an
+ * optional fraction (leading or trailing dot allowed) and an optional
+ * exponent. Anything else ("0x10", "+12", "Infinity") is rejected BEFORE
+ * Number() gets a chance to reinterpret it.
+ */
+const PRICE_SHAPE = /^(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
+/**
+ * Whole-dollar digits beyond this length would push the cents integer math
+ * past Number.MAX_SAFE_INTEGER (≈9.007e15 cents) and silently misround —
+ * the literal-digit guarantee would be a lie. 13 digits (≤ $9.99 trillion)
+ * keeps the math exact with room to spare; no marketplace price is larger.
+ */
+const MAX_WHOLE_DIGITS = 13;
+
+/**
  * Round a decimal-string price to cents using its literal digits (half-up),
- * avoiding binary-float tie errors. Falls back to numeric rounding for
- * exotic-but-valid forms (exponent notation), where the overflow check in the
- * caller still applies.
+ * avoiding binary-float tie errors. Falls back to numeric rounding only for
+ * sub-one fractions ("\.5") and out-of-range exponents, where the caller's
+ * finiteness/positivity checks still apply. Returns NaN (→ caller rejects)
+ * when the magnitude would break the exact integer math.
  */
 function roundToCents(text: string): number {
   const m = /^([0-9]+)(?:\.([0-9]+))?$/.exec(expandExponent(text));
@@ -100,6 +125,7 @@ function roundToCents(text: string): number {
     return Math.round(n * 100) / 100;
   }
   const whole = m[1];
+  if (whole.replace(/^0+/, "").length > MAX_WHOLE_DIGITS) return NaN;
   const frac = (m[2] ?? "").padEnd(3, "0");
   // Integer math on the digit string: cents plus a half-up look at digit 3+.
   let centsInt = Number(whole) * 100 + Number(frac.slice(0, 2));
