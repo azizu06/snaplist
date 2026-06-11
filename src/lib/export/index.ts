@@ -4,8 +4,11 @@
  * platform's conventions (FB: casual / short / local pickup; Mercari: ≤ 40-char
  * title, hashtags, shipping-oriented) and each rendered as one clean paste-able
  * block. Constraints are enforced STRUCTURALLY (Zod caps, hashtag bounds, the
- * core-derived hashtag whitelist) on top of the prompt rules, and the model
- * call is injectable so the contract tests run fully offline.
+ * core-derived hashtag whitelist, token-boundary title grounding) on top of
+ * the prompt rules, and the model call is injectable so the contract tests run
+ * fully offline. Titles are grounded model output; DESCRIPTIONS are assembled
+ * deterministically from the validated core (never model free text), so no
+ * channel exists for invented attributes to reach the published packs.
  */
 export {
   FACEBOOK_PLATFORM,
@@ -37,6 +40,9 @@ export {
   derivableHashtagBodies,
   packsHallucinateAttributes,
   repairMercariDescription,
+  buildCoreDescription,
+  buildFacebookDescription,
+  buildMercariDescription,
   formatPrice,
   FACEBOOK_PICKUP_LINE,
   MERCARI_SHIPPING_SUFFIX,

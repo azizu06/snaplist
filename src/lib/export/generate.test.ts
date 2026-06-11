@@ -15,14 +15,13 @@ import {
 import {
   FACEBOOK_PICKUP_LINE,
   MERCARI_SHIPPING_SUFFIX,
+  buildCoreDescription,
+  buildFacebookDescription,
+  buildMercariDescription,
   buildNumericGrounding,
   derivableHashtagBodies,
   deriveDefaultHashtags,
-  descriptionsViolateGrounding,
-  fallbackDescription,
-  fallbackFacebookDescription,
   fallbackFacebookTitle,
-  fallbackMercariDescription,
   fallbackMercariTitle,
   findUngroundedNumbers,
   formatPrice,
@@ -47,8 +46,12 @@ import {
  *  - Mercari conventions hold structurally: title ≤ 40, ≤ 3 normalized
  *    hashtags, and the description ALWAYS mentions shipping;
  *  - NO attribute is invented beyond the validated core: every emitted hashtag
- *    is derivable from the core (whitelist), and the price line comes ONLY from
- *    the caller-passed stored price — never from the model;
+ *    is derivable from the core (whitelist), titles are grounded on TOKEN
+ *    BOUNDARIES against the core (with deterministic fallbacks), DESCRIPTIONS
+ *    are assembled deterministically from the core (model description text is
+ *    NEVER published — the only sound defense against invented digit-free
+ *    claims), and the price line comes ONLY from the caller-passed stored
+ *    price — never from the model;
  *  - each platform's output is ONE clean copy-paste string.
  */
 
@@ -152,12 +155,13 @@ describe("Facebook conventions (structural)", () => {
     expect(res.facebook.pack.title.length).toBeGreaterThan(0);
   });
 
-  it("keeps the FB description structurally short (≤ cap) even when the model rambles", async () => {
+  it("publishes the deterministic core-built FB description (≤ cap) regardless of model rambling", async () => {
     const ramble = "These headphones are truly wonderful in every way. ".repeat(40);
     const { generate } = scriptedGenerate([
       { ...GOOD_RAW, facebook: { ...GOOD_RAW.facebook, description: ramble } },
     ]);
     const res = await generateExportPacks({ attributes: CORE, generate });
+    expect(res.facebook.pack.description).toBe(buildFacebookDescription(CORE));
     expect(res.facebook.pack.description.length).toBeLessThanOrEqual(
       FACEBOOK_DESCRIPTION_MAX_LENGTH,
     );
@@ -195,33 +199,27 @@ describe("Mercari conventions (structural)", () => {
     expect(res.mercari.pack.title.length).toBeGreaterThan(0);
   });
 
-  it("guarantees a shipping mention: appends the neutral suffix when the model forgot", async () => {
-    const { generate } = scriptedGenerate([
-      {
-        ...GOOD_RAW,
-        mercari: {
-          ...GOOD_RAW.mercari,
-          description: "Sony WH-1000XM4 headphones in good condition.",
-        },
-      },
-    ]);
+  it("the published Mercari description always mentions shipping (deterministic suffix)", async () => {
+    const { generate } = scriptedGenerate([GOOD_RAW]);
     const res = await generateExportPacks({ attributes: CORE, generate });
     expect(res.mercari.pack.description).toMatch(/ship/i);
     expect(res.mercari.pack.description).toContain(MERCARI_SHIPPING_SUFFIX);
   });
 
-  it("keeps a model-written shipping mention untouched (no double suffix)", async () => {
+  it("publishes the deterministic core-built Mercari description, never model text", async () => {
     const { generate } = scriptedGenerate([GOOD_RAW]);
     const res = await generateExportPacks({ attributes: CORE, generate });
-    expect(res.mercari.pack.description).toBe(GOOD_RAW.mercari.description);
+    expect(res.mercari.pack.description).toBe(buildMercariDescription(CORE));
+    expect(res.mercari.pack.description).not.toBe(GOOD_RAW.mercari.description);
   });
 
-  it("caps the repaired description at the Mercari limit even for a rambling model", async () => {
-    const ramble = "Great wireless sound and very comfortable to wear all day. ".repeat(40);
-    const { generate } = scriptedGenerate([
-      { ...GOOD_RAW, mercari: { ...GOOD_RAW.mercari, description: ramble } },
-    ]);
-    const res = await generateExportPacks({ attributes: CORE, generate });
+  it("caps the deterministic description at the Mercari limit even for a spec-heavy core", async () => {
+    const heavy: ExtractedAttributes = {
+      ...CORE,
+      specs: Array.from({ length: 40 }, (_, i) => `very long descriptive spec line number item ${"x".repeat(20)}${i}`),
+    };
+    const { generate } = scriptedGenerate([GOOD_RAW]);
+    const res = await generateExportPacks({ attributes: heavy, generate });
     expect(res.mercari.pack.description.length).toBeLessThanOrEqual(
       MERCARI_DESCRIPTION_MAX_LENGTH,
     );
@@ -376,13 +374,34 @@ describe("retry + failure behavior", () => {
   });
 });
 
-describe("description grounding: no ungrounded numbers or prices in free text", () => {
+describe("published descriptions are deterministic core-backed assembly", () => {
   /** Helper: every numeric token in `text` is contextually grounded in CORE. */
   function ungrounded(text: string): string[] {
     return findUngroundedNumbers(text, buildNumericGrounding(CORE));
   }
 
-  it("a model-written '$50' in the FB description triggers retry, then the deterministic fallback", async () => {
+  it("invented digit-free claims never publish: model descriptions are discarded without a retry", async () => {
+    // "Includes charger" / "Waterproof" carry no digits, so no numeric check
+    // can catch them — the defense is that model description text is simply
+    // never published. No retry is needed or spent.
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: { ...GOOD_RAW.facebook, description: "Includes charger." },
+      mercari: { ...GOOD_RAW.mercari, description: "Waterproof. Ships fast." },
+    };
+    const { generate, calls } = scriptedGenerate([dirty]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+
+    expect(calls.length).toBe(1);
+    expect(res.facebook.pack.description).toBe(buildFacebookDescription(CORE));
+    expect(res.mercari.pack.description).toBe(buildMercariDescription(CORE));
+    expect(res.facebook.copyBlock).not.toContain("charger");
+    expect(res.mercari.copyBlock).not.toContain("Waterproof");
+    expect(facebookPackSchema.safeParse(res.facebook.pack).success).toBe(true);
+    expect(mercariPackSchema.safeParse(res.mercari.pack).success).toBe(true);
+  });
+
+  it("a model-written '$50' in the FB description is never published and costs no retry", async () => {
     const dirty: RawExportPacks = {
       ...GOOD_RAW,
       facebook: {
@@ -390,21 +409,19 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
         description: "Great Sony headphones, asking $50 or best offer.",
       },
     };
-    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const { generate, calls } = scriptedGenerate([dirty]);
     const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
 
-    // One self-correction retry happened before settling on the fallback.
-    expect(calls.length).toBe(2);
-    // The claim is NOT published: deterministic core-only fallback instead.
-    expect(res.facebook.pack.description).toBe(fallbackFacebookDescription(CORE));
+    // The description is not a published model surface, so no retry is spent.
+    expect(calls.length).toBe(1);
+    // The claim is NOT published: deterministic core-only assembly instead.
+    expect(res.facebook.pack.description).toBe(buildFacebookDescription(CORE));
     expect(res.facebook.pack.description).not.toContain("$");
     expect(res.facebook.pack.description).not.toContain("50");
     expect(facebookPackSchema.safeParse(res.facebook.pack).success).toBe(true);
-    // The Mercari description was clean and survives untouched.
-    expect(res.mercari.pack.description).toBe(GOOD_RAW.mercari.description);
   });
 
-  it("an unsupported number in the Mercari description triggers retry, then the deterministic fallback", async () => {
+  it("an unsupported number in the model's Mercari description is never published", async () => {
     const dirty: RawExportPacks = {
       ...GOOD_RAW,
       mercari: {
@@ -413,31 +430,18 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
           "Sony WH-1000XM4 headphones, includes a 25W charger. Ships fast.",
       },
     };
-    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const { generate, calls } = scriptedGenerate([dirty]);
     const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
 
-    expect(calls.length).toBe(2);
-    expect(res.mercari.pack.description).toBe(fallbackMercariDescription(CORE));
+    expect(calls.length).toBe(1);
+    expect(res.mercari.pack.description).toBe(buildMercariDescription(CORE));
     expect(res.mercari.pack.description).not.toContain("25");
-    // The fallback still honors the Mercari shipping convention and schema.
+    // The deterministic build still honors the Mercari shipping convention.
     expect(res.mercari.pack.description).toMatch(/ship/i);
     expect(mercariPackSchema.safeParse(res.mercari.pack).success).toBe(true);
-    // The FB description was clean and survives untouched.
-    expect(res.facebook.pack.description).toBe(GOOD_RAW.facebook.description);
   });
 
-  it("a successful self-correction retry publishes the model's clean copy, not the fallback", async () => {
-    const dirty: RawExportPacks = {
-      ...GOOD_RAW,
-      facebook: { ...GOOD_RAW.facebook, description: "Asking 50 dollars, like new." },
-    };
-    const { generate, calls } = scriptedGenerate([dirty, GOOD_RAW]);
-    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
-    expect(calls.length).toBe(2);
-    expect(res.facebook.pack.description).toBe(GOOD_RAW.facebook.description);
-  });
-
-  it("grounded numbers from the core pass without a retry (e.g. 'WH-1000XM4', '128GB')", async () => {
+  it("even a perfectly clean model description is not published — only core-backed assembly is", async () => {
     const core: ExtractedAttributes = { ...CORE, specs: [...CORE.specs!, "128GB case"] };
     const raw: RawExportPacks = {
       ...GOOD_RAW,
@@ -450,12 +454,14 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
     const { generate, calls } = scriptedGenerate([raw]);
     const res = await generateExportPacks({ attributes: core, generate });
     expect(calls.length).toBe(1);
-    expect(res.facebook.pack.description).toBe(raw.facebook.description);
+    expect(res.facebook.pack.description).toBe(buildFacebookDescription(core));
+    // The core spec still reaches the buyer — via the deterministic build.
+    expect(res.facebook.pack.description).toContain("128GB case");
   });
 
-  it("the deterministic fallback satisfies both strict schemas and contains no ungrounded numbers", () => {
-    const fb = fallbackFacebookDescription(CORE);
-    const mercari = fallbackMercariDescription(CORE);
+  it("the deterministic builds satisfy both strict schemas and contain no ungrounded numbers", () => {
+    const fb = buildFacebookDescription(CORE);
+    const mercari = buildMercariDescription(CORE);
     expect(
       facebookPackSchema.safeParse({ title: "t", description: fb }).success,
     ).toBe(true);
@@ -463,30 +469,18 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
       mercariPackSchema.safeParse({ title: "t", description: mercari, hashtags: [] })
         .success,
     ).toBe(true);
+    expect(mercari).toMatch(/ship/i);
     expect(ungrounded(fb)).toEqual([]);
     expect(ungrounded(mercari)).toEqual([]);
-    // A bare core still yields non-empty, schema-valid fallback text.
-    expect(fallbackDescription({}).length).toBeGreaterThan(0);
-    expect(ungrounded(fallbackFacebookDescription({}))).toEqual([]);
+    // A bare core still yields non-empty, schema-valid text.
+    expect(buildCoreDescription({}).length).toBeGreaterThan(0);
+    expect(ungrounded(buildFacebookDescription({}))).toEqual([]);
   });
 
-  it("grounds numbers by CONTEXT: digits mined out of identifiers never license standalone numbers", async () => {
+  it("grounds numbers by CONTEXT: digits mined out of identifiers never license standalone numbers", () => {
     // CORE's model is WH-1000XM4, so the bare digit "4" exists in the core —
     // but "Includes 4 charging cables" is a different CLAIM and must violate.
-    const dirty: RawExportPacks = {
-      ...GOOD_RAW,
-      facebook: {
-        ...GOOD_RAW.facebook,
-        description: "Sony WH-1000XM4 headphones. Includes 4 charging cables.",
-      },
-    };
-    const { generate, calls } = scriptedGenerate([dirty, dirty]);
-    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
-
-    // Retry happened, then the deterministic core-only fallback was published.
-    expect(calls.length).toBe(2);
-    expect(res.facebook.pack.description).toBe(fallbackFacebookDescription(CORE));
-    expect(res.facebook.pack.description).not.toContain("4 charging");
+    expect(ungrounded("Includes 4 charging cables.")).toEqual(["4"]);
   });
 
   it("the stored price never grounds free text: '50-hour battery' violates even at price 50", () => {
@@ -496,26 +490,14 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
     expect(findUngroundedNumbers("50-hour battery life.", grounding)).toEqual([
       "50-hour",
     ]);
-    expect(
-      descriptionsViolateGrounding(
-        {
-          ...GOOD_RAW,
-          facebook: {
-            ...GOOD_RAW.facebook,
-            description: "Amazing 50-hour battery life on these.",
-          },
-        },
-        CORE,
-      ),
-    ).toBe(true);
   });
 
-  it("buildNumericGrounding carries core values and standalone numbers, never the price", () => {
+  it("buildNumericGrounding carries core tokens and standalone numbers, never the price", () => {
     const grounding = buildNumericGrounding({
       ...CORE,
       specs: [...CORE.specs!, "2 ear pads included"],
     });
-    expect(grounding.coreValues).toContain("wh-1000xm4");
+    expect(grounding.coreTokens.has("wh-1000xm4")).toBe(true);
     // "2" appears standalone in a spec; "1000"/"4" only inside the identifier.
     expect(grounding.standaloneNumbers.has("2")).toBe(true);
     expect(grounding.standaloneNumbers.has("1000")).toBe(false);
@@ -527,15 +509,14 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
     // appended deterministically, never written by the model.
     expect(ungrounded("Asking $120 firm.").length).toBeGreaterThan(0);
     expect(ungrounded("Asking 120 dollars.").length).toBeGreaterThan(0);
-    // An identifier fragment that appears whole inside a core value passes.
-    expect(ungrounded("The 1000XM4 model.")).toEqual([]);
     // A standalone number matching a standalone core number passes.
     const withCount = buildNumericGrounding({ ...CORE, specs: ["2 cables"] });
     expect(findUngroundedNumbers("Comes with 2 cables.", withCount)).toEqual([]);
   });
 
-  it("packsHallucinateAttributes now covers descriptions, not just hashtags", () => {
+  it("packsHallucinateAttributes covers hashtags and titles; model descriptions are ignored", () => {
     expect(packsHallucinateAttributes(GOOD_RAW, CORE)).toBe(false);
+    // A dirty model description does NOT burn a retry — it is never published.
     expect(
       packsHallucinateAttributes(
         {
@@ -544,17 +525,65 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
         },
         CORE,
       ),
-    ).toBe(true);
+    ).toBe(false);
+    // A dirty TITLE (a published model surface) still flags.
     expect(
       packsHallucinateAttributes(
         {
           ...GOOD_RAW,
-          mercari: { ...GOOD_RAW.mercari, description: "Includes 3 cables. Ships." },
+          facebook: { ...GOOD_RAW.facebook, title: "Sony WH-1000XM5" },
         },
         CORE,
       ),
     ).toBe(true);
-    expect(descriptionsViolateGrounding(GOOD_RAW, CORE)).toBe(false);
+  });
+});
+
+describe("token-boundary numeric grounding (no substring licensing)", () => {
+  it("core '128GB' does NOT license a generated '8GB'; the exact token still passes", () => {
+    const grounding = buildNumericGrounding({ ...CORE, specs: ["128GB"] });
+    expect(findUngroundedNumbers("Comes with 8GB of storage.", grounding)).toEqual([
+      "8gb",
+    ]);
+    expect(findUngroundedNumbers("Comes with 128GB of storage.", grounding)).toEqual(
+      [],
+    );
+  });
+
+  it("core '150-hour' does NOT license a generated '50-hour'", () => {
+    const grounding = buildNumericGrounding({
+      ...CORE,
+      specs: ["150-hour battery"],
+    });
+    expect(findUngroundedNumbers("Up to 50-hour battery life.", grounding)).toEqual([
+      "50-hour",
+    ]);
+    expect(findUngroundedNumbers("Up to 150-hour battery life.", grounding)).toEqual(
+      [],
+    );
+  });
+
+  it("identifier fragments no longer pass: '1000XM4' alone is not a core token", () => {
+    // Under substring matching "1000XM4" leaked through because it appears
+    // inside "wh-1000xm4"; token-boundary equality rejects it.
+    const grounding = buildNumericGrounding(CORE);
+    expect(findUngroundedNumbers("The 1000XM4 model.", grounding)).toEqual([
+      "1000xm4",
+    ]);
+    expect(findUngroundedNumbers("The WH-1000XM4 model.", grounding)).toEqual([]);
+  });
+
+  it("a changed-specification title ('8GB' from a 128GB core) is replaced with the fallback title", async () => {
+    const core: ExtractedAttributes = { ...CORE, specs: ["128GB"] };
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: { ...GOOD_RAW.facebook, title: "Sony WH-1000XM4 8GB headphones" },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const res = await generateExportPacks({ attributes: core, generate, maxRetries: 1 });
+    expect(calls.length).toBe(2);
+    expect(res.facebook.pack.title).toBe(fallbackFacebookTitle(core));
+    expect(res.facebook.pack.title).not.toContain("8GB");
   });
 });
 

@@ -114,19 +114,28 @@ export type MercariPack = z.infer<typeof mercariPackSchema>;
 /**
  * PERMISSIVE schema handed to `generateObject` on the real path (mirrors
  * `ebayListingRawSchema`): it relaxes exactly the DETERMINISTICALLY-REPAIRABLE
- * constraints — title/description length caps and the hashtag format/count —
- * so the model's output is ACCEPTED by the SDK and reaches the repair/whitelist
- * step instead of throwing inside `generateObject`. The repaired packs are then
+ * constraints — title length caps and the hashtag format/count — so the
+ * model's output is ACCEPTED by the SDK and reaches the repair/whitelist step
+ * instead of throwing inside `generateObject`. The repaired packs are then
  * validated against the strict schemas above.
+ *
+ * DESCRIPTIONS are deliberately OPTIONAL and IGNORED: the published
+ * descriptions are assembled deterministically from the validated core in
+ * `generate.ts` (an invented digit-free claim like "Includes charger" cannot
+ * be detected deterministically in model free text, so model-authored
+ * description copy is never published). The fields remain accepted here only
+ * so a model that emits one anyway does not fail schema validation.
  */
 export const rawExportPacksSchema = z.object({
   facebook: z.object({
     title: z.string().min(1, "Facebook title is required"),
-    description: z.string().min(1, "Facebook description is required"),
+    /** Accepted but IGNORED — published FB descriptions are core-built. */
+    description: z.string().optional(),
   }),
   mercari: z.object({
     title: z.string().min(1, "Mercari title is required"),
-    description: z.string().min(1, "Mercari description is required"),
+    /** Accepted but IGNORED — published Mercari descriptions are core-built. */
+    description: z.string().optional(),
     hashtags: z.array(z.string()),
   }),
 });
