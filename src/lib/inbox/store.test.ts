@@ -574,7 +574,11 @@ describe("stubDeliverReply", () => {
   it("is a logged no-op (sandbox — real send arrives with the eBay adapter, #14)", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
-      await stubDeliverReply({ messageId: MESSAGE_ID, reply: "Hello buyer" });
+      await stubDeliverReply({
+        messageId: MESSAGE_ID,
+        reply: "Hello buyer",
+        idempotencyKey: MESSAGE_ID,
+      });
       expect(info).toHaveBeenCalledTimes(1);
       const logged = String(info.mock.calls[0][0]);
       expect(logged).toContain("STUBBED delivery");
