@@ -32,15 +32,19 @@ export default async function RootLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Dev-only: the screenshot preview harness (src/app/dev/preview) needs the
+  // signed-in chrome without a running auth stack. Never true in production.
+  const previewSignedIn =
+    process.env.NODE_ENV !== "production" &&
+    process.env.PREVIEW_SIGNED_IN === "1";
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <AppShell user={user ? { email: user.email ?? null } : null}>
-          {children}
-        </AppShell>
+        <AppShell signedIn={user != null || previewSignedIn}>{children}</AppShell>
       </body>
     </html>
   );

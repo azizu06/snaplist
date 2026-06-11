@@ -75,20 +75,23 @@ export default async function ExportPage({
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6 sm:py-10">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
-          Cross-post your listing
-        </h1>
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+      <header className="flex items-center gap-3">
         <Link
           href={`/review/${itemId}`}
-          className="text-sm text-muted hover:text-fg"
+          aria-label="Back to review"
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:text-fg"
         >
-          ← Back to review
+          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
         </Link>
+        <h1 className="min-w-0 flex-1 truncate text-lg font-bold tracking-tight text-fg-strong">
+          Cross-post your listing
+        </h1>
       </header>
 
-      <p className="text-sm text-muted">
+      <p className="text-[13px] leading-relaxed text-muted">
         Facebook Marketplace and Mercari don&apos;t allow apps to post for you,
         so SnapList prepares a ready-to-paste pack for each — written in that
         platform&apos;s style, using only your verified item details
@@ -152,7 +155,7 @@ function PackCard({
       />
       <CardBody className="flex flex-col gap-3">
         <p className="text-xs text-muted">{note}</p>
-        <pre className="whitespace-pre-wrap rounded-md border border-border bg-surface-2 p-4 font-sans text-sm leading-relaxed text-fg">
+        <pre className="whitespace-pre-wrap rounded-lg border border-border bg-surface-2/60 p-4 font-sans text-sm leading-relaxed text-fg">
           {pack.copyBlock}
         </pre>
         <ol className="flex list-decimal flex-col gap-1 pl-5 text-xs text-muted">
