@@ -133,3 +133,16 @@ describe("parsePriceOverride — sub-cent inputs", () => {
     expect(parsePriceOverride("12.345")).toBe(12.35);
   });
 });
+
+describe("parsePriceOverride — decimal rounding and overflow", () => {
+  it("rounds half-cent decimal strings on their literal digits, not binary floats", () => {
+    expect(parsePriceOverride("1.005")).toBe(1.01); // naive n*100 gives 100.4999… → 1.00
+    expect(parsePriceOverride("2.675")).toBe(2.68);
+    expect(parsePriceOverride("19.999")).toBe(20);
+  });
+
+  it("rejects values whose cent normalization overflows to Infinity", () => {
+    expect(() => parsePriceOverride(1e307)).toThrow(/finite/);
+    expect(() => parsePriceOverride("1e307")).toThrow(/finite/);
+  });
+});

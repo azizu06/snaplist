@@ -69,14 +69,40 @@ export function parsePriceOverride(raw: unknown): number | null {
     );
   }
   // Normalize to cents — eBay-style marketplaces don't take sub-cent prices,
-  // and it keeps the numeric column tidy. Validate the ROUNDED value: a
-  // sub-cent input like 0.004 would otherwise persist a 0 override that
-  // effectivePrice() rejects while the UI still labels it "your override".
-  const cents = Math.round(n * 100) / 100;
-  if (cents < 0.01) {
+  // and it keeps the numeric column tidy. Rounding is DECIMAL-safe: naive
+  // `Math.round(n * 100)` misrounds half-cent decimals ("1.005" * 100 is
+  // 100.4999… in binary, rounding to 1.00 instead of 1.01), so string inputs
+  // round on their literal decimal digits and numeric inputs go through a
+  // shortest-round-trip decimal rendering first.
+  const cents = roundToCents(typeof text === "string" ? text : String(n));
+  // Validate AFTER normalization: a sub-cent input like 0.004 rounds to a 0
+  // override that effectivePrice() rejects while the UI still labels it
+  // "your override", and an overflow (1e307 * 100 → Infinity) would JSON-
+  // serialize to null and silently CLEAR an existing override.
+  if (!Number.isFinite(cents) || cents < 0.01) {
     throw new Error(
-      `Invalid price override ${JSON.stringify(raw)}: must be at least 0.01.`,
+      `Invalid price override ${JSON.stringify(raw)}: must be a finite price of at least 0.01.`,
     );
   }
   return cents;
+}
+
+/**
+ * Round a decimal-string price to cents using its literal digits (half-up),
+ * avoiding binary-float tie errors. Falls back to numeric rounding for
+ * exotic-but-valid forms (exponent notation), where the overflow check in the
+ * caller still applies.
+ */
+function roundToCents(text: string): number {
+  const m = /^([0-9]+)(?:\.([0-9]+))?$/.exec(text);
+  if (!m) {
+    const n = Number(text);
+    return Math.round(n * 100) / 100;
+  }
+  const whole = m[1];
+  const frac = (m[2] ?? "").padEnd(3, "0");
+  // Integer math on the digit string: cents plus a half-up look at digit 3+.
+  let centsInt = Number(whole) * 100 + Number(frac.slice(0, 2));
+  if (Number(frac.slice(2, 3)) >= 5) centsInt += 1;
+  return centsInt / 100;
 }
