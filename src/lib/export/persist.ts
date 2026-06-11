@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ExtractedAttributes } from "../pipeline/types";
 import {
+  facebookCopyBlock,
   generateExportPacks,
   type ExportPackGenerate,
 } from "./generate";
@@ -69,8 +70,20 @@ interface ListingRow {
  * unless the row round-trips its strict platform schema AND carries the stored
  * copy block — a stale/foreign row falls through to regeneration instead of
  * rendering something invalid.
+ *
+ * FACEBOOK PRICE FRESHNESS: the FB block's meta lines (condition / "Asking $X" /
+ * pickup) are deterministic renderings, never model text — so the FB copy block
+ * is REBUILT on every read from the persisted title + description plus the
+ * CURRENT price and condition, instead of echoing the persisted snapshot. A new
+ * pricing run therefore can never serve a stale "Asking" line, while the
+ * load-or-generate semantics stay intact (no model call; the persisted
+ * `copy.copyBlock` remains a generation-time snapshot used only as a validity
+ * marker that this row was written by the export feature).
  */
-function rowToView(row: ListingRow): ExportPackView | null {
+function rowToView(
+  row: ListingRow,
+  current: { price?: number; condition?: string },
+): ExportPackView | null {
   const copyBlock = row.copy?.["copyBlock"];
   if (typeof copyBlock !== "string" || copyBlock.length === 0) return null;
   if (row.platform === FACEBOOK_PLATFORM) {
@@ -79,7 +92,11 @@ function rowToView(row: ListingRow): ExportPackView | null {
       description: row.description,
     });
     if (!parsed.success) return null;
-    return { ...parsed.data, copyBlock, hashtags: [] };
+    return {
+      ...parsed.data,
+      copyBlock: facebookCopyBlock(parsed.data, current),
+      hashtags: [],
+    };
   }
   if (row.platform === MERCARI_PLATFORM) {
     const parsed = mercariPackSchema.safeParse({
@@ -114,13 +131,17 @@ export async function loadOrGenerateExportPacks(
     throw new Error(`Failed to read export packs: ${readErr.message}`);
   }
 
+  const current = {
+    price: input.price,
+    condition: input.attributes.condition,
+  };
   let storedFacebook: ExportPackView | null = null;
   let storedMercari: ExportPackView | null = null;
   for (const row of (rows ?? []) as ListingRow[]) {
     if (row.platform === FACEBOOK_PLATFORM && !storedFacebook) {
-      storedFacebook = rowToView(row);
+      storedFacebook = rowToView(row, current);
     } else if (row.platform === MERCARI_PLATFORM && !storedMercari) {
-      storedMercari = rowToView(row);
+      storedMercari = rowToView(row, current);
     }
   }
 

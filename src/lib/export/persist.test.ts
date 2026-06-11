@@ -150,6 +150,82 @@ describe("loadOrGenerateExportPacks", () => {
     expect(inserted).toHaveLength(0);
   });
 
+  it("a cached Facebook block always reflects the CURRENT price, never the persisted snapshot", async () => {
+    // The pack was generated when the price was 100; a new pricing run says 120.
+    const stored: StoredRow[] = [
+      {
+        platform: FACEBOOK_PLATFORM,
+        title: "Stored FB title",
+        description: "Stored FB description.",
+        copy: {
+          copyBlock:
+            "Stored FB title\n\nStored FB description.\n\nCondition: good\nAsking $100\nLocal pickup — message me if interested!",
+        },
+      },
+      {
+        platform: MERCARI_PLATFORM,
+        title: "Stored Mercari title",
+        description: "Stored Mercari description. Ships fast.",
+        copy: { hashtags: ["#sony"], copyBlock: "Stored Mercari block. Ships." },
+      },
+    ];
+    const inserted: InsertedRow[] = [];
+    const { generate, calls } = countingGenerate();
+    const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
+      userId: "user-1",
+      itemId: "item-1",
+      attributes: CORE,
+      price: 120,
+      generate,
+    });
+
+    // Still fully cached: no model call, no new rows.
+    expect(calls()).toBe(0);
+    expect(view.cached).toBe(true);
+    expect(inserted).toHaveLength(0);
+    // The FB block is rebuilt deterministically from the CURRENT price.
+    expect(view.facebook.copyBlock).toContain("Asking $120");
+    expect(view.facebook.copyBlock).not.toContain("$100");
+    expect(view.facebook.copyBlock).toContain("Stored FB title");
+    expect(view.facebook.copyBlock).toContain("Stored FB description.");
+    expect(view.facebook.copyBlock).toContain("Condition: good");
+    // Mercari carries no price line and is served verbatim.
+    expect(view.mercari.copyBlock).toBe("Stored Mercari block. Ships.");
+  });
+
+  it("a cached Facebook block drops the price line when the item carries no current price", async () => {
+    const stored: StoredRow[] = [
+      {
+        platform: FACEBOOK_PLATFORM,
+        title: "Stored FB title",
+        description: "Stored FB description.",
+        copy: {
+          copyBlock:
+            "Stored FB title\n\nStored FB description.\n\nAsking $100\nLocal pickup — message me if interested!",
+        },
+      },
+      {
+        platform: MERCARI_PLATFORM,
+        title: "Stored Mercari title",
+        description: "Stored Mercari description. Ships fast.",
+        copy: { hashtags: [], copyBlock: "Stored Mercari block. Ships." },
+      },
+    ];
+    const inserted: InsertedRow[] = [];
+    const { generate, calls } = countingGenerate();
+    const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
+      userId: "user-1",
+      itemId: "item-1",
+      attributes: CORE,
+      generate,
+    });
+
+    expect(calls()).toBe(0);
+    expect(view.cached).toBe(true);
+    expect(view.facebook.copyBlock).not.toContain("Asking");
+    expect(view.facebook.copyBlock).not.toContain("$");
+  });
+
   it("a partial store regenerates but only inserts the missing platform", async () => {
     const stored: StoredRow[] = [
       {

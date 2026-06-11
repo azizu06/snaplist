@@ -15,20 +15,23 @@ import {
 import {
   FACEBOOK_PICKUP_LINE,
   MERCARI_SHIPPING_SUFFIX,
+  buildNumericGrounding,
   derivableHashtagBodies,
   deriveDefaultHashtags,
   descriptionsViolateGrounding,
   fallbackDescription,
   fallbackFacebookDescription,
+  fallbackFacebookTitle,
   fallbackMercariDescription,
+  fallbackMercariTitle,
   findUngroundedNumbers,
   formatPrice,
-  groundedNumericTokens,
   generateExportPacks,
   normalizeHashtag,
   packsHallucinateAttributes,
   reconcileHashtags,
   repairMercariDescription,
+  titlesViolateGrounding,
   type ExportPackGenerate,
 } from "./generate";
 
@@ -374,9 +377,9 @@ describe("retry + failure behavior", () => {
 });
 
 describe("description grounding: no ungrounded numbers or prices in free text", () => {
-  /** Helper: every digit run in `text` is grounded in CORE (+ optional price). */
-  function ungrounded(text: string, price?: number): string[] {
-    return findUngroundedNumbers(text, groundedNumericTokens(CORE, price));
+  /** Helper: every numeric token in `text` is contextually grounded in CORE. */
+  function ungrounded(text: string): string[] {
+    return findUngroundedNumbers(text, buildNumericGrounding(CORE));
   }
 
   it("a model-written '$50' in the FB description triggers retry, then the deterministic fallback", async () => {
@@ -467,22 +470,68 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
     expect(ungrounded(fallbackFacebookDescription({}))).toEqual([]);
   });
 
-  it("groundedNumericTokens covers core digit runs and the stored price", () => {
-    const tokens = groundedNumericTokens(CORE, 49.99);
-    expect(tokens.has("1000")).toBe(true); // from WH-1000XM4
-    expect(tokens.has("4")).toBe(true);
-    expect(tokens.has("49")).toBe(true); // from the stored price
-    expect(tokens.has("99")).toBe(true);
-    expect(tokens.has("50")).toBe(false);
+  it("grounds numbers by CONTEXT: digits mined out of identifiers never license standalone numbers", async () => {
+    // CORE's model is WH-1000XM4, so the bare digit "4" exists in the core —
+    // but "Includes 4 charging cables" is a different CLAIM and must violate.
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: {
+        ...GOOD_RAW.facebook,
+        description: "Sony WH-1000XM4 headphones. Includes 4 charging cables.",
+      },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+
+    // Retry happened, then the deterministic core-only fallback was published.
+    expect(calls.length).toBe(2);
+    expect(res.facebook.pack.description).toBe(fallbackFacebookDescription(CORE));
+    expect(res.facebook.pack.description).not.toContain("4 charging");
   });
 
-  it("findUngroundedNumbers flags currency-like spans even when the digits are grounded", () => {
-    // "120" is allowlisted via the stored price, but writing it AS A PRICE is
-    // still a violation — the price line is appended deterministically.
-    expect(ungrounded("Asking $120 firm.", 120).length).toBeGreaterThan(0);
-    expect(ungrounded("Asking 120 dollars.", 120).length).toBeGreaterThan(0);
-    // A bare grounded number (a spec-like mention) passes.
-    expect(ungrounded("The 1000XM4 model.", 120)).toEqual([]);
+  it("the stored price never grounds free text: '50-hour battery' violates even at price 50", () => {
+    const grounding = buildNumericGrounding(CORE);
+    // The price is deliberately ABSENT from the grounding context, so a stored
+    // price of 50 cannot license "50-hour battery" (or any other 50-claim).
+    expect(findUngroundedNumbers("50-hour battery life.", grounding)).toEqual([
+      "50-hour",
+    ]);
+    expect(
+      descriptionsViolateGrounding(
+        {
+          ...GOOD_RAW,
+          facebook: {
+            ...GOOD_RAW.facebook,
+            description: "Amazing 50-hour battery life on these.",
+          },
+        },
+        CORE,
+      ),
+    ).toBe(true);
+  });
+
+  it("buildNumericGrounding carries core values and standalone numbers, never the price", () => {
+    const grounding = buildNumericGrounding({
+      ...CORE,
+      specs: [...CORE.specs!, "2 ear pads included"],
+    });
+    expect(grounding.coreValues).toContain("wh-1000xm4");
+    // "2" appears standalone in a spec; "1000"/"4" only inside the identifier.
+    expect(grounding.standaloneNumbers.has("2")).toBe(true);
+    expect(grounding.standaloneNumbers.has("1000")).toBe(false);
+    expect(grounding.standaloneNumbers.has("4")).toBe(false);
+  });
+
+  it("findUngroundedNumbers flags currency-like spans regardless of context", () => {
+    // Writing any number AS A PRICE is always a violation — the price line is
+    // appended deterministically, never written by the model.
+    expect(ungrounded("Asking $120 firm.").length).toBeGreaterThan(0);
+    expect(ungrounded("Asking 120 dollars.").length).toBeGreaterThan(0);
+    // An identifier fragment that appears whole inside a core value passes.
+    expect(ungrounded("The 1000XM4 model.")).toEqual([]);
+    // A standalone number matching a standalone core number passes.
+    const withCount = buildNumericGrounding({ ...CORE, specs: ["2 cables"] });
+    expect(findUngroundedNumbers("Comes with 2 cables.", withCount)).toEqual([]);
   });
 
   it("packsHallucinateAttributes now covers descriptions, not just hashtags", () => {
@@ -505,9 +554,84 @@ describe("description grounding: no ungrounded numbers or prices in free text", 
         CORE,
       ),
     ).toBe(true);
+    expect(descriptionsViolateGrounding(GOOD_RAW, CORE)).toBe(false);
+  });
+});
+
+describe("title grounding: titles are validated against the attribute core", () => {
+  it("a mutated model number in a title triggers retry, then the deterministic fallback title", async () => {
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: {
+        ...GOOD_RAW.facebook,
+        // "WH-1000XM5" is NOT the core's model (WH-1000XM4) — must not publish.
+        title: "Sony WH-1000XM5 wireless headphones",
+      },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+
+    // One self-correction retry happened before settling on the fallback.
+    expect(calls.length).toBe(2);
+    expect(res.facebook.pack.title).toBe(fallbackFacebookTitle(CORE));
+    expect(res.facebook.pack.title).not.toContain("XM5");
+    expect(facebookPackSchema.safeParse(res.facebook.pack).success).toBe(true);
+    // The clean Mercari title survives untouched.
+    expect(res.mercari.pack.title).toBe(GOOD_RAW.mercari.title);
+  });
+
+  it("an ungrounded Mercari title is replaced with the Mercari-capped fallback", async () => {
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      mercari: { ...GOOD_RAW.mercari, title: "Sony WH-1000XM5 Headphones" },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, dirty]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+
+    expect(calls.length).toBe(2);
+    expect(res.mercari.pack.title).toBe(fallbackMercariTitle(CORE));
+    expect(res.mercari.pack.title.length).toBeLessThanOrEqual(MERCARI_TITLE_MAX_LENGTH);
+    expect(mercariPackSchema.safeParse(res.mercari.pack).success).toBe(true);
+  });
+
+  it("a successful title self-correction publishes the model's clean title, not the fallback", async () => {
+    const dirty: RawExportPacks = {
+      ...GOOD_RAW,
+      facebook: { ...GOOD_RAW.facebook, title: "Sony WH-1000XM5 headphones" },
+    };
+    const { generate, calls } = scriptedGenerate([dirty, GOOD_RAW]);
+    const res = await generateExportPacks({ attributes: CORE, generate, maxRetries: 1 });
+    expect(calls.length).toBe(2);
+    expect(res.facebook.pack.title).toBe(GOOD_RAW.facebook.title);
+  });
+
+  it("clean grounded titles pass without a retry", async () => {
+    const { generate, calls } = scriptedGenerate([GOOD_RAW]);
+    const res = await generateExportPacks({ attributes: CORE, generate });
+    expect(calls.length).toBe(1);
+    expect(res.facebook.pack.title).toBe(GOOD_RAW.facebook.title);
+    expect(res.mercari.pack.title).toBe(GOOD_RAW.mercari.title);
+  });
+
+  it("titlesViolateGrounding flags only ungrounded titles; the fallbacks are grounded and capped", () => {
+    expect(titlesViolateGrounding(GOOD_RAW, CORE)).toBe(false);
     expect(
-      descriptionsViolateGrounding(GOOD_RAW, CORE, 49.99),
-    ).toBe(false);
+      titlesViolateGrounding(
+        {
+          ...GOOD_RAW,
+          facebook: { ...GOOD_RAW.facebook, title: "Sony WH-1000XM5" },
+        },
+        CORE,
+      ),
+    ).toBe(true);
+    const grounding = buildNumericGrounding(CORE);
+    expect(findUngroundedNumbers(fallbackFacebookTitle(CORE), grounding)).toEqual([]);
+    expect(findUngroundedNumbers(fallbackMercariTitle(CORE), grounding)).toEqual([]);
+    expect(fallbackMercariTitle(CORE).length).toBeLessThanOrEqual(
+      MERCARI_TITLE_MAX_LENGTH,
+    );
+    // A bare core still yields a non-empty fallback title.
+    expect(fallbackFacebookTitle({}).length).toBeGreaterThan(0);
   });
 });
 
