@@ -115,6 +115,25 @@ describe("replyAssertsUngroundedNumbers", () => {
     // …but it does not license other numbers.
     expect(replyAssertsUngroundedNumbers("I'm asking $40 for them.", priced)).toBe(true);
   });
+
+  it("binds a grounded number to its claim context — a count cannot be repurposed as a timing", () => {
+    const bundle: ReplyGrounding = {
+      attributes: { title: "PS5 console bundle" },
+      listing: {
+        title: "PS5 bundle",
+        description: "Includes 2 controllers and the original box.",
+      },
+    };
+    // Same claim ("2 controllers") → grounded.
+    expect(
+      replyAssertsUngroundedNumbers("Yes, it comes with 2 controllers.", bundle),
+    ).toBe(false);
+    // The SAME digit repurposed for an unrelated assertion → rejected: the
+    // grounding says nothing about shipping time.
+    expect(
+      replyAssertsUngroundedNumbers("Yes, I can ship in 2 days.", bundle),
+    ).toBe(true);
+  });
 });
 
 describe("draftBuyerReply", () => {

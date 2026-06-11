@@ -114,6 +114,77 @@ function normalizeNumber(token: string): string {
   return token.replace(/,/g, "");
 }
 
+/** A token plus whether it was currency-marked ("$45") in the source text. */
+interface TokenInfo {
+  token: string;
+  currency: boolean;
+}
+
+function tokenInfos(text: string): TokenInfo[] {
+  const lower = text.toLowerCase();
+  const infos: TokenInfo[] = [];
+  for (const m of lower.matchAll(TOKEN_RE)) {
+    infos.push({
+      token: m[0],
+      currency: m.index != null && m.index > 0 && lower[m.index - 1] === "$",
+    });
+  }
+  return infos;
+}
+
+/** How many tokens on each side of a number count as its claim context. */
+const NUMBER_CONTEXT_WINDOW = 2;
+
+/** What the grounding licenses each standalone number to be used FOR. */
+interface NumberGrounding {
+  /** Numbers the corpus carries with a currency marker ("$180"). */
+  currencyNumbers: Set<string>;
+  /** normalized number → the non-number tokens near it in the corpus (its claim context). */
+  contexts: Map<string, Set<string>>;
+  /**
+   * Numbers that occur context-free in some grounding part (e.g. an attribute
+   * value that is just "45") — there is no context to bind, so any use passes.
+   */
+  contextFree: Set<string>;
+}
+
+/**
+ * Collect, per grounding PART (parts never share a sentence, so windows must
+ * not cross part boundaries), the context tokens around every standalone
+ * number plus the set of currency-marked numbers.
+ */
+function collectNumberGrounding(parts: readonly string[]): NumberGrounding {
+  const currencyNumbers = new Set<string>();
+  const contexts = new Map<string, Set<string>>();
+  const contextFree = new Set<string>();
+  for (const part of parts) {
+    const infos = tokenInfos(part);
+    infos.forEach((info, i) => {
+      if (!isStandaloneNumber(info.token)) return;
+      const key = normalizeNumber(info.token);
+      if (info.currency) currencyNumbers.add(key);
+      let added = 0;
+      let ctx = contexts.get(key);
+      for (
+        let j = Math.max(0, i - NUMBER_CONTEXT_WINDOW);
+        j <= Math.min(infos.length - 1, i + NUMBER_CONTEXT_WINDOW);
+        j++
+      ) {
+        if (j === i) continue;
+        if (isStandaloneNumber(infos[j].token)) continue; // numbers don't vouch for numbers
+        if (!ctx) {
+          ctx = new Set();
+          contexts.set(key, ctx);
+        }
+        ctx.add(infos[j].token);
+        added += 1;
+      }
+      if (added === 0 && !info.currency) contextFree.add(key);
+    });
+  }
+  return { currencyNumbers, contexts, contextFree };
+}
+
 /**
  * Does the reply ASSERT a numeric claim (a price, a timing, a count, a spec
  * measurement) that appears nowhere in the grounding corpus? Numbers are the
@@ -126,30 +197,48 @@ function normalizeNumber(token: string): string {
  *  (a) it is an alphanumeric token (`wh-1000xm4`, `128gb`) that appears as a
  *      WHOLE token (case-insensitive) in the corpus; or
  *  (b) it is a STANDALONE number that appears as a standalone number in the
- *      corpus (e.g. the `45` in listing copy "Asking $45").
+ *      corpus AND the reply uses it for the SAME CLAIM: a currency-marked
+ *      reply number ("$45") matches a currency-marked corpus number, and any
+ *      other reply number must share at least one nearby non-number token
+ *      with the corpus occurrence ("2 controllers" ↔ "comes with 2
+ *      controllers"). The mere presence of a `2` in the grounding never
+ *      licenses "I can ship in 2 days" — counts cannot be repurposed as
+ *      timings, prices, or specs.
  *
  * Digits mined out of identifiers never license standalone numbers: a grounding
  * `WH-1000XM4` does NOT make "I can ship in 4 days" pass. Numbers the BUYER used
  * are still not grounded facts (the question is excluded from the corpus), so a
  * reply echoing them as assertions is rejected (→ retry, then deterministic
- * fallback). Free-text wording stays the prompt's job; the fallback covers the
- * rest.
+ * fallback). The asymmetry is deliberate: a true-but-rejected number only costs
+ * a retry/fallback, while an accepted hallucination ships to a buyer.
  */
 export function replyAssertsUngroundedNumbers(
   reply: string,
   grounding: ReplyGrounding,
 ): boolean {
-  const corpusTokens = tokenize(groundingCorpus(grounding));
-  const allowedTokens = new Set(corpusTokens);
-  const allowedNumbers = new Set(
-    corpusTokens.filter(isStandaloneNumber).map(normalizeNumber),
-  );
-  return tokenize(reply).some((token) => {
-    if (!/\d/.test(token)) return false; // no numeric claim in this token
-    if (isStandaloneNumber(token)) {
-      return !allowedNumbers.has(normalizeNumber(token));
+  const parts = groundingCorpus(grounding).split("\n");
+  const allowedTokens = new Set(parts.flatMap(tokenize));
+  const numbers = collectNumberGrounding(parts);
+
+  const replyInfos = tokenInfos(reply);
+  return replyInfos.some((info, i) => {
+    if (!/\d/.test(info.token)) return false; // no numeric claim in this token
+    if (!isStandaloneNumber(info.token)) return !allowedTokens.has(info.token);
+
+    const key = normalizeNumber(info.token);
+    if (info.currency && numbers.currencyNumbers.has(key)) return false;
+    if (numbers.contextFree.has(key)) return false;
+    const corpusCtx = numbers.contexts.get(key);
+    if (!corpusCtx) return true; // number absent from the grounding entirely
+    for (
+      let j = Math.max(0, i - NUMBER_CONTEXT_WINDOW);
+      j <= Math.min(replyInfos.length - 1, i + NUMBER_CONTEXT_WINDOW);
+      j++
+    ) {
+      if (j === i) continue;
+      if (corpusCtx.has(replyInfos[j].token)) return false; // same claim context
     }
-    return !allowedTokens.has(token);
+    return true;
   });
 }
 
