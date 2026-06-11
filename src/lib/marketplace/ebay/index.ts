@@ -61,6 +61,14 @@ export function createEbayAdapter(): EbayAdapter {
  * The adapter for a signed-in seller (issue #17): their own OAuth tokens when
  * an eBay account is connected, the app-level env credentials otherwise (the
  * sandbox loop keeps working with zero per-user setup).
+ *
+ * SINGLE-SELLER CONSTRAINT (deliberate, documented in docs/ebay-production.md):
+ * business policies (EBAY_*_POLICY_ID) and the merchant location stay
+ * env-configured, and policies belong to the eBay account that created them —
+ * so production publishing is correct for THE seller whose policies are in the
+ * env (the #17 go-live story), not for arbitrary additional sellers. True
+ * multi-seller needs per-connection policy discovery via the Sell Account API
+ * (sell.account scope) — tracked as a follow-up issue, out of scope here.
  */
 export async function createEbayAdapterForUser(
   supabase: SupabaseClient,

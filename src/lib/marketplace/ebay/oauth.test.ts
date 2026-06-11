@@ -4,6 +4,7 @@ import {
   buildAuthorizeUrl,
   ebayApiBaseUrl,
   ebayAuthorizeBaseUrl,
+  ebayIdentityBaseUrl,
   exchangeAuthorizationCode,
   fetchEbayIdentity,
 } from "./oauth";
@@ -31,6 +32,15 @@ describe("ebay oauth", () => {
       const prod = { EBAY_BASE_URL: "https://api.ebay.com" };
       expect(ebayApiBaseUrl(prod)).toBe("https://api.ebay.com");
       expect(ebayAuthorizeBaseUrl(prod)).toBe("https://auth.ebay.com");
+    });
+
+    it("serves identity from the apiz host, never the Sell API host", () => {
+      // getUser only exists on apiz.* — the api.* host 404s, which would
+      // silently store null eBay ids and break deletion-notice matching.
+      expect(ebayIdentityBaseUrl({})).toBe("https://apiz.sandbox.ebay.com");
+      expect(ebayIdentityBaseUrl({ EBAY_BASE_URL: "https://api.ebay.com" })).toBe(
+        "https://apiz.ebay.com",
+      );
     });
   });
 
@@ -108,13 +118,19 @@ describe("ebay oauth", () => {
   });
 
   describe("fetchEbayIdentity", () => {
-    it("returns the eBay identity on success", async () => {
-      const stubFetch: typeof fetch = async () =>
-        jsonResponse(200, { userId: "ebay-uid", username: "seller_aziz" });
+    it("returns the eBay identity on success, calling the apiz host", async () => {
+      let seenUrl = "";
+      const stubFetch: typeof fetch = async (input) => {
+        seenUrl = String(input);
+        return jsonResponse(200, { userId: "ebay-uid", username: "seller_aziz" });
+      };
       await expect(fetchEbayIdentity("tok", ENV, stubFetch)).resolves.toEqual({
         userId: "ebay-uid",
         username: "seller_aziz",
       });
+      expect(seenUrl).toBe(
+        "https://apiz.sandbox.ebay.com/commerce/identity/v1/user/",
+      );
     });
 
     it("degrades to null on HTTP or network failure (identity is best-effort)", async () => {

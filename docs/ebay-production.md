@@ -84,6 +84,18 @@ disconnect any time. Publishes now run under the seller's own identity — the
 Upload a real item → review → **Publish to eBay**. Verify the listing on
 ebay.com, then end it from Seller Hub if it was only a smoke test.
 
+## Known constraint: single production seller
+
+Business policies and the merchant location are env-configured
+(`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) and **belong to the eBay
+account that created them**. Production publishing is therefore correct for
+the one seller whose policies are in the env — which is exactly the #17
+go-live story. If a *second* seller connects, their publishes would submit the
+first seller's policy ids and eBay would reject the offer. True multi-seller
+support means discovering each connection's policies via the Sell Account API
+(`sell.account` scope) at connect time and injecting them per publish — tracked
+as a follow-up issue.
+
 ## Security notes
 
 - Seller refresh/access tokens are encrypted at rest (AES-256-GCM,

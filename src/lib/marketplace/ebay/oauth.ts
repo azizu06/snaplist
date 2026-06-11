@@ -34,6 +34,18 @@ export function ebayAuthorizeBaseUrl(env: Env): string {
     : "https://auth.ebay.com";
 }
 
+/**
+ * The Commerce Identity API is served from the `apiz` host (apiz.ebay.com /
+ * apiz.sandbox.ebay.com), NOT the Sell API's `api` host — calling getUser on
+ * the wrong host fails every time, which would silently store null eBay
+ * identifiers and break deletion-notice matching (Codex P1 on PR #46).
+ */
+export function ebayIdentityBaseUrl(env: Env): string {
+  return ebayApiBaseUrl(env).includes("sandbox")
+    ? "https://apiz.sandbox.ebay.com"
+    : "https://apiz.ebay.com";
+}
+
 /** Build the consent-screen URL the connect route redirects the seller to. */
 export function buildAuthorizeUrl(env: Env, state: string): string {
   const clientId = env.EBAY_CLIENT_ID;
@@ -144,7 +156,7 @@ export async function fetchEbayIdentity(
 ): Promise<EbayIdentity | null> {
   try {
     const res = await fetchImpl(
-      `${ebayApiBaseUrl(env)}/commerce/identity/v1/user/`,
+      `${ebayIdentityBaseUrl(env)}/commerce/identity/v1/user/`,
       { headers: { authorization: `Bearer ${accessToken}` } },
     );
     if (!res.ok) return null;
