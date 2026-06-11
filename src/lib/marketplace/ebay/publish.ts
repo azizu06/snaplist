@@ -123,6 +123,22 @@ export async function publishListingToEbay(
     options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
   );
 
+  // eBay requires at least one image, so an empty set is a GUARANTEED failed
+  // publish. Fail fast LOCALLY — before the adapter makes any eBay call (no
+  // partial remote writes) — through the same failed-publish path an adapter
+  // error takes, with a user-attributable reason.
+  if (imageUrls.length === 0) {
+    await markPublishFailed(supabase, listingId);
+    throw new Error(
+      photoPaths.length === 0
+        ? `Listing ${listingId} has no photos — eBay requires at least one image. ` +
+          "Add a photo to the item before publishing."
+        : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
+          "signed into a fetchable URL — eBay requires at least one image. " +
+          "Re-upload the item's photos before publishing.",
+    );
+  }
+
   // 5. Map onto the provider shape (pure; throws on unpublishable input).
   const request = toEbayPublishRequest({
     listingId,
@@ -142,12 +158,7 @@ export async function publishListingToEbay(
   try {
     result = await adapter.publishListing(request);
   } catch (err) {
-    // Best-effort failure marker; never mask the original error.
-    await supabase
-      .from("listings")
-      .update({ ebay_status: "failed", status: "failed" })
-      .eq("id", listingId)
-      .then(undefined, () => undefined);
+    await markPublishFailed(supabase, listingId);
     throw err;
   }
 
@@ -176,6 +187,18 @@ export async function publishListingToEbay(
     ebayStatus: "published",
     alreadyPublished: false,
   };
+}
+
+/** Best-effort failed-publish marker; never masks the error being thrown. */
+async function markPublishFailed(
+  supabase: SupabaseClient,
+  listingId: string,
+): Promise<void> {
+  await supabase
+    .from("listings")
+    .update({ ebay_status: "failed", status: "failed" })
+    .eq("id", listingId)
+    .then(undefined, () => undefined);
 }
 
 /** Sign each private photo path; skip (don't fail the publish) on a bad path. */

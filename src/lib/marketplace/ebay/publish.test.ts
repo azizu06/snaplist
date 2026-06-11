@@ -259,6 +259,96 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     expect(adapter.requests).toHaveLength(0);
   });
 
+  it("fails fast and marks the listing failed when the item has NO photos (no eBay call)", async () => {
+    if (!reachable) return;
+
+    // Hand-built item with an empty photos array, plus a price log so the
+    // image check is the ONLY thing standing between us and the adapter.
+    const { data: item } = await userA.client
+      .from("items")
+      .insert({ user_id: userA.id, photos: [], attributes: {} })
+      .select("id")
+      .single();
+    const { data: listing } = await userA.client
+      .from("listings")
+      .insert({
+        user_id: userA.id,
+        item_id: item!.id as string,
+        platform: "ebay",
+        title: "Photo-less thing",
+        description: "Never photographed.",
+        copy: {},
+      })
+      .select("id")
+      .single();
+    const { error: logErr } = await userA.client
+      .from("prediction_logs")
+      .insert({ user_id: userA.id, item_id: item!.id as string, price: 25 });
+    expect(logErr).toBeNull();
+
+    const adapter = new MockEbayAdapter();
+    await expect(
+      publishListingToEbay(userA.client, listing!.id as string, adapter),
+    ).rejects.toThrowError(/has no photos/i);
+    expect(adapter.requests).toHaveLength(0); // never reached eBay
+
+    // Reported through the existing failed-publish path.
+    const { data: row } = await userA.client
+      .from("listings")
+      .select("status, ebay_status, ebay_listing_id")
+      .eq("id", listing!.id as string)
+      .single();
+    expect(row?.ebay_status).toBe("failed");
+    expect(row?.status).toBe("failed");
+    expect(row?.ebay_listing_id).toBeNull();
+  });
+
+  it("fails fast and marks the listing failed when EVERY photo URL fails to sign (no eBay call)", async () => {
+    if (!reachable) return;
+
+    // Photo paths that don't exist in storage — every createSignedUrl fails.
+    const { data: item } = await userA.client
+      .from("items")
+      .insert({
+        user_id: userA.id,
+        photos: [`${userA.id}/missing-1.png`, `${userA.id}/missing-2.png`],
+        attributes: {},
+      })
+      .select("id")
+      .single();
+    const { data: listing } = await userA.client
+      .from("listings")
+      .insert({
+        user_id: userA.id,
+        item_id: item!.id as string,
+        platform: "ebay",
+        title: "Unsignable thing",
+        description: "Photos vanished from storage.",
+        copy: {},
+      })
+      .select("id")
+      .single();
+    const { error: logErr } = await userA.client
+      .from("prediction_logs")
+      .insert({ user_id: userA.id, item_id: item!.id as string, price: 25 });
+    expect(logErr).toBeNull();
+
+    const adapter = new MockEbayAdapter();
+    await expect(
+      publishListingToEbay(userA.client, listing!.id as string, adapter),
+    ).rejects.toThrowError(/none could be signed/i);
+    expect(adapter.requests).toHaveLength(0); // never reached eBay
+
+    const { data: row } = await userA.client
+      .from("listings")
+      .select("status, ebay_status, ebay_listing_id")
+      .eq("id", listing!.id as string)
+      .single();
+    expect(row?.ebay_status).toBe("failed");
+    expect(row?.status).toBe("failed");
+    expect(row?.ebay_listing_id).toBeNull();
+  });
+
   it("refuses to publish when no usable price exists for the item", async () => {
     if (!reachable) return;
 

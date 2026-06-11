@@ -84,6 +84,16 @@ export class HttpEbayAdapter implements EbayAdapter {
       );
     }
 
+    // eBay requires at least one image to publish a listing. Fail fast LOCALLY
+    // — before the token mint and before any Sell API write — so a doomed
+    // publish never leaves partial remote state (inventory item / offer).
+    if (request.imageUrls.length === 0) {
+      throw new Error(
+        `Cannot publish listing ${request.sku} to eBay: no image URLs were provided. ` +
+          "eBay requires at least one photo — add or re-upload the item's photos and retry.",
+      );
+    }
+
     const token = await this.tokenProvider.getAccessToken();
 
     // --- 1. Upsert the inventory item (idempotent by SKU). -------------------
@@ -97,7 +107,7 @@ export class HttpEbayAdapter implements EbayAdapter {
           title: request.title,
           description: request.description,
           aspects: request.aspects,
-          ...(request.imageUrls.length > 0 ? { imageUrls: request.imageUrls } : {}),
+          imageUrls: request.imageUrls, // guaranteed non-empty by the guard above
         },
         availability: {
           shipToLocationAvailability: { quantity: request.quantity },
@@ -110,6 +120,9 @@ export class HttpEbayAdapter implements EbayAdapter {
       sku: request.sku,
       marketplaceId,
       format: "FIXED_PRICE",
+      // Required by createOffer before an offer can publish; eBay mandates GTC
+      // (Good 'Til Cancelled) as the only duration for fixed-price listings.
+      listingDuration: "GTC",
       availableQuantity: request.quantity,
       categoryId: request.categoryId,
       listingDescription: request.description,

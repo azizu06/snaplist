@@ -128,6 +128,7 @@ describe("HttpEbayAdapter.publishListing", () => {
       sku: "listing-uuid-1",
       marketplaceId: "EBAY_US",
       format: "FIXED_PRICE",
+      listingDuration: "GTC",
       availableQuantity: 1,
       categoryId: "112529",
       listingDescription: request.description,
@@ -139,6 +140,38 @@ describe("HttpEbayAdapter.publishListing", () => {
       pricingSummary: { price: { value: "149.50", currency: "USD" } },
       merchantLocationKey: "loc-1",
     });
+  });
+
+  it("sends the required GTC listingDuration on every fixed-price offer body", async () => {
+    const { fetch, calls } = fakeFetch((url) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/offer")) return json(201, { offerId: "o" });
+      return json(200, { listingId: "l" });
+    });
+    const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => sellerEnv });
+    await adapter.publishListing(request);
+
+    // publishOffer rejects fixed-price offers without it (GTC is mandatory).
+    const offerBody = JSON.parse(String(calls[1]!.init.body));
+    expect(offerBody.format).toBe("FIXED_PRICE");
+    expect(offerBody.listingDuration).toBe("GTC");
+  });
+
+  it("rejects a request with no image URLs BEFORE any eBay call (no partial remote writes)", async () => {
+    const fetchSpy = vi.fn();
+    const adapter = new HttpEbayAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => sellerEnv,
+    });
+
+    const err = await adapter
+      .publishListing({ ...request, imageUrls: [] })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/no image URLs/i);
+    expect((err as Error).message).toMatch(/at least one photo/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("recovers from 'offer already exists' (25002) by updating + publishing the existing offer", async () => {
@@ -172,6 +205,9 @@ describe("HttpEbayAdapter.publishListing", () => {
       "PUT /sell/inventory/v1/offer/offer-old",
       "POST /sell/inventory/v1/offer/offer-old/publish",
     ]);
+    // The recovered offer's update-in-place carries the required duration too.
+    const updateBody = JSON.parse(String(calls[2]!.init.body));
+    expect(updateBody.listingDuration).toBe("GTC");
   });
 
   it("propagates other eBay errors as EbayApiError with status + payload", async () => {
