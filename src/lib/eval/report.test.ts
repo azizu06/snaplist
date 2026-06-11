@@ -137,6 +137,8 @@ describe("predictionFromLogRow", () => {
     tier_fired: "branded-web",
     model: "gpt-5.5",
     listing_model: "gpt-5.5",
+    pricing_model: null,
+    run_id: null,
     sources: [],
   };
 

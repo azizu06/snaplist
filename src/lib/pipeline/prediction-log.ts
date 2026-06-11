@@ -58,6 +58,13 @@ export interface PredictionLogRow {
    * vision model; falls back to `model` when a single model served the whole run (#32).
    */
   listing_model: string;
+  /**
+   * The model that produced the PRICE (the web tiers' comp extractor via
+   * PRICING_MODEL). NULLABLE ON PURPOSE: null means no LLM was involved in
+   * pricing (e.g. the deterministic ISBN lookup) — never backfilled or coerced,
+   * so the column and this read contract agree (#10 review).
+   */
+  pricing_model: string | null;
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
   /**
@@ -83,6 +90,7 @@ export interface PredictionLogRow {
  *   price.tier        → tier_fired
  *   model             → model
  *   listingModel      → listing_model  (falls back to model when the run had one model)
+ *   pricingModel      → pricing_model  (null when no LLM was involved in pricing)
  *   price.sources     → sources
  */
 export function buildPredictionLogRow(
@@ -104,6 +112,9 @@ export function buildPredictionLogRow(
     // The listing's own model when the pipeline produced one; otherwise the run's
     // single model (the stub / vision-only path) so provenance is never null (#32).
     listing_model: result.listingModel ?? result.model,
+    // Pricing-model provenance: present only when an LLM priced the item (web
+    // tiers); null = deterministic pricing (ISBN lookup), NOT a missing value.
+    pricing_model: result.pricingModel ?? null,
     // Persist the cited comps so the {suggested, range, confidence, sources[]}
     // contract is complete — rendered for verification, consumed by the eval harness.
     sources: result.price.sources,
@@ -175,7 +186,7 @@ export async function readPredictionLogs(
   let query = supabase
     .from("prediction_logs")
     .select(
-      "user_id, item_id, run_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources, created_at",
+      "user_id, item_id, run_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, pricing_model, sources, created_at",
     );
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);

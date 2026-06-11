@@ -120,6 +120,12 @@ export const pipelineResultSchema = z.object({
    */
   listingModel: z.string().optional(),
   /**
+   * The model that produced the PRICE (the web tiers' comp extractor, via
+   * `PRICING_MODEL`), logged for provenance. OPTIONAL: deterministic pricing
+   * tiers (ISBN lookup) and the stub involve no pricing LLM (#10 review).
+   */
+  pricingModel: z.string().optional(),
+  /**
    * "What we think it is", surfaced before pricing. OPTIONAL so the walking-skeleton
    * stub (which predates the real vision slice) still satisfies the contract.
    */
@@ -134,6 +140,11 @@ export type PipelineResult = {
   model: string;
   /** The model that produced the listing copy, logged for provenance (#32). OPTIONAL. */
   listingModel?: string;
+  /**
+   * The model that produced the price, logged for provenance (#10 review). OPTIONAL:
+   * unset when no LLM was involved in pricing (deterministic ISBN lookup, the stub).
+   */
+  pricingModel?: string;
   /**
    * "What we think it is" for user confirmation before pricing. OPTIONAL: the stub
    * does not produce it, so its existing return still type-checks (issue #6 rule).
