@@ -323,7 +323,7 @@ function pipelineWithConfidence(
           range: { min: 150, max: 210 },
           confidence: confidence.score,
           sources: [],
-          tier: "isbn",
+          tier: "isbn-lookup",
         },
         confidence,
         listing: { platform: "ebay", title: "Item", description: "desc", fields: {} },

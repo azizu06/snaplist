@@ -43,6 +43,12 @@ export async function runPipelineAndPersist(
     throw new Error("runPipelineAndPersist requires at least one photo path");
   }
 
+  // One id for this run, stamped on BOTH the listing and the prediction log so
+  // downstream consumers (the eval harness) can pair them by identity instead
+  // of by created_at coincidence — independent "newest row" lookups can mix
+  // rows from different runs under concurrency or partial failures.
+  const runId = crypto.randomUUID();
+
   // 1. Create the items row FIRST (so the run is anchored to a persisted item
   //    even if a later step fails). RLS pins ownership via WITH CHECK.
   const { data: item, error: itemErr } = await supabase
@@ -89,7 +95,10 @@ export async function runPipelineAndPersist(
   //    a listing is inert; a QUEUED listing without its mandatory evaluation
   //    record is a publishable run the upload request reported as failed —
   //    a queue consumer could post it, and a retried upload could duplicate it.
-  await logPrediction(supabase, input.userId, itemId, result, input.autopilotEnabled);
+  await logPrediction(supabase, input.userId, itemId, result, {
+    autopilotEnabled: input.autopilotEnabled,
+    runId,
+  });
 
   // 5. Persist the generated listing. The initial status is the confidence-gated
   //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
@@ -105,6 +114,7 @@ export async function runPipelineAndPersist(
       description: result.listing.description,
       copy: result.listing.fields,
       status: initialListingStatus(result.confidence),
+      run_id: runId,
     })
     .select("id")
     .single();

@@ -10,6 +10,7 @@ import type {
   ExtractItemAttributesResult,
 } from "./extract";
 import type { SignedUrlClient } from "./photos";
+import { attributesToSignal } from "../pipeline/stub";
 
 /**
  * `createVisionPipeline` tests (offline). Extraction, pricing, listing generation, and
@@ -132,6 +133,20 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     }).run({ photos: ["u/a.jpg"] });
     expect(result.model).toBe("test-vision-model");
     expect(result.listingModel).toBe("listing-gpt-5.5-mini");
+  });
+
+  it("surfaces the pricing model from the price result (#10 provenance), unset when deterministic", async () => {
+    // A web-tier price stamps the comp-extraction model on the result; the pipeline
+    // must thread it through as `pricingModel` so the prediction log can record it.
+    const webPriced = await makePipeline({
+      priceItem: async () => ({ ...STUB_PRICE, model: "pricing-gpt-5.5" }),
+    }).run({ photos: ["u/a.jpg"] });
+    expect(webPriced.pricingModel).toBe("pricing-gpt-5.5");
+    // A deterministic tier (no pricing LLM) leaves it unset — logged as null, not faked.
+    const deterministic = await makePipeline({
+      priceItem: async () => STUB_PRICE,
+    }).run({ photos: ["u/a.jpg"] });
+    expect(deterministic.pricingModel).toBeUndefined();
   });
 
   it("routes the attribute-derived ItemSignal (incl. ISBN) to the pricer", async () => {
@@ -291,6 +306,10 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
         { url: "https://example.com/ask/x", title: "Asking comp", kind: "asking-comp" },
       ],
       tier: "branded-web",
+      // Even a LOCKSTEP asking cluster (judged agreement 1) must not clear the
+      // gate: tight asking prices prove sellers agree on what to ask, not what
+      // buyers pay (#10 round-5).
+      compAgreement: 1,
     });
     const soldComped = priceResultSchema.parse({
       suggested: 180,
@@ -314,6 +333,76 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     // ...while a real sold comp earns the tight tier, scores strictly higher, and IS eligible.
     expect(sold.confidence.score).toBeGreaterThan(asking.confidence.score);
     expect(sold.confidence.autopilotEligible).toBe(true);
+  });
+
+  it("#10 round-4: a SCATTERED sold set stays web_wide and cannot auto-post", async () => {
+    // $60/$185/$420 sold comps: real sold evidence, but spread (max-min)/median
+    // = 1.95 → judged agreement 0. Pre-fix, the sold-comp label alone earned
+    // web_tight with a fixed 0.7 agreement (score 0.7725 ≥ 0.75 gate). Now the
+    // provider's judged tightness rides on the result: a wide sold set maps to
+    // web_wide (0.6·0.6 + 0.25·1 + 0.15·0 = 0.61) and stays sub-gate, while a
+    // tight cluster keeps web_tight and clears it.
+    const brandedItem: ExtractItemAttributesResult = {
+      attributes: {
+        brand: "Sony",
+        model: "WH-1000XM4",
+        category: "electronics",
+        condition: "good",
+        upc: "027242920866",
+        title: "Sony WH-1000XM4 Headphones",
+      },
+      identification: { label: "Sony WH-1000XM4", confident: true, evidence: 1 },
+      model: "m",
+    };
+    const soldSources = [
+      { url: "https://example.com/sold/1", title: "Sold $60", kind: "sold-comp" },
+      { url: "https://example.com/sold/2", title: "Sold $185", kind: "sold-comp" },
+      { url: "https://example.com/sold/3", title: "Sold $420", kind: "sold-comp" },
+    ];
+    const scattered = priceResultSchema.parse({
+      suggested: 185,
+      range: { min: 60, max: 420 },
+      confidence: 0.7,
+      sources: soldSources,
+      tier: "branded-web",
+      compAgreement: 0, // spreadToAgreement(1.95)
+    });
+    const tight = priceResultSchema.parse({
+      suggested: 185,
+      range: { min: 178, max: 200 },
+      confidence: 0.8,
+      sources: soldSources,
+      tier: "branded-web",
+      compAgreement: 0.88, // spreadToAgreement(0.12)
+    });
+
+    const wide = await makePipeline({
+      extract: fakeExtract(brandedItem),
+      priceItem: async () => scattered,
+    }).run({ photos: ["u/a.jpg"] });
+    const clustered = await makePipeline({
+      extract: fakeExtract(brandedItem),
+      priceItem: async () => tight,
+    }).run({ photos: ["u/a.jpg"] });
+
+    expect(wide.confidence.autopilotEligible).toBe(false);
+    expect(wide.confidence.score).toBeLessThan(0.75);
+    expect(clustered.confidence.autopilotEligible).toBe(true);
+    expect(clustered.confidence.score).toBeGreaterThan(wide.confidence.score);
+  });
+
+  it("#10 round-4: the generated display title is NOT identification (no resolvedName)", async () => {
+    // The vision prompt generates a short title even for generic items, so
+    // attributesToSignal must not map it into signal.resolvedName — otherwise
+    // brand "Nike" + title "Nike running shoes" defeats the bare-brand
+    // safeguard and prices an unidentified product from same-brand comps.
+    const signal = attributesToSignal({
+      brand: "Nike",
+      category: "shoes",
+      title: "Nike running shoes",
+    });
+    expect(signal.resolvedName).toBeUndefined();
+    expect(signal.brand).toBe("Nike");
   });
 
   it("throws when given no photos", async () => {

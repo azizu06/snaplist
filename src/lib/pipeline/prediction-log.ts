@@ -58,6 +58,13 @@ export interface PredictionLogRow {
    * vision model; falls back to `model` when a single model served the whole run (#32).
    */
   listing_model: string;
+  /**
+   * The model that produced the PRICE (the web tiers' comp extractor via
+   * PRICING_MODEL). NULLABLE ON PURPOSE: null means no LLM was involved in
+   * pricing (e.g. the deterministic ISBN lookup) — never backfilled or coerced,
+   * so the column and this read contract agree (#10 review).
+   */
+  pricing_model: string | null;
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
   /**
@@ -68,6 +75,25 @@ export interface PredictionLogRow {
   autopilot_enabled: boolean | null;
   /** The gate's output for this run (enabled AND score >= threshold). */
   autopilot_eligible: boolean | null;
+  /**
+   * The pipeline run this row belongs to — the SAME id is stamped on the
+   * listing the run persisted, so the eval harness pairs a prediction with
+   * exactly its own listing (never a neighboring run's). Null only on legacy
+   * rows written before run pairing existed.
+   */
+  run_id: string | null;
+}
+
+/**
+ * Run-scoped context that rides alongside the PipelineResult into the log row:
+ * facts the RUN consumed/produced that aren't part of the model's output —
+ * the autopilot switch value and the listing-pairing run id.
+ */
+export interface PredictionLogContext {
+  /** The master autopilot switch value this run consumed. */
+  autopilotEnabled?: boolean;
+  /** The run id stamped on both the listing and this log row. */
+  runId?: string;
 }
 
 /**
@@ -84,21 +110,23 @@ export interface PredictionLogRow {
  *   price.tier        → tier_fired
  *   model             → model
  *   listingModel      → listing_model  (falls back to model when the run had one model)
+ *   pricingModel      → pricing_model  (null when no LLM was involved in pricing)
  *   price.sources     → sources
  */
 export function buildPredictionLogRow(
   userId: string,
   itemId: string,
   result: PipelineResult,
-  autopilotEnabled?: boolean,
+  context: PredictionLogContext = {},
 ): PredictionLogRow {
   return {
     user_id: userId,
     item_id: itemId,
+    run_id: context.runId ?? null,
     extracted_attrs: result.attributes,
     // The gate decision as the run saw it — run-time facts for the review
     // page's disposition explanation; never re-derivable from live settings.
-    autopilot_enabled: autopilotEnabled ?? null,
+    autopilot_enabled: context.autopilotEnabled ?? null,
     autopilot_eligible: result.confidence.autopilotEligible ?? null,
     price: result.price.suggested,
     price_range: { low: result.price.range.min, high: result.price.range.max },
@@ -108,6 +136,9 @@ export function buildPredictionLogRow(
     // The listing's own model when the pipeline produced one; otherwise the run's
     // single model (the stub / vision-only path) so provenance is never null (#32).
     listing_model: result.listingModel ?? result.model,
+    // Pricing-model provenance: present only when an LLM priced the item (web
+    // tiers); null = deterministic pricing (ISBN lookup), NOT a missing value.
+    pricing_model: result.pricingModel ?? null,
     // Persist the cited comps so the {suggested, range, confidence, sources[]}
     // contract is complete — rendered for verification, consumed by the eval harness.
     sources: result.price.sources,
@@ -124,9 +155,9 @@ export async function logPrediction(
   userId: string,
   itemId: string,
   result: PipelineResult,
-  autopilotEnabled?: boolean,
+  context: PredictionLogContext = {},
 ): Promise<void> {
-  const row = buildPredictionLogRow(userId, itemId, result, autopilotEnabled);
+  const row = buildPredictionLogRow(userId, itemId, result, context);
   const { error } = await supabase.from("prediction_logs").insert(row);
   if (error) {
     throw new Error(`Failed to write prediction log: ${error.message}`);
@@ -137,28 +168,62 @@ export async function logPrediction(
 export interface ReadPredictionLogsFilter {
   /** Narrow to a single item's run(s). */
   itemId?: string;
+  /**
+   * Sort direction on `created_at`; defaults to ascending (oldest first).
+   * Newest-first + `limit: 1` is how a caller selects "the latest run"
+   * without reading the whole history — important because PostgREST caps
+   * responses at `api.max_rows` (1000 locally), so an unbounded ascending
+   * read of a large table silently returns only the OLDEST page.
+   */
+  ascending?: boolean;
+  /** Cap the number of rows returned (applied after ordering). */
+  limit?: number;
+}
+
+/**
+ * A `prediction_logs` row as READ BACK from the database: the insert payload plus
+ * the DB-defaulted `created_at` timestamp. `created_at` exists only on the read
+ * side (it is never set by `buildPredictionLogRow`), and it is what makes the
+ * read ordering — and therefore "newest run per item" dedup downstream —
+ * deterministic.
+ */
+export interface PredictionLogReadRow extends PredictionLogRow {
+  /** DB-defaulted insert timestamp (ISO 8601), the run-recency ordering key. */
+  created_at: string;
 }
 
 /**
  * Read prediction-log rows back through the caller's user-scoped client (RLS means
  * the caller only ever sees its own rows). Minimal by design — the eval harness's
  * read seam. Throws on a query error so callers never silently get an empty set.
+ *
+ * ORDERING CONTRACT: rows are returned ordered by `created_at` ASCENDING
+ * (oldest first). PostgREST guarantees no row order without an explicit
+ * `order`, so this is what lets consumers that keep the LAST row per item
+ * (e.g. the eval harness's `matchPredictions`) deterministically score the
+ * NEWEST run instead of an arbitrary historical one.
  */
 export async function readPredictionLogs(
   supabase: SupabaseClient,
   filter: ReadPredictionLogsFilter = {},
-): Promise<PredictionLogRow[]> {
+): Promise<PredictionLogReadRow[]> {
   let query = supabase
     .from("prediction_logs")
     .select(
-      "user_id, item_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources",
+      "user_id, item_id, run_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, pricing_model, sources, autopilot_enabled, autopilot_eligible, created_at",
     );
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);
   }
-  const { data, error } = await query;
+  let ordered = query.order("created_at", {
+    ascending: filter.ascending ?? true,
+  });
+  if (filter.limit !== undefined) {
+    ordered = ordered.limit(filter.limit);
+  }
+  const { data, error } = await ordered;
   if (error) {
     throw new Error(`Failed to read prediction logs: ${error.message}`);
   }
-  return (data ?? []) as unknown as PredictionLogRow[];
+  return (data ?? []) as unknown as PredictionLogReadRow[];
 }
