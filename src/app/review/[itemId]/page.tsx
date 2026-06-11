@@ -103,14 +103,68 @@ export default async function ReviewPage({
     suggested != null ? effectivePrice(suggested, override) : override;
 
   // Disposition transparency (issue #12): a queued listing was confidence-gated
-  // into the auto-post path; a draft is awaiting review — either because the
+  // into the auto-post path; a DRAFT is awaiting review — either because the
   // confidence fell short or because autopilot was off entirely. The
   // explanation derives from the RUN-TIME facts (persisted status + logged
   // confidence), never the live setting: flipping the master switch later
-  // must not rewrite history about why this listing queued.
-  const queuedForAutopost = listing?.status === "queued";
+  // must not rewrite history about why this listing queued. Terminal lifecycle
+  // states (published / failed) are rendered as themselves — they must never
+  // be misattributed to confidence or autopilot.
   const confidenceFellShort =
     confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
+  const banner = (() => {
+    switch (listing?.status) {
+      case "queued":
+        return {
+          tone: "emerald" as const,
+          title: "Queued for auto-posting",
+          detail:
+            "High confidence and autopilot was on — this listing is eligible to post without manual approval.",
+        };
+      case "draft":
+        return {
+          tone: "amber" as const,
+          title: "Queued for your review",
+          detail: confidenceFellShort
+            ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
+            : confidence != null
+              ? "Autopilot was off when this listing was generated — it waits for your approval."
+              : "This listing waits for your approval.",
+        };
+      case "published":
+        return {
+          tone: "emerald" as const,
+          title: "Published",
+          detail: "This listing is live on the marketplace.",
+        };
+      case "failed":
+        return {
+          tone: "red" as const,
+          title: "Publish failed",
+          detail:
+            "The marketplace rejected or errored on this listing — review it and retry.",
+        };
+      default:
+        return null;
+    }
+  })();
+  const bannerStyles = {
+    emerald: {
+      section: "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3",
+      title: "text-sm font-medium text-emerald-800",
+      detail: "mt-0.5 text-xs text-emerald-700",
+    },
+    amber: {
+      section: "rounded-md border border-amber-200 bg-amber-50 px-4 py-3",
+      title: "text-sm font-medium text-amber-800",
+      detail: "mt-0.5 text-xs text-amber-700",
+    },
+    red: {
+      section: "rounded-md border border-red-200 bg-red-50 px-4 py-3",
+      title: "text-sm font-medium text-red-800",
+      detail: "mt-0.5 text-xs text-red-700",
+    },
+  } as const;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-12">
@@ -130,40 +184,10 @@ export default async function ReviewPage({
         </p>
       ) : null}
 
-      {listing ? (
-        <section
-          className={
-            queuedForAutopost
-              ? "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3"
-              : "rounded-md border border-amber-200 bg-amber-50 px-4 py-3"
-          }
-        >
-          <p
-            className={
-              queuedForAutopost
-                ? "text-sm font-medium text-emerald-800"
-                : "text-sm font-medium text-amber-800"
-            }
-          >
-            {queuedForAutopost
-              ? "Queued for auto-posting"
-              : "Queued for your review"}
-          </p>
-          <p
-            className={
-              queuedForAutopost
-                ? "mt-0.5 text-xs text-emerald-700"
-                : "mt-0.5 text-xs text-amber-700"
-            }
-          >
-            {queuedForAutopost
-              ? "High confidence and autopilot was on — this listing is eligible to post without manual approval."
-              : confidenceFellShort
-                ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
-                : confidence != null
-                  ? "Autopilot was off when this listing was generated — it waits for your approval."
-                  : "This listing waits for your approval."}
-          </p>
+      {banner ? (
+        <section className={bannerStyles[banner.tone].section}>
+          <p className={bannerStyles[banner.tone].title}>{banner.title}</p>
+          <p className={bannerStyles[banner.tone].detail}>{banner.detail}</p>
         </section>
       ) : null}
 
