@@ -50,7 +50,7 @@ idea seen three ways. The map from skill to code:
 | Structured outputs | Zod everywhere a model speaks: `src/lib/pipeline/types.ts`, `src/lib/listing/schema.ts` — no ad-hoc JSON parsing |
 | Prompt/context engineering | `src/lib/listing` + `src/lib/export` — per-platform copy generation, used-vs-new disambiguation |
 | Evals + calibration | `src/lib/eval` — gold set, ID/pricing metrics, reliability buckets + ECE, LLM judge validated against human labels |
-| Security | Supabase Auth + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts`), user-scoped storage paths, lazy env validation (`src/lib/env.ts`), eBay account-deletion endpoint |
+| Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, lazy env validation (`src/lib/env.ts`), eBay account-deletion endpoint |
 | Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell API, sandbox) · export packs for FB Marketplace/Mercari |
 | Docker / CI / observability | `Dockerfile`, `.github/workflows/ci.yml`, `src/lib/observability.ts`, `/api/health` |
 

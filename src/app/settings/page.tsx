@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserEmail, getUserId } from "@/lib/auth";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { setAutopilotSetting } from "@/app/upload/actions";
 import { Banner } from "@/components/ui/banner";
@@ -20,12 +21,11 @@ export default async function SettingsPage({
   const { error } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/settings");
+  const userId = await getUserId();
+  if (!userId) redirect("/login?next=/settings");
 
-  const autopilotEnabled = await getAutopilotEnabled(supabase, user.id);
+  const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
+  const email = await getUserEmail();
 
   return (
     <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
@@ -33,7 +33,9 @@ export default async function SettingsPage({
         <h1 className="text-lg font-bold tracking-tight text-fg-strong">
           Settings
         </h1>
-        <p className="mt-0.5 text-[13px] text-muted">Signed in as {user.email}</p>
+        <p className="mt-0.5 text-[13px] text-muted">
+          Signed in as {email ?? "your account"}
+        </p>
       </header>
 
       {error ? (

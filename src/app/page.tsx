@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
 import {
@@ -23,11 +24,9 @@ export default async function Home({
   const { filter: rawFilter } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const userId = await getUserId();
 
-  if (!user) {
+  if (!userId) {
     return (
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-6 px-6 py-16">
         <h1 className="text-3xl font-semibold tracking-tight text-fg-strong">

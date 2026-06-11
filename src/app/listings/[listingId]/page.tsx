@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { publishToEbay } from "./actions";
 import { PublishView, type PublishData } from "./publish-view";
 
@@ -21,10 +22,8 @@ export default async function ListingPage({
   const { error } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/listings/${listingId}`);
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=/listings/${listingId}`);
 
   // RLS scopes to the owner; a foreign/missing id returns no row → 404.
   const { data: listing } = await supabase

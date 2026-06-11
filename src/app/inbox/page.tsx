@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { InboxClient, type ItemOption } from "./inbox-client";
@@ -13,10 +14,8 @@ import { InboxClient, type ItemOption } from "./inbox-client";
  */
 export default async function InboxPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login?next=/inbox");
+  const userId = await getUserId();
+  if (!userId) redirect("/login?next=/inbox");
 
   const [{ data: messages }, { data: items }] = await Promise.all([
     supabase
@@ -59,7 +58,7 @@ export default async function InboxPage() {
       </header>
 
       <InboxClient
-        userId={user.id}
+        userId={userId}
         initialMessages={initialMessages}
         items={itemOptions}
       />

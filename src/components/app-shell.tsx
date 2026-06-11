@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SidebarNav, MobileNav } from "./nav-links";
+import { AppSignOutButton } from "./sign-out-button";
 
 /**
  * AppShell — Shopify-admin chrome (issue #40 round 2, replicated from the
@@ -58,19 +59,14 @@ export function AppShell({
         {signedIn ? (
           <aside className="sticky top-12 hidden h-[calc(100vh-3rem)] w-56 shrink-0 flex-col justify-between border-r border-border bg-bg px-3 py-4 sm:flex">
             <SidebarNav />
-            <form action="/auth/signout" method="post">
-              <button
-                type="submit"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-3/60 hover:text-fg"
-              >
-                <svg viewBox="0 0 24 24" className="size-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <path d="m16 17 5-5-5-5" />
-                  <path d="M21 12H9" />
-                </svg>
-                Sign out
-              </button>
-            </form>
+            <AppSignOutButton className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-3/60 hover:text-fg">
+              <svg viewBox="0 0 24 24" className="size-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <path d="m16 17 5-5-5-5" />
+                <path d="M21 12H9" />
+              </svg>
+              Sign out
+            </AppSignOutButton>
           </aside>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col pb-16 sm:pb-0">{children}</div>

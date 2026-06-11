@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { createEbayAdapter, publishListingToEbay } from "@/lib/marketplace/ebay";
 
 /**
@@ -19,10 +20,8 @@ export async function publishToEbay(formData: FormData) {
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/listings/${listingId}`);
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=/listings/${listingId}`);
 
   try {
     await publishListingToEbay(supabase, listingId, createEbayAdapter());

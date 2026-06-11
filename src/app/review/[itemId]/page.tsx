@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
@@ -31,10 +32,8 @@ export default async function ReviewPage({
   const { error: actionError } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/review/${itemId}`);
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=/review/${itemId}`);
 
   // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase

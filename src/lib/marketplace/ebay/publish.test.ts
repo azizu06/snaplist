@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  cleanupClerkTestUsers,
+  provisionClerkTestUser,
+  type ClerkTestUser,
+} from "../../supabase/test-users";
 import { StubPipeline } from "../../pipeline/stub";
 import { runPipelineAndPersist } from "../../pipeline/persist";
 import { MockEbayAdapter } from "./mock";
@@ -39,44 +44,20 @@ async function stackReachable(): Promise<boolean> {
   }
 }
 
-type TestUser = { id: string; email: string; client: SupabaseClient };
 
 let reachable = false;
 let admin: SupabaseClient;
-let userA: TestUser;
-let userB: TestUser;
-const createdUserIds: string[] = [];
+let userA: ClerkTestUser;
+let userB: ClerkTestUser;
 
-async function provisionUser(label: string): Promise<TestUser> {
-  const email = `ebay-pub-${label}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}@example.com`;
-  const password = "test-password-123!";
-
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
-  if (createErr || !created.user) {
-    throw new Error(`createUser failed for ${label}: ${createErr?.message}`);
-  }
-  createdUserIds.push(created.user.id);
-
-  const client = createClient(SUPABASE_URL, ANON_KEY!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { error: signInErr } = await client.auth.signInWithPassword({
-    email,
-    password,
-  });
-  if (signInErr) throw new Error(`signIn failed for ${label}: ${signInErr.message}`);
-
-  return { id: created.user.id, email, client };
+// Clerk-era provisioning (issue #41): identities are minted JWTs with text
+// subs — no auth.users rows. See test-users.ts.
+async function provisionUser(label: string): Promise<ClerkTestUser> {
+  return provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, `publish_${label}`);
 }
 
 /** Upload a tiny PNG to the user-scoped path, as the upload route would. */
-async function uploadPhoto(user: TestUser): Promise<string> {
+async function uploadPhoto(user: ClerkTestUser): Promise<string> {
   const pngBase64 =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
   const bytes = Buffer.from(pngBase64, "base64");
@@ -89,7 +70,7 @@ async function uploadPhoto(user: TestUser): Promise<string> {
 }
 
 /** Run the stub pipeline end-to-end so a real listings row + price log exist. */
-async function persistedRun(user: TestUser) {
+async function persistedRun(user: ClerkTestUser) {
   const photoPath = await uploadPhoto(user);
   return runPipelineAndPersist(
     user.client,
@@ -109,7 +90,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!reachable || !admin) return;
-  await Promise.all(createdUserIds.map((id) => admin.auth.admin.deleteUser(id)));
+  // No auth.users cascade anymore (Clerk migration dropped those FKs) —
+  // delete owned domain rows explicitly.
+  await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
 });
 
 describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", () => {

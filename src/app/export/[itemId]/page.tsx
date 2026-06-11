@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import {
   loadOrGenerateExportPacks,
@@ -28,10 +29,8 @@ export default async function ExportPage({
   const { itemId } = await params;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=/export/${itemId}`);
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=/export/${itemId}`);
 
   // RLS scopes this to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
@@ -65,7 +64,7 @@ export default async function ExportPage({
   let error: string | null = null;
   try {
     packs = await loadOrGenerateExportPacks(supabase, {
-      userId: user.id,
+      userId: userId,
       itemId,
       attributes,
       price,

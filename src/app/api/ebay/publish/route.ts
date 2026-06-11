@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getUserId } from "@/lib/auth";
 import { createEbayAdapter, publishListingToEbay } from "@/lib/marketplace/ebay";
 
 /**
@@ -19,10 +20,8 @@ import { createEbayAdapter, publishListingToEbay } from "@/lib/marketplace/ebay"
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const userId = await getUserId();
+  if (!userId) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
@@ -51,10 +50,8 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
+  const userId = await getUserId();
+  if (!userId) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 

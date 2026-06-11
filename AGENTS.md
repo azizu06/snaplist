@@ -10,8 +10,9 @@ A production-real AI-engineering showcase: photo of a used item → priced, read
 adapter and is **not on the Phase 1 critical path**.
 
 ## Non-negotiable decisions (don't relitigate without the user)
-- **Multi-tenant from day one:** Supabase Auth, `user_id` on every domain table, Postgres **RLS**
-  enforces isolation. Never write a query path that bypasses tenant isolation.
+- **Multi-tenant from day one:** Clerk auth (Supabase third-party JWTs; issue #41), text `user_id`
+  (the Clerk id) on every domain table, Postgres **RLS** enforces isolation via
+  `public.clerk_user_id()`. Never write a query path that bypasses tenant isolation.
 - **OpenAI via the Vercel AI SDK.** All model calls go through the SDK; provider stays swappable.
   Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
 - **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → web-search
@@ -40,7 +41,7 @@ adapter and is **not on the Phase 1 critical path**.
 
 ## Stack
 Next.js (App Router) + TypeScript · Vercel AI SDK + OpenAI · Tavily (primary) / Exa (secondary) web
-search · Supabase (Postgres + pgvector + Auth + Realtime + Storage + cron) · Zod · Tailwind +
+search · Clerk (auth) · Supabase (Postgres + pgvector + Realtime + Storage + cron) · Zod · Tailwind +
 shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, via adapter).
 
 ## Conventions
