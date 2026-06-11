@@ -40,10 +40,15 @@ export default async function ReviewPage({
     .single();
   if (!item) notFound();
 
+  // This page reviews the SALE listing. Export packs persist as facebook/
+  // mercari rows in the SAME table with newer timestamps, so the query must
+  // pin the canonical platform — otherwise visiting Export and returning here
+  // would show a pack instead of the eBay draft.
   const { data: listing } = await supabase
     .from("listings")
     .select("platform, title, description, copy, status")
     .eq("item_id", itemId)
+    .eq("platform", "ebay")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

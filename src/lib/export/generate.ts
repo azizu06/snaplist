@@ -379,8 +379,14 @@ export function packsHallucinateAttributes(
 // Deterministic repairs + the copy-paste blocks
 // ---------------------------------------------------------------------------
 
-/** The deterministic shipping line appended when the model forgot to mention shipping. */
-export const MERCARI_SHIPPING_SUFFIX = "Ships fast with tracking.";
+/**
+ * The deterministic shipping line appended when the model forgot to mention
+ * shipping. NEUTRAL by design: it states only that the item ships (a Mercari
+ * platform mechanic), never speed or tracking — seller-performance promises
+ * aren't in the validated core or any shipping settings, so asserting them
+ * would be exactly the hallucination this feature guards against.
+ */
+export const MERCARI_SHIPPING_SUFFIX = "Shipping available.";
 
 /** The deterministic Facebook local-pickup line — always the block's last line. */
 export const FACEBOOK_PICKUP_LINE = "Local pickup — message me if interested!";

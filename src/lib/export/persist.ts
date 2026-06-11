@@ -40,7 +40,12 @@ export interface ExportPacksView {
   mercari: ExportPackView;
   /** True when both packs were served from persisted rows (no model call). */
   cached: boolean;
-  /** The generating model id; undefined when served from cache. */
+  /**
+   * The generating model id — provenance is PERSISTED with each pack row
+   * (copy.model) so export outputs stay attributable in the eval harness, and
+   * cached reads return the stored id. Undefined only for legacy rows written
+   * before provenance landed.
+   */
   model?: string;
 }
 
@@ -137,16 +142,30 @@ export async function loadOrGenerateExportPacks(
   };
   let storedFacebook: ExportPackView | null = null;
   let storedMercari: ExportPackView | null = null;
+  let storedModel: string | undefined;
   for (const row of (rows ?? []) as ListingRow[]) {
     if (row.platform === FACEBOOK_PLATFORM && !storedFacebook) {
       storedFacebook = rowToView(row, current);
     } else if (row.platform === MERCARI_PLATFORM && !storedMercari) {
       storedMercari = rowToView(row, current);
+    } else {
+      continue;
+    }
+    // Provenance rides with whichever stored row served a pack (rows from one
+    // generation share the same model id).
+    const model = row.copy?.["model"];
+    if (storedModel === undefined && typeof model === "string" && model !== "") {
+      storedModel = model;
     }
   }
 
   if (storedFacebook && storedMercari) {
-    return { facebook: storedFacebook, mercari: storedMercari, cached: true };
+    return {
+      facebook: storedFacebook,
+      mercari: storedMercari,
+      cached: true,
+      model: storedModel,
+    };
   }
 
   const result = await generateExportPacks({
@@ -158,6 +177,9 @@ export async function loadOrGenerateExportPacks(
 
   // Persist only the platforms that lack a valid stored pack, so a partial
   // earlier write never produces duplicate rows for the platform it covered.
+  // Each row carries its generating model id (copy.model) — export outputs
+  // must stay attributable (AGENTS.md: log every run's model), including on
+  // later cached reads.
   const inserts = [
     ...(storedFacebook
       ? []
@@ -168,7 +190,7 @@ export async function loadOrGenerateExportPacks(
             platform: FACEBOOK_PLATFORM,
             title: result.facebook.pack.title,
             description: result.facebook.pack.description,
-            copy: result.facebook.copy.fields,
+            copy: { ...result.facebook.copy.fields, model: result.model },
             status: "draft",
           },
         ]),
@@ -181,7 +203,7 @@ export async function loadOrGenerateExportPacks(
             platform: MERCARI_PLATFORM,
             title: result.mercari.pack.title,
             description: result.mercari.pack.description,
-            copy: result.mercari.copy.fields,
+            copy: { ...result.mercari.copy.fields, model: result.model },
             status: "draft",
           },
         ]),

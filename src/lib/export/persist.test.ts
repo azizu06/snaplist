@@ -116,7 +116,44 @@ describe("loadOrGenerateExportPacks", () => {
       expect(row.item_id).toBe("item-1");
       expect(row.status).toBe("draft");
       expect(typeof row.copy["copyBlock"]).toBe("string");
+      // Provenance is persisted WITH the pack so export outputs stay
+      // attributable on later cached reads (AGENTS.md: log every run's model).
+      expect(row.copy["model"]).toBe("test-model");
     }
+  });
+
+  it("cached reads return the PERSISTED model provenance, not undefined", async () => {
+    const stored: StoredRow[] = [
+      {
+        platform: FACEBOOK_PLATFORM,
+        title: "Stored FB title",
+        description: "Stored FB description.",
+        copy: {
+          copyBlock: "Stored FB title\n\nStored FB description.",
+          model: "stored-model-id",
+        },
+      },
+      {
+        platform: MERCARI_PLATFORM,
+        title: "Stored Mercari title",
+        description: "Stored Mercari description. Ships fast.",
+        copy: {
+          hashtags: ["#sony"],
+          copyBlock: "Stored Mercari title\n\nStored Mercari description.\n\n#sony",
+          model: "stored-model-id",
+        },
+      },
+    ];
+    const { generate, calls } = countingGenerate();
+    const view = await loadOrGenerateExportPacks(fakeSupabase(stored, []), {
+      userId: "user-1",
+      itemId: "item-1",
+      attributes: CORE,
+      generate,
+    });
+    expect(calls()).toBe(0);
+    expect(view.cached).toBe(true);
+    expect(view.model).toBe("stored-model-id");
   });
 
   it("later visits: serves both packs from the stored rows with NO model call", async () => {
