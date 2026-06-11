@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval": "tsx src/lib/eval/run.ts",
     "supabase": "supabase"
   },
   "dependencies": {
@@ -32,6 +33,7 @@
     "eslint-config-next": "16.2.9",
     "supabase": "^2.105.0",
     "tailwindcss": "^4",
+    "tsx": "^4.20.6",
     "typescript": "^5",
     "vitest": "^4.1.8"
   }

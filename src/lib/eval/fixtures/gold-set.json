@@ -1,0 +1,200 @@
+[
+  {
+    "id": "gold-electronics-sony-wh1000xm4",
+    "sourceRef": "ref-electronics-sony-wh1000xm4",
+    "truth": { "brand": "Sony", "model": "WH-1000XM4", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 130, "high": 200 }
+  },
+  {
+    "id": "gold-electronics-bose-qc35ii",
+    "sourceRef": "ref-electronics-bose-qc35ii",
+    "truth": { "brand": "Bose", "model": "QuietComfort 35 II", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 80, "high": 140 }
+  },
+  {
+    "id": "gold-electronics-apple-airpodspro2",
+    "sourceRef": "ref-electronics-apple-airpodspro2",
+    "truth": { "brand": "Apple", "model": "AirPods Pro 2", "category": "electronics", "condition": "like-new" },
+    "priceBand": { "low": 110, "high": 175 }
+  },
+  {
+    "id": "gold-electronics-nintendo-switch-oled",
+    "sourceRef": "ref-electronics-nintendo-switch-oled",
+    "truth": { "brand": "Nintendo", "model": "Switch OLED", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 190, "high": 280 }
+  },
+  {
+    "id": "gold-electronics-kindle-paperwhite",
+    "sourceRef": "ref-electronics-kindle-paperwhite",
+    "truth": { "brand": "Amazon", "model": "Kindle Paperwhite", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 50, "high": 95 }
+  },
+  {
+    "id": "gold-electronics-apple-ipad-9",
+    "truth": { "brand": "Apple", "model": "iPad 9th Generation", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 150, "high": 230 }
+  },
+  {
+    "id": "gold-electronics-jbl-flip6",
+    "truth": { "brand": "JBL", "model": "Flip 6", "category": "electronics", "condition": "very-good" },
+    "priceBand": { "low": 55, "high": 90 }
+  },
+  {
+    "id": "gold-electronics-sony-dualsense",
+    "truth": { "brand": "Sony", "model": "DualSense Wireless Controller", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 35, "high": 55 }
+  },
+  {
+    "id": "gold-electronics-garmin-forerunner245",
+    "truth": { "brand": "Garmin", "model": "Forerunner 245", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 90, "high": 150 }
+  },
+  {
+    "id": "gold-electronics-apple-watch-se2",
+    "truth": { "brand": "Apple", "model": "Watch SE 2nd Generation", "category": "electronics", "condition": "very-good" },
+    "priceBand": { "low": 120, "high": 180 }
+  },
+  {
+    "id": "gold-electronics-anker-powercore10000",
+    "truth": { "brand": "Anker", "model": "PowerCore 10000", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 12, "high": 25 }
+  },
+  {
+    "id": "gold-books-pragmatic-programmer",
+    "sourceRef": "ref-books-pragmatic-programmer",
+    "truth": { "brand": "Addison-Wesley", "model": "The Pragmatic Programmer 20th Anniversary", "category": "books", "condition": "like-new", "isbn": "9780135957059" },
+    "priceBand": { "low": 20, "high": 38 }
+  },
+  {
+    "id": "gold-books-clean-code",
+    "sourceRef": "ref-books-clean-code",
+    "truth": { "brand": "Prentice Hall", "model": "Clean Code", "category": "books", "condition": "good", "isbn": "9780132350884" },
+    "priceBand": { "low": 15, "high": 30 }
+  },
+  {
+    "id": "gold-books-dune",
+    "sourceRef": "ref-books-dune",
+    "truth": { "brand": "Ace", "model": "Dune", "category": "books", "condition": "good", "isbn": "9780441172719" },
+    "priceBand": { "low": 6, "high": 16 }
+  },
+  {
+    "id": "gold-books-ddia",
+    "truth": { "brand": "O'Reilly", "model": "Designing Data-Intensive Applications", "category": "books", "condition": "very-good", "isbn": "9781449373320" },
+    "priceBand": { "low": 25, "high": 45 }
+  },
+  {
+    "id": "gold-books-ctci",
+    "truth": { "brand": "CareerCup", "model": "Cracking the Coding Interview 6th Edition", "category": "books", "condition": "good", "isbn": "9780984782857" },
+    "priceBand": { "low": 18, "high": 32 }
+  },
+  {
+    "id": "gold-books-atomic-habits",
+    "truth": { "brand": "Avery", "model": "Atomic Habits", "category": "books", "condition": "like-new", "isbn": "9780735211292" },
+    "priceBand": { "low": 9, "high": 18 }
+  },
+  {
+    "id": "gold-books-clrs-3rd",
+    "truth": { "brand": "MIT Press", "model": "Introduction to Algorithms 3rd Edition", "category": "books", "condition": "good", "isbn": "9780262033848" },
+    "priceBand": { "low": 30, "high": 60 }
+  },
+  {
+    "id": "gold-books-hobbit",
+    "truth": { "brand": "Houghton Mifflin", "model": "The Hobbit", "category": "books", "condition": "good", "isbn": "9780547928227" },
+    "priceBand": { "low": 5, "high": 14 }
+  },
+  {
+    "id": "gold-boardgames-catan",
+    "sourceRef": "ref-boardgames-catan",
+    "truth": { "brand": "Catan Studio", "model": "Catan (Base Game)", "category": "board-games", "condition": "good" },
+    "priceBand": { "low": 22, "high": 42 }
+  },
+  {
+    "id": "gold-boardgames-ticket-to-ride",
+    "sourceRef": "ref-boardgames-ticket-to-ride",
+    "truth": { "brand": "Days of Wonder", "model": "Ticket to Ride", "category": "board-games", "condition": "very-good" },
+    "priceBand": { "low": 25, "high": 45 }
+  },
+  {
+    "id": "gold-boardgames-wingspan",
+    "sourceRef": "ref-boardgames-wingspan",
+    "truth": { "brand": "Stonemaier Games", "model": "Wingspan", "category": "board-games", "condition": "like-new" },
+    "priceBand": { "low": 35, "high": 55 }
+  },
+  {
+    "id": "gold-boardgames-pandemic",
+    "truth": { "brand": "Z-Man Games", "model": "Pandemic", "category": "board-games", "condition": "good" },
+    "priceBand": { "low": 18, "high": 35 }
+  },
+  {
+    "id": "gold-boardgames-azul",
+    "truth": { "brand": "Next Move Games", "model": "Azul", "category": "board-games", "condition": "very-good" },
+    "priceBand": { "low": 20, "high": 35 }
+  },
+  {
+    "id": "gold-boardgames-codenames",
+    "truth": { "brand": "Czech Games Edition", "model": "Codenames", "category": "board-games", "condition": "good" },
+    "priceBand": { "low": 8, "high": 16 }
+  },
+  {
+    "id": "gold-boardgames-7wonders",
+    "truth": { "brand": "Repos Production", "model": "7 Wonders", "category": "board-games", "condition": "good" },
+    "priceBand": { "low": 22, "high": 40 }
+  },
+  {
+    "id": "gold-gear-patagonia-nano-puff",
+    "sourceRef": "ref-gear-patagonia-nano-puff",
+    "truth": { "brand": "Patagonia", "model": "Nano Puff Jacket", "category": "branded-gear", "condition": "good" },
+    "priceBand": { "low": 70, "high": 130 }
+  },
+  {
+    "id": "gold-gear-yeti-rambler",
+    "sourceRef": "ref-gear-yeti-rambler",
+    "truth": { "brand": "YETI", "model": "Rambler 20oz Tumbler", "category": "branded-gear", "condition": "good" },
+    "priceBand": { "low": 15, "high": 30 }
+  },
+  {
+    "id": "gold-gear-stanley-quencher",
+    "sourceRef": "ref-gear-stanley-quencher",
+    "truth": { "brand": "Stanley", "model": "Quencher H2.0 40oz", "category": "branded-gear", "condition": "very-good" },
+    "priceBand": { "low": 20, "high": 38 }
+  },
+  {
+    "id": "gold-gear-northface-borealis",
+    "truth": { "brand": "The North Face", "model": "Borealis Backpack", "category": "branded-gear", "condition": "good" },
+    "priceBand": { "low": 40, "high": 70 }
+  },
+  {
+    "id": "gold-gear-hydroflask-32oz",
+    "truth": { "brand": "Hydro Flask", "model": "Wide Mouth 32oz", "category": "branded-gear", "condition": "good" },
+    "priceBand": { "low": 15, "high": 28 }
+  },
+  {
+    "id": "gold-gear-carhartt-detroit",
+    "truth": { "brand": "Carhartt", "model": "Detroit Jacket", "category": "branded-gear", "condition": "good" },
+    "priceBand": { "low": 60, "high": 120 }
+  },
+  {
+    "id": "gold-gear-lululemon-define",
+    "truth": { "brand": "Lululemon", "model": "Define Jacket", "category": "branded-gear", "condition": "very-good" },
+    "priceBand": { "low": 55, "high": 90 }
+  },
+  {
+    "id": "gold-generic-ceramic-mug",
+    "sourceRef": "ref-generic-ceramic-mug",
+    "truth": { "category": "generic", "condition": "good" },
+    "priceBand": { "low": 3, "high": 10 },
+    "notes": "Graceful-degradation case: unbranded item, llm-only / depreciation territory."
+  },
+  {
+    "id": "gold-generic-desk-lamp",
+    "sourceRef": "ref-generic-desk-lamp",
+    "truth": { "category": "generic", "condition": "good" },
+    "priceBand": { "low": 8, "high": 22 },
+    "notes": "Graceful-degradation case: generic LED desk lamp, no brand/model ground truth."
+  },
+  {
+    "id": "gold-electronics-logitech-mxmaster3",
+    "truth": { "brand": "Logitech", "model": "MX Master 3", "category": "electronics", "condition": "good" },
+    "priceBand": { "low": 40, "high": 70 }
+  }
+]
