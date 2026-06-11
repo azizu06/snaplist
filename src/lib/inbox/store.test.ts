@@ -280,7 +280,14 @@ describe("approveAndSendReply", () => {
       ["status", "drafted"],
     ]);
     const sentAt = updates[0].payload.sent_at;
-    expect(updates[0].payload).toEqual({ status: "sent", sent_at: sentAt });
+    // The claim persists the APPROVED text into draft_reply, so a delivery
+    // failure after this point can only ever retry the seller-approved copy —
+    // never the stale agent draft (#13 review round 4).
+    expect(updates[0].payload).toEqual({
+      status: "sent",
+      sent_at: sentAt,
+      draft_reply: "Edited reply",
+    });
 
     // Outbound row: threaded, stamped with the SAME timestamp, seller-owned.
     expect(inserts).toHaveLength(1);

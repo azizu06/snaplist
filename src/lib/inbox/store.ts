@@ -177,10 +177,14 @@ export async function approveAndSendReply(
   const sentAt = new Date().toISOString();
 
   // 1. Compare-and-set claim: only the request that flips drafted → sent may
-  //    deliver. RLS still scopes the update to the owner's rows.
+  //    deliver. RLS still scopes the update to the owner's rows. The claim
+  //    also persists the APPROVED (possibly seller-edited) text into
+  //    draft_reply: if delivery fails after this point, retryReplyDelivery
+  //    re-reads draft_reply, and it must be the text the seller approved —
+  //    never the stale agent draft they edited away.
   const { data: claimed, error: claimErr } = await supabase
     .from("messages")
-    .update({ status: "sent", sent_at: sentAt })
+    .update({ status: "sent", sent_at: sentAt, draft_reply: reply })
     .eq("id", input.message.id)
     .eq("status", "drafted")
     .select("id");
