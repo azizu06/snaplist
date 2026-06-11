@@ -293,6 +293,30 @@ describe("branded-web pricing agent", () => {
     expect(search.queries.length).toBe(1); // early stop — no wasted iterations
   });
 
+  it("does NOT early-stop on a tight ASKING-only cluster — later refinements may surface sold comps", async () => {
+    const search = fakeSearch([cannedResults("q1"), cannedResults("q2")]);
+    const tightAsking: WebComp[] = [
+      { url: "https://www.ebay.com/itm/q1-1", price: 180, kind: "asking" },
+      { url: "https://www.ebay.com/itm/q1-2", price: 185, kind: "asking" },
+      { url: "https://www.mercari.com/us/item/q1-3", price: 190, kind: "asking" },
+    ];
+    const laterSold: WebComp[] = [
+      { url: "https://www.ebay.com/itm/q2-1", price: 175, kind: "sold" },
+      { url: "https://www.ebay.com/itm/q2-2", price: 182, kind: "sold" },
+    ];
+    const provider = createBrandedWebPricingProvider({
+      searchClient: search,
+      extractComps: fakeExtractor([tightAsking, laterSold]),
+    });
+    const result = await provider.price(BRANDED_SIGNAL);
+    expect(result).not.toBeNull();
+    // The asking cluster alone must not end the search: the second query runs
+    // and its sold comps become the pricing basis.
+    expect(search.queries.length).toBeGreaterThan(1);
+    expect(result!.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+    expect(result!.suggested).toBeCloseTo((175 + 182) / 2, 2);
+  });
+
   it("refines ONCE when the first search is thin, accumulating comps across iterations", async () => {
     const search = fakeSearch([cannedResults("q1"), cannedResults("q2")]);
     // First query: a single sold comp (not enough). Second: two more that agree.

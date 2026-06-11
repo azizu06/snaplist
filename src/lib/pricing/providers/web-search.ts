@@ -377,9 +377,16 @@ function judgeComps(comps: readonly WebComp[]): CompJudgement {
   return { basis, soldBasis, spread };
 }
 
-/** Is coverage + agreement good enough to stop searching early? */
+/**
+ * Is coverage + agreement good enough to stop searching early? Only a
+ * SOLD-grounded basis may end the search: a tight asking-only cluster is
+ * weaker evidence than sold comps a later refinement (e.g. the UPC path's
+ * explicit "sold price" query) could still surface within the same iteration
+ * budget, so asking-only clusters exhaust the remaining refinements instead
+ * of locking in the weaker basis.
+ */
 function sufficient(j: CompJudgement): boolean {
-  return j.basis.length >= SUFFICIENT_COMPS && j.spread <= TIGHT_SPREAD;
+  return j.soldBasis && j.basis.length >= SUFFICIENT_COMPS && j.spread <= TIGHT_SPREAD;
 }
 
 /**
