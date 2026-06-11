@@ -70,6 +70,8 @@ describe("buildPredictionLogRow", () => {
       model: "stub-pipeline-v1",
       // No distinct listingModel on this result → provenance falls back to `model`.
       listing_model: "stub-pipeline-v1",
+      // No pricingModel on this result → null (no LLM was involved in pricing).
+      pricing_model: null,
       sources: result.price.sources,
     });
   });
@@ -85,6 +87,41 @@ describe("buildPredictionLogRow", () => {
     );
     expect(row.model).toBe("vision-gpt-5.5");
     expect(row.listing_model).toBe("listing-gpt-5.5-mini");
+  });
+
+  it("propagates the pricing model into the log row for a web-tier result (#10 review)", () => {
+    // The web tiers resolve their own PRICING_MODEL for comp extraction; that
+    // provenance must reach the prediction log, distinct from the vision and
+    // listing models, so pricing evaluations stay attributable.
+    const row = buildPredictionLogRow(
+      "u",
+      "i",
+      makeResult({
+        model: "vision-gpt-5.5",
+        listingModel: "listing-gpt-5.5-mini",
+        pricingModel: "pricing-gpt-5.5",
+      }),
+    );
+    expect(row.pricing_model).toBe("pricing-gpt-5.5");
+    expect(row.model).toBe("vision-gpt-5.5");
+    expect(row.listing_model).toBe("listing-gpt-5.5-mini");
+  });
+
+  it("logs pricing_model as NULL for a deterministic ISBN result (no pricing LLM ran)", () => {
+    // Null is a meaningful value here — "no LLM was involved in pricing" — never
+    // backfilled or coerced to the run model.
+    const result = makeResult({
+      price: {
+        suggested: 12,
+        range: { min: 10, max: 14 },
+        confidence: 0.9,
+        sources: [{ url: "https://openlibrary.org/isbn/9780140328721", kind: "isbn-lookup" }],
+        tier: "isbn-lookup",
+      },
+    });
+    const row = buildPredictionLogRow("u", "i", result);
+    expect(row.tier_fired).toBe("isbn-lookup");
+    expect(row.pricing_model).toBeNull();
   });
 
   it("pins the user_id and item_id passed in (RLS ownership), not anything from result", () => {

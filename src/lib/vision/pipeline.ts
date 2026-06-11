@@ -6,6 +6,8 @@ import {
 import {
   PriceRouter,
   createIsbnPricingProvider,
+  createUpcWebPricingProvider,
+  createBrandedWebPricingProvider,
   priceResultSchema,
   type ItemSignal,
   type PriceResult,
@@ -20,6 +22,7 @@ import type {
   PipelineResult,
 } from "../pipeline/types";
 import { attributesToSignal } from "../pipeline/stub";
+import { TIGHT_AGREEMENT_MIN } from "../pricing/providers/web-search";
 import {
   extractItemAttributes,
   type VisionGenerate,
@@ -73,10 +76,11 @@ export interface CreateVisionPipelineOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Interim catch-all pricing provider: when no real tier handles the signal (e.g. a
- * non-ISBN item, before the web/depreciation tiers land), yield an honest llm-only
- * price-0 placeholder so the router always produces a schema-valid price. This is NOT
- * the real LLM-only pricing tier (#11) — just a placeholder until #10/#11 add real tiers.
+ * Interim catch-all pricing provider: when no real tier handles the signal (e.g. an
+ * unbranded item the web tiers decline, before the depreciation tier lands), yield an
+ * honest llm-only price-0 placeholder so the router always produces a schema-valid
+ * price. This is NOT the real LLM-only pricing tier (#11) — just a placeholder until
+ * #11 adds the real fallback.
  */
 function interimFallbackProvider(): PricingProvider {
   return {
@@ -93,10 +97,17 @@ function interimFallbackProvider(): PricingProvider {
   };
 }
 
-/** The default real pricer: ISBN tier first, interim llm-only catch-all last. */
+/**
+ * The default real pricer in PRD priority order: ISBN structured lookup, then the
+ * #10 web-search agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction,
+ * env-key gated — a keyless deployment makes those tiers decline gracefully), then
+ * the interim llm-only catch-all.
+ */
 function createDefaultPricer(): (signal: ItemSignal) => Promise<PriceResult> {
   const router = new PriceRouter([
     createIsbnPricingProvider(),
+    createUpcWebPricingProvider(),
+    createBrandedWebPricingProvider(),
     interimFallbackProvider(),
   ]);
   return (signal) => router.price(signal);
@@ -152,7 +163,15 @@ function pricingTierToConfidenceTier(
     case "upc-aided-web":
       return "web_wide";
     case "branded-web":
-      return hasSoldComp(price) ? "web_tight" : "web_wide";
+      // #10 round-4 calibration: web_tight needs BOTH sold grounding AND the
+      // provider's judged tight agreement. A scattered sold set ($60/$185/$420)
+      // is real evidence of *a* market but not of a defensible tight price —
+      // it stays web_wide and cannot ride the sold-comp label past the
+      // autopilot gate. Providers that don't report agreement (e.g. injected
+      // test pricers) keep the sold-comp-only behavior.
+      return hasSoldComp(price) && tightAgreement(price)
+        ? "web_tight"
+        : "web_wide";
     case "depreciation":
       return "depreciation";
     case "llm-only":
@@ -161,8 +180,33 @@ function pricingTierToConfidenceTier(
   }
 }
 
-/** Conservative comp-agreement signal from the price's sources (real clustering TBD). */
+/** Did the provider judge its comp cluster tight? (Unreported = no objection.) */
+function tightAgreement(price: PriceResult): boolean {
+  return price.compAgreement == null || price.compAgreement >= TIGHT_AGREEMENT_MIN;
+}
+
+/**
+ * Without sold grounding, judged agreement is capped here: a tight cluster of
+ * ASKING prices proves sellers agree on what to ask, not what buyers pay, so
+ * it must not push a no-sold-comp item over the autopilot gate (full-id
+ * asking-only would otherwise score 0.6·0.6 + 0.25·1 + 0.15·1 = 0.76 ≥ 0.75).
+ * 0.4 matches the conservative no-sold constant below: full-id asking-only
+ * tops out at 0.67, safely sub-gate.
+ */
+const ASKING_AGREEMENT_CAP = 0.4;
+
+/**
+ * Comp-agreement signal for the confidence composite: the provider's own
+ * judged agreement when reported (the web tiers measure relative spread) —
+ * capped without sold grounding — else the conservative constants for
+ * providers without a comp cluster.
+ */
 function compAgreementFor(price: PriceResult): number {
+  if (price.compAgreement != null) {
+    return hasSoldComp(price)
+      ? price.compAgreement
+      : Math.min(price.compAgreement, ASKING_AGREEMENT_CAP);
+  }
   if (hasSoldComp(price)) return 0.7;
   return price.sources.length > 0 ? 0.4 : 0.3;
 }
@@ -248,6 +292,10 @@ export function createVisionPipeline(
         // The listing model is logged separately so a prediction's listing copy stays
         // attributable even when LISTING_MODEL differs from the vision model (#32).
         listingModel,
+        // Pricing-model provenance (same precedent): the web tiers resolve their own
+        // PRICING_MODEL for comp extraction and stamp it on the price result; a
+        // deterministic tier (ISBN lookup) leaves it unset → logged as null (#10 review).
+        pricingModel: price.model,
         identification,
       };
     },
