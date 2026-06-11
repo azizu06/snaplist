@@ -559,8 +559,10 @@ function reconcilePacks(
   attributes: ExtractedAttributes,
 ): ReconciledPacks {
   const grounding = buildNumericGrounding(attributes);
-  const grounded = (text: string) =>
-    findUngroundedNumbers(text, grounding).length === 0;
+  // Titles use the FULL guard (numeric + digit-free token allowlist) — the
+  // deterministic fallback must kick in for "Includes Charger" exactly as it
+  // does for an ungrounded number.
+  const grounded = (text: string) => titleViolations(text, grounding).length === 0;
   return {
     facebook: {
       title: grounded(raw.facebook.title)
