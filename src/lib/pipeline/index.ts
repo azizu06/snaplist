@@ -24,6 +24,7 @@ export {
   logPrediction,
   readPredictionLogs,
   type PredictionLogRow,
+  type PredictionLogReadRow,
   type PredictionLogPriceRange,
   type ReadPredictionLogsFilter,
 } from "./prediction-log";

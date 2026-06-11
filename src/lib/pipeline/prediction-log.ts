@@ -126,25 +126,43 @@ export interface ReadPredictionLogsFilter {
 }
 
 /**
+ * A `prediction_logs` row as READ BACK from the database: the insert payload plus
+ * the DB-defaulted `created_at` timestamp. `created_at` exists only on the read
+ * side (it is never set by `buildPredictionLogRow`), and it is what makes the
+ * read ordering — and therefore "newest run per item" dedup downstream —
+ * deterministic.
+ */
+export interface PredictionLogReadRow extends PredictionLogRow {
+  /** DB-defaulted insert timestamp (ISO 8601), the run-recency ordering key. */
+  created_at: string;
+}
+
+/**
  * Read prediction-log rows back through the caller's user-scoped client (RLS means
  * the caller only ever sees its own rows). Minimal by design — the eval harness's
  * read seam. Throws on a query error so callers never silently get an empty set.
+ *
+ * ORDERING CONTRACT: rows are returned ordered by `created_at` ASCENDING
+ * (oldest first). PostgREST guarantees no row order without an explicit
+ * `order`, so this is what lets consumers that keep the LAST row per item
+ * (e.g. the eval harness's `matchPredictions`) deterministically score the
+ * NEWEST run instead of an arbitrary historical one.
  */
 export async function readPredictionLogs(
   supabase: SupabaseClient,
   filter: ReadPredictionLogsFilter = {},
-): Promise<PredictionLogRow[]> {
+): Promise<PredictionLogReadRow[]> {
   let query = supabase
     .from("prediction_logs")
     .select(
-      "user_id, item_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources",
+      "user_id, item_id, extracted_attrs, price, price_range, confidence, tier_fired, model, listing_model, sources, created_at",
     );
   if (filter.itemId !== undefined) {
     query = query.eq("item_id", filter.itemId);
   }
-  const { data, error } = await query;
+  const { data, error } = await query.order("created_at", { ascending: true });
   if (error) {
     throw new Error(`Failed to read prediction logs: ${error.message}`);
   }
-  return (data ?? []) as unknown as PredictionLogRow[];
+  return (data ?? []) as unknown as PredictionLogReadRow[];
 }

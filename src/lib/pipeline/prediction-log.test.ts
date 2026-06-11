@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { buildPredictionLogRow } from "./prediction-log";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  buildPredictionLogRow,
+  readPredictionLogs,
+  type PredictionLogReadRow,
+} from "./prediction-log";
 import type { PipelineResult } from "./types";
 import type { PriceResult } from "../pricing";
 import type { ConfidenceResult } from "../confidence/confidence";
+import { matchPredictions } from "../eval/metrics";
+import { predictionFromLogRow, type GoldItem } from "../eval/types";
 
 /**
  * Pure unit tests for `buildPredictionLogRow` — the single source of truth for the
  * `prediction_logs` row shape. NO database: this asserts the result → row mapping
  * and its edge cases directly, so the write (logPrediction) and the eval-harness
  * read can never drift from the contract.
+ *
+ * Plus mock-client tests for `readPredictionLogs`'s ORDERING CONTRACT
+ * (`created_at` ascending) — the property the eval harness's keep-last dedup
+ * depends on to score the newest run per item. NO live API calls: the Supabase
+ * client is a minimal in-memory stub that emulates PostgREST `order`/`eq`.
  */
 
 /** A fully-populated, schema-shaped PipelineResult for the happy path. */
@@ -153,5 +165,151 @@ describe("buildPredictionLogRow", () => {
     expect(row.price).toBe(0);
     expect(row.price_range).toEqual({ low: 0, high: 0 });
     expect(row.confidence).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readPredictionLogs ordering contract (newest-run dedup prerequisite)
+// ---------------------------------------------------------------------------
+
+/** A minimal read-back row for a given item/run. */
+function makeReadRow(
+  itemId: string,
+  createdAt: string,
+  price: number,
+): PredictionLogReadRow {
+  return {
+    user_id: "user-1",
+    item_id: itemId,
+    extracted_attrs: { category: "electronics" },
+    price,
+    price_range: { low: price - 10, high: price + 10 },
+    confidence: 0.5,
+    tier_fired: "llm-only",
+    model: "stub-pipeline-v1",
+    listing_model: "stub-pipeline-v1",
+    sources: [],
+    created_at: createdAt,
+  };
+}
+
+/**
+ * In-memory stand-in for the Supabase client emulating the PostgREST behavior
+ * `readPredictionLogs` relies on: WITHOUT `order` rows come back in arbitrary
+ * (here: insertion/fixture) order; WITH `order` they are sorted. Records the
+ * query calls so tests can assert the ordering is actually requested.
+ */
+function makeMockSupabase(rows: PredictionLogReadRow[]) {
+  const calls: {
+    table?: string;
+    select?: string;
+    eq?: [string, unknown];
+    order?: [string, { ascending: boolean }];
+  } = {};
+  const builder = {
+    eq(column: string, value: unknown) {
+      calls.eq = [column, value];
+      return builder;
+    },
+    order(column: string, opts: { ascending: boolean }) {
+      calls.order = [column, opts];
+      let result = rows;
+      if (calls.eq !== undefined) {
+        const [col, val] = calls.eq;
+        result = result.filter(
+          (r) => (r as unknown as Record<string, unknown>)[col] === val,
+        );
+      }
+      const key = column as keyof PredictionLogReadRow;
+      result = [...result].sort((a, b) => {
+        const cmp = String(a[key]).localeCompare(String(b[key]));
+        return opts.ascending ? cmp : -cmp;
+      });
+      return Promise.resolve({ data: result, error: null });
+    },
+  };
+  const client = {
+    from(table: string) {
+      calls.table = table;
+      return {
+        select(columns: string) {
+          calls.select = columns;
+          return builder;
+        },
+      };
+    },
+  };
+  return { client: client as unknown as SupabaseClient, calls };
+}
+
+describe("readPredictionLogs ordering contract", () => {
+  it("selects created_at and orders rows by it ascending (oldest first)", async () => {
+    // Fixture deliberately NEWEST-first: PostgREST guarantees no order without
+    // an explicit `order`, so the helper must impose one itself.
+    const { client, calls } = makeMockSupabase([
+      makeReadRow("item-1", "2026-06-10T12:00:00Z", 200),
+      makeReadRow("item-2", "2026-06-09T12:00:00Z", 90),
+      makeReadRow("item-1", "2026-06-08T12:00:00Z", 100),
+    ]);
+
+    const logs = await readPredictionLogs(client);
+
+    expect(calls.table).toBe("prediction_logs");
+    expect(calls.select).toContain("created_at");
+    expect(calls.order).toEqual(["created_at", { ascending: true }]);
+    expect(logs.map((l) => l.created_at)).toEqual([
+      "2026-06-08T12:00:00Z",
+      "2026-06-09T12:00:00Z",
+      "2026-06-10T12:00:00Z",
+    ]);
+  });
+
+  it("keeps the ordering when filtering to one item", async () => {
+    const { client, calls } = makeMockSupabase([
+      makeReadRow("item-1", "2026-06-10T12:00:00Z", 200),
+      makeReadRow("item-2", "2026-06-09T12:00:00Z", 90),
+      makeReadRow("item-1", "2026-06-08T12:00:00Z", 100),
+    ]);
+
+    const logs = await readPredictionLogs(client, { itemId: "item-1" });
+
+    expect(calls.eq).toEqual(["item_id", "item-1"]);
+    expect(logs).toHaveLength(2);
+    expect(logs.map((l) => l.price)).toEqual([100, 200]);
+  });
+
+  it("scores the NEWEST run when an item has duplicate predictions in non-chronological input order", async () => {
+    // Two logged runs for the SAME item, stubbed newest-first (the order an
+    // unordered PostgREST read could legally return). The full --db dedup path
+    // — readPredictionLogs → predictionFromLogRow → matchPredictions keep-last
+    // — must score the newer run (price 200), not the stale one (price 100).
+    const newest = makeReadRow("item-1", "2026-06-10T12:00:00Z", 200);
+    const stale = makeReadRow("item-1", "2026-06-08T12:00:00Z", 100);
+    const { client } = makeMockSupabase([newest, stale]);
+
+    const gold: GoldItem[] = [
+      {
+        id: "gold-1",
+        itemId: "item-1",
+        truth: { category: "electronics" },
+        priceBand: { low: 150, high: 250 },
+      },
+    ];
+    const goldIdByItemId = new Map([["item-1", "gold-1"]]);
+
+    const rows = await readPredictionLogs(client);
+    const predictions = rows
+      .map((row) => predictionFromLogRow(row, goldIdByItemId))
+      .filter((p) => p !== null);
+
+    const { pairs, missingGoldIds, unmatchedGoldIds } = matchPredictions(
+      gold,
+      predictions,
+    );
+
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]!.prediction.price).toBe(200); // the newest run, never the stale one
+    expect(missingGoldIds).toEqual([]);
+    expect(unmatchedGoldIds).toEqual([]);
   });
 });
