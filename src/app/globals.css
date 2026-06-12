@@ -364,7 +364,7 @@
     opacity: 1;
   }
   50% {
-    transform: translateY(96px);
+    transform: translateY(var(--scan-range, 96px));
     opacity: 1;
   }
   88% {
