@@ -62,7 +62,7 @@ const LINKS = [
   },
 ] as const;
 
-export function SidebarNav() {
+export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname();
   return (
     <nav aria-label="Primary" className="flex flex-col gap-0.5">
@@ -73,16 +73,25 @@ export function SidebarNav() {
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
-            className={
+            title={collapsed ? label : undefined}
+            className={`flex items-center gap-2.5 rounded-lg py-2 text-[13px] ${
+              collapsed ? "justify-center px-0" : "px-2.5"
+            } ${
               active
-                ? "flex items-center gap-2.5 rounded-lg bg-accent-soft px-2.5 py-2 text-[13px] font-semibold text-accent-soft-fg"
-                : "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong"
-            }
+                ? "bg-accent-soft font-semibold text-accent-soft-fg"
+                : "font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong"
+            }`}
           >
             <span className={active ? "text-accent-soft-fg" : "text-faint"}>
               {ICONS[icon]}
             </span>
-            {label}
+            <span
+              className={`overflow-hidden whitespace-nowrap transition-[opacity,width] duration-200 ${
+                collapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+              }`}
+            >
+              {label}
+            </span>
           </Link>
         );
       })}
