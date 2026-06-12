@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { StatusBadge } from "@/components/ui/badge";
+import { InboxEmptyState } from "./inbox-empty";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -324,15 +325,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
       <section className="flex flex-col gap-3">
         <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
         {inbound.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-            <p className="text-base font-semibold text-fg-strong">
-              No buyer questions yet
-            </p>
-            <p className="max-w-sm text-sm text-muted">
-              The moment one arrives we&apos;ll draft a reply for your approval —
-              it will appear here without a refresh. Try the simulator above.
-            </p>
-          </div>
+          <InboxEmptyState />
         ) : (
           inbound.map((message, index) => {
             const sentReply = repliesByQuestion.get(message.id);

@@ -118,18 +118,31 @@ function SpotlightStatLink({
 }
 
 /**
- * Empty dashboard — react-bits Folder (violet) holding tiny listing-card
- * mockups; click/hover plays with the papers. The one place the dashboard
- * gets to be charming instead of dense.
+ * Empty dashboard — react-bits Folder (violet) holding miniature LISTING
+ * PREVIEWS: real demo photos with a plausible title + price each, so the
+ * opened folder reads as "this is what your listings will become" instead of
+ * three blank placeholder cards. Click/hover plays with the papers.
  */
-function MockListingPaper({ price }: { price: string }) {
+function MiniListingCard({
+  src,
+  title,
+  price,
+}: {
+  src: string;
+  title: string;
+  price: string;
+}) {
   return (
-    <span className="flex size-full flex-col gap-1 p-1.5">
-      <span className="block h-1/2 w-full rounded-[5px] bg-accent-soft" />
-      <span className="block h-1 w-3/4 rounded-full bg-border" />
-      <span className="block h-1 w-1/2 rounded-full bg-border" />
-      <span className="block text-left text-[7px] font-bold leading-none text-accent-soft-fg">
-        {price}
+    <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm">
+      {/* eslint-disable-next-line @next/next/no-img-element -- tiny static demo thumbnail inside the folder animation */}
+      <img src={src} alt="" aria-hidden className="h-[58%] w-full object-cover" />
+      <span className="flex min-h-0 flex-1 flex-col justify-center gap-[2px] px-[5px]">
+        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-fg-strong">
+          {title}
+        </span>
+        <span className="block text-[7px] font-bold leading-none text-accent-soft-fg" data-nums>
+          {price}
+        </span>
       </span>
     </span>
   );
@@ -138,15 +151,15 @@ function MockListingPaper({ price }: { price: string }) {
 function DashboardEmpty() {
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-      {/* mt-10: headroom so the opened papers stay inside the dashed card */}
-      <div className="mb-5 mt-10">
+      {/* mt-20: headroom so the opened previews stay inside the dashed card */}
+      <div className="mb-7 mt-20">
         <Folder
           color="#6d4aff"
-          size={1.1}
+          size={1.4}
           items={[
-            <MockListingPaper key="p1" price="$178" />,
-            <MockListingPaper key="p2" price="$64" />,
-            <MockListingPaper key="p3" price="$112" />,
+            <MiniListingCard key="p1" src="/demo/camera.jpg" title="Canon AE-1" price="$385" />,
+            <MiniListingCard key="p2" src="/demo/book.jpg" title="Organic Chemistry 6e" price="$48" />,
+            <MiniListingCard key="p3" src="/demo/sneakers.jpg" title="Jordan 1 Mid" price="$92" />,
           ]}
         />
       </div>

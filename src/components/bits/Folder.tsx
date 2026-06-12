@@ -86,10 +86,13 @@ const Folder: React.FC<FolderProps> = ({ color = '#6d4aff', size = 1, items = []
 
   const scaleStyle = { transform: `scale(${size})` };
 
+  // SnapList: spread widened vs the registry default — the papers carry real
+  // mini listing previews (photo + title + price), so they fan out far enough
+  // to stay readable instead of stacking over each other.
   const getOpenTransform = (index: number) => {
-    if (index === 0) return 'translate(-120%, -70%) rotate(-15deg)';
-    if (index === 1) return 'translate(10%, -70%) rotate(15deg)';
-    if (index === 2) return 'translate(-50%, -100%) rotate(5deg)';
+    if (index === 0) return 'translate(-148%, -72%) rotate(-13deg)';
+    if (index === 1) return 'translate(48%, -72%) rotate(13deg)';
+    if (index === 2) return 'translate(-50%, -122%) rotate(2deg)';
     return '';
   };
 

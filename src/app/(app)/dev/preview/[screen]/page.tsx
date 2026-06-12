@@ -9,6 +9,11 @@ import {
   PublishView,
   type PublishData,
 } from "@/app/(app)/listings/[listingId]/publish-view";
+import {
+  SettingsView,
+  type SettingsData,
+} from "@/app/(app)/settings/settings-view";
+import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -106,6 +111,18 @@ const FIXTURE_REVIEW: ReviewData = {
   actionError: null,
 };
 
+const FIXTURE_SETTINGS: SettingsData = {
+  user: {
+    name: "Aziz Umarov",
+    email: "preview@snaplist.dev",
+    imageUrl: null,
+  },
+  autopilotEnabled: true,
+  ebay: { connected: true, ebayUsername: "aziz_resells" },
+  error: null,
+  ebayBanner: null,
+};
+
 const FIXTURE_PUBLISH: PublishData = {
   listingId: "l-1",
   itemId: "fx-1",
@@ -146,7 +163,45 @@ export default async function PreviewPage({
         <DashboardView rows={[]} counts={{ draft: 0, attention: 0, live: 0 }} filter="all" />
       );
     case "review":
-      return <ReviewView data={FIXTURE_REVIEW} overrideAction={noopAction} />;
+      return <ReviewView data={FIXTURE_REVIEW} saveAction={noopAction} />;
+    case "settings":
+      return (
+        <SettingsView
+          data={FIXTURE_SETTINGS}
+          autopilotAction={noopAction}
+          disconnectEbayAction={noopAction}
+        />
+      );
+    case "settings-disconnected":
+      return (
+        <SettingsView
+          data={{
+            ...FIXTURE_SETTINGS,
+            autopilotEnabled: false,
+            ebay: { connected: false, ebayUsername: null },
+          }}
+          autopilotAction={noopAction}
+          disconnectEbayAction={noopAction}
+        />
+      );
+    case "inbox-empty":
+      return (
+        <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+          <header>
+            <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
+              Buyer inbox
+            </h1>
+            <p className="mt-0.5 text-[13px] text-muted">
+              Questions from buyers appear here live. We draft a reply from the
+              listing — you approve or edit before anything sends.
+            </p>
+          </header>
+          <section className="flex flex-col gap-3">
+            <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
+            <InboxEmptyState />
+          </section>
+        </main>
+      );
     case "upload":
       return <UploadView action={noopAction} actionError={null} />;
     case "publish":
@@ -189,7 +244,7 @@ export default async function PreviewPage({
             displayPrice: 45,
             range: { low: 30, high: 70 },
           }}
-          overrideAction={noopAction}
+          saveAction={noopAction}
         />
       );
     default:
