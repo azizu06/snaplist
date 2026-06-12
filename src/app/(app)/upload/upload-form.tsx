@@ -139,18 +139,21 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
   );
 }
 
-/** Mercari field-list row: label left, "Auto" pill + chevron right. */
+/**
+ * Field-list row for the fields the pipeline pre-fills. Deliberately NOT an
+ * "Auto" lock pill (that read as "you can't change this") — the sparkle badge
+ * says the AI *suggests* a value, and the section footer says where you edit
+ * it (the review screen renders each one as a real input).
+ */
 function AutoFieldRow({ label }: { label: string }) {
   return (
     <div className="flex items-center justify-between py-3.5">
       <span className="text-sm font-medium text-fg">{label}</span>
-      <span className="flex items-center gap-1.5">
-        <span className="rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-muted">
-          Auto
-        </span>
-        <svg viewBox="0 0 24 24" className="size-4 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m9 18 6-6-6-6" />
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-soft-fg">
+        <svg viewBox="0 0 24 24" className="size-2.5" fill="currentColor" aria-hidden>
+          <path d="M12 2.5c.3 0 .57.2.66.49l1.4 4.6a3 3 0 0 0 1.99 1.99l4.6 1.4a.69.69 0 0 1 0 1.32l-4.6 1.4a3 3 0 0 0-1.99 1.99l-1.4 4.6a.69.69 0 0 1-1.32 0l-1.4-4.6a3 3 0 0 0-1.99-1.99l-4.6-1.4a.69.69 0 0 1 0-1.32l4.6-1.4a3 3 0 0 0 1.99-1.99l1.4-4.6c.09-.29.36-.49.66-.49Z" />
         </svg>
+        AI suggests
       </span>
     </div>
   );
@@ -363,8 +366,8 @@ function FormBody({
           <AutoFieldRow label="Price" />
         </div>
         <p className="pb-3 text-xs text-faint">
-          Filled automatically once your photos are analyzed — you review
-          everything before it posts.
+          Pre-filled from your photos — every one is a real, editable field on
+          the review screen before anything posts.
         </p>
       </section>
 
