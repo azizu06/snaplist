@@ -209,8 +209,9 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   // --- Static page surfaces (post v3 passes; reflects actual usage) ---
   "landing-carousel": ["camera", "book", "sneakers", "chess", "headphones"],
   "landing-storefronts": ["keyboard"],
-  "features-demos": ["polaroid", "vinyl", "gshock"],
-  "features-waterfall": ["guitar"],
+  // /features was deleted in r5 (redirects to /how-it-works); the waterfall
+  // explorer now lives only on /how-it-works, last section before the CTA.
+  "hiw-waterfall": ["guitar"],
   "how-it-works": ["gameboy"], // + embeds the step-* clips above
   // Hero ScanShowcase on /how-it-works — a deliberate 10-product montage
   // (scanning-beam cycle), exempt from the one-surface rule by design.
@@ -230,7 +231,8 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   // product on the About hero — replaced with the verified turntable photo.
   // The mixer entry stays (the step-write Remotion clip still uses it).
   "about-price-report": ["turntable"],
-  "about-faq": ["espresso"],
   "upload-examples": ["gameboy", "vinyl"], // app surface; overlaps marketing by design
-  "dashboard-folder": ["keyboard", "chess", "headphones"],
+  // r5: espresso freed up when the About FAQ anchor card was removed; the
+  // folder now pops items that no landing surface features.
+  "dashboard-folder": ["gshock", "espresso", "turntable"],
 };
