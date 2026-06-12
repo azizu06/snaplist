@@ -1,6 +1,5 @@
 import Link from "next/link";
 import BlurText from "@/components/bits/BlurText";
-import CardSwap, { Card } from "@/components/bits/CardSwap";
 import ClickSpark from "@/components/bits/ClickSpark";
 import GradientText from "@/components/bits/GradientText";
 import MagicBento from "@/components/bits/MagicBento";
@@ -16,20 +15,14 @@ import {
 } from "@/components/marketing/live-backgrounds";
 import { MarketplaceLoop } from "@/components/marketing/marketplace-loop";
 import { Reveal } from "@/components/marketing/reveal";
-import {
-  ConfidenceGaugeVisual,
-  PlatformCardsVisual,
-  PriceModuleVisual,
-} from "@/components/marketing/visuals";
+import { PlatformCardsVisual } from "@/components/marketing/visuals";
 
 /**
- * Landing (react-bits bold pass): the page is visibly alive, not just
- * entrance-animated. Persistent on-page motion comes from five layers —
- * LightRays streaming through the prism slab, a CardSwap deck cycling the
- * product story in the hero, the marketplace LogoLoop band, the MagicBento
- * features grid (spotlight + border glow + hover particles), and Threads
- * behind the final CTA. Text animation (SplitText/BlurText/RotatingText)
- * carries over from the first react-bits pass.
+ * Landing (react-bits bold pass, round 2): the demo video IS the hero — flat,
+ * large, full-width under the headline, never interrupted. Persistent motion
+ * comes from LightRays streaming through the prism slab, the marketplace
+ * LogoLoop band, the MagicBento features grid, and Threads behind the final
+ * CTA. Text animation (SplitText/BlurText/RotatingText) carries over.
  */
 
 const ROTATING_CATEGORIES = [
@@ -104,13 +97,13 @@ const BENTO_CARDS = [
 export default function Landing() {
   return (
     <>
-      {/* ====== 1 · hero — prism slab + LightRays, CardSwap product deck ====== */}
-      <section className="relative overflow-hidden pb-20 pt-32 sm:pb-28 sm:pt-40">
+      {/* ====== 1 · hero — prism slab + LightRays, demo video centerpiece ====== */}
+      <section className="relative overflow-hidden pb-20 pt-32 sm:pb-24 sm:pt-40">
         <div aria-hidden className="prism-gradient" />
         <div aria-hidden className="prism-grain" />
         <HeroPrismRays />
-        <div className="relative mx-auto grid w-full max-w-6xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.05fr_0.95fr]">
-          <div>
+        <div className="relative mx-auto w-full max-w-6xl px-5 sm:px-8">
+          <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
             <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3.5 py-1.5 text-[12px] font-semibold text-flash shadow-xs backdrop-blur">
               <span className="size-1.5 rounded-full bg-iris" />
               AI-priced listings, live on eBay
@@ -120,7 +113,7 @@ export default function Landing() {
                 text="Snap a photo."
                 tag="span"
                 className="block"
-                textAlign="left"
+                textAlign="center"
                 splitType="chars"
                 delay={28}
                 duration={0.9}
@@ -131,7 +124,7 @@ export default function Landing() {
                 text="Sell it properly."
                 tag="span"
                 className="block"
-                textAlign="left"
+                textAlign="center"
                 splitType="chars"
                 delay={28}
                 duration={0.9}
@@ -144,10 +137,10 @@ export default function Landing() {
               animateBy="words"
               delay={18}
               stepDuration={0.3}
-              className="mt-6 max-w-[46ch] text-[16.5px] font-medium leading-relaxed text-flash"
+              className="mt-6 max-w-[52ch] justify-center text-[16.5px] font-medium leading-relaxed text-flash"
             />
-            {/* rotating categories — this line replaced the old marquee section */}
-            <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] font-semibold text-flash/90">
+            {/* rotating categories — fixed-width pill, no reflow as words cycle */}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[14px] font-semibold text-flash/90">
               <span>Built for</span>
               <RotatingText
                 texts={[...ROTATING_CATEGORIES]}
@@ -161,7 +154,7 @@ export default function Landing() {
               />
               <span>and everything shelved beside them.</span>
             </div>
-            <div className="mt-8 flex flex-wrap items-center gap-3.5">
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3.5">
               <Magnet padding={80} magnetStrength={18}>
                 <ClickSpark
                   className="inline-block"
@@ -184,8 +177,16 @@ export default function Landing() {
               </Magnet>
               <Link
                 href="/how-it-works"
-                className="inline-flex items-center gap-2 rounded-full bg-white/70 px-6 py-3 text-[15px] font-semibold text-flash backdrop-blur transition-colors hover:bg-white"
+                className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[15px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm"
               >
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                  className="size-3.5 text-iris transition-transform group-hover:scale-110"
+                  fill="currentColor"
+                >
+                  <path d="M8 5.14v13.72c0 .8.87 1.3 1.56.88l10.54-6.86a1.04 1.04 0 0 0 0-1.76L9.56 4.26A1.04 1.04 0 0 0 8 5.14Z" />
+                </svg>
                 See how it works
               </Link>
             </div>
@@ -195,79 +196,17 @@ export default function Landing() {
             </p>
           </div>
 
-          {/* Desktop: a CardSwap deck cycling demo → price research → confidence.
-              Mobile/tablet: the plain demo video (no 3D deck on small screens). */}
-          <div className="relative hidden h-[460px] lg:block">
-            <div className="absolute inset-0 -translate-y-20">
-            <CardSwap
-              width={470}
-              height={400}
-              cardDistance={56}
-              verticalDistance={64}
-              delay={4600}
-              skewAmount={5}
-              easing="elastic"
-              pauseOnHover
-            >
-              <Card aria-label="Demo: a photo becomes a priced, published eBay listing">
-                <div className="flex h-full flex-col">
-                  <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-                    <span className="size-2 rounded-full bg-iris" />
-                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-flash-dim">
-                      Live demo
-                    </span>
-                  </div>
-                  <video
-                    src="/hero-demo.mp4"
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    className="h-full w-full flex-1 object-cover"
-                  />
-                </div>
-              </Card>
-              <Card aria-label="The price module: suggested price, range, and cited sources">
-                <div className="flex h-full flex-col">
-                  <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-                    <span className="size-2 rounded-full bg-iris" />
-                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-flash-dim">
-                      Priced with receipts
-                    </span>
-                  </div>
-                  <div className="flex-1 overflow-hidden [&>div]:border-0 [&>div]:shadow-none">
-                    <PriceModuleVisual />
-                  </div>
-                </div>
-              </Card>
-              <Card aria-label="The confidence gauge and the signals feeding it">
-                <div className="flex h-full flex-col">
-                  <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-                    <span className="size-2 rounded-full bg-iris" />
-                    <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-flash-dim">
-                      Confidence-gated
-                    </span>
-                  </div>
-                  <div className="flex-1 overflow-hidden [&>div]:border-0 [&>div]:shadow-none">
-                    <ConfidenceGaugeVisual />
-                  </div>
-                </div>
-              </Card>
-            </CardSwap>
-            </div>
-          </div>
-          <div className="flex justify-center lg:hidden">
-            <div className="glass-panel w-full max-w-[560px] overflow-hidden rounded-2xl">
-              <video
-                src="/hero-demo.mp4"
-                autoPlay
-                muted
-                loop
-                playsInline
-                className="block h-auto w-full"
-                aria-label="Demo: a photo becomes a priced, published eBay listing"
-              />
-            </div>
+          {/* The demo video — flat, large, the unmistakable centerpiece. */}
+          <div className="mx-auto mt-12 w-full max-w-5xl sm:mt-16">
+            <video
+              src="/hero-demo.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              className="block h-auto w-full rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(19,30,58,0.35),0_4px_16px_-6px_rgba(19,30,58,0.12)]"
+              aria-label="Demo: a photo becomes a priced, published eBay listing"
+            />
           </div>
         </div>
       </section>
@@ -373,7 +312,7 @@ export default function Landing() {
         </ScrollFloat>
         <Reveal>
           <p className="mt-4 max-w-[54ch] text-[15px] leading-relaxed text-flash-dim">
-            The same validated item renders platform-fluent copy for each
+            Every validated item renders platform-fluent copy for its
             marketplace — eBay publishes directly, Facebook and Mercari get
             clean copy-paste packs.
           </p>

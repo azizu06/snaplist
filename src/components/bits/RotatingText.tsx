@@ -184,17 +184,30 @@ const RotatingText = forwardRef<RotatingTextRef, RotatingTextProps>(
 
     return (
       <motion.span
-        className={cn('flex flex-wrap whitespace-pre-wrap relative', mainClassName)}
+        className={cn('relative inline-grid justify-items-center whitespace-pre-wrap', mainClassName)}
         {...rest}
-        layout
         transition={transition}
       >
         <span className="sr-only">{texts[currentTextIndex]}</span>
+        {/* Invisible sizers: every candidate text occupies the same grid cell,
+            so the container permanently reserves the footprint of the longest
+            one — surrounding copy never reflows when the word changes. */}
+        {texts.map(text => (
+          <span
+            key={text}
+            aria-hidden="true"
+            className="invisible col-start-1 row-start-1 whitespace-pre"
+          >
+            {text}
+          </span>
+        ))}
         <AnimatePresence mode={animatePresenceMode} initial={animatePresenceInitial}>
           <motion.span
             key={currentTextIndex}
-            className={cn(splitBy === 'lines' ? 'flex flex-col w-full' : 'flex flex-wrap whitespace-pre-wrap relative')}
-            layout
+            className={cn(
+              'col-start-1 row-start-1',
+              splitBy === 'lines' ? 'flex flex-col w-full' : 'relative flex flex-wrap justify-center whitespace-pre-wrap'
+            )}
             aria-hidden="true"
           >
             {elements.map((wordObj, wordIndex, array) => {
