@@ -99,7 +99,7 @@ export default function HowItWorks() {
             <h1 className="mt-3 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               One photo in.
               <br />A{" "}
-              <em className="font-serif-accent font-normal italic text-iris">
+              <em className="text-iris">
                 defensible
               </em>{" "}
               listing out.
@@ -162,7 +162,7 @@ export default function HowItWorks() {
             </p>
             <h2 className="mt-3 max-w-2xl font-display text-[clamp(26px,3.6vw,40px)] font-bold leading-tight tracking-tight text-flash">
               The best source that exists for{" "}
-              <em className="font-serif-accent font-normal italic">your</em>{" "}
+              <em className="text-iris">your</em>{" "}
               item — honestly labeled
             </h2>
             <p className="mt-4 max-w-[58ch] text-[15px] leading-relaxed text-flash-dim">
@@ -204,7 +204,7 @@ export default function HowItWorks() {
           </h2>
           <Link
             href="/login"
-            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15px] font-semibold text-iris-ink shadow-[0_0_40px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03]"
+            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
           >
             Try it free
             <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>

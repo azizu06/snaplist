@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { HeroDemo } from "@/components/marketing/hero-demo";
 import { Reveal } from "@/components/marketing/reveal";
-import { LensRings, PlatformCardsVisual } from "@/components/marketing/visuals";
+import { PlatformCardsVisual } from "@/components/marketing/visuals";
 
 /**
- * Landing (issue #49, Darkroom identity). The hero demo IS the pitch — a
+ * Landing (issue #49 round 3, Stripe-light identity). The hero demo IS the pitch — a
  * photo becoming a priced, published listing on loop. Everything below it
  * reinforces the same three beats: identify, price with sources, publish.
  */
@@ -84,26 +83,22 @@ const FEATURES = [
 export default function Landing() {
   return (
     <>
-      {/* ================================ hero ================================ */}
-      <section className="aurora grain relative overflow-hidden pb-20 pt-32 sm:pb-28 sm:pt-40">
-        <LensRings className="pointer-events-none absolute -right-48 top-1/2 w-[640px] -translate-y-1/2 text-iris" />
+      {/* ====== hero — Stripe rainbow slab, navy type, Remotion demo video ====== */}
+      <section className="relative overflow-hidden pb-20 pt-32 sm:pb-28 sm:pt-40">
+        <div aria-hidden className="stripe-gradient" />
         <div className="relative mx-auto grid w-full max-w-6xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
             <Reveal>
-              <span className="inline-flex items-center gap-2 rounded-full border border-line bg-panel/60 px-3.5 py-1.5 text-[12px] font-medium text-flash-dim">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3.5 py-1.5 text-[12px] font-semibold text-flash backdrop-blur">
                 <span className="size-1.5 rounded-full bg-iris" />
                 AI-priced listings, live on eBay
               </span>
               <h1 className="mt-6 font-display text-[clamp(40px,6vw,68px)] font-bold leading-[1.02] tracking-tight text-flash">
                 Snap a photo.
                 <br />
-                Sell it{" "}
-                <em className="font-serif-accent font-normal italic text-iris">
-                  properly
-                </em>
-                .
+                Sell it properly.
               </h1>
-              <p className="mt-6 max-w-[46ch] text-[16.5px] leading-relaxed text-flash-dim">
+              <p className="mt-6 max-w-[46ch] text-[16.5px] font-medium leading-relaxed text-flash/90">
                 SnapList identifies what you&apos;re selling, researches a fair
                 used price with cited sources, and writes the listing — eBay,
                 Facebook Marketplace, and Mercari, from one photo.
@@ -111,7 +106,7 @@ export default function Landing() {
               <div className="mt-9 flex flex-wrap items-center gap-3.5">
                 <Link
                   href="/login"
-                  className="group inline-flex items-center gap-2 rounded-full bg-iris px-6 py-3 text-[15px] font-semibold text-iris-ink shadow-[0_0_36px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                  className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform hover:scale-[1.03] active:scale-[0.98]"
                 >
                   Start selling free
                   <span aria-hidden className="transition-transform group-hover:translate-x-1">
@@ -120,12 +115,12 @@ export default function Landing() {
                 </Link>
                 <Link
                   href="/how-it-works"
-                  className="inline-flex items-center gap-2 rounded-full border border-line-2 px-6 py-3 text-[15px] font-medium text-flash transition-colors hover:bg-panel"
+                  className="inline-flex items-center gap-2 rounded-full bg-white/70 px-6 py-3 text-[15px] font-semibold text-flash backdrop-blur transition-colors hover:bg-white"
                 >
                   See how it works
                 </Link>
               </div>
-              <p className="mt-6 text-[12.5px] text-flash-faint">
+              <p className="mt-6 text-[12.5px] font-medium text-flash/70">
                 Free while in beta · no credit card · your eBay account, your
                 sales
               </p>
@@ -133,7 +128,17 @@ export default function Landing() {
           </div>
 
           <div className="flex justify-center lg:justify-end">
-            <HeroDemo />
+            <div className="glass-panel w-full max-w-[420px] overflow-hidden rounded-2xl">
+              <video
+                src="/hero-demo.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="block h-auto w-full"
+                aria-label="Demo: a photo becomes a priced, published eBay listing"
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -165,7 +170,7 @@ export default function Landing() {
           </p>
           <h2 className="mt-3 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
             From shelf to{" "}
-            <em className="font-serif-accent font-normal italic">sold</em> in
+            <em className="text-iris">sold</em> in
             three moves
           </h2>
         </Reveal>
@@ -213,7 +218,7 @@ export default function Landing() {
             </p>
             <h2 className="mt-3 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
               Built like a marketplace pro,{" "}
-              <em className="font-serif-accent font-normal italic">
+              <em className="text-iris">
                 honest like a friend
               </em>
             </h2>
@@ -249,7 +254,7 @@ export default function Landing() {
           </p>
           <h2 className="mt-3 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
             One photo,{" "}
-            <em className="font-serif-accent font-normal italic">
+            <em className="text-iris">
               three storefronts
             </em>
           </h2>
@@ -288,7 +293,7 @@ export default function Landing() {
           <Reveal>
             <h2 className="font-display text-[clamp(32px,5vw,52px)] font-bold leading-tight tracking-tight text-flash">
               That box in your closet is{" "}
-              <em className="font-serif-accent font-normal italic text-iris">
+              <em className="text-iris">
                 money
               </em>
             </h2>
@@ -298,7 +303,7 @@ export default function Landing() {
             </p>
             <Link
               href="/login"
-              className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink shadow-[0_0_44px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Snap your first photo
               <span aria-hidden className="transition-transform group-hover:translate-x-1">

@@ -44,7 +44,7 @@ export default function Pricing() {
             </p>
             <h1 className="mx-auto mt-3 max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               Free while we&apos;re in{" "}
-              <em className="font-serif-accent font-normal italic text-iris">
+              <em className="text-iris">
                 beta
               </em>
             </h1>
@@ -59,7 +59,7 @@ export default function Pricing() {
       <section className="mx-auto w-full max-w-5xl px-5 pb-28 sm:px-8">
         <Reveal stagger className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr_0.9fr]">
           {/* live tier */}
-          <div className="relative overflow-hidden rounded-3xl border border-iris/40 bg-panel p-8 shadow-[0_0_60px_-20px] shadow-iris/30">
+          <div className="relative overflow-hidden rounded-3xl border border-iris/40 bg-panel p-8">
             <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
               Live now
             </span>

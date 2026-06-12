@@ -75,7 +75,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
               </Link>
               <Link
                 href="/login"
-                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink shadow-[0_0_28px_-6px] shadow-iris/40 transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
               >
                 Start selling
                 <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>

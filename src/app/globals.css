@@ -24,24 +24,25 @@
   --font-serif-accent: var(--font-serif-accent), ui-serif, Georgia, serif;
 
   /* ==========================================================================
-     Darkroom identity (issue #49) — marketing + (eventually) the whole app.
-     Near-black canvas so the seller's item photos are the color; one iris
-     accent reserved for actions. Palette adopted from Linear's dark site
-     (owner-picked over Stripe/Mercury/Raycast/Vercel candidates).
-     These are fixed (not scheme-dependent): the marketing site is always dark.
+     Stripe-light identity (issue #49 round 3, owner-locked spec): white
+     canvas, navy ink, blurple accent, rainbow gradient heroes — replicating
+     stripe.com. Token names kept from the dark era (night/panel/flash/iris)
+     so the components didn't need a rename; values are now light.
+       night  = page canvas (white)     panel  = soft gray card
+       flash  = navy ink (text scale)   iris   = Stripe blurple
      ========================================================================== */
-  --color-night:       #08090a;  /* page canvas               */
-  --color-night-2:     #0f1011;  /* raised section            */
-  --color-panel:       #141516;  /* card                      */
-  --color-panel-2:     #1b1c1e;  /* nested / hover            */
-  --color-line:        #23252a;  /* hairline on night         */
-  --color-line-2:      #2e3035;  /* stronger hairline         */
-  --color-flash:       #f7f8f8;  /* display white             */
-  --color-flash-dim:   #d0d6e0;  /* secondary text            */
-  --color-flash-faint: #8a8f98;  /* tertiary text             */
-  --color-iris:        #5e6ad2;  /* the accent — Linear iris  */
-  --color-iris-deep:   #4f5abf;
-  --color-iris-ink:    #ffffff;  /* text on iris              */
+  --color-night:       #ffffff;  /* page canvas               */
+  --color-night-2:     #f6f9fc;  /* raised section gray       */
+  --color-panel:       #ffffff;  /* card (white, shadow-borne)*/
+  --color-panel-2:     #f6f9fc;  /* nested / hover            */
+  --color-line:        #e6ebf1;  /* hairline                  */
+  --color-line-2:      #cfd7df;  /* stronger hairline         */
+  --color-flash:       #0a2540;  /* navy ink — headings       */
+  --color-flash-dim:   #425466;  /* secondary text            */
+  --color-flash-faint: #6b7c93;  /* tertiary text             */
+  --color-iris:        #635bff;  /* the accent — Stripe blurple */
+  --color-iris-deep:   #5851ea;
+  --color-iris-ink:    #ffffff;  /* text on blurple           */
 
   /* Neutrals — Shopify-admin chrome (issue #40 round 2): gray canvas so the
      white cards read as surfaces, a near-black top bar, and a near-black
@@ -148,16 +149,13 @@
    keyframes shared by the landing sections; GSAP drives everything stateful.
    ============================================================================ */
 @layer components {
-  /* Film grain — SVG turbulence noise, the texture of the Darkroom. */
+  /* No-op since the Stripe-light pivot (grain retired); kept so stray
+     class usages stay harmless. */
   .grain::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    opacity: 0.045;
+    content: none;
   }
-  /* Aurora glow — soft radial pools behind hero sections. */
+  /* Inner-page hero wash — Stripe's quiet pages: a faint blurple/cyan
+     gradient pool at the top, nothing more. */
   .aurora::before {
     content: "";
     position: absolute;
@@ -165,27 +163,40 @@
     height: 80%;
     pointer-events: none;
     background:
-      radial-gradient(38% 45% at 28% 18%, rgba(94, 106, 210, 0.24), transparent 70%),
-      radial-gradient(42% 50% at 74% 8%, rgba(139, 92, 246, 0.2), transparent 70%),
-      radial-gradient(30% 36% at 55% 30%, rgba(124, 136, 232, 0.08), transparent 70%);
-    filter: blur(28px);
+      radial-gradient(40% 48% at 24% 12%, rgba(99, 91, 255, 0.1), transparent 70%),
+      radial-gradient(44% 52% at 78% 6%, rgba(0, 212, 255, 0.09), transparent 70%);
+    filter: blur(30px);
+  }
+  /* The Stripe rainbow — animated multi-pool gradient slab with the
+     signature skewed bottom edge. Used on the landing + auth heroes. */
+  .stripe-gradient {
+    position: absolute;
+    inset: -25% 0 auto 0;
+    height: 110%;
+    pointer-events: none;
+    clip-path: polygon(0 0, 100% 0, 100% 72%, 0 96%);
+    background:
+      radial-gradient(42% 60% at 12% 36%, #ff5996 0%, transparent 65%),
+      radial-gradient(44% 62% at 38% 22%, #ff7e33 0%, transparent 62%),
+      radial-gradient(50% 68% at 64% 38%, #a960ee 0%, transparent 64%),
+      radial-gradient(46% 64% at 88% 24%, #90e0ff 0%, transparent 62%),
+      radial-gradient(40% 60% at 76% 60%, #ffcb57 0%, transparent 60%),
+      linear-gradient(100deg, #a960ee 0%, #ff5996 45%, #ff7e33 100%);
+    background-size: 160% 160%;
+    animation: stripe-drift 16s ease-in-out infinite alternate;
+    opacity: 0.92;
   }
   /* 3D stage for tilt/perspective children. */
   .stage-3d {
     perspective: 1200px;
   }
-  /* Glassy raised card on the night canvas. */
+  /* Raised white card — Stripe's floating-panel shadow recipe. */
   .glass-panel {
-    background: linear-gradient(
-      180deg,
-      rgba(27, 28, 30, 0.92),
-      rgba(18, 19, 21, 0.92)
-    );
-    border: 1px solid rgba(46, 48, 53, 0.7);
+    background: #ffffff;
+    border: 1px solid rgba(230, 235, 241, 0.9);
     box-shadow:
-      0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
-      0 24px 64px -24px rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(10px);
+      0 13px 27px -5px rgba(50, 50, 93, 0.18),
+      0 8px 16px -8px rgba(0, 0, 0, 0.2);
   }
   /* Infinite category marquee. */
   .marquee-track {
@@ -197,9 +208,19 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .marquee-track,
-    .scan-line {
+    .scan-line,
+    .stripe-gradient {
       animation: none;
     }
+  }
+}
+
+@keyframes stripe-drift {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 100% 60%;
   }
 }
 

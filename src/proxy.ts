@@ -41,6 +41,6 @@ export const proxy = clerkMiddleware(async (auth, request) => {
 export const config = {
   // Match everything except Next internals and static asset files.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
   ],
 };

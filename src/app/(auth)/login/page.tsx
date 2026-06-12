@@ -28,7 +28,7 @@ export default async function LoginPage({
       <div className="text-center">
         <h1 className="font-display text-[26px] font-bold tracking-tight text-flash">
           Welcome back to{" "}
-          <em className="font-serif-accent font-normal italic text-iris">
+          <em className="text-iris">
             SnapList
           </em>
         </h1>

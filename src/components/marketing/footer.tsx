@@ -76,7 +76,7 @@ export function MarketingFooter() {
         aria-hidden
         className="pointer-events-none select-none overflow-hidden"
       >
-        <p className="-mb-[0.23em] bg-gradient-to-b from-panel-2 to-night bg-clip-text text-center font-display text-[clamp(96px,18vw,260px)] font-bold leading-none tracking-tight text-transparent">
+        <p className="-mb-[0.23em] bg-gradient-to-b from-line to-night bg-clip-text text-center font-display text-[clamp(96px,18vw,260px)] font-bold leading-none tracking-tight text-transparent">
           SnapList
         </p>
       </div>

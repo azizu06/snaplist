@@ -12,7 +12,8 @@ export default function AuthLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <div className="aurora grain relative flex min-h-screen flex-col overflow-hidden bg-night text-flash">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-night text-flash">
+      <div aria-hidden className="stripe-gradient" />
       <header className="relative z-10 px-5 py-5 sm:px-8">
         <Link href="/" className="inline-flex text-flash">
           <Logo markClassName="size-8" />

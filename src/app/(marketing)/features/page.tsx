@@ -152,11 +152,11 @@ export default function Features() {
             </p>
             <h1 className="mt-3 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               Everything between{" "}
-              <em className="font-serif-accent font-normal italic text-iris">
+              <em className="text-iris">
                 photo
               </em>{" "}
               and{" "}
-              <em className="font-serif-accent font-normal italic text-iris">
+              <em className="text-iris">
                 paid
               </em>
             </h1>
@@ -179,7 +179,7 @@ export default function Features() {
                     <h2 className="font-display text-[clamp(22px,3vw,30px)] font-bold tracking-tight text-flash">
                       {heading}
                     </h2>
-                    <p className="font-serif-accent text-[16px] italic text-flash-faint">
+                    <p className="text-[15px] text-flash-faint">
                       {blurb}
                     </p>
                   </div>
@@ -217,7 +217,7 @@ export default function Features() {
           </h2>
           <Link
             href="/login"
-            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15px] font-semibold text-iris-ink shadow-[0_0_40px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03]"
+            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
           >
             List something free
             <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>

@@ -8,17 +8,16 @@ export function LogoMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 48 48" className={className} aria-hidden>
       <defs>
-        <linearGradient id="iris-grad" x1="10" y1="6" x2="40" y2="44" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#7c88e8" />
-          <stop offset="0.55" stopColor="#5e6ad2" />
-          <stop offset="1" stopColor="#8b5cf6" />
+        <linearGradient id="iris-grad" x1="6" y1="4" x2="44" y2="46" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#7a73ff" />
+          <stop offset="0.55" stopColor="#635bff" />
+          <stop offset="1" stopColor="#a960ee" />
         </linearGradient>
       </defs>
-      <rect x="2" y="2" width="44" height="44" rx="13" fill="#101113" />
-      <rect x="2" y="2" width="44" height="44" rx="13" fill="none" stroke="#2e3035" strokeWidth="1" />
+      <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#iris-grad)" />
       {/* aperture blades */}
-      <g stroke="url(#iris-grad)" strokeWidth="3.2" strokeLinecap="round" fill="none">
-        <circle cx="24" cy="24" r="14.5" opacity="0.45" />
+      <g stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" fill="none">
+        <circle cx="24" cy="24" r="14.5" opacity="0.4" />
         <path d="M26.9 18.4 30.8 31" />
         <path d="M19.7 18.4h14.4" />
         <path d="m17.1 24 4.5-12.1" />
@@ -27,7 +26,7 @@ export function LogoMark({ className }: { className?: string }) {
         <path d="m30.9 24-5.1 13.9" />
       </g>
       {/* flash dot */}
-      <circle cx="24" cy="24" r="2.1" fill="#f7f8f8" />
+      <circle cx="24" cy="24" r="2.1" fill="#ffffff" />
     </svg>
   );
 }
