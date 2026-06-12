@@ -53,23 +53,19 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
     setOpen(true);
   }, []);
 
-  // ⌘K / Ctrl+K toggles from anywhere.
+  // ⌘K / Ctrl+K toggles from anywhere. Re-registered when `open` flips so
+  // the reset stays in plain handler code (state updaters must be pure).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setOpen((v) => {
-          if (v) return false;
-          setQuery("");
-          setHits([]);
-          setSelected(0);
-          return true;
-        });
+        if (open) setOpen(false);
+        else openPalette();
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [open, openPalette]);
 
   // In-flight work dies with the component.
   useEffect(
