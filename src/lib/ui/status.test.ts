@@ -3,6 +3,7 @@ import {
   confidenceBand,
   confidenceLabel,
   lifecycleLabel,
+  lifecycleShortLabel,
   tierLabel,
 } from "./status";
 
@@ -45,6 +46,25 @@ describe("lifecycleLabel", () => {
     });
     expect(lifecycleLabel(null)).toBeNull();
     expect(lifecycleLabel(undefined)).toBeNull();
+  });
+});
+
+describe("lifecycleShortLabel", () => {
+  it("compacts the chip for narrow surfaces, keeping the SAME tone", () => {
+    expect(lifecycleShortLabel("draft")).toEqual({ label: "Draft", tone: "warning" });
+    expect(lifecycleShortLabel("queued")).toEqual({ label: "Queued", tone: "success" });
+    expect(lifecycleShortLabel("published")).toEqual({ label: "Live", tone: "success-solid" });
+    expect(lifecycleShortLabel("failed")).toEqual({ label: "Attention", tone: "danger" });
+    expect(lifecycleShortLabel("draft_failed")).toEqual({ label: "Attention", tone: "danger" });
+    expect(lifecycleShortLabel("new")).toEqual({ label: "Processing", tone: "neutral" });
+  });
+
+  it("falls back to the long label's honest rendering for unknown/null", () => {
+    expect(lifecycleShortLabel("something_else")).toEqual({
+      label: "something_else",
+      tone: "neutral",
+    });
+    expect(lifecycleShortLabel(null)).toBeNull();
   });
 });
 

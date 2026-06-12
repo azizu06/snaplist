@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
+import { itemLabel } from "@/lib/ui/item-label";
 import {
   DashboardView,
   DASHBOARD_FILTERS,
@@ -46,16 +46,6 @@ export default async function Dashboard({
       .order("created_at", { ascending: false })
       .limit(200),
   ]);
-
-  const itemLabel = (attributes: unknown, id: string): string => {
-    const parsed = extractedAttributesSchema.safeParse(attributes ?? {});
-    if (parsed.success) {
-      const a = parsed.data;
-      const label = [a.brand, a.model].filter(Boolean).join(" ") || a.title;
-      if (label) return label;
-    }
-    return `Item ${id.slice(0, 8)}`;
-  };
 
   // Latest logged price per item (rows already newest-first).
   const latestPrice = new Map<string, number>();

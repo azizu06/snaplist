@@ -41,6 +41,29 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
   }
 }
 
+/**
+ * Compact chip for narrow surfaces (mobile rows, the ⌘K palette) — same
+ * tones as lifecycleLabel so color meaning never diverges; only the copy
+ * shortens. Unknown keys fall through to the long label's honest rendering.
+ */
+export function lifecycleShortLabel(
+  status: string | null | undefined,
+): StatusLabel | null {
+  const full = lifecycleLabel(status);
+  if (!full) return null;
+  switch (status) {
+    case "draft":
+      return { label: "Draft", tone: full.tone };
+    case "queued":
+      return { label: "Queued", tone: full.tone };
+    case "failed":
+    case "draft_failed":
+      return { label: "Attention", tone: full.tone };
+    default:
+      return full;
+  }
+}
+
 export type ConfidenceBand = "high" | "medium" | "low";
 
 const MEDIUM_MIN = 0.5;
