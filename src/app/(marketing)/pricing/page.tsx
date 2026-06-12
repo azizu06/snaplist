@@ -9,7 +9,9 @@ export const metadata: Metadata = {
     "SnapList is free while in beta — every feature, no credit card. Paid tiers arrive later with honest limits.",
 };
 
-/** /pricing (issue #49) — single live tier (beta), ghost tiers signposted. */
+/** /pricing (issue #49, round 2) — two uniform tier cards: the live Beta tier
+ * (subtle ElectricBorder marks it) and a mocked-up "Seller Pro" coming-soon
+ * tier with the same height and structure so the row reads balanced. */
 
 const INCLUDED = [
   "Unlimited photo identifications",
@@ -21,17 +23,14 @@ const INCLUDED = [
   "Private photo storage",
 ] as const;
 
-const GHOSTS = [
-  {
-    name: "Seller",
-    note: "For steady decluttering",
-    teaser: "Volume autopilot, bulk uploads, listing analytics",
-  },
-  {
-    name: "Power",
-    note: "For flippers & resellers",
-    teaser: "Multi-account, priority research, API access",
-  },
+const PRO_INCLUDED = [
+  "Everything in Beta",
+  "Higher listing limits",
+  "Autopilot publishing at volume",
+  "Bulk photo uploads",
+  "Listing & pricing analytics",
+  "Priority research queue",
+  "Priority support",
 ] as const;
 
 export default function Pricing() {
@@ -58,66 +57,88 @@ export default function Pricing() {
       </section>
 
       <section className="mx-auto w-full max-w-5xl px-5 pb-28 sm:px-8">
-        <Reveal stagger className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr_0.9fr]">
-          {/* live tier — react-bits ElectricBorder marks the recommended plan */}
-          <ElectricBorder color="#6d4aff" speed={0.9} chaos={0.06} borderRadius={24}>
-          <div className="relative overflow-hidden rounded-3xl bg-panel p-8">
-            <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
-              Live now
+        <Reveal stagger className="grid items-stretch gap-6 lg:grid-cols-2">
+          {/* live tier — a calm ElectricBorder hugs the recommended plan */}
+          <ElectricBorder
+            color="#6d4aff"
+            speed={0.5}
+            chaos={0.045}
+            displacement={12}
+            borderRadius={24}
+            className="h-full"
+          >
+            <div className="relative flex h-full flex-col overflow-hidden rounded-3xl bg-panel p-8">
+              <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
+                Live now
+              </span>
+              <h2 className="font-display text-[22px] font-bold text-flash">Beta</h2>
+              <p className="mt-1 text-[13.5px] text-flash-faint">
+                Everything SnapList can do today
+              </p>
+              <p className="nums mt-6 font-display text-[52px] font-bold leading-none tracking-tight text-flash">
+                $0
+                <span className="ml-1.5 text-[15px] font-medium text-flash-faint">
+                  / forever-while-beta
+                </span>
+              </p>
+              <ul className="mb-8 mt-7 space-y-3">
+                {INCLUDED.map((line) => (
+                  <li key={line} className="flex items-start gap-2.5 text-[14px] text-flash-dim">
+                    <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/login"
+                className="group mt-auto inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
+              >
+                Start selling free
+                <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
+              </Link>
+              <p className="mt-3 text-center text-[12px] text-flash-faint">
+                No credit card · cancel nothing, there&apos;s nothing to cancel
+              </p>
+            </div>
+          </ElectricBorder>
+
+          {/* coming-soon tier — same skeleton as Beta so the row reads uniform */}
+          <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-line bg-panel p-8 shadow-card">
+            <span className="absolute right-6 top-6 rounded-full border border-line bg-night-2 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-flash-faint">
+              Coming soon
             </span>
-            <h2 className="font-display text-[22px] font-bold text-flash">Beta</h2>
+            <h2 className="font-display text-[22px] font-bold text-flash">Seller Pro</h2>
             <p className="mt-1 text-[13.5px] text-flash-faint">
-              Everything SnapList can do today
+              For flippers, resellers & steady decluttering
             </p>
-            <p className="nums mt-6 font-display text-[52px] font-bold leading-none tracking-tight text-flash">
-              $0
+            <p className="nums mt-6 font-display text-[52px] font-bold leading-none tracking-tight text-flash-dim">
+              $—
               <span className="ml-1.5 text-[15px] font-medium text-flash-faint">
-                / forever-while-beta
+                / month, after beta
               </span>
             </p>
-            <ul className="mt-7 space-y-3">
-              {INCLUDED.map((line) => (
+            <ul className="mb-8 mt-7 space-y-3">
+              {PRO_INCLUDED.map((line) => (
                 <li key={line} className="flex items-start gap-2.5 text-[14px] text-flash-dim">
-                  <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-flash-faint" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
                   {line}
                 </li>
               ))}
             </ul>
-            <Link
-              href="/login"
-              className="group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
+            <p
+              aria-disabled="true"
+              className="mt-auto inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-full border border-line bg-night-2 px-6 py-3 text-[15px] font-semibold text-flash-faint"
             >
-              Start selling free
-              <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
-            </Link>
+              Notify me when it lands
+            </p>
+            <p className="mt-3 text-center text-[12px] text-flash-faint">
+              Beta users keep early-bird pricing
+            </p>
           </div>
-          </ElectricBorder>
-
-          {/* ghost tiers */}
-          {GHOSTS.map(({ name, note, teaser }) => (
-            <div
-              key={name}
-              className="flex flex-col justify-between rounded-3xl border border-dashed border-line-2 bg-panel/30 p-8"
-            >
-              <div>
-                <h2 className="font-display text-[20px] font-bold text-flash-dim">
-                  {name}
-                </h2>
-                <p className="mt-1 text-[13px] text-flash-faint">{note}</p>
-                <p className="nums mt-6 font-display text-[36px] font-bold leading-none text-flash-faint">
-                  —
-                </p>
-                <p className="mt-6 text-[13.5px] leading-relaxed text-flash-faint">
-                  {teaser}
-                </p>
-              </div>
-              <p className="mt-8 rounded-full border border-line px-4 py-2.5 text-center text-[12.5px] font-medium text-flash-faint">
-                After beta — beta users keep early-bird pricing
-              </p>
-            </div>
-          ))}
         </Reveal>
 
         <Reveal className="mt-14 rounded-2xl border border-line bg-night-2 p-7 text-center">
