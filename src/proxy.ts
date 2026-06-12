@@ -11,10 +11,13 @@ import { NextResponse } from "next/server";
  */
 // /dev is the screenshot preview harness — its pages hard-404 in production
 // (see src/app/dev/preview), so whitelisting it here is dev-only in effect.
+// /api/ebay/account-deletion is called server-to-server by eBay (no session);
+// the route gates itself via eBay's signature verification (412 otherwise).
 const isPublic = createRouteMatcher([
   "/",
   "/login(.*)",
   "/api/health",
+  "/api/ebay/account-deletion",
   "/dev(.*)",
 ]);
 
