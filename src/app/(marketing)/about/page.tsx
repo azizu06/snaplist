@@ -105,7 +105,7 @@ export default function About() {
           {PRINCIPLES.map(({ title, body }) => (
             <div
               key={title}
-              className="rounded-2xl border border-line/70 bg-panel/50 p-7"
+              className="rounded-2xl border border-line bg-panel shadow-card p-7"
             >
               <h3 className="font-display text-[18px] font-semibold text-flash">
                 {title}
@@ -118,7 +118,7 @@ export default function About() {
         </Reveal>
       </section>
 
-      <section id="faq" className="border-t border-line/60 bg-night-2/40">
+      <section id="faq" className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8">
           <Reveal>
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
@@ -132,7 +132,7 @@ export default function About() {
             {FAQ.map(({ q, a }) => (
               <details
                 key={q}
-                className="group rounded-2xl border border-line/70 bg-panel/50 transition-colors open:bg-panel hover:border-line-2"
+                className="group rounded-2xl border border-line bg-panel shadow-card transition-colors open:bg-panel hover:border-line-2"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-[15px] font-semibold text-flash [&::-webkit-details-marker]:hidden">
                   {q}

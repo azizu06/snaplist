@@ -87,7 +87,7 @@ export function PhotoSlotsVisual() {
 export function ScanChipsVisual() {
   return (
     <div className="glass-panel relative overflow-hidden rounded-2xl p-5">
-      <div className="relative mx-auto w-[200px] rounded-xl border border-line-2/60 bg-gradient-to-br from-panel-2 to-night-2 p-4">
+      <div className="relative mx-auto w-[200px] rounded-xl border border-line-2 bg-gradient-to-br from-panel-2 to-night-2 p-4">
         <span aria-hidden className="absolute left-2 top-2 size-3 rounded-tl border-l-2 border-t-2 border-iris/70" />
         <span aria-hidden className="absolute right-2 top-2 size-3 rounded-tr border-r-2 border-t-2 border-iris/70" />
         <span aria-hidden className="absolute bottom-2 left-2 size-3 rounded-bl border-b-2 border-l-2 border-iris/70" />
@@ -138,7 +138,7 @@ export function PriceModuleVisual() {
         ].map(([src, price, age]) => (
           <div
             key={src}
-            className="flex items-center justify-between rounded-lg border border-line/60 bg-night-2/70 px-3 py-2"
+            className="flex items-center justify-between rounded-lg border border-line bg-night-2 px-3 py-2"
           >
             <span className="flex items-center gap-2 text-[12px] text-flash-dim">
               <svg viewBox="0 0 24 24" className="size-3 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -209,7 +209,7 @@ export function PlatformCardsVisual() {
 export function PublishVisual() {
   return (
     <div className="glass-panel rounded-2xl p-5">
-      <div className="flex items-center justify-between rounded-xl border border-line/70 bg-night-2/80 px-4 py-3">
+      <div className="flex items-center justify-between rounded-xl border border-line bg-night-2 px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-lg border border-line bg-gradient-to-br from-panel-2 to-night p-1.5">
             <CameraArt className="w-full text-flash-dim" />
@@ -270,7 +270,7 @@ export function ConfidenceGaugeVisual() {
           ["Comp agreement", "tight cluster", "w-[84%]"],
           ["Identification", "brand + model + code", "w-[91%]"],
         ].map(([label, detail, w]) => (
-          <div key={label} className="rounded-lg border border-line/60 bg-night-2/70 px-3 py-2">
+          <div key={label} className="rounded-lg border border-line bg-night-2 px-3 py-2">
             <div className="flex items-center justify-between text-[11.5px]">
               <span className="font-medium text-flash-dim">{label}</span>
               <span className="text-flash-faint">{detail}</span>
@@ -289,7 +289,7 @@ export function ConfidenceGaugeVisual() {
 export function InboxVisual() {
   return (
     <div className="glass-panel rounded-2xl p-5">
-      <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line/70 bg-night-2 px-3.5 py-2.5">
+      <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-night-2 px-3.5 py-2.5">
         <p className="text-[10.5px] font-semibold text-flash-faint">buyer · via eBay</p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
           Does the light meter work? And is there any fungus in the lens?
@@ -344,7 +344,7 @@ export function SecurityVisual() {
         {["a", "b"].map((u) => (
           <div
             key={u}
-            className="flex items-center justify-between rounded-lg border border-line/50 px-3 py-2.5 opacity-50"
+            className="flex items-center justify-between rounded-lg border border-line px-3 py-2.5 opacity-50"
           >
             <span className="flex items-center gap-2.5 text-[12.5px] text-flash-faint">
               <span className="flex size-6 items-center justify-center rounded-full bg-panel-2 text-[10px] font-bold text-flash-faint">

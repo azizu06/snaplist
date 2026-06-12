@@ -154,7 +154,7 @@ export default function HowItWorks() {
       </section>
 
       {/* pricing waterfall */}
-      <section className="border-t border-line/60 bg-night-2/40">
+      <section className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
           <Reveal>
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
@@ -175,7 +175,7 @@ export default function HowItWorks() {
             {TIERS.map(({ name, when, confidence, width }) => (
               <div
                 key={name}
-                className="rounded-2xl border border-line/70 bg-panel/50 p-6"
+                className="rounded-2xl border border-line bg-panel shadow-card p-6"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h3 className="font-display text-[17px] font-semibold text-flash">

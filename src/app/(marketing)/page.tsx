@@ -85,7 +85,7 @@ export default function Landing() {
     <>
       {/* ====== hero — Stripe rainbow slab, navy type, Remotion demo video ====== */}
       <section className="relative overflow-hidden pb-20 pt-32 sm:pb-28 sm:pt-40">
-        <div aria-hidden className="stripe-gradient" />
+        <div aria-hidden className="prism-gradient" />
         <div className="relative mx-auto grid w-full max-w-6xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
             <Reveal>
@@ -128,7 +128,7 @@ export default function Landing() {
           </div>
 
           <div className="flex justify-center lg:justify-end">
-            <div className="glass-panel w-full max-w-[420px] overflow-hidden rounded-2xl">
+            <div className="glass-panel w-full max-w-[560px] overflow-hidden rounded-2xl">
               <video
                 src="/hero-demo.mp4"
                 autoPlay
@@ -146,14 +146,14 @@ export default function Landing() {
       {/* ============================== marquee ============================== */}
       <section
         aria-label="Things people sell with SnapList"
-        className="border-y border-line/60 bg-night-2/60 py-5"
+        className="border-y border-line bg-night-2 py-5"
       >
         <div className="relative overflow-hidden [mask-image:linear-gradient(90deg,transparent,black_12%,black_88%,transparent)]">
           <div className="marquee-track flex w-max gap-3">
             {[...MARQUEE_ITEMS, ...MARQUEE_ITEMS].map((item, i) => (
               <span
                 key={`${item}-${i}`}
-                className="whitespace-nowrap rounded-full border border-line/70 px-4 py-1.5 text-[13px] font-medium text-flash-faint"
+                className="whitespace-nowrap rounded-full border border-line px-4 py-1.5 text-[13px] font-medium text-flash-faint"
               >
                 {item}
               </span>
@@ -178,7 +178,7 @@ export default function Landing() {
           {STEPS.map(({ n, title, body }) => (
             <div
               key={n}
-              className="group relative overflow-hidden rounded-2xl border border-line/70 bg-panel/50 p-7 transition-colors hover:border-line-2 hover:bg-panel"
+              className="group relative overflow-hidden rounded-2xl border border-line bg-panel shadow-card p-7 transition-colors hover:border-line-2 hover:bg-panel"
             >
               <span className="nums font-display text-[13px] font-bold text-iris">
                 {n}
@@ -210,7 +210,7 @@ export default function Landing() {
       </section>
 
       {/* ============================= feature bento ========================== */}
-      <section className="border-t border-line/60 bg-night-2/40">
+      <section className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-32">
           <Reveal>
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
@@ -227,7 +227,7 @@ export default function Landing() {
             {FEATURES.map(({ big, title, body, tag }) => (
               <div
                 key={title}
-                className={`group relative overflow-hidden rounded-2xl border border-line/70 bg-panel/50 p-7 transition-colors hover:border-line-2 hover:bg-panel ${
+                className={`group relative overflow-hidden rounded-2xl border border-line bg-panel shadow-card p-7 transition-colors hover:border-line-2 hover:bg-panel ${
                   big ? "lg:col-span-1 lg:row-span-2" : ""
                 }`}
               >
@@ -270,7 +270,7 @@ export default function Landing() {
       </section>
 
       {/* =============================== stats ================================ */}
-      <section className="mx-auto w-full max-w-6xl border-t border-line/60 px-5 py-24 sm:px-8">
+      <section className="mx-auto w-full max-w-6xl border-t border-line px-5 py-24 sm:px-8">
         <Reveal stagger className="grid gap-10 text-center sm:grid-cols-3">
           {[
             ["~30s", "from photo to draft listing"],
@@ -288,7 +288,7 @@ export default function Landing() {
       </section>
 
       {/* ============================== final CTA ============================= */}
-      <section className="aurora relative overflow-hidden border-t border-line/60">
+      <section className="aurora relative overflow-hidden border-t border-line">
         <div className="mx-auto w-full max-w-3xl px-5 py-28 text-center sm:px-8 sm:py-36">
           <Reveal>
             <h2 className="font-display text-[clamp(32px,5vw,52px)] font-bold leading-tight tracking-tight text-flash">

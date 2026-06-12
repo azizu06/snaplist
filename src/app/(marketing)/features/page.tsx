@@ -210,7 +210,7 @@ export default function Features() {
         })}
       </section>
 
-      <section className="border-t border-line/60 bg-night-2/40 px-5 py-24 text-center sm:px-8">
+      <section className="border-t border-line bg-night-2 px-5 py-24 text-center sm:px-8">
         <Reveal>
           <h2 className="font-display text-[clamp(28px,4vw,42px)] font-bold tracking-tight text-flash">
             Stop reading about it

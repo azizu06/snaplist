@@ -96,7 +96,7 @@ export default function Pricing() {
           {GHOSTS.map(({ name, note, teaser }) => (
             <div
               key={name}
-              className="flex flex-col justify-between rounded-3xl border border-dashed border-line-2/70 bg-panel/30 p-8"
+              className="flex flex-col justify-between rounded-3xl border border-dashed border-line-2 bg-panel/30 p-8"
             >
               <div>
                 <h2 className="font-display text-[20px] font-bold text-flash-dim">
@@ -117,7 +117,7 @@ export default function Pricing() {
           ))}
         </Reveal>
 
-        <Reveal className="mt-14 rounded-2xl border border-line/70 bg-night-2/60 p-7 text-center">
+        <Reveal className="mt-14 rounded-2xl border border-line bg-night-2 p-7 text-center">
           <p className="mx-auto max-w-[62ch] text-[14px] leading-relaxed text-flash-dim">
             The honest part: SnapList is a production-real AI engineering
             showcase. Beta is genuinely free because your usage is what makes

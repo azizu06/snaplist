@@ -32,7 +32,7 @@ const COLUMNS = [
  */
 export function MarketingFooter() {
   return (
-    <footer className="relative overflow-hidden border-t border-line/60 bg-night">
+    <footer className="relative overflow-hidden border-t border-line bg-night">
       <div className="mx-auto w-full max-w-6xl px-5 pb-10 pt-16 sm:px-8">
         <div className="flex flex-col justify-between gap-12 sm:flex-row">
           <div className="max-w-xs">
@@ -65,7 +65,7 @@ export function MarketingFooter() {
           </div>
         </div>
 
-        <div className="mt-14 flex items-center justify-between border-t border-line/60 pt-6 text-[12.5px] text-flash-faint">
+        <div className="mt-14 flex items-center justify-between border-t border-line pt-6 text-[12.5px] text-flash-faint">
           <p>© {new Date().getFullYear()} SnapList</p>
           <p>Built as a production-real AI engineering showcase</p>
         </div>

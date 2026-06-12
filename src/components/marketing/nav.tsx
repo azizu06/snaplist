@@ -31,7 +31,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
     <header
       className={`fixed inset-x-0 top-0 z-40 transition-[background-color,border-color,backdrop-filter] duration-300 ${
         scrolled || open
-          ? "border-b border-line/70 bg-night/80 backdrop-blur-xl"
+          ? "border-b border-line bg-night/80 backdrop-blur-xl"
           : "border-b border-transparent bg-transparent"
       }`}
     >
@@ -99,7 +99,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
       </nav>
 
       {open ? (
-        <div className="border-t border-line/60 px-5 pb-5 pt-2 md:hidden">
+        <div className="border-t border-line px-5 pb-5 pt-2 md:hidden">
           {LINKS.map(({ href, label }) => (
             <Link
               key={href}
