@@ -13,11 +13,13 @@ export const metadata: Metadata = {
     "Why SnapList exists, the engineering principles behind it, and answers to the questions everyone asks.",
 };
 
-/** /about (ui-r4) — story beside a full-size price report (the verified
- * Victrola turntable: large legible product photo, suggested price, range
- * band, confidence chip, cited sources — a miniature of the real product
- * experience), numbered principle cards (SpotlightCard), and a two-column
- * FAQ anchored by a fixed product-photo card (verified espresso machine). */
+/** /about (ui-r5-marketing) — story beside a full-size price report (the
+ * verified Victrola turntable: large legible product photo, suggested price,
+ * a self-explaining sold-price range with labeled endpoints, confidence chip,
+ * cited sources — a miniature of the real product experience), numbered
+ * principle cards (SpotlightCard), and a single clean centered FAQ list (the
+ * espresso anchor card is gone — owner round-5: "It should just be the list
+ * of questions"). */
 
 const PRINCIPLES = [
   {
@@ -32,7 +34,7 @@ const PRINCIPLES = [
   },
   {
     title: "Flag, don't fake",
-    body: "When identification is ambiguous or comps are thin, the system says so. Low confidence is information, not failure.",
+    body: "When the system isn't sure what your item is, or few similar items have sold recently, it says so. Low confidence is information, not failure.",
     icon: (
       <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
@@ -69,7 +71,7 @@ const FAQ = [
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we show you which tier fired. Books and media with ISBNs are strongest (exact lookups). Branded items priced from live web comps are solid. Generic items fall back to a depreciation model and are clearly labeled lower-confidence. Every price is editable.",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are strongest — an exact lookup, no guessing. Branded items are priced from what similar items recently sold for, which is solid. Everyday items get an estimate marked down from the new price, clearly labeled as less certain. Every price is editable.",
   },
   {
     q: "Is my data private?",
@@ -77,7 +79,7 @@ const FAQ = [
   },
   {
     q: "Does autopilot post things without asking me?",
-    a: "Only if you turn it on, and only for items above the confidence bar — a score computed from real signals (pricing tier, comp agreement, identification completeness), not the model's self-assessment. Everything else queues for your review. You can keep autopilot off entirely.",
+    a: "Only if you turn it on, and only for items above the confidence bar — a score computed from real signals (how the price was found, how closely recent sales agree, and how completely the item was identified), never the AI grading its own work. Everything else queues for your review. You can keep autopilot off entirely.",
   },
   {
     q: "What does it cost?",
@@ -91,16 +93,17 @@ const FAQ = [
 
 /**
  * Full-size price report for the About hero — the verified Victrola
- * turntable from the demo catalog. Comps tier (its honest pricing path):
- * large product photo, suggested price, range band, confidence chip,
- * cited sources.
+ * turntable from the demo catalog, priced its honest way (recent sale
+ * prices): large product photo, suggested price, a sold-price range with
+ * labeled endpoints and a captioned suggested-price marker, confidence
+ * chip, cited sources.
  */
 function AboutPriceReport() {
   const p = DEMO_PRODUCTS_BY_SLUG.turntable;
   const sources = [
-    ["eBay sold listing", "$64", "3d ago"],
-    ["Mercari comp", "$72", "5d ago"],
-    ["Facebook ask — down-weighted", "$85", "1w ago"],
+    ["Sold on eBay", "$64", "3 days ago"],
+    ["Sold on Mercari", "$72", "5 days ago"],
+    ["Facebook asking price — counted less", "$85", "last week"],
   ] as const;
   return (
     <div className="glass-panel overflow-hidden rounded-3xl">
@@ -133,18 +136,37 @@ function AboutPriceReport() {
             <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M20 6 9 17l-5-5" />
             </svg>
-            82% · live comps
+            82% confidence
           </span>
         </div>
-        {/* range band — suggested sits inside the researched window */}
-        <div className="relative mt-3.5 h-2 rounded-full bg-panel-2">
-          <div className="absolute inset-y-0 left-[14%] right-[10%] rounded-full bg-gradient-to-r from-iris-deep/70 to-iris" />
-          <span className="absolute left-[47%] top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris shadow-sm" />
-        </div>
-        <div className="nums mt-2 flex justify-between text-[12px] text-flash-faint">
-          <span>$55</span>
-          <span>range</span>
-          <span>$85</span>
+        {/* what similar items sold for — labeled endpoints, suggested price
+            marked and captioned, so the band explains itself at a glance */}
+        <div className="mt-5">
+          <p className="text-[12.5px] font-medium leading-snug text-flash-dim">
+            Similar turntables sold from{" "}
+            <span className="nums font-semibold text-flash">$55</span> to{" "}
+            <span className="nums font-semibold text-flash">$85</span> recently
+          </p>
+          <div className="relative mt-9">
+            <div className="absolute bottom-full left-[43%] flex -translate-x-1/2 flex-col items-center">
+              <span className="nums whitespace-nowrap rounded-full bg-iris/12 px-2.5 py-1 text-[11.5px] font-semibold text-iris">
+                ${p.price} suggested
+              </span>
+              <span aria-hidden className="h-2.5 w-px bg-iris/50" />
+            </div>
+            <div className="relative h-2">
+              <div className="absolute inset-0 rounded-full bg-gradient-to-r from-iris-deep/70 to-iris" />
+              <span className="absolute left-[43%] top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris shadow-sm" />
+            </div>
+            <div className="mt-1.5 flex justify-between text-[11.5px] text-flash-faint">
+              <span>
+                <span className="nums font-semibold">$55</span> — lowest sale
+              </span>
+              <span>
+                <span className="nums font-semibold">$85</span> — highest sale
+              </span>
+            </div>
+          </div>
         </div>
         <div className="mt-5 space-y-2.5 border-t border-line pt-4">
           {sources.map(([src, price, age]) => (
@@ -162,58 +184,6 @@ function AboutPriceReport() {
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Fixed-container product photo anchoring the FAQ — the verified espresso
- * machine from the demo catalog. Gives the section a concrete visual
- * subject: every answer below is about items like this one.
- */
-function FaqAnchorCard() {
-  const p = DEMO_PRODUCTS_BY_SLUG.espresso;
-  return (
-    <div className="glass-panel overflow-hidden rounded-3xl">
-      <div className="relative h-[330px]">
-        <Image
-          src={p.image}
-          alt={p.alt}
-          fill
-          sizes="(min-width: 1024px) 380px, 100vw"
-          className="object-cover"
-        />
-        {/* scrim stays dark in BOTH themes — it sits over a photo, so the
-            caption is always white-on-dark rather than token-flipped */}
-        <div
-          aria-hidden
-          className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/75 to-transparent"
-        />
-        <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-3">
-          <p className="text-[14px] font-semibold leading-snug text-white">
-            {p.shortName}
-          </p>
-          <span className="nums shrink-0 rounded-full bg-black/60 px-3 py-1.5 text-[12.5px] font-bold text-white backdrop-blur">
-            ${p.price}
-          </span>
-        </div>
-      </div>
-      <div className="p-5">
-        <div className="flex flex-wrap gap-1.5">
-          {["Identified", "Priced from comps", "Listed on eBay"].map((chip) => (
-            <span
-              key={chip}
-              className="rounded-md bg-iris/10 px-2.5 py-1 text-[12px] font-medium text-iris"
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
-        <p className="mt-3.5 text-[13.5px] leading-relaxed text-flash-dim">
-          Every answer below is about items exactly like this one — photographed
-          on a counter, identified, priced with cited comps, and listed.
-        </p>
       </div>
     </div>
   );
@@ -295,30 +265,24 @@ export default function About() {
         </Reveal>
       </section>
 
+      {/* one clean question list — no anchor card, no side column (ui-r5) */}
       <section id="faq" className="border-t border-line bg-night-2">
-        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
-          <div className="grid gap-12 lg:grid-cols-[380px_1fr] lg:gap-16">
-            <div>
-              <Reveal>
-                <Eyebrow n="02" tint="cyan">
-                  FAQ
-                </Eyebrow>
-                <h2 className="mt-4 font-display text-[clamp(26px,3.4vw,38px)] font-bold tracking-tight text-flash">
-                  The questions everyone asks
-                </h2>
-                <p className="mt-4 text-[16px] leading-relaxed text-flash-dim">
-                  Marketplaces, accuracy, privacy, and what autopilot will
-                  never do without you — answered straight.
-                </p>
-              </Reveal>
-              <Reveal delay={0.1} className="mt-9 hidden lg:block lg:sticky lg:top-24">
-                <FaqAnchorCard />
-              </Reveal>
-            </div>
-            <Reveal className="min-w-0">
-              <FaqAccordion items={FAQ} />
-            </Reveal>
-          </div>
+        <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8 sm:py-28">
+          <Reveal className="flex flex-col items-center text-center">
+            <Eyebrow n="02" tint="cyan">
+              FAQ
+            </Eyebrow>
+            <h2 className="mt-4 font-display text-[clamp(28px,3.6vw,40px)] font-bold tracking-tight text-flash">
+              The questions everyone asks
+            </h2>
+            <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-flash-dim">
+              Marketplaces, accuracy, privacy, and what autopilot will never
+              do without you — answered straight.
+            </p>
+          </Reveal>
+          <Reveal delay={0.1} className="mt-12">
+            <FaqAccordion items={FAQ} />
+          </Reveal>
         </div>
       </section>
 

@@ -3,8 +3,6 @@ import Link from "next/link";
 import { Reveal } from "@/components/marketing/reveal";
 import { DemoClip } from "@/components/marketing/demo-clip";
 import { WaterfallExplorer } from "@/components/marketing/waterfall-explorer";
-import { HiwJourneyRail } from "@/components/marketing/hiw-journey-rail";
-import { HiwPipelineNav } from "@/components/marketing/hiw-pipeline-nav";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
 import { ScanShowcase } from "@/components/marketing/scan-showcase";
 import { Eyebrow, LensRings } from "@/components/marketing/visuals";
@@ -16,17 +14,15 @@ export const metadata: Metadata = {
 };
 
 /**
- * /how-it-works (ui-r4-hiw) — the pipeline walkthrough at demo scale.
- * Owner round-4 feedback drove this layout: the five step clips
- * (/demo/steps/*.mp4, 1920×1080 loops via DemoClip — lazy-mounted, designed
- * slate fallback) now run near-content-width (~63% of a max-w-7xl row,
- * alternating sides) so the UI inside each recording is actually readable;
- * the buyer-Q&A clip gets the same treatment. The old ScrollVelocity verb
- * marquee is replaced by HiwPipelineNav (rich verb cards with hover clip
- * previews that deep-link to #step-{id}), and HiwJourneyRail is the premium
- * three-moves overview (connected rail, one item travelling it). The
- * WaterfallExplorer mirrors the real PricingProvider router tiers — keep in
- * sync. Products: gameboy (hero + rail); the step clips embed their own
+ * /how-it-works (ui-r5-marketing) — the pipeline walkthrough at demo scale.
+ * Owner round-5 feedback killed the repetition: HiwJourneyRail ("the short
+ * version") and HiwPipelineNav ("the pipeline, up close") are gone — both
+ * restated what the five step clips already show. In their place a single
+ * plain heading block introduces the steps. Section order: hero (ScanShowcase)
+ * → step-intro header → five step clips (/demo/steps/*.mp4, 1920×1080 loops
+ * via DemoClip, near-content-width, alternating sides) → buyer-Q&A → pricing
+ * waterfall LAST → CTA. The WaterfallExplorer mirrors the real
+ * PricingProvider router tiers — keep in sync. The step clips embed their own
  * assigned items (see DEMO_SURFACE_ASSIGNMENTS).
  */
 
@@ -42,21 +38,21 @@ const STEPS = [
     n: "02",
     id: "identify",
     title: "Identify",
-    body: "A vision model extracts brand, model, category, condition, and key specs into a strict schema. Ambiguous items get flagged, never silently guessed.",
-    poster: "Pixels in, validated attributes out.",
+    body: "SnapList reads your photo and pulls out the brand, model, category, condition, and key details. If it isn't sure what it's looking at, it tells you — it never quietly guesses.",
+    poster: "It knows exactly what it's looking at.",
   },
   {
     n: "03",
     id: "price",
     title: "Price",
-    body: "A research agent works the waterfall below and synthesizes a suggested price, a realistic range, and the sources it used — sold signals over asking prices.",
+    body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources it used — real sale prices, not wishful asking prices.",
     poster: "A defensible number, with its receipts.",
   },
   {
     n: "04",
     id: "write",
     title: "Write",
-    body: "One validated core renders platform-fluent copy: eBay item specifics and keyword titles, Facebook's casual local tone, Mercari's hashtags and shipping framing.",
+    body: "Your listing is written three ways, one per marketplace: eBay gets detailed item specifics and a search-friendly title, Facebook gets a casual local tone, Mercari gets hashtags and shipping details.",
     poster: "Three marketplaces, three native tongues.",
   },
   {
@@ -94,36 +90,23 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* the whole journey, three moves — connected rail, one item travelling it */}
-      <section className="mx-auto w-full max-w-6xl px-5 py-20 sm:px-8 sm:py-24">
-        <Reveal>
-          <Eyebrow>The short version</Eyebrow>
-          <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
-            Three moves. <em className="text-iris">That&apos;s the whole job.</em>
+      {/* one plain heading introduces the steps — no cards, no carousel
+          (replaced the repetitive journey-rail + verb-card bands, ui-r5) */}
+      <section className="mx-auto w-full max-w-7xl px-5 pt-20 sm:px-8 sm:pt-28">
+        <Reveal className="mx-auto flex max-w-3xl flex-col items-center text-center">
+          <Eyebrow>The pipeline</Eyebrow>
+          <h2 className="mt-4 font-display text-[clamp(30px,4vw,46px)] font-bold leading-tight tracking-tight text-flash">
+            The pipeline, <em className="text-iris">step by step</em>
           </h2>
-          <p className="mt-4 max-w-[56ch] text-[16px] leading-relaxed text-flash-dim">
-            Watch one Game Boy make the trip: photographed, researched, live —
-            the only part that&apos;s yours is the approval.
+          <p className="mt-4 max-w-[54ch] text-[17px] leading-relaxed text-flash-dim">
+            Five steps run every time you snap a photo. Here is each one doing
+            its job — real screens, real items.
           </p>
         </Reveal>
-        <div className="mt-14">
-          <HiwJourneyRail />
-        </div>
-      </section>
-
-      {/* the pipeline verbs as navigation — hover previews, click to jump */}
-      <section className="border-y border-line bg-night-2 py-12 sm:py-14">
-        <div className="mx-auto mb-8 flex w-full max-w-7xl flex-wrap items-end justify-between gap-3 px-5 sm:px-8">
-          <Eyebrow tint="indigo">The pipeline, up close</Eyebrow>
-          <p className="text-[13px] font-medium text-flash-faint">
-            Pick a step to jump straight to it
-          </p>
-        </div>
-        <HiwPipelineNav />
       </section>
 
       {/* the five steps — demo clips at readable scale, alternating sides */}
-      <section className="mx-auto w-full max-w-7xl px-5 py-24 sm:px-8 sm:py-28">
+      <section className="mx-auto w-full max-w-7xl px-5 pb-24 pt-16 sm:px-8 sm:pb-28 sm:pt-20">
         <div className="space-y-24 sm:space-y-32">
           {STEPS.map(({ n, id, title, body, poster }, i) => (
             <Reveal key={n} delay={0.05}>
@@ -161,29 +144,9 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* interactive pricing waterfall */}
-      <section className="border-t border-line bg-night-2">
-        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-28">
-          <Reveal>
-            <Eyebrow tint="cyan">The pricing waterfall</Eyebrow>
-            <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
-              The best source that exists for <em className="text-iris">your</em>{" "}
-              item — honestly labeled
-            </h2>
-            <p className="mt-4 max-w-[58ch] text-[16px] leading-relaxed text-flash-dim">
-              Not every item can be priced with the same rigor. Pick a tier to
-              see what it actually does — the confidence score always tells
-              you which one fired.
-            </p>
-          </Reveal>
-          <Reveal className="mt-12">
-            <WaterfallExplorer />
-          </Reveal>
-        </div>
-      </section>
-
       {/* buyer messaging — same demo scale as the steps */}
-      <section className="mx-auto w-full max-w-7xl px-5 py-24 sm:px-8 sm:py-28">
+      <section className="border-t border-line">
+        <div className="mx-auto w-full max-w-7xl px-5 py-24 sm:px-8 sm:py-28">
         <Reveal>
           <div className="grid items-center gap-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] lg:gap-16">
             <div>
@@ -195,9 +158,9 @@ export default function HowItWorks() {
               </h2>
               <p className="mt-4 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
                 Incoming messages land in a live inbox with a reply already
-                drafted from the item&apos;s real attributes — edition,
-                condition, what&apos;s included. You approve, edit, or rewrite;
-                nothing sends without you.
+                drafted from the item&apos;s real details — edition, condition,
+                what&apos;s included. You approve, edit, or rewrite; nothing
+                sends without you.
               </p>
             </div>
             <DemoClip
@@ -210,9 +173,31 @@ export default function HowItWorks() {
             />
           </div>
         </Reveal>
+        </div>
       </section>
 
-      <section className="border-t border-line bg-night-2 px-5 py-24 text-center sm:px-8 sm:py-28">
+      {/* interactive pricing waterfall — last stop before the CTA */}
+      <section className="border-t border-line bg-night-2">
+        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-28">
+          <Reveal>
+            <Eyebrow tint="cyan">Where the price comes from</Eyebrow>
+            <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
+              The best price source that exists for{" "}
+              <em className="text-iris">your</em> item — honestly labeled
+            </h2>
+            <p className="mt-4 max-w-[58ch] text-[16px] leading-relaxed text-flash-dim">
+              Not every item can be priced the same way. SnapList works down
+              this list, uses the best source it can find for your item — and
+              always shows you which one it used. Pick one to see how it works.
+            </p>
+          </Reveal>
+          <Reveal className="mt-12">
+            <WaterfallExplorer />
+          </Reveal>
+        </div>
+      </section>
+
+      <section className="border-t border-line px-5 py-24 text-center sm:px-8 sm:py-28">
         <Reveal>
           <h2 className="font-display text-[clamp(30px,4.2vw,46px)] font-bold tracking-tight text-flash">
             See it on your own shelf
