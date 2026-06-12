@@ -11,6 +11,59 @@ import { PendingButton } from "@/components/ui/button";
 import { buttonClasses } from "@/components/ui/button-styles";
 import { AppSignOutButton } from "@/components/sign-out-button";
 import { StatusBadge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+
+/** Violet-soft leading square for section-card headers (Stripe treatment). */
+function SectionIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      aria-hidden
+      className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-soft-fg"
+    >
+      {children}
+    </span>
+  );
+}
+
+const ICON_SVG_PROPS = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  className: "size-4",
+} as const;
+
+function SparklesIcon() {
+  return (
+    <svg {...ICON_SVG_PROPS}>
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+      <path d="M20 3v4" />
+      <path d="M22 5h-4" />
+      <path d="M4 17v2" />
+      <path d="M5 18H3" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg {...ICON_SVG_PROPS}>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg {...ICON_SVG_PROPS}>
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
 
 /**
  * Settings (audit X-11): the autopilot master switch, moved out of the upload
@@ -57,12 +110,30 @@ export default async function SettingsPage({
 
       <Card>
         <CardHeader
-          title="Autopilot"
+          title={
+            <span className="flex items-center gap-2.5">
+              <SectionIcon>
+                <SparklesIcon />
+              </SectionIcon>
+              Autopilot
+            </span>
+          }
           aside={
-            <StatusBadge
-              label={autopilotEnabled ? "On" : "Off"}
-              tone={autopilotEnabled ? "success" : "neutral"}
-            />
+            <>
+              <StatusBadge
+                label={autopilotEnabled ? "On" : "Off"}
+                tone={autopilotEnabled ? "success" : "neutral"}
+              />
+              <form action={setAutopilotSetting} className="flex items-center">
+                <Switch
+                  checked={autopilotEnabled}
+                  name="enabled"
+                  aria-label={
+                    autopilotEnabled ? "Turn autopilot off" : "Turn autopilot on"
+                  }
+                />
+              </form>
+            </>
           }
         />
         <CardBody className="flex flex-col gap-4">
@@ -74,19 +145,6 @@ export default async function SettingsPage({
             for your review. Turn it off and every listing waits for you, no
             exceptions.
           </p>
-          <form action={setAutopilotSetting}>
-            <input
-              type="hidden"
-              name="enabled"
-              value={autopilotEnabled ? "false" : "true"}
-            />
-            <PendingButton
-              pendingLabel="Saving…"
-              variant={autopilotEnabled ? "secondary" : "primary"}
-            >
-              {autopilotEnabled ? "Turn autopilot off" : "Turn autopilot on"}
-            </PendingButton>
-          </form>
           <p className="text-xs text-faint">
             Changing this affects new uploads — it never rewrites why a past
             listing was queued or held.
@@ -96,7 +154,14 @@ export default async function SettingsPage({
 
       <Card>
         <CardHeader
-          title="eBay account"
+          title={
+            <span className="flex items-center gap-2.5">
+              <SectionIcon>
+                <LinkIcon />
+              </SectionIcon>
+              eBay account
+            </span>
+          }
           aside={
             <StatusBadge
               label={ebayConnection.connected ? "Connected" : "Not connected"}
@@ -140,7 +205,16 @@ export default async function SettingsPage({
       </Card>
 
       <Card>
-        <CardHeader title="Account" />
+        <CardHeader
+          title={
+            <span className="flex items-center gap-2.5">
+              <SectionIcon>
+                <UserIcon />
+              </SectionIcon>
+              Account
+            </span>
+          }
+        />
         <CardBody>
           {/* Clerk sign-out (issue #41) — the /auth/signout route is gone. */}
           <AppSignOutButton className="inline-flex items-center justify-center gap-2 rounded-md border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg shadow-xs transition-colors hover:bg-surface-2" />

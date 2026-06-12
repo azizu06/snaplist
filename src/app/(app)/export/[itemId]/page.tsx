@@ -149,7 +149,11 @@ function PackCard({
   return (
     <Card>
       <CardHeader
-        title={heading}
+        title={
+          <span className="inline-flex items-center rounded-full bg-accent-soft px-2.5 py-0.5 text-[11px] font-semibold text-accent-soft-fg">
+            {heading}
+          </span>
+        }
         aside={<CopyButton text={pack.copyBlock} label={`Copy the ${heading} pack`} />}
       />
       <CardBody className="flex flex-col gap-3">

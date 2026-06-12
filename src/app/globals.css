@@ -220,6 +220,43 @@
       animation: none;
     }
   }
+  /* Hover-pause for the category marquee — class lives on the section
+     wrapper so any point inside it pauses the track. */
+  .marquee-pause:hover .marquee-track {
+    animation-play-state: paused;
+  }
+  /* Empty-state aperture iris: the blade group drifts one revolution every
+     40s — barely perceptible, just alive. */
+  .aperture-blades {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: aperture-spin 40s linear infinite;
+  }
+  /* Skeleton shimmer: a translating gradient sheen layered over the
+     animate-pulse base so loading blocks read as in-motion, not stalled. */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.55),
+      transparent
+    );
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .aperture-blades,
+    .skeleton-shimmer::after {
+      animation: none;
+    }
+  }
 }
 
 /* Route-transition entrance — applied by each group's template.tsx, which
@@ -276,6 +313,24 @@
   }
   to {
     transform: translateX(-50%);
+  }
+}
+
+@keyframes aperture-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
   }
 }
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Reveal } from "@/components/marketing/reveal";
+import { StatCounter } from "@/components/marketing/stat-counter";
 import { PlatformCardsVisual } from "@/components/marketing/visuals";
 
 /**
@@ -106,7 +107,7 @@ export default function Landing() {
               <div className="mt-9 flex flex-wrap items-center gap-3.5">
                 <Link
                   href="/login"
-                  className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                  className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
                 >
                   Start selling free
                   <span aria-hidden className="transition-transform group-hover:translate-x-1">
@@ -146,7 +147,7 @@ export default function Landing() {
       {/* ============================== marquee ============================== */}
       <section
         aria-label="Things people sell with SnapList"
-        className="border-y border-line bg-night-2 py-5"
+        className="marquee-pause border-y border-line bg-night-2 py-5"
       >
         <div className="relative overflow-hidden [mask-image:linear-gradient(90deg,transparent,black_12%,black_88%,transparent)]">
           <div className="marquee-track flex w-max gap-3">
@@ -279,7 +280,7 @@ export default function Landing() {
           ].map(([stat, label]) => (
             <div key={label}>
               <p className="nums font-display text-[clamp(40px,5vw,56px)] font-bold tracking-tight text-flash">
-                {stat}
+                <StatCounter value={stat} />
               </p>
               <p className="mt-1.5 text-[14px] text-flash-faint">{label}</p>
             </div>
@@ -303,7 +304,7 @@ export default function Landing() {
             </p>
             <Link
               href="/login"
-              className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
             >
               Snap your first photo
               <span aria-hidden className="transition-transform group-hover:translate-x-1">
