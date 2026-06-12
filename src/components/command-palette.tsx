@@ -43,6 +43,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
   const abortRef = useRef<AbortController | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestQueryRef = useRef("");
 
   const showActions = query.trim() === "";
 
@@ -82,7 +83,11 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
   const onQueryChange = (value: string) => {
     setQuery(value);
     if (timerRef.current) clearTimeout(timerRef.current);
+    // Kill any in-flight request NOW — waiting for the debounce timer would
+    // let a previous query's response land under the new input (Codex P2).
+    abortRef.current?.abort();
     const q = value.trim();
+    latestQueryRef.current = q;
     if (!q) {
       setHits([]);
       setSelected(0);
@@ -100,7 +105,6 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
       return;
     }
     timerRef.current = setTimeout(async () => {
-      abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
       try {
@@ -109,6 +113,8 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
         });
         if (!res.ok) return;
         const body = (await res.json()) as { results?: PaletteHit[] };
+        // Belt-and-braces staleness check on top of the abort.
+        if (latestQueryRef.current !== q) return;
         setHits(body.results ?? []);
         setSelected(0);
       } catch {

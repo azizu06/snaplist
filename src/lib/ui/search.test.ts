@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesQuery, searchRows } from "./search";
+import { firstSearchToken, matchesQuery, searchRows } from "./search";
 
 /**
  * Contract tests for the listing search matcher (dashboard v2). One pure
@@ -79,5 +79,22 @@ describe("searchRows (⌘K palette results)", () => {
 
   it("caps results at the limit", () => {
     expect(searchRows(ROWS, "a", 2)).toHaveLength(2);
+  });
+});
+
+describe("firstSearchToken (the token pushed down to the DB filter)", () => {
+  it("returns the first whitespace token, lowercased", () => {
+    expect(firstSearchToken("Sony headphones")).toBe("sony");
+    expect(firstSearchToken("  LEGO  ")).toBe("lego");
+  });
+
+  it("strips characters that would break PostgREST filter syntax or act as wildcards", () => {
+    expect(firstSearchToken('so%n_y*("),')).toBe("sony");
+    expect(firstSearchToken("100%wool")).toBe("100wool");
+  });
+
+  it("returns empty when nothing safe remains (caller skips the DB filter)", () => {
+    expect(firstSearchToken("")).toBe("");
+    expect(firstSearchToken("%*()")).toBe("");
   });
 });

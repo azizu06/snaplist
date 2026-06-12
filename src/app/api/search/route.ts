@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { searchRows } from "@/lib/ui/search";
+import { firstSearchToken, searchRows } from "@/lib/ui/search";
 import { itemLabel } from "@/lib/ui/item-label";
 
 /**
@@ -28,18 +28,33 @@ export async function GET(request: Request) {
   if (!q) return NextResponse.json({ results: [] });
 
   const supabase = await createClient();
+
+  // Push the first query token into Postgres so matches aren't limited to
+  // the newest rows (Codex P2 on PR #52): a seller with years of inventory
+  // can still find old items, and pipeline reruns inserting duplicate
+  // listing rows for one item can't crowd matching rows out of the window.
+  // The full multi-token matcher/ranker still runs in-process below.
+  const tok = firstSearchToken(q);
+  let listingsQuery = supabase
+    .from("listings")
+    .select("id, item_id, title, status, created_at")
+    .eq("platform", "ebay")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  let itemsQuery = supabase
+    .from("items")
+    .select("id, attributes, created_at")
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (tok) {
+    listingsQuery = listingsQuery.ilike("title", `%${tok}%`);
+    itemsQuery = itemsQuery.or(
+      `attributes->>title.ilike.*${tok}*,attributes->>brand.ilike.*${tok}*,attributes->>model.ilike.*${tok}*`,
+    );
+  }
   const [{ data: listings }, { data: items }] = await Promise.all([
-    supabase
-      .from("listings")
-      .select("id, item_id, title, status, created_at")
-      .eq("platform", "ebay")
-      .order("created_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("items")
-      .select("id, attributes, created_at")
-      .order("created_at", { ascending: false })
-      .limit(100),
+    listingsQuery,
+    itemsQuery,
   ]);
 
   const newestPerItem = new Map<string, NonNullable<typeof listings>[number]>();
