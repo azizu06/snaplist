@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useRef, useEffect, useCallback } from 'react';
 
 interface ClickSparkProps {
@@ -8,6 +10,8 @@ interface ClickSparkProps {
   duration?: number;
   easing?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
   extraScale?: number;
+  /** Layout class for the wrapper (e.g. `inline-block` around a button). */
+  className?: string;
   children?: React.ReactNode;
 }
 
@@ -26,6 +30,7 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
   duration = 400,
   easing = 'ease-out',
   extraScale = 1.0,
+  className = 'w-full h-full',
   children
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,8 +46,10 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
 
     let resizeTimeout: ReturnType<typeof setTimeout>;
 
+    // Size to the canvas's own (over-extended) rect so sparks can fly past the
+    // wrapped element's edge instead of clipping at a small button's bounds.
     const resizeCanvas = () => {
-      const { width, height } = parent.getBoundingClientRect();
+      const { width, height } = canvas.getBoundingClientRect();
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
         canvas.height = height;
@@ -151,8 +158,8 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full" onClick={handleClick}>
-      <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+    <div className={`relative ${className}`} onClick={handleClick}>
+      <canvas ref={canvasRef} className="pointer-events-none absolute -inset-10 z-10" />
       {children}
     </div>
   );

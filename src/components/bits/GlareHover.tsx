@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useRef } from 'react';
 
 interface GlareHoverProps {
@@ -17,15 +19,17 @@ interface GlareHoverProps {
   style?: React.CSSProperties;
 }
 
+// Defaults flipped for SnapList's Prism-light identity: a white card that
+// fills its grid cell, with a faint violet glare instead of white-on-dark.
 const GlareHover: React.FC<GlareHoverProps> = ({
-  width = '500px',
-  height = '500px',
-  background = '#000',
-  borderRadius = '10px',
-  borderColor = '#333',
+  width = '100%',
+  height = '100%',
+  background = 'var(--color-panel)',
+  borderRadius = '16px',
+  borderColor = 'var(--color-line)',
   children,
-  glareColor = '#ffffff',
-  glareOpacity = 0.5,
+  glareColor = '#6d4aff',
+  glareOpacity = 0.1,
   glareAngle = -45,
   glareSize = 250,
   transitionDuration = 650,
@@ -87,7 +91,7 @@ const GlareHover: React.FC<GlareHoverProps> = ({
 
   return (
     <div
-      className={`relative grid place-items-center overflow-hidden border cursor-pointer ${className}`}
+      className={`relative overflow-hidden border ${className}`}
       style={{
         width,
         height,

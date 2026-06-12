@@ -1,3 +1,5 @@
+'use client';
+
 import { useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { motion, useMotionValue, useAnimationFrame, useTransform } from 'motion/react';
 
@@ -6,18 +8,19 @@ interface GradientTextProps {
   className?: string;
   colors?: string[];
   animationSpeed?: number;
-  showBorder?: boolean;
   direction?: 'horizontal' | 'vertical' | 'diagonal';
   pauseOnHover?: boolean;
   yoyo?: boolean;
 }
 
+// Adapted for SnapList: renders inline <span>s (usable inside a headline),
+// defaults to the prism-violet palette, and the dark showBorder variant is
+// removed (its inner fill was a black slab — never appropriate on light).
 export default function GradientText({
   children,
   className = '',
-  colors = ['#5227FF', '#FF9FFC', '#B497CF'],
+  colors = ['#6d4aff', '#635bff', '#9f7aff'],
   animationSpeed = 8,
-  showBorder = false,
   direction = 'horizontal',
   pauseOnHover = false,
   yoyo = true
@@ -62,7 +65,7 @@ export default function GradientText({
   useEffect(() => {
     elapsedRef.current = 0;
     progress.set(0);
-  }, [animationSpeed, yoyo]);
+  }, [animationSpeed, yoyo, progress]);
 
   const backgroundPosition = useTransform(progress, p => {
     if (direction === 'horizontal') {
@@ -95,34 +98,13 @@ export default function GradientText({
   };
 
   return (
-    <motion.div
-      className={`relative mx-auto flex max-w-fit flex-row items-center justify-center rounded-[1.25rem] font-medium backdrop-blur transition-shadow duration-500 overflow-hidden cursor-pointer ${showBorder ? 'py-1 px-2' : ''} ${className}`}
+    <motion.span
+      className={`inline-block bg-clip-text text-transparent ${className}`}
+      style={{ ...gradientStyle, backgroundPosition, WebkitBackgroundClip: 'text' }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {showBorder && (
-        <motion.div
-          className="absolute inset-0 z-0 pointer-events-none rounded-[1.25rem]"
-          style={{ ...gradientStyle, backgroundPosition }}
-        >
-          <div
-            className="absolute bg-black rounded-[1.25rem] z-[-1]"
-            style={{
-              width: 'calc(100% - 2px)',
-              height: 'calc(100% - 2px)',
-              left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -50%)'
-            }}
-          />
-        </motion.div>
-      )}
-      <motion.div
-        className="inline-block relative z-2 text-transparent bg-clip-text"
-        style={{ ...gradientStyle, backgroundPosition, WebkitBackgroundClip: 'text' }}
-      >
-        {children}
-      </motion.div>
-    </motion.div>
+      {children}
+    </motion.span>
   );
 }

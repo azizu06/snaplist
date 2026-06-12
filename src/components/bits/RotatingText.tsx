@@ -1,3 +1,5 @@
+'use client';
+
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
   motion,
@@ -11,6 +13,16 @@ import {
 function cn(...classes: (string | undefined | null | boolean)[]): string {
   return classes.filter(Boolean).join(' ');
 }
+
+// Pure helper hoisted out of the component so the `elements` useMemo below has
+// a complete, stable dependency list (exhaustive-deps).
+const splitIntoCharacters = (text: string): string[] => {
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
+    return Array.from(segmenter.segment(text), segment => segment.segment);
+  }
+  return Array.from(text);
+};
 
 export interface RotatingTextRef {
   next: () => void;
@@ -68,14 +80,6 @@ const RotatingText = forwardRef<RotatingTextRef, RotatingTextProps>(
     ref
   ) => {
     const [currentTextIndex, setCurrentTextIndex] = useState<number>(0);
-
-    const splitIntoCharacters = (text: string): string[] => {
-      if (typeof Intl !== 'undefined' && Intl.Segmenter) {
-        const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
-        return Array.from(segmenter.segment(text), segment => segment.segment);
-      }
-      return Array.from(text);
-    };
 
     const elements = useMemo(() => {
       const currentText: string = texts[currentTextIndex];
