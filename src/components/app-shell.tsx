@@ -50,7 +50,9 @@ export function AppShell({
               <>
                 <CommandPalette fixtures={searchFixtures} />
 
-                <div className="ml-auto flex items-center gap-2.5">
+                {/* gap-4: breathing room between the primary action and the
+                    avatar (round 5 — they sat nearly touching). */}
+                <div className="ml-auto flex items-center gap-4">
                   {/* react-bits ClickSpark: a small violet burst on the primary
                       action — subtle, product-dashboard scale. */}
                   <ClickSpark

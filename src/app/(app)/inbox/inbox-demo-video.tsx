@@ -52,24 +52,24 @@ function PosterScene() {
             "radial-gradient(70% 90% at 50% 0%, rgba(109, 74, 255, 0.12), transparent 70%)",
         }}
       />
-      <div className="relative max-w-[62%] rounded-2xl rounded-bl-md border border-border bg-surface px-3 py-1.5 shadow-xs sm:py-2">
-        <p className="text-[9px] font-semibold text-faint sm:text-[9.5px]">
+      <div className="relative max-w-[62%] rounded-2xl rounded-bl-md border border-border bg-surface px-3.5 py-2 shadow-xs sm:py-2.5">
+        <p className="text-[10px] font-semibold text-faint sm:text-[11px]">
           buyer · via eBay
         </p>
-        <p className="mt-0.5 text-[11px] leading-snug text-fg sm:text-[12px]">
+        <p className="mt-0.5 text-[12px] leading-snug text-fg sm:text-[13.5px]">
           Is this still available? Any scratches?
         </p>
       </div>
-      <div className="relative ml-auto max-w-[68%] rounded-2xl rounded-br-md border border-accent/25 bg-accent-soft/70 px-3 py-1.5 shadow-xs sm:py-2">
-        <p className="flex items-center gap-1 text-[9px] font-semibold text-accent-soft-fg sm:text-[9.5px]">
-          <SparkleIcon className="size-2.5" />
+      <div className="relative ml-auto max-w-[68%] rounded-2xl rounded-br-md border border-accent/25 bg-accent-soft/70 px-3.5 py-2 shadow-xs sm:py-2.5">
+        <p className="flex items-center gap-1 text-[10px] font-semibold text-accent-soft-fg sm:text-[11px]">
+          <SparkleIcon className="size-3" />
           reply drafted in seconds
         </p>
-        <p className="mt-0.5 text-[11px] leading-snug text-fg sm:text-[12px]">
+        <p className="mt-0.5 text-[12px] leading-snug text-fg sm:text-[13.5px]">
           Yes, it&apos;s available — light wear only, photos show every angle.
         </p>
       </div>
-      <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-[#131e3a]/70 px-3 py-1 text-[10px] font-semibold text-white sm:mt-1 sm:text-[10.5px]">
+      <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-[#131e3a]/70 px-3.5 py-1.5 text-[11px] font-semibold text-white sm:mt-1 sm:text-[12px]">
         <svg viewBox="0 0 24 24" className="size-3" fill="currentColor" aria-hidden>
           <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86Z" />
         </svg>
@@ -106,20 +106,23 @@ export function InboxDemoVideo() {
   const showVideo = inView && !reduced && !failed;
 
   return (
-    <figure className="mx-auto mt-6 w-full max-w-md text-left">
+    /* Full panel width (round 5): the 1920×1080 clip was capped at max-w-md
+       and its on-screen text was illegible. px-4 keeps a slim inset inside
+       the empty-state card; the video now spans the whole panel. */
+    <figure className="mt-8 w-full px-4 pb-4 text-left sm:px-5 sm:pb-5">
       <div
         ref={frameRef}
         className="overflow-hidden rounded-xl border border-border bg-surface shadow-md"
       >
         {/* mini app-window chrome so the teaser reads as a product moment */}
-        <div className="flex items-center gap-1.5 border-b border-border bg-surface-2/70 px-3 py-2">
-          <span aria-hidden className="size-2 rounded-full bg-border-strong" />
-          <span aria-hidden className="size-2 rounded-full bg-border-strong" />
-          <span aria-hidden className="size-2 rounded-full bg-border-strong" />
-          <span className="ml-2 flex items-center gap-1.5 text-[10.5px] font-semibold text-muted">
-            <span aria-hidden className="relative flex size-1.5">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
-              <span className="relative inline-flex size-1.5 rounded-full bg-success" />
+        <div className="flex items-center gap-1.5 border-b border-border bg-surface-2/70 px-3.5 py-2.5">
+          <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
+          <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
+          <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
+          <span className="ml-2 flex items-center gap-1.5 text-[12px] font-semibold text-muted">
+            <span aria-hidden className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60 motion-reduce:animate-none" />
+              <span className="relative inline-flex size-2 rounded-full bg-success" />
             </span>
             Watch how replies work
           </span>
@@ -146,7 +149,7 @@ export function InboxDemoVideo() {
           ) : null}
         </div>
       </div>
-      <figcaption className="mt-2 text-center text-[11.5px] leading-relaxed text-faint">
+      <figcaption className="mt-2.5 text-center text-[12.5px] leading-relaxed text-faint">
         A buyer asks · the agent drafts from your listing · you approve &amp; send.
       </figcaption>
     </figure>

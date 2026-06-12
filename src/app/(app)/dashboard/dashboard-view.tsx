@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import CountUp from "@/components/bits/CountUp";
 import Folder from "@/components/bits/Folder";
+import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
 import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
 import { matchesQuery } from "@/lib/ui/search";
@@ -119,32 +120,43 @@ function SpotlightStatLink({
 
 /**
  * Empty dashboard — react-bits Folder (violet) holding miniature LISTING
- * PREVIEWS: real demo photos with a plausible title + price each, so the
- * opened folder reads as "this is what your listings will become" instead of
- * three blank placeholder cards. Click/hover plays with the papers.
+ * PREVIEWS pulled straight from the demo catalog (image + name + price always
+ * come from the SAME DemoProduct, so a photo can never carry another item's
+ * label — round-5 owner trust fix). The opened folder reads as "this is what
+ * your listings will become". Click/hover plays with the papers.
+ *
+ * Items picked for variety against other surfaces (round 5): turntable,
+ * espresso, gshock — none headline the landing carousel/storefronts or the
+ * new-listing examples.
  */
-function MiniListingCard({
-  src,
-  title,
-  price,
-}: {
-  src: string;
-  title: string;
-  price: string;
-}) {
+const FOLDER_ITEMS: DemoProduct[] = [
+  // Order matters: paper 0 is the narrowest, paper 2 the widest — the
+  // longest short-name (turntable) rides the wide paper so nothing truncates.
+  DEMO_PRODUCTS_BY_SLUG.gshock,
+  DEMO_PRODUCTS_BY_SLUG.espresso,
+  DEMO_PRODUCTS_BY_SLUG.turntable,
+];
+
+function MiniListingCard({ product }: { product: DemoProduct }) {
   return (
     /* The folder papers stay literal white paper in both themes, so their ink
        is pinned (fg-strong / accent-soft-fg flip light in dark mode and would
-       wash out on the white card). */
+       wash out on the white card). Sizes look tiny here but render ~2.2× via
+       the Folder scale transform. */
     <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm dark:border-white/20">
       {/* eslint-disable-next-line @next/next/no-img-element -- tiny static demo thumbnail inside the folder animation */}
-      <img src={src} alt="" aria-hidden className="h-[58%] w-full object-cover" />
+      <img
+        src={product.image}
+        alt=""
+        aria-hidden
+        className="h-[58%] w-full object-cover"
+      />
       <span className="flex min-h-0 flex-1 flex-col justify-center gap-[2px] px-[5px]">
         <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#131e3a]">
-          {title}
+          {product.shortName}
         </span>
-        <span className="block text-[7px] font-bold leading-none text-[#5a36f0]" data-nums>
-          {price}
+        <span className="block text-[7.5px] font-bold leading-none text-[#5a36f0]" data-nums>
+          ${product.price}
         </span>
       </span>
     </span>
@@ -153,17 +165,16 @@ function MiniListingCard({
 
 function DashboardEmpty() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-      {/* mt-20: headroom so the opened previews stay inside the dashed card */}
-      <div className="mb-7 mt-20">
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-14 text-center">
+      {/* mt-36: headroom so the opened previews stay inside the dashed card
+          at the larger folder scale */}
+      <div className="mb-12 mt-36">
         <Folder
           color="#6d4aff"
-          size={1.4}
-          items={[
-            <MiniListingCard key="p1" src="/demo/camera.jpg" title="Canon AE-1" price="$385" />,
-            <MiniListingCard key="p2" src="/demo/book.jpg" title="Organic Chemistry 6e" price="$48" />,
-            <MiniListingCard key="p3" src="/demo/sneakers.jpg" title="Jordan 1 Mid" price="$92" />,
-          ]}
+          size={2.2}
+          items={FOLDER_ITEMS.map((product) => (
+            <MiniListingCard key={product.slug} product={product} />
+          ))}
         />
       </div>
       <p className="text-base font-semibold text-fg-strong">

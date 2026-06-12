@@ -41,62 +41,66 @@ function GhostCard({ className }: { className: string }) {
 
 export function InboxEmptyState() {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-surface px-6 pb-10 pt-9 text-center shadow-xs">
+    <div className="relative overflow-hidden rounded-xl border border-border bg-surface pt-10 text-center shadow-xs">
       {/* soft violet bloom behind the composition */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-20 left-1/2 h-64 w-[520px] -translate-x-1/2 rounded-full"
+        className="pointer-events-none absolute -top-20 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full"
         style={{
           background:
             "radial-gradient(closest-side, rgba(109, 74, 255, 0.10), rgba(109, 74, 255, 0.04) 55%, transparent)",
         }}
       />
 
-      {/* ---- stacked ghost conversation ---- */}
-      <div aria-hidden className="relative mx-auto h-48 w-full max-w-sm select-none">
-        <GhostCard className="top-3 -rotate-3 opacity-40" />
-        <GhostCard className="top-1.5 rotate-2 opacity-60" />
+      <div className="px-6">
+        {/* ---- stacked ghost conversation ---- */}
+        <div aria-hidden className="relative mx-auto h-52 w-full max-w-md select-none">
+          <GhostCard className="top-3 -rotate-3 opacity-40" />
+          <GhostCard className="top-1.5 rotate-2 opacity-60" />
 
-        {/* the front card: a believable thread, dimmed to read as a preview */}
-        <div className="absolute inset-x-0 top-0 rounded-2xl border border-accent/15 bg-surface p-4 text-left opacity-80 shadow-md">
-          <div className="max-w-[78%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3 py-2">
-            <p className="text-[9.5px] font-semibold text-faint">buyer · via eBay</p>
-            <p className="mt-0.5 text-[12px] leading-snug text-fg">
-              Hi! Does it come with the original box and cables?
-            </p>
+          {/* the front card: a believable thread, dimmed to read as a preview */}
+          <div className="absolute inset-x-0 top-0 rounded-2xl border border-accent/15 bg-surface p-4 text-left opacity-80 shadow-md">
+            <div className="max-w-[78%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
+              <p className="text-[10.5px] font-semibold text-faint">buyer · via eBay</p>
+              <p className="mt-0.5 text-[13px] leading-snug text-fg">
+                Hi! Does it come with the original box and cables?
+              </p>
+            </div>
+            <div className="ml-auto mt-2.5 max-w-[80%] rounded-2xl rounded-br-md border border-accent/20 bg-accent-soft/60 px-3.5 py-2.5">
+              <p className="flex items-center gap-1 text-[10.5px] font-semibold text-accent-soft-fg">
+                <SparkleIcon className="size-3" />
+                reply drafted — awaiting your approval
+              </p>
+              <p className="mt-0.5 text-[13px] leading-snug text-fg">
+                Yes — it ships in the original box with both cables included.
+              </p>
+            </div>
           </div>
-          <div className="ml-auto mt-2.5 max-w-[80%] rounded-2xl rounded-br-md border border-accent/20 bg-accent-soft/60 px-3 py-2">
-            <p className="flex items-center gap-1 text-[9.5px] font-semibold text-accent-soft-fg">
-              <SparkleIcon className="size-2.5" />
-              reply drafted — awaiting your approval
-            </p>
-            <p className="mt-0.5 text-[12px] leading-snug text-fg">
-              Yes — it ships in the original box with both cables included.
-            </p>
-          </div>
+
+          {/* fade the composition into the copy below */}
+          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface to-transparent" />
         </div>
 
-        {/* fade the composition into the copy below */}
-        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface to-transparent" />
+        {/* ---- copy: one headline, one sentence, one hint ---- */}
+        <h3 className="font-display text-[20px] font-bold tracking-tight text-fg-strong">
+          No buyer questions yet
+        </h3>
+        <p className="mx-auto mt-2 max-w-md text-[14.5px] leading-relaxed text-muted">
+          When a buyer asks about one of your listings, it lands here live — with
+          a reply already drafted for your approval.
+        </p>
+        <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-3.5 py-1.5 text-[12.5px] font-medium text-muted">
+          <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M21 12a9 9 0 1 1-9-9" />
+            <path d="M21 3v6h-6" />
+          </svg>
+          eBay buyer questions sync here automatically — or try the simulator above.
+        </p>
       </div>
 
-      {/* ---- copy: one headline, one sentence, one hint ---- */}
-      <h3 className="font-display text-[17px] font-bold tracking-tight text-fg-strong">
-        No buyer questions yet
-      </h3>
-      <p className="mx-auto mt-1.5 max-w-sm text-sm leading-relaxed text-muted">
-        When a buyer asks about one of your listings, it lands here live — with
-        a reply already drafted for your approval.
-      </p>
-      <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-3 py-1 text-[11.5px] font-medium text-muted">
-        <svg viewBox="0 0 24 24" className="size-3 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M21 12a9 9 0 1 1-9-9" />
-          <path d="M21 3v6h-6" />
-        </svg>
-        eBay buyer questions sync here automatically — or try the simulator above.
-      </p>
-
-      {/* ---- the flow, live: lazy muted-loop walkthrough ---- */}
+      {/* ---- the flow, live: lazy muted-loop walkthrough. Sits outside the
+           px-6 column so the 1920×1080 video gets the full panel width and
+           the on-screen conversation stays legible (round-5 owner fix). ---- */}
       <InboxDemoVideo />
     </div>
   );
