@@ -74,8 +74,8 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
         aria-expanded={open}
         aria-label="Account menu"
         onClick={() => setOpen((v) => !v)}
-        className={`flex size-8 items-center justify-center overflow-hidden rounded-full text-[12px] font-bold text-white ring-offset-2 transition-shadow ${
-          open ? "ring-2 ring-accent" : "hover:ring-2 hover:ring-border-strong"
+        className={`flex size-8 items-center justify-center overflow-hidden rounded-full text-[12px] font-bold text-white ring-2 ring-offset-2 ring-offset-surface transition-shadow ${
+          open ? "ring-accent" : "ring-border hover:ring-border-strong"
         }`}
       >
         {user.imageUrl ? (

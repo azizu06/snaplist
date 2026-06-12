@@ -118,8 +118,10 @@ const Folder: React.FC<FolderProps> = ({ color = '#6d4aff', size = 1, items = []
           ></span>
           {papers.map((item, i) => {
             let sizeClasses = '';
-            if (i === 0) sizeClasses = open ? 'w-[70%] h-[80%]' : 'w-[70%] h-[80%]';
-            if (i === 1) sizeClasses = open ? 'w-[80%] h-[80%]' : 'w-[80%] h-[70%]';
+            // SnapList: opened papers widened vs the registry default so the
+            // mini listing-card titles fit without truncating.
+            if (i === 0) sizeClasses = open ? 'w-[86%] h-[80%]' : 'w-[70%] h-[80%]';
+            if (i === 1) sizeClasses = open ? 'w-[88%] h-[80%]' : 'w-[80%] h-[70%]';
             if (i === 2) sizeClasses = open ? 'w-[90%] h-[80%]' : 'w-[90%] h-[60%]';
 
             const transformStyle = open
