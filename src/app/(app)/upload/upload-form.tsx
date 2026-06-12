@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
+import ClickSpark from "@/components/bits/ClickSpark";
+import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Banner } from "@/components/ui/banner";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -168,12 +170,73 @@ function FormBody({
   const { pending } = useFormStatus();
   const photoCount = previews.filter(Boolean).length;
 
+  // Drag-and-drop onto the photo strip: dropped images fill the empty slots
+  // in order (the same inputs the click flow uses, so the server action sees
+  // identical FormData). dragDepth tracks nested dragenter/leave pairs.
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    const dropped = Array.from(e.dataTransfer.files).filter((f) =>
+      ACCEPT.split(",").includes(f.type),
+    );
+    if (dropped.length === 0) return;
+    const emptySlots = previews
+      .map((p, slot) => (p ? null : slot))
+      .filter((s): s is number => s !== null);
+    dropped.slice(0, emptySlots.length).forEach((file, i) => {
+      const slot = emptySlots[i];
+      const input = inputRefs.current[slot];
+      if (input) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+      }
+      onPick(slot, file);
+    });
+  };
+
   if (pending) return <ProcessingView coverUrl={previews[0]} />;
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ---- photo strip (Mercari: rounded squares, camera on slot 1) ---- */}
-      <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
+      {/* ---- photo strip (Mercari: rounded squares, camera on slot 1).
+           While dragging files over it, a react-bits ElectricBorder (violet,
+           pointer-events-none overlay — the inputs never remount) signals
+           the drop target. ---- */}
+      <section
+        onDragEnter={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDragActive(true);
+        }}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={() => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragActive(false);
+        }}
+        onDrop={handleDrop}
+        className="relative rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5"
+      >
+        {dragActive ? (
+          <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+            <ElectricBorder
+              color="#6d4aff"
+              speed={1.2}
+              chaos={0.08}
+              borderRadius={14}
+              className="size-full"
+            />
+          </div>
+        ) : null}
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h2 className="text-[13px] font-semibold text-fg-strong">Photos</h2>
           <span className="text-xs text-muted" data-nums>
@@ -306,14 +369,24 @@ function FormBody({
       </section>
 
       {/* ---- sticky bottom CTA bar (Mercari "List" bar) ---- */}
-      <div className="sticky bottom-16 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-xl sm:border sm:shadow-md">
-        <button
-          type="submit"
-          disabled={photoCount === 0}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+      <div className="sticky bottom-20 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-xl sm:border sm:shadow-md">
+        {/* react-bits ClickSpark: violet burst on the one action that starts
+            the whole pipeline. */}
+        <ClickSpark
+          className="block w-full"
+          sparkColor="#6d4aff"
+          sparkSize={8}
+          sparkRadius={20}
+          sparkCount={10}
         >
-          Identify, price &amp; draft
-        </button>
+          <button
+            type="submit"
+            disabled={photoCount === 0}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+          >
+            Identify, price &amp; draft
+          </button>
+        </ClickSpark>
       </div>
     </div>
   );

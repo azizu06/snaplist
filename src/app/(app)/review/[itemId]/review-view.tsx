@@ -1,4 +1,6 @@
 import Link from "next/link";
+import FadeContent from "@/components/bits/FadeContent";
+import SpotlightCard from "@/components/bits/SpotlightCard";
 import { StatusBadge } from "@/components/ui/badge";
 import { ConfidenceGauge } from "@/components/ui/confidence-gauge";
 import { Banner, type BannerVariant } from "@/components/ui/banner";
@@ -49,6 +51,9 @@ export interface ReviewData {
   banner: { variant: BannerVariant; title: string; detail: string } | null;
   actionError: string | null;
 }
+
+/** App-card chrome for the react-bits SpotlightCard (vs its marketing default). */
+const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
 
 function FieldShell({
   label,
@@ -162,7 +167,9 @@ export function ReviewView({
           <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
             <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">Media</h2>
             {data.photoUrls.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
+              /* react-bits FadeContent: one soft blur-up entrance for the
+                 photo grid (reduced-motion safe inside the component). */
+              <FadeContent blur duration={500} className="flex flex-wrap gap-2">
                 {data.photoUrls.map((url, i) => (
                   // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URLs
                   <img
@@ -176,14 +183,19 @@ export function ReviewView({
                     }
                   />
                 ))}
-              </div>
+              </FadeContent>
             ) : (
               <p className="text-sm text-muted">No photos.</p>
             )}
           </section>
 
-          {/* Pricing card */}
-          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
+          {/* Pricing card — react-bits SpotlightCard wearing app chrome: a
+              soft violet spotlight follows the cursor over the money card. */}
+          <SpotlightCard
+            chromeClassName={APP_CARD_CHROME}
+            spotlightColor="rgba(109, 74, 255, 0.09)"
+            className="p-4 sm:p-5"
+          >
             <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">Pricing</h2>
             <form action={overrideAction} className="flex flex-col gap-4">
               <input type="hidden" name="itemId" value={data.itemId} />
@@ -253,13 +265,13 @@ export function ReviewView({
                 </div>
               ) : null}
             </form>
-          </section>
+          </SpotlightCard>
         </div>
 
-        {/* ===== sidebar ===== */}
+        {/* ===== sidebar (SpotlightCard hover treatment on all three) ===== */}
         <div className="flex flex-col gap-4">
           {/* Status card */}
-          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
+          <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
             <h2 className="mb-2 text-[13px] font-semibold text-fg-strong">Status</h2>
             {statusChip ? (
               <StatusBadge label={statusChip.label} tone={statusChip.tone} dot={false} />
@@ -271,11 +283,11 @@ export function ReviewView({
                 {data.banner.detail}
               </p>
             ) : null}
-          </section>
+          </SpotlightCard>
 
           {/* Identification card (the "Insights" slot) */}
           {data.identification ? (
-            <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
+            <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h2 className="text-[13px] font-semibold text-fg-strong">
                   Identification
@@ -297,11 +309,11 @@ export function ReviewView({
                   identifiers resolved
                 </p>
               )}
-            </section>
+            </SpotlightCard>
           ) : null}
 
           {/* Item details card (the "Product organization" slot) */}
-          <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
+          <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
             <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">
               Item details
             </h2>
@@ -315,7 +327,7 @@ export function ReviewView({
                 </div>
               ))}
             </dl>
-          </section>
+          </SpotlightCard>
         </div>
       </div>
     </main>

@@ -159,7 +159,14 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
 
   return (
     <div className={`relative ${className}`} onClick={handleClick}>
-      <canvas ref={canvasRef} className="pointer-events-none absolute -inset-10 z-10" />
+      {/* Canvas is a replaced element: insets alone position it but leave it
+          at its intrinsic 300x150 (which overflowed the viewport and caused a
+          page-wide horizontal scrollbar) — size it explicitly to the wrapper
+          plus the 40px spark overflow margin on each side. */}
+      <canvas
+        ref={canvasRef}
+        className="pointer-events-none absolute -left-10 -top-10 z-10 h-[calc(100%+5rem)] w-[calc(100%+5rem)]"
+      />
       {children}
     </div>
   );

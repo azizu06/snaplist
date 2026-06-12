@@ -78,7 +78,8 @@ export function AppShell({
           </div>
         </header>
 
-        <div className="flex min-w-0 flex-1 flex-col pb-16 sm:pb-0">{children}</div>
+        {/* pb-20: clearance for the floating mobile Dock (react-bits app pass) */}
+        <div className="flex min-w-0 flex-1 flex-col pb-20 sm:pb-0">{children}</div>
       </div>
 
       {signedIn ? <MobileNav /> : null}

@@ -9,6 +9,10 @@ interface Position {
 
 interface SpotlightCardProps extends React.PropsWithChildren {
   className?: string;
+  /** Card chrome (border/bg/radius/shadow). Defaults to the marketing card
+   *  look; app surfaces pass their own (e.g. the review page's app-card
+   *  chrome) so the spotlight can dress existing cards without restyling. */
+  chromeClassName?: string;
   spotlightColor?: `rgba(${number}, ${number}, ${number}, ${number})`;
 }
 
@@ -17,6 +21,7 @@ interface SpotlightCardProps extends React.PropsWithChildren {
 const SpotlightCard: React.FC<SpotlightCardProps> = ({
   children,
   className = '',
+  chromeClassName = 'rounded-2xl border border-line bg-panel shadow-card',
   spotlightColor = 'rgba(109, 74, 255, 0.12)'
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
@@ -57,7 +62,7 @@ const SpotlightCard: React.FC<SpotlightCardProps> = ({
       onBlur={handleBlur}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`relative overflow-hidden rounded-2xl border border-line bg-panel shadow-card ${className}`}
+      className={`relative overflow-hidden ${chromeClassName} ${className}`}
     >
       <div
         className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 ease-in-out"

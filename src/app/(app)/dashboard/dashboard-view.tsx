@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import CountUp from "@/components/bits/CountUp";
+import Folder from "@/components/bits/Folder";
 import { StatusBadge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/empty-state";
 import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
 import { matchesQuery } from "@/lib/ui/search";
 import { relativeDay } from "@/lib/ui/dates";
@@ -68,6 +68,107 @@ function Thumb({ url }: { url: string | null }) {
   );
 }
 
+/**
+ * Stat-tab filter card with the react-bits SpotlightCard treatment adapted
+ * onto a real <Link> (the vendored SpotlightCard is a div — wrapping the Link
+ * would bury navigation semantics). A violet radial spotlight tracks the
+ * cursor; the active card keeps its violet border + ring untouched.
+ */
+function SpotlightStatLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [lit, setLit] = useState(false);
+
+  return (
+    <Link
+      ref={ref}
+      href={href}
+      aria-current={active ? "page" : undefined}
+      onMouseMove={(e) => {
+        const rect = ref.current?.getBoundingClientRect();
+        if (rect) setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      }}
+      onMouseEnter={() => setLit(true)}
+      onMouseLeave={() => setLit(false)}
+      className={`relative min-w-[124px] shrink-0 overflow-hidden rounded-xl border bg-surface px-3.5 py-2.5 transition-all motion-safe:active:scale-[0.98] sm:min-w-0 ${
+        active
+          ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
+          : "border-border hover:-translate-y-px hover:border-border-strong hover:shadow-xs"
+      }`}
+    >
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 transition-opacity duration-300 ease-in-out"
+        style={{
+          opacity: lit ? 1 : 0,
+          background: `radial-gradient(circle at ${pos.x}px ${pos.y}px, rgba(109, 74, 255, 0.10), transparent 80%)`,
+        }}
+      />
+      {children}
+    </Link>
+  );
+}
+
+/**
+ * Empty dashboard — react-bits Folder (violet) holding tiny listing-card
+ * mockups; click/hover plays with the papers. The one place the dashboard
+ * gets to be charming instead of dense.
+ */
+function MockListingPaper({ price }: { price: string }) {
+  return (
+    <span className="flex size-full flex-col gap-1 p-1.5">
+      <span className="block h-1/2 w-full rounded-[5px] bg-accent-soft" />
+      <span className="block h-1 w-3/4 rounded-full bg-border" />
+      <span className="block h-1 w-1/2 rounded-full bg-border" />
+      <span className="block text-left text-[7px] font-bold leading-none text-accent-soft-fg">
+        {price}
+      </span>
+    </span>
+  );
+}
+
+function DashboardEmpty() {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+      {/* mt-10: headroom so the opened papers stay inside the dashed card */}
+      <div className="mb-5 mt-10">
+        <Folder
+          color="#6d4aff"
+          size={1.1}
+          items={[
+            <MockListingPaper key="p1" price="$178" />,
+            <MockListingPaper key="p2" price="$64" />,
+            <MockListingPaper key="p3" price="$112" />,
+          ]}
+        />
+      </div>
+      <p className="text-base font-semibold text-fg-strong">
+        List your first item
+      </p>
+      <p className="max-w-sm text-sm text-muted">
+        Take a photo of something you want to sell — we&apos;ll identify it,
+        research the price, and write the listing for you.
+      </p>
+      <div className="mt-1">
+        <Link
+          href="/upload"
+          className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
+        >
+          New listing
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 // `counts` stays in the props API for the page/preview callers, but the
 // stat-tab cards compute per-filter counts from `rows` directly.
 export function DashboardView({
@@ -102,23 +203,13 @@ export function DashboardView({
           Listings
         </h1>
         <span className="text-[12.5px] text-muted" data-nums>
-          {rows.length} item{rows.length === 1 ? "" : "s"}
+          <CountUp to={rows.length} duration={0.7} /> item
+          {rows.length === 1 ? "" : "s"}
         </span>
       </header>
 
       {rows.length === 0 ? (
-        <EmptyState
-          title="List your first item"
-          detail="Take a photo of something you want to sell — we'll identify it, research the price, and write the listing for you."
-          action={
-            <Link
-              href="/upload"
-              className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
-            >
-              New listing
-            </Link>
-          }
-        />
+        <DashboardEmpty />
       ) : (
         <>
           {/* ---- stat-tab cards (Stripe Transactions pattern: the filters ARE
@@ -130,15 +221,10 @@ export function DashboardView({
             {DASHBOARD_FILTERS.map((f) => {
               const active = f.key === filter;
               return (
-                <Link
+                <SpotlightStatLink
                   key={f.key}
                   href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
-                  aria-current={active ? "page" : undefined}
-                  className={`min-w-[124px] shrink-0 rounded-xl border bg-surface px-3.5 py-2.5 transition-all motion-safe:active:scale-[0.98] sm:min-w-0 ${
-                    active
-                      ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
-                      : "border-border hover:-translate-y-px hover:border-border-strong hover:shadow-xs"
-                  }`}
+                  active={active}
                 >
                   <span
                     className={`block text-[12px] font-medium ${
@@ -150,7 +236,7 @@ export function DashboardView({
                   <span className="mt-0.5 block text-[18px] font-bold text-fg-strong" data-nums>
                     <CountUp to={filterCount(f)} duration={0.7} />
                   </span>
-                </Link>
+                </SpotlightStatLink>
               );
             })}
           </nav>

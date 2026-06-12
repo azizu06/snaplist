@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
+import GlareHover from "@/components/bits/GlareHover";
 import { StatusBadge } from "@/components/ui/badge";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -208,22 +209,26 @@ export function PublishView({
         </Banner>
       ) : null}
 
-      <Card>
-        <CardHeader
-          title="Listing preview"
-          aside={
-            <span className="text-xs uppercase tracking-wide text-faint">
-              {data.platform}
-            </span>
-          }
-        />
-        <CardBody>
-          <p className="text-sm font-semibold text-fg-strong">{data.title}</p>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">
-            {data.description}
-          </p>
-        </CardBody>
-      </Card>
+      {/* react-bits GlareHover (app pass): violet glare sweep on hover over
+          the preview of what buyers will see. */}
+      <GlareHover>
+        <Card>
+          <CardHeader
+            title="Listing preview"
+            aside={
+              <span className="text-xs uppercase tracking-wide text-faint">
+                {data.platform}
+              </span>
+            }
+          />
+          <CardBody>
+            <p className="text-sm font-semibold text-fg-strong">{data.title}</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">
+              {data.description}
+            </p>
+          </CardBody>
+        </Card>
+      </GlareHover>
 
       {data.published ? (
         <Card>

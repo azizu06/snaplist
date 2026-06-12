@@ -5,6 +5,8 @@ import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { getEbayConnectionStatus } from "@/lib/marketplace/ebay";
 import { setAutopilotSetting } from "@/app/(app)/upload/actions";
 import { disconnectEbay } from "./actions";
+import GlareHover from "@/components/bits/GlareHover";
+import ShinyText from "@/components/bits/ShinyText";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PendingButton } from "@/components/ui/button";
@@ -108,6 +110,9 @@ export default async function SettingsPage({
         </Banner>
       ) : null}
 
+      {/* react-bits GlareHover (app pass): a quiet violet glare sweep across
+          each settings card on hover — chrome polish only, content untouched. */}
+      <GlareHover>
       <Card>
         <CardHeader
           title={
@@ -151,7 +156,9 @@ export default async function SettingsPage({
           </p>
         </CardBody>
       </Card>
+      </GlareHover>
 
+      <GlareHover>
       <Card>
         <CardHeader
           title={
@@ -174,9 +181,15 @@ export default async function SettingsPage({
             <>
               <p className="text-sm leading-relaxed text-muted">
                 Connected as{" "}
-                <strong className="font-medium text-fg">
-                  {ebayConnection.ebayUsername ?? "your eBay account"}
-                </strong>
+                {/* react-bits ShinyText: a slow violet shimmer on the live
+                    connection — the one celebratory note on this page. */}
+                <ShinyText
+                  text={ebayConnection.ebayUsername ?? "your eBay account"}
+                  color="#3d4a68"
+                  shineColor="#6d4aff"
+                  speed={3.5}
+                  className="font-semibold"
+                />
                 . Listings publish under this account. Your tokens are stored
                 encrypted and you can disconnect at any time.
               </p>
@@ -203,7 +216,9 @@ export default async function SettingsPage({
           )}
         </CardBody>
       </Card>
+      </GlareHover>
 
+      <GlareHover>
       <Card>
         <CardHeader
           title={
@@ -220,6 +235,7 @@ export default async function SettingsPage({
           <AppSignOutButton className="inline-flex items-center justify-center gap-2 rounded-md border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg shadow-xs transition-colors hover:bg-surface-2" />
         </CardBody>
       </Card>
+      </GlareHover>
     </main>
   );
 }
