@@ -212,7 +212,7 @@ export default function Features() {
           <Reveal key={n}>
             <div
               className={`grid items-center gap-8 lg:gap-16 ${
-                i % 2 === 0 ? "lg:grid-cols-[1fr_460px]" : "lg:grid-cols-[460px_1fr]"
+                i % 2 === 0 ? "lg:grid-cols-[1fr_480px]" : "lg:grid-cols-[480px_1fr]"
               }`}
             >
               <div className={i % 2 === 0 ? "" : "lg:order-2"}>
@@ -222,7 +222,7 @@ export default function Features() {
                 <h2 className="mt-4 font-display text-[clamp(24px,3.4vw,34px)] font-bold tracking-tight text-flash">
                   {title}
                 </h2>
-                <p className="mt-3 max-w-[44ch] text-[15px] leading-relaxed text-flash-dim">
+                <p className="mt-3.5 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
                   {blurb}
                 </p>
                 <div className="mt-6 flex flex-wrap gap-2.5">
@@ -251,7 +251,7 @@ export default function Features() {
           <div className="mt-8 grid gap-5 lg:grid-cols-2">
             <div>
               <BuyerReplyCard />
-              <p className="mt-3 px-1 text-[13px] leading-relaxed text-flash-faint">
+              <p className="mt-3.5 px-1 text-[14px] leading-relaxed text-flash-faint">
                 Buyer questions arrive pre-answered from the item&apos;s real
                 attributes — you approve, edit, or rewrite before anything
                 sends.
@@ -259,7 +259,7 @@ export default function Features() {
             </div>
             <div>
               <IsolationCard />
-              <p className="mt-3 px-1 text-[13px] leading-relaxed text-flash-faint">
+              <p className="mt-3.5 px-1 text-[14px] leading-relaxed text-flash-faint">
                 Every row is isolated to your account by the database itself;
                 photos live behind signed, expiring URLs.
               </p>

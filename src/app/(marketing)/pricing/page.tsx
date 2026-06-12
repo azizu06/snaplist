@@ -93,24 +93,24 @@ export default function Pricing() {
             borderRadius={24}
             className="h-full"
           >
-            <div className="relative flex h-full flex-col overflow-hidden rounded-3xl bg-panel p-8">
-              <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
+            <div className="relative flex h-full flex-col overflow-hidden rounded-3xl bg-panel p-8 sm:p-9">
+              <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[11.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
                 Live now
               </span>
-              <h2 className="font-display text-[22px] font-bold text-flash">Beta</h2>
-              <p className="mt-1 text-[13.5px] text-flash-faint">
+              <h2 className="font-display text-[24px] font-bold text-flash">Beta</h2>
+              <p className="mt-1.5 text-[15px] text-flash-faint">
                 Everything SnapList can do today
               </p>
-              <p className="nums mt-6 font-display text-[52px] font-bold leading-none tracking-tight text-flash">
+              <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash">
                 $0
-                <span className="ml-1.5 text-[15px] font-medium text-flash-faint">
+                <span className="ml-1.5 text-[16px] font-medium text-flash-faint">
                   / forever-while-beta
                 </span>
               </p>
-              <ul className="mb-8 mt-7 space-y-3">
+              <ul className="mb-8 mt-7 space-y-3.5">
                 {INCLUDED.map((line) => (
-                  <li key={line} className="flex items-start gap-2.5 text-[14px] text-flash-dim">
-                    <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <li key={line} className="flex items-start gap-3 text-[15px] text-flash-dim">
+                    <svg viewBox="0 0 24 24" className="mt-0.5 size-[18px] shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 6 9 17l-5-5" />
                     </svg>
                     {line}
@@ -119,36 +119,36 @@ export default function Pricing() {
               </ul>
               <Link
                 href="/login"
-                className="group mt-auto inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
+                className="group mt-auto inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
               >
                 Start selling free
                 <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
               </Link>
-              <p className="mt-3 text-center text-[12px] text-flash-faint">
+              <p className="mt-3.5 text-center text-[13px] text-flash-faint">
                 No credit card · cancel nothing, there&apos;s nothing to cancel
               </p>
             </div>
           </ElectricBorder>
 
           {/* coming-soon tier — same skeleton as Beta so the row reads uniform */}
-          <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-line bg-panel p-8 shadow-card">
-            <span className="absolute right-6 top-6 rounded-full border border-line bg-night-2 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-flash-faint">
+          <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-line bg-panel p-8 shadow-card sm:p-9">
+            <span className="absolute right-6 top-6 rounded-full border border-line bg-night-2 px-3 py-1 text-[11.5px] font-bold uppercase tracking-[0.1em] text-flash-faint">
               Coming soon
             </span>
-            <h2 className="font-display text-[22px] font-bold text-flash">Seller Pro</h2>
-            <p className="mt-1 text-[13.5px] text-flash-faint">
+            <h2 className="font-display text-[24px] font-bold text-flash">Seller Pro</h2>
+            <p className="mt-1.5 text-[15px] text-flash-faint">
               For flippers, resellers & steady decluttering
             </p>
-            <p className="nums mt-6 font-display text-[52px] font-bold leading-none tracking-tight text-flash-dim">
+            <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash-dim">
               $—
-              <span className="ml-1.5 text-[15px] font-medium text-flash-faint">
+              <span className="ml-1.5 text-[16px] font-medium text-flash-faint">
                 / month, after beta
               </span>
             </p>
-            <ul className="mb-8 mt-7 space-y-3">
+            <ul className="mb-8 mt-7 space-y-3.5">
               {PRO_INCLUDED.map((line) => (
-                <li key={line} className="flex items-start gap-2.5 text-[14px] text-flash-dim">
-                  <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-flash-faint" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <li key={line} className="flex items-start gap-3 text-[15px] text-flash-dim">
+                  <svg viewBox="0 0 24 24" className="mt-0.5 size-[18px] shrink-0 text-flash-faint" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
                   {line}
@@ -157,18 +157,18 @@ export default function Pricing() {
             </ul>
             <p
               aria-disabled="true"
-              className="mt-auto inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-full border border-line bg-night-2 px-6 py-3 text-[15px] font-semibold text-flash-faint"
+              className="mt-auto inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-full border border-line bg-night-2 px-6 py-3.5 text-[15.5px] font-semibold text-flash-faint"
             >
               Notify me when it lands
             </p>
-            <p className="mt-3 text-center text-[12px] text-flash-faint">
+            <p className="mt-3.5 text-center text-[13px] text-flash-faint">
               Beta users keep early-bird pricing
             </p>
           </div>
         </Reveal>
 
-        <Reveal className="mt-14 rounded-2xl border border-line bg-night-2 p-7 text-center">
-          <p className="mx-auto max-w-[62ch] text-[14px] leading-relaxed text-flash-dim">
+        <Reveal className="mt-14 rounded-2xl border border-line bg-night-2 p-8 text-center">
+          <p className="mx-auto max-w-[62ch] text-[15px] leading-relaxed text-flash-dim">
             The honest part: SnapList is a production-real AI engineering
             showcase. Beta is genuinely free because your usage is what makes
             the pricing engine smarter — when paid tiers land, nothing you
@@ -190,7 +190,7 @@ export default function Pricing() {
             <FaqAccordion items={PRICING_FAQ} />
           </Reveal>
           <Reveal className="mt-10 text-center">
-            <p className="text-[13.5px] text-flash-dim">
+            <p className="text-[14.5px] text-flash-dim">
               Product questions live on the{" "}
               <Link href="/about#faq" className="link-underline font-semibold text-iris">
                 general FAQ
