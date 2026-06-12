@@ -1,12 +1,16 @@
+import { InboxDemoVideo } from "./inbox-demo-video";
+
 /**
- * Inbox empty state (UI pass: the old one was "just a bunch of text").
- * A ghost-conversation composition — two tilted blank message cards behind a
- * low-opacity mock thread (buyer bubble + sparkle-drafted reply) under a soft
- * violet glow — reading as "this is what it will look like", then one
- * headline, one sentence, and a hint about where messages come from.
+ * Inbox empty state (app-surfaces v3). A ghost-conversation composition — two
+ * tilted blank message cards behind a low-opacity mock thread (buyer bubble +
+ * sparkle-drafted reply) under a soft violet glow — reading as "this is what
+ * it will look like", then one headline, one sentence, a hint about where
+ * messages come from, and a lazy "watch how replies work" video teaser
+ * (designed CSS poster until the mp4 can play, so it never reads broken).
  *
- * Pure CSS/SVG, no client state — renders identically from the live inbox and
- * the dev preview harness.
+ * The composition itself stays CSS/SVG; only the video teaser is a client
+ * component — the state renders identically from the live inbox and the dev
+ * preview harness.
  */
 
 function SparkleIcon({ className }: { className?: string }) {
@@ -91,6 +95,9 @@ export function InboxEmptyState() {
         </svg>
         eBay buyer questions sync here automatically — or try the simulator above.
       </p>
+
+      {/* ---- the flow, live: lazy muted-loop walkthrough ---- */}
+      <InboxDemoVideo />
     </div>
   );
 }

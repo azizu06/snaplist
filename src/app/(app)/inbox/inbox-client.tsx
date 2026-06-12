@@ -6,6 +6,7 @@ import { useSupabaseClient } from "@/lib/supabase/client";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { StatusBadge } from "@/components/ui/badge";
 import { InboxEmptyState } from "./inbox-empty";
+import { SimulatorCard } from "./simulator-card";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -260,58 +261,14 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[13px] font-semibold text-fg-strong">
-            Simulate a buyer question
-          </h2>
-          <StatusBadge
-            label={live ? "Live" : "Connecting…"}
-            tone={live ? "success" : "neutral"}
-          />
-        </div>
-        {items.length === 0 ? (
-          <p className="text-sm text-muted">
-            No items yet — create a listing first, then simulate a buyer question
-            about it.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={selectedItem}
-              onChange={(e) => setSelectedItem(e.target.value)}
-              className="rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
-              aria-label="Item to ask about"
-            >
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={simulate}
-              // Disabled until the Realtime subscription is live: simulating
-              // before SUBSCRIBED could let the INSERT land before the listener
-              // is active, leaving the question invisible until refresh.
-              disabled={busy === "simulate" || !live}
-              title={live ? undefined : "Waiting for the live connection…"}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
-            >
-              {busy === "simulate"
-                ? "Asking…"
-                : live
-                  ? "Simulate buyer question"
-                  : "Connecting…"}
-            </button>
-          </div>
-        )}
-        <p className="text-xs text-faint">
-          Sandbox: replies are drafted by the agent, approved by you, and delivery
-          is a logged no-op until the eBay adapter lands.
-        </p>
-      </section>
+      <SimulatorCard
+        items={items}
+        selectedItem={selectedItem}
+        onSelectItem={setSelectedItem}
+        onSimulate={simulate}
+        live={live}
+        simulating={busy === "simulate"}
+      />
 
       {error ? (
         <p
@@ -323,7 +280,17 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
       ) : null}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
+          {inbound.length > 0 ? (
+            <span
+              data-nums
+              className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
+            >
+              {inbound.length}
+            </span>
+          ) : null}
+        </div>
         {inbound.length === 0 ? (
           <InboxEmptyState />
         ) : (
