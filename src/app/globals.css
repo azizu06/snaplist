@@ -25,22 +25,23 @@
 
   /* ==========================================================================
      Darkroom identity (issue #49) — marketing + (eventually) the whole app.
-     Near-black canvas so the seller's item photos are the color; one volt
-     accent reserved for actions; warm "flash" white for display type.
+     Near-black canvas so the seller's item photos are the color; one iris
+     accent reserved for actions. Palette adopted from Linear's dark site
+     (owner-picked over Stripe/Mercury/Raycast/Vercel candidates).
      These are fixed (not scheme-dependent): the marketing site is always dark.
      ========================================================================== */
-  --color-night:       oklch(15.5% 0.006 285);  /* page canvas              */
-  --color-night-2:     oklch(18%   0.007 285);  /* raised section           */
-  --color-panel:       oklch(21%   0.008 285);  /* card                     */
-  --color-panel-2:     oklch(25%   0.009 285);  /* nested / hover           */
-  --color-line:        oklch(30%   0.008 285);  /* hairline on night        */
-  --color-line-2:      oklch(38%   0.010 285);  /* stronger hairline        */
-  --color-flash:       oklch(97%   0.004 95);   /* warm display white       */
-  --color-flash-dim:   oklch(80%   0.006 95);   /* secondary text           */
-  --color-flash-faint: oklch(62%   0.008 285);  /* tertiary text            */
-  --color-volt:        oklch(92%   0.21  118);  /* the accent — volt lime   */
-  --color-volt-deep:   oklch(80%   0.19  120);
-  --color-volt-ink:    oklch(18%   0.04  120);  /* text on volt             */
+  --color-night:       #08090a;  /* page canvas               */
+  --color-night-2:     #0f1011;  /* raised section            */
+  --color-panel:       #141516;  /* card                      */
+  --color-panel-2:     #1b1c1e;  /* nested / hover            */
+  --color-line:        #23252a;  /* hairline on night         */
+  --color-line-2:      #2e3035;  /* stronger hairline         */
+  --color-flash:       #f7f8f8;  /* display white             */
+  --color-flash-dim:   #d0d6e0;  /* secondary text            */
+  --color-flash-faint: #8a8f98;  /* tertiary text             */
+  --color-iris:        #5e6ad2;  /* the accent — Linear iris  */
+  --color-iris-deep:   #4f5abf;
+  --color-iris-ink:    #ffffff;  /* text on iris              */
 
   /* Neutrals — Shopify-admin chrome (issue #40 round 2): gray canvas so the
      white cards read as surfaces, a near-black top bar, and a near-black
@@ -163,21 +164,21 @@
     height: 80%;
     pointer-events: none;
     background:
-      radial-gradient(38% 45% at 28% 18%, oklch(92% 0.21 118 / 0.17), transparent 70%),
-      radial-gradient(42% 50% at 74% 8%, oklch(70% 0.16 290 / 0.2), transparent 70%);
+      radial-gradient(38% 45% at 28% 18%, rgba(94, 106, 210, 0.22), transparent 70%),
+      radial-gradient(42% 50% at 74% 8%, rgba(139, 92, 246, 0.18), transparent 70%);
     filter: blur(28px);
   }
   /* Glassy raised card on the night canvas. */
   .glass-panel {
     background: linear-gradient(
       180deg,
-      oklch(23% 0.009 285 / 0.92),
-      oklch(19% 0.008 285 / 0.92)
+      rgba(27, 28, 30, 0.92),
+      rgba(18, 19, 21, 0.92)
     );
-    border: 1px solid oklch(34% 0.01 285 / 0.7);
+    border: 1px solid rgba(46, 48, 53, 0.7);
     box-shadow:
-      0 1px 0 0 oklch(100% 0 0 / 0.06) inset,
-      0 24px 64px -24px oklch(0% 0 0 / 0.7);
+      0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+      0 24px 64px -24px rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(10px);
   }
   /* Infinite category marquee. */

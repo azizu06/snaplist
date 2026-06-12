@@ -79,13 +79,13 @@ export default function HowItWorks() {
       <section className="aurora dotgrid relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <div className="mx-auto w-full max-w-6xl">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-volt">
+            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
               How it works
             </p>
             <h1 className="mt-3 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               One photo in.
               <br />A{" "}
-              <em className="font-serif-accent font-normal italic text-volt">
+              <em className="font-serif-accent font-normal italic text-iris">
                 defensible
               </em>{" "}
               listing out.
@@ -104,7 +104,7 @@ export default function HowItWorks() {
             <Reveal key={n} delay={0.05}>
               <div className="grid items-start gap-6 rounded-2xl border border-line/70 bg-panel/50 p-7 transition-colors hover:border-line-2 hover:bg-panel sm:grid-cols-[140px_1fr] sm:p-9">
                 <div className="flex items-baseline gap-3 sm:block">
-                  <span className="nums font-display text-[13px] font-bold text-volt">
+                  <span className="nums font-display text-[13px] font-bold text-iris">
                     {n}
                   </span>
                   <h2 className="font-display text-[24px] font-bold tracking-tight text-flash sm:mt-1.5">
@@ -119,7 +119,7 @@ export default function HowItWorks() {
                     {chips.map((chip) => (
                       <span
                         key={chip}
-                        className="rounded-full border border-volt/25 bg-volt/8 px-3 py-1 text-[11.5px] font-medium text-volt"
+                        className="rounded-full border border-iris/25 bg-iris/8 px-3 py-1 text-[11.5px] font-medium text-iris"
                       >
                         {chip}
                       </span>
@@ -139,7 +139,7 @@ export default function HowItWorks() {
       <section className="border-t border-line/60 bg-night-2/40">
         <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-volt">
+            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
               The pricing waterfall
             </p>
             <h2 className="mt-3 max-w-2xl font-display text-[clamp(26px,3.6vw,40px)] font-bold leading-tight tracking-tight text-flash">
@@ -163,14 +163,14 @@ export default function HowItWorks() {
                   <h3 className="font-display text-[17px] font-semibold text-flash">
                     {name}
                   </h3>
-                  <span className="text-[12px] font-semibold text-volt">
+                  <span className="text-[12px] font-semibold text-iris">
                     {confidence} confidence
                   </span>
                 </div>
                 <p className="mt-1 text-[13.5px] text-flash-faint">{when}</p>
                 <div className="mt-3.5 h-1.5 overflow-hidden rounded-full bg-panel-2">
                   <div
-                    className={`h-full ${width} rounded-full bg-gradient-to-r from-volt-deep to-volt`}
+                    className={`h-full ${width} rounded-full bg-gradient-to-r from-iris-deep to-iris`}
                   />
                 </div>
               </div>
@@ -186,7 +186,7 @@ export default function HowItWorks() {
           </h2>
           <Link
             href="/login"
-            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-volt px-7 py-3.5 text-[15px] font-semibold text-volt-ink shadow-[0_0_40px_-8px] shadow-volt/50 transition-transform hover:scale-[1.03]"
+            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15px] font-semibold text-iris-ink shadow-[0_0_40px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03]"
           >
             Try it free
             <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>

@@ -89,14 +89,14 @@ export default function Landing() {
           <div>
             <Reveal>
               <span className="inline-flex items-center gap-2 rounded-full border border-line bg-panel/60 px-3.5 py-1.5 text-[12px] font-medium text-flash-dim">
-                <span className="size-1.5 rounded-full bg-volt" />
+                <span className="size-1.5 rounded-full bg-iris" />
                 AI-priced listings, live on eBay
               </span>
               <h1 className="mt-6 font-display text-[clamp(40px,6vw,68px)] font-bold leading-[1.02] tracking-tight text-flash">
                 Snap a photo.
                 <br />
                 Sell it{" "}
-                <em className="font-serif-accent font-normal italic text-volt">
+                <em className="font-serif-accent font-normal italic text-iris">
                   properly
                 </em>
                 .
@@ -109,7 +109,7 @@ export default function Landing() {
               <div className="mt-9 flex flex-wrap items-center gap-3.5">
                 <Link
                   href="/login"
-                  className="group inline-flex items-center gap-2 rounded-full bg-volt px-6 py-3 text-[15px] font-semibold text-volt-ink shadow-[0_0_36px_-8px] shadow-volt/50 transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                  className="group inline-flex items-center gap-2 rounded-full bg-iris px-6 py-3 text-[15px] font-semibold text-iris-ink shadow-[0_0_36px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03] active:scale-[0.98]"
                 >
                   Start selling free
                   <span aria-hidden className="transition-transform group-hover:translate-x-1">
@@ -158,7 +158,7 @@ export default function Landing() {
       {/* ============================ how it works ============================ */}
       <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-32">
         <Reveal>
-          <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-volt">
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
             How it works
           </p>
           <h2 className="mt-3 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
@@ -173,7 +173,7 @@ export default function Landing() {
               key={n}
               className="group relative overflow-hidden rounded-2xl border border-line/70 bg-panel/50 p-7 transition-colors hover:border-line-2 hover:bg-panel"
             >
-              <span className="nums font-display text-[13px] font-bold text-volt">
+              <span className="nums font-display text-[13px] font-bold text-iris">
                 {n}
               </span>
               <h3 className="mt-4 font-display text-[20px] font-semibold text-flash">
@@ -184,7 +184,7 @@ export default function Landing() {
               </p>
               <span
                 aria-hidden
-                className="pointer-events-none absolute -bottom-12 -right-12 size-32 rounded-full bg-volt/0 blur-2xl transition-colors duration-500 group-hover:bg-volt/10"
+                className="pointer-events-none absolute -bottom-12 -right-12 size-32 rounded-full bg-iris/0 blur-2xl transition-colors duration-500 group-hover:bg-iris/10"
               />
             </div>
           ))}
@@ -192,7 +192,7 @@ export default function Landing() {
         <Reveal className="mt-10">
           <Link
             href="/how-it-works"
-            className="group inline-flex items-center gap-2 text-[14.5px] font-semibold text-volt"
+            className="group inline-flex items-center gap-2 text-[14.5px] font-semibold text-iris"
           >
             Walk through the whole pipeline
             <span aria-hidden className="transition-transform group-hover:translate-x-1">
@@ -206,7 +206,7 @@ export default function Landing() {
       <section className="border-t border-line/60 bg-night-2/40">
         <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-32">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-volt">
+            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
               Features
             </p>
             <h2 className="mt-3 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
@@ -224,7 +224,7 @@ export default function Landing() {
                   big ? "lg:col-span-1 lg:row-span-2" : ""
                 }`}
               >
-                <span className="rounded-full bg-volt/10 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-volt">
+                <span className="rounded-full bg-iris/10 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris">
                   {tag}
                 </span>
                 <h3 className="mt-4 font-display text-[19px] font-semibold leading-snug text-flash">
@@ -263,7 +263,7 @@ export default function Landing() {
           <Reveal>
             <h2 className="font-display text-[clamp(32px,5vw,52px)] font-bold leading-tight tracking-tight text-flash">
               That box in your closet is{" "}
-              <em className="font-serif-accent font-normal italic text-volt">
+              <em className="font-serif-accent font-normal italic text-iris">
                 money
               </em>
             </h2>
@@ -273,7 +273,7 @@ export default function Landing() {
             </p>
             <Link
               href="/login"
-              className="group mt-9 inline-flex items-center gap-2 rounded-full bg-volt px-7 py-3.5 text-[15.5px] font-semibold text-volt-ink shadow-[0_0_44px_-8px] shadow-volt/50 transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink shadow-[0_0_44px_-8px] shadow-iris/50 transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Snap your first photo
               <span aria-hidden className="transition-transform group-hover:translate-x-1">

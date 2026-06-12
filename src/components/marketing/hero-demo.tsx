@@ -172,10 +172,10 @@ export function HeroDemo() {
         className="absolute left-1/2 top-[64px] w-[270px] -translate-x-1/2 rounded-2xl border border-line-2/60 bg-gradient-to-br from-panel-2 to-night-2 p-5 shadow-[0_16px_40px_-12px_rgba(0,0,0,.7)]"
       >
         {/* viewfinder brackets */}
-        <span aria-hidden className="absolute left-2.5 top-2.5 size-4 border-l-2 border-t-2 border-volt/80 rounded-tl" />
-        <span aria-hidden className="absolute right-2.5 top-2.5 size-4 border-r-2 border-t-2 border-volt/80 rounded-tr" />
-        <span aria-hidden className="absolute bottom-2.5 left-2.5 size-4 border-b-2 border-l-2 border-volt/80 rounded-bl" />
-        <span aria-hidden className="absolute bottom-2.5 right-2.5 size-4 border-b-2 border-r-2 border-volt/80 rounded-br" />
+        <span aria-hidden className="absolute left-2.5 top-2.5 size-4 border-l-2 border-t-2 border-iris/80 rounded-tl" />
+        <span aria-hidden className="absolute right-2.5 top-2.5 size-4 border-r-2 border-t-2 border-iris/80 rounded-tr" />
+        <span aria-hidden className="absolute bottom-2.5 left-2.5 size-4 border-b-2 border-l-2 border-iris/80 rounded-bl" />
+        <span aria-hidden className="absolute bottom-2.5 right-2.5 size-4 border-b-2 border-r-2 border-iris/80 rounded-br" />
         <CameraArt className="h-auto w-full text-flash-dim" />
         <p className="mt-3 text-center text-[11px] font-medium tracking-wide text-flash-faint">
           IMG_4032.jpg
@@ -185,7 +185,7 @@ export function HeroDemo() {
       {/* scan beam */}
       <div
         data-scan
-        className="absolute left-6 right-6 top-[8%] h-[3px] rounded-full bg-gradient-to-r from-transparent via-volt to-transparent shadow-[0_0_18px_2px] shadow-volt/40"
+        className="absolute left-6 right-6 top-[8%] h-[3px] rounded-full bg-gradient-to-r from-transparent via-iris to-transparent shadow-[0_0_18px_2px] shadow-iris/40"
       />
 
       {/* ---- stage 2: attribute chips ---- */}
@@ -194,7 +194,7 @@ export function HeroDemo() {
           <span
             key={chip}
             data-chip
-            className="rounded-full border border-volt/30 bg-volt/10 px-3 py-1.5 text-[11.5px] font-medium text-volt"
+            className="rounded-full border border-iris/30 bg-iris/10 px-3 py-1.5 text-[11.5px] font-medium text-iris"
           >
             {chip}
           </span>
@@ -219,14 +219,14 @@ export function HeroDemo() {
             </p>
           </div>
           <div className="text-right">
-            <span className="rounded-full bg-volt/15 px-2.5 py-1 text-[10.5px] font-semibold text-volt">
+            <span className="rounded-full bg-iris/15 px-2.5 py-1 text-[10.5px] font-semibold text-iris">
               6 sources cited
             </span>
             <p className="mt-1.5 text-[11px] text-flash-faint">range $98–$145</p>
           </div>
         </div>
         <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-panel-2">
-          <div data-range-fill className="h-full w-[72%] rounded-full bg-gradient-to-r from-volt-deep to-volt" />
+          <div data-range-fill className="h-full w-[72%] rounded-full bg-gradient-to-r from-iris-deep to-iris" />
         </div>
       </div>
 
@@ -252,20 +252,20 @@ export function HeroDemo() {
           </div>
         </div>
         <div className="mt-3.5 flex items-center justify-between gap-3">
-          <span className="rounded-full bg-volt/12 px-2.5 py-1 text-[10.5px] font-semibold text-volt">
+          <span className="rounded-full bg-iris/12 px-2.5 py-1 text-[10.5px] font-semibold text-iris">
             92% confident
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-volt px-3.5 py-1.5 text-[12px] font-bold text-volt-ink">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-iris px-3.5 py-1.5 text-[12px] font-bold text-iris-ink">
             Publish to eBay
           </span>
         </div>
         <div
           data-live
-          className="absolute -right-2 -top-2 flex items-center gap-1.5 rounded-full border border-volt/40 bg-night px-2.5 py-1 text-[10.5px] font-bold text-volt shadow-[0_0_20px_-2px] shadow-volt/40"
+          className="absolute -right-2 -top-2 flex items-center gap-1.5 rounded-full border border-iris/40 bg-night px-2.5 py-1 text-[10.5px] font-bold text-iris shadow-[0_0_20px_-2px] shadow-iris/40"
         >
           <span className="relative flex size-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-volt opacity-75" />
-            <span className="relative inline-flex size-1.5 rounded-full bg-volt" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iris opacity-75" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-iris" />
           </span>
           LIVE ON EBAY
         </div>

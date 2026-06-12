@@ -39,12 +39,12 @@ export default function Pricing() {
       <section className="aurora dotgrid relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <div className="mx-auto w-full max-w-6xl text-center">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-volt">
+            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
               Pricing
             </p>
             <h1 className="mx-auto mt-3 max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               Free while we&apos;re in{" "}
-              <em className="font-serif-accent font-normal italic text-volt">
+              <em className="font-serif-accent font-normal italic text-iris">
                 beta
               </em>
             </h1>
@@ -59,8 +59,8 @@ export default function Pricing() {
       <section className="mx-auto w-full max-w-5xl px-5 pb-28 sm:px-8">
         <Reveal stagger className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr_0.9fr]">
           {/* live tier */}
-          <div className="relative overflow-hidden rounded-3xl border border-volt/40 bg-panel p-8 shadow-[0_0_60px_-20px] shadow-volt/30">
-            <span className="absolute right-6 top-6 rounded-full bg-volt px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-volt-ink">
+          <div className="relative overflow-hidden rounded-3xl border border-iris/40 bg-panel p-8 shadow-[0_0_60px_-20px] shadow-iris/30">
+            <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
               Live now
             </span>
             <h2 className="font-display text-[22px] font-bold text-flash">Beta</h2>
@@ -76,7 +76,7 @@ export default function Pricing() {
             <ul className="mt-7 space-y-3">
               {INCLUDED.map((line) => (
                 <li key={line} className="flex items-start gap-2.5 text-[14px] text-flash-dim">
-                  <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-volt" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg viewBox="0 0 24 24" className="mt-0.5 size-4 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
                   {line}
@@ -85,7 +85,7 @@ export default function Pricing() {
             </ul>
             <Link
               href="/login"
-              className="group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-volt px-6 py-3 text-[15px] font-semibold text-volt-ink transition-transform hover:scale-[1.02]"
+              className="group mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
             >
               Start selling free
               <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>

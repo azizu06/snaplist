@@ -42,7 +42,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
         >
           <span
             aria-hidden
-            className="flex size-7 items-center justify-center rounded-lg bg-volt text-volt-ink shadow-[0_0_24px_-4px] shadow-volt/50"
+            className="flex size-7 items-center justify-center rounded-lg bg-iris text-iris-ink shadow-[0_0_24px_-4px] shadow-iris/50"
           >
             <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
@@ -68,7 +68,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           {signedIn ? (
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-volt px-4.5 py-2 text-[13.5px] font-semibold text-volt-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Open app
               <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -83,7 +83,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
               </Link>
               <Link
                 href="/login"
-                className="group inline-flex items-center gap-1.5 rounded-full bg-volt px-4.5 py-2 text-[13.5px] font-semibold text-volt-ink shadow-[0_0_28px_-6px] shadow-volt/40 transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink shadow-[0_0_28px_-6px] shadow-iris/40 transition-transform hover:scale-[1.03] active:scale-[0.98]"
               >
                 Start selling
                 <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -121,7 +121,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           <Link
             href={signedIn ? "/dashboard" : "/login"}
             onClick={() => setOpen(false)}
-            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-volt px-4 py-2.5 text-[14px] font-semibold text-volt-ink"
+            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[14px] font-semibold text-iris-ink"
           >
             {signedIn ? "Open app →" : "Start selling →"}
           </Link>

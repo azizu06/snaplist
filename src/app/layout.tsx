@@ -51,25 +51,25 @@ export default function RootLayout({
     <ClerkProvider
       appearance={{
         variables: {
-          colorPrimary: "#e4ff4f",
-          colorPrimaryForeground: "#101013",
-          colorBackground: "#16161a",
-          colorForeground: "#f4f4f2",
-          colorMutedForeground: "#9b9ba4",
-          colorInput: "#1d1d22",
-          colorInputForeground: "#f4f4f2",
-          colorBorder: "#2a2a31",
-          colorRing: "#e4ff4f",
+          colorPrimary: "#5e6ad2",
+          colorPrimaryForeground: "#ffffff",
+          colorBackground: "#141516",
+          colorForeground: "#f7f8f8",
+          colorMutedForeground: "#8a8f98",
+          colorInput: "#1b1c1e",
+          colorInputForeground: "#f7f8f8",
+          colorBorder: "#23252a",
+          colorRing: "#5e6ad2",
           borderRadius: "0.75rem",
           fontFamily: "var(--font-geist-sans), ui-sans-serif, sans-serif",
         },
         elements: {
-          cardBox: { boxShadow: "0 0 0 1px #2a2a31, 0 24px 64px -16px rgba(0,0,0,.8)" },
+          cardBox: { boxShadow: "0 0 0 1px #23252a, 0 24px 64px -16px rgba(0,0,0,.8)" },
           socialButtonsBlockButton: {
-            background: "#1d1d22",
-            border: "1px solid #2a2a31",
+            background: "#1b1c1e",
+            border: "1px solid #23252a",
           },
-          footer: { background: "#131316" },
+          footer: { background: "#0f1011" },
         },
       }}
     >
