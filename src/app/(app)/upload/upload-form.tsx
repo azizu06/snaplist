@@ -287,13 +287,15 @@ function FormBody({
                       type="button"
                       onClick={() => onClear(slot)}
                       aria-label={`Remove photo ${slot + 1}`}
-                      className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-fg-strong/70 text-white transition-colors hover:bg-fg-strong"
+                      className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
                     >
                       <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                         <path d="M18 6 6 18M6 6l12 12" />
                       </svg>
                     </button>
-                    <span className="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-fg-strong/70 text-[10px] font-semibold text-white">
+                    {/* Photo scrim badges: pinned ink scrim — a dark badge on
+                        a photo is right in both themes (fg-strong inverts). */}
+                    <span className="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-[#131e3a]/70 text-[10px] font-semibold text-white">
                       {slot + 1}
                     </span>
                   </>

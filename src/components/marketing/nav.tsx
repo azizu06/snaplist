@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/logo";
+import { ThemeIconToggle } from "@/components/theme-toggle";
 
 const LINKS = [
   { href: "/how-it-works", label: "How it works" },
@@ -57,6 +58,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
         </div>
 
         <div className="hidden items-center gap-2.5 md:flex">
+          <ThemeIconToggle />
           {signedIn ? (
             <Link
               href="/dashboard"
@@ -84,18 +86,21 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           )}
         </div>
 
-        {/* mobile toggle */}
+        {/* mobile: theme toggle + menu burger */}
+        <div className="flex items-center gap-1 md:hidden">
+        <ThemeIconToggle />
         <button
           type="button"
           aria-expanded={open}
           aria-label="Toggle menu"
           onClick={() => setOpen((v) => !v)}
-          className="flex size-9 items-center justify-center rounded-lg text-flash md:hidden"
+          className="flex size-9 items-center justify-center rounded-lg text-flash"
         >
           <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             {open ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
           </svg>
         </button>
+        </div>
       </nav>
 
       {open ? (

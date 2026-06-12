@@ -104,7 +104,7 @@ export default function Landing() {
         <HeroPrismRays />
         <div className="relative mx-auto w-full max-w-6xl px-5 sm:px-8">
           <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3.5 py-1.5 text-[12px] font-semibold text-flash shadow-xs backdrop-blur">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3.5 py-1.5 text-[12px] font-semibold text-flash shadow-xs backdrop-blur dark:border dark:border-white/10 dark:bg-white/10">
               <span className="size-1.5 rounded-full bg-iris" />
               AI-priced listings, live on eBay
             </span>
@@ -144,7 +144,7 @@ export default function Landing() {
               <span>Built for</span>
               <RotatingText
                 texts={[...ROTATING_CATEGORIES]}
-                mainClassName="overflow-hidden rounded-full bg-white/70 px-3 py-0.5 text-iris backdrop-blur"
+                mainClassName="overflow-hidden rounded-full bg-white/70 px-3 py-0.5 text-iris backdrop-blur dark:bg-white/10"
                 staggerFrom="last"
                 staggerDuration={0.02}
                 rotationInterval={2200}
@@ -166,7 +166,7 @@ export default function Landing() {
                 >
                   <Link
                     href="/login"
-                    className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
+                    className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98] dark:text-night"
                   >
                     Start selling free
                     <span aria-hidden className="transition-transform group-hover:translate-x-1">
@@ -177,7 +177,7 @@ export default function Landing() {
               </Magnet>
               <Link
                 href="/how-it-works"
-                className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[15px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm"
+                className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[15px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -196,7 +196,10 @@ export default function Landing() {
             </p>
           </div>
 
-          {/* The demo video — flat, large, the unmistakable centerpiece. */}
+          {/* The demo video — flat, large, the unmistakable centerpiece.
+              The footage itself is white-background; in dark mode the frame
+              gets a stronger border + a soft violet halo so it reads as an
+              intentional bright "screen", not a glaring white hole. */}
           <div className="mx-auto mt-12 w-full max-w-5xl sm:mt-16">
             <video
               src="/hero-demo.mp4"
@@ -204,7 +207,7 @@ export default function Landing() {
               muted
               loop
               playsInline
-              className="block h-auto w-full rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(19,30,58,0.35),0_4px_16px_-6px_rgba(19,30,58,0.12)]"
+              className="block h-auto w-full rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(19,30,58,0.35),0_4px_16px_-6px_rgba(19,30,58,0.12)] dark:border-2 dark:border-white/20 dark:shadow-[0_0_0_1px_rgba(126,95,255,0.25),0_0_60px_-10px_rgba(126,95,255,0.35),0_24px_64px_-24px_rgba(0,0,0,0.7)]"
               aria-label="Demo: a photo becomes a priced, published eBay listing"
             />
           </div>

@@ -58,6 +58,10 @@ const LOGOS: LogoItem[] = [
 export function MarketplaceLoop() {
   return (
     <LogoLoop
+      // LogoLoop's root is overflow-x-hidden only, which computes overflow-y
+      // to auto — a 3px descender overflow rendered a stray scrollbar nub at
+      // the band's right edge. Clamp the cross axis too.
+      className="overflow-y-hidden"
       logos={LOGOS}
       speed={36}
       direction="left"
@@ -65,7 +69,10 @@ export function MarketplaceLoop() {
       gap={140}
       pauseOnHover
       fadeOut
-      fadeOutColor="#ffffff"
+      // The fade gradient must match whatever the band sits on — the canvas
+      // token, not a hardcoded white, so the dark theme flips it for free
+      // (LogoLoop feeds this straight into a CSS custom property).
+      fadeOutColor="var(--color-night)"
       ariaLabel="Marketplaces SnapList publishes to"
     />
   );

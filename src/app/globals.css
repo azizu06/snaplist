@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* User-controlled dark mode (next-themes sets .dark on <html>); `dark:`
+   utilities key off the class, never the OS media query, so the in-app
+   toggle is the single source of truth. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ============================================================================
    SnapList design tokens (issue #40, audit X-1 + X-5 + X-10).
    Single source of truth for color, type, radius, elevation on all surfaces.
@@ -121,9 +126,106 @@
                  0 12px 32px -12px rgba(19, 30, 58, 0.14);
 }
 
+/* ============================================================================
+   Prism-dark theme. Same identity, lights off: every token above re-points
+   under `.dark` so token-driven components flip automatically. The canvas
+   family is derived from the ink (#131e3a → a #0b1020-family navy-black),
+   violet stays the brand voice (nudged brighter for contrast on dark),
+   shadows go black-heavy with a faint violet rim on cards.
+   Unlayered on purpose: wins over the @layer theme defaults. */
+.dark {
+  /* Marketing surface family */
+  --color-night:       #0b1020;  /* page canvas               */
+  --color-night-2:     #0f1730;  /* raised section slab       */
+  --color-panel:       #111a38;  /* card                      */
+  --color-panel-2:     #1a2444;  /* nested / hover            */
+  --color-line:        #222c4e;  /* hairline                  */
+  --color-line-2:      #32406e;  /* stronger hairline         */
+  --color-flash:       #edf1fc;  /* headings                  */
+  --color-flash-dim:   #aab6d8;  /* secondary text            */
+  --color-flash-faint: #7d8ab2;  /* tertiary text             */
+  --color-iris:        #7e5fff;  /* prism violet, +luminosity */
+  --color-iris-deep:   #8f74ff;  /* hover goes LIGHTER on dark*/
+  --color-iris-ink:    #ffffff;
+
+  /* App neutrals */
+  --color-bg:            #0b1020;
+  --color-surface:       #111a38;
+  --color-surface-2:     #182242;
+  --color-surface-3:     #20294e;
+  --color-fg:            #aab6d8;
+  --color-fg-strong:     #edf1fc;
+  --color-muted:         #8794ba;
+  --color-faint:         #65719a;
+  --color-border:        #222c4e;
+  --color-border-strong: #32406e;
+
+  /* App chrome */
+  --color-topbar:        #0e1530;
+  --color-topbar-fg:     #edf1fc;
+  --color-topbar-muted:  #8794ba;
+  --color-topbar-pill:   #1a2444;
+  --color-primary:       #7e5fff;
+  --color-primary-hover: #8f74ff;
+  --color-primary-fg:    #ffffff;
+
+  --color-accent:         #7e5fff;
+  --color-accent-solid:   #7e5fff;
+  --color-accent-hover:   #8f74ff;
+  --color-accent-fg:      #ffffff;
+  --color-accent-soft:    #261f52;
+  --color-accent-soft-fg: #b6a6ff;
+
+  /* Lifecycle: draft → amber */
+  --color-warning:         oklch(78% 0.14 80);
+  --color-warning-solid:   oklch(70% 0.15 70);
+  --color-warning-soft:    oklch(30% 0.055 75);
+  --color-warning-soft-fg: oklch(86% 0.11 85);
+  --color-warning-border:  oklch(45% 0.09 75);
+
+  /* Lifecycle: queued + published → emerald */
+  --color-success:         oklch(72% 0.13 158);
+  --color-success-solid:   oklch(56% 0.13 158);
+  --color-success-soft:    oklch(29% 0.05 160);
+  --color-success-soft-fg: oklch(85% 0.10 160);
+  --color-success-border:  oklch(44% 0.08 160);
+
+  /* Lifecycle: failed / draft_failed → red */
+  --color-danger:         oklch(68% 0.19 27);
+  --color-danger-solid:   oklch(58% 0.20 27);
+  --color-danger-soft:    oklch(28% 0.07 26);
+  --color-danger-soft-fg: oklch(84% 0.10 25);
+  --color-danger-border:  oklch(46% 0.13 27);
+
+  /* Info / processing */
+  --color-info-soft:    oklch(27% 0.04 250);
+  --color-info-soft-fg: oklch(83% 0.06 250);
+  --color-info-border:  oklch(42% 0.06 250);
+
+  /* Navy-alpha shadows vanish on navy — go black, heavier. */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.45),
+               0 1px 1px -1px rgb(0 0 0 / 0.35);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.5),
+               0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.6),
+               0 4px 8px -4px rgb(0 0 0 / 0.45);
+
+  /* Card lift: black depth + a whisper of violet rim so cards separate
+     from the navy canvas. */
+  --shadow-card: 0 0 0 1px rgba(126, 95, 255, 0.08),
+                 0 2px 6px -2px rgba(0, 0, 0, 0.5),
+                 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    color-scheme: light;
+  }
+  /* Native form controls / scrollbars follow the user toggle. */
+  html.dark {
+    color-scheme: dark;
   }
   body {
     font-family: var(--font-sans);
@@ -172,6 +274,12 @@
       radial-gradient(44% 52% at 78% 6%, rgba(0, 212, 255, 0.09), transparent 70%);
     filter: blur(30px);
   }
+  /* Same pools after dark — a touch more luminous so they read on navy. */
+  .dark .aurora::before {
+    background:
+      radial-gradient(40% 48% at 24% 12%, rgba(126, 95, 255, 0.2), transparent 70%),
+      radial-gradient(44% 52% at 78% 6%, rgba(0, 212, 255, 0.12), transparent 70%);
+  }
   /* The prism — SnapList's own animated gradient slab: light split through
      an aperture. Rebuilt as three layers so the color visibly FLOWS instead
      of a barely-perceptible background pan (Aziz: "just a rainbow, no
@@ -219,6 +327,29 @@
       radial-gradient(30% 40% at 30% 16%, rgba(95, 208, 245, 0.6) 0%, transparent 60%);
     animation: prism-flow-b 23s ease-in-out infinite alternate;
   }
+  /* Prism after dark: the same aperture, lights off. The white bloom pools
+     are gone (they read as glare on navy); instead the violet/cyan blobs
+     glow against a deep indigo wash so the light-through-a-prism story
+     survives the theme flip and light text stays readable on top. */
+  .dark .prism-gradient {
+    background:
+      radial-gradient(52% 68% at 20% 52%, rgba(126, 95, 255, 0.16) 0%, transparent 68%),
+      radial-gradient(60% 70% at 50% -10%, rgba(157, 123, 255, 0.18) 0%, transparent 60%),
+      linear-gradient(80deg, #221a55 0%, #0f3148 48%, #2c1d56 100%);
+    opacity: 0.96;
+  }
+  .dark .prism-gradient::before {
+    background:
+      radial-gradient(30% 38% at 12% 30%, rgba(126, 97, 255, 0.5) 0%, transparent 64%),
+      radial-gradient(34% 42% at 44% 46%, rgba(56, 178, 224, 0.38) 0%, transparent 62%),
+      radial-gradient(30% 40% at 80% 30%, rgba(255, 143, 171, 0.26) 0%, transparent 60%);
+  }
+  .dark .prism-gradient::after {
+    background:
+      radial-gradient(28% 38% at 64% 22%, rgba(168, 128, 255, 0.42) 0%, transparent 62%),
+      radial-gradient(24% 34% at 78% 12%, rgba(255, 197, 92, 0.2) 0%, transparent 58%),
+      radial-gradient(30% 40% at 30% 16%, rgba(82, 190, 235, 0.3) 0%, transparent 60%);
+  }
   /* Fine photographic grain over the slab only — texture so the gradient
      reads as material, not a flat rainbow. */
   .prism-grain {
@@ -243,6 +374,14 @@
     box-shadow:
       0 13px 27px -5px rgba(50, 50, 93, 0.18),
       0 8px 16px -8px rgba(0, 0, 0, 0.2);
+  }
+  .dark .glass-panel {
+    background: var(--color-panel);
+    border-color: rgba(50, 64, 110, 0.7);
+    box-shadow:
+      0 0 0 1px rgba(126, 95, 255, 0.07),
+      0 13px 27px -5px rgba(0, 0, 0, 0.5),
+      0 8px 16px -8px rgba(0, 0, 0, 0.55);
   }
   /* Infinite category marquee. */
   .marquee-track {
@@ -290,6 +429,15 @@
       transparent
     );
     animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+  /* Full-strength white sheen flashes on dark surfaces — dim it. */
+  .dark .skeleton-shimmer::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.09),
+      transparent
+    );
   }
   @media (prefers-reduced-motion: reduce) {
     .aperture-blades,

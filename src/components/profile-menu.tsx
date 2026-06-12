@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AppSignOutButton } from "./sign-out-button";
+import { ThemeMenuToggle } from "./theme-toggle";
 
 /**
  * ProfileMenu — the topbar avatar opens an account dropdown (dashboard v2).
@@ -138,6 +139,10 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
             >
               How it works
             </MenuItem>
+            {/* Quick light/dark flip — full Light/Dark/System lives in
+                Settings → Appearance. Doesn't close the menu: flipping is
+                something you want to see happen. */}
+            <ThemeMenuToggle />
           </div>
 
           <div className="border-t border-border pt-1">
