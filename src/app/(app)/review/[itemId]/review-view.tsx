@@ -88,7 +88,7 @@ export function ReviewView({
             <path d="m15 18-6-6 6-6" />
           </svg>
         </Link>
-        <h1 className="min-w-0 flex-1 truncate text-lg font-bold tracking-tight text-fg-strong">
+        <h1 className="min-w-0 flex-1 truncate font-display text-[22px] font-bold tracking-tight text-fg-strong">
           {data.listing?.title ?? data.identification?.label ?? "Review listing"}
         </h1>
         {statusChip ? (

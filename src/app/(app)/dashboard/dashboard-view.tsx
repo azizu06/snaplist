@@ -65,9 +65,10 @@ function Thumb({ url, title }: { url: string | null; title: string }) {
   );
 }
 
+// `counts` stays in the props API for the page/preview callers, but the
+// stat-tab cards compute per-filter counts from `rows` directly.
 export function DashboardView({
   rows,
-  counts,
   filter,
 }: {
   rows: DashboardRow[];
@@ -80,17 +81,19 @@ export function DashboardView({
     ? rows.filter((r) => activeFilter.statuses!.includes(r.status))
     : rows;
 
+  const filterCount = (f: (typeof DASHBOARD_FILTERS)[number]) =>
+    f.statuses ? rows.filter((r) => f.statuses!.includes(r.status)).length : rows.length;
+
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
-      {/* ---- page header (Shopify: title left, primary action right) ---- */}
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 py-7 sm:px-6">
+      {/* ---- page header (Stripe: 24px bold title; primary lives in topbar) ---- */}
       <header className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-bold tracking-tight text-fg-strong">Listings</h1>
-        <Link
-          href="/upload"
-          className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
-        >
-          New listing
-        </Link>
+        <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
+          Listings
+        </h1>
+        <span className="text-[12.5px] text-muted" data-nums>
+          {rows.length} item{rows.length === 1 ? "" : "s"}
+        </span>
       </header>
 
       {rows.length === 0 ? (
@@ -108,45 +111,42 @@ export function DashboardView({
         />
       ) : (
         <>
-          {/* ---- metrics strip (Shopify products-index pattern) ---- */}
-          <section className="grid grid-cols-3 divide-x divide-border rounded-xl border border-border bg-surface shadow-xs">
-            {(
-              [
-                { label: "Drafts to review", value: counts.draft },
-                { label: "Needs attention", value: counts.attention },
-                { label: "Live", value: counts.live },
-              ] as const
-            ).map(({ label, value }) => (
-              <div key={label} className="px-4 py-3">
-                <p className="text-xs font-medium text-muted">{label}</p>
-                <p className="mt-0.5 text-lg font-semibold text-fg-strong" data-nums>
-                  {value}
-                </p>
-              </div>
-            ))}
-          </section>
-
-          {/* ---- main card: tabs + table ---- */}
-          <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
-            <nav
-              aria-label="Filter by status"
-              className="flex items-center gap-0.5 border-b border-border px-2 py-1.5"
-            >
-              {DASHBOARD_FILTERS.map((f) => (
+          {/* ---- stat-tab cards (Stripe Transactions pattern: the filters ARE
+               the metric cards; selected = violet border) ---- */}
+          <nav
+            aria-label="Filter by status"
+            className="grid grid-cols-2 gap-2.5 sm:grid-cols-5"
+          >
+            {DASHBOARD_FILTERS.map((f) => {
+              const active = f.key === filter;
+              return (
                 <Link
                   key={f.key}
-                  href={f.key === "all" ? "/" : `/?filter=${f.key}`}
-                  aria-current={f.key === filter ? "page" : undefined}
-                  className={
-                    f.key === filter
-                      ? "rounded-lg bg-surface-3 px-3 py-1.5 text-[13px] font-semibold text-fg-strong"
-                      : "rounded-lg px-3 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg"
-                  }
+                  href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-xl border bg-surface px-3.5 py-2.5 transition-colors ${
+                    active
+                      ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
+                      : "border-border hover:border-border-strong"
+                  }`}
                 >
-                  {f.label}
+                  <span
+                    className={`block text-[12px] font-medium ${
+                      active ? "text-accent-soft-fg" : "text-muted"
+                    }`}
+                  >
+                    {f.label}
+                  </span>
+                  <span className="mt-0.5 block text-[18px] font-bold text-fg-strong" data-nums>
+                    {filterCount(f)}
+                  </span>
                 </Link>
-              ))}
-            </nav>
+              );
+            })}
+          </nav>
+
+          {/* ---- table card ---- */}
+          <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
 
             {visible.length === 0 ? (
               <p className="px-4 py-10 text-center text-sm text-muted">
@@ -158,11 +158,11 @@ export function DashboardView({
                 {/* desktop: Shopify data table */}
                 <table className="hidden w-full sm:table">
                   <thead>
-                    <tr className="border-b border-border text-left text-xs font-medium text-muted">
-                      <th className="py-2.5 pl-4 pr-2 font-medium">Product</th>
-                      <th className="px-2 py-2.5 font-medium">Status</th>
-                      <th className="px-2 py-2.5 text-right font-medium">Price</th>
-                      <th className="py-2.5 pl-2 pr-4 text-right font-medium">Created</th>
+                    <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+                      <th className="py-2.5 pl-4 pr-2 font-semibold">Product</th>
+                      <th className="px-2 py-2.5 font-semibold">Status</th>
+                      <th className="px-2 py-2.5 text-right font-semibold">Price</th>
+                      <th className="py-2.5 pl-2 pr-4 text-right font-semibold">Created</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
