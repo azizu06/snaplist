@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
 import { Banner } from "@/components/ui/banner";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -37,7 +38,7 @@ const STEPS = [
   },
 ] as const;
 
-function ProcessingView() {
+function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
   const [stage, setStage] = useState(0);
   useEffect(() => {
     // Pacing only: ~7s per stage, capped at the last (it holds until redirect).
@@ -52,43 +53,86 @@ function ProcessingView() {
     <div
       role="status"
       aria-live="polite"
-      className="flex flex-col gap-5 rounded-xl border border-border bg-surface p-5 shadow-xs"
+      className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs"
     >
-      <p className="text-sm font-semibold text-fg-strong">
-        Building your listing — this usually takes under half a minute.
-      </p>
-      <ol className="flex flex-col gap-4">
-        {STEPS.map((step, i) => (
-          <li key={step.label} className="flex items-start gap-3">
-            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
-              {i < stage ? (
-                <svg viewBox="0 0 24 24" className="size-5 text-success" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-              ) : i === stage ? (
-                <Spinner className="size-4 text-fg" />
-              ) : (
-                <span className="size-2 rounded-full bg-border-strong" />
-              )}
-            </span>
-            <span>
-              <span
-                className={`block text-sm font-medium ${
-                  i <= stage ? "text-fg-strong" : "text-faint"
-                }`}
-              >
-                {step.label}
+      {/* The seller's own photo under the scanner — the pipeline made visible. */}
+      {coverUrl ? (
+        <div className="relative h-60 overflow-hidden border-b border-border bg-surface-2">
+          {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
+          <img src={coverUrl} alt="" aria-hidden className="size-full object-cover" />
+          <motion.div
+            aria-hidden
+            className="absolute inset-x-0 h-16 bg-gradient-to-b from-transparent via-accent/25 to-transparent"
+            initial={{ top: "-12%" }}
+            animate={{ top: "104%" }}
+            transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+          />
+          {/* viewfinder corners */}
+          <span aria-hidden className="absolute left-3 top-3 size-5 rounded-tl border-l-[3px] border-t-[3px] border-white drop-shadow" />
+          <span aria-hidden className="absolute right-3 top-3 size-5 rounded-tr border-r-[3px] border-t-[3px] border-white drop-shadow" />
+          <span aria-hidden className="absolute bottom-3 left-3 size-5 rounded-bl border-b-[3px] border-l-[3px] border-white drop-shadow" />
+          <span aria-hidden className="absolute bottom-3 right-3 size-5 rounded-br border-b-[3px] border-r-[3px] border-white drop-shadow" />
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-5 p-5">
+        <p className="text-sm font-semibold text-fg-strong">
+          Building your listing — this usually takes under half a minute.
+        </p>
+        <ol className="flex flex-col gap-4">
+          {STEPS.map((step, i) => (
+            <li key={step.label} className="flex items-start gap-3">
+              <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
+                {i < stage ? (
+                  <motion.svg
+                    viewBox="0 0 24 24"
+                    className="size-5 text-success"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    initial={{ scale: 0.4, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 18 }}
+                  >
+                    <path d="M20 6 9 17l-5-5" />
+                  </motion.svg>
+                ) : i === stage ? (
+                  <Spinner className="size-4 text-accent" />
+                ) : (
+                  <span className="size-2 rounded-full bg-border-strong" />
+                )}
               </span>
-              {i === stage ? (
-                <span className="mt-0.5 block text-xs text-muted">{step.detail}</span>
-              ) : null}
-            </span>
-          </li>
-        ))}
-      </ol>
-      <p className="text-xs text-muted">
-        Keep this page open — you&apos;ll land on the finished draft automatically.
-      </p>
+              <span>
+                <span
+                  className={`block text-sm font-medium ${
+                    i <= stage ? "text-fg-strong" : "text-faint"
+                  }`}
+                >
+                  {step.label}
+                </span>
+                <AnimatePresence>
+                  {i === stage ? (
+                    <motion.span
+                      className="mt-0.5 block text-xs text-muted"
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                    >
+                      {step.detail}
+                    </motion.span>
+                  ) : null}
+                </AnimatePresence>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p className="text-xs text-muted">
+          Keep this page open — you&apos;ll land on the finished draft
+          automatically.
+        </p>
+      </div>
     </div>
   );
 }
@@ -124,7 +168,7 @@ function FormBody({
   const { pending } = useFormStatus();
   const photoCount = previews.filter(Boolean).length;
 
-  if (pending) return <ProcessingView />;
+  if (pending) return <ProcessingView coverUrl={previews[0]} />;
 
   return (
     <div className="flex flex-col gap-4">
