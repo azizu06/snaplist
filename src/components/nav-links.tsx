@@ -36,7 +36,12 @@ const ICONS: Record<string, React.ReactNode> = {
 };
 
 const LINKS = [
-  { href: "/", label: "Home", icon: "home", match: (p: string) => p === "/" },
+  {
+    href: "/dashboard",
+    label: "Home",
+    icon: "home",
+    match: (p: string) => p.startsWith("/dashboard"),
+  },
   {
     href: "/upload",
     label: "New listing",

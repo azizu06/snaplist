@@ -2,13 +2,13 @@ import { notFound } from "next/navigation";
 import {
   DashboardView,
   type DashboardRow,
-} from "@/app/dashboard-view";
-import { ReviewView, type ReviewData } from "@/app/review/[itemId]/review-view";
-import { UploadView } from "@/app/upload/upload-form";
+} from "@/app/(app)/dashboard/dashboard-view";
+import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
+import { UploadView } from "@/app/(app)/upload/upload-form";
 import {
   PublishView,
   type PublishData,
-} from "@/app/listings/[listingId]/publish-view";
+} from "@/app/(app)/listings/[listingId]/publish-view";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the

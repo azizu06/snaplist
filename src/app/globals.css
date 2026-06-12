@@ -19,6 +19,28 @@
     BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", "JetBrains Mono",
     Menlo, Consolas, monospace;
+  --font-display: var(--font-display), var(--font-geist-sans), ui-sans-serif,
+    sans-serif;
+  --font-serif-accent: var(--font-serif-accent), ui-serif, Georgia, serif;
+
+  /* ==========================================================================
+     Darkroom identity (issue #49) — marketing + (eventually) the whole app.
+     Near-black canvas so the seller's item photos are the color; one volt
+     accent reserved for actions; warm "flash" white for display type.
+     These are fixed (not scheme-dependent): the marketing site is always dark.
+     ========================================================================== */
+  --color-night:       oklch(15.5% 0.006 285);  /* page canvas              */
+  --color-night-2:     oklch(18%   0.007 285);  /* raised section           */
+  --color-panel:       oklch(21%   0.008 285);  /* card                     */
+  --color-panel-2:     oklch(25%   0.009 285);  /* nested / hover           */
+  --color-line:        oklch(30%   0.008 285);  /* hairline on night        */
+  --color-line-2:      oklch(38%   0.010 285);  /* stronger hairline        */
+  --color-flash:       oklch(97%   0.004 95);   /* warm display white       */
+  --color-flash-dim:   oklch(80%   0.006 95);   /* secondary text           */
+  --color-flash-faint: oklch(62%   0.008 285);  /* tertiary text            */
+  --color-volt:        oklch(92%   0.21  118);  /* the accent — volt lime   */
+  --color-volt-deep:   oklch(80%   0.19  120);
+  --color-volt-ink:    oklch(18%   0.04  120);  /* text on volt             */
 
   /* Neutrals — Shopify-admin chrome (issue #40 round 2): gray canvas so the
      white cards read as surfaces, a near-black top bar, and a near-black
@@ -117,6 +139,64 @@
   ::selection {
     background: var(--color-accent-soft);
     color: var(--color-accent-soft-fg);
+  }
+}
+
+/* ============================================================================
+   Darkroom marketing utilities (issue #49). Pure CSS — GPU-cheap textures and
+   keyframes shared by the landing sections; GSAP drives everything stateful.
+   ============================================================================ */
+@layer components {
+  /* Dot-grid texture over the night canvas (Stitch-style). */
+  .dotgrid {
+    background-image: radial-gradient(
+      oklch(100% 0 0 / 0.055) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+  /* Aurora glow — two soft radial pools behind the hero. */
+  .aurora::before {
+    content: "";
+    position: absolute;
+    inset: -20% -10% auto;
+    height: 80%;
+    pointer-events: none;
+    background:
+      radial-gradient(38% 45% at 28% 18%, oklch(92% 0.21 118 / 0.17), transparent 70%),
+      radial-gradient(42% 50% at 74% 8%, oklch(70% 0.16 290 / 0.2), transparent 70%);
+    filter: blur(28px);
+  }
+  /* Glassy raised card on the night canvas. */
+  .glass-panel {
+    background: linear-gradient(
+      180deg,
+      oklch(23% 0.009 285 / 0.92),
+      oklch(19% 0.008 285 / 0.92)
+    );
+    border: 1px solid oklch(34% 0.01 285 / 0.7);
+    box-shadow:
+      0 1px 0 0 oklch(100% 0 0 / 0.06) inset,
+      0 24px 64px -24px oklch(0% 0 0 / 0.7);
+    backdrop-filter: blur(10px);
+  }
+  /* Infinite category marquee. */
+  .marquee-track {
+    animation: marquee 36s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .marquee-track {
+      animation: none;
+    }
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
   }
 }
 

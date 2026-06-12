@@ -100,7 +100,7 @@ export function PublishView({
             >
               Cross-post to Facebook &amp; Mercari
             </Link>
-            <Link href="/" className={buttonClasses("ghost")}>
+            <Link href="/dashboard" className={buttonClasses("ghost")}>
               Back to dashboard
             </Link>
           </CardBody>

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
@@ -10,13 +10,14 @@ import {
 } from "./dashboard-view";
 
 /**
- * Home: signed-out → landing; signed-in → the seller dashboard (Shopify
- * products-index replica — see dashboard-view.tsx). This file is data
- * assembly only: RLS-scoped reads, newest-eBay-listing-per-item union with
- * unlisted items, signed thumbnail URLs, latest logged price per item with
- * the seller override winning.
+ * /dashboard — the seller dashboard (issue #49: the marketing landing now
+ * owns `/`; the app lives here). This file is data assembly only: RLS-scoped
+ * reads, newest-eBay-listing-per-item union with unlisted items, signed
+ * thumbnail URLs, latest logged price per item with the seller override
+ * winning. The auth proxy gates the route; the redirect below is
+ * defense-in-depth.
  */
-export default async function Home({
+export default async function Dashboard({
   searchParams,
 }: {
   searchParams: Promise<{ filter?: string }>;
@@ -25,30 +26,7 @@ export default async function Home({
 
   const supabase = await createClient();
   const userId = await getUserId();
-
-  if (!userId) {
-    return (
-      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-6 px-6 py-16">
-        <h1 className="text-3xl font-semibold tracking-tight text-fg-strong">
-          Snap a photo. We price it and write the listing.
-        </h1>
-        <p className="text-base leading-relaxed text-muted">
-          SnapList identifies your item, researches a fair used price with
-          sources, and drafts ready-to-post listings for eBay, Facebook
-          Marketplace, and Mercari — you stay in control of every word and
-          every dollar.
-        </p>
-        <div>
-          <Link
-            href="/login"
-            className="inline-flex items-center rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
-          >
-            Get started
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  if (!userId) redirect("/login?next=/dashboard");
 
   const [{ data: listings }, { data: items }, { data: logs }] = await Promise.all([
     supabase

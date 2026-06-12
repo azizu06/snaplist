@@ -24,12 +24,15 @@ export default async function LoginPage({
   if (userId) redirect(safeNext(next));
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-6 px-6 py-16">
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-7 px-6 pb-20 pt-6">
       <div className="text-center">
-        <h1 className="text-2xl font-semibold tracking-tight text-fg-strong">
-          Welcome to SnapList
+        <h1 className="font-display text-[26px] font-bold tracking-tight text-flash">
+          Welcome back to{" "}
+          <em className="font-serif-accent font-normal italic text-volt">
+            SnapList
+          </em>
         </h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-muted">
+        <p className="mt-2 max-w-[38ch] text-[13.5px] leading-relaxed text-flash-dim">
           Snap a photo of something you want to sell — we identify it, price it
           with sources, and write the listing.
         </p>

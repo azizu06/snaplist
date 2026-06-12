@@ -24,7 +24,7 @@ export function AppShell({
       <header className="sticky top-0 z-30 bg-topbar">
         <div className="flex h-12 items-center justify-between gap-3 px-3 sm:px-4">
           <Link
-            href="/"
+            href="/dashboard"
             className="flex items-center gap-2 text-sm font-semibold tracking-tight text-topbar-fg"
           >
             <span

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserEmail, getUserId } from "@/lib/auth";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { getEbayConnectionStatus } from "@/lib/marketplace/ebay";
-import { setAutopilotSetting } from "@/app/upload/actions";
+import { setAutopilotSetting } from "@/app/(app)/upload/actions";
 import { disconnectEbay } from "./actions";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";

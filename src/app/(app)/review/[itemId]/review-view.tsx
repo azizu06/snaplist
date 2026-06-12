@@ -80,7 +80,7 @@ export function ReviewView({
       {/* ---- header: back + title + chip, actions right (Shopify) ---- */}
       <header className="flex flex-wrap items-center gap-3">
         <Link
-          href="/"
+          href="/dashboard"
           aria-label="Back to listings"
           className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:text-fg"
         >

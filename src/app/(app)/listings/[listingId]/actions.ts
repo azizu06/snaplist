@@ -19,7 +19,7 @@ import {
 export async function publishToEbay(formData: FormData) {
   const listingId = formData.get("listingId");
   if (typeof listingId !== "string" || listingId.length === 0) {
-    redirect("/");
+    redirect("/dashboard");
   }
 
   const supabase = await createClient();
