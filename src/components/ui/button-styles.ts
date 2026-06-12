@@ -29,5 +29,5 @@ export function buttonClasses(
   variant: ButtonVariant = "primary",
   size: ButtonSize = "md",
 ): string {
-  return `inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors disabled:pointer-events-none disabled:opacity-60 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]}`;
+  return `inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-[color,background-color,border-color,transform] duration-100 motion-safe:active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]}`;
 }

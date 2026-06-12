@@ -1,0 +1,198 @@
+import { notFound } from "next/navigation";
+import {
+  DashboardView,
+  type DashboardRow,
+} from "@/app/(app)/dashboard/dashboard-view";
+import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
+import { UploadView } from "@/app/(app)/upload/upload-form";
+import {
+  PublishView,
+  type PublishData,
+} from "@/app/(app)/listings/[listingId]/publish-view";
+
+/**
+ * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
+ * presentational views with fixture data so every screen can be screenshot-
+ * iterated against the Mobbin references WITHOUT a running Supabase stack.
+ * Hard-gated out of production builds.
+ */
+
+const FIXTURE_ROWS: DashboardRow[] = [
+  {
+    itemId: "fx-1",
+    listingId: "l-1",
+    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones",
+    status: "draft",
+    createdAt: "2026-06-11T15:00:00Z",
+    price: 178,
+    thumbUrl: null,
+  },
+  {
+    itemId: "fx-2",
+    listingId: "l-2",
+    title: "LEGO Star Wars Millennium Falcon 75257 — complete in box",
+    status: "queued",
+    createdAt: "2026-06-11T13:30:00Z",
+    price: 112,
+    thumbUrl: null,
+  },
+  {
+    itemId: "fx-3",
+    listingId: "l-3",
+    title: "Patagonia Better Sweater Fleece Jacket, Men's M",
+    status: "published",
+    createdAt: "2026-06-10T19:12:00Z",
+    price: 64,
+    thumbUrl: null,
+  },
+  {
+    itemId: "fx-4",
+    listingId: "l-4",
+    title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red",
+    status: "failed",
+    createdAt: "2026-06-10T16:40:00Z",
+    price: 210,
+    thumbUrl: null,
+  },
+  {
+    itemId: "fx-5",
+    listingId: null,
+    title: "The Pragmatic Programmer (20th Anniversary, hardcover)",
+    status: "new",
+    createdAt: "2026-06-09T11:05:00Z",
+    price: null,
+    thumbUrl: null,
+  },
+];
+
+const FIXTURE_REVIEW: ReviewData = {
+  itemId: "fx-1",
+  photoUrls: [],
+  identification: {
+    label: "Sony WH-1000XM4 Wireless Headphones",
+    confident: true,
+    reason: null,
+    candidates: [],
+    evidence: 0.85,
+  },
+  attrs: [
+    { key: "brand", value: "Sony" },
+    { key: "model", value: "WH-1000XM4" },
+    { key: "category", value: "Consumer electronics" },
+    { key: "condition", value: "Good — light wear on the headband" },
+    { key: "upc", value: "027242919623" },
+    { key: "isbn", value: null },
+  ],
+  listing: {
+    id: "l-1",
+    platform: "ebay",
+    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+    description:
+      "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+    status: "draft",
+  },
+  suggested: 178,
+  override: null,
+  displayPrice: 178,
+  range: { low: 155, high: 205 },
+  confidence: 0.82,
+  tier: "web_tight",
+  banner: {
+    variant: "warning",
+    title: "Waiting for your review",
+    detail:
+      "Confidence was below the autopilot threshold when this listing was generated, so it waits for you.",
+  },
+  actionError: null,
+};
+
+const FIXTURE_PUBLISH: PublishData = {
+  listingId: "l-1",
+  itemId: "fx-1",
+  platform: "ebay",
+  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+  description:
+    "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+  status: "draft",
+  published: false,
+  failed: false,
+  ebayListingId: null,
+  actionError: null,
+};
+
+export default async function PreviewPage({
+  params,
+}: {
+  params: Promise<{ screen: string }>;
+}) {
+  if (process.env.NODE_ENV === "production") notFound();
+  const { screen } = await params;
+
+  async function noopAction(_formData: FormData) {
+    "use server";
+  }
+
+  switch (screen) {
+    case "dashboard":
+      return (
+        <DashboardView
+          rows={FIXTURE_ROWS}
+          counts={{ draft: 1, attention: 1, live: 1 }}
+          filter="all"
+        />
+      );
+    case "dashboard-empty":
+      return (
+        <DashboardView rows={[]} counts={{ draft: 0, attention: 0, live: 0 }} filter="all" />
+      );
+    case "review":
+      return <ReviewView data={FIXTURE_REVIEW} overrideAction={noopAction} />;
+    case "upload":
+      return <UploadView action={noopAction} actionError={null} />;
+    case "publish":
+      return <PublishView data={FIXTURE_PUBLISH} publishAction={noopAction} />;
+    case "publish-live":
+      return (
+        <PublishView
+          data={{
+            ...FIXTURE_PUBLISH,
+            status: "published",
+            published: true,
+            ebayListingId: "110586744102",
+          }}
+          publishAction={noopAction}
+        />
+      );
+    case "publish-failed":
+      return (
+        <PublishView
+          data={{ ...FIXTURE_PUBLISH, status: "failed", failed: true }}
+          publishAction={noopAction}
+        />
+      );
+    case "review-uncertain":
+      return (
+        <ReviewView
+          data={{
+            ...FIXTURE_REVIEW,
+            identification: {
+              label: "Bluetooth over-ear headphones",
+              confident: false,
+              reason:
+                "No clear brand markings were visible in the photos, and several models share this design.",
+              candidates: ["Sony WH-CH720N", "Anker Soundcore Q45", "JBL Tune 770NC"],
+              evidence: 0.35,
+            },
+            confidence: 0.41,
+            tier: "llm_only",
+            suggested: 45,
+            displayPrice: 45,
+            range: { low: 30, high: 70 },
+          }}
+          overrideAction={noopAction}
+        />
+      );
+    default:
+      notFound();
+  }
+}

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
-import { getUserId } from "@/lib/auth";
-import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,38 +13,68 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Stripe-light identity (issue #49 round 3): Schibsted Grotesk is the
+// Söhne-like display face (owner-picked); Stripe's look is neutral type +
+// bold color, so the serif italic accent is retired.
+const schibsted = Schibsted_Grotesk({
+  variable: "--font-display",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
-  title: "SnapList",
-  description: "Photo of a used item → a priced, ready-to-post listing.",
+  metadataBase: new URL("https://snaplist.dev"),
+  title: {
+    default: "SnapList — photo to priced listing",
+    template: "%s · SnapList",
+  },
+  description:
+    "Snap a photo of something you want to sell. SnapList identifies it, researches a fair used price with cited sources, and writes ready-to-post listings.",
 };
 
-export default async function RootLayout({
+/**
+ * Root layout is chrome-free (issue #49): the (marketing), (auth) and (app)
+ * route groups each own their shell. Clerk components are themed here once —
+ * dark Darkroom surfaces so the auth cards never read as a stock white modal.
+ */
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Auth state drives the shell (X-2): signed-in users get the persistent nav
-  // everywhere; signed-out visitors get a logo-only header. getUserId() reads
-  // cookies first, keeping secret-less builds prerender-safe (issue #41).
-  const userId = await getUserId();
-
-  // Dev-only: the screenshot preview harness (src/app/dev/preview) needs the
-  // signed-in chrome without a running auth stack. Never true in production.
-  const previewSignedIn =
-    process.env.NODE_ENV !== "production" &&
-    process.env.PREVIEW_SIGNED_IN === "1";
-
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorPrimary: "#6d4aff",
+          colorPrimaryForeground: "#ffffff",
+          colorBackground: "#ffffff",
+          colorForeground: "#131e3a",
+          colorMutedForeground: "#5f6b88",
+          colorInput: "#ffffff",
+          colorInputForeground: "#131e3a",
+          colorBorder: "#dfe4ee",
+          colorRing: "#6d4aff",
+          borderRadius: "0.5rem",
+          fontFamily: "var(--font-geist-sans), ui-sans-serif, sans-serif",
+        },
+        elements: {
+          cardBox: {
+            boxShadow:
+              "0 13px 27px -5px rgba(19,30,58,0.18), 0 8px 16px -8px rgba(19,30,58,0.22)",
+          },
+          socialButtonsBlockButton: {
+            background: "#ffffff",
+            border: "1px solid #dfe4ee",
+          },
+          footer: { background: "#f4f6fb" },
+        },
+      }}
+    >
       <html
         lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} h-full antialiased`}
       >
-        <body className="min-h-full">
-          <AppShell signedIn={userId != null || previewSignedIn}>
-            {children}
-          </AppShell>
-        </body>
+        <body className="min-h-full">{children}</body>
       </html>
     </ClerkProvider>
   );

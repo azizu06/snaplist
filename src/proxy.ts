@@ -15,6 +15,10 @@ import { NextResponse } from "next/server";
 // the route gates itself via eBay's signature verification (412 otherwise).
 const isPublic = createRouteMatcher([
   "/",
+  "/how-it-works",
+  "/features",
+  "/pricing",
+  "/about",
   "/login(.*)",
   "/api/health",
   "/api/ebay/account-deletion",
@@ -37,6 +41,6 @@ export const proxy = clerkMiddleware(async (auth, request) => {
 export const config = {
   // Match everything except Next internals and static asset files.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
   ],
 };

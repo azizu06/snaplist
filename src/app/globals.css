@@ -19,37 +19,61 @@
     BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", "JetBrains Mono",
     Menlo, Consolas, monospace;
+  --font-display: var(--font-display), var(--font-geist-sans), ui-sans-serif,
+    sans-serif;
+  --font-serif-accent: var(--font-serif-accent), ui-serif, Georgia, serif;
 
-  /* Neutrals — Shopify-admin chrome (issue #40 round 2): gray canvas so the
-     white cards read as surfaces, a near-black top bar, and a near-black
-     primary button. Reference: Shopify admin product/index screens (Mobbin). */
-  --color-bg:            oklch(96.5% 0.002 255); /* canvas — Shopify ~#f1f1f1 */
-  --color-surface:       oklch(100%  0     0);
-  --color-surface-2:     oklch(97%   0.003 255);
-  --color-surface-3:     oklch(94%   0.004 255);
-  --color-fg:            oklch(24%   0.012 260);
-  --color-fg-strong:     oklch(18%   0.013 260);
-  --color-muted:         oklch(50%   0.012 260);
-  --color-faint:         oklch(62%   0.010 260);
-  --color-border:        oklch(91%   0.004 260);
-  --color-border-strong: oklch(84%   0.006 260);
+  /* ==========================================================================
+     Stripe-light identity (issue #49 round 3, owner-locked spec): white
+     canvas, navy ink, blurple accent, rainbow gradient heroes — replicating
+     stripe.com. Token names kept from the dark era (night/panel/flash/iris)
+     so the components didn't need a rename; values are now light.
+       night  = page canvas (white)     panel  = soft gray card
+       flash  = navy ink (text scale)   iris   = Stripe blurple
+     ========================================================================== */
+  --color-night:       #ffffff;  /* page canvas               */
+  --color-night-2:     #f4f6fb;  /* raised section slab       */
+  --color-panel:       #ffffff;  /* card (white, shadow-borne)*/
+  --color-panel-2:     #eef1f8;  /* nested / hover            */
+  --color-line:        #dfe4ee;  /* hairline                  */
+  --color-line-2:      #c3cbdd;  /* stronger hairline         */
+  --color-flash:       #131e3a;  /* indigo ink — headings     */
+  --color-flash-dim:   #3d4a68;  /* secondary text            */
+  --color-flash-faint: #5f6b88;  /* tertiary text             */
+  --color-iris:        #6d4aff;  /* the accent — prism violet */
+  --color-iris-deep:   #5a36f0;
+  --color-iris-ink:    #ffffff;  /* text on violet            */
 
-  /* Admin chrome */
-  --color-topbar:        oklch(21% 0.005 260);   /* near-black app bar        */
-  --color-topbar-fg:     oklch(92% 0.003 260);
-  --color-topbar-muted:  oklch(65% 0.006 260);
-  --color-topbar-pill:   oklch(30% 0.006 260);   /* search pill on the bar    */
-  --color-primary:       oklch(25% 0.01  260);   /* near-black primary button */
-  --color-primary-hover: oklch(33% 0.01  260);
-  --color-primary-fg:    oklch(99% 0     0);
+  /* Neutrals — Prism-light app chrome (issue #49 round 4): Stripe-Dashboard
+     layout language on the marketing palette. White surfaces, indigo ink,
+     violet primary. */
+  --color-bg:            #f6f8fc;  /* content canvas            */
+  --color-surface:       #ffffff;
+  --color-surface-2:     #f4f6fb;
+  --color-surface-3:     #eef1f8;
+  --color-fg:            #3d4a68;
+  --color-fg-strong:     #131e3a;
+  --color-muted:         #5f6b88;
+  --color-faint:         #8593ad;
+  --color-border:        #dfe4ee;
+  --color-border-strong: #c3cbdd;
 
-  /* Accent — one only */
-  --color-accent:         oklch(52% 0.16 255);
-  --color-accent-solid:   oklch(50% 0.17 255);
-  --color-accent-hover:   oklch(45% 0.16 255);
-  --color-accent-fg:      oklch(99% 0    255);
-  --color-accent-soft:    oklch(96% 0.03 255);
-  --color-accent-soft-fg: oklch(43% 0.15 255);
+  /* App chrome — white topbar/sidebar, ink text */
+  --color-topbar:        #ffffff;
+  --color-topbar-fg:     #131e3a;
+  --color-topbar-muted:  #5f6b88;
+  --color-topbar-pill:   #f4f6fb;
+  --color-primary:       #6d4aff;  /* violet primary button     */
+  --color-primary-hover: #5a36f0;
+  --color-primary-fg:    #ffffff;
+
+  /* Accent — the same prism violet as marketing */
+  --color-accent:         #6d4aff;
+  --color-accent-solid:   #6d4aff;
+  --color-accent-hover:   #5a36f0;
+  --color-accent-fg:      #ffffff;
+  --color-accent-soft:    #efeaff;
+  --color-accent-soft-fg: #5a36f0;
 
   /* Lifecycle: draft → amber */
   --color-warning:         oklch(72%   0.15 75);
@@ -90,6 +114,11 @@
                0 2px 4px -2px oklch(24% 0.02 260 / 0.06);
   --shadow-lg: 0 12px 28px -6px oklch(24% 0.02 260 / 0.16),
                0 4px 8px -4px oklch(24% 0.02 260 / 0.08);
+
+  /* Prism-light marketing card shadow — crisp lift on white so cards never
+     blend into the canvas. */
+  --shadow-card: 0 2px 6px -2px rgba(19, 30, 58, 0.08),
+                 0 12px 32px -12px rgba(19, 30, 58, 0.14);
 }
 
 @layer base {
@@ -120,60 +149,188 @@
   }
 }
 
-/* X-10 — dark mode: re-point the semantic tokens only. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg:            oklch(17% 0.006 260);
-    --color-surface:       oklch(21% 0.007 260);
-    --color-surface-2:     oklch(25% 0.008 260);
-    --color-surface-3:     oklch(29% 0.009 260);
-    --color-fg:            oklch(93% 0.004 260);
-    --color-fg-strong:     oklch(97% 0.003 260);
-    --color-muted:         oklch(68% 0.012 260);
-    --color-faint:         oklch(56% 0.010 260);
-    --color-border:        oklch(30% 0.008 260);
-    --color-border-strong: oklch(38% 0.010 260);
-
-    --color-accent:         oklch(72% 0.15 255);
-    --color-accent-solid:   oklch(58% 0.16 255);
-    --color-accent-hover:   oklch(66% 0.16 255);
-    --color-accent-fg:      oklch(99% 0    255);
-    --color-accent-soft:    oklch(30% 0.06 255);
-    --color-accent-soft-fg: oklch(83% 0.10 255);
-
-    --color-warning:         oklch(78% 0.15 80);
-    --color-warning-solid:   oklch(72% 0.15 75);
-    --color-warning-soft:    oklch(32% 0.06 75);
-    --color-warning-soft-fg: oklch(86% 0.10 82);
-    --color-warning-border:  oklch(45% 0.08 75);
-
-    --color-success:         oklch(70% 0.14 158);
-    --color-success-solid:   oklch(58% 0.13 158);
-    --color-success-soft:    oklch(30% 0.06 158);
-    --color-success-soft-fg: oklch(83% 0.11 158);
-    --color-success-border:  oklch(44% 0.08 158);
-
-    --color-danger:         oklch(70% 0.18 27);
-    --color-danger-solid:   oklch(58% 0.20 27);
-    --color-danger-soft:    oklch(32% 0.08 27);
-    --color-danger-soft-fg: oklch(86% 0.11 27);
-    --color-danger-border:  oklch(46% 0.11 27);
-
-    --color-info-soft:    oklch(30% 0.04 250);
-    --color-info-soft-fg: oklch(83% 0.08 255);
-    --color-info-border:  oklch(42% 0.05 250);
-
-    --color-topbar:        oklch(13% 0.005 260);
-    --color-topbar-fg:     oklch(92% 0.003 260);
-    --color-topbar-muted:  oklch(60% 0.006 260);
-    --color-topbar-pill:   oklch(24% 0.006 260);
-    --color-primary:       oklch(90% 0.003 260);
-    --color-primary-hover: oklch(82% 0.004 260);
-    --color-primary-fg:    oklch(15% 0.01  260);
-
-    --shadow-xs: 0 1px 2px 0 oklch(0% 0 0 / 0.30);
-    --shadow-sm: 0 1px 2px 0 oklch(0% 0 0 / 0.40);
-    --shadow-md: 0 4px 12px -2px oklch(0% 0 0 / 0.50);
-    --shadow-lg: 0 12px 28px -6px oklch(0% 0 0 / 0.60);
+/* ============================================================================
+   Darkroom marketing utilities (issue #49). Pure CSS — GPU-cheap textures and
+   keyframes shared by the landing sections; GSAP drives everything stateful.
+   ============================================================================ */
+@layer components {
+  /* No-op since the Stripe-light pivot (grain retired); kept so stray
+     class usages stay harmless. */
+  .grain::after {
+    content: none;
+  }
+  /* Inner-page hero wash — Stripe's quiet pages: a faint blurple/cyan
+     gradient pool at the top, nothing more. */
+  .aurora::before {
+    content: "";
+    position: absolute;
+    inset: -20% -10% auto;
+    height: 80%;
+    pointer-events: none;
+    background:
+      radial-gradient(40% 48% at 24% 12%, rgba(99, 91, 255, 0.1), transparent 70%),
+      radial-gradient(44% 52% at 78% 6%, rgba(0, 212, 255, 0.09), transparent 70%);
+    filter: blur(30px);
+  }
+  /* The prism — SnapList's own animated gradient slab: light split through
+     an aperture. Violet→cyan→amber→magenta pools, skewed the opposite way
+     from Stripe's, with a soft white bloom where the "light" enters. */
+  .prism-gradient {
+    position: absolute;
+    inset: -25% 0 auto 0;
+    height: 110%;
+    pointer-events: none;
+    clip-path: polygon(0 0, 100% 0, 100% 94%, 0 70%);
+    background:
+      radial-gradient(38% 54% at 8% 28%, #7b61ff 0%, transparent 64%),
+      radial-gradient(44% 60% at 34% 40%, #4cc9f0 0%, transparent 62%),
+      radial-gradient(42% 58% at 62% 22%, #b388ff 0%, transparent 62%),
+      radial-gradient(40% 56% at 86% 42%, #ff8fab 0%, transparent 60%),
+      radial-gradient(34% 50% at 74% 14%, #ffd166 0%, transparent 58%),
+      radial-gradient(60% 70% at 50% -10%, rgba(255, 255, 255, 0.75) 0%, transparent 60%),
+      linear-gradient(80deg, #7b61ff 0%, #4cc9f0 48%, #b388ff 100%);
+    background-size: 165% 165%;
+    animation: stripe-drift 18s ease-in-out infinite alternate;
+    opacity: 0.94;
+  }
+  /* 3D stage for tilt/perspective children. */
+  .stage-3d {
+    perspective: 1200px;
+  }
+  /* Raised white card — Stripe's floating-panel shadow recipe. */
+  .glass-panel {
+    background: #ffffff;
+    border: 1px solid rgba(230, 235, 241, 0.9);
+    box-shadow:
+      0 13px 27px -5px rgba(50, 50, 93, 0.18),
+      0 8px 16px -8px rgba(0, 0, 0, 0.2);
+  }
+  /* Infinite category marquee. */
+  .marquee-track {
+    animation: marquee 36s linear infinite;
+  }
+  /* Ambient scan beam inside the ScanChipsVisual. */
+  .scan-line {
+    animation: scan-sweep 3.2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .marquee-track,
+    .scan-line,
+    .prism-gradient {
+      animation: none;
+    }
+  }
+  /* Hover-pause for the category marquee — class lives on the section
+     wrapper so any point inside it pauses the track. */
+  .marquee-pause:hover .marquee-track {
+    animation-play-state: paused;
+  }
+  /* Empty-state aperture iris: the blade group drifts one revolution every
+     40s — barely perceptible, just alive. */
+  .aperture-blades {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: aperture-spin 40s linear infinite;
+  }
+  /* Skeleton shimmer: a translating gradient sheen layered over the
+     animate-pulse base so loading blocks read as in-motion, not stalled. */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.55),
+      transparent
+    );
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .aperture-blades,
+    .skeleton-shimmer::after {
+      animation: none;
+    }
   }
 }
+
+/* Route-transition entrance — applied by each group's template.tsx, which
+   re-mounts per navigation. */
+.page-enter {
+  animation: page-enter 0.42s cubic-bezier(0.21, 0.8, 0.32, 1);
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
+}
+
+@keyframes stripe-drift {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 100% 60%;
+  }
+}
+
+@keyframes scan-sweep {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.2;
+  }
+  12% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(96px);
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes aperture-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+

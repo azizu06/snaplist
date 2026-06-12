@@ -36,7 +36,12 @@ const ICONS: Record<string, React.ReactNode> = {
 };
 
 const LINKS = [
-  { href: "/", label: "Home", icon: "home", match: (p: string) => p === "/" },
+  {
+    href: "/dashboard",
+    label: "Home",
+    icon: "home",
+    match: (p: string) => p.startsWith("/dashboard"),
+  },
   {
     href: "/upload",
     label: "New listing",
@@ -70,11 +75,11 @@ export function SidebarNav() {
             aria-current={active ? "page" : undefined}
             className={
               active
-                ? "flex items-center gap-2.5 rounded-lg bg-surface px-2.5 py-1.5 text-[13px] font-semibold text-fg-strong shadow-xs"
-                : "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-3/60 hover:text-fg"
+                ? "flex items-center gap-2.5 rounded-lg bg-accent-soft px-2.5 py-2 text-[13px] font-semibold text-accent-soft-fg"
+                : "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong"
             }
           >
-            <span className={active ? "text-fg-strong" : "text-faint"}>
+            <span className={active ? "text-accent-soft-fg" : "text-faint"}>
               {ICONS[icon]}
             </span>
             {label}
