@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -70,11 +71,23 @@ export default function RootLayout({
         },
       }}
     >
+      {/* suppressHydrationWarning: next-themes mutates <html> class before
+          hydration (its inline script kills the FOUC) — expected mismatch. */}
       <html
         lang="en"
+        suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} h-full antialiased`}
       >
-        <body className="min-h-full">{children}</body>
+        <body className="min-h-full">
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="light"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+          </ThemeProvider>
+        </body>
       </html>
     </ClerkProvider>
   );
