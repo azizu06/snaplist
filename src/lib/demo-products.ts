@@ -184,9 +184,13 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   "step-write": ["mixer"], // public/demo/steps/write.mp4
   "step-publish": ["keyboard"], // public/demo/steps/publish.mp4
   "buyer-qa": ["chess"], // public/demo/buyer-qa.mp4
-  // --- Static page surfaces (pending rewire to the new clip set; the
-  // how-it-works carousel will embed the step-* videos above) ---
-  "landing-features": ["vinyl", "book", "headphones"],
+  // --- Static page surfaces (post v3 passes; reflects actual usage) ---
+  "landing-carousel": ["camera", "book", "sneakers", "chess", "headphones"],
+  "landing-storefronts": ["keyboard"],
+  "features-demos": ["polaroid", "vinyl", "gshock"],
+  "features-waterfall": ["guitar"],
+  "how-it-works": ["gameboy"], // + embeds the step-* clips above
+  "about-price-report": ["mixer"],
+  "upload-examples": ["gameboy", "vinyl"], // app surface; overlaps marketing by design
   "dashboard-folder": ["keyboard", "chess", "headphones"],
-  "app-empty-states": ["vinyl", "gameboy"],
 };

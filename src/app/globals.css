@@ -709,3 +709,29 @@
   }
 }
 
+
+/* ─── Clerk per-theme variables (root layout appearance reads these) ─────────
+   Clerk's appearance.variables accept CSS var() refs, so the auth card can
+   follow the .dark class without restructuring providers. */
+:root {
+  --clerk-primary: #6d4aff;
+  --clerk-bg: #ffffff;
+  --clerk-fg: #131e3a;
+  --clerk-muted: #5f6b88;
+  --clerk-input-bg: #ffffff;
+  --clerk-border: #dfe4ee;
+  --clerk-footer-bg: #f4f6fb;
+  --clerk-card-shadow: 0 13px 27px -5px rgba(19, 30, 58, 0.18),
+    0 8px 16px -8px rgba(19, 30, 58, 0.22);
+}
+.dark {
+  --clerk-primary: #7e5fff;
+  --clerk-bg: #111a38;
+  --clerk-fg: #edf1fc;
+  --clerk-muted: #aab6d8;
+  --clerk-input-bg: #0b1020;
+  --clerk-border: #222c4e;
+  --clerk-footer-bg: #0f1730;
+  --clerk-card-shadow: 0 13px 27px -5px rgba(0, 0, 0, 0.55),
+    0 8px 16px -8px rgba(126, 95, 255, 0.12);
+}

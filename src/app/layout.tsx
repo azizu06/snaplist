@@ -45,29 +45,28 @@ export default function RootLayout({
   return (
     <ClerkProvider
       appearance={{
+        // var() refs resolve in the browser, so the card follows the .dark
+        // class live (values defined at the end of globals.css).
         variables: {
-          colorPrimary: "#6d4aff",
+          colorPrimary: "var(--clerk-primary)",
           colorPrimaryForeground: "#ffffff",
-          colorBackground: "#ffffff",
-          colorForeground: "#131e3a",
-          colorMutedForeground: "#5f6b88",
-          colorInput: "#ffffff",
-          colorInputForeground: "#131e3a",
-          colorBorder: "#dfe4ee",
-          colorRing: "#6d4aff",
+          colorBackground: "var(--clerk-bg)",
+          colorForeground: "var(--clerk-fg)",
+          colorMutedForeground: "var(--clerk-muted)",
+          colorInput: "var(--clerk-input-bg)",
+          colorInputForeground: "var(--clerk-fg)",
+          colorBorder: "var(--clerk-border)",
+          colorRing: "var(--clerk-primary)",
           borderRadius: "0.5rem",
           fontFamily: "var(--font-geist-sans), ui-sans-serif, sans-serif",
         },
         elements: {
-          cardBox: {
-            boxShadow:
-              "0 13px 27px -5px rgba(19,30,58,0.18), 0 8px 16px -8px rgba(19,30,58,0.22)",
-          },
+          cardBox: { boxShadow: "var(--clerk-card-shadow)" },
           socialButtonsBlockButton: {
-            background: "#ffffff",
-            border: "1px solid #dfe4ee",
+            background: "var(--clerk-bg)",
+            border: "1px solid var(--clerk-border)",
           },
-          footer: { background: "#f4f6fb" },
+          footer: { background: "var(--clerk-footer-bg)" },
         },
       }}
     >
