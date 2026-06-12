@@ -1,13 +1,18 @@
 "use client";
 
 /**
- * Interactive pricing-waterfall explorer (/how-it-works, subpages v3).
- * Replaces the static bar chart: selecting a tier shows that tier's worked
- * example — animated bar fill, counting numbers, and source citations that
- * appear in sequence. Stays honest by design: the comps tier uses a real
- * catalog product whose plausible pricing path IS comps (Taylor guitar);
- * the other tiers show their mechanism schematically rather than pinning a
- * product onto a tier that wouldn't fire for it.
+ * Interactive pricing-waterfall explorer (/how-it-works, ui-r5-marketing).
+ * Selecting a tier shows that tier's worked example — animated fills,
+ * counting numbers, and source rows that appear in sequence. Stays honest by
+ * design: the recent-sales tier uses a real catalog product whose plausible
+ * pricing path IS recent sales (Taylor guitar); the other tiers show their
+ * mechanism with concrete worked numbers rather than pinning a product onto
+ * a tier that wouldn't fire for it.
+ *
+ * Copy rule (owner round-5): every visible word reads like plain seller
+ * language — no "comps", no "conf", no "category prior". The depreciation
+ * tier shows a price-decaying-over-age arc ($200 new in 2021 → $84 today);
+ * the best-guess tier shows an honestly wide labeled range.
  */
 
 import Image from "next/image";
@@ -27,29 +32,29 @@ const TIERS: {
 }[] = [
   {
     id: "isbn",
-    name: "ISBN lookup",
-    when: "Books & media with a readable ISBN",
+    name: "Exact book lookup",
+    when: "Books & media with a readable ISBN on the cover",
     confidence: 96,
     label: "Highest",
   },
   {
     id: "comps",
-    name: "Live comps research",
+    name: "Recent sale prices",
     when: "Branded, recognizable items",
     confidence: 84,
     label: "High",
   },
   {
     id: "depreciation",
-    name: "Depreciation model",
-    when: "Generic items where only retail exists",
+    name: "New price, marked down",
+    when: "Everyday items where only the new price can be found",
     confidence: 52,
     label: "Medium",
   },
   {
     id: "llm",
-    name: "Model estimate",
-    when: "Last resort — clearly labeled",
+    name: "Best-guess estimate",
+    when: "The last resort — always flagged for your review",
     confidence: 30,
     label: "Low",
   },
@@ -102,19 +107,20 @@ function IsbnExample() {
         </div>
       </div>
       <div className="mt-4 space-y-2.5">
-        <SourceRow i={0} value="edition matched">
-          Open Library — structured lookup
+        <SourceRow i={0} value="exact edition found">
+          Open Library — book database
         </SourceRow>
-        <SourceRow i={1} value="metadata confirmed">
-          Google Books — title, year, format
+        <SourceRow i={1} value="title &amp; year confirmed">
+          Google Books — book database
         </SourceRow>
-        <SourceRow i={2} value="exact identity">
-          Sold-listing search, seeded by ISBN
+        <SourceRow i={2} value="sale prices found">
+          Recent sales of this exact book
         </SourceRow>
       </div>
-      <p className="mt-4 text-[13px] leading-relaxed text-flash-faint">
-        An exact identity skips estimation entirely — the strongest tier in
-        the waterfall, which is why books and media price best.
+      <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
+        When we know the exact book, there is no guessing involved — that is
+        why books and media get the most accurate prices of anything you can
+        snap.
       </p>
     </div>
   );
@@ -141,18 +147,21 @@ function CompsExample() {
         </p>
       </div>
       <div className="mt-4 space-y-2.5">
-        <SourceRow i={0} value="$870 · 2d">
-          Reverb sold listing
+        <SourceRow i={0} value="$870 · 2 days ago">
+          Sold on Reverb
         </SourceRow>
-        <SourceRow i={1} value="$925 · 4d">
-          eBay sold, koa cutaway
+        <SourceRow i={1} value="$925 · 4 days ago">
+          Sold on eBay — same koa cutaway
         </SourceRow>
-        <SourceRow i={2} value="$850 · 1w">
-          Mercari comp
+        <SourceRow i={2} value="$850 · last week">
+          Sold on Mercari
         </SourceRow>
       </div>
-      <p className="nums mt-3.5 text-[13px] text-flash-faint">
-        range $780 – $960 · asking prices down-weighted against sold signals
+      <p className="mt-3.5 text-[13.5px] leading-relaxed text-flash-faint">
+        Similar guitars sold for{" "}
+        <span className="nums font-semibold text-flash-dim">$780–$960</span>{" "}
+        recently. Real sale prices count more than asking prices — what
+        something sold for beats what someone hoped to get.
       </p>
     </div>
   );
@@ -160,37 +169,92 @@ function CompsExample() {
 
 function DepreciationExample() {
   const reduced = useReducedMotion();
-  const steps = [
-    ["Retail anchor found", "$129"],
-    ["× 0.42 condition factor (Good)", ""],
-    ["Estimate", "$54"],
+  // A concrete worked arc: a kitchen mixer bought new in 2021 for $200,
+  // marked down year by year to $84 today.
+  const points = [
+    { year: "2021", value: 200 },
+    { year: "2022", value: 161 },
+    { year: "2023", value: 128 },
+    { year: "2024", value: 103 },
+    { year: "Today", value: 84 },
   ] as const;
+  const max = points[0].value;
   return (
     <div>
-      <div className="space-y-2.5">
-        {steps.map(([label, value], i) => (
-          <motion.div
-            key={label}
-            initial={reduced ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.1 + i * 0.16 }}
-            className={`flex items-center justify-between rounded-xl px-4 py-3.5 ${
-              i === steps.length - 1
-                ? "border border-iris/35 bg-iris/8"
-                : "border border-line bg-night-2"
-            }`}
-          >
-            <span className="text-[14px] text-flash-dim">{label}</span>
-            {value ? (
-              <span className="nums text-[15px] font-bold text-flash">{value}</span>
-            ) : null}
-          </motion.div>
-        ))}
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <div>
+          <p className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+            Bought new in 2021
+          </p>
+          <p className="nums mt-0.5 font-display text-[26px] font-bold leading-none text-flash-dim">
+            $200
+          </p>
+        </div>
+        <svg
+          viewBox="0 0 24 24"
+          className="mb-1 size-5 text-flash-faint"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+        <div className="text-right">
+          <p className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-iris">
+            Worth now · Good condition
+          </p>
+          <p className="nums mt-0.5 font-display text-[30px] font-bold leading-none text-flash">
+            $84
+          </p>
+        </div>
       </div>
-      <p className="mt-4 text-[13px] leading-relaxed text-flash-faint">
-        When no resale comps exist, retail × a condition curve is the honest
-        fallback — labeled as an estimate and held to a lower confidence, so
-        it can never sneak past the autopilot gate.
+
+      {/* the value, falling year by year — last bar (today) highlighted */}
+      <div className="mt-5 rounded-2xl border border-line bg-night-2 px-5 pb-4 pt-5">
+        <div className="flex items-end justify-between gap-2.5 sm:gap-3.5">
+          {points.map(({ year, value }, i) => {
+            const today = i === points.length - 1;
+            return (
+              <div key={year} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+                <span
+                  className={`nums text-[12px] font-semibold ${
+                    today ? "text-iris" : "text-flash-faint"
+                  }`}
+                >
+                  ${value}
+                </span>
+                <motion.span
+                  initial={reduced ? false : { scaleY: 0 }}
+                  animate={{ scaleY: 1 }}
+                  transition={{ duration: 0.5, delay: 0.08 + i * 0.09, ease: [0.21, 0.8, 0.32, 1] }}
+                  style={{ height: Math.round((value / max) * 104) }}
+                  className={`w-full origin-bottom rounded-t-md ${
+                    today
+                      ? "bg-gradient-to-t from-iris-deep to-iris"
+                      : "bg-iris/25"
+                  }`}
+                />
+                <span
+                  className={`text-[12px] ${
+                    today ? "font-semibold text-flash-dim" : "text-flash-faint"
+                  }`}
+                >
+                  {year}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
+        When nothing like your item has sold recently, we start from what it
+        cost new and mark it down for its age and condition. It is clearly
+        labeled an estimate — and it always waits for your approval before
+        anything goes live.
       </p>
     </div>
   );
@@ -202,27 +266,43 @@ function LlmExample() {
     <div>
       <div className="rounded-2xl border border-line bg-night-2 p-5">
         <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
-          Category prior · wide range
+          An honestly wide range
         </p>
-        <div className="relative mt-4 h-2.5 rounded-full bg-panel-2">
-          <motion.div
-            initial={reduced ? false : { scaleX: 0 }}
-            animate={{ scaleX: 1 }}
-            transition={{ duration: 0.8, ease: [0.21, 0.8, 0.32, 1] }}
-            className="absolute inset-y-0 left-[6%] right-[8%] origin-left rounded-full bg-gradient-to-r from-iris/30 via-iris/70 to-iris/30"
-          />
-          <span className="absolute left-[46%] top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris" />
-        </div>
-        <div className="nums mt-2.5 flex justify-between text-[12px] text-flash-faint">
-          <span>$10</span>
-          <span>$35 — model&apos;s best guess</span>
-          <span>$80</span>
+
+        {/* the suggested price, labeled and tethered to its spot on the range */}
+        <div className="relative mt-5 pb-1 pt-12">
+          <div className="absolute left-[46%] top-0 flex -translate-x-1/2 flex-col items-center">
+            <span className="whitespace-nowrap rounded-full bg-iris/12 px-3 py-1.5 text-[12.5px] font-semibold text-iris">
+              Our best guess — <span className="nums font-bold">$35</span>
+            </span>
+            <span aria-hidden className="h-3.5 w-px bg-iris/50" />
+          </div>
+          <div className="relative h-2.5 rounded-full bg-panel-2">
+            <motion.div
+              initial={reduced ? false : { scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{ duration: 0.8, ease: [0.21, 0.8, 0.32, 1] }}
+              className="absolute inset-y-0 left-[5%] right-[5%] origin-left rounded-full bg-gradient-to-r from-iris/30 via-iris/70 to-iris/30"
+            />
+            <span className="absolute left-[46%] top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris" />
+          </div>
+          <div className="mt-2.5 flex justify-between gap-3 text-[12.5px] leading-snug text-flash-faint">
+            <span>
+              could sell for as little as{" "}
+              <span className="nums font-semibold text-flash-dim">$10</span>
+            </span>
+            <span className="text-right">
+              or as much as{" "}
+              <span className="nums font-semibold text-flash-dim">$80</span>
+            </span>
+          </div>
         </div>
       </div>
-      <p className="mt-4 text-[13px] leading-relaxed text-flash-faint">
-        The last resort, and it says so: a model-only estimate with the widest
-        range and the lowest confidence. Always flagged in the review queue —
-        never eligible for autopilot.
+      <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
+        When we cannot identify the exact item and nothing similar has sold
+        recently, we give a careful guess with a wide range — our least
+        certain answer, and we say so. It is always flagged for your review
+        and never publishes on its own.
       </p>
     </div>
   );
@@ -299,10 +379,10 @@ export function WaterfallExplorer() {
       <div className="glass-panel flex min-w-0 flex-col rounded-3xl p-6 sm:p-7">
         <div className="flex items-center justify-between">
           <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
-            What this tier looks like
+            What this looks like on a real item
           </p>
           <span className="nums rounded-full bg-iris/12 px-3 py-1.5 text-[12.5px] font-bold text-iris">
-            <CountUp key={tier.id} to={tier.confidence} duration={0.9} />% conf
+            <CountUp key={tier.id} to={tier.confidence} duration={0.9} />% confidence
           </span>
         </div>
         <div className="mt-5 flex min-h-[300px] flex-1 flex-col">

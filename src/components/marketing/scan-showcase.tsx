@@ -9,10 +9,16 @@
  * condition from src/lib/demo-products (labels stay truthful — every entry
  * is vision-verified against its photo).
  *
+ * While the beam is mid-sweep the output panel never shows the previous
+ * product's listing (owner round-5: stale data during a scan reads as a bug).
+ * Instead it shows an "analyzing" placeholder — shimmer skeleton fields plus
+ * three working-status rows — and the real listing is revealed only when the
+ * beam lands.
+ *
  * Motion rules: images crossfade (opacity only), the output panel enters on
  * a whole-pixel translate — no scale/3D transforms ever touch text. Under
  * prefers-reduced-motion the component renders a static first frame with the
- * output already filled in: no beam, no cycling.
+ * output already filled in: no beam, no cycling, no skeleton.
  */
 
 import Image from "next/image";
@@ -61,6 +67,46 @@ function CheckRow({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** What the output panel shows while the beam is mid-sweep: shimmer
+ *  skeletons where the title/price/condition will land, plus three
+ *  working-status rows with staggered pulsing dots. Mirrors the listing
+ *  layout so the reveal doesn't jump. */
+function AnalyzingPanel() {
+  return (
+    <div className="mt-5 flex flex-1 flex-col" aria-live="polite">
+      <p className="sr-only">Analyzing the photo…</p>
+      <div aria-hidden className="space-y-2.5">
+        <span className="scan-skel block h-[17px] w-4/5 rounded-md" />
+        <span className="scan-skel block h-[17px] w-3/5 rounded-md" />
+      </div>
+      <div aria-hidden className="mt-4 flex items-center gap-3">
+        <span className="scan-skel block h-9 w-28 rounded-lg" />
+        <span className="scan-skel block h-[26px] w-24 rounded-full" />
+      </div>
+      <span aria-hidden className="scan-skel mt-3 block h-[13px] w-2/5 rounded-md" />
+      <div className="mt-auto space-y-2.5 border-t border-line pt-5">
+        {[
+          "Reading the photo",
+          "Checking recent sale prices",
+          "Drafting the listing",
+        ].map((label, i) => (
+          <p
+            key={label}
+            className="flex items-center gap-2.5 text-[13px] text-flash-faint"
+          >
+            <span
+              aria-hidden
+              className="scan-think-dot"
+              style={{ animationDelay: `${i * 0.4}s` }}
+            />
+            {label}…
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 
 function subscribeReducedMotion(onChange: () => void) {
@@ -80,12 +126,16 @@ export function ScanShowcase() {
   /** Photo currently in the frame (and being scanned). */
   const [active, setActive] = useState(0);
   /** Product whose finished listing the output panel shows — lags `active`
-   *  until the beam finishes its pass. */
-  const [output, setOutput] = useState(0);
+   *  until the beam finishes its pass. `null` until the first sweep lands,
+   *  so the panel opens on the analyzing placeholder, never a pre-revealed
+   *  listing. While `output !== active` the beam is mid-sweep and the panel
+   *  shows the placeholder — stale listings are never visible during a scan. */
+  const [output, setOutput] = useState<number | null>(null);
 
   useEffect(() => {
     if (reduced) return;
-    // Scan completes → reveal this product's listing; then advance the frame.
+    // Beam lands → reveal this product's listing; hold; then advance the
+    // frame (which restarts the sweep and flips the panel back to analyzing).
     const reveal = setTimeout(() => setOutput(active), SCAN_MS);
     const advance = setTimeout(
       () => setActive((a) => (a + 1) % PRODUCTS.length),
@@ -98,7 +148,8 @@ export function ScanShowcase() {
   }, [active, reduced]);
 
   const photo = reduced ? 0 : active;
-  const listing = PRODUCTS[reduced ? 0 : output];
+  const listing = PRODUCTS[reduced ? 0 : (output ?? 0)];
+  const analyzing = !reduced && output !== active;
 
   return (
     <div className="glass-panel grid overflow-hidden rounded-2xl md:grid-cols-[1.12fr_1fr]">
@@ -140,33 +191,43 @@ export function ScanShowcase() {
       {/* ----------------------------------------- a defensible listing out */}
       <div className="flex flex-col border-t border-line bg-panel p-6 sm:p-7 md:border-l md:border-t-0">
         <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-flash-faint">
-          <span aria-hidden className="size-1.5 rounded-full bg-iris" />
-          A defensible listing out
+          <span
+            aria-hidden
+            className={`size-1.5 rounded-full bg-iris ${analyzing ? "animate-pulse" : ""}`}
+          />
+          {analyzing ? "Analyzing the photo" : "A defensible listing out"}
         </p>
 
-        <div key={reduced ? "static" : output} className="scan-output-enter mt-5 flex flex-1 flex-col">
-          <p className="font-display text-[17px] font-semibold leading-snug text-flash">
-            {listing.title}
-          </p>
+        {analyzing ? (
+          <AnalyzingPanel />
+        ) : (
+          <div
+            key={reduced ? "static" : output}
+            className="scan-output-enter mt-5 flex flex-1 flex-col"
+          >
+            <p className="font-display text-[17px] font-semibold leading-snug text-flash">
+              {listing.title}
+            </p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <span className="nums font-display text-[36px] font-bold leading-none tracking-tight text-flash">
-              ${listing.price}
-            </span>
-            <span className="rounded-full border border-line bg-night-2 px-3 py-1 text-[12px] font-semibold text-flash-dim">
-              {listing.condition}
-            </span>
-          </div>
-          <p className="mt-2.5 text-[12.5px] font-medium text-flash-faint">
-            {listing.category} · suggested from the used market
-          </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <span className="nums font-display text-[36px] font-bold leading-none tracking-tight text-flash">
+                ${listing.price}
+              </span>
+              <span className="rounded-full border border-line bg-night-2 px-3 py-1 text-[12px] font-semibold text-flash-dim">
+                {listing.condition}
+              </span>
+            </div>
+            <p className="mt-2.5 text-[12.5px] font-medium text-flash-faint">
+              {listing.category} · suggested from the used market
+            </p>
 
-          <div className="mt-auto space-y-2.5 border-t border-line pt-5">
-            <CheckRow>Identified from the photo — brand, model, condition</CheckRow>
-            <CheckRow>Priced against real comps, sources cited</CheckRow>
-            <CheckRow>Copy drafted for eBay, Facebook &amp; Mercari</CheckRow>
+            <div className="mt-auto space-y-2.5 border-t border-line pt-5">
+              <CheckRow>Identified from the photo — brand, model, condition</CheckRow>
+              <CheckRow>Priced from recent sale prices, sources cited</CheckRow>
+              <CheckRow>Copy drafted for eBay, Facebook &amp; Mercari</CheckRow>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

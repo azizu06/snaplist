@@ -909,3 +909,80 @@
 }
 
 /* --- end ui-r5-landing --- */
+
+/* --- ui-r5-marketing --- */
+/* Scan showcase "analyzing" placeholder: shimmer skeleton fields shown while
+   the beam is mid-sweep (scan-showcase.tsx). Light theme shimmers a touch
+   darker than the panel; dark theme a touch lighter. */
+.scan-skel {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-panel-2);
+}
+.scan-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(109, 74, 255, 0.1) 45%,
+    rgba(255, 255, 255, 0.55) 50%,
+    rgba(109, 74, 255, 0.1) 55%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: scan-skel-shimmer 1.5s ease-in-out infinite;
+}
+.dark .scan-skel::after {
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(126, 95, 255, 0.12) 45%,
+    rgba(207, 216, 255, 0.22) 50%,
+    rgba(126, 95, 255, 0.12) 55%,
+    transparent 80%
+  );
+}
+@keyframes scan-skel-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Working-status rows under the skeleton: small iris dots pulsing in a
+   staggered wave (delay set inline per row). */
+.scan-think-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: var(--color-iris);
+  animation: scan-think-pulse 1.2s ease-in-out infinite;
+}
+@keyframes scan-think-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    box-shadow: 0 0 0 0 rgba(126, 95, 255, 0);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 8px 1px rgba(126, 95, 255, 0.45);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The analyzing placeholder never mounts under reduced motion (the
+     showcase renders its static first frame), but keep the animations
+     inert anyway in case markup is reached some other way. */
+  .scan-skel::after {
+    animation: none;
+    transform: translateX(-100%);
+  }
+  .scan-think-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+/* --- end ui-r5-marketing --- */
