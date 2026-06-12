@@ -1,6 +1,6 @@
 import React from "react";
 import { Composition } from "remotion";
-import { HeroDemoVideo } from "./HeroDemoVideo";
+import { HERO_DEMO_LEN, HeroDemoVideo } from "./HeroDemoVideo";
 import { StageIdentify } from "./StageIdentify";
 import { StagePrice } from "./StagePrice";
 import { StagePublish } from "./StagePublish";
@@ -13,7 +13,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="hero-demo"
         component={HeroDemoVideo}
-        durationInFrames={390}
+        durationInFrames={HERO_DEMO_LEN}
         fps={30}
         width={1120}
         height={840}
