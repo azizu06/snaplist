@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Reveal } from "@/components/marketing/reveal";
+import { FaqAccordion } from "@/components/marketing/faq-accordion";
+import { Eyebrow } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "Pricing",
@@ -9,9 +11,33 @@ export const metadata: Metadata = {
     "SnapList is free while in beta — every feature, no credit card. Paid tiers arrive later with honest limits.",
 };
 
-/** /pricing (issue #49, round 2) — two uniform tier cards: the live Beta tier
+/** /pricing (subpages v3) — two uniform tier cards: the live Beta tier
  * (subtle ElectricBorder marks it) and a mocked-up "Seller Pro" coming-soon
- * tier with the same height and structure so the row reads balanced. */
+ * tier with the same height and structure so the row reads balanced, plus a
+ * billing FAQ on the animated accordion. */
+
+const PRICING_FAQ = [
+  {
+    q: "What does the beta actually cost?",
+    a: "Nothing. Every feature, no credit card, no listing caps, no trial timer. Beta is genuinely free because real usage is what makes the pricing engine smarter.",
+  },
+  {
+    q: "What happens when the beta ends?",
+    a: "Paid tiers arrive with honest limits, and beta users keep early-bird pricing. Nothing you already listed gets held hostage — your items, listings, and history stay yours.",
+  },
+  {
+    q: "Will I be charged automatically when paid plans launch?",
+    a: "No. There's no card on file to charge. When Seller Pro lands you'll get an explicit choice; until you pick a paid plan, you stay on the free tier that exists then.",
+  },
+  {
+    q: "Are there hidden per-listing fees?",
+    a: "None from SnapList. eBay's own selling fees still apply when something sells — those go to eBay, exactly as if you'd listed by hand.",
+  },
+  {
+    q: "What will Seller Pro cost?",
+    a: "Undecided — that's why the card says $—. It will be priced for flippers and steady resellers, and beta users will see the number before anyone else, with early-bird pricing locked in.",
+  },
+] as const;
 
 const INCLUDED = [
   "Unlimited photo identifications",
@@ -42,7 +68,7 @@ export default function Pricing() {
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
               Pricing
             </p>
-            <h1 className="mx-auto mt-3 max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
+            <h1 className="mx-auto mt-4 max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               Free while we&apos;re in{" "}
               <em className="text-iris">
                 beta
@@ -149,6 +175,30 @@ export default function Pricing() {
             already listed gets held hostage.
           </p>
         </Reveal>
+      </section>
+
+      {/* billing FAQ — animated accordion */}
+      <section className="border-t border-line bg-night-2">
+        <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8">
+          <Reveal>
+            <Eyebrow tint="cyan">Billing FAQ</Eyebrow>
+            <h2 className="mt-4 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
+              Money questions, straight answers
+            </h2>
+          </Reveal>
+          <Reveal className="mt-10">
+            <FaqAccordion items={PRICING_FAQ} />
+          </Reveal>
+          <Reveal className="mt-10 text-center">
+            <p className="text-[13.5px] text-flash-dim">
+              Product questions live on the{" "}
+              <Link href="/about#faq" className="link-underline font-semibold text-iris">
+                general FAQ
+              </Link>
+              .
+            </p>
+          </Reveal>
+        </div>
       </section>
     </>
   );

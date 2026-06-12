@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import SpotlightCard from "@/components/bits/SpotlightCard";
 import { Reveal } from "@/components/marketing/reveal";
-import { LensRings, PriceModuleVisual } from "@/components/marketing/visuals";
+import { FaqAccordion } from "@/components/marketing/faq-accordion";
+import { Eyebrow, LensRings, MiniPriceReport } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "About & FAQ",
@@ -10,9 +11,11 @@ export const metadata: Metadata = {
     "Why SnapList exists, the engineering principles behind it, and answers to the questions everyone asks.",
 };
 
-/** /about (issue #49, react-bits round 2) — story, numbered principle cards
- * (SpotlightCard, matching the landing's "how it works" treatment), FAQ
- * (native <details> accordion). */
+/** /about (subpages v3) — story beside a refined mini price report (the
+ * KitchenAid mixer from the verified catalog: photo, suggested price, range
+ * band, confidence chip, cited sources — a miniature of the real product
+ * experience), numbered principle cards (SpotlightCard), and the FAQ on the
+ * animated accordion. */
 
 const PRINCIPLES = [
   {
@@ -91,10 +94,8 @@ export default function About() {
         <LensRings className="pointer-events-none absolute -left-44 -top-44 w-[560px] text-iris" />
         <div className="mx-auto grid w-full max-w-6xl items-center gap-12 lg:grid-cols-[1fr_400px]">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
-              About
-            </p>
-            <h1 className="mt-3 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
+            <Eyebrow>About</Eyebrow>
+            <h1 className="mt-4 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               Selling used stuff is{" "}
               <em className="text-iris">
                 unpaid admin work
@@ -117,17 +118,17 @@ export default function About() {
             </div>
           </Reveal>
           <Reveal delay={0.15} className="hidden lg:block">
-            <PriceModuleVisual />
+            <MiniPriceReport />
           </Reveal>
         </div>
       </section>
 
       <section className="relative mx-auto w-full max-w-6xl px-5 pb-24 sm:px-8">
         <Reveal>
-          <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
+          <Eyebrow n="01" tint="indigo">
             Principles
-          </p>
-          <h2 className="mt-3 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
+          </Eyebrow>
+          <h2 className="mt-4 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
             Principles we don&apos;t{" "}
             <em className="text-iris">bend</em>
           </h2>
@@ -165,37 +166,15 @@ export default function About() {
       <section id="faq" className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
+            <Eyebrow n="02" tint="cyan">
               FAQ
-            </p>
-            <h2 className="mt-3 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
+            </Eyebrow>
+            <h2 className="mt-4 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
               The questions everyone asks
             </h2>
           </Reveal>
-          <Reveal className="mt-10 space-y-3">
-            {FAQ.map(({ q, a }) => (
-              <details
-                key={q}
-                className="group rounded-2xl border border-line bg-panel shadow-card transition-colors open:bg-panel hover:border-line-2"
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-[15px] font-semibold text-flash [&::-webkit-details-marker]:hidden">
-                  {q}
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="size-4 shrink-0 text-flash-faint transition-transform group-open:rotate-45"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                  >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                </summary>
-                <p className="px-6 pb-6 text-[14px] leading-relaxed text-flash-dim">
-                  {a}
-                </p>
-              </details>
-            ))}
+          <Reveal className="mt-10">
+            <FaqAccordion items={FAQ} />
           </Reveal>
         </div>
       </section>

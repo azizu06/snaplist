@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ScrollVelocity from "@/components/bits/ScrollVelocity";
 import { Reveal } from "@/components/marketing/reveal";
+import { DemoClip } from "@/components/marketing/demo-clip";
+import { WaterfallExplorer } from "@/components/marketing/waterfall-explorer";
 import {
+  Eyebrow,
   LensRings,
-  PhotoSlotsVisual,
-  PlatformCardsVisual,
+  SnapIdentityCard,
 } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
@@ -15,112 +17,89 @@ export const metadata: Metadata = {
 };
 
 /**
- * /how-it-works (issue #49) — the pipeline walkthrough. The pricing waterfall
- * section mirrors the real PricingProvider router tiers; keep them in sync.
- * The Identify/Price/Publish rows use per-stage Remotion clips (rendered to
- * public/stage-*.mp4 from remotion/Stage*.tsx) in the same glass-panel frame
- * as the landing hero video.
+ * /how-it-works (subpages v3) — the pipeline walkthrough rebuilt around the
+ * five step clips (/demo/steps/*.mp4, 1920×1080 loops; DemoClip lazy-loads
+ * them and falls back to a designed slate while a render is missing), an
+ * interactive pricing-waterfall explorer that mirrors the real
+ * PricingProvider router tiers (keep in sync), and the buyer-Q&A clip.
+ * Products are the how-it-works pool: gameboy (hero), guitar (waterfall);
+ * the mixer headlines /about.
  */
 
-function StageVideo({ src, label }: { src: string; label: string }) {
-  return (
-    <div className="glass-panel w-full overflow-hidden rounded-2xl">
-      <video
-        src={src}
-        autoPlay
-        muted
-        loop
-        playsInline
-        className="block h-auto w-full"
-        aria-label={label}
-      />
-    </div>
-  );
-}
+const STEP_GLYPHS: Record<string, React.ReactNode> = {
+  snap: (
+    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+      <circle cx="12" cy="13" r="3" />
+    </svg>
+  ),
+  identify: (
+    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ),
+  price: (
+    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="12" x2="12" y1="2" y2="22" />
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+    </svg>
+  ),
+  write: (
+    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  ),
+  publish: (
+    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+      <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </svg>
+  ),
+  chat: (
+    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+    </svg>
+  ),
+};
 
-const IdentifyClip = () => (
-  <StageVideo
-    src="/stage-identify.mp4"
-    label="Demo: a photo is scanned and identified as a Canon EOS 80D with extracted attributes"
-  />
-);
-
-const PriceClip = () => (
-  <StageVideo
-    src="/stage-price.mp4"
-    label="Demo: cited price sources assemble into a suggested price, range, and confidence score"
-  />
-);
-
-const PublishClip = () => (
-  <StageVideo
-    src="/stage-publish.mp4"
-    label="Demo: a finished listing is published and goes live on eBay"
-  />
-);
-
-const STAGES = [
+const STEPS = [
   {
     n: "01",
+    id: "snap",
     title: "Snap",
-    body: "Take one photo — or up to four if condition matters. SnapList reads visible barcodes and ISBNs automatically, so books and boxed items start with an exact identity.",
-    chips: ["1–4 photos", "barcode & ISBN detection", "30 seconds of your time"],
-    visual: PhotoSlotsVisual,
+    body: "One photo — or up to four if condition matters. Visible barcodes and ISBNs are read automatically, so books and boxed items start with an exact identity.",
+    poster: "Four slots, thirty seconds of your time.",
   },
   {
     n: "02",
+    id: "identify",
     title: "Identify",
-    body: "A vision model extracts structured attributes — brand, model, category, condition, key specs — and validates them against a strict schema. Ambiguous items get flagged, never silently guessed.",
-    chips: ["brand & model", "condition assessment", "ambiguity flagging"],
-    visual: IdentifyClip,
+    body: "A vision model extracts brand, model, category, condition, and key specs into a strict schema. Ambiguous items get flagged, never silently guessed.",
+    poster: "Pixels in, validated attributes out.",
   },
   {
     n: "03",
+    id: "price",
     title: "Price",
-    body: "A research agent works the pricing waterfall below and synthesizes a suggested price, a realistic range, and the sources it used. Asking prices are down-weighted against sold signals.",
-    chips: ["cited sources", "used value, not retail", "editable always"],
-    visual: PriceClip,
+    body: "A research agent works the waterfall below and synthesizes a suggested price, a realistic range, and the sources it used — sold signals over asking prices.",
+    poster: "A defensible number, with its receipts.",
   },
   {
     n: "04",
+    id: "write",
     title: "Write",
-    body: "One validated attribute core renders into platform-fluent listings: eBay item specifics and keyword titles, Facebook's casual local tone, Mercari's hashtags and shipping framing.",
-    chips: ["eBay", "Facebook Marketplace", "Mercari"],
-    visual: PlatformCardsVisual,
+    body: "One validated core renders platform-fluent copy: eBay item specifics and keyword titles, Facebook's casual local tone, Mercari's hashtags and shipping framing.",
+    poster: "Three marketplaces, three native tongues.",
   },
   {
     n: "05",
+    id: "publish",
     title: "Publish",
-    body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; everything else queues for your approval.",
-    chips: ["your eBay account", "confidence-gated autopilot", "status tracking"],
-    visual: PublishClip,
-  },
-] as const;
-
-const TIERS = [
-  {
-    name: "ISBN lookup",
-    when: "Books & media with a readable ISBN",
-    confidence: "Highest",
-    width: "w-[96%]",
-  },
-  {
-    name: "Web comps research",
-    when: "Branded, recognizable items",
-    confidence: "High",
-    width: "w-[78%]",
-  },
-  {
-    name: "Depreciation model",
-    when: "Generic items where only retail exists",
-    confidence: "Medium",
-    width: "w-[52%]",
-  },
-  {
-    name: "Model estimate",
-    when: "Last resort — clearly labeled",
-    confidence: "Low",
-    width: "w-[30%]",
+    body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
+    poster: "Live on eBay, under your name.",
   },
 ] as const;
 
@@ -129,23 +108,20 @@ export default function HowItWorks() {
     <>
       <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <LensRings className="pointer-events-none absolute -right-40 -top-40 w-[560px] text-iris" />
-        <div className="mx-auto w-full max-w-6xl">
+        <div className="mx-auto grid w-full max-w-6xl items-center gap-12 lg:grid-cols-[1fr_380px]">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
-              How it works
-            </p>
-            <h1 className="mt-3 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
+            <Eyebrow>How it works</Eyebrow>
+            <h1 className="mt-4 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               One photo in.
-              <br />A{" "}
-              <em className="text-iris">
-                defensible
-              </em>{" "}
-              listing out.
+              <br />A <em className="text-iris">defensible</em> listing out.
             </h1>
             <p className="mt-5 max-w-[52ch] text-[16px] leading-relaxed text-flash-dim">
               SnapList is a pipeline, not a magic trick. Here is exactly what
               happens between your camera roll and a live eBay listing.
             </p>
+          </Reveal>
+          <Reveal delay={0.15} className="hidden lg:block">
+            <SnapIdentityCard />
           </Reveal>
         </div>
       </section>
@@ -172,40 +148,34 @@ export default function HowItWorks() {
         />
       </section>
 
+      {/* the five steps, each with its rendered demo clip */}
       <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
         <div className="space-y-16 sm:space-y-20">
-          {STAGES.map(({ n, title, body, chips, visual: Visual }, i) => (
+          {STEPS.map(({ n, id, title, body, poster }, i) => (
             <Reveal key={n} delay={0.05}>
               <div
                 className={`grid items-center gap-8 lg:gap-14 ${
-                  i % 2 === 0 ? "lg:grid-cols-[1fr_440px]" : "lg:grid-cols-[440px_1fr]"
+                  i % 2 === 0 ? "lg:grid-cols-[1fr_460px]" : "lg:grid-cols-[460px_1fr]"
                 }`}
               >
                 <div className={i % 2 === 0 ? "" : "lg:order-2"}>
-                  <div className="flex items-baseline gap-3">
-                    <span className="nums font-display text-[14px] font-bold text-iris">
-                      {n}
-                    </span>
-                    <h2 className="font-display text-[clamp(24px,3vw,32px)] font-bold tracking-tight text-flash">
-                      {title}
-                    </h2>
-                  </div>
-                  <p className="mt-3.5 max-w-[58ch] text-[15px] leading-relaxed text-flash-dim">
+                  <Eyebrow n={n}>{`Step ${i + 1}`}</Eyebrow>
+                  <h2 className="mt-3.5 font-display text-[clamp(24px,3vw,32px)] font-bold tracking-tight text-flash">
+                    {title}
+                  </h2>
+                  <p className="mt-3.5 max-w-[56ch] text-[15px] leading-relaxed text-flash-dim">
                     {body}
                   </p>
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {chips.map((chip) => (
-                      <span
-                        key={chip}
-                        className="rounded-full border border-iris/25 bg-iris/8 px-3 py-1 text-[11.5px] font-medium text-iris"
-                      >
-                        {chip}
-                      </span>
-                    ))}
-                  </div>
                 </div>
                 <div className={i % 2 === 0 ? "" : "lg:order-1"}>
-                  <Visual />
+                  <DemoClip
+                    src={`/demo/steps/${id}.mp4`}
+                    label={`Demo clip — the ${title} step of the SnapList pipeline`}
+                    n={n}
+                    title={title}
+                    caption={poster}
+                    glyph={STEP_GLYPHS[id]}
+                  />
                 </div>
               </div>
             </Reveal>
@@ -213,51 +183,57 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* pricing waterfall */}
+      {/* interactive pricing waterfall */}
       <section className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
-              The pricing waterfall
-            </p>
-            <h2 className="mt-3 max-w-2xl font-display text-[clamp(26px,3.6vw,40px)] font-bold leading-tight tracking-tight text-flash">
-              The best source that exists for{" "}
-              <em className="text-iris">your</em>{" "}
+            <Eyebrow tint="cyan">The pricing waterfall</Eyebrow>
+            <h2 className="mt-4 max-w-2xl font-display text-[clamp(26px,3.6vw,40px)] font-bold leading-tight tracking-tight text-flash">
+              The best source that exists for <em className="text-iris">your</em>{" "}
               item — honestly labeled
             </h2>
             <p className="mt-4 max-w-[58ch] text-[15px] leading-relaxed text-flash-dim">
-              Not every item can be priced with the same rigor. SnapList routes
-              each one to the strongest available strategy and tells you which
-              tier fired — confidence reflects it.
+              Not every item can be priced with the same rigor. Pick a tier to
+              see what it actually does — the confidence score always tells
+              you which one fired.
             </p>
           </Reveal>
-          <Reveal stagger className="mt-12 space-y-4">
-            {TIERS.map(({ name, when, confidence, width }) => (
-              <div
-                key={name}
-                className="rounded-2xl border border-line bg-panel shadow-card p-6"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="font-display text-[17px] font-semibold text-flash">
-                    {name}
-                  </h3>
-                  <span className="text-[12px] font-semibold text-iris">
-                    {confidence} confidence
-                  </span>
-                </div>
-                <p className="mt-1 text-[13.5px] text-flash-faint">{when}</p>
-                <div className="mt-3.5 h-1.5 overflow-hidden rounded-full bg-panel-2">
-                  <div
-                    className={`h-full ${width} rounded-full bg-gradient-to-r from-iris-deep to-iris`}
-                  />
-                </div>
-              </div>
-            ))}
+          <Reveal className="mt-12">
+            <WaterfallExplorer />
           </Reveal>
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-3xl px-5 py-24 text-center sm:px-8">
+      {/* buyer messaging */}
+      <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
+        <Reveal>
+          <div className="grid items-center gap-8 lg:grid-cols-[1fr_460px] lg:gap-14">
+            <div>
+              <Eyebrow n="06" tint="rose">
+                After it&apos;s live
+              </Eyebrow>
+              <h2 className="mt-3.5 font-display text-[clamp(24px,3vw,32px)] font-bold tracking-tight text-flash">
+                Buyer questions, pre-answered
+              </h2>
+              <p className="mt-3.5 max-w-[56ch] text-[15px] leading-relaxed text-flash-dim">
+                Incoming messages land in a live inbox with a reply already
+                drafted from the item&apos;s real attributes — edition,
+                condition, what&apos;s included. You approve, edit, or rewrite;
+                nothing sends without you.
+              </p>
+            </div>
+            <DemoClip
+              src="/demo/buyer-qa.mp4"
+              label="Demo clip — a buyer question arrives and a grounded reply is drafted for approval"
+              title="Buyer Q&A"
+              caption="Drafted from attributes, sent by you."
+              glyph={STEP_GLYPHS.chat}
+            />
+          </div>
+        </Reveal>
+      </section>
+
+      <section className="border-t border-line bg-night-2 px-5 py-24 text-center sm:px-8">
         <Reveal>
           <h2 className="font-display text-[clamp(28px,4vw,42px)] font-bold tracking-tight text-flash">
             See it on your own shelf
