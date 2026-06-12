@@ -2,33 +2,20 @@
 
 /**
  * The persistent marketplace marquee under the hero — react-bits LogoLoop.
- * Only three destinations exist (eBay / Facebook Marketplace / Mercari), so
- * the loop earns its length honestly: brand wordmarks interleaved with
- * violet capability chips (what each destination gets) and neutral category
- * chips (what people sell) — ~15 distinct items instead of 3 logos on repeat.
+ * Companies only: the three destinations SnapList actually publishes to
+ * (eBay / Facebook Marketplace / Mercari), each exactly once in the source
+ * array — the loop itself handles repetition. Wordmarks are rendered at a
+ * comfortable size with a generous gap so three items never feel cramped,
+ * and LogoLoop snaps its transform to whole pixels so the text stays sharp.
  */
 
 import LogoLoop, { type LogoItem } from "@/components/bits/LogoLoop";
 
+/** Uniform wordmark treatment — same family, weight and size for all three;
+ *  only the official brand colors differ. */
 function Wordmark({ children }: { children: React.ReactNode }) {
   return (
-    <span className="font-display text-[22px] font-bold tracking-tight">
-      {children}
-    </span>
-  );
-}
-
-function CapabilityChip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full border border-iris/25 bg-iris/8 px-3.5 py-1.5 text-[12px] font-semibold tracking-wide text-iris">
-      {children}
-    </span>
-  );
-}
-
-function CategoryChip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full border border-line px-3.5 py-1.5 text-[12px] font-medium text-flash-faint">
+    <span className="font-display text-[26px] font-bold leading-none tracking-tight antialiased">
       {children}
     </span>
   );
@@ -47,22 +34,16 @@ const LOGOS: LogoItem[] = [
     title: "eBay",
     ariaLabel: "eBay",
   },
-  { node: <CapabilityChip>publishes directly</CapabilityChip> },
-  { node: <CategoryChip>film cameras</CategoryChip> },
-  { node: <CapabilityChip>cited prices</CapabilityChip> },
   {
     node: (
       <Wordmark>
         <span style={{ color: "#1877f2" }}>facebook</span>{" "}
-        <span className="font-semibold text-flash-dim">Marketplace</span>
+        <span className="text-flash-dim">Marketplace</span>
       </Wordmark>
     ),
     title: "Facebook Marketplace",
     ariaLabel: "Facebook Marketplace",
   },
-  { node: <CapabilityChip>copy-paste pack</CapabilityChip> },
-  { node: <CategoryChip>textbooks</CategoryChip> },
-  { node: <CapabilityChip>~30s to a draft</CapabilityChip> },
   {
     node: (
       <Wordmark>
@@ -72,22 +53,16 @@ const LOGOS: LogoItem[] = [
     title: "Mercari",
     ariaLabel: "Mercari",
   },
-  { node: <CapabilityChip>hashtag-ready copy</CapabilityChip> },
-  { node: <CategoryChip>sneakers</CategoryChip> },
-  { node: <CapabilityChip>autopilot publishing</CapabilityChip> },
-  { node: <CategoryChip>vinyl records</CategoryChip> },
-  { node: <CapabilityChip>barcode &amp; ISBN reads</CapabilityChip> },
-  { node: <CategoryChip>board games</CategoryChip> },
 ];
 
 export function MarketplaceLoop() {
   return (
     <LogoLoop
       logos={LOGOS}
-      speed={48}
+      speed={36}
       direction="left"
-      logoHeight={24}
-      gap={56}
+      logoHeight={26}
+      gap={140}
       pauseOnHover
       fadeOut
       fadeOutColor="#ffffff"
