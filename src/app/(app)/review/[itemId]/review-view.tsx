@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfidenceGauge } from "@/components/ui/confidence-gauge";
 import { Banner, type BannerVariant } from "@/components/ui/banner";
 import { PendingButton } from "@/components/ui/button";
 import {
@@ -216,29 +217,25 @@ export function ReviewView({
                 ) : null}
               </div>
 
-              {/* Suggested / Range / Confidence — Shopify's Cost/Profit/Margin row */}
-              <div className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-2/60">
-                <div className="px-3 py-2.5">
-                  <p className="text-xs text-muted">Suggested</p>
-                  <p className="mt-0.5 text-sm font-semibold text-fg-strong" data-nums>
-                    {data.suggested != null ? `$${data.suggested}` : "—"}
-                  </p>
-                </div>
-                <div className="px-3 py-2.5">
-                  <p className="text-xs text-muted">Typical range</p>
-                  <p className="mt-0.5 text-sm font-semibold text-fg-strong" data-nums>
-                    {data.range?.low != null && data.range?.high != null
-                      ? `$${data.range.low}–$${data.range.high}`
-                      : "—"}
-                  </p>
-                </div>
-                <div className="px-3 py-2.5">
-                  <p className="text-xs text-muted">Confidence</p>
-                  <p className="mt-0.5 text-sm font-semibold text-fg-strong" data-nums>
-                    {data.confidence != null
-                      ? `${Math.round(data.confidence * 100)}%`
-                      : "—"}
-                  </p>
+              {/* Pricing intelligence — animated gauge + Suggested/Range
+                  (the marketing site's promise, kept in the product) */}
+              <div className="flex items-center gap-4 rounded-lg border border-border bg-surface-2/60 px-4 py-3">
+                <ConfidenceGauge value={data.confidence} size={120} />
+                <div className="grid flex-1 grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-muted">Suggested</p>
+                    <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
+                      {data.suggested != null ? `$${data.suggested}` : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted">Typical range</p>
+                    <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
+                      {data.range?.low != null && data.range?.high != null
+                        ? `$${data.range.low}–$${data.range.high}`
+                        : "—"}
+                    </p>
+                  </div>
                 </div>
               </div>
 
