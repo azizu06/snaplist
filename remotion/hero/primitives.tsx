@@ -177,27 +177,42 @@ export function Caret({ visible, height = 15 }: { visible: boolean; height?: num
 
 /* ================= app chrome ================= */
 
+/**
+ * Exact replica of the site brand mark (src/components/logo.tsx): white
+ * 800-weight "SL" initials on the iris-gradient tile. Same gradient stops,
+ * corner radius, and letter-spacing so the videos match the page chrome.
+ */
 export function LogoMark({ size = 26 }: { size?: number }) {
   return (
     <svg viewBox="0 0 48 48" width={size} height={size}>
       <defs>
-        <linearGradient id="lg" x1="6" y1="4" x2="44" y2="46" gradientUnits="userSpaceOnUse">
+        <linearGradient
+          id="iris-grad"
+          x1="6"
+          y1="4"
+          x2="44"
+          y2="46"
+          gradientUnits="userSpaceOnUse"
+        >
           <stop offset="0" stopColor="#7a73ff" />
-          <stop offset="0.55" stopColor="#6d4aff" />
+          <stop offset="0.55" stopColor="#635bff" />
           <stop offset="1" stopColor="#a960ee" />
         </linearGradient>
       </defs>
-      <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#lg)" />
-      <g stroke="#fff" strokeWidth="3.2" strokeLinecap="round" fill="none">
-        <circle cx="24" cy="24" r="14.5" opacity="0.4" />
-        <path d="M26.9 18.4 30.8 31" />
-        <path d="M19.7 18.4h14.4" />
-        <path d="m17.1 24 4.5-12.1" />
-        <path d="M21.1 29.6 14.9 15.9" />
-        <path d="M28.3 29.6H12.4" />
-        <path d="m30.9 24-5.1 13.9" />
-      </g>
-      <circle cx="24" cy="24" r="2.1" fill="#fff" />
+      <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#iris-grad)" />
+      <text
+        x="24"
+        y="25"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+        fontWeight="800"
+        fontSize="20.5"
+        letterSpacing="-0.8"
+        fill="#ffffff"
+      >
+        SL
+      </text>
     </svg>
   );
 }
