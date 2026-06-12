@@ -15,6 +15,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useTheme } from "next-themes";
 
 const LightRays = dynamic(() => import("@/components/bits/LightRays"), {
   ssr: false,
@@ -40,16 +41,25 @@ function usePrefersReducedMotion(): boolean {
   );
 }
 
-/** White light shafts streaming down through the hero's prism gradient. */
+/**
+ * Light shafts streaming down through the hero's prism gradient. Pure white
+ * over the pastel light slab; in dark mode the slab itself goes deep indigo,
+ * so the rays shift to a violet-white — full white reads as glare there.
+ * resolvedTheme is undefined until next-themes mounts; default to the light
+ * color (matches defaultTheme="light") and re-render on flip — LightRays
+ * rebuilds its uniforms when props change.
+ */
 export function HeroPrismRays() {
   const reduced = usePrefersReducedMotion();
+  const { resolvedTheme } = useTheme();
   if (reduced) return null;
+  const dark = resolvedTheme === "dark";
 
   return (
     <div aria-hidden className="absolute inset-0 hidden sm:block">
       <LightRays
         raysOrigin="top-center"
-        raysColor="#ffffff"
+        raysColor={dark ? "#b9a8ff" : "#ffffff"}
         raysSpeed={1.1}
         lightSpread={1.05}
         rayLength={1.5}
@@ -62,13 +72,17 @@ export function HeroPrismRays() {
   );
 }
 
+/** #6d4aff — visible on white. */
 const THREADS_VIOLET: [number, number, number] = [0.427, 0.29, 1];
+/** Brighter lavender so the lines don't sink into the navy canvas. */
+const THREADS_VIOLET_DARK: [number, number, number] = [0.65, 0.55, 1];
 
 /** Calm violet thread lines behind the final CTA band. Mounts on scroll. */
 export function CtaThreads() {
   const hostRef = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
   const reduced = usePrefersReducedMotion();
+  const { resolvedTheme } = useTheme();
 
   useEffect(() => {
     const el = hostRef.current;
@@ -91,7 +105,9 @@ export function CtaThreads() {
     >
       {inView && !reduced && (
         <Threads
-          color={THREADS_VIOLET}
+          color={
+            resolvedTheme === "dark" ? THREADS_VIOLET_DARK : THREADS_VIOLET
+          }
           amplitude={1.2}
           distance={0.3}
           enableMouseInteraction={false}

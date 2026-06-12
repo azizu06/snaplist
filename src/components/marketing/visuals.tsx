@@ -249,7 +249,9 @@ export function ConfidenceGaugeVisual() {
     <div className="glass-panel rounded-2xl p-5">
       <div className="mx-auto w-[180px]">
         <svg viewBox="0 0 140 84" className="w-full" aria-hidden>
-          <path d="M 16 76 A 54 54 0 0 1 124 76" fill="none" stroke="#eef1f8" strokeWidth="10" strokeLinecap="round" />
+          {/* Track + label use tokens via style (SVG presentation attributes
+              can't resolve var()), so the gauge flips with the theme. */}
+          <path d="M 16 76 A 54 54 0 0 1 124 76" fill="none" style={{ stroke: "var(--color-panel-2)" }} strokeWidth="10" strokeLinecap="round" />
           <path
             d="M 16 76 A 54 54 0 0 1 124 76"
             fill="none"
@@ -264,7 +266,7 @@ export function ConfidenceGaugeVisual() {
               <stop offset="1" stopColor="#8b5cf6" />
             </linearGradient>
           </defs>
-          <text x="70" y="66" textAnchor="middle" className="nums" fill="#131e3a" fontSize="24" fontWeight="700">
+          <text x="70" y="66" textAnchor="middle" className="nums" style={{ fill: "var(--color-flash)" }} fontSize="24" fontWeight="700">
             92%
           </text>
         </svg>

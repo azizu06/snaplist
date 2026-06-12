@@ -511,7 +511,9 @@ export function ReviewView({
         {/* ---- contextual save bar (Shopify): appears only when dirty ---- */}
         {dirty ? (
           <div className="pointer-events-none sticky bottom-24 z-30 sm:bottom-5">
-            <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-white/10 bg-fg-strong px-3 py-2 text-white shadow-lg">
+            {/* Pinned ink navy (bg-fg-strong flips near-white in dark, which
+                would break the white inner text); dark gets a raised navy. */}
+            <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#131e3a] px-3 py-2 text-white shadow-lg dark:border-white/15 dark:bg-[#20294e]">
               <span className="flex items-center gap-2 pl-1 text-[13px] font-medium text-white/85">
                 <span aria-hidden className="size-1.5 rounded-full bg-warning" />
                 Unsaved changes

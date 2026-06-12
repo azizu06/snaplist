@@ -133,14 +133,17 @@ function MiniListingCard({
   price: string;
 }) {
   return (
-    <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm">
+    /* The folder papers stay literal white paper in both themes, so their ink
+       is pinned (fg-strong / accent-soft-fg flip light in dark mode and would
+       wash out on the white card). */
+    <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm dark:border-white/20">
       {/* eslint-disable-next-line @next/next/no-img-element -- tiny static demo thumbnail inside the folder animation */}
       <img src={src} alt="" aria-hidden className="h-[58%] w-full object-cover" />
       <span className="flex min-h-0 flex-1 flex-col justify-center gap-[2px] px-[5px]">
-        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-fg-strong">
+        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#131e3a]">
           {title}
         </span>
-        <span className="block text-[7px] font-bold leading-none text-accent-soft-fg" data-nums>
+        <span className="block text-[7px] font-bold leading-none text-[#5a36f0]" data-nums>
           {price}
         </span>
       </span>
