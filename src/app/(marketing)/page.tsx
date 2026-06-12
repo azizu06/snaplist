@@ -107,10 +107,11 @@ export default function Landing() {
       {/* ====== 1 · hero — prism slab + LightRays, CardSwap product deck ====== */}
       <section className="relative overflow-hidden pb-20 pt-32 sm:pb-28 sm:pt-40">
         <div aria-hidden className="prism-gradient" />
+        <div aria-hidden className="prism-grain" />
         <HeroPrismRays />
         <div className="relative mx-auto grid w-full max-w-6xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3.5 py-1.5 text-[12px] font-semibold text-flash backdrop-blur">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3.5 py-1.5 text-[12px] font-semibold text-flash shadow-xs backdrop-blur">
               <span className="size-1.5 rounded-full bg-iris" />
               AI-priced listings, live on eBay
             </span>
@@ -143,10 +144,10 @@ export default function Landing() {
               animateBy="words"
               delay={18}
               stepDuration={0.3}
-              className="mt-6 max-w-[46ch] text-[16.5px] font-medium leading-relaxed text-flash/90"
+              className="mt-6 max-w-[46ch] text-[16.5px] font-medium leading-relaxed text-flash"
             />
             {/* rotating categories — this line replaced the old marquee section */}
-            <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] font-semibold text-flash/80">
+            <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] font-semibold text-flash/90">
               <span>Built for</span>
               <RotatingText
                 texts={[...ROTATING_CATEGORIES]}
@@ -188,7 +189,7 @@ export default function Landing() {
                 See how it works
               </Link>
             </div>
-            <p className="mt-6 text-[12.5px] font-medium text-flash/70">
+            <p className="mt-6 text-[12.5px] font-medium text-flash/85">
               Free while in beta · no credit card · your eBay account, your
               sales
             </p>
