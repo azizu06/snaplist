@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import ScrollVelocity from "@/components/bits/ScrollVelocity";
 import { Reveal } from "@/components/marketing/reveal";
 import { DemoClip } from "@/components/marketing/demo-clip";
 import { WaterfallExplorer } from "@/components/marketing/waterfall-explorer";
+import { HiwJourneyRail } from "@/components/marketing/hiw-journey-rail";
+import { HiwPipelineNav } from "@/components/marketing/hiw-pipeline-nav";
+import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
 import {
   Eyebrow,
   LensRings,
@@ -17,53 +19,19 @@ export const metadata: Metadata = {
 };
 
 /**
- * /how-it-works (subpages v3) — the pipeline walkthrough rebuilt around the
- * five step clips (/demo/steps/*.mp4, 1920×1080 loops; DemoClip lazy-loads
- * them and falls back to a designed slate while a render is missing), an
- * interactive pricing-waterfall explorer that mirrors the real
- * PricingProvider router tiers (keep in sync), and the buyer-Q&A clip.
- * Products are the how-it-works pool: gameboy (hero), guitar (waterfall);
- * the mixer headlines /about.
+ * /how-it-works (ui-r4-hiw) — the pipeline walkthrough at demo scale.
+ * Owner round-4 feedback drove this layout: the five step clips
+ * (/demo/steps/*.mp4, 1920×1080 loops via DemoClip — lazy-mounted, designed
+ * slate fallback) now run near-content-width (~63% of a max-w-7xl row,
+ * alternating sides) so the UI inside each recording is actually readable;
+ * the buyer-Q&A clip gets the same treatment. The old ScrollVelocity verb
+ * marquee is replaced by HiwPipelineNav (rich verb cards with hover clip
+ * previews that deep-link to #step-{id}), and HiwJourneyRail is the premium
+ * three-moves overview (connected rail, one item travelling it). The
+ * WaterfallExplorer mirrors the real PricingProvider router tiers — keep in
+ * sync. Products: gameboy (hero + rail); the step clips embed their own
+ * assigned items (see DEMO_SURFACE_ASSIGNMENTS).
  */
-
-const STEP_GLYPHS: Record<string, React.ReactNode> = {
-  snap: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-      <circle cx="12" cy="13" r="3" />
-    </svg>
-  ),
-  identify: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  ),
-  price: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <line x1="12" x2="12" y1="2" y2="22" />
-      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-    </svg>
-  ),
-  write: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
-      <path d="m15 5 4 4" />
-    </svg>
-  ),
-  publish: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
-      <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
-      <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
-    </svg>
-  ),
-  chat: (
-    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
-    </svg>
-  ),
-};
 
 const STEPS = [
   {
@@ -111,11 +79,11 @@ export default function HowItWorks() {
         <div className="mx-auto grid w-full max-w-6xl items-center gap-12 lg:grid-cols-[1fr_380px]">
           <Reveal>
             <Eyebrow>How it works</Eyebrow>
-            <h1 className="mt-4 max-w-3xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
+            <h1 className="mt-4 max-w-3xl font-display text-[clamp(36px,5.2vw,60px)] font-bold leading-[1.05] tracking-tight text-flash">
               One photo in.
               <br />A <em className="text-iris">defensible</em> listing out.
             </h1>
-            <p className="mt-5 max-w-[52ch] text-[16px] leading-relaxed text-flash-dim">
+            <p className="mt-5 max-w-[52ch] text-[17px] leading-relaxed text-flash-dim">
               SnapList is a pipeline, not a magic trick. Here is exactly what
               happens between your camera roll and a live eBay listing.
             </p>
@@ -126,44 +94,53 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* react-bits ScrollVelocity — the pipeline as a scroll-reactive marquee */}
-      <section className="overflow-hidden border-y border-line bg-night-2 py-8 sm:py-10">
-        <ScrollVelocity
-          velocity={55}
-          numCopies={8}
-          texts={[
-            <span key="pipeline" className="text-flash">
-              Snap <span className="text-iris">·</span> Identify{" "}
-              <span className="text-iris">·</span> Price{" "}
-              <span className="text-iris">·</span> Write{" "}
-              <span className="text-iris">·</span> Publish{" "}
-              <span className="text-iris">·</span>
-            </span>,
-            <span key="marketplaces" className="text-flash-faint/45">
-              eBay <span className="text-iris/50">·</span> Facebook
-              Marketplace <span className="text-iris/50">·</span> Mercari{" "}
-              <span className="text-iris/50">·</span>
-            </span>,
-          ]}
-        />
+      {/* the whole journey, three moves — connected rail, one item travelling it */}
+      <section className="mx-auto w-full max-w-6xl px-5 py-20 sm:px-8 sm:py-24">
+        <Reveal>
+          <Eyebrow>The short version</Eyebrow>
+          <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
+            Three moves. <em className="text-iris">That&apos;s the whole job.</em>
+          </h2>
+          <p className="mt-4 max-w-[56ch] text-[16px] leading-relaxed text-flash-dim">
+            Watch one Game Boy make the trip: photographed, researched, live —
+            the only part that&apos;s yours is the approval.
+          </p>
+        </Reveal>
+        <div className="mt-14">
+          <HiwJourneyRail />
+        </div>
       </section>
 
-      {/* the five steps, each with its rendered demo clip */}
-      <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
-        <div className="space-y-16 sm:space-y-20">
+      {/* the pipeline verbs as navigation — hover previews, click to jump */}
+      <section className="border-y border-line bg-night-2 py-12 sm:py-14">
+        <div className="mx-auto mb-8 flex w-full max-w-7xl flex-wrap items-end justify-between gap-3 px-5 sm:px-8">
+          <Eyebrow tint="indigo">The pipeline, up close</Eyebrow>
+          <p className="text-[13px] font-medium text-flash-faint">
+            Pick a step to jump straight to it
+          </p>
+        </div>
+        <HiwPipelineNav />
+      </section>
+
+      {/* the five steps — demo clips at readable scale, alternating sides */}
+      <section className="mx-auto w-full max-w-7xl px-5 py-24 sm:px-8 sm:py-28">
+        <div className="space-y-24 sm:space-y-32">
           {STEPS.map(({ n, id, title, body, poster }, i) => (
             <Reveal key={n} delay={0.05}>
               <div
-                className={`grid items-center gap-8 lg:gap-14 ${
-                  i % 2 === 0 ? "lg:grid-cols-[1fr_460px]" : "lg:grid-cols-[460px_1fr]"
+                id={`step-${id}`}
+                className={`grid scroll-mt-24 items-center gap-9 lg:gap-16 ${
+                  i % 2 === 0
+                    ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]"
+                    : "lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]"
                 }`}
               >
                 <div className={i % 2 === 0 ? "" : "lg:order-2"}>
                   <Eyebrow n={n}>{`Step ${i + 1}`}</Eyebrow>
-                  <h2 className="mt-3.5 font-display text-[clamp(24px,3vw,32px)] font-bold tracking-tight text-flash">
+                  <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
                     {title}
                   </h2>
-                  <p className="mt-3.5 max-w-[56ch] text-[15px] leading-relaxed text-flash-dim">
+                  <p className="mt-4 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
                     {body}
                   </p>
                 </div>
@@ -174,7 +151,8 @@ export default function HowItWorks() {
                     n={n}
                     title={title}
                     caption={poster}
-                    glyph={STEP_GLYPHS[id]}
+                    glyph={HIW_GLYPHS[id]}
+                    className="rounded-3xl"
                   />
                 </div>
               </div>
@@ -185,14 +163,14 @@ export default function HowItWorks() {
 
       {/* interactive pricing waterfall */}
       <section className="border-t border-line bg-night-2">
-        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
+        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-28">
           <Reveal>
             <Eyebrow tint="cyan">The pricing waterfall</Eyebrow>
-            <h2 className="mt-4 max-w-2xl font-display text-[clamp(26px,3.6vw,40px)] font-bold leading-tight tracking-tight text-flash">
+            <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
               The best source that exists for <em className="text-iris">your</em>{" "}
               item — honestly labeled
             </h2>
-            <p className="mt-4 max-w-[58ch] text-[15px] leading-relaxed text-flash-dim">
+            <p className="mt-4 max-w-[58ch] text-[16px] leading-relaxed text-flash-dim">
               Not every item can be priced with the same rigor. Pick a tier to
               see what it actually does — the confidence score always tells
               you which one fired.
@@ -204,18 +182,18 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* buyer messaging */}
-      <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
+      {/* buyer messaging — same demo scale as the steps */}
+      <section className="mx-auto w-full max-w-7xl px-5 py-24 sm:px-8 sm:py-28">
         <Reveal>
-          <div className="grid items-center gap-8 lg:grid-cols-[1fr_460px] lg:gap-14">
+          <div className="grid items-center gap-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] lg:gap-16">
             <div>
               <Eyebrow n="06" tint="rose">
                 After it&apos;s live
               </Eyebrow>
-              <h2 className="mt-3.5 font-display text-[clamp(24px,3vw,32px)] font-bold tracking-tight text-flash">
+              <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
                 Buyer questions, pre-answered
               </h2>
-              <p className="mt-3.5 max-w-[56ch] text-[15px] leading-relaxed text-flash-dim">
+              <p className="mt-4 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
                 Incoming messages land in a live inbox with a reply already
                 drafted from the item&apos;s real attributes — edition,
                 condition, what&apos;s included. You approve, edit, or rewrite;
@@ -227,20 +205,25 @@ export default function HowItWorks() {
               label="Demo clip — a buyer question arrives and a grounded reply is drafted for approval"
               title="Buyer Q&A"
               caption="Drafted from attributes, sent by you."
-              glyph={STEP_GLYPHS.chat}
+              glyph={HIW_GLYPHS.chat}
+              className="rounded-3xl"
             />
           </div>
         </Reveal>
       </section>
 
-      <section className="border-t border-line bg-night-2 px-5 py-24 text-center sm:px-8">
+      <section className="border-t border-line bg-night-2 px-5 py-24 text-center sm:px-8 sm:py-28">
         <Reveal>
-          <h2 className="font-display text-[clamp(28px,4vw,42px)] font-bold tracking-tight text-flash">
+          <h2 className="font-display text-[clamp(30px,4.2vw,46px)] font-bold tracking-tight text-flash">
             See it on your own shelf
           </h2>
+          <p className="mx-auto mt-4 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
+            The whole pipeline you just read about, on your first photo —
+            free while in beta.
+          </p>
           <Link
             href="/login"
-            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
+            className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-8 py-4 text-[15.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
           >
             Try it free
             <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
