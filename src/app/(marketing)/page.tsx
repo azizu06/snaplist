@@ -19,7 +19,6 @@ import {
   MarketplaceLoop,
 } from "@/components/marketing/marketplace-loop";
 import { Reveal } from "@/components/marketing/reveal";
-import { ScanShowcase } from "@/components/marketing/scan-showcase";
 import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
 
 /**
@@ -343,13 +342,19 @@ export default function Landing() {
             </p>
           </div>
 
-          {/* The hero showcase (round 4) — replaces the looping mp4 with the
-              live ScanShowcase: ten catalog photos cycle under a scanning
-              beam, and each completed scan flips the output panel to that
-              product's real title / price / condition. One photo in, a
-              defensible listing out — performed, not narrated. */}
+          {/* The demo video IS the hero (owner directive): pure vision-model
+              showcase, flat and full, SL-branded chrome. The ScanShowcase
+              lives on /how-it-works under its namesake headline. */}
           <div className="mx-auto mt-12 w-full max-w-5xl sm:mt-16">
-            <ScanShowcase />
+            <video
+              src="/hero-demo.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              className="block h-auto w-full rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(19,30,58,0.35),0_4px_16px_-6px_rgba(19,30,58,0.12)] dark:border-2 dark:border-white/20 dark:shadow-[0_0_0_1px_rgba(126,95,255,0.25),0_0_60px_-10px_rgba(126,95,255,0.35),0_24px_64px_-24px_rgba(0,0,0,0.7)]"
+              aria-label="Demo: a photo becomes a priced, published eBay listing"
+            />
           </div>
         </div>
       </section>

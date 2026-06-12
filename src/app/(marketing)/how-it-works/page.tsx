@@ -6,11 +6,8 @@ import { WaterfallExplorer } from "@/components/marketing/waterfall-explorer";
 import { HiwJourneyRail } from "@/components/marketing/hiw-journey-rail";
 import { HiwPipelineNav } from "@/components/marketing/hiw-pipeline-nav";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
-import {
-  Eyebrow,
-  LensRings,
-  SnapIdentityCard,
-} from "@/components/marketing/visuals";
+import { ScanShowcase } from "@/components/marketing/scan-showcase";
+import { Eyebrow, LensRings } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "How it works",
@@ -76,10 +73,10 @@ export default function HowItWorks() {
     <>
       <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <LensRings className="pointer-events-none absolute -right-40 -top-40 w-[560px] text-iris" />
-        <div className="mx-auto grid w-full max-w-6xl items-center gap-12 lg:grid-cols-[1fr_380px]">
-          <Reveal>
+        <div className="mx-auto w-full max-w-6xl">
+          <Reveal className="mx-auto flex max-w-3xl flex-col items-center text-center">
             <Eyebrow>How it works</Eyebrow>
-            <h1 className="mt-4 max-w-3xl font-display text-[clamp(36px,5.2vw,60px)] font-bold leading-[1.05] tracking-tight text-flash">
+            <h1 className="mt-4 font-display text-[clamp(36px,5.2vw,60px)] font-bold leading-[1.05] tracking-tight text-flash">
               One photo in.
               <br />A <em className="text-iris">defensible</em> listing out.
             </h1>
@@ -88,8 +85,11 @@ export default function HowItWorks() {
               happens between your camera roll and a live eBay listing.
             </p>
           </Reveal>
-          <Reveal delay={0.15} className="hidden lg:block">
-            <SnapIdentityCard />
+          {/* The headline, performed: ten catalog photos cycle under a
+              scanning beam; each completed scan flips the output panel to
+              that product's real title / price / condition. */}
+          <Reveal delay={0.15} className="mx-auto mt-12 w-full max-w-5xl sm:mt-14">
+            <ScanShowcase />
           </Reveal>
         </div>
       </section>

@@ -212,6 +212,20 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   "features-demos": ["polaroid", "vinyl", "gshock"],
   "features-waterfall": ["guitar"],
   "how-it-works": ["gameboy"], // + embeds the step-* clips above
+  // Hero ScanShowcase on /how-it-works — a deliberate 10-product montage
+  // (scanning-beam cycle), exempt from the one-surface rule by design.
+  "hiw-hero-scan": [
+    "camera",
+    "book",
+    "sneakers",
+    "vinyl",
+    "gameboy",
+    "headphones",
+    "guitar",
+    "polaroid",
+    "mixer",
+    "gshock",
+  ],
   // ui-r4: mixer.jpg is an extreme close-up that doesn't read as a sellable
   // product on the About hero — replaced with the verified turntable photo.
   // The mixer entry stays (the step-write Remotion clip still uses it).
