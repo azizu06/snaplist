@@ -156,6 +156,28 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     alt: "Ornate vintage brass chess pieces standing on a wooden chessboard",
   },
   {
+    slug: "turntable",
+    image: "/demo/turntable.jpg",
+    title: "Victrola belt-drive turntable — silver",
+    shortName: "Victrola turntable",
+    price: 68,
+    condition: "Good",
+    category: "Audio & Hi-Fi",
+    pricingStory: "comps",
+    alt: "Silver Victrola belt-drive turntable with a vinyl record on the platter, beside a sketchpad",
+  },
+  {
+    slug: "espresso",
+    image: "/demo/espresso.jpg",
+    title: "Stainless slim espresso machine with portafilter",
+    shortName: "Espresso machine",
+    price: 95,
+    condition: "Good",
+    category: "Home & Kitchen",
+    pricingStory: "comps",
+    alt: "Stainless-steel slim espresso machine pulling a shot into a white cup on a wooden counter",
+  },
+  {
     slug: "gshock",
     image: "/demo/gshock.jpg",
     title: "Casio G-Shock DW-5600 digital watch",
@@ -190,7 +212,11 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   "features-demos": ["polaroid", "vinyl", "gshock"],
   "features-waterfall": ["guitar"],
   "how-it-works": ["gameboy"], // + embeds the step-* clips above
-  "about-price-report": ["mixer"],
+  // ui-r4: mixer.jpg is an extreme close-up that doesn't read as a sellable
+  // product on the About hero — replaced with the verified turntable photo.
+  // The mixer entry stays (the step-write Remotion clip still uses it).
+  "about-price-report": ["turntable"],
+  "about-faq": ["espresso"],
   "upload-examples": ["gameboy", "vinyl"], // app surface; overlaps marketing by design
   "dashboard-folder": ["keyboard", "chess", "headphones"],
 };

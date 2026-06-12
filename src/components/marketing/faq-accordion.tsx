@@ -35,12 +35,12 @@ export function FaqAccordion({
                 aria-expanded={isOpen}
                 aria-controls={panelId}
                 onClick={() => setOpen(isOpen ? null : i)}
-                className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-2xl px-6 py-5 text-left text-[15px] font-semibold text-flash"
+                className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-2xl px-7 py-6 text-left text-[16.5px] font-semibold text-flash"
               >
                 {q}
                 <svg
                   viewBox="0 0 24 24"
-                  className={`size-4 shrink-0 transition-transform duration-300 ease-out ${
+                  className={`size-[18px] shrink-0 transition-transform duration-300 ease-out ${
                     isOpen ? "rotate-180 text-iris" : "text-flash-faint"
                   }`}
                   fill="none"
@@ -56,7 +56,7 @@ export function FaqAccordion({
             </h3>
             <div className="faq-panel" data-open={isOpen} id={panelId}>
               <div>
-                <p className="faq-panel-content px-6 pb-6 text-[14px] leading-relaxed text-flash-dim">
+                <p className="faq-panel-content px-7 pb-7 text-[15px] leading-relaxed text-flash-dim">
                   {a}
                 </p>
               </div>

@@ -43,8 +43,8 @@ export function IdentifyDemo() {
   const [active, setActive] = useState(0);
   const region = ID_REGIONS[active];
   return (
-    <div className="glass-panel rounded-3xl p-4">
-      <div className="relative h-[230px] overflow-hidden rounded-2xl sm:h-[260px]">
+    <div className="glass-panel rounded-3xl p-5">
+      <div className="relative h-[250px] overflow-hidden rounded-2xl sm:h-[290px]">
         <Image src={p.image} alt={p.alt} fill sizes="440px" className="object-cover" />
         <div
           className="scan-line absolute inset-x-2 top-2 h-[2px] rounded-full bg-gradient-to-r from-transparent via-iris to-transparent"
@@ -57,7 +57,7 @@ export function IdentifyDemo() {
           style={region.box}
         >
           <span
-            className={`absolute left-0 whitespace-nowrap rounded-md bg-iris px-1.5 py-0.5 text-[10px] font-bold text-iris-ink ${
+            className={`absolute left-0 whitespace-nowrap rounded-md bg-iris px-2 py-1 text-[11px] font-bold text-iris-ink ${
               region.labelInside ? "left-1 top-1" : "-top-6"
             }`}
           >
@@ -65,10 +65,10 @@ export function IdentifyDemo() {
           </span>
         </div>
       </div>
-      <p className="mt-3.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
+      <p className="mt-4 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
         Extracted attributes — hover to inspect
       </p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className="mt-2.5 flex flex-wrap gap-2">
         {ID_REGIONS.map(({ label }, i) => (
           <button
             key={label}
@@ -76,7 +76,7 @@ export function IdentifyDemo() {
             onMouseEnter={() => setActive(i)}
             onFocus={() => setActive(i)}
             onClick={() => setActive(i)}
-            className={`rounded-md px-2 py-1 text-[11.5px] font-medium transition-colors ${
+            className={`rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
               active === i
                 ? "bg-iris text-iris-ink"
                 : "bg-iris/10 text-iris hover:bg-iris/20"
@@ -103,28 +103,28 @@ export function PriceReportDemo() {
   const p = DEMO_PRODUCTS_BY_SLUG.vinyl;
   const reduced = useReducedMotion();
   return (
-    <div className="glass-panel rounded-3xl p-5">
-      <div className="flex items-center gap-3.5">
-        <div className="relative size-14 shrink-0 overflow-hidden rounded-xl">
-          <Image src={p.image} alt={p.alt} fill sizes="56px" className="object-cover" />
+    <div className="glass-panel rounded-3xl p-6">
+      <div className="flex items-center gap-4">
+        <div className="relative size-16 shrink-0 overflow-hidden rounded-xl">
+          <Image src={p.image} alt={p.alt} fill sizes="64px" className="object-cover" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold text-flash">{p.title}</p>
-          <p className="text-[11.5px] text-flash-faint">
+          <p className="truncate text-[14.5px] font-semibold text-flash">{p.title}</p>
+          <p className="mt-0.5 text-[13px] text-flash-faint">
             {p.condition} · {p.category}
           </p>
         </div>
       </div>
       <div className="mt-4 flex items-end justify-between">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
             Suggested price
           </p>
-          <p className="nums font-display text-[34px] font-bold leading-tight text-flash">
+          <p className="nums font-display text-[38px] font-bold leading-tight text-flash">
             $<CountUp to={p.price} duration={0.9} />
           </p>
         </div>
-        <span className="mb-1 rounded-full px-2.5 py-1 text-[10.5px] font-semibold" style={{ background: "var(--tint-cyan-soft)", color: "var(--tint-cyan)" }}>
+        <span className="mb-1 rounded-full px-3 py-1.5 text-[12px] font-semibold" style={{ background: "var(--tint-cyan-soft)", color: "var(--tint-cyan)" }}>
           <CountUp to={81} duration={0.9} />% confident
         </span>
       </div>
@@ -136,7 +136,7 @@ export function PriceReportDemo() {
         className="mt-3 h-1.5 origin-left rounded-full bg-gradient-to-r from-iris-deep to-iris"
         style={{ width: "72%" }}
       />
-      <p className="nums mt-1.5 text-[11px] text-flash-faint">range $22 – $34 · sold signals over asking</p>
+      <p className="nums mt-2 text-[12.5px] text-flash-faint">range $22 – $34 · sold signals over asking</p>
       <div className="mt-4 space-y-2">
         {VINYL_SOURCES.map(([src, price, age], i) => (
           <motion.div
@@ -145,16 +145,16 @@ export function PriceReportDemo() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.6 }}
             transition={{ duration: 0.45, delay: 0.25 + i * 0.18 }}
-            className="flex items-center justify-between rounded-lg border border-line bg-night-2 px-3 py-2"
+            className="flex items-center justify-between rounded-lg border border-line bg-night-2 px-3.5 py-2.5"
           >
-            <span className="flex items-center gap-2 text-[12px] text-flash-dim">
-              <svg viewBox="0 0 24 24" className="size-3 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <span className="flex items-center gap-2 text-[13.5px] text-flash-dim">
+              <svg viewBox="0 0 24 24" className="size-3.5 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
               {src}
             </span>
-            <span className="nums text-[12px] font-semibold text-flash">
+            <span className="nums text-[13.5px] font-semibold text-flash">
               {price} <span className="font-normal text-flash-faint">· {age}</span>
             </span>
           </motion.div>
@@ -179,7 +179,7 @@ const PLATFORM_TABS = [
           ["Model", "DW-5600"],
           ["Condition", "Good — tested, keeps time"],
         ].map(([k, v]) => (
-          <div key={k} className="flex justify-between gap-3 text-[12px]">
+          <div key={k} className="flex justify-between gap-3 text-[13.5px]">
             <span className="text-flash-faint">{k}</span>
             <span className="font-medium text-flash-dim">{v}</span>
           </div>
@@ -193,7 +193,7 @@ const PLATFORM_TABS = [
     note: "casual · local pickup",
     title: "Casio G-Shock watch — works perfectly",
     body: (
-      <p className="text-[12.5px] leading-relaxed text-flash-dim">
+      <p className="text-[13.5px] leading-relaxed text-flash-dim">
         Classic square G-Shock, keeps perfect time. Light wear on the strap,
         glass is clean. Pickup near campus or can meet locally.
       </p>
@@ -205,7 +205,7 @@ const PLATFORM_TABS = [
     note: "hashtags · ships next day",
     title: "Casio G-Shock DW-5600 classic square",
     body: (
-      <p className="text-[12.5px] leading-relaxed text-flash-dim">
+      <p className="text-[13.5px] leading-relaxed text-flash-dim">
         Tested and working, ships next day in protective wrap.{" "}
         <span className="text-iris">#gshock #casio #watch #edc</span>
       </p>
@@ -220,14 +220,14 @@ export function ListingComposerDemo() {
   const [tab, setTab] = useState(0);
   const t = PLATFORM_TABS[tab];
   return (
-    <div className="glass-panel rounded-3xl p-4">
-      <div className="flex items-center gap-3 px-1">
-        <div className="relative size-12 shrink-0 overflow-hidden rounded-xl">
-          <Image src={p.image} alt={p.alt} fill sizes="48px" className="object-cover" />
+    <div className="glass-panel rounded-3xl p-5">
+      <div className="flex items-center gap-3.5 px-1">
+        <div className="relative size-14 shrink-0 overflow-hidden rounded-xl">
+          <Image src={p.image} alt={p.alt} fill sizes="56px" className="object-cover" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[12.5px] font-semibold text-flash">{p.title}</p>
-          <p className="nums text-[11px] text-flash-faint">
+          <p className="truncate text-[14px] font-semibold text-flash">{p.title}</p>
+          <p className="nums mt-0.5 text-[12.5px] text-flash-faint">
             one validated core · ${p.price}
           </p>
         </div>
@@ -240,7 +240,7 @@ export function ListingComposerDemo() {
             role="tab"
             aria-selected={tab === i}
             onClick={() => setTab(i)}
-            className={`flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-colors ${
+            className={`flex-1 rounded-lg px-2 py-2 text-[13px] font-semibold transition-colors ${
               tab === i
                 ? "bg-panel text-flash shadow-xs"
                 : "text-flash-faint hover:text-flash-dim"
@@ -250,7 +250,7 @@ export function ListingComposerDemo() {
           </button>
         ))}
       </div>
-      <div className="relative mt-3 min-h-[148px]">
+      <div className="relative mt-3.5 min-h-[168px]">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={t.id}
@@ -258,19 +258,19 @@ export function ListingComposerDemo() {
             animate={{ opacity: 1, y: 0 }}
             exit={reduced ? undefined : { opacity: 0, y: -6 }}
             transition={{ duration: 0.22, ease: "easeOut" }}
-            className="rounded-2xl border border-line bg-panel p-4 shadow-xs"
+            className="rounded-2xl border border-line bg-panel p-5 shadow-xs"
           >
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[10.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--tint-rose)" }}>
+              <span className="text-[11.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--tint-rose)" }}>
                 {t.name}
               </span>
-              <span className="nums text-[12.5px] font-bold text-flash">${p.price}</span>
+              <span className="nums text-[14px] font-bold text-flash">${p.price}</span>
             </div>
-            <p className="mt-2 text-[13px] font-semibold leading-snug text-flash">
+            <p className="mt-2 text-[14.5px] font-semibold leading-snug text-flash">
               {t.title}
             </p>
             <div className="mt-2.5">{t.body}</div>
-            <p className="mt-3 text-[10.5px] text-flash-faint">{t.note}</p>
+            <p className="mt-3 text-[12px] text-flash-faint">{t.note}</p>
           </motion.div>
         </AnimatePresence>
       </div>
@@ -291,11 +291,11 @@ export function AutopilotDemo() {
   const [gate, setGate] = useState(85);
   const [enabled, setEnabled] = useState(true);
   return (
-    <div className="glass-panel rounded-3xl p-5">
+    <div className="glass-panel rounded-3xl p-6">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-[13px] font-semibold text-flash">Autopilot gate</p>
-          <p className="text-[11px] text-flash-faint">
+          <p className="text-[15px] font-semibold text-flash">Autopilot gate</p>
+          <p className="mt-0.5 text-[12.5px] text-flash-faint">
             publishes above <span className="nums font-semibold text-flash-dim">{gate}%</span> confidence
           </p>
         </div>
@@ -331,16 +331,16 @@ export function AutopilotDemo() {
           return (
             <div
               key={label}
-              className="flex items-center justify-between gap-3 rounded-lg border border-line bg-night-2 px-3 py-2.5"
+              className="flex items-center justify-between gap-3 rounded-lg border border-line bg-night-2 px-3.5 py-3"
             >
               <div className="min-w-0">
-                <p className="truncate text-[12.5px] font-medium text-flash-dim">{label}</p>
-                <p className="truncate text-[10.5px] text-flash-faint">{detail}</p>
+                <p className="truncate text-[14px] font-medium text-flash-dim">{label}</p>
+                <p className="truncate text-[12px] text-flash-faint">{detail}</p>
               </div>
               <div className="flex shrink-0 items-center gap-2.5">
-                <span className="nums text-[11.5px] font-semibold text-flash-dim">{conf}%</span>
+                <span className="nums text-[13px] font-semibold text-flash-dim">{conf}%</span>
                 <span
-                  className={`w-[86px] rounded-full px-2 py-1 text-center text-[10px] font-bold uppercase tracking-[0.06em] transition-colors ${
+                  className={`w-[96px] rounded-full px-2 py-1.5 text-center text-[11px] font-bold uppercase tracking-[0.06em] transition-colors ${
                     publishes
                       ? "bg-iris text-iris-ink"
                       : "border border-line-2 text-flash-faint"
@@ -353,7 +353,7 @@ export function AutopilotDemo() {
           );
         })}
       </div>
-      <p className="mt-3.5 text-[11px] text-flash-faint">
+      <p className="mt-4 text-[12.5px] leading-relaxed text-flash-faint">
         Confidence is computed from pricing tier, comp agreement, and ID
         completeness — never the model grading itself.
       </p>
