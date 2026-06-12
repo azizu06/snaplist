@@ -27,8 +27,10 @@ const COLUMNS = [
 ] as const;
 
 /**
- * Marketing footer (issue #49) — oversized wordmark as the closing visual,
- * Mercury-style link columns above it.
+ * Marketing footer (issue #49, subpages v3) — oversized wordmark as the
+ * closing visual, Mercury-style link columns above it. Column links carry an
+ * animated accent underline (.link-underline: scale-x from the left) plus an
+ * ink shift on hover; the iris token keeps it correct in both themes.
  */
 export function MarketingFooter() {
   return (
@@ -53,7 +55,7 @@ export function MarketingFooter() {
                     <li key={`${href}-${label}`}>
                       <Link
                         href={href}
-                        className="text-[13.5px] text-flash-dim transition-colors hover:text-flash"
+                        className="link-underline inline-block text-[13.5px] text-flash-dim transition-colors hover:text-flash"
                       >
                         {label}
                       </Link>
