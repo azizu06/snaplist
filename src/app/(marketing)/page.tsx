@@ -60,7 +60,7 @@ const STEPS = [
   {
     n: "02",
     title: "We research it",
-    body: "We identify brand, model and condition, then price against real comps — every number cites its sources.",
+    body: "We identify brand, model and condition, then price against what similar items recently sold for — every number cites its sources.",
   },
   {
     n: "03",
@@ -130,7 +130,7 @@ const BENTO_CARDS = [
     label: "Pricing engine",
     title: "Prices that show their work",
     description:
-      "No black-box numbers. Every suggestion comes as a price, a range, and the cited comps it was built from — ISBN lookups for books, live web research for the rest.",
+      "No black-box numbers. Every suggestion comes as a price, a range, and the cited recent sale prices it was built from — ISBN lookups for books, live web research for the rest.",
     icon: <BentoIcon d={[...ICONS.tag]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",
@@ -153,7 +153,7 @@ const BENTO_CARDS = [
     label: "Confidence gate",
     title: "Autopilot with a conscience",
     description:
-      "Confidence is computed from real signals — which pricing tier fired, how tightly comps agree, how complete the identification is. High confidence can publish itself; anything murky waits for you.",
+      "Confidence is computed from real signals — which pricing tier fired, how closely recent sale prices agree, how complete the identification is. High confidence can publish itself; anything murky waits for you.",
     icon: <BentoIcon d={[...ICONS.shieldCheck]} />,
     tint: "green" as const,
     className: "lg:col-span-2",
@@ -190,13 +190,15 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
  * "One photo, three storefronts" — the single instance of the motif on the
  * whole site. One verified catalog product (the keyboard — reserved for this
  * section; the marquee runs the other five) rendered three platform-fluent
- * ways. Round 4: each card now mimics how its platform ACTUALLY formats a
- * listing (eBay's condition chip + Buy It Now, Facebook's local-pickup
- * message context, Mercari's smart-pricing retail card) instead of three
- * copies of the same blurb, and everything got a size up. Copy only restates
- * attributes the photo verifies. Hover lifts via whole-pixel translate — no
- * scale / 3D transforms on text-bearing layers (the old TiltedCard blur);
- * image zoom is allowed because the photo carries no glyphs.
+ * ways. Round 5 (owner): the photo goes full-width at its natural wide
+ * aspect so the WHOLE keyboard is visible (the old 400px column cropped it
+ * to a sliver), and the three cards share one identical structural skeleton
+ * — platform header row → listing title → price row → one platform-detail
+ * line → one platform-flavored footer element — with only the CONTENT of
+ * each slot changing per marketplace. Copy only restates attributes the
+ * photo verifies. Hover lifts via whole-pixel translate — no scale / 3D
+ * transforms on text-bearing layers; image zoom is allowed because the
+ * photo carries no glyphs.
  * ------------------------------------------------------------------------- */
 
 const STOREFRONT_PRODUCT = DEMO_PRODUCTS_BY_SLUG.keyboard;
@@ -213,10 +215,46 @@ function StorefrontHeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <MarketplaceBadge marketplace={platform} className="text-[15px]" />
+      <MarketplaceBadge marketplace={platform} className="text-[16px]" />
       <span className="rounded-full bg-iris/10 px-2.5 py-1 text-[11px] font-semibold text-iris">
         {delivery}
       </span>
+    </div>
+  );
+}
+
+/** The shared anatomy for all three storefront cards: every slot lives at
+ *  the same position with the same spacing and type scale; only the slot
+ *  CONTENT is platform-specific. min-heights on the title and price row
+ *  keep the slots horizontally aligned across the three-up grid. */
+function StorefrontListing({
+  platform,
+  delivery,
+  title,
+  price,
+  detail,
+  footer,
+}: {
+  platform: "eBay" | "Facebook" | "Mercari";
+  delivery: string;
+  title: string;
+  price: React.ReactNode;
+  detail: string;
+  footer: React.ReactNode;
+}) {
+  return (
+    <div className={STOREFRONT_CARD}>
+      <StorefrontHeader platform={platform} delivery={delivery} />
+      <p className="mt-4 text-[14.5px] font-semibold leading-snug text-flash lg:min-h-[3.75em]">
+        {title}
+      </p>
+      <div className="mt-3 flex min-h-[34px] flex-wrap items-center gap-x-3 gap-y-2">
+        {price}
+      </div>
+      <p className="mt-2.5 text-[13px] leading-relaxed text-flash-dim">
+        {detail}
+      </p>
+      <div className="mt-auto flex min-h-[48px] items-center pt-4">{footer}</div>
     </div>
   );
 }
@@ -361,8 +399,8 @@ export default function Landing() {
 
       {/* ====== 1.5 · finished-listings band — what SnapList produces ====== */}
       <section className="border-b border-line bg-night py-10">
-        <p className="px-5 text-center text-[11.5px] font-semibold uppercase tracking-[0.18em] text-flash-faint">
-          Snapped, priced, written — straight from the pipeline
+        <p className="px-5 text-center text-[12px] font-semibold uppercase tracking-[0.18em] text-flash-faint">
+          From camera roll to cash
         </p>
         <div className="mt-6">
           <MarketplaceLoop />
@@ -464,109 +502,110 @@ export default function Landing() {
             </p>
           </Reveal>
           <Reveal delay={0.1} className="relative mt-12">
-            <div className="grid gap-6 lg:grid-cols-[minmax(320px,400px)_1fr] lg:items-stretch">
-              {/* the one photo — hover zooms the IMAGE inside its clipped
-                  frame (never the caption) + an iris glow ring */}
-              <figure className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
-                <div className="relative aspect-[4/3] overflow-hidden lg:min-h-0 lg:flex-1">
-                  <Image
-                    src={STOREFRONT_PRODUCT.image}
-                    alt={STOREFRONT_PRODUCT.alt}
-                    fill
-                    sizes="(max-width: 1024px) 100vw, 400px"
-                    className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
-                  />
-                  <span className="absolute left-3.5 top-3.5 rounded-md bg-flash/80 px-2.5 py-1 text-[11.5px] font-semibold text-white backdrop-blur dark:bg-night/80 dark:text-flash">
-                    The one photo
-                  </span>
-                </div>
-                <figcaption className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5">
-                  <span className="truncate text-[13.5px] font-semibold text-flash">
-                    {STOREFRONT_PRODUCT.shortName}
-                  </span>
-                  <span className="nums shrink-0 text-[13.5px] font-semibold text-flash-dim">
-                    ${STOREFRONT_PRODUCT.price} · {STOREFRONT_PRODUCT.condition}
-                  </span>
-                </figcaption>
-              </figure>
+            {/* the one photo — full panel width at a wide aspect so the whole
+                keyboard is visible edge to edge; hover zooms the IMAGE inside
+                its clipped frame (never the caption) + an iris glow ring */}
+            <figure className="group overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
+              <div className="relative aspect-[16/10] overflow-hidden sm:aspect-[2.4/1]">
+                <Image
+                  src={STOREFRONT_PRODUCT.image}
+                  alt={STOREFRONT_PRODUCT.alt}
+                  fill
+                  sizes="(max-width: 1152px) 100vw, 1024px"
+                  className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+                />
+                <span className="absolute left-3.5 top-3.5 rounded-md bg-flash/80 px-2.5 py-1 text-[11.5px] font-semibold text-white backdrop-blur dark:bg-night/80 dark:text-flash">
+                  The one photo
+                </span>
+              </div>
+              <figcaption className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5">
+                <span className="truncate text-[13.5px] font-semibold text-flash">
+                  {STOREFRONT_PRODUCT.shortName}
+                </span>
+                <span className="nums shrink-0 text-[13.5px] font-semibold text-flash-dim">
+                  ${STOREFRONT_PRODUCT.price} · {STOREFRONT_PRODUCT.condition}
+                </span>
+              </figcaption>
+            </figure>
 
-              {/* three platform renderings, stacked tall so each card gets
-                  real estate — every one formatted the way ITS marketplace
-                  actually shows a listing */}
-              <div className="flex flex-col gap-5">
-                {/* eBay — keyword title, condition chip, shipping line, BIN */}
-                <div className={STOREFRONT_CARD}>
-                  <StorefrontHeader platform="eBay" delivery="Publishes directly" />
-                  <p className="mt-3.5 text-[14.5px] font-semibold leading-snug text-flash">
-                    Custom 65% Mechanical Keyboard — Green &amp; White Keycaps —
-                    Like New
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/* three platform renderings — identical skeleton (header →
+                title → price row → detail line → footer), three-up so the
+                matching slots line up shoulder to shoulder */}
+            <div className="mt-6 grid gap-5 lg:grid-cols-3">
+              {/* eBay — keyword title, condition chip, shipping detail, BIN */}
+              <StorefrontListing
+                platform="eBay"
+                delivery="Publishes directly"
+                title="Custom 65% Mechanical Keyboard — Green & White Keycaps — Like New"
+                price={
+                  <>
+                    <span className="nums text-[20px] font-bold leading-none text-flash">
+                      $120.00
+                    </span>
                     <span className="rounded-md border border-line bg-night-2 px-2.5 py-1 text-[12px] font-medium text-flash-dim">
                       Pre-owned · Like new
                     </span>
-                    <span className="nums text-[19px] font-bold leading-none text-flash">
-                      $120.00
-                    </span>
-                    <span className="text-[13px] text-flash-dim">
-                      Free shipping · 30-day returns
-                    </span>
-                    <span className="ml-auto rounded-full bg-[#3665f3] px-4 py-1.5 text-[12.5px] font-semibold text-white">
-                      Buy It Now
-                    </span>
-                  </div>
-                </div>
+                  </>
+                }
+                detail="Free shipping · 30-day returns"
+                footer={
+                  <span className="rounded-full bg-[#3665f3] px-5 py-2 text-[13px] font-semibold text-white">
+                    Buy It Now
+                  </span>
+                }
+              />
 
-                {/* Facebook Marketplace — local pickup, location line, the
-                    "Is this available?" opener */}
-                <div className={STOREFRONT_CARD}>
-                  <StorefrontHeader platform="Facebook" delivery="Copy-paste pack" />
-                  <div className="mt-3.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <span className="nums text-[19px] font-bold leading-none text-flash">
+              {/* Facebook Marketplace — casual title, local-pickup detail,
+                  the "Is this available?" opener with the drafted reply */}
+              <StorefrontListing
+                platform="Facebook"
+                delivery="Copy-paste pack"
+                title="Custom mechanical keyboard — 65% layout, like new"
+                price={
+                  <>
+                    <span className="nums text-[20px] font-bold leading-none text-flash">
                       $120
                     </span>
-                    <p className="text-[14.5px] font-semibold leading-snug text-flash">
-                      Custom mechanical keyboard — 65% layout, like new
-                    </p>
-                  </div>
-                  <p className="mt-1.5 text-[13px] text-flash-dim">
-                    Listed today · Local pickup · Orlando, FL
-                  </p>
-                  <div className="mt-3.5 flex items-center justify-between gap-3 rounded-xl bg-night-2 px-3.5 py-2.5">
                     <span className="text-[13px] font-medium text-flash-dim">
+                      Like new
+                    </span>
+                  </>
+                }
+                detail="Listed today · Local pickup · Orlando, FL"
+                footer={
+                  <div className="flex w-full items-center justify-between gap-3 rounded-xl bg-night-2 px-3.5 py-2.5">
+                    <span className="truncate text-[13px] font-medium text-flash-dim">
                       “Is this available?”
                     </span>
-                    <span className="rounded-full bg-[#1877f2] px-3.5 py-1 text-[12px] font-semibold text-white">
+                    <span className="shrink-0 rounded-full bg-[#1877f2] px-3.5 py-1 text-[12px] font-semibold text-white">
                       Reply drafted
                     </span>
                   </div>
-                </div>
+                }
+              />
 
-                {/* Mercari — clean retail card with the smart-pricing hint */}
-                <div className={STOREFRONT_CARD}>
-                  <StorefrontHeader platform="Mercari" delivery="Copy-paste pack" />
-                  <p className="mt-3.5 text-[14.5px] font-semibold leading-snug text-flash">
-                    Custom 65% mech keyboard — green/white keycaps
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              {/* Mercari — short title, smart-pricing detail, hashtags */}
+              <StorefrontListing
+                platform="Mercari"
+                delivery="Copy-paste pack"
+                title="Custom 65% mech keyboard — green/white keycaps"
+                price={
+                  <>
                     <span className="nums text-[14px] font-medium text-flash-faint line-through">
                       $135
                     </span>
-                    <span className="nums text-[19px] font-bold leading-none text-flash">
+                    <span className="nums text-[20px] font-bold leading-none text-flash">
                       $120
                     </span>
-                    <span className="rounded-md bg-success-soft px-2.5 py-1 text-[12px] font-semibold text-success-soft-fg">
-                      Smart pricing · floor $95
-                    </span>
-                    <span className="ml-auto text-[13px] text-flash-dim">
-                      Free shipping · ships next day
-                    </span>
-                  </div>
-                  <p className="mt-2.5 text-[13px] font-medium text-iris">
+                  </>
+                }
+                detail="Smart pricing keeps it competitive — never below your $95 floor"
+                footer={
+                  <p className="text-[13px] font-medium text-iris">
                     #mechkeyboard&ensp;#65percent&ensp;#customkeyboard
                   </p>
-                </div>
-              </div>
+                }
+              />
             </div>
           </Reveal>
         </div>

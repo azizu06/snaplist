@@ -7,7 +7,6 @@ import { ThemeIconToggle } from "@/components/theme-toggle";
 
 const LINKS = [
   { href: "/how-it-works", label: "How it works" },
-  { href: "/features", label: "Features" },
   { href: "/pricing", label: "Pricing" },
   { href: "/about", label: "About" },
 ] as const;

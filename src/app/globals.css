@@ -738,51 +738,23 @@
 
 /* --- ui-r4-landing --- */
 
-/* ── Footer wordmark glow ────────────────────────────────────────────────────
-   The oversized clipped "SnapList" keeps its quiet vertical fade at rest; on
-   hover a bright iris shimmer sweeps left→right through the glyphs and a
-   soft violet glow blooms via drop-shadow. Both gradient layers clip to the
-   text, so the sweep lives INSIDE the letters. The sweep itself is driven by
-   rAF inline background-position (wordmark-glow.tsx) because Chrome won't
-   repaint clipped-text backgrounds from a CSS keyframe. Tokens re-point
-   under .dark. */
+/* ── Footer wordmark — resting layer ────────────────────────────────────────
+   The oversized clipped "SnapList" wears a quiet vertical fade at rest. The
+   round-4 hover shimmer sweep was replaced in round 5 by a cursor-tracking
+   flashlight (see .wordmark-flashlight in the ui-r5-landing block +
+   wordmark-glow.tsx); this rule is now only the dim base the light reveals
+   against. Tokens re-point under .dark. */
 .wordmark-glow {
   --wm-top: var(--color-line);
   --wm-bottom: var(--color-night);
-  --wm-shine: rgba(109, 74, 255, 0.95);
-  --wm-shine-edge: rgba(95, 208, 245, 0.55);
-  --wm-glow: rgba(109, 74, 255, 0.28);
   color: transparent;
-  background-image:
-    /* layer 1 — the traveling shimmer (transparent until it sweeps) */
-    linear-gradient(
-      100deg,
-      transparent 41%,
-      var(--wm-shine-edge) 45%,
-      var(--wm-shine) 48%,
-      var(--wm-shine) 52%,
-      var(--wm-shine-edge) 55%,
-      transparent 59%
-    ),
-    /* layer 2 — the resting vertical fade */
-    linear-gradient(to bottom, var(--wm-top), var(--wm-bottom));
-  background-size: 240% 100%, 100% 100%;
-  background-position: 200% 0, 0 0;
-  background-repeat: no-repeat;
+  background-image: linear-gradient(to bottom, var(--wm-top), var(--wm-bottom));
   -webkit-background-clip: text;
   background-clip: text;
-  filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
-  transition: filter 0.5s ease;
-}
-.wordmark-glow:hover {
-  filter: drop-shadow(0 6px 26px var(--wm-glow));
 }
 .dark .wordmark-glow {
   --wm-top: #36447a;
   --wm-bottom: var(--color-night);
-  --wm-shine: rgba(214, 200, 255, 1);
-  --wm-shine-edge: rgba(126, 95, 255, 0.75);
-  --wm-glow: rgba(126, 95, 255, 0.45);
 }
 
 /* Subtler cousin for the small footer nav-row wordmark: a soft iris halo
@@ -869,9 +841,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wordmark-glow {
-    transition: none;
-  }
   .footer-logo-glow span {
     transition: none;
   }
@@ -885,3 +854,58 @@
 }
 
 /* --- end ui-r4-landing --- */
+
+/* --- ui-r5-landing --- */
+
+/* ── Footer wordmark flashlight ──────────────────────────────────────────────
+   Owner round 5: "my mouse is like a flashlight — it lights up the spot
+   where my mouse is." A bright duplicate of the wordmark sits exactly over
+   the dim resting layer, clipped to the same glyphs, and is revealed through
+   a soft radial mask whose position chases the cursor (rAF-lerped inline
+   mask-position from wordmark-glow.tsx; mask-size there is LIGHT_SIZE and
+   must match the mask-size below). The drop-shadow blooms only around the
+   lit letters because the filter applies after the mask. Entering fades the
+   light up under the cursor; leaving fades it out in place. Reduced motion:
+   the JS never arms, .is-lit is never added, the word stays at rest. */
+.wordmark-flashlight {
+  --wm-light-a: #8e6bff;
+  --wm-light-b: #5435d6;
+  --wm-bloom: rgba(109, 74, 255, 0.45);
+  color: transparent;
+  background-image: linear-gradient(to bottom, var(--wm-light-a), var(--wm-light-b));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-mask-image: radial-gradient(
+    closest-side,
+    rgb(0 0 0) 0%,
+    rgb(0 0 0 / 0.6) 52%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    closest-side,
+    rgb(0 0 0) 0%,
+    rgb(0 0 0 / 0.6) 52%,
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 520px 520px;
+  mask-size: 520px 520px;
+  /* parked offscreen until the first pointermove paints a real position */
+  -webkit-mask-position: -9999px -9999px;
+  mask-position: -9999px -9999px;
+  filter: drop-shadow(0 0 28px var(--wm-bloom));
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.wordmark-flashlight.is-lit {
+  opacity: 1;
+}
+.dark .wordmark-flashlight {
+  --wm-light-a: #f3eeff;
+  --wm-light-b: #a98aff;
+  --wm-bloom: rgba(140, 110, 255, 0.55);
+}
+
+/* --- end ui-r5-landing --- */

@@ -1,56 +1,103 @@
 "use client";
 
 /**
- * Footer wordmark with a hover-driven shimmer sweep. The gradient layers and
- * glow live in .wordmark-glow (globals.css, ui-r4-landing block); this
- * component only drives background-position from rAF while hovered.
+ * Footer wordmark with a cursor-tracking flashlight (owner round 5: "my mouse
+ * is like a flashlight — it lights up the spot where my mouse is"). Two
+ * layers, both clipped to the glyphs:
  *
- * Why JS and not a CSS keyframe: Chrome doesn't reliably repaint
- * background-clip:text layers during background-position keyframe animation
- * (stale paint — the band freezes). Per-frame inline style updates force the
- * repaint; it's the same technique react-bits ShinyText uses.
+ *   - .wordmark-glow        — the dim resting vertical fade (globals.css,
+ *                             ui-r4-landing block)
+ *   - .wordmark-flashlight  — a bright duplicate of the word revealed through
+ *                             a soft radial mask (globals.css, ui-r5-landing
+ *                             block)
+ *
+ * This component only drives the mask position: pointermove sets a target,
+ * an rAF loop lerps toward it (smooth trailing), and inline style updates
+ * force Chrome to repaint the masked clipped-text layer every frame (the
+ * same stale-paint workaround the old shimmer needed). On pointer leave the
+ * light fades out via the CSS opacity transition. Reduced motion: the
+ * listeners never arm, so the word stays at its static resting state.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
-/** One full left→right pass of the shine band. */
-const SWEEP_MS = 2400;
+/** Diameter of the flashlight mask — must match mask-size in globals.css. */
+const LIGHT_SIZE = 520;
+/** Per-frame chase factor: how fast the light catches up to the cursor. */
+const LERP = 0.16;
 
 export function WordmarkGlow() {
-  const ref = useRef<HTMLParagraphElement>(null);
-  const [hovered, setHovered] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const lightRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!hovered || !el) return;
+    const wrap = wrapRef.current;
+    const light = lightRef.current;
+    if (!wrap || !light) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     let raf = 0;
-    const start = performance.now();
-    const tick = (now: number) => {
-      const progress = ((now - start) % SWEEP_MS) / SWEEP_MS;
-      // p: 200% (band parked off the left edge) → -100% (off the right edge);
-      // layer 2 (the resting vertical fade) stays pinned at 0 0.
-      const p = 200 - progress * 300;
-      el.style.backgroundPosition = `${p}% 0, 0 0`;
-      raf = requestAnimationFrame(tick);
+    let inside = false;
+    const cur = { x: 0, y: 0 };
+    const target = { x: 0, y: 0 };
+
+    const paint = () => {
+      const pos = `${cur.x - LIGHT_SIZE / 2}px ${cur.y - LIGHT_SIZE / 2}px`;
+      light.style.webkitMaskPosition = pos;
+      light.style.maskPosition = pos;
     };
-    raf = requestAnimationFrame(tick);
+
+    const tick = () => {
+      cur.x += (target.x - cur.x) * LERP;
+      cur.y += (target.y - cur.y) * LERP;
+      paint();
+      const settled =
+        Math.abs(target.x - cur.x) < 0.3 && Math.abs(target.y - cur.y) < 0.3;
+      if (inside || !settled) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        raf = 0;
+      }
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const r = wrap.getBoundingClientRect();
+      target.x = e.clientX - r.left;
+      target.y = e.clientY - r.top;
+      if (!inside) {
+        inside = true;
+        // Snap to the entry point so the light doesn't fly in from the
+        // last exit position — it just fades up under the cursor.
+        cur.x = target.x;
+        cur.y = target.y;
+        paint();
+        light.classList.add("is-lit");
+      }
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+
+    const onLeave = () => {
+      inside = false;
+      light.classList.remove("is-lit"); // CSS fades the light out in place
+    };
+
+    wrap.addEventListener("pointermove", onMove);
+    wrap.addEventListener("pointerleave", onLeave);
     return () => {
+      wrap.removeEventListener("pointermove", onMove);
+      wrap.removeEventListener("pointerleave", onLeave);
       cancelAnimationFrame(raf);
-      el.style.backgroundPosition = ""; // back to the CSS rest position
+      light.classList.remove("is-lit");
     };
-  }, [hovered]);
+  }, []);
 
   return (
-    <div aria-hidden className="select-none overflow-hidden">
-      <p
-        ref={ref}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        className="wordmark-glow -mb-[0.23em] text-center font-display text-[clamp(96px,18vw,260px)] font-bold leading-none tracking-tight"
-      >
+    <div ref={wrapRef} aria-hidden className="select-none overflow-hidden">
+      <p className="wordmark-glow relative -mb-[0.23em] text-center font-display text-[clamp(96px,18vw,260px)] font-bold leading-none tracking-tight">
         SnapList
+        <span ref={lightRef} className="wordmark-flashlight absolute inset-0">
+          SnapList
+        </span>
       </p>
     </div>
   );

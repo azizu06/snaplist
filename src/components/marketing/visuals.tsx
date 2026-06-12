@@ -95,62 +95,6 @@ export function PointChip({
   );
 }
 
-/* ------------------------------------------------- landing (do not break) */
-
-/**
- * "One photo, three storefronts" — used ONLY by the landing page (the
- * subpages dropped this motif so the landing keeps the single instance).
- * Blur fix: the old TiltedCard wrapper rotated/scaled the whole text card,
- * rasterizing copy mid-hover. Cards now lift on a whole-pixel translate
- * (transform-gpu pins the layer) and the depth cue moved to shadow/border.
- */
-export function PlatformCardsVisual() {
-  const cards = [
-    {
-      platform: "eBay",
-      title: "Canon AE-1 Program 35mm Film Camera w/ FD 50mm f/1.8 — Tested",
-      price: "$128",
-      tone: "border-iris/40",
-      note: "Item specifics · keyword title",
-    },
-    {
-      platform: "Facebook",
-      title: "Organic Chemistry 6th ed. — clean pages, no highlighting. Pickup near campus",
-      price: "$45",
-      tone: "border-line-2",
-      note: "Casual · local pickup",
-    },
-    {
-      platform: "Mercari",
-      title: "Air Jordan 1 Mid, sz 10.5 #jordan1 #sneakers — ships next day",
-      price: "$164",
-      tone: "border-line-2",
-      note: "Hashtags · shipping-first",
-    },
-  ] as const;
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      {cards.map(({ platform, title, price, tone, note }) => (
-        <div
-          key={platform}
-          className={`glass-panel h-full transform-gpu rounded-2xl border p-4 transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1.5 hover:border-iris/50 hover:shadow-lg ${tone}`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
-              {platform}
-            </span>
-            <span className="nums text-[13px] font-bold text-flash">{price}</span>
-          </div>
-          <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
-            {title}
-          </p>
-          <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /* ----------------------------------------------------- about page (mixer) */
 
 /**
@@ -162,7 +106,7 @@ export function MiniPriceReport() {
   const p = DEMO_PRODUCTS_BY_SLUG.mixer;
   const sources = [
     ["eBay sold listing", "$179", "3d ago"],
-    ["Mercari comp", "$192", "5d ago"],
+    ["Mercari recent sale", "$192", "5d ago"],
     ["Facebook ask — down-weighted", "$210", "1w ago"],
   ] as const;
   return (
@@ -196,7 +140,7 @@ export function MiniPriceReport() {
             <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M20 6 9 17l-5-5" />
             </svg>
-            78% · live comps
+            78% · recent sales
           </span>
         </div>
         {/* range band — suggested sits inside the researched window */}
@@ -265,7 +209,7 @@ export function SnapIdentityCard() {
         ))}
       </div>
       <div className="mt-3 flex items-center justify-between rounded-xl bg-night-2 px-3 py-2.5">
-        <span className="text-[11.5px] text-flash-faint">Suggested from live comps</span>
+        <span className="text-[11.5px] text-flash-faint">Priced from recent sales</span>
         <span className="nums text-[14px] font-bold text-flash">${p.price}</span>
       </div>
     </div>

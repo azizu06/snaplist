@@ -7,7 +7,6 @@ const COLUMNS = [
     heading: "Product",
     links: [
       { href: "/how-it-works", label: "How it works" },
-      { href: "/features", label: "Features" },
       { href: "/pricing", label: "Pricing" },
     ],
   },
@@ -74,10 +73,11 @@ export function MarketingFooter() {
         </div>
       </div>
 
-      {/* oversized clipped wordmark — hover sweeps a bright shimmer through
-          the glyphs (rAF-driven; see wordmark-glow.tsx + .wordmark-glow in
-          globals.css). Decorative/aria-hidden, but pointer events stay on so
-          the hover can land. */}
+      {/* oversized clipped wordmark — the cursor acts as a flashlight,
+          lighting up the letters under it (rAF-lerped mask; see
+          wordmark-glow.tsx + .wordmark-flashlight in globals.css).
+          Decorative/aria-hidden, but pointer events stay on so the
+          flashlight can land. */}
       <WordmarkGlow />
     </footer>
   );

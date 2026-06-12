@@ -7,7 +7,7 @@
  * title and price (src/lib/demo-products — never relabel), plus the
  * marketplace it ships to and the confidence chip the pipeline would show.
  * Confidence tints come from the status palette (emerald = autopilot-high,
- * blue = solid comps, amber = queued for review) so the chips MEAN the same
+ * blue = solid recent-sales data, amber = queued for review) so the chips MEAN the same
  * thing here as in the app.
  *
  * Text stays crisp because LogoLoop snaps its track transform to whole CSS
@@ -111,17 +111,19 @@ export function MarketplaceBadge({
 
 /** Round-4 sizing: real listing-card proportions — a proper photo on top
  *  (was a 56px thumb nobody could read), 13px+ body text, fewer cards per
- *  view. Nothing inside transforms on hover; the loop just pauses. */
+ *  view. Round 5: wider card so the confidence chip breathes (real padding,
+ *  no cramped leading-none), and the marketplace wordmark reads at a glance
+ *  (15px, was 12px). Nothing inside transforms on hover; the loop pauses. */
 function ListingCard({ listing }: { listing: LoopListing }) {
   const product = DEMO_PRODUCTS_BY_SLUG[listing.slug];
   return (
-    <article className="w-[300px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
-      <div className="relative h-[170px] border-b border-line">
+    <article className="w-[324px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
+      <div className="relative h-[176px] border-b border-line">
         <Image
           src={product.image}
           alt={product.alt}
           fill
-          sizes="300px"
+          sizes="324px"
           className="object-cover"
         />
         <span className="absolute right-2.5 top-2.5 rounded-md bg-night/85 px-2 py-1 text-[11px] font-semibold text-flash backdrop-blur">
@@ -132,17 +134,17 @@ function ListingCard({ listing }: { listing: LoopListing }) {
         <p className="truncate text-[13.5px] font-semibold leading-snug text-flash">
           {product.title}
         </p>
-        <div className="mt-2 flex items-center gap-2.5">
-          <span className="nums text-[16px] font-bold leading-none text-flash">
+        <div className="mt-2.5 flex items-center gap-2.5">
+          <span className="nums text-[17px] font-bold leading-none text-flash">
             ${product.price}
           </span>
           <span aria-hidden className="text-line-2">
             ·
           </span>
-          <MarketplaceBadge marketplace={listing.marketplace} className="text-[12px]" />
+          <MarketplaceBadge marketplace={listing.marketplace} className="text-[15px]" />
         </div>
         <span
-          className={`mt-3 inline-block rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none ${TONE_CLASSES[listing.tone]}`}
+          className={`mt-3.5 inline-block max-w-full rounded-full px-3.5 py-1.5 text-[12px] font-semibold leading-snug ${TONE_CLASSES[listing.tone]}`}
         >
           {listing.confidence}
         </span>
