@@ -19,6 +19,7 @@ import {
   MarketplaceLoop,
 } from "@/components/marketing/marketplace-loop";
 import { Reveal } from "@/components/marketing/reveal";
+import { ScanShowcase } from "@/components/marketing/scan-showcase";
 import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
 
 /**
@@ -190,33 +191,36 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
  * "One photo, three storefronts" — the single instance of the motif on the
  * whole site. One verified catalog product (the keyboard — reserved for this
  * section; the marquee runs the other five) rendered three platform-fluent
- * ways. Copy only restates attributes the photo verifies. Hover lifts via
- * whole-pixel translate — no scale / 3D transforms on text-bearing layers,
- * which is what blurred the old TiltedCard treatment.
+ * ways. Round 4: each card now mimics how its platform ACTUALLY formats a
+ * listing (eBay's condition chip + Buy It Now, Facebook's local-pickup
+ * message context, Mercari's smart-pricing retail card) instead of three
+ * copies of the same blurb, and everything got a size up. Copy only restates
+ * attributes the photo verifies. Hover lifts via whole-pixel translate — no
+ * scale / 3D transforms on text-bearing layers (the old TiltedCard blur);
+ * image zoom is allowed because the photo carries no glyphs.
  * ------------------------------------------------------------------------- */
 
 const STOREFRONT_PRODUCT = DEMO_PRODUCTS_BY_SLUG.keyboard;
 
-const STOREFRONTS = [
-  {
-    platform: "eBay",
-    copy: "Custom 65% Mechanical Keyboard — Green & White Keycaps — Like New",
-    note: "Item specifics · keyword title",
-    delivery: "Publishes directly",
-  },
-  {
-    platform: "Facebook",
-    copy: "Custom mechanical keyboard, 65% layout with green & white keycaps. Like new — happy to demo at pickup.",
-    note: "Casual · local pickup",
-    delivery: "Copy-paste pack",
-  },
-  {
-    platform: "Mercari",
-    copy: "Custom 65% mech keyboard, green/white keycaps #mechkeyboard #65percent — ships next day",
-    note: "Hashtags · shipping-first",
-    delivery: "Copy-paste pack",
-  },
-] as const;
+const STOREFRONT_CARD =
+  "group/sf flex flex-col rounded-2xl border border-line bg-panel p-6 shadow-card transition-all duration-200 hover:-translate-y-1 hover:border-iris/40 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0";
+
+function StorefrontHeader({
+  platform,
+  delivery,
+}: {
+  platform: "eBay" | "Facebook" | "Mercari";
+  delivery: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <MarketplaceBadge marketplace={platform} className="text-[15px]" />
+      <span className="rounded-full bg-iris/10 px-2.5 py-1 text-[11px] font-semibold text-iris">
+        {delivery}
+      </span>
+    </div>
+  );
+}
 
 export default function Landing() {
   return (
@@ -268,7 +272,9 @@ export default function Landing() {
               <span>Built for</span>
               <RotatingText
                 texts={[...ROTATING_CATEGORIES]}
-                mainClassName="overflow-hidden rounded-full bg-white/70 px-3 py-0.5 text-iris backdrop-blur dark:bg-white/10"
+                // Dark mode: the resting iris (#7e5fff) is too dim on the navy
+                // hero slab — lift the rotating word to the bright accent tint.
+                mainClassName="overflow-hidden rounded-full bg-white/70 px-3 py-0.5 text-iris backdrop-blur dark:bg-white/10 dark:text-[color:var(--color-accent-soft-fg)]"
                 staggerFrom="last"
                 staggerDuration={0.02}
                 rotationInterval={2200}
@@ -337,20 +343,13 @@ export default function Landing() {
             </p>
           </div>
 
-          {/* The demo video — flat, large, the unmistakable centerpiece.
-              The footage itself is white-background; in dark mode the frame
-              gets a stronger border + a soft violet halo so it reads as an
-              intentional bright "screen", not a glaring white hole. */}
+          {/* The hero showcase (round 4) — replaces the looping mp4 with the
+              live ScanShowcase: ten catalog photos cycle under a scanning
+              beam, and each completed scan flips the output panel to that
+              product's real title / price / condition. One photo in, a
+              defensible listing out — performed, not narrated. */}
           <div className="mx-auto mt-12 w-full max-w-5xl sm:mt-16">
-            <video
-              src="/hero-demo.mp4"
-              autoPlay
-              muted
-              loop
-              playsInline
-              className="block h-auto w-full rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(19,30,58,0.35),0_4px_16px_-6px_rgba(19,30,58,0.12)] dark:border-2 dark:border-white/20 dark:shadow-[0_0_0_1px_rgba(126,95,255,0.25),0_0_60px_-10px_rgba(126,95,255,0.35),0_24px_64px_-24px_rgba(0,0,0,0.7)]"
-              aria-label="Demo: a photo becomes a priced, published eBay listing"
-            />
+            <ScanShowcase />
           </div>
         </div>
       </section>
@@ -379,16 +378,16 @@ export default function Landing() {
           {STEPS.map(({ n, title, body }) => (
             <SpotlightCard
               key={n}
-              className="p-7"
+              className="p-8"
               spotlightColor="rgba(109, 74, 255, 0.12)"
             >
-              <span className="nums font-display text-[13px] font-bold text-iris">
+              <span className="nums font-display text-[13.5px] font-bold text-iris">
                 {n}
               </span>
-              <h3 className="mt-4 font-display text-[20px] font-semibold text-flash">
+              <h3 className="mt-4 font-display text-[21px] font-semibold text-flash">
                 {title}
               </h3>
-              <p className="mt-2.5 text-[14px] leading-relaxed text-flash-dim">
+              <p className="mt-3 text-[14.5px] leading-relaxed text-flash-dim">
                 {body}
               </p>
             </SpotlightCard>
@@ -460,54 +459,108 @@ export default function Landing() {
             </p>
           </Reveal>
           <Reveal delay={0.1} className="relative mt-12">
-            <div className="grid gap-5 lg:grid-cols-[300px_1fr] lg:items-stretch">
-              {/* the one photo */}
-              <figure className="flex flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
-                <div className="relative aspect-[4/3] lg:min-h-0 lg:flex-1">
+            <div className="grid gap-6 lg:grid-cols-[minmax(320px,400px)_1fr] lg:items-stretch">
+              {/* the one photo — hover zooms the IMAGE inside its clipped
+                  frame (never the caption) + an iris glow ring */}
+              <figure className="group flex flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
+                <div className="relative aspect-[4/3] overflow-hidden lg:min-h-0 lg:flex-1">
                   <Image
                     src={STOREFRONT_PRODUCT.image}
                     alt={STOREFRONT_PRODUCT.alt}
                     fill
-                    sizes="(max-width: 1024px) 100vw, 300px"
-                    className="object-cover"
+                    sizes="(max-width: 1024px) 100vw, 400px"
+                    className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
                   />
-                  <span className="absolute left-3 top-3 rounded-md bg-flash/80 px-2 py-1 text-[10.5px] font-semibold text-white backdrop-blur dark:bg-night/80 dark:text-flash">
+                  <span className="absolute left-3.5 top-3.5 rounded-md bg-flash/80 px-2.5 py-1 text-[11.5px] font-semibold text-white backdrop-blur dark:bg-night/80 dark:text-flash">
                     The one photo
                   </span>
                 </div>
-                <figcaption className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
-                  <span className="truncate text-[12px] font-semibold text-flash">
+                <figcaption className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5">
+                  <span className="truncate text-[13.5px] font-semibold text-flash">
                     {STOREFRONT_PRODUCT.shortName}
                   </span>
-                  <span className="nums shrink-0 text-[12px] font-semibold text-flash-dim">
+                  <span className="nums shrink-0 text-[13.5px] font-semibold text-flash-dim">
                     ${STOREFRONT_PRODUCT.price} · {STOREFRONT_PRODUCT.condition}
                   </span>
                 </figcaption>
               </figure>
-              {/* three platform renderings — hover lifts whole-pixel, text never scales */}
-              <div className="grid gap-4 sm:grid-cols-3">
-                {STOREFRONTS.map(({ platform, copy, note, delivery }) => (
-                  <div
-                    key={platform}
-                    className="flex h-full flex-col rounded-2xl border border-line bg-panel p-5 shadow-card transition-all duration-200 hover:-translate-y-1 hover:border-iris/40 hover:shadow-lg"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <MarketplaceBadge
-                        marketplace={platform}
-                        className="text-[13px]"
-                      />
-                      <span className="nums text-[13px] font-bold text-flash">
-                        ${STOREFRONT_PRODUCT.price}
-                      </span>
-                    </div>
-                    <p className="mt-3 text-[12.5px] leading-relaxed text-flash-dim">
-                      {copy}
-                    </p>
-                    <p className="mt-auto pt-4 text-[10.5px] font-medium text-flash-faint">
-                      {note} · {delivery}
+
+              {/* three platform renderings, stacked tall so each card gets
+                  real estate — every one formatted the way ITS marketplace
+                  actually shows a listing */}
+              <div className="flex flex-col gap-5">
+                {/* eBay — keyword title, condition chip, shipping line, BIN */}
+                <div className={STOREFRONT_CARD}>
+                  <StorefrontHeader platform="eBay" delivery="Publishes directly" />
+                  <p className="mt-3.5 text-[14.5px] font-semibold leading-snug text-flash">
+                    Custom 65% Mechanical Keyboard — Green &amp; White Keycaps —
+                    Like New
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <span className="rounded-md border border-line bg-night-2 px-2.5 py-1 text-[12px] font-medium text-flash-dim">
+                      Pre-owned · Like new
+                    </span>
+                    <span className="nums text-[19px] font-bold leading-none text-flash">
+                      $120.00
+                    </span>
+                    <span className="text-[13px] text-flash-dim">
+                      Free shipping · 30-day returns
+                    </span>
+                    <span className="ml-auto rounded-full bg-[#3665f3] px-4 py-1.5 text-[12.5px] font-semibold text-white">
+                      Buy It Now
+                    </span>
+                  </div>
+                </div>
+
+                {/* Facebook Marketplace — local pickup, location line, the
+                    "Is this available?" opener */}
+                <div className={STOREFRONT_CARD}>
+                  <StorefrontHeader platform="Facebook" delivery="Copy-paste pack" />
+                  <div className="mt-3.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="nums text-[19px] font-bold leading-none text-flash">
+                      $120
+                    </span>
+                    <p className="text-[14.5px] font-semibold leading-snug text-flash">
+                      Custom mechanical keyboard — 65% layout, like new
                     </p>
                   </div>
-                ))}
+                  <p className="mt-1.5 text-[13px] text-flash-dim">
+                    Listed today · Local pickup · Orlando, FL
+                  </p>
+                  <div className="mt-3.5 flex items-center justify-between gap-3 rounded-xl bg-night-2 px-3.5 py-2.5">
+                    <span className="text-[13px] font-medium text-flash-dim">
+                      “Is this available?”
+                    </span>
+                    <span className="rounded-full bg-[#1877f2] px-3.5 py-1 text-[12px] font-semibold text-white">
+                      Reply drafted
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mercari — clean retail card with the smart-pricing hint */}
+                <div className={STOREFRONT_CARD}>
+                  <StorefrontHeader platform="Mercari" delivery="Copy-paste pack" />
+                  <p className="mt-3.5 text-[14.5px] font-semibold leading-snug text-flash">
+                    Custom 65% mech keyboard — green/white keycaps
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span className="nums text-[14px] font-medium text-flash-faint line-through">
+                      $135
+                    </span>
+                    <span className="nums text-[19px] font-bold leading-none text-flash">
+                      $120
+                    </span>
+                    <span className="rounded-md bg-success-soft px-2.5 py-1 text-[12px] font-semibold text-success-soft-fg">
+                      Smart pricing · floor $95
+                    </span>
+                    <span className="ml-auto text-[13px] text-flash-dim">
+                      Free shipping · ships next day
+                    </span>
+                  </div>
+                  <p className="mt-2.5 text-[13px] font-medium text-iris">
+                    #mechkeyboard&ensp;#65percent&ensp;#customkeyboard
+                  </p>
+                </div>
               </div>
             </div>
           </Reveal>

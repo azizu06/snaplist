@@ -735,3 +735,153 @@
   --clerk-card-shadow: 0 13px 27px -5px rgba(0, 0, 0, 0.55),
     0 8px 16px -8px rgba(126, 95, 255, 0.12);
 }
+
+/* --- ui-r4-landing --- */
+
+/* ── Footer wordmark glow ────────────────────────────────────────────────────
+   The oversized clipped "SnapList" keeps its quiet vertical fade at rest; on
+   hover a bright iris shimmer sweeps left→right through the glyphs and a
+   soft violet glow blooms via drop-shadow. Both gradient layers clip to the
+   text, so the sweep lives INSIDE the letters. The sweep itself is driven by
+   rAF inline background-position (wordmark-glow.tsx) because Chrome won't
+   repaint clipped-text backgrounds from a CSS keyframe. Tokens re-point
+   under .dark. */
+.wordmark-glow {
+  --wm-top: var(--color-line);
+  --wm-bottom: var(--color-night);
+  --wm-shine: rgba(109, 74, 255, 0.95);
+  --wm-shine-edge: rgba(95, 208, 245, 0.55);
+  --wm-glow: rgba(109, 74, 255, 0.28);
+  color: transparent;
+  background-image:
+    /* layer 1 — the traveling shimmer (transparent until it sweeps) */
+    linear-gradient(
+      100deg,
+      transparent 41%,
+      var(--wm-shine-edge) 45%,
+      var(--wm-shine) 48%,
+      var(--wm-shine) 52%,
+      var(--wm-shine-edge) 55%,
+      transparent 59%
+    ),
+    /* layer 2 — the resting vertical fade */
+    linear-gradient(to bottom, var(--wm-top), var(--wm-bottom));
+  background-size: 240% 100%, 100% 100%;
+  background-position: 200% 0, 0 0;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 0 0 rgba(0, 0, 0, 0));
+  transition: filter 0.5s ease;
+}
+.wordmark-glow:hover {
+  filter: drop-shadow(0 6px 26px var(--wm-glow));
+}
+.dark .wordmark-glow {
+  --wm-top: #36447a;
+  --wm-bottom: var(--color-night);
+  --wm-shine: rgba(214, 200, 255, 1);
+  --wm-shine-edge: rgba(126, 95, 255, 0.75);
+  --wm-glow: rgba(126, 95, 255, 0.45);
+}
+
+/* Subtler cousin for the small footer nav-row wordmark: a soft iris halo
+   fades in around the text on hover — no sweep at this size. */
+.footer-logo-glow span {
+  transition: text-shadow 0.35s ease;
+}
+.footer-logo-glow:hover span {
+  text-shadow:
+    0 0 14px rgba(109, 74, 255, 0.45),
+    0 0 32px rgba(109, 74, 255, 0.25);
+}
+.dark .footer-logo-glow:hover span {
+  text-shadow:
+    0 0 14px rgba(126, 95, 255, 0.6),
+    0 0 36px rgba(126, 95, 255, 0.35);
+}
+
+/* ── Hero scan showcase ──────────────────────────────────────────────────────
+   The vision beam: a bright horizontal line with a soft gradient trail that
+   sweeps down each hero photo once per cycle (re-keyed per product, duration
+   must equal SCAN_MS in scan-showcase.tsx). Animating `top` keeps the trail
+   anchored without measuring the frame. */
+.scan-showcase-beam {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 2%;
+  height: 2.5px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(126, 95, 255, 0.95) 22%,
+    #cfd8ff 50%,
+    rgba(126, 95, 255, 0.95) 78%,
+    transparent
+  );
+  box-shadow:
+    0 0 14px 2px rgba(126, 95, 255, 0.6),
+    0 0 38px 6px rgba(126, 95, 255, 0.28);
+  animation: scan-showcase-sweep 2.1s cubic-bezier(0.45, 0.05, 0.45, 0.95) forwards;
+}
+/* soft gradient trail above the line — the "already scanned" wake */
+.scan-showcase-beam-trail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 72px;
+  background: linear-gradient(to top, rgba(126, 95, 255, 0.22), transparent);
+  pointer-events: none;
+}
+@keyframes scan-showcase-sweep {
+  0% {
+    top: 2%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    top: 96%;
+    opacity: 0;
+  }
+}
+
+/* Output panel entrance — whole-pixel rise + fade, never a scale. */
+.scan-output-enter {
+  animation: scan-output-enter 0.45s cubic-bezier(0.21, 0.8, 0.32, 1) both;
+}
+@keyframes scan-output-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wordmark-glow {
+    transition: none;
+  }
+  .footer-logo-glow span {
+    transition: none;
+  }
+  .scan-showcase-beam {
+    animation: none;
+    opacity: 0;
+  }
+  .scan-output-enter {
+    animation: none;
+  }
+}
+
+/* --- end ui-r4-landing --- */
