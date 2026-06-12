@@ -73,10 +73,34 @@ export function AppSidebar() {
   return (
     <aside
       data-collapsed={collapsed || undefined}
-      className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none sm:flex ${
+      className={`relative sticky top-0 z-40 hidden h-screen shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none sm:flex ${
         collapsed ? "w-16" : "w-[218px]"
       }`}
     >
+      {/* Floating edge toggle — straddles the sidebar border, aligned with
+          the brand row. z-40 on the aside keeps the overhanging half above
+          the z-30 topbar. */}
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={`${collapsed ? "Expand" : "Collapse"} sidebar — [`}
+        className="absolute -right-3 top-[22px] flex size-6 items-center justify-center rounded-full border border-border bg-surface text-faint shadow-xs transition-all hover:border-border-strong hover:text-fg motion-safe:active:scale-95"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className={`size-3.5 transition-transform duration-300 motion-reduce:transition-none ${
+            collapsed ? "rotate-180" : ""
+          }`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+      </button>
       <Link
         href="/dashboard"
         className={`flex items-center gap-2.5 pb-4 pt-5 text-[15px] font-bold tracking-tight text-fg-strong ${
@@ -97,39 +121,6 @@ export function AppSidebar() {
         <SidebarNav collapsed={collapsed} />
       </div>
 
-      <div className={`border-t border-border py-3 ${collapsed ? "px-2.5" : "px-3"}`}>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={`${collapsed ? "Expand" : "Collapse"} sidebar  [`}
-          className={`flex w-full items-center gap-2.5 rounded-lg py-2 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg ${
-            collapsed ? "justify-center px-0" : "px-2.5"
-          }`}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className={`size-4 shrink-0 text-faint transition-transform duration-300 motion-reduce:transition-none ${
-              collapsed ? "rotate-180" : ""
-            }`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="m11 17-5-5 5-5" />
-            <path d="m18 17-5-5 5-5" />
-          </svg>
-          <span
-            className={`overflow-hidden whitespace-nowrap transition-opacity duration-200 ${
-              collapsed ? "w-0 opacity-0" : "opacity-100"
-            }`}
-          >
-            Collapse
-          </span>
-        </button>
-      </div>
     </aside>
   );
 }

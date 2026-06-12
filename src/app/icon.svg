@@ -7,14 +7,5 @@
     </linearGradient>
   </defs>
   <rect x="1" y="1" width="46" height="46" rx="13" fill="url(#g)"/>
-  <g stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" fill="none">
-    <circle cx="24" cy="24" r="14.5" opacity="0.4"/>
-    <path d="M26.9 18.4 30.8 31"/>
-    <path d="M19.7 18.4h14.4"/>
-    <path d="m17.1 24 4.5-12.1"/>
-    <path d="M21.1 29.6 14.9 15.9"/>
-    <path d="M28.3 29.6H12.4"/>
-    <path d="m30.9 24-5.1 13.9"/>
-  </g>
-  <circle cx="24" cy="24" r="2.1" fill="#ffffff"/>
+  <text x="24" y="25" text-anchor="middle" dominant-baseline="central" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="800" font-size="21.5" letter-spacing="-0.8" fill="#ffffff">SL</text>
 </svg>

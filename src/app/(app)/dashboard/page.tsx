@@ -3,11 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { effectivePrice } from "@/lib/pipeline";
 import { itemLabel } from "@/lib/ui/item-label";
-import {
-  DashboardView,
-  DASHBOARD_FILTERS,
-  type DashboardRow,
-} from "./dashboard-view";
+import { DashboardView, type DashboardRow } from "./dashboard-view";
+// NOT from dashboard-view: that file is "use client", and a runtime value
+// imported across the client boundary arrives as a reference proxy, not the
+// array (the post-#52 production outage).
+import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 
 /**
  * /dashboard — the seller dashboard (issue #49: the marketing landing now
@@ -135,7 +135,7 @@ export default async function Dashboard({
   };
 
   const filter = DASHBOARD_FILTERS.some((f) => f.key === rawFilter)
-    ? (rawFilter as (typeof DASHBOARD_FILTERS)[number]["key"])
+    ? (rawFilter as DashboardFilterKey)
     : "all";
 
   return <DashboardView rows={rows} counts={counts} filter={filter} />;

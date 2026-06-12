@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
 import { matchesQuery } from "@/lib/ui/search";
 import { relativeDay } from "@/lib/ui/dates";
+import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 
 /**
  * Dashboard — Shopify products index, replicated (issue #40 round 2; Mobbin
@@ -35,18 +36,6 @@ export interface DashboardCounts {
   attention: number;
   live: number;
 }
-
-export const DASHBOARD_FILTERS: ReadonlyArray<{
-  key: "all" | "draft" | "queued" | "live" | "attention";
-  label: string;
-  statuses: readonly string[] | null;
-}> = [
-  { key: "all", label: "All", statuses: null },
-  { key: "draft", label: "Draft", statuses: ["draft"] },
-  { key: "queued", label: "Queued", statuses: ["queued"] },
-  { key: "live", label: "Live", statuses: ["published"] },
-  { key: "attention", label: "Needs attention", statuses: ["failed", "draft_failed"] },
-];
 
 const PRICE_FMT = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -86,7 +75,7 @@ export function DashboardView({
 }: {
   rows: DashboardRow[];
   counts: DashboardCounts;
-  filter: (typeof DASHBOARD_FILTERS)[number]["key"];
+  filter: DashboardFilterKey;
 }) {
   const [query, setQuery] = useState("");
 
