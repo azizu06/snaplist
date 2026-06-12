@@ -7,6 +7,7 @@ import { buttonClasses } from "@/components/ui/button-styles";
 import { AppSignOutButton } from "@/components/sign-out-button";
 import { StatusBadge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { ThemeSegmented } from "@/components/theme-toggle";
 import type { ProfileUser } from "@/components/profile-menu";
 
 /**
@@ -86,6 +87,15 @@ function UserIcon() {
     <svg {...ICON_SVG_PROPS}>
       <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
+function ContrastIcon() {
+  return (
+    <svg {...ICON_SVG_PROPS}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 18a6 6 0 0 0 0-12v12z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -190,6 +200,30 @@ export function SettingsView({
       </Card>
       </GlareHover>
 
+      {/* ---- Appearance: light / dark / system, persisted per device ---- */}
+      <GlareHover>
+      <Card>
+        <CardHeader
+          title={
+            <span className="flex items-center gap-2.5">
+              <SectionIcon>
+                <ContrastIcon />
+              </SectionIcon>
+              Appearance
+            </span>
+          }
+          aside={<ThemeSegmented />}
+        />
+        <CardBody>
+          <p className="text-sm leading-relaxed text-muted">
+            Choose how SnapList looks on this device.{" "}
+            <strong className="font-medium text-fg">System</strong> follows
+            your OS setting automatically.
+          </p>
+        </CardBody>
+      </Card>
+      </GlareHover>
+
       {/* react-bits GlareHover (app pass): a quiet violet glare sweep across
           each settings card on hover — chrome polish only, content untouched. */}
       <GlareHover>
@@ -265,8 +299,8 @@ export function SettingsView({
                     connection — the one celebratory note on this page. */}
                 <ShinyText
                   text={ebay.ebayUsername ?? "your eBay account"}
-                  color="#3d4a68"
-                  shineColor="#6d4aff"
+                  color="var(--color-fg)"
+                  shineColor="var(--color-iris)"
                   speed={3.5}
                   className="font-semibold"
                 />
