@@ -38,3 +38,6 @@ next-env.d.ts
 
 # graphify (local knowledge-graph index; regenerate with `graphify update .`)
 /graphify-out
+
+# clerk configuration (can include secrets)
+/.clerk/

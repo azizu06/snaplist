@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import CountUp from "@/components/bits/CountUp";
 import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
@@ -147,7 +148,7 @@ export function DashboardView({
                     {f.label}
                   </span>
                   <span className="mt-0.5 block text-[18px] font-bold text-fg-strong" data-nums>
-                    {filterCount(f)}
+                    <CountUp to={filterCount(f)} duration={0.7} />
                   </span>
                 </Link>
               );

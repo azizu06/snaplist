@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { SignIn } from "@clerk/nextjs";
+import FadeContent from "@/components/bits/FadeContent";
 import { getUserId } from "@/lib/auth";
 import { safeNext } from "./safe-next";
 
@@ -24,24 +25,31 @@ export default async function LoginPage({
   if (userId) redirect(safeNext(next));
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-7 px-6 pb-20 pt-6">
-      <div className="text-center">
-        <h1 className="font-display text-[26px] font-bold tracking-tight text-flash">
-          Welcome back to{" "}
-          <em className="text-iris">
-            SnapList
-          </em>
-        </h1>
-        <p className="mt-2 max-w-[38ch] text-[13.5px] leading-relaxed text-flash-dim">
-          Snap a photo of something you want to sell — we identify it, price it
-          with sources, and write the listing.
-        </p>
-      </div>
-      <SignIn
-        routing="hash"
-        fallbackRedirectUrl={safeNext(next)}
-        signUpFallbackRedirectUrl={safeNext(next)}
-      />
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pb-20 pt-6">
+      {/* react-bits FadeContent: one soft blur-up entrance for the whole card */}
+      <FadeContent
+        blur
+        duration={600}
+        className="flex w-full flex-col items-center gap-7"
+      >
+        <div className="text-center">
+          <h1 className="font-display text-[26px] font-bold tracking-tight text-flash">
+            Welcome back to{" "}
+            <em className="text-iris">
+              SnapList
+            </em>
+          </h1>
+          <p className="mt-2 max-w-[38ch] text-[13.5px] leading-relaxed text-flash-dim">
+            Snap a photo of something you want to sell — we identify it, price it
+            with sources, and write the listing.
+          </p>
+        </div>
+        <SignIn
+          routing="hash"
+          fallbackRedirectUrl={safeNext(next)}
+          signUpFallbackRedirectUrl={safeNext(next)}
+        />
+      </FadeContent>
     </main>
   );
 }
