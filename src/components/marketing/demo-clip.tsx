@@ -22,6 +22,7 @@ export function DemoClip({
   title,
   caption,
   glyph,
+  className,
 }: {
   src: string;
   /** Accessible description of the clip's content. */
@@ -31,6 +32,8 @@ export function DemoClip({
   title: string;
   caption: string;
   glyph: React.ReactNode;
+  /** Extra classes on the outer frame (ui-r4-hiw; optional, additive). */
+  className?: string;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -66,11 +69,11 @@ export function DemoClip({
   return (
     <div
       ref={frameRef}
-      className="glass-panel relative overflow-hidden rounded-2xl"
+      className={`glass-panel relative overflow-hidden rounded-2xl ${className ?? ""}`}
     >
       <div className="relative aspect-video">
         {/* designed poster / fallback slate */}
-        <div className="absolute inset-0 flex flex-col justify-between overflow-hidden bg-night-2 p-5">
+        <div className="absolute inset-0 flex flex-col justify-between overflow-hidden bg-night-2 p-5 sm:p-7">
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"
@@ -90,10 +93,10 @@ export function DemoClip({
             ) : null}
           </div>
           <div className="relative">
-            <p className="font-display text-[19px] font-bold tracking-tight text-flash">
+            <p className="font-display text-[19px] font-bold tracking-tight text-flash sm:text-[22px]">
               {title}
             </p>
-            <p className="mt-1 max-w-[40ch] text-[12.5px] leading-relaxed text-flash-faint">
+            <p className="mt-1 max-w-[40ch] text-[12.5px] leading-relaxed text-flash-faint sm:text-[13.5px]">
               {caption}
             </p>
             {/* faux player rail so the slate reads as a deliberate still */}
