@@ -12,13 +12,28 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { gsap } from 'gsap';
 
+/** Status-palette tints for the duotone icon chips — per-category color so
+ *  the cards stop repeating one identical violet pill (purple-pill fatigue). */
+export type BentoTint = 'violet' | 'amber' | 'blue' | 'green';
+
 export interface BentoCardData {
   label: string;
   title: string;
   description: string;
+  /** Small duotone icon rendered inside the tinted chip. */
+  icon?: React.ReactNode;
+  /** Chip tint family; defaults to violet. */
+  tint?: BentoTint;
   /** Extra grid classes, e.g. `lg:col-span-2`. */
   className?: string;
 }
+
+const TINT_CLASSES: Record<BentoTint, string> = {
+  violet: 'bg-accent-soft text-accent-soft-fg',
+  amber: 'bg-warning-soft text-warning-soft-fg',
+  blue: 'bg-info-soft text-info-soft-fg',
+  green: 'bg-success-soft text-success-soft-fg'
+};
 
 export interface BentoProps {
   cards: BentoCardData[];
@@ -559,7 +574,11 @@ const MagicBento: React.FC<BentoProps> = ({
         {cards.map((card, index) => (
           <ParticleCard
             key={index}
-            className={`card ${enableBorderGlow ? 'card--border-glow' : ''} flex min-h-[190px] flex-col justify-between rounded-2xl border border-line bg-panel p-6 shadow-card transition-colors duration-300 ${card.className ?? ''}`}
+            // One internal rhythm for every card: header → mt-4 title →
+            // mt-2 description, top-aligned. (justify-between used to
+            // stretch the label↔title gap differently per card height —
+            // the bento spacing bug.)
+            className={`card ${enableBorderGlow ? 'card--border-glow' : ''} flex min-h-[190px] flex-col rounded-2xl border border-line bg-panel p-6 shadow-card transition-colors duration-300 ${card.className ?? ''}`}
             disableAnimations={shouldDisableAnimations}
             particleCount={enableStars ? particleCount : 0}
             glowColor={glowColor}
@@ -567,12 +586,18 @@ const MagicBento: React.FC<BentoProps> = ({
             clickEffect={clickEffect}
             enableMagnetism={enableMagnetism}
           >
-            <div className="relative">
-              <span className="rounded-full bg-iris/10 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris">
+            <div className="relative flex items-center gap-2.5">
+              <span
+                className={`flex size-8 items-center justify-center rounded-lg ${TINT_CLASSES[card.tint ?? 'violet']}`}
+                aria-hidden
+              >
+                {card.icon ?? <span className="size-1.5 rounded-full bg-current" />}
+              </span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-flash-faint">
                 {card.label}
               </span>
             </div>
-            <div className="relative mt-5 flex flex-col">
+            <div className="relative mt-4 flex flex-col">
               <h3 className="font-display text-[19px] font-semibold leading-snug text-flash">{card.title}</h3>
               <p className="mt-2 text-[13.5px] leading-relaxed text-flash-dim">{card.description}</p>
             </div>
