@@ -4,10 +4,7 @@ import { Reveal } from "@/components/marketing/reveal";
 import {
   LensRings,
   PhotoSlotsVisual,
-  ScanChipsVisual,
-  PriceModuleVisual,
   PlatformCardsVisual,
-  PublishVisual,
 } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
@@ -19,7 +16,47 @@ export const metadata: Metadata = {
 /**
  * /how-it-works (issue #49) — the pipeline walkthrough. The pricing waterfall
  * section mirrors the real PricingProvider router tiers; keep them in sync.
+ * The Identify/Price/Publish rows use per-stage Remotion clips (rendered to
+ * public/stage-*.mp4 from remotion/Stage*.tsx) in the same glass-panel frame
+ * as the landing hero video.
  */
+
+function StageVideo({ src, label }: { src: string; label: string }) {
+  return (
+    <div className="glass-panel w-full overflow-hidden rounded-2xl">
+      <video
+        src={src}
+        autoPlay
+        muted
+        loop
+        playsInline
+        className="block h-auto w-full"
+        aria-label={label}
+      />
+    </div>
+  );
+}
+
+const IdentifyClip = () => (
+  <StageVideo
+    src="/stage-identify.mp4"
+    label="Demo: a photo is scanned and identified as a Canon EOS 80D with extracted attributes"
+  />
+);
+
+const PriceClip = () => (
+  <StageVideo
+    src="/stage-price.mp4"
+    label="Demo: cited price sources assemble into a suggested price, range, and confidence score"
+  />
+);
+
+const PublishClip = () => (
+  <StageVideo
+    src="/stage-publish.mp4"
+    label="Demo: a finished listing is published and goes live on eBay"
+  />
+);
 
 const STAGES = [
   {
@@ -34,14 +71,14 @@ const STAGES = [
     title: "Identify",
     body: "A vision model extracts structured attributes — brand, model, category, condition, key specs — and validates them against a strict schema. Ambiguous items get flagged, never silently guessed.",
     chips: ["brand & model", "condition assessment", "ambiguity flagging"],
-    visual: ScanChipsVisual,
+    visual: IdentifyClip,
   },
   {
     n: "03",
     title: "Price",
     body: "A research agent works the pricing waterfall below and synthesizes a suggested price, a realistic range, and the sources it used. Asking prices are down-weighted against sold signals.",
     chips: ["cited sources", "used value, not retail", "editable always"],
-    visual: PriceModuleVisual,
+    visual: PriceClip,
   },
   {
     n: "04",
@@ -55,7 +92,7 @@ const STAGES = [
     title: "Publish",
     body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; everything else queues for your approval.",
     chips: ["your eBay account", "confidence-gated autopilot", "status tracking"],
-    visual: PublishVisual,
+    visual: PublishClip,
   },
 ] as const;
 

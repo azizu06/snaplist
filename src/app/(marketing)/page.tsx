@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MagneticCta } from "@/components/marketing/magnetic-cta";
 import { Reveal } from "@/components/marketing/reveal";
 import { StatCounter } from "@/components/marketing/stat-counter";
 import { PlatformCardsVisual } from "@/components/marketing/visuals";
@@ -105,15 +106,17 @@ export default function Landing() {
                 Facebook Marketplace, and Mercari, from one photo.
               </p>
               <div className="mt-9 flex flex-wrap items-center gap-3.5">
-                <Link
-                  href="/login"
-                  className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
-                >
-                  Start selling free
-                  <span aria-hidden className="transition-transform group-hover:translate-x-1">
-                    →
-                  </span>
-                </Link>
+                <MagneticCta>
+                  <Link
+                    href="/login"
+                    className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
+                  >
+                    Start selling free
+                    <span aria-hidden className="transition-transform group-hover:translate-x-1">
+                      →
+                    </span>
+                  </Link>
+                </MagneticCta>
                 <Link
                   href="/how-it-works"
                   className="inline-flex items-center gap-2 rounded-full bg-white/70 px-6 py-3 text-[15px] font-semibold text-flash backdrop-blur transition-colors hover:bg-white"

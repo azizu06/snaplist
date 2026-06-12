@@ -169,7 +169,10 @@ export function DashboardView({
                     {visible.map((row) => {
                       const chip = lifecycleLabel(row.status);
                       return (
-                        <tr key={`${row.itemId}-${row.listingId ?? "item"}`} className="group">
+                        <tr
+                          key={`${row.itemId}-${row.listingId ?? "item"}`}
+                          className="group transition-colors hover:bg-surface-2/50"
+                        >
                           <td className="py-2 pl-4 pr-2">
                             <Link
                               href={`/review/${row.itemId}`}
@@ -211,7 +214,7 @@ export function DashboardView({
                       <li key={`m-${row.itemId}-${row.listingId ?? "item"}`}>
                         <Link
                           href={`/review/${row.itemId}`}
-                          className="flex items-center gap-3 px-4 py-3"
+                          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/50 active:bg-surface-2"
                         >
                           <Thumb url={row.thumbUrl} title={row.title} />
                           <span className="min-w-0 flex-1">
