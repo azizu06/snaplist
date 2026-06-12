@@ -23,6 +23,9 @@ interface ElectricBorderProps {
   color?: string;
   speed?: number;
   chaos?: number;
+  /** Max pixel excursion of the lightning path away from the border. Small
+   *  values (10–20) read as a subtle living edge; the default 60 is wild. */
+  displacement?: number;
   borderRadius?: number;
   className?: string;
   style?: CSSProperties;
@@ -33,6 +36,7 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
   color = '#5227FF',
   speed = 1,
   chaos = 0.12,
+  displacement = 60,
   borderRadius = 24,
   className,
   style
@@ -188,8 +192,7 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
     const amplitude = chaos;
     const frequency = 10;
     const baseFlatness = 0;
-    const displacement = 60;
-    const borderOffset = 60;
+    const borderOffset = Math.max(20, displacement);
 
     const updateSize = () => {
       const rect = container.getBoundingClientRect();
@@ -310,7 +313,7 @@ const ElectricBorder: React.FC<ElectricBorderProps> = ({
       }
       resizeObserver.disconnect();
     };
-  }, [color, speed, chaos, borderRadius, octavedNoise, getRoundedRectPoint]);
+  }, [color, speed, chaos, displacement, borderRadius, octavedNoise, getRoundedRectPoint]);
 
   return (
     <div

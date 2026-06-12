@@ -1,38 +1,16 @@
 /**
- * Marketing visuals (issue #49 round 2) — compact, server-safe product mocks
- * so no page is a wall of text. Pure CSS/SVG; entrance animation comes from
- * the surrounding <Reveal>, ambient motion from CSS keyframes (reduced-motion
- * safe via globals.css). The platform cards additionally get react-bits
- * TiltedCard interactive tilt (client component rendered as JSX — fine from
- * this server module).
+ * Marketing visuals (issue #49 round 2, react-bits round 2 polish) — compact,
+ * server-safe product mocks so no page is a wall of text. Identification and
+ * publish mocks use the real demo photos (public/demo) instead of line-art
+ * icons; the platform cards sit FLAT (resting 3D rotation rasterized text
+ * blurry) and only tilt on hover via react-bits TiltedCard. Example listings
+ * span distinct products — camera, textbook, sneakers, vinyl — so the mocks
+ * never repeat one item. Entrance animation comes from the surrounding
+ * <Reveal>; ambient motion from CSS keyframes (reduced-motion safe).
  */
 
+import Image from "next/image";
 import TiltedCard from "@/components/bits/TiltedCard";
-
-export function CameraArt({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 200 130"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <rect x="18" y="38" width="164" height="74" rx="10" />
-      <path d="M18 52h54l10-14h36l10 14h54" />
-      <path d="M78 38v-8a4 4 0 0 1 4-4h36a4 4 0 0 1 4 4v8" />
-      <circle cx="100" cy="78" r="26" />
-      <circle cx="100" cy="78" r="16" />
-      <circle cx="100" cy="78" r="7" />
-      <circle cx="44" cy="58" r="7" />
-      <rect x="142" y="50" width="22" height="9" rx="3" />
-      <path d="M18 70h-5M187 70h-5" />
-    </svg>
-  );
-}
 
 /** Faint concentric lens rings — decorative anchor for hero corners. */
 export function LensRings({ className }: { className?: string }) {
@@ -62,8 +40,14 @@ export function PhotoSlotsVisual() {
         Add photos
       </p>
       <div className="mt-3 grid grid-cols-4 gap-2.5">
-        <div className="relative flex aspect-square items-center justify-center rounded-xl border border-iris/40 bg-gradient-to-br from-panel-2 to-night-2 p-2">
-          <CameraArt className="w-full text-flash-dim" />
+        <div className="relative aspect-square overflow-hidden rounded-xl border border-iris/40">
+          <Image
+            src="/demo/camera.jpg"
+            alt=""
+            fill
+            sizes="120px"
+            className="object-cover"
+          />
           <span className="absolute left-1.5 top-1.5 flex size-4 items-center justify-center rounded-full bg-iris text-[9px] font-bold text-iris-ink">
             1
           </span>
@@ -87,17 +71,28 @@ export function PhotoSlotsVisual() {
   );
 }
 
-/** Stage 2 — scan beam over the photo, attributes extracted. */
+/** Stage 2 — scan beam over a real product photo, attributes extracted. */
 export function ScanChipsVisual() {
   return (
     <div className="glass-panel relative overflow-hidden rounded-2xl p-5">
-      <div className="relative mx-auto w-[200px] rounded-xl border border-line-2 bg-gradient-to-br from-panel-2 to-night-2 p-4">
-        <span aria-hidden className="absolute left-2 top-2 size-3 rounded-tl border-l-2 border-t-2 border-iris/70" />
-        <span aria-hidden className="absolute right-2 top-2 size-3 rounded-tr border-r-2 border-t-2 border-iris/70" />
-        <span aria-hidden className="absolute bottom-2 left-2 size-3 rounded-bl border-b-2 border-l-2 border-iris/70" />
-        <span aria-hidden className="absolute bottom-2 right-2 size-3 rounded-br border-b-2 border-r-2 border-iris/70" />
-        <CameraArt className="w-full text-flash-dim" />
-        <div className="scan-line absolute inset-x-3 top-3 h-[2px] rounded-full bg-gradient-to-r from-transparent via-iris to-transparent" />
+      <div className="relative mx-auto w-[230px] rounded-xl border border-line-2 bg-night-2 p-2.5">
+        <span aria-hidden className="absolute left-1 top-1 z-10 size-3.5 rounded-tl border-l-2 border-t-2 border-iris/80" />
+        <span aria-hidden className="absolute right-1 top-1 z-10 size-3.5 rounded-tr border-r-2 border-t-2 border-iris/80" />
+        <span aria-hidden className="absolute bottom-1 left-1 z-10 size-3.5 rounded-bl border-b-2 border-l-2 border-iris/80" />
+        <span aria-hidden className="absolute bottom-1 right-1 z-10 size-3.5 rounded-br border-b-2 border-r-2 border-iris/80" />
+        <div className="relative h-[150px] overflow-hidden rounded-lg">
+          <Image
+            src="/demo/camera.jpg"
+            alt="Canon AE-1 Program film camera being identified"
+            fill
+            sizes="230px"
+            className="object-cover"
+          />
+          <div
+            className="scan-line absolute inset-x-1 top-1 h-[2px] rounded-full bg-gradient-to-r from-transparent via-iris to-transparent"
+            style={{ "--scan-range": "140px" } as React.CSSProperties}
+          />
+        </div>
       </div>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
         {["Canon AE-1 Program", "Film camera", "Good · tested", "FD 50mm f/1.8"].map((chip) => (
@@ -113,7 +108,7 @@ export function ScanChipsVisual() {
   );
 }
 
-/** Stage 3 — the price module with range + cited sources. */
+/** Stage 3 — the price module with range + cited sources (vinyl record). */
 export function PriceModuleVisual() {
   return (
     <div className="glass-panel rounded-2xl p-5">
@@ -123,22 +118,22 @@ export function PriceModuleVisual() {
             Suggested price
           </p>
           <p className="nums font-display text-[30px] font-bold leading-tight text-flash">
-            $128
+            $52
           </p>
         </div>
         <span className="rounded-full bg-iris/15 px-2.5 py-1 text-[10.5px] font-semibold text-iris">
-          92% confident
+          89% confident
         </span>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-panel-2">
         <div className="h-full w-[72%] rounded-full bg-gradient-to-r from-iris-deep to-iris" />
       </div>
-      <p className="mt-1.5 text-[11px] text-flash-faint">range $98 – $145 · used, good condition</p>
+      <p className="mt-1.5 text-[11px] text-flash-faint">range $38 – $64 · vinyl, VG+ with sleeve</p>
       <div className="mt-4 space-y-2">
         {[
-          ["eBay sold listing", "$122", "2d ago"],
-          ["Mercari comp", "$135", "5d ago"],
-          ["KEH used grade EX", "$139", "1w ago"],
+          ["eBay sold listing", "$49", "2d ago"],
+          ["Discogs sale, VG+", "$55", "4d ago"],
+          ["Mercari comp", "$50", "1w ago"],
         ].map(([src, price, age]) => (
           <div
             key={src}
@@ -161,50 +156,49 @@ export function PriceModuleVisual() {
   );
 }
 
-/** Stage 4 — three platform listings fanned in 3D. */
+/** Stage 4 — three platform listings, distinct products. Cards rest FLAT
+ *  (a permanent rotate-y rasterized the copy blurry) and only tilt on hover. */
 export function PlatformCardsVisual() {
   const cards = [
     {
       platform: "eBay",
       title: "Canon AE-1 Program 35mm Film Camera w/ FD 50mm f/1.8 — Tested",
-      style: "-rotate-y-12 -translate-x-3 lg:-translate-x-6",
+      price: "$128",
       tone: "border-iris/40",
       note: "Item specifics · keyword title",
     },
     {
       platform: "Facebook",
-      title: "Canon AE-1 film camera, works great! Pickup near campus 📸",
-      style: "z-10 -translate-y-2 scale-[1.04]",
+      title: "Organic Chemistry 6th ed. — clean pages, no highlighting. Pickup near campus",
+      price: "$45",
       tone: "border-line-2",
       note: "Casual · local pickup",
     },
     {
       platform: "Mercari",
-      title: "Canon AE-1 Program #filmcamera #35mm — ships fast",
-      style: "rotate-y-12 translate-x-3 lg:translate-x-6",
+      title: "Air Jordan 1 Mid, sz 10.5 #jordan1 #sneakers — ships next day",
+      price: "$164",
       tone: "border-line-2",
       note: "Hashtags · shipping-first",
     },
   ] as const;
   return (
-    <div className="stage-3d grid gap-3 sm:grid-cols-3">
-      {cards.map(({ platform, title, style, tone, note }) => (
-        <div key={platform} className={`transform-3d ${style}`}>
-          <TiltedCard className="h-full" rotateAmplitude={9} scaleOnHover={1.05}>
-            <div className={`glass-panel h-full rounded-2xl border p-4 ${tone}`}>
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
-                  {platform}
-                </span>
-                <span className="nums text-[13px] font-bold text-flash">$128</span>
-              </div>
-              <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
-                {title}
-              </p>
-              <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
+    <div className="grid gap-3 sm:grid-cols-3">
+      {cards.map(({ platform, title, price, tone, note }) => (
+        <TiltedCard key={platform} className="h-full" rotateAmplitude={6} scaleOnHover={1.04}>
+          <div className={`glass-panel h-full rounded-2xl border p-4 ${tone}`}>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
+                {platform}
+              </span>
+              <span className="nums text-[13px] font-bold text-flash">{price}</span>
             </div>
-          </TiltedCard>
-        </div>
+            <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
+              {title}
+            </p>
+            <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
+          </div>
+        </TiltedCard>
       ))}
     </div>
   );
@@ -216,8 +210,14 @@ export function PublishVisual() {
     <div className="glass-panel rounded-2xl p-5">
       <div className="flex items-center justify-between rounded-xl border border-line bg-night-2 px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg border border-line bg-gradient-to-br from-panel-2 to-night p-1.5">
-            <CameraArt className="w-full text-flash-dim" />
+          <div className="relative size-10 overflow-hidden rounded-lg border border-line">
+            <Image
+              src="/demo/camera.jpg"
+              alt=""
+              fill
+              sizes="40px"
+              className="object-cover"
+            />
           </div>
           <div>
             <p className="text-[12.5px] font-semibold text-flash">Canon AE-1 Program</p>
@@ -297,7 +297,7 @@ export function InboxVisual() {
       <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-night-2 px-3.5 py-2.5">
         <p className="text-[10.5px] font-semibold text-flash-faint">buyer · via eBay</p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
-          Does the light meter work? And is there any fungus in the lens?
+          Is this the 6th edition? And is there any highlighting inside?
         </p>
       </div>
       <div className="ml-auto mt-3 max-w-[88%] rounded-2xl rounded-br-md border border-iris/30 bg-iris/10 px-3.5 py-2.5">
@@ -308,9 +308,9 @@ export function InboxVisual() {
           drafted from item attributes — awaiting your approval
         </p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
-          Yes — the meter was tested with fresh batteries and reads accurately.
-          Glass is clean: no fungus, haze, or scratches. Happy to send more
-          photos!
+          Yes — 6th edition, the ISBN in the photos confirms it. Pages are
+          clean with no highlighting or notes, just light shelf wear on the
+          cover. Happy to send more photos!
         </p>
       </div>
       <div className="mt-3.5 flex justify-end gap-2">
@@ -342,7 +342,7 @@ export function SecurityVisual() {
             <span className="flex size-6 items-center justify-center rounded-full bg-iris text-[10px] font-bold text-iris-ink">
               you
             </span>
-            Canon AE-1 · $128 · live
+            Air Jordan 1 Mid · $164 · live
           </span>
           <span className="text-[10.5px] font-semibold text-iris">visible</span>
         </div>

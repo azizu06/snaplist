@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import SpotlightCard from "@/components/bits/SpotlightCard";
 import { Reveal } from "@/components/marketing/reveal";
 import { LensRings, PriceModuleVisual } from "@/components/marketing/visuals";
 
@@ -9,24 +10,50 @@ export const metadata: Metadata = {
     "Why SnapList exists, the engineering principles behind it, and answers to the questions everyone asks.",
 };
 
-/** /about (issue #49) — story, principles, FAQ (native <details> accordion). */
+/** /about (issue #49, react-bits round 2) — story, numbered principle cards
+ * (SpotlightCard, matching the landing's "how it works" treatment), FAQ
+ * (native <details> accordion). */
 
 const PRINCIPLES = [
   {
     title: "Show the sources",
     body: "A price you can't trace is a guess wearing a suit. Every suggestion carries its receipts.",
+    icon: (
+      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      </svg>
+    ),
   },
   {
     title: "Flag, don't fake",
     body: "When identification is ambiguous or comps are thin, the system says so. Low confidence is information, not failure.",
+    icon: (
+      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+        <path d="M4 22v-7" />
+      </svg>
+    ),
   },
   {
     title: "You own the send button",
     body: "Autopilot is opt-in and gated on computed confidence. Nothing posts, replies, or changes price without a rule you set.",
+    icon: (
+      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="m22 2-7 20-4-9-9-4Z" />
+        <path d="M22 2 11 13" />
+      </svg>
+    ),
   },
   {
     title: "Honest ceilings",
     body: "Asking prices aren't sold prices. Generic items price worse than branded ones. We tell you which is which instead of pretending.",
+    icon: (
+      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="m12 14 4-4" />
+        <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+      </svg>
+    ),
   },
 ] as const;
 
@@ -95,25 +122,42 @@ export default function About() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-5 pb-24 sm:px-8">
+      <section className="relative mx-auto w-full max-w-6xl px-5 pb-24 sm:px-8">
         <Reveal>
-          <h2 className="font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
-            Principles we don&apos;t bend
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
+            Principles
+          </p>
+          <h2 className="mt-3 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
+            Principles we don&apos;t{" "}
+            <em className="text-iris">bend</em>
           </h2>
+          <p className="mt-4 max-w-[54ch] text-[15px] leading-relaxed text-flash-dim">
+            Four rules the pipeline is built around — they decide what ships
+            and what gets cut.
+          </p>
         </Reveal>
         <Reveal stagger className="mt-10 grid gap-5 sm:grid-cols-2">
-          {PRINCIPLES.map(({ title, body }) => (
-            <div
+          {PRINCIPLES.map(({ title, body, icon }, i) => (
+            <SpotlightCard
               key={title}
-              className="rounded-2xl border border-line bg-panel shadow-card p-7"
+              className="group p-7"
+              spotlightColor="rgba(109, 74, 255, 0.12)"
             >
-              <h3 className="font-display text-[18px] font-semibold text-flash">
+              <div className="flex items-center justify-between">
+                <span className="flex size-10 items-center justify-center rounded-xl bg-iris/10 text-iris transition-colors duration-300 group-hover:bg-iris group-hover:text-iris-ink">
+                  {icon}
+                </span>
+                <span className="nums font-display text-[13px] font-bold text-iris/70">
+                  0{i + 1}
+                </span>
+              </div>
+              <h3 className="mt-5 font-display text-[18px] font-semibold text-flash">
                 {title}
               </h3>
               <p className="mt-2.5 text-[14px] leading-relaxed text-flash-dim">
                 {body}
               </p>
-            </div>
+            </SpotlightCard>
           ))}
         </Reveal>
       </section>

@@ -148,9 +148,12 @@ const useAnimationLoop = (
 
     if (seqSize > 0) {
       offsetRef.current = ((offsetRef.current % seqSize) + seqSize) % seqSize;
+      // Snap to whole CSS pixels: fractional translate3d offsets rasterize
+      // text at subpixel positions and blur wordmarks.
+      const rounded = Math.round(offsetRef.current);
       const transformValue = isVertical
-        ? `translate3d(0, ${-offsetRef.current}px, 0)`
-        : `translate3d(${-offsetRef.current}px, 0, 0)`;
+        ? `translate3d(0, ${-rounded}px, 0)`
+        : `translate3d(${-rounded}px, 0, 0)`;
       track.style.transform = transformValue;
     }
 
@@ -179,9 +182,12 @@ const useAnimationLoop = (
         nextOffset = ((nextOffset % seqSize) + seqSize) % seqSize;
         offsetRef.current = nextOffset;
 
+        // Accumulate fractionally but RENDER on whole CSS pixels — fractional
+        // offsets rasterize text at subpixel positions and read as blur.
+        const rounded = Math.round(offsetRef.current);
         const transformValue = isVertical
-          ? `translate3d(0, ${-offsetRef.current}px, 0)`
-          : `translate3d(${-offsetRef.current}px, 0, 0)`;
+          ? `translate3d(0, ${-rounded}px, 0)`
+          : `translate3d(${-rounded}px, 0, 0)`;
         track.style.transform = transformValue;
       }
 
