@@ -260,7 +260,15 @@ export function DashboardView({
                           <td className="px-2 py-2 text-right text-[13px] text-fg" data-nums>
                             {row.price != null ? PRICE_FMT.format(row.price) : "—"}
                           </td>
-                          <td className="py-2 pl-2 text-right text-[13px] text-muted" data-nums>
+                          {/* suppressHydrationWarning: relative dates are
+                              computed in the server's TZ during SSR and the
+                              user's TZ after hydration — they may differ
+                              around midnight, by design. */}
+                          <td
+                            className="py-2 pl-2 text-right text-[13px] text-muted"
+                            data-nums
+                            suppressHydrationWarning
+                          >
                             {row.createdAt ? relativeDay(row.createdAt) : "—"}
                           </td>
                           <td className="py-2 pl-1 pr-3">
@@ -302,7 +310,11 @@ export function DashboardView({
                             <span className="block truncate text-sm font-semibold text-fg-strong">
                               {row.title}
                             </span>
-                            <span className="mt-0.5 block text-xs text-muted" data-nums>
+                            <span
+                              className="mt-0.5 block text-xs text-muted"
+                              data-nums
+                              suppressHydrationWarning
+                            >
                               {row.price != null ? PRICE_FMT.format(row.price) : "No price yet"}
                               {row.createdAt ? ` · ${relativeDay(row.createdAt)}` : ""}
                             </span>
