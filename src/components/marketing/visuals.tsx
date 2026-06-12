@@ -2,8 +2,12 @@
  * Marketing visuals (issue #49 round 2) — compact, server-safe product mocks
  * so no page is a wall of text. Pure CSS/SVG; entrance animation comes from
  * the surrounding <Reveal>, ambient motion from CSS keyframes (reduced-motion
- * safe via globals.css).
+ * safe via globals.css). The platform cards additionally get react-bits
+ * TiltedCard interactive tilt (client component rendered as JSX — fine from
+ * this server module).
  */
+
+import TiltedCard from "@/components/bits/TiltedCard";
 
 export function CameraArt({ className }: { className?: string }) {
   return (
@@ -185,20 +189,21 @@ export function PlatformCardsVisual() {
   return (
     <div className="stage-3d grid gap-3 sm:grid-cols-3">
       {cards.map(({ platform, title, style, tone, note }) => (
-        <div
-          key={platform}
-          className={`transform-3d glass-panel rounded-2xl border p-4 ${tone} ${style}`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
-              {platform}
-            </span>
-            <span className="nums text-[13px] font-bold text-flash">$128</span>
-          </div>
-          <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
-            {title}
-          </p>
-          <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
+        <div key={platform} className={`transform-3d ${style}`}>
+          <TiltedCard className="h-full" rotateAmplitude={9} scaleOnHover={1.05}>
+            <div className={`glass-panel h-full rounded-2xl border p-4 ${tone}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
+                  {platform}
+                </span>
+                <span className="nums text-[13px] font-bold text-flash">$128</span>
+              </div>
+              <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
+                {title}
+              </p>
+              <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
+            </div>
+          </TiltedCard>
         </div>
       ))}
     </div>
@@ -244,7 +249,7 @@ export function ConfidenceGaugeVisual() {
     <div className="glass-panel rounded-2xl p-5">
       <div className="mx-auto w-[180px]">
         <svg viewBox="0 0 140 84" className="w-full" aria-hidden>
-          <path d="M 16 76 A 54 54 0 0 1 124 76" fill="none" stroke="#1b1c1e" strokeWidth="10" strokeLinecap="round" />
+          <path d="M 16 76 A 54 54 0 0 1 124 76" fill="none" stroke="#eef1f8" strokeWidth="10" strokeLinecap="round" />
           <path
             d="M 16 76 A 54 54 0 0 1 124 76"
             fill="none"
@@ -259,7 +264,7 @@ export function ConfidenceGaugeVisual() {
               <stop offset="1" stopColor="#8b5cf6" />
             </linearGradient>
           </defs>
-          <text x="70" y="66" textAnchor="middle" className="nums" fill="#f7f8f8" fontSize="24" fontWeight="700">
+          <text x="70" y="66" textAnchor="middle" className="nums" fill="#131e3a" fontSize="24" fontWeight="700">
             92%
           </text>
         </svg>

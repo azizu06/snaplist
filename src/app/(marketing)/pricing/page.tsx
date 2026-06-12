@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Reveal } from "@/components/marketing/reveal";
 
 export const metadata: Metadata = {
@@ -58,8 +59,9 @@ export default function Pricing() {
 
       <section className="mx-auto w-full max-w-5xl px-5 pb-28 sm:px-8">
         <Reveal stagger className="grid gap-5 lg:grid-cols-[1.2fr_0.9fr_0.9fr]">
-          {/* live tier */}
-          <div className="relative overflow-hidden rounded-3xl border border-iris/40 bg-panel p-8">
+          {/* live tier — react-bits ElectricBorder marks the recommended plan */}
+          <ElectricBorder color="#6d4aff" speed={0.9} chaos={0.06} borderRadius={24}>
+          <div className="relative overflow-hidden rounded-3xl bg-panel p-8">
             <span className="absolute right-6 top-6 rounded-full bg-iris px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-iris-ink">
               Live now
             </span>
@@ -91,6 +93,7 @@ export default function Pricing() {
               <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
             </Link>
           </div>
+          </ElectricBorder>
 
           {/* ghost tiers */}
           {GHOSTS.map(({ name, note, teaser }) => (

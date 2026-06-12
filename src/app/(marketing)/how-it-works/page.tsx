@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import ScrollVelocity from "@/components/bits/ScrollVelocity";
 import { Reveal } from "@/components/marketing/reveal";
 import {
   LensRings,
@@ -149,7 +150,29 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-5 pb-24 sm:px-8">
+      {/* react-bits ScrollVelocity — the pipeline as a scroll-reactive marquee */}
+      <section className="overflow-hidden border-y border-line bg-night-2 py-8 sm:py-10">
+        <ScrollVelocity
+          velocity={55}
+          numCopies={8}
+          texts={[
+            <span key="pipeline" className="text-flash">
+              Snap <span className="text-iris">·</span> Identify{" "}
+              <span className="text-iris">·</span> Price{" "}
+              <span className="text-iris">·</span> Write{" "}
+              <span className="text-iris">·</span> Publish{" "}
+              <span className="text-iris">·</span>
+            </span>,
+            <span key="marketplaces" className="text-flash-faint/45">
+              eBay <span className="text-iris/50">·</span> Facebook
+              Marketplace <span className="text-iris/50">·</span> Mercari{" "}
+              <span className="text-iris/50">·</span>
+            </span>,
+          ]}
+        />
+      </section>
+
+      <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
         <div className="space-y-16 sm:space-y-20">
           {STAGES.map(({ n, title, body, chips, visual: Visual }, i) => (
             <Reveal key={n} delay={0.05}>
