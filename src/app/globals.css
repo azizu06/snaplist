@@ -601,3 +601,111 @@
   }
 }
 
+/* ============================================================================
+   Marketing subpages v3 (features / how-it-works / about / pricing / footer).
+   Appended block — owned by the subpages pass; everything below is scoped to
+   marketing affordances and is safe to remove with that pass.
+   ============================================================================ */
+
+/* --- Prism spectrum tints -------------------------------------------------
+   The features page keys each capability area to one band of the prism
+   (the same hues the hero gradient splits into). Deliberately NOT the
+   lifecycle hues (amber/emerald/red mean status); these are violet, cyan,
+   rose, and a slate-indigo. Each tint ships a readable ink + a soft wash,
+   re-pointed under .dark. */
+:root {
+  --tint-violet:      #6d4aff;
+  --tint-violet-soft: rgba(109, 74, 255, 0.1);
+  --tint-cyan:        #0086ad;
+  --tint-cyan-soft:   rgba(0, 165, 207, 0.12);
+  --tint-rose:        #c4317e;
+  --tint-rose-soft:   rgba(228, 77, 153, 0.1);
+  --tint-indigo:      #4955c8;
+  --tint-indigo-soft: rgba(89, 103, 222, 0.11);
+}
+.dark {
+  --tint-violet:      #9d85ff;
+  --tint-violet-soft: rgba(126, 95, 255, 0.16);
+  --tint-cyan:        #4ed3f5;
+  --tint-cyan-soft:   rgba(78, 211, 245, 0.12);
+  --tint-rose:        #f583c0;
+  --tint-rose-soft:   rgba(244, 114, 182, 0.13);
+  --tint-indigo:      #93a0ff;
+  --tint-indigo-soft: rgba(147, 160, 255, 0.13);
+}
+
+/* --- Footer link underline ------------------------------------------------
+   Animated accent underline: scales from the left on hover/focus. Sits a
+   hair below the baseline; theme-accent color flips with the iris token. */
+.link-underline {
+  position: relative;
+}
+.link-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--color-iris);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.28s cubic-bezier(0.21, 0.8, 0.32, 1);
+}
+.link-underline:hover::after,
+.link-underline:focus-visible::after {
+  transform: scaleX(1);
+}
+
+/* --- Eyebrow underline ----------------------------------------------------
+   The numbered section eyebrows carry a short tinted rule instead of the
+   ubiquitous violet pill. */
+.eyebrow-rule {
+  position: relative;
+  padding-bottom: 7px;
+}
+.eyebrow-rule::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 30px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--eyebrow-tint, var(--color-iris));
+}
+
+/* --- FAQ accordion --------------------------------------------------------
+   grid-template-rows 0fr→1fr height animation; the inner wrapper clips.
+   Content fades + rises with a slight delay so the reveal reads staged. */
+.faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.36s cubic-bezier(0.21, 0.8, 0.32, 1);
+}
+.faq-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.faq-panel > div {
+  overflow: hidden;
+  min-height: 0;
+}
+.faq-panel-content {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+.faq-panel[data-open="true"] .faq-panel-content {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.3s ease 0.12s, transform 0.3s ease 0.12s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .link-underline::after,
+  .faq-panel,
+  .faq-panel-content {
+    transition: none;
+  }
+}
+

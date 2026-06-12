@@ -1,16 +1,20 @@
 /**
- * Marketing visuals (issue #49 round 2, react-bits round 2 polish) — compact,
- * server-safe product mocks so no page is a wall of text. Identification and
- * publish mocks use the real demo photos (public/demo) instead of line-art
- * icons; the platform cards sit FLAT (resting 3D rotation rasterized text
- * blurry) and only tilt on hover via react-bits TiltedCard. Example listings
- * span distinct products — camera, textbook, sneakers, vinyl — so the mocks
- * never repeat one item. Entrance animation comes from the surrounding
- * <Reveal>; ambient motion from CSS keyframes (reduced-motion safe).
+ * Marketing visuals (subpages v3) — server-safe product mocks shared by the
+ * marketing pages. Products come exclusively from the verified demo catalog
+ * (src/lib/demo-products.ts) and are never relabeled; each page draws from
+ * its assigned pool so no item repeats across surfaces. The Canon camera is
+ * reserved for the landing hero video and appears nowhere here.
+ *
+ * Hover affordances are translate/shadow-only: scale and 3D rotations on
+ * text-bearing layers rasterize glyphs at subpixel positions (the "blurry
+ * hover" bug), so transforms here move whole pixels with a GPU hint and
+ * scaling is reserved for imagery.
  */
 
 import Image from "next/image";
-import TiltedCard from "@/components/bits/TiltedCard";
+import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
+
+/* ---------------------------------------------------------------- shared */
 
 /** Faint concentric lens rings — decorative anchor for hero corners. */
 export function LensRings({ className }: { className?: string }) {
@@ -32,132 +36,74 @@ export function LensRings({ className }: { className?: string }) {
   );
 }
 
-/** Stage 1 — the Mercari-style photo slot strip. */
-export function PhotoSlotsVisual() {
+export type SpectrumTint = "violet" | "cyan" | "rose" | "indigo";
+
+const TINT_VAR: Record<SpectrumTint, { ink: string; soft: string }> = {
+  violet: { ink: "var(--tint-violet)", soft: "var(--tint-violet-soft)" },
+  cyan: { ink: "var(--tint-cyan)", soft: "var(--tint-cyan-soft)" },
+  rose: { ink: "var(--tint-rose)", soft: "var(--tint-rose-soft)" },
+  indigo: { ink: "var(--tint-indigo)", soft: "var(--tint-indigo-soft)" },
+};
+
+/**
+ * Numbered section eyebrow with a short tinted rule — the affordance system
+ * that replaces the repeated violet pill chip. Each capability area keys to
+ * one band of the prism spectrum.
+ */
+export function Eyebrow({
+  n,
+  tint = "violet",
+  children,
+}: {
+  n?: string;
+  tint?: SpectrumTint;
+  children: React.ReactNode;
+}) {
+  const t = TINT_VAR[tint];
   return (
-    <div className="glass-panel rounded-2xl p-5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
-        Add photos
-      </p>
-      <div className="mt-3 grid grid-cols-4 gap-2.5">
-        <div className="relative aspect-square overflow-hidden rounded-xl border border-iris/40">
-          <Image
-            src="/demo/camera.jpg"
-            alt=""
-            fill
-            sizes="120px"
-            className="object-cover"
-          />
-          <span className="absolute left-1.5 top-1.5 flex size-4 items-center justify-center rounded-full bg-iris text-[9px] font-bold text-iris-ink">
-            1
-          </span>
-        </div>
-        {[2, 3, 4].map((n) => (
-          <div
-            key={n}
-            className="flex aspect-square items-center justify-center rounded-xl border border-dashed border-line-2 text-flash-faint"
-          >
-            <span className="text-[10px] font-semibold">{n}</span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-3.5 flex items-center gap-2 rounded-xl bg-iris/10 px-3 py-2">
-        <span className="size-1.5 rounded-full bg-iris" />
-        <p className="text-[11.5px] font-medium text-iris">
-          ISBN 978-0-13-468599-1 detected on photo 1
-        </p>
-      </div>
-    </div>
+    <p
+      className="eyebrow-rule inline-flex items-baseline gap-2 text-[12px] font-semibold uppercase tracking-[0.16em]"
+      style={{ color: t.ink, "--eyebrow-tint": t.ink } as React.CSSProperties}
+    >
+      {n ? <span className="nums opacity-60">{n}</span> : null}
+      {children}
+    </p>
   );
 }
 
-/** Stage 2 — scan beam over a real product photo, attributes extracted. */
-export function ScanChipsVisual() {
+/** Compact icon + phrase chip — replaces paragraph bullets on /features. */
+export function PointChip({
+  tint = "violet",
+  icon,
+  children,
+}: {
+  tint?: SpectrumTint;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const t = TINT_VAR[tint];
   return (
-    <div className="glass-panel relative overflow-hidden rounded-2xl p-5">
-      <div className="relative mx-auto w-[230px] rounded-xl border border-line-2 bg-night-2 p-2.5">
-        <span aria-hidden className="absolute left-1 top-1 z-10 size-3.5 rounded-tl border-l-2 border-t-2 border-iris/80" />
-        <span aria-hidden className="absolute right-1 top-1 z-10 size-3.5 rounded-tr border-r-2 border-t-2 border-iris/80" />
-        <span aria-hidden className="absolute bottom-1 left-1 z-10 size-3.5 rounded-bl border-b-2 border-l-2 border-iris/80" />
-        <span aria-hidden className="absolute bottom-1 right-1 z-10 size-3.5 rounded-br border-b-2 border-r-2 border-iris/80" />
-        <div className="relative h-[150px] overflow-hidden rounded-lg">
-          <Image
-            src="/demo/camera.jpg"
-            alt="Canon AE-1 Program film camera being identified"
-            fill
-            sizes="230px"
-            className="object-cover"
-          />
-          <div
-            className="scan-line absolute inset-x-1 top-1 h-[2px] rounded-full bg-gradient-to-r from-transparent via-iris to-transparent"
-            style={{ "--scan-range": "140px" } as React.CSSProperties}
-          />
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
-        {["Canon AE-1 Program", "Film camera", "Good · tested", "FD 50mm f/1.8"].map((chip) => (
-          <span
-            key={chip}
-            className="rounded-full border border-iris/30 bg-iris/10 px-2.5 py-1 text-[11px] font-medium text-iris"
-          >
-            {chip}
-          </span>
-        ))}
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-2.5 rounded-xl border border-line bg-panel py-2 pl-2 pr-3.5 text-[13px] font-medium text-flash-dim shadow-xs">
+      <span
+        className="flex size-7 items-center justify-center rounded-lg"
+        style={{ background: t.soft, color: t.ink }}
+      >
+        {icon}
+      </span>
+      {children}
+    </span>
   );
 }
 
-/** Stage 3 — the price module with range + cited sources (vinyl record). */
-export function PriceModuleVisual() {
-  return (
-    <div className="glass-panel rounded-2xl p-5">
-      <div className="flex items-end justify-between">
-        <div>
-          <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
-            Suggested price
-          </p>
-          <p className="nums font-display text-[30px] font-bold leading-tight text-flash">
-            $52
-          </p>
-        </div>
-        <span className="rounded-full bg-iris/15 px-2.5 py-1 text-[10.5px] font-semibold text-iris">
-          89% confident
-        </span>
-      </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-panel-2">
-        <div className="h-full w-[72%] rounded-full bg-gradient-to-r from-iris-deep to-iris" />
-      </div>
-      <p className="mt-1.5 text-[11px] text-flash-faint">range $38 – $64 · vinyl, VG+ with sleeve</p>
-      <div className="mt-4 space-y-2">
-        {[
-          ["eBay sold listing", "$49", "2d ago"],
-          ["Discogs sale, VG+", "$55", "4d ago"],
-          ["Mercari comp", "$50", "1w ago"],
-        ].map(([src, price, age]) => (
-          <div
-            key={src}
-            className="flex items-center justify-between rounded-lg border border-line bg-night-2 px-3 py-2"
-          >
-            <span className="flex items-center gap-2 text-[12px] text-flash-dim">
-              <svg viewBox="0 0 24 24" className="size-3 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-              </svg>
-              {src}
-            </span>
-            <span className="nums text-[12px] font-semibold text-flash">
-              {price} <span className="font-normal text-flash-faint">· {age}</span>
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+/* ------------------------------------------------- landing (do not break) */
 
-/** Stage 4 — three platform listings, distinct products. Cards rest FLAT
- *  (a permanent rotate-y rasterized the copy blurry) and only tilt on hover. */
+/**
+ * "One photo, three storefronts" — used ONLY by the landing page (the
+ * subpages dropped this motif so the landing keeps the single instance).
+ * Blur fix: the old TiltedCard wrapper rotated/scaled the whole text card,
+ * rasterizing copy mid-hover. Cards now lift on a whole-pixel translate
+ * (transform-gpu pins the layer) and the depth cue moved to shadow/border.
+ */
 export function PlatformCardsVisual() {
   const cards = [
     {
@@ -185,134 +131,172 @@ export function PlatformCardsVisual() {
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {cards.map(({ platform, title, price, tone, note }) => (
-        <TiltedCard key={platform} className="h-full" rotateAmplitude={6} scaleOnHover={1.04}>
-          <div className={`glass-panel h-full rounded-2xl border p-4 ${tone}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
-                {platform}
-              </span>
-              <span className="nums text-[13px] font-bold text-flash">{price}</span>
-            </div>
-            <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
-              {title}
-            </p>
-            <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
+        <div
+          key={platform}
+          className={`glass-panel h-full transform-gpu rounded-2xl border p-4 transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1.5 hover:border-iris/50 hover:shadow-lg ${tone}`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-iris">
+              {platform}
+            </span>
+            <span className="nums text-[13px] font-bold text-flash">{price}</span>
           </div>
-        </TiltedCard>
+          <p className="mt-2.5 line-clamp-3 text-[12px] leading-relaxed text-flash-dim">
+            {title}
+          </p>
+          <p className="mt-3 text-[10.5px] text-flash-faint">{note}</p>
+        </div>
       ))}
     </div>
   );
 }
 
-/** Stage 5 — published listing + autopilot toggle. */
-export function PublishVisual() {
+/* ----------------------------------------------------- about page (mixer) */
+
+/**
+ * Refined mini price report — the about hero visual: a miniature of the real
+ * product experience. KitchenAid mixer from the verified catalog; comps-tier
+ * story (its honest pricing path), range band, confidence chip, cited rows.
+ */
+export function MiniPriceReport() {
+  const p = DEMO_PRODUCTS_BY_SLUG.mixer;
+  const sources = [
+    ["eBay sold listing", "$179", "3d ago"],
+    ["Mercari comp", "$192", "5d ago"],
+    ["Facebook ask — down-weighted", "$210", "1w ago"],
+  ] as const;
   return (
-    <div className="glass-panel rounded-2xl p-5">
-      <div className="flex items-center justify-between rounded-xl border border-line bg-night-2 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="relative size-10 overflow-hidden rounded-lg border border-line">
-            <Image
-              src="/demo/camera.jpg"
-              alt=""
-              fill
-              sizes="40px"
-              className="object-cover"
-            />
-          </div>
-          <div>
-            <p className="text-[12.5px] font-semibold text-flash">Canon AE-1 Program</p>
-            <p className="nums text-[11.5px] text-flash-faint">$128 · eBay</p>
-          </div>
-        </div>
-        <span className="flex items-center gap-1.5 rounded-full border border-iris/40 bg-night px-2.5 py-1 text-[10px] font-bold text-iris">
-          <span className="size-1.5 rounded-full bg-iris" />
-          LIVE
+    <div className="glass-panel overflow-hidden rounded-3xl">
+      <div className="relative h-[150px]">
+        <Image
+          src={p.image}
+          alt={p.alt}
+          fill
+          sizes="400px"
+          className="object-cover"
+        />
+        <span className="absolute left-3 top-3 rounded-full bg-night/85 px-2.5 py-1 text-[10.5px] font-semibold text-flash backdrop-blur">
+          {p.category}
         </span>
       </div>
-      <div className="mt-3 flex items-center justify-between rounded-xl bg-iris/8 px-4 py-3">
-        <div>
-          <p className="text-[12px] font-semibold text-flash">Autopilot</p>
-          <p className="text-[11px] text-flash-faint">publishes above 85% confidence</p>
+      <div className="p-5">
+        <p className="text-[13px] font-semibold leading-snug text-flash">
+          {p.title}
+        </p>
+        <div className="mt-3.5 flex items-end justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
+              Suggested price
+            </p>
+            <p className="nums font-display text-[32px] font-bold leading-tight text-flash">
+              ${p.price}
+            </p>
+          </div>
+          <span className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-iris/12 px-2.5 py-1 text-[10.5px] font-semibold text-iris">
+            <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            78% · live comps
+          </span>
         </div>
-        <span className="relative h-5 w-9 rounded-full bg-iris">
-          <span className="absolute right-0.5 top-0.5 size-4 rounded-full bg-white" />
-        </span>
+        {/* range band — suggested sits inside the researched window */}
+        <div className="relative mt-3 h-2 rounded-full bg-panel-2">
+          <div className="absolute inset-y-0 left-[18%] right-[14%] rounded-full bg-gradient-to-r from-iris-deep/70 to-iris" />
+          <span className="absolute left-[52%] top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris shadow-sm" />
+        </div>
+        <div className="nums mt-1.5 flex justify-between text-[10.5px] text-flash-faint">
+          <span>$150</span>
+          <span>range</span>
+          <span>$220</span>
+        </div>
+        <div className="mt-4 space-y-1.5 border-t border-line pt-3.5">
+          {sources.map(([src, price, age]) => (
+            <div key={src} className="flex items-center justify-between text-[11.5px]">
+              <span className="flex items-center gap-2 text-flash-dim">
+                <svg viewBox="0 0 24 24" className="size-3 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+                {src}
+              </span>
+              <span className="nums font-semibold text-flash">
+                {price} <span className="font-normal text-flash-faint">· {age}</span>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-/** Confidence gauge + the three signals feeding it. */
-export function ConfidenceGaugeVisual() {
-  // Arc: r=54, semicircle length ≈ 169.6; 92% ≈ 156.
+/* ----------------------------------------- how-it-works hero (Game Boy) */
+
+/**
+ * Snap → identity mock for the how-it-works hero: one pool photo with the
+ * extracted-attribute chips the pipeline would produce. Ambient scan line
+ * only — no hover transforms near text.
+ */
+export function SnapIdentityCard() {
+  const p = DEMO_PRODUCTS_BY_SLUG.gameboy;
   return (
-    <div className="glass-panel rounded-2xl p-5">
-      <div className="mx-auto w-[180px]">
-        <svg viewBox="0 0 140 84" className="w-full" aria-hidden>
-          {/* Track + label use tokens via style (SVG presentation attributes
-              can't resolve var()), so the gauge flips with the theme. */}
-          <path d="M 16 76 A 54 54 0 0 1 124 76" fill="none" style={{ stroke: "var(--color-panel-2)" }} strokeWidth="10" strokeLinecap="round" />
-          <path
-            d="M 16 76 A 54 54 0 0 1 124 76"
-            fill="none"
-            stroke="url(#gauge-grad)"
-            strokeWidth="10"
-            strokeLinecap="round"
-            strokeDasharray="156 170"
+    <div className="glass-panel rounded-3xl p-4">
+      <div className="relative overflow-hidden rounded-2xl">
+        <div className="relative h-[180px]">
+          <Image src={p.image} alt={p.alt} fill sizes="380px" className="object-cover" />
+          <div
+            className="scan-line absolute inset-x-2 top-2 h-[2px] rounded-full bg-gradient-to-r from-transparent via-iris to-transparent"
+            style={{ "--scan-range": "164px" } as React.CSSProperties}
           />
-          <defs>
-            <linearGradient id="gauge-grad" x1="16" y1="76" x2="124" y2="76" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stopColor="#4f5abf" />
-              <stop offset="1" stopColor="#8b5cf6" />
-            </linearGradient>
-          </defs>
-          <text x="70" y="66" textAnchor="middle" className="nums" style={{ fill: "var(--color-flash)" }} fontSize="24" fontWeight="700">
-            92%
-          </text>
-        </svg>
+          <span aria-hidden className="absolute left-2 top-2 size-4 rounded-tl-lg border-l-2 border-t-2 border-iris/80" />
+          <span aria-hidden className="absolute right-2 top-2 size-4 rounded-tr-lg border-r-2 border-t-2 border-iris/80" />
+          <span aria-hidden className="absolute bottom-2 left-2 size-4 rounded-bl-lg border-b-2 border-l-2 border-iris/80" />
+          <span aria-hidden className="absolute bottom-2 right-2 size-4 rounded-br-lg border-b-2 border-r-2 border-iris/80" />
+        </div>
       </div>
-      <div className="mt-2 space-y-2">
-        {[
-          ["Pricing tier", "ISBN exact lookup", "w-[95%]"],
-          ["Comp agreement", "tight cluster", "w-[84%]"],
-          ["Identification", "brand + model + code", "w-[91%]"],
-        ].map(([label, detail, w]) => (
-          <div key={label} className="rounded-lg border border-line bg-night-2 px-3 py-2">
-            <div className="flex items-center justify-between text-[11.5px]">
-              <span className="font-medium text-flash-dim">{label}</span>
-              <span className="text-flash-faint">{detail}</span>
-            </div>
-            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-panel-2">
-              <div className={`h-full ${w} rounded-full bg-iris/80`} />
-            </div>
-          </div>
+      <div className="mt-3.5 flex flex-wrap gap-1.5">
+        {["Nintendo", "Game Boy Color", "Dandelion", "Good · tested"].map((chip) => (
+          <span
+            key={chip}
+            className="rounded-md bg-iris/10 px-2 py-1 text-[11px] font-medium text-iris"
+          >
+            {chip}
+          </span>
         ))}
       </div>
+      <div className="mt-3 flex items-center justify-between rounded-xl bg-night-2 px-3 py-2.5">
+        <span className="text-[11.5px] text-flash-faint">Suggested from live comps</span>
+        <span className="nums text-[14px] font-bold text-flash">${p.price}</span>
+      </div>
     </div>
   );
 }
 
-/** Buyer question → grounded draft reply. */
-export function InboxVisual() {
+/* ------------------------------------------------ features page duo cards */
+
+/**
+ * Buyer question → grounded draft reply. Continues the page's G-Shock
+ * narrative in text only (the photo appears once, in the listing composer).
+ */
+export function BuyerReplyCard() {
   return (
-    <div className="glass-panel rounded-2xl p-5">
-      <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-night-2 px-3.5 py-2.5">
+    <div className="glass-panel h-full rounded-2xl p-5">
+      <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-line bg-night-2 px-3.5 py-2.5">
         <p className="text-[10.5px] font-semibold text-flash-faint">buyer · via eBay</p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
-          Is this the 6th edition? And is there any highlighting inside?
+          Is this the DW-5600 with the backlight? Does it keep time okay?
         </p>
       </div>
-      <div className="ml-auto mt-3 max-w-[88%] rounded-2xl rounded-br-md border border-iris/30 bg-iris/10 px-3.5 py-2.5">
+      <div className="ml-auto mt-3 max-w-[90%] rounded-2xl rounded-br-md border border-iris/30 bg-iris/10 px-3.5 py-2.5">
         <p className="flex items-center gap-1.5 text-[10.5px] font-semibold text-iris">
-          <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2m0-12.8-2.2 2.2M7.8 16.2l-2.2 2.2" />
           </svg>
           drafted from item attributes — awaiting your approval
         </p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
-          Yes — 6th edition, the ISBN in the photos confirms it. Pages are
-          clean with no highlighting or notes, just light shelf wear on the
-          cover. Happy to send more photos!
+          Yes — DW-5600E with the EL backlight, and it keeps accurate time.
+          Light wear on the strap, glass is clean. Happy to send more photos!
         </p>
       </div>
       <div className="mt-3.5 flex justify-end gap-2">
@@ -320,19 +304,19 @@ export function InboxVisual() {
           Edit
         </span>
         <span className="rounded-full bg-iris px-3.5 py-1.5 text-[11.5px] font-semibold text-iris-ink">
-          Approve & send
+          Approve &amp; send
         </span>
       </div>
     </div>
   );
 }
 
-/** Per-account isolation rows. */
-export function SecurityVisual() {
+/** Per-account isolation rows — row-level security made visible. */
+export function IsolationCard() {
   return (
-    <div className="glass-panel rounded-2xl p-5">
+    <div className="glass-panel h-full rounded-2xl p-5">
       <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
-        <svg viewBox="0 0 24 24" className="size-3.5 text-iris" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg viewBox="0 0 24 24" className="size-3.5 text-iris" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
         </svg>
@@ -344,23 +328,23 @@ export function SecurityVisual() {
             <span className="flex size-6 items-center justify-center rounded-full bg-iris text-[10px] font-bold text-iris-ink">
               you
             </span>
-            Air Jordan 1 Mid · $164 · live
+            G-Shock DW-5600 · $42 · live
           </span>
           <span className="text-[10.5px] font-semibold text-iris">visible</span>
         </div>
-        {["a", "b"].map((u) => (
+        {["u2", "u3"].map((u) => (
           <div
             key={u}
             className="flex items-center justify-between rounded-lg border border-line px-3 py-2.5 opacity-50"
           >
             <span className="flex items-center gap-2.5 text-[12.5px] text-flash-faint">
               <span className="flex size-6 items-center justify-center rounded-full bg-panel-2 text-[10px] font-bold text-flash-faint">
-                {u === "a" ? "u2" : "u3"}
+                {u}
               </span>
-              <span className="select-none blur-[5px]">Sony A6000 · $415 · draft</span>
+              <span className="select-none blur-[5px]">someone else&apos;s listing</span>
             </span>
             <span className="flex items-center gap-1 text-[10.5px] font-semibold text-flash-faint">
-              <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
