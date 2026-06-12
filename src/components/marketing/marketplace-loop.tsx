@@ -29,18 +29,45 @@ type Marketplace = "eBay" | "Facebook" | "Mercari";
 type LoopListing = {
   slug: string;
   marketplace: Marketplace;
-  /** Short confidence chip copy, truthful to the product's pricingStory. */
+  /** Confidence chip in plain seller language (owner round 4: "92 comps"
+   *  meant nothing to anyone) — still truthful to the product's
+   *  pricingStory: barcode → ISBN match, comps → recent sales,
+   *  depreciation → held for review. */
   confidence: string;
   tone: "high" | "solid" | "review";
 };
 
-/** barcode → ISBN-grade confidence; comps → solid; depreciation → review. */
 const LISTINGS: LoopListing[] = [
-  { slug: "camera", marketplace: "eBay", confidence: "92% · comps", tone: "high" },
-  { slug: "book", marketplace: "eBay", confidence: "97% · ISBN", tone: "high" },
-  { slug: "sneakers", marketplace: "Mercari", confidence: "87% · comps", tone: "solid" },
-  { slug: "chess", marketplace: "Facebook", confidence: "72% · review", tone: "review" },
-  { slug: "headphones", marketplace: "Mercari", confidence: "89% · comps", tone: "solid" },
+  {
+    slug: "camera",
+    marketplace: "eBay",
+    confidence: "Priced from recent sales · 92% sure",
+    tone: "high",
+  },
+  {
+    slug: "book",
+    marketplace: "eBay",
+    confidence: "ISBN match · 97% sure",
+    tone: "high",
+  },
+  {
+    slug: "sneakers",
+    marketplace: "Mercari",
+    confidence: "Priced from recent sales · 87% sure",
+    tone: "solid",
+  },
+  {
+    slug: "chess",
+    marketplace: "Facebook",
+    confidence: "Waiting for your review",
+    tone: "review",
+  },
+  {
+    slug: "headphones",
+    marketplace: "Mercari",
+    confidence: "Priced from recent sales · 89% sure",
+    tone: "solid",
+  },
 ];
 
 const TONE_CLASSES: Record<LoopListing["tone"], string> = {
@@ -82,37 +109,43 @@ export function MarketplaceBadge({
   );
 }
 
+/** Round-4 sizing: real listing-card proportions — a proper photo on top
+ *  (was a 56px thumb nobody could read), 13px+ body text, fewer cards per
+ *  view. Nothing inside transforms on hover; the loop just pauses. */
 function ListingCard({ listing }: { listing: LoopListing }) {
   const product = DEMO_PRODUCTS_BY_SLUG[listing.slug];
   return (
-    <article className="flex w-[320px] items-center gap-3 rounded-xl border border-line bg-panel p-3 shadow-card">
-      <div className="relative size-14 shrink-0 overflow-hidden rounded-lg border border-line">
+    <article className="w-[300px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
+      <div className="relative h-[170px] border-b border-line">
         <Image
           src={product.image}
           alt={product.alt}
           fill
-          sizes="56px"
+          sizes="300px"
           className="object-cover"
         />
+        <span className="absolute right-2.5 top-2.5 rounded-md bg-night/85 px-2 py-1 text-[11px] font-semibold text-flash backdrop-blur">
+          {product.condition}
+        </span>
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[12.5px] font-semibold leading-snug text-flash">
+      <div className="p-4">
+        <p className="truncate text-[13.5px] font-semibold leading-snug text-flash">
           {product.title}
         </p>
-        <div className="mt-1.5 flex items-center gap-2">
-          <span className="nums text-[13px] font-bold leading-none text-flash">
+        <div className="mt-2 flex items-center gap-2.5">
+          <span className="nums text-[16px] font-bold leading-none text-flash">
             ${product.price}
           </span>
           <span aria-hidden className="text-line-2">
             ·
           </span>
-          <MarketplaceBadge marketplace={listing.marketplace} />
-          <span
-            className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ${TONE_CLASSES[listing.tone]}`}
-          >
-            {listing.confidence}
-          </span>
+          <MarketplaceBadge marketplace={listing.marketplace} className="text-[12px]" />
         </div>
+        <span
+          className={`mt-3 inline-block rounded-full px-2.5 py-1 text-[11.5px] font-semibold leading-none ${TONE_CLASSES[listing.tone]}`}
+        >
+          {listing.confidence}
+        </span>
       </div>
     </article>
   );
@@ -134,10 +167,10 @@ export function MarketplaceLoop() {
       // scrollbar nub. Breathing room for those shadows comes from py-2.
       className="overflow-y-hidden py-2"
       logos={LOOP_ITEMS}
-      speed={30}
+      speed={32}
       direction="left"
       logoHeight={14}
-      gap={20}
+      gap={24}
       pauseOnHover
       fadeOut
       // The fade gradient must match whatever the band sits on — the canvas

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { WordmarkGlow } from "@/components/marketing/wordmark-glow";
 
 const COLUMNS = [
   {
@@ -38,7 +39,7 @@ export function MarketingFooter() {
       <div className="mx-auto w-full max-w-6xl px-5 pb-10 pt-16 sm:px-8">
         <div className="flex flex-col justify-between gap-12 sm:flex-row">
           <div className="max-w-xs">
-            <Logo className="text-flash" markClassName="size-7" />
+            <Logo className="footer-logo-glow text-flash" markClassName="size-7" />
             <p className="mt-3 text-[13.5px] leading-relaxed text-flash-faint">
               Snap a photo of something you want to sell. We identify it, price
               it with sources, and write the listing.
@@ -73,15 +74,11 @@ export function MarketingFooter() {
         </div>
       </div>
 
-      {/* oversized clipped wordmark */}
-      <div
-        aria-hidden
-        className="pointer-events-none select-none overflow-hidden"
-      >
-        <p className="-mb-[0.23em] bg-gradient-to-b from-line to-night bg-clip-text text-center font-display text-[clamp(96px,18vw,260px)] font-bold leading-none tracking-tight text-transparent">
-          SnapList
-        </p>
-      </div>
+      {/* oversized clipped wordmark — hover sweeps a bright shimmer through
+          the glyphs (rAF-driven; see wordmark-glow.tsx + .wordmark-glow in
+          globals.css). Decorative/aria-hidden, but pointer events stay on so
+          the hover can land. */}
+      <WordmarkGlow />
     </footer>
   );
 }
