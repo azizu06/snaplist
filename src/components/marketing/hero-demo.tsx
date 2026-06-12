@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
+import { CameraArt } from "./visuals";
 
 gsap.registerPlugin(useGSAP);
 
@@ -10,7 +11,8 @@ gsap.registerPlugin(useGSAP);
  * Hero pipeline demo (issue #49) — the product story as one looping GSAP
  * timeline: photo → identify (scan + attribute chips) → price (count-up with
  * range + sources) → assembled listing, published. Pure CSS/SVG scene; no
- * image assets. Reduced motion gets the final assembled frame, static.
+ * image assets. Reduced motion gets the final assembled frame, static, and
+ * no pointer tilt.
  */
 
 const CHIPS = [
@@ -19,36 +21,6 @@ const CHIPS = [
   "Condition: good · tested",
   "FD 50mm f/1.8 lens",
 ] as const;
-
-function CameraArt({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 200 130"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      {/* body */}
-      <rect x="18" y="38" width="164" height="74" rx="10" />
-      {/* top plate + prism hump */}
-      <path d="M18 52h54l10-14h36l10 14h54" />
-      <path d="M78 38v-8a4 4 0 0 1 4-4h36a4 4 0 0 1 4 4v8" />
-      {/* lens */}
-      <circle cx="100" cy="78" r="26" />
-      <circle cx="100" cy="78" r="16" />
-      <circle cx="100" cy="78" r="7" />
-      {/* controls */}
-      <circle cx="44" cy="58" r="7" />
-      <rect x="142" y="50" width="22" height="9" rx="3" />
-      {/* strap lugs */}
-      <path d="M18 70h-5M187 70h-5" />
-    </svg>
-  );
-}
 
 export function HeroDemo() {
   const scope = useRef<HTMLDivElement>(null);
@@ -142,7 +114,34 @@ export function HeroDemo() {
             "+=0.5",
           );
 
-        return () => tl.kill();
+        // 3D pointer tilt — the panel leans toward the cursor.
+        const el = scope.current;
+        let cleanupTilt = () => {};
+        if (el) {
+          gsap.set(el, { transformPerspective: 900 });
+          const rx = gsap.quickTo(el, "rotationX", { duration: 0.6, ease: "power3.out" });
+          const ry = gsap.quickTo(el, "rotationY", { duration: 0.6, ease: "power3.out" });
+          const onMove = (e: PointerEvent) => {
+            const r = el.getBoundingClientRect();
+            ry(((e.clientX - r.left) / r.width - 0.5) * 10);
+            rx(((e.clientY - r.top) / r.height - 0.5) * -8);
+          };
+          const onLeave = () => {
+            rx(0);
+            ry(0);
+          };
+          el.addEventListener("pointermove", onMove);
+          el.addEventListener("pointerleave", onLeave);
+          cleanupTilt = () => {
+            el.removeEventListener("pointermove", onMove);
+            el.removeEventListener("pointerleave", onLeave);
+          };
+        }
+
+        return () => {
+          tl.kill();
+          cleanupTilt();
+        };
       });
     },
     { scope },

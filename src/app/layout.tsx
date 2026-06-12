@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Space_Grotesk, Instrument_Serif } from "next/font/google";
+import {
+  Geist,
+  Geist_Mono,
+  Bricolage_Grotesque,
+  Instrument_Serif,
+} from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
@@ -13,9 +18,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Darkroom identity (issue #49): Space Grotesk carries display type,
-// Instrument Serif italic is the editorial accent ("photo" / "minutes").
-const spaceGrotesk = Space_Grotesk({
+// Darkroom identity (issue #49): Bricolage Grotesque carries display type
+// (characterful, owner-picked over the plainer Space Grotesk), Instrument
+// Serif italic is the editorial accent ("properly" / "sold").
+const bricolage = Bricolage_Grotesque({
   variable: "--font-display",
   subsets: ["latin"],
 });
@@ -75,7 +81,7 @@ export default function RootLayout({
     >
       <html
         lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${instrumentSerif.variable} h-full antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${bricolage.variable} ${instrumentSerif.variable} h-full antialiased`}
       >
         <body className="min-h-full">{children}</body>
       </html>

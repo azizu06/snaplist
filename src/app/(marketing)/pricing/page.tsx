@@ -36,7 +36,7 @@ const GHOSTS = [
 export default function Pricing() {
   return (
     <>
-      <section className="aurora dotgrid relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
+      <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <div className="mx-auto w-full max-w-6xl text-center">
           <Reveal>
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">

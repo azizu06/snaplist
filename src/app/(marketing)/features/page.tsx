@@ -1,6 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Reveal } from "@/components/marketing/reveal";
+import {
+  LensRings,
+  ScanChipsVisual,
+  PriceModuleVisual,
+  PlatformCardsVisual,
+  ConfidenceGaugeVisual,
+  InboxVisual,
+  SecurityVisual,
+} from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "Features",
@@ -8,7 +17,17 @@ export const metadata: Metadata = {
     "AI identification, pricing with cited sources, confidence-gated autopilot, platform-native listings, drafted buyer replies, and per-account security.",
 };
 
-/** /features (issue #49) — capability deep-dive grouped by pipeline area. */
+/** /features (issue #49) — capability deep-dive grouped by pipeline area,
+ * each group anchored by a product-mock visual (round 2: no text walls). */
+
+const GROUP_VISUALS: Record<string, () => React.ReactNode> = {
+  Identification: ScanChipsVisual,
+  Pricing: PriceModuleVisual,
+  Listings: PlatformCardsVisual,
+  "Autopilot & trust": ConfidenceGaugeVisual,
+  "Selling & inbox": InboxVisual,
+  Security: SecurityVisual,
+};
 
 const GROUPS = [
   {
@@ -124,7 +143,8 @@ const GROUPS = [
 export default function Features() {
   return (
     <>
-      <section className="aurora dotgrid relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
+      <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
+        <LensRings className="pointer-events-none absolute -right-40 -top-40 w-[560px] text-iris" />
         <div className="mx-auto w-full max-w-6xl">
           <Reveal>
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
@@ -144,36 +164,50 @@ export default function Features() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl space-y-20 px-5 pb-28 sm:px-8">
-        {GROUPS.map(({ heading, blurb, items }) => (
-          <div key={heading}>
-            <Reveal>
-              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                <h2 className="font-display text-[clamp(22px,3vw,30px)] font-bold tracking-tight text-flash">
-                  {heading}
-                </h2>
-                <p className="font-serif-accent text-[16px] italic text-flash-faint">
-                  {blurb}
-                </p>
+      <section className="mx-auto w-full max-w-6xl space-y-16 px-5 pb-28 sm:space-y-24 sm:px-8">
+        {GROUPS.map(({ heading, blurb, items }, i) => {
+          const Visual = GROUP_VISUALS[heading];
+          return (
+            <Reveal key={heading}>
+              <div
+                className={`grid items-center gap-8 lg:gap-14 ${
+                  i % 2 === 0 ? "lg:grid-cols-[1fr_430px]" : "lg:grid-cols-[430px_1fr]"
+                }`}
+              >
+                <div className={i % 2 === 0 ? "" : "lg:order-2"}>
+                  <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                    <h2 className="font-display text-[clamp(22px,3vw,30px)] font-bold tracking-tight text-flash">
+                      {heading}
+                    </h2>
+                    <p className="font-serif-accent text-[16px] italic text-flash-faint">
+                      {blurb}
+                    </p>
+                  </div>
+                  <ul className="mt-6 space-y-4">
+                    {items.map(({ title, body }) => (
+                      <li key={title} className="flex gap-3">
+                        <svg viewBox="0 0 24 24" className="mt-1 size-4 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                        <div>
+                          <h3 className="font-display text-[15.5px] font-semibold text-flash">
+                            {title}
+                          </h3>
+                          <p className="mt-1 text-[13.5px] leading-relaxed text-flash-dim">
+                            {body}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className={i % 2 === 0 ? "" : "lg:order-1"}>
+                  {Visual ? <Visual /> : null}
+                </div>
               </div>
             </Reveal>
-            <Reveal stagger className="mt-7 grid gap-5 md:grid-cols-3">
-              {items.map(({ title, body }) => (
-                <div
-                  key={title}
-                  className="rounded-2xl border border-line/70 bg-panel/50 p-6 transition-colors hover:border-line-2 hover:bg-panel"
-                >
-                  <h3 className="font-display text-[16.5px] font-semibold text-flash">
-                    {title}
-                  </h3>
-                  <p className="mt-2 text-[13.5px] leading-relaxed text-flash-dim">
-                    {body}
-                  </p>
-                </div>
-              ))}
-            </Reveal>
-          </div>
-        ))}
+          );
+        })}
       </section>
 
       <section className="border-t border-line/60 bg-night-2/40 px-5 py-24 text-center sm:px-8">

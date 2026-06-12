@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Logo } from "@/components/logo";
 
 const COLUMNS = [
   {
@@ -35,10 +36,8 @@ export function MarketingFooter() {
       <div className="mx-auto w-full max-w-6xl px-5 pb-10 pt-16 sm:px-8">
         <div className="flex flex-col justify-between gap-12 sm:flex-row">
           <div className="max-w-xs">
-            <p className="font-display text-[15px] font-semibold text-flash">
-              SnapList
-            </p>
-            <p className="mt-2 text-[13.5px] leading-relaxed text-flash-faint">
+            <Logo className="text-flash" markClassName="size-7" />
+            <p className="mt-3 text-[13.5px] leading-relaxed text-flash-faint">
               Snap a photo of something you want to sell. We identify it, price
               it with sources, and write the listing.
             </p>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Logo } from "@/components/logo";
 
 const LINKS = [
   { href: "/how-it-works", label: "How it works" },
@@ -37,19 +38,10 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
       <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
         <Link
           href="/"
-          className="flex items-center gap-2.5 font-display text-[17px] font-semibold tracking-tight text-flash"
+          className="text-flash"
           onClick={() => setOpen(false)}
         >
-          <span
-            aria-hidden
-            className="flex size-7 items-center justify-center rounded-lg bg-iris text-iris-ink shadow-[0_0_24px_-4px] shadow-iris/50"
-          >
-            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-              <circle cx="12" cy="13" r="3" />
-            </svg>
-          </span>
-          SnapList
+          <Logo markClassName="size-8" />
         </Link>
 
         <div className="hidden items-center gap-1 md:flex">

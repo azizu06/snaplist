@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Reveal } from "@/components/marketing/reveal";
+import { LensRings, PriceModuleVisual } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "About & FAQ",
@@ -59,8 +60,9 @@ const FAQ = [
 export default function About() {
   return (
     <>
-      <section className="aurora dotgrid relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
-        <div className="mx-auto w-full max-w-6xl">
+      <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
+        <LensRings className="pointer-events-none absolute -left-44 -top-44 w-[560px] text-iris" />
+        <div className="mx-auto grid w-full max-w-6xl items-center gap-12 lg:grid-cols-[1fr_400px]">
           <Reveal>
             <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
               About
@@ -86,6 +88,9 @@ export default function About() {
                 own accuracy.
               </p>
             </div>
+          </Reveal>
+          <Reveal delay={0.15} className="hidden lg:block">
+            <PriceModuleVisual />
           </Reveal>
         </div>
       </section>

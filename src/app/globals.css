@@ -148,15 +148,16 @@
    keyframes shared by the landing sections; GSAP drives everything stateful.
    ============================================================================ */
 @layer components {
-  /* Dot-grid texture over the night canvas (Stitch-style). */
-  .dotgrid {
-    background-image: radial-gradient(
-      oklch(100% 0 0 / 0.055) 1px,
-      transparent 1px
-    );
-    background-size: 22px 22px;
+  /* Film grain — SVG turbulence noise, the texture of the Darkroom. */
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.045;
   }
-  /* Aurora glow — two soft radial pools behind the hero. */
+  /* Aurora glow — soft radial pools behind hero sections. */
   .aurora::before {
     content: "";
     position: absolute;
@@ -164,9 +165,14 @@
     height: 80%;
     pointer-events: none;
     background:
-      radial-gradient(38% 45% at 28% 18%, rgba(94, 106, 210, 0.22), transparent 70%),
-      radial-gradient(42% 50% at 74% 8%, rgba(139, 92, 246, 0.18), transparent 70%);
+      radial-gradient(38% 45% at 28% 18%, rgba(94, 106, 210, 0.24), transparent 70%),
+      radial-gradient(42% 50% at 74% 8%, rgba(139, 92, 246, 0.2), transparent 70%),
+      radial-gradient(30% 36% at 55% 30%, rgba(124, 136, 232, 0.08), transparent 70%);
     filter: blur(28px);
+  }
+  /* 3D stage for tilt/perspective children. */
+  .stage-3d {
+    perspective: 1200px;
   }
   /* Glassy raised card on the night canvas. */
   .glass-panel {
@@ -185,10 +191,33 @@
   .marquee-track {
     animation: marquee 36s linear infinite;
   }
+  /* Ambient scan beam inside the ScanChipsVisual. */
+  .scan-line {
+    animation: scan-sweep 3.2s ease-in-out infinite;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .marquee-track {
+    .marquee-track,
+    .scan-line {
       animation: none;
     }
+  }
+}
+
+@keyframes scan-sweep {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.2;
+  }
+  12% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(96px);
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
   }
 }
 
