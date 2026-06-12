@@ -13,11 +13,14 @@ import { EbayApiError } from "./types";
  * `EBAY_RU_NAME` flips alongside the credentials.
  */
 
-/** Scopes the per-user connection asks for: publish inventory + read identity
- * (identity is what lets the account-deletion endpoint map eBay user -> tokens). */
+/** Scopes the per-user connection asks for: publish inventory, read identity
+ * (what lets the account-deletion endpoint map eBay user -> tokens), and read
+ * the seller's account config (business policies + merchant location — the
+ * production flip discovers their ids through this; issue #17/#47). */
 export const EBAY_OAUTH_SCOPES = [
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
+  "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
 ];
 
 type Env = Record<string, string | undefined>;

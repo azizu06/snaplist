@@ -24,6 +24,24 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("ebay oauth", () => {
+  describe("EBAY_OAUTH_SCOPES (the connection's capability contract)", () => {
+    it("covers publish, identity, and business-policy reads", () => {
+      // sell.inventory: publish offers. commerce.identity.readonly: map eBay
+      // user -> tokens for deletion notices. sell.account.readonly: read the
+      // seller's business policies + merchant location at connect time (the
+      // production flip needs their ids; issue #17 / #47 groundwork).
+      expect(EBAY_OAUTH_SCOPES).toContain(
+        "https://api.ebay.com/oauth/api_scope/sell.inventory",
+      );
+      expect(EBAY_OAUTH_SCOPES).toContain(
+        "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
+      );
+      expect(EBAY_OAUTH_SCOPES).toContain(
+        "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
+      );
+    });
+  });
+
   describe("base urls (the sandbox -> production flip)", () => {
     it("defaults to sandbox and flips the consent host with EBAY_BASE_URL", () => {
       expect(ebayApiBaseUrl({})).toBe("https://api.sandbox.ebay.com");
