@@ -176,9 +176,17 @@ export const DEMO_PRODUCTS_BY_SLUG: Record<string, DemoProduct> =
  * no product should headline more than one surface.
  */
 export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
-  "hero-video": ["camera", "book", "sneakers"], // current hero-demo.mp4 acts
-  "landing-features": ["polaroid", "vinyl", "gshock"],
-  "how-it-works": ["gameboy", "guitar", "mixer"],
+  // --- Remotion demo-video suite (remotion/suite; see remotion/INTEGRATION.md) ---
+  "hero-video": ["polaroid", "gameboy", "gshock"], // public/hero-demo.mp4 — vision-showcase acts 1–3
+  "step-snap": ["guitar"], // public/demo/steps/snap.mp4
+  "step-identify": ["camera"], // public/demo/steps/identify.mp4
+  "step-price": ["sneakers"], // public/demo/steps/price.mp4
+  "step-write": ["mixer"], // public/demo/steps/write.mp4
+  "step-publish": ["keyboard"], // public/demo/steps/publish.mp4
+  "buyer-qa": ["chess"], // public/demo/buyer-qa.mp4
+  // --- Static page surfaces (pending rewire to the new clip set; the
+  // how-it-works carousel will embed the step-* videos above) ---
+  "landing-features": ["vinyl", "book", "headphones"],
   "dashboard-folder": ["keyboard", "chess", "headphones"],
   "app-empty-states": ["vinyl", "gameboy"],
 };
