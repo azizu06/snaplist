@@ -54,12 +54,13 @@ export function InboxEmptyState() {
 
       <div className="px-6">
         {/* ---- stacked ghost conversation ---- */}
-        {/* h-64 (was h-52): the front card is ~190px tall, so the old 64px
-            bottom fade sat ON the reply's last line and greyed out "cables
-            included" (owner). The extra height puts clear space under the
-            card and the slimmer fade lives only there — every word of the
-            thread stays fully legible, and the soft fade-out remains. */}
-        <div aria-hidden className="relative mx-auto h-64 w-full max-w-md select-none">
+        {/* The fade needs CONTENT to dissolve: a gradient over empty surface
+            is invisible (card bg = container bg = surface), which is why no
+            fade showed. So the thread ends with a faint trailing buyer
+            message that the bottom gradient melts away — the approved reply
+            ("...cables included.") stays fully crisp ABOVE the fade, and the
+            dissolving stub reads as "more questions keep arriving." */}
+        <div aria-hidden className="relative mx-auto h-72 w-full max-w-md select-none">
           <GhostCard className="top-3 -rotate-3 opacity-40" />
           <GhostCard className="top-1.5 rotate-2 opacity-60" />
 
@@ -81,13 +82,20 @@ export function InboxEmptyState() {
                 Yes, it ships in the original box with both cables included.
               </p>
             </div>
+            {/* trailing stub — the gradient below dissolves this, giving the
+                fade something visible to act on while the reply stays crisp */}
+            <div className="mt-2.5 max-w-[72%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
+              <p className="text-[11.5px] font-semibold text-muted">buyer · via eBay</p>
+              <p className="mt-0.5 text-[14px] leading-snug text-fg-strong">
+                Perfect, would you take $90 shipped?
+              </p>
+            </div>
           </div>
 
-          {/* fade the composition into the copy below — a soft gradient
-              bridge from the ghost card down to the headline (owner wanted
-              it more present again). Sits in the gap BELOW the card text, so
-              "cables included" stays crisp while the empty space dissolves. */}
-          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-surface via-surface/85 to-transparent" />
+          {/* dissolves the trailing stub into the copy below. Reaches up far
+              enough (h-28) to melt the stub bubble, but its opaque region
+              stays under the approved reply so "cables included" is crisp. */}
+          <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-surface via-surface/90 to-transparent" />
         </div>
 
         {/* ---- copy: one headline, one sentence, one hint ---- */}
