@@ -85,8 +85,8 @@ const STEPS = [
   },
   {
     n: "06",
-    eyebrow: "After it's live",
-    tint: "rose",
+    eyebrow: "Step 6",
+    tint: undefined,
     src: "/demo/buyer-qa.mp4",
     glyph: "chat",
     title: "Answer",
@@ -144,7 +144,7 @@ export default function HowItWorks() {
           in-video UI is readable without squinting. */}
       <section className="mx-auto w-full max-w-[1720px] px-5 pb-24 pt-16 sm:px-8 sm:pb-28 sm:pt-20">
         <div className="space-y-24 sm:space-y-32">
-          {STEPS.map(({ n, eyebrow, tint, src, glyph, title, body, poster, label }, i) => (
+          {STEPS.map(({ n, eyebrow, src, glyph, title, body, poster, label }, i) => (
             <Reveal key={n} delay={0.05}>
               <div
                 id={`step-${glyph === "chat" ? "qa" : glyph}`}
@@ -155,9 +155,11 @@ export default function HowItWorks() {
                 }`}
               >
                 <div className={i % 2 === 0 ? "" : "lg:order-2"}>
-                  <Eyebrow n={n} tint={tint}>
-                    {eyebrow}
-                  </Eyebrow>
+                  {/* uniform across all six steps: same violet tint, single
+                      "Step N" label (the old "01 · Step 1" double-numbered,
+                      and step 6 was a different rose color — owner). The
+                      numeral still rides the clip badge via DemoClip n={n}. */}
+                  <Eyebrow>{eyebrow}</Eyebrow>
                   <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
                     {title}
                   </h2>

@@ -83,9 +83,11 @@ export function InboxEmptyState() {
             </div>
           </div>
 
-          {/* fade the composition into the copy below — kept BELOW the
-              card text (see h-64 note above) */}
-          <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-surface to-transparent" />
+          {/* fade the composition into the copy below — a soft gradient
+              bridge from the ghost card down to the headline (owner wanted
+              it more present again). Sits in the gap BELOW the card text, so
+              "cables included" stays crisp while the empty space dissolves. */}
+          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-surface via-surface/85 to-transparent" />
         </div>
 
         {/* ---- copy: one headline, one sentence, one hint ---- */}

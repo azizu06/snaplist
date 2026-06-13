@@ -74,9 +74,15 @@ export default function RootLayout({
           },
           // Primary action matches the site's rounded-full CTAs.
           formButtonPrimary: { borderRadius: "9999px" },
+          // Interactive controls get the STRONGER border — the hairline
+          // token was invisible on the white card (owner). The email field
+          // and the Google button now read as real, tappable controls.
           socialButtonsBlockButton: {
             background: "var(--clerk-bg)",
-            border: "1px solid var(--clerk-border)",
+            border: "1px solid var(--clerk-border-strong)",
+          },
+          formFieldInput: {
+            border: "1px solid var(--clerk-border-strong)",
           },
           footer: { background: "var(--clerk-footer-bg)" },
         },

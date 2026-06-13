@@ -166,12 +166,13 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
 function DashboardEmpty() {
   return (
     <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 pb-14 pt-10 text-center">
-      {/* mt-40 (r6): at mt-28 the opened previews popped right up against
-          the section's top edge (owner: "way too cramped up to the top").
-          160px clears the full card pop at the 2.2 folder scale while the
-          closed state still reads centered. mb-16 separates the folder
-          from the title. */}
-      <div className="mb-16 mt-40">
+      {/* mt-60 (r6): the opened previews pop ~225px UP from the folder, so
+          the folder's closed top needs ~280px of clear space above it
+          (pt-10 + mt-60) for the popped cards to land comfortably inside the
+          container instead of spilling toward the header (owner). With more
+          room above (280px) than below (~220px), the folder settles just
+          below the container's vertical center. mb-16 → title. */}
+      <div className="mb-16 mt-60">
         <Folder
           color="#6d4aff"
           size={2.2}
