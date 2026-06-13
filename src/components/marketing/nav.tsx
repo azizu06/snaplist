@@ -15,6 +15,19 @@ const LINKS = [
  * Marketing nav (issue #49). Transparent over the hero; gains a glass blur +
  * hairline once the page scrolls. Signed-in visitors get "Open app" instead
  * of the login/signup pair.
+ *
+ * ui-r6-nav:
+ * - Link hover/focus pills use `flash/10` (ink at 10%) instead of
+ *   `panel-2/70` — panel-2 is near-identical to the scrolled bar color in
+ *   both themes, so the old hover was invisible exactly when the bar turned
+ *   solid. Ink-derived tint reads on transparent AND solid, light AND dark.
+ * - Dock-out animation: at rest the nav content sits in the centered
+ *   max-w-6xl cluster; once scrolled the container's max-width animates to
+ *   100% (see .nav-dock in globals.css), sliding the logo left and the
+ *   actions right toward the viewport edges so the bar reads as full-width
+ *   app chrome. Pure layout (no transforms), so text stays crisp; padding
+ *   keeps a 20–32px edge margin; on small screens the viewport is already
+ *   narrower than the max-width so nothing moves; reduced-motion jumps.
  */
 export function MarketingNav({ signedIn }: { signedIn: boolean }) {
   const [scrolled, setScrolled] = useState(false);
@@ -35,7 +48,10 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           : "border-b border-transparent bg-transparent"
       }`}
     >
-      <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
+      <nav
+        data-docked={scrolled}
+        className="nav-dock mx-auto flex h-16 w-full items-center justify-between px-5 sm:px-8"
+      >
         <Link
           href="/"
           className="text-flash"
@@ -49,7 +65,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
             <Link
               key={href}
               href={href}
-              className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:bg-panel-2/70 hover:text-flash"
+              className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
             >
               {label}
             </Link>
@@ -70,7 +86,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
             <>
               <Link
                 href="/login"
-                className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:text-flash"
+                className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
               >
                 Log in
               </Link>

@@ -1005,3 +1005,27 @@
     animation: none;
   }
 }
+
+/* --- ui-r6-nav -------------------------------------------------------------
+   Nav dock-out: at rest the bar's content is the centered max-w-6xl cluster;
+   once the page scrolls (data-docked="true") the container's max-width eases
+   to the full viewport, sliding the logo toward the left edge and the
+   actions toward the right edge — the bar "docks" into full-width app
+   chrome. Animating max-width is a pure layout change (no transforms on
+   text-bearing layers), so glyphs never blur; px-5/sm:px-8 padding keeps a
+   20–32px comfort margin at the edges. Interpolating 72rem ↔ 100% works via
+   standard calc() interpolation. Below the max-width nothing moves on small
+   screens, which is the graceful mobile fallback. Reduced motion: snap. */
+.nav-dock {
+  max-width: 72rem;
+  transition: max-width 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nav-dock[data-docked="true"] {
+  max-width: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-dock {
+    transition: none;
+  }
+}
+/* --- end ui-r6-nav --- */

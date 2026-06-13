@@ -262,15 +262,54 @@ function DepreciationExample() {
 
 function LlmExample() {
   const reduced = useReducedMotion();
+  // ui-r6: the panel earns its space honestly — the trail of better sources
+  // that came up empty, the wide-range slider as the centerpiece, and the
+  // flagged-for-review card instead of a closing text wall.
+  const tried = [
+    { source: "Book barcode", result: "none on the item" },
+    { source: "Recent sale prices", result: "nothing close enough" },
+    { source: "New price to mark down", result: "couldn’t find one" },
+  ] as const;
   return (
     <div>
-      <div className="rounded-2xl border border-line bg-night-2 p-5">
+      <p className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+        What we tried first
+      </p>
+      <div className="mt-2 space-y-1.5">
+        {tried.map(({ source, result }, i) => (
+          <motion.div
+            key={source}
+            initial={reduced ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 + i * 0.12 }}
+            className="flex items-center justify-between gap-3 rounded-xl border border-line bg-night-2 px-4 py-1.5"
+          >
+            <span className="flex items-center gap-2.5 text-[13px] text-flash-dim">
+              <svg
+                viewBox="0 0 24 24"
+                className="size-3 shrink-0 text-flash-faint"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                aria-hidden
+              >
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+              {source}
+            </span>
+            <span className="text-right text-[12.5px] text-flash-faint">{result}</span>
+          </motion.div>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-2xl border border-line bg-night-2 p-4">
         <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
           An honestly wide range
         </p>
 
         {/* the suggested price, labeled and tethered to its spot on the range */}
-        <div className="relative mt-5 pb-1 pt-12">
+        <div className="relative mt-3 pb-1 pt-10">
           <div className="absolute left-[46%] top-0 flex -translate-x-1/2 flex-col items-center">
             <span className="whitespace-nowrap rounded-full bg-iris/12 px-3 py-1.5 text-[12.5px] font-semibold text-iris">
               Our best guess — <span className="nums font-bold">$35</span>
@@ -298,12 +337,30 @@ function LlmExample() {
           </div>
         </div>
       </div>
-      <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
-        When we cannot identify the exact item and nothing similar has sold
-        recently, we give a careful guess with a wide range — our least
-        certain answer, and we say so. It is always flagged for your review
-        and never publishes on its own.
-      </p>
+      <motion.div
+        initial={reduced ? false : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.5 }}
+        className="mt-3 flex items-start gap-3 rounded-2xl border border-iris/25 bg-iris/8 px-4 py-3"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="mt-0.5 size-4 shrink-0 text-iris"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+          <path d="M4 22v-7" />
+        </svg>
+        <p className="text-[12.5px] leading-snug text-flash-faint">
+          <span className="font-semibold text-flash">Flagged for your review</span>{" "}
+          — a guess this rough never goes live; you set the final price first.
+        </p>
+      </motion.div>
     </div>
   );
 }
@@ -377,13 +434,20 @@ export function WaterfallExplorer() {
           four-row stack exactly; content is vertically centered so the
           larger typography fills the panel instead of floating at the top */}
       <div className="glass-panel flex min-w-0 flex-col rounded-3xl p-6 sm:p-7">
-        <div className="flex items-center justify-between">
+        {/* ui-r6: the label gets its own line; the tier name + "how sure"
+            chip sit on a second row, so nothing crowds onto one line */}
+        <div>
           <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
             What this looks like on a real item
           </p>
-          <span className="nums rounded-full bg-iris/12 px-3 py-1.5 text-[12.5px] font-bold text-iris">
-            <CountUp key={tier.id} to={tier.confidence} duration={0.9} />% confidence
-          </span>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+            <h3 className="font-display text-[19px] font-semibold leading-snug text-flash">
+              {tier.name}
+            </h3>
+            <span className="nums rounded-full bg-iris/12 px-3 py-1 text-[12.5px] font-bold text-iris">
+              <CountUp key={tier.id} to={tier.confidence} duration={0.9} />% sure
+            </span>
+          </div>
         </div>
         <div className="mt-5 flex min-h-[300px] flex-1 flex-col">
           <AnimatePresence mode="wait" initial={false}>
