@@ -231,7 +231,9 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   // product on the About hero — replaced with the verified turntable photo.
   // The mixer entry stays (the step-write Remotion clip still uses it).
   "about-price-report": ["turntable"],
-  "upload-examples": ["gameboy", "vinyl"], // app surface; overlaps marketing by design
+  // r5.1: the upload page's "one photo in, a finished listing out" example
+  // strip was removed (how-it-works already tells that story) — gameboy and
+  // vinyl remain in use via the step clips and the hiw scan montage.
   // r5: espresso freed up when the About FAQ anchor card was removed; the
   // folder now pops items that no landing surface features.
   "dashboard-folder": ["gshock", "espresso", "turntable"],

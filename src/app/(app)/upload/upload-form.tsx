@@ -7,7 +7,6 @@ import ClickSpark from "@/components/bits/ClickSpark";
 import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Banner } from "@/components/ui/banner";
 import { Spinner } from "@/components/ui/spinner";
-import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
 
 /**
  * Sell sheet — app-surfaces v3. The default state is composed as "the start
@@ -19,9 +18,7 @@ import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
  *   three labeled angle slots (back/detail/label), ElectricBorder + violet
  *   wash on drag-over;
  * - the Mercari field rows live under an "Autofill by SnapList" card header,
- *   each with a leading glyph + the sparkle "AI suggests" pill;
- * - two real demo examples (assigned pool: gameboy + vinyl) show what one
- *   photo becomes — photo → title → price.
+ *   each with a leading glyph + the sparkle "AI suggests" pill.
  *
  * Mechanism is UNCHANGED from round 1 (audit U-1/U-2/U-3): four slot inputs
  * all named `photo` (the server action reads formData.getAll("photo")), slot
@@ -265,102 +262,6 @@ function JourneyRail() {
         </li>
       ))}
     </ol>
-  );
-}
-
-/* Real demo items (assigned pool for this surface family — never relabeled). */
-const EXAMPLES = [
-  DEMO_PRODUCTS_BY_SLUG.gameboy,
-  DEMO_PRODUCTS_BY_SLUG.vinyl,
-] as const;
-
-/**
- * Before → after strip (round 5). The old two-up "what one photo becomes"
- * grid read as a confusing pair of cramped, truncated product rows (the
- * owner saw "a Nintendo Game Boy limited to pressing" — two truncated
- * neighbors merging at a glance). Rebuilt so the purpose lands in one look:
- * the seller's raw photo on the left, an arrow, and the finished listing
- * card that single photo became on the right. Image + title + price always
- * come from the same catalog product, so they can never mismatch.
- */
-function ExampleStrip() {
-  return (
-    <section className="rounded-xl border border-border bg-surface shadow-xs">
-      <header className="border-b border-border px-4 py-3.5 sm:px-5">
-        <h2 className="text-[14px] font-semibold text-fg-strong">
-          One photo in, a finished listing out
-        </h2>
-        <p className="mt-0.5 text-[12px] text-muted">
-          Real examples — the photo on the left is all the seller added.
-        </p>
-      </header>
-      <div className="divide-y divide-border">
-        {EXAMPLES.map((p) => (
-          <div
-            key={p.slug}
-            className="flex items-center gap-3 px-4 py-4 sm:gap-4 sm:px-5"
-          >
-            {/* before: the raw photo */}
-            <figure className="flex w-[88px] shrink-0 flex-col items-center gap-1.5 sm:w-[104px]">
-              {/* eslint-disable-next-line @next/next/no-img-element -- local /demo asset */}
-              <img
-                src={p.image}
-                alt={p.alt}
-                className="size-[72px] rounded-xl border border-border object-cover shadow-xs sm:size-[88px]"
-              />
-              <figcaption className="text-[10.5px] font-medium text-faint">
-                Your photo
-              </figcaption>
-            </figure>
-
-            {/* the becomes-arrow */}
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden
-              className="size-5 shrink-0 text-accent"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M5 12h14M13 6l6 6-6 6" />
-            </svg>
-
-            {/* after: the finished listing card it became */}
-            <div className="min-w-0 flex-1 rounded-xl border border-accent/25 bg-accent-soft/30 p-3 sm:p-3.5">
-              <div className="flex items-start gap-2.5">
-                {/* eslint-disable-next-line @next/next/no-img-element -- local /demo asset */}
-                <img
-                  src={p.image}
-                  alt=""
-                  aria-hidden
-                  className="size-10 shrink-0 rounded-lg border border-border object-cover sm:size-11"
-                />
-                <div className="min-w-0">
-                  <p className="text-[13px] font-semibold leading-snug text-fg-strong">
-                    {p.title}
-                  </p>
-                  <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted">
-                    <span
-                      data-nums
-                      className="rounded-md bg-accent-soft px-1.5 py-0.5 font-bold text-accent-soft-fg"
-                    >
-                      ${p.price}
-                    </span>
-                    <span>{p.condition}</span>
-                    <span className="inline-flex items-center gap-1 font-semibold text-accent-soft-fg">
-                      <SparkleIcon className="size-2.5" />
-                      written for you
-                    </span>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -624,9 +525,6 @@ function FormBody({
           </p>
         </div>
       </section>
-
-      {/* ---- real examples from the demo catalog ---- */}
-      <ExampleStrip />
 
       {/* ---- sticky bottom CTA bar ---- */}
       <div className="sticky bottom-20 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-xl sm:border sm:shadow-md">
