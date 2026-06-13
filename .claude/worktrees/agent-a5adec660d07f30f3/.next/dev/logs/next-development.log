@@ -1,4 +1,0 @@
-{"timestamp":"00:30:55.429","source":"Server","level":"ERROR","message":"Error: ENOENT: no such file or directory, scandir '/Users/aziz.u/Developer/projects/snaplist/.claude/worktrees/agent-a5adec660d07f30f3/src/app'"}
-{"timestamp":"00:30:55.511","source":"Server","level":"ERROR","message":"⨯ \"unhandledRejection:\" Error: ENOENT: no such file or directory, scandir '/Users/aziz.u/Developer/projects/snaplist/.claude/worktrees/agent-a5adec660d07f30f3/src/app'"}
-{"timestamp":"00:30:55.521","source":"Server","level":"ERROR","message":"⨯ \"unhandledRejection: \" Error: ENOENT: no such file or directory, scandir '/Users/aziz.u/Developer/projects/snaplist/.claude/worktrees/agent-a5adec660d07f30f3/src/app'"}
-{"timestamp":"00:31:10.805","source":"Server","level":"LOG","message":"✓ Compiled in 27.7s"}
