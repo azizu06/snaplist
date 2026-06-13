@@ -70,6 +70,134 @@ const STEPS = [
 ] as const;
 
 /* ---------------------------------------------------------------------------
+ * r6 — "From shelf to sold" step visuals (Open Design concept, adapted).
+ * One REAL item carries through all three cards — the $48 sneakers from the
+ * verified catalog — so the row reads as a single product moving through the
+ * pipeline, not three decorative illustrations: snapped in the viewfinder →
+ * priced at $48 with its honest range → approved as a ready-to-post listing.
+ * A gradient journey rail connects the step numbers (desktop); a slow pulse
+ * travels it left→right (killed under prefers-reduced-motion).
+ * ------------------------------------------------------------------------- */
+
+const STEP_PRODUCT = DEMO_PRODUCTS_BY_SLUG.sneakers;
+
+/** Shared stage chrome: fixed-height visual slot at the top of each card. */
+function StepStage({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      aria-hidden
+      className={`relative flex h-44 items-center justify-center overflow-hidden rounded-xl border border-line bg-night-2 ${className}`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SnapStage() {
+  return (
+    <StepStage>
+      <div className="relative aspect-[4/3] w-[188px]">
+        <div className="relative size-full overflow-hidden rounded-lg">
+          <Image
+            src={STEP_PRODUCT.image}
+            alt=""
+            fill
+            sizes="188px"
+            className="object-cover"
+          />
+        </div>
+        {/* iris viewfinder brackets, hung just outside the photo edges */}
+        <span className="absolute -left-[7px] -top-[7px] size-[18px] rounded-tl-[5px] border-l-2 border-t-2 border-iris" />
+        <span className="absolute -right-[7px] -top-[7px] size-[18px] rounded-tr-[5px] border-r-2 border-t-2 border-iris" />
+        <span className="absolute -bottom-[7px] -left-[7px] size-[18px] rounded-bl-[5px] border-b-2 border-l-2 border-iris" />
+        <span className="absolute -bottom-[7px] -right-[7px] size-[18px] rounded-br-[5px] border-b-2 border-r-2 border-iris" />
+        <span className="absolute bottom-2 left-2 rounded-md bg-night/70 px-2 py-1 font-mono text-[10.5px] text-flash backdrop-blur dark:bg-night/80">
+          IMG_2041.jpg
+        </span>
+      </div>
+    </StepStage>
+  );
+}
+
+function PriceStage() {
+  return (
+    <StepStage className="flex-col !items-stretch !justify-center px-6">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-flash-faint">
+        Suggested price
+      </p>
+      <p className="nums mt-0.5 font-display text-[36px] font-bold leading-tight tracking-tight text-flash">
+        ${STEP_PRODUCT.price}
+      </p>
+      <div className="relative mt-3 h-1.5 rounded-full bg-line">
+        <span className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-55" />
+        <span className="absolute left-[52%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(109,74,255,0.22)]" />
+      </div>
+      <div className="nums mt-1.5 flex justify-between px-[8%] text-[11px] font-medium text-flash-faint">
+        <span>$35</span>
+        <span>$60</span>
+      </div>
+      <span className="mt-3.5 inline-flex items-center gap-1.5 self-start rounded-full border border-line bg-panel px-2.5 py-1 text-[11px] font-medium text-flash-dim">
+        <svg viewBox="0 0 10 10" className="size-2.5 text-success-soft-fg" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M1.5 5.5l2.2 2.2L8.5 2.9" />
+        </svg>
+        3 sources cited
+      </span>
+    </StepStage>
+  );
+}
+
+function ApproveStage() {
+  return (
+    <StepStage className="px-5">
+      <div className="w-full rounded-[10px] border border-line bg-panel p-3 shadow-card">
+        <div className="flex items-center gap-2.5">
+          <span className="relative size-[42px] shrink-0 overflow-hidden rounded-[7px]">
+            <Image
+              src={STEP_PRODUCT.image}
+              alt=""
+              fill
+              sizes="42px"
+              className="object-cover"
+            />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-semibold text-flash">
+              {STEP_PRODUCT.title}
+            </span>
+            <span className="nums mt-0.5 block truncate text-[11.5px] text-flash-dim">
+              ${STEP_PRODUCT.price} · {STEP_PRODUCT.condition} condition
+            </span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-1 text-[10.5px] font-semibold text-success-soft-fg">
+            <span className="size-1.5 rounded-full bg-current" />
+            Ready to post
+          </span>
+        </div>
+        <div className="mt-2.5 flex items-center gap-3 border-t border-line pt-2.5">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-[12.5px] font-semibold text-iris-ink">
+            <svg viewBox="0 0 10 10" className="size-[11px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1.5 5.5l2.2 2.2L8.5 2.9" />
+            </svg>
+            Approve listing
+          </span>
+          <span className="text-[12px] font-medium text-flash-dim">
+            Edit first
+          </span>
+        </div>
+      </div>
+    </StepStage>
+  );
+}
+
+const STEP_STAGES = [<SnapStage key="snap" />, <PriceStage key="price" />, <ApproveStage key="approve" />];
+
+/* ---------------------------------------------------------------------------
  * Small inline icons (lucide outlines) for the bento duotone chips + hero
  * trust strip. Kept local: they're presentation-only and page-specific.
  * ------------------------------------------------------------------------- */
@@ -418,20 +546,42 @@ export default function Landing() {
             three moves
           </h2>
         </Reveal>
-        <Reveal stagger className="mt-14 grid gap-5 md:grid-cols-3">
-          {STEPS.map(({ n, title, body }) => (
+        {/* desktop journey rail: gradient track + slow left→right pulse, with
+            the step numbers sitting ON it — reads as one item flowing through
+            the pipeline, not three islands. Hidden on mobile (cards stack). */}
+        <div
+          aria-hidden
+          className="relative mt-14 hidden grid-cols-3 md:grid"
+        >
+          <div className="step-rail-track">
+            <span className="step-rail-pulse" />
+          </div>
+          {STEPS.map(({ n }) => (
+            <span
+              key={n}
+              className="nums relative z-[1] mx-auto grid size-11 place-items-center rounded-full border border-line bg-panel font-display text-[15px] font-bold text-iris shadow-card"
+            >
+              {n}
+            </span>
+          ))}
+        </div>
+
+        <Reveal stagger className="mt-6 grid gap-5 md:grid-cols-3">
+          {STEPS.map(({ n, title, body }, i) => (
             <SpotlightCard
               key={n}
-              className="p-8"
+              className="p-6"
               spotlightColor="rgba(109, 74, 255, 0.12)"
             >
-              <span className="nums font-display text-[13.5px] font-bold text-iris">
+              {/* mobile-only step number (the rail above is desktop-only) */}
+              <span className="nums mb-4 inline-grid size-9 place-items-center rounded-full border border-line font-display text-[13px] font-bold text-iris md:hidden">
                 {n}
               </span>
-              <h3 className="mt-4 font-display text-[21px] font-semibold text-flash">
+              {STEP_STAGES[i]}
+              <h3 className="mt-5 font-display text-[20px] font-semibold text-flash">
                 {title}
               </h3>
-              <p className="mt-3 text-[14.5px] leading-relaxed text-flash-dim">
+              <p className="mt-2.5 text-[14px] leading-relaxed text-flash-dim">
                 {body}
               </p>
             </SpotlightCard>
