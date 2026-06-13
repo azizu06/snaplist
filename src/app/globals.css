@@ -735,6 +735,9 @@
   --clerk-muted: #aab6d8;
   --clerk-input-bg: #0b1020;
   --clerk-border: #222c4e;
+  /* Lighter than the divider hairline so the control ring is visible on the
+     very dark input/button surfaces (owner: borders were invisible). */
+  --clerk-border-strong: #3e4f80;
   --clerk-footer-bg: #0f1730;
   --clerk-card-shadow: 0 13px 27px -5px rgba(0, 0, 0, 0.55),
     0 8px 16px -8px rgba(126, 95, 255, 0.12);
@@ -1125,3 +1128,8 @@
   }
 }
 /* --- end ui-r6-landing-steps --- */
+
+/* ui-r6 login control borders: see (auth)/layout.tsx. Clerk injects its own
+   input/button styles into <head> at runtime, so a rule here (also <head>,
+   but earlier) loses on source order. The override lives in the auth layout
+   body instead, where it sits later in document order and wins. */

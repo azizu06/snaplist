@@ -28,6 +28,27 @@ export default function AuthLayout({
         <ThemeIconToggle className="border border-white/45 bg-white/70 backdrop-blur hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15" />
       </header>
       <div className="relative z-10 flex flex-1 flex-col">{children}</div>
+
+      {/*
+        Clerk draws the email input and social-button "border" as a box-shadow
+        ring keyed to colorBorder at ~11% alpha — invisible on the white card
+        and the dark input (owner). Clerk's styles inject into <head> at
+        runtime and resist both the appearance API and high-specificity
+        !important overrides placed in globals.css (also <head>, loaded
+        earlier → it loses on source order). `outline` is the one edge
+        property Clerk never sets; placed HERE in the body it sits later in
+        document order than Clerk's <head> styles, so it wins. An inset
+        offset makes it read as a real border that follows the rounded
+        corners; focus swaps to the brand-violet ring.
+      */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+.cl-formFieldInput{outline:1.5px solid var(--clerk-border-strong)!important;outline-offset:-1.5px!important;}
+.cl-formFieldInput:focus,.cl-formFieldInput:focus-visible{outline:2px solid var(--clerk-primary)!important;outline-offset:-2px!important;}
+.cl-socialButtonsBlockButton{outline:1.5px solid var(--clerk-border-strong)!important;outline-offset:-1.5px!important;}`,
+        }}
+      />
     </div>
   );
 }

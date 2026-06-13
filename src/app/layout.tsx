@@ -74,15 +74,12 @@ export default function RootLayout({
           },
           // Primary action matches the site's rounded-full CTAs.
           formButtonPrimary: { borderRadius: "9999px" },
-          // Interactive controls get the STRONGER border — the hairline
-          // token was invisible on the white card (owner). The email field
-          // and the Google button now read as real, tappable controls.
+          // The visible control "border" (input + Google button) is a Clerk
+          // box-shadow ring keyed to colorBorder at ~11% alpha — invisible on
+          // both themes. The appearance API can't override that ring, so it's
+          // forced via .cl- class rules in globals.css (ui-r6-login-borders).
           socialButtonsBlockButton: {
             background: "var(--clerk-bg)",
-            border: "1px solid var(--clerk-border-strong)",
-          },
-          formFieldInput: {
-            border: "1px solid var(--clerk-border-strong)",
           },
           footer: { background: "var(--clerk-footer-bg)" },
         },

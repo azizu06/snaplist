@@ -60,12 +60,14 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           <Logo markClassName="size-8" />
         </Link>
 
-        <div className="hidden items-center gap-1 md:flex">
+        {/* r6: primary wayfinding links bumped to 15px (was 13.5) with more
+            padding + gap so they carry real presence in the bar (owner). */}
+        <div className="hidden items-center gap-1.5 md:flex">
           {LINKS.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
-              className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
+              className="rounded-full px-4 py-2 text-[15px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
             >
               {label}
             </Link>
