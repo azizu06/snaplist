@@ -61,7 +61,19 @@ export default function RootLayout({
           fontFamily: "var(--font-geist-sans), ui-sans-serif, sans-serif",
         },
         elements: {
-          cardBox: { boxShadow: "var(--clerk-card-shadow)" },
+          // rounded-2xl card on the landing's floating-panel shadow — the
+          // same surface idiom as the marketing cards (ui-r6-login pass).
+          cardBox: {
+            boxShadow: "var(--clerk-card-shadow)",
+            borderRadius: "20px",
+          },
+          headerTitle: {
+            fontFamily:
+              "var(--font-display), var(--font-geist-sans), ui-sans-serif, sans-serif",
+            letterSpacing: "-0.01em",
+          },
+          // Primary action matches the site's rounded-full CTAs.
+          formButtonPrimary: { borderRadius: "9999px" },
           socialButtonsBlockButton: {
             background: "var(--clerk-bg)",
             border: "1px solid var(--clerk-border)",
