@@ -128,7 +128,7 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
                 </svg>
               }
             >
-              How it works
+              Tour
             </MenuItem>
             {/* Quick light/dark flip — full Light/Dark/System lives in
                 Settings → Appearance. Doesn't close the menu: flipping is
