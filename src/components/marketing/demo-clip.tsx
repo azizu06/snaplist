@@ -4,17 +4,15 @@
  * DemoClip (subpages v3) — lazy demo-video frame for the how-it-works steps
  * and the buyer-Q&A section.
  *
- * - The video element only mounts once the frame nears the viewport
- *   (IntersectionObserver, 240px rootMargin) and plays/pauses as it enters
- *   and leaves view: autoplay muted loop playsInline, never with sound.
- * - A designed poster (step glyph, title, prism tint, faux player chrome)
- *   renders underneath: it is the loading state AND the permanent fallback
- *   if the clip 404s, so a missing render never looks broken.
+ * The video engine is SeamlessThemeVideo: it lazy-mounts near the viewport,
+ * plays/pauses with visibility, swaps the dark render in on dark mode, and
+ * recolours in place on a theme toggle (no restart). The designed poster slate
+ * below is passed as its fallback — it is the loading state AND the permanent
+ * fallback if a clip 404s, so a missing render never looks broken, and under
+ * prefers-reduced-motion it stands alone (no video mounts).
  */
 
-import { useEffect, useRef, useState } from "react";
-import { useReducedMotion } from "motion/react";
-import { useThemedVideoSrc } from "@/lib/use-themed-video-src";
+import { SeamlessThemeVideo } from "@/components/seamless-theme-video";
 
 export function DemoClip({
   src,
@@ -36,55 +34,11 @@ export function DemoClip({
   /** Extra classes on the outer frame (ui-r4-hiw; optional, additive). */
   className?: string;
 }) {
-  const frameRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const reduced = useReducedMotion();
-  const [near, setNear] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [failed, setFailed] = useState(false);
-  // Follow the app theme: same clip, dark render swapped in when dark.
-  const themedSrc = useThemedVideoSrc(src);
-
-  // On a theme flip the src changes; reload the element so the new (dark or
-  // light) file actually plays instead of keeping the stale source buffered.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !near) return;
-    setPlaying(false);
-    video.load();
-    video.play().catch(() => {});
-  }, [themedSrc, near]);
-
-  // Mount the <video> when the frame approaches the viewport; play/pause it
-  // as the frame crosses 35% visibility so off-screen clips don't burn CPU.
-  // Under prefers-reduced-motion the designed poster stands in for the loop.
-  useEffect(() => {
-    if (reduced) return;
-    const el = frameRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) setNear(true);
-        const video = videoRef.current;
-        if (!video) return;
-        if (entry.intersectionRatio >= 0.35) {
-          video.play().catch(() => {});
-        } else {
-          video.pause();
-        }
-      },
-      { rootMargin: "240px 0px", threshold: [0, 0.35] },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [reduced]);
-
   return (
     <div
-      ref={frameRef}
       className={`glass-panel relative overflow-hidden rounded-2xl ${className ?? ""}`}
     >
-      <div className="relative aspect-video">
+      <SeamlessThemeVideo src={src} label={label} lazy className="aspect-video">
         {/* designed poster / fallback slate */}
         <div className="absolute inset-0 flex flex-col justify-between overflow-hidden bg-night-2 p-5 sm:p-7">
           <div
@@ -125,25 +79,7 @@ export function DemoClip({
             </div>
           </div>
         </div>
-
-        {near && !failed ? (
-          <video
-            ref={videoRef}
-            src={themedSrc}
-            muted
-            loop
-            playsInline
-            autoPlay
-            preload="metadata"
-            aria-label={label}
-            onError={() => setFailed(true)}
-            onPlaying={() => setPlaying(true)}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
-              playing ? "opacity-100" : "opacity-0"
-            }`}
-          />
-        ) : null}
-      </div>
+      </SeamlessThemeVideo>
     </div>
   );
 }

@@ -1,34 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useThemedVideoSrc } from "@/lib/use-themed-video-src";
+import { SeamlessThemeVideo } from "@/components/seamless-theme-video";
 
 /**
  * "Watch how replies work" teaser inside the inbox empty state.
  *
- * Plays /demo/buyer-qa.mp4 (1920×1080 muted loop) inside a mini app-window
- * frame, with three guards so it always reads as designed:
- * - lazy: the <video> element only mounts once the frame scrolls into view
- *   (IntersectionObserver), and autoplays muted/loop/playsInline from there;
- * - a fully designed CSS poster (a paused buyer→draft exchange) sits under
- *   the video and stays up until the first frame can actually play — so a
- *   missing/still-rendering mp4 degrades to an intentional illustration,
- *   never a broken player;
- * - prefers-reduced-motion: the video never mounts; the poster stands alone.
+ * The clip (/demo/buyer-qa.mp4, 1920×1080 muted loop) runs through
+ * SeamlessThemeVideo inside a mini app-window frame: it lazy-mounts on scroll,
+ * swaps in the dark render on dark mode and recolours in place on a toggle (no
+ * restart), and only ever fetches the active theme on the critical path. The
+ * designed CSS poster (a paused buyer→draft exchange) is its fallback — it
+ * holds the slot until the clip plays, degrades a missing/still-rendering mp4
+ * to an intentional still, and stands alone under prefers-reduced-motion.
  */
-
-function useReducedMotion(): boolean {
-  const subscribe = useCallback((onChange: () => void) => {
-    const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }, []);
-  return useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    () => true,
-  );
-}
 
 function SparkleIcon({ className }: { className?: string }) {
   return (
@@ -81,42 +65,12 @@ function PosterScene() {
 }
 
 export function InboxDemoVideo() {
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [inView, setInView] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const reduced = useReducedMotion();
-  // Follow the app theme: swap in the dark render of the buyer-Q&A clip.
-  const themedSrc = useThemedVideoSrc("/demo/buyer-qa.mp4");
-
-  // Lazy mount: only attach the <video> once the frame scrolls into view.
-  useEffect(() => {
-    const node = frameRef.current;
-    if (!node || reduced) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setInView(true);
-          io.disconnect();
-        }
-      },
-      { rootMargin: "160px" },
-    );
-    io.observe(node);
-    return () => io.disconnect();
-  }, [reduced]);
-
-  const showVideo = inView && !reduced && !failed;
-
   return (
     /* Full panel width (round 5): the 1920×1080 clip was capped at max-w-md
        and its on-screen text was illegible. px-4 keeps a slim inset inside
        the empty-state card; the video now spans the whole panel. */
     <figure className="mt-8 w-full px-4 pb-4 text-left sm:px-5 sm:pb-5">
-      <div
-        ref={frameRef}
-        className="overflow-hidden rounded-xl border border-border bg-surface shadow-md"
-      >
+      <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-md">
         {/* mini app-window chrome so the teaser reads as a product moment */}
         <div className="flex items-center gap-1.5 border-b border-border bg-surface-2/70 px-3.5 py-2.5">
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
@@ -130,29 +84,15 @@ export function InboxDemoVideo() {
             Watch how replies work
           </span>
         </div>
-        <div className="relative aspect-video">
+        <SeamlessThemeVideo
+          src="/demo/buyer-qa.mp4"
+          label="Demo: a buyer question answered with a drafted reply"
+          lazy
+          rootMargin="160px"
+          className="aspect-video"
+        >
           <PosterScene />
-          {showVideo ? (
-            <video
-              key={themedSrc}
-              src={themedSrc}
-              muted
-              loop
-              playsInline
-              autoPlay
-              preload="metadata"
-              onLoadStart={() => setPlaying(false)}
-              onCanPlay={(e) => {
-                void e.currentTarget.play().catch(() => {});
-                setPlaying(true);
-              }}
-              onError={() => setFailed(true)}
-              className={`absolute inset-0 size-full object-cover transition-opacity duration-500 ${
-                playing ? "opacity-100" : "opacity-0"
-              }`}
-            />
-          ) : null}
-        </div>
+        </SeamlessThemeVideo>
       </div>
       <figcaption className="mt-2.5 text-center text-[13.5px] leading-relaxed text-muted">
         A buyer asks · the agent drafts from your listing · you approve &amp; send.
