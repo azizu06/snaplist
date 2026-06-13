@@ -12,36 +12,36 @@ function darkVariant(src: string) {
 type Theme = "light" | "dark";
 
 /**
- * SeamlessThemeVideo — a theme-aware demo clip that recolors IN PLACE on a
- * light/dark toggle instead of restarting.
+ * SeamlessThemeVideo — a theme-aware demo clip that recolors IN PLACE and
+ * (near-)INSTANTLY on a light/dark toggle, matching the page background.
  *
  * Why it can: the light and dark renders are the same Remotion composition, so
- * frame N is pixel-identical except for colour. Two <video>s are stacked (one
- * per theme); on a toggle we seek the incoming one to the outgoing one's
- * `currentTime` and crossfade — the scene continues from the same frame, just
- * recoloured. No reload, no jump to 0.
+ * frame N is pixel-identical except colour. Two <video>s are stacked (one per
+ * theme) and BOTH play in lockstep while on screen — same duration, same rate,
+ * so they stay frame-aligned. A toggle is then a pure opacity crossfade with
+ * NO seek, so the recolour starts on the next frame (~instant) instead of
+ * waiting ~1.4s for a paused video to seek+decode to the current timestamp.
  *
- * Performance is preserved at the same time:
+ * Performance is preserved:
  * - Only the ACTIVE theme's clip is fetched on the critical path, and only once
- *   the theme is known (`resolvedTheme != null`), so a dark visitor never pulls
- *   the light file first. The opposite theme is preloaded on
- *   requestIdleCallback — off the critical path — so the first toggle is
- *   instant without costing initial load.
- * - At rest exactly one decoder runs: the off-theme video is paused (no decode)
- *   and only wakes for the crossfade, after which the outgoing one is paused.
- * - Mounting is deferred one frame past first paint; below-the-fold instances
- *   are gated on an IntersectionObserver and paused when scrolled away.
- * - prefers-reduced-motion: no video plays; the `children` poster stands alone.
+ *   the theme is known (`resolvedTheme != null`) so a dark visitor never pulls
+ *   the light file first. The opposite preloads on requestIdleCallback — off
+ *   the critical path — then starts playing muted at opacity 0, synced once to
+ *   the active clip (that single seek is hidden inside idle time).
+ * - Both decoders run only WHILE THE CLIP IS ON SCREEN; below-the-fold
+ *   instances stay paused (IntersectionObserver) and pause again when scrolled
+ *   away, so there is no steady-state cost when you are not looking at it.
+ * - Mounting is deferred one frame past first paint. prefers-reduced-motion:
+ *   nothing plays; the `children` poster stands alone.
  *
- * `children` render behind both videos as the poster / loading / 404 fallback,
- * so a still-rendering or missing clip degrades to an intentional still.
+ * `children` render behind both videos as the poster / loading / 404 fallback.
  */
 export function SeamlessThemeVideo({
   src,
   label,
   className,
   videoClassName = "object-cover",
-  fadeMs = 320,
+  fadeMs = 140,
   lazy = false,
   rootMargin = "240px 0px",
   children,
@@ -53,7 +53,7 @@ export function SeamlessThemeVideo({
   className?: string;
   /** Classes for each stacked <video> (defaults to object-cover). */
   videoClassName?: string;
-  /** Crossfade / fade-in duration in ms. */
+  /** Crossfade / fade-in duration in ms (kept short so a toggle feels instant). */
   fadeMs?: number;
   /** Defer mounting until scrolled near (below-the-fold instances). */
   lazy?: boolean;
@@ -68,7 +68,6 @@ export function SeamlessThemeVideo({
   const rootRef = useRef<HTMLDivElement>(null);
   const lightRef = useRef<HTMLVideoElement>(null);
   const darkRef = useRef<HTMLVideoElement>(null);
-  const prevActive = useRef<Theme | null>(null);
 
   const [mounted, setMounted] = useState(false);
   const [near, setNear] = useState(!lazy);
@@ -78,19 +77,14 @@ export function SeamlessThemeVideo({
   const [shownDark, setShownDark] = useState(false);
   const [failedLight, setFailedLight] = useState(false);
   const [failedDark, setFailedDark] = useState(false);
-  // The theme held at opacity 1. Flipped in onPlaying (an event, not an effect)
-  // once the incoming video is actually playing, so the crossfade never reveals
-  // the poster mid-swap and a toggle-back shows the freshly re-synced frame.
-  const [displayed, setDisplayed] = useState<Theme>("light");
 
   const active: Theme = resolvedTheme === "dark" ? "dark" : "light";
   // resolvedTheme is undefined until next-themes mounts; wait for it so the
   // first fetch is always the correct theme (no light-then-dark double load).
   const themeReady = mounted && near && !reduced && resolvedTheme != null;
 
-  // Attachment is DERIVED, not an effect: the active theme attaches as soon as
-  // the slot is ready (the single critical-path fetch); the opposite attaches
-  // once idle-preloaded. Unattached videos carry no src and fetch nothing.
+  // Attachment is DERIVED: the active theme attaches as soon as the slot is
+  // ready (single critical-path fetch); the opposite once idle-preloaded.
   const attachLight = themeReady && (active === "light" || idlePreloaded);
   const attachDark = themeReady && (active === "dark" || idlePreloaded);
 
@@ -117,8 +111,8 @@ export function SeamlessThemeVideo({
     return () => io.disconnect();
   }, [lazy, rootMargin]);
 
-  // Preload the OPPOSITE theme on idle so the first toggle is instant, but off
-  // the critical path (setState runs inside the idle callback — never sync).
+  // Preload the OPPOSITE theme on idle so the toggle is instant, but off the
+  // critical path (setState runs inside the idle callback — never sync).
   useEffect(() => {
     if (!themeReady) return;
     const w = window as typeof window & {
@@ -133,54 +127,50 @@ export function SeamlessThemeVideo({
     return () => cancel(id);
   }, [themeReady]);
 
-  // Drive playback: play the active video — continuing from the outgoing one's
-  // position on a toggle (no restart) — and pause everything when out of view.
+  // Drive playback: keep BOTH videos playing in lockstep while visible (so a
+  // toggle is a pure opacity swap, no seek), pause both when out of view. The
+  // off-theme clip is synced to the active one's time once it joins; the only
+  // slow seek happens here, while it is still hidden (opacity 0).
   useEffect(() => {
     if (!themeReady) return;
+    const light = lightRef.current;
+    const dark = darkRef.current;
     if (!visible) {
-      lightRef.current?.pause();
-      darkRef.current?.pause();
+      light?.pause();
+      dark?.pause();
       return;
     }
-    const a = (active === "dark" ? darkRef : lightRef).current;
-    if (!a) return;
-
-    const justToggled = prevActive.current != null && prevActive.current !== active;
-    prevActive.current = active;
-
-    if (justToggled) {
-      const out = (active === "dark" ? lightRef : darkRef).current;
-      const t = out?.currentTime;
-      const go = () => {
+    const activeEl = active === "dark" ? dark : light;
+    const otherEl = active === "dark" ? light : dark;
+    const otherAttached = active === "dark" ? attachLight : attachDark;
+    if (activeEl) void activeEl.play().catch(() => {});
+    if (otherEl && otherAttached) {
+      const at = activeEl?.currentTime;
+      // Re-align the hidden clip if it has drifted (invisible seek), then keep
+      // it running so the next toggle is instant.
+      if (at != null && Number.isFinite(at) && Math.abs(otherEl.currentTime - at) > 0.3) {
         try {
-          if (t != null && Number.isFinite(t)) a.currentTime = t;
+          otherEl.currentTime = at;
         } catch {
-          /* seeking before metadata can throw; play() below still recovers */
+          /* seeking before metadata can throw; play() still recovers */
         }
-        void a.play().catch(() => {});
-      };
-      if (a.readyState >= 1 /* HAVE_METADATA */) go();
-      else a.addEventListener("loadedmetadata", go, { once: true });
-    } else {
-      void a.play().catch(() => {});
-    }
-  }, [themeReady, visible, active, idlePreloaded]);
-
-  // After the crossfade lands, pause the now-hidden video to free its decoder.
-  useEffect(() => {
-    const offRef = displayed === "dark" ? lightRef : darkRef;
-    const id = window.setTimeout(() => {
-      try {
-        offRef.current?.pause();
-      } catch {
-        /* no-op */
       }
-    }, fadeMs + 40);
-    return () => window.clearTimeout(id);
-  }, [displayed, fadeMs]);
+      void otherEl.play().catch(() => {});
+    }
+  }, [themeReady, visible, active, idlePreloaded, attachLight, attachDark]);
 
-  const lightOn = displayed === "light" && shownLight && !failedLight;
-  const darkOn = displayed === "dark" && shownDark && !failedDark;
+  // The crossfade is driven by the `.dark` CLASS, not React state — next-themes
+  // flips that class synchronously (the same thing that recolours the page
+  // background instantly), so the video swap starts on the very next frame
+  // instead of waiting for `resolvedTheme` to propagate through the React tree
+  // (which on a heavy page can lag ~0.7s). Both clips already play in lockstep,
+  // so the incoming one is showing the correct, aligned frame the instant it
+  // becomes visible. The `shown` gate keeps a clip hidden until it has produced
+  // a frame, so the initial reveal still fades up from the poster.
+  const lightOpacity =
+    shownLight && !failedLight ? "opacity-100 dark:opacity-0" : "opacity-0";
+  const darkOpacity =
+    shownDark && !failedDark ? "opacity-0 dark:opacity-100" : "opacity-0";
   const fade = { transitionDuration: `${fadeMs}ms` };
 
   return (
@@ -194,15 +184,10 @@ export function SeamlessThemeVideo({
         loop
         playsInline
         aria-label={label}
-        onPlaying={() => {
-          setShownLight(true);
-          if (active === "light") setDisplayed("light");
-        }}
+        onPlaying={() => setShownLight(true)}
         onError={() => setFailedLight(true)}
         style={fade}
-        className={`absolute inset-0 h-full w-full transition-opacity ${videoClassName} ${
-          lightOn ? "opacity-100" : "opacity-0"
-        }`}
+        className={`absolute inset-0 h-full w-full transition-opacity ${videoClassName} ${lightOpacity}`}
       />
       <video
         ref={darkRef}
@@ -212,15 +197,10 @@ export function SeamlessThemeVideo({
         loop
         playsInline
         aria-hidden
-        onPlaying={() => {
-          setShownDark(true);
-          if (active === "dark") setDisplayed("dark");
-        }}
+        onPlaying={() => setShownDark(true)}
         onError={() => setFailedDark(true)}
         style={fade}
-        className={`absolute inset-0 h-full w-full transition-opacity ${videoClassName} ${
-          darkOn ? "opacity-100" : "opacity-0"
-        }`}
+        className={`absolute inset-0 h-full w-full transition-opacity ${videoClassName} ${darkOpacity}`}
       />
     </div>
   );
