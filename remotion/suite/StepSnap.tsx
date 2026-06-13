@@ -331,7 +331,7 @@ function AddTile({ count }: { count: number }) {
       }}
     >
       <span style={{ fontSize: 22, fontWeight: 400, lineHeight: 1, color: VIOLET }}>+</span>
-      <span style={{ fontSize: 10.5, fontWeight: 700 }}>Add photo</span>
+      <span style={{ fontSize: 12, fontWeight: 700 }}>Add photo</span>
     </div>
   );
 }
@@ -378,8 +378,8 @@ function FileCard({ x, y, ghost }: { x: number; y: number; ghost?: boolean }) {
         />
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: INK }}>IMG_5714.jpg</div>
-        <div style={{ fontSize: 10.5, color: FAINT, marginTop: 2 }}>2.4 MB · JPEG</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: INK }}>IMG_5714.jpg</div>
+        <div style={{ fontSize: 11.5, color: FAINT, marginTop: 2 }}>2.4 MB · photo file</div>
       </div>
     </div>
   );
@@ -456,12 +456,12 @@ function SnapAct() {
           >
             <span
               style={{
-                fontSize: 12,
+                fontSize: 13.5,
                 fontWeight: 800,
                 color: VIOLET,
                 background: "white",
                 borderRadius: 99,
-                padding: "6px 14px",
+                padding: "7px 15px",
                 boxShadow: "0 6px 18px -6px rgba(19,30,58,0.25)",
               }}
             >
@@ -490,16 +490,16 @@ function SnapAct() {
           {frame >= READY_AT ? (
             <>
               <CheckIcon />
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: GREEN }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: GREEN }}>
                 3 photos · ready to identify
               </span>
             </>
           ) : photoCount > 0 ? (
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: FAINT }}>
-              {photoCount} photo{photoCount > 1 ? "s" : ""} · more angles help condition grading
+            <span style={{ fontSize: 14, fontWeight: 600, color: FAINT }}>
+              {photoCount} photo{photoCount > 1 ? "s" : ""} · more angles help judge condition
             </span>
           ) : (
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: FAINT }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: FAINT }}>
               1–4 photos · the first sets the cover
             </span>
           )}
@@ -518,7 +518,7 @@ function SnapAct() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 13,
+              fontSize: 14.5,
               fontWeight: 700,
               opacity: hintIn,
               transform: `translateY(${(1 - hintIn) * 10}px)`,
@@ -551,13 +551,13 @@ function SnapAct() {
           top: PHONE.y + PHONE.h + 8,
           width: PHONE.w,
           textAlign: "center",
-          fontSize: 10.5,
+          fontSize: 11.5,
           fontWeight: 700,
           letterSpacing: 1,
           color: FAINT,
         }}
       >
-        OR CAPTURE ON YOUR PHONE
+        OR SNAP IT ON YOUR PHONE
       </div>
     </AbsoluteFill>
   );

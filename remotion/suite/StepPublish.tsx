@@ -29,12 +29,11 @@ import {
 
 /**
  * Step 5 · Publish — the review screen in full: checklist ticks, the
- * confidence gate explains *why* this one needs a human (74% < threshold),
+ * autopilot gate explains *why* this one waits for a human (only 74% sure),
  * then a cursor-accurate Publish click → posting state → live confirmation
  * card with the listing id.
  * Product: Custom 65% mechanical keyboard — green & white keycaps
- * (demo/keyboard.jpg) — depreciation-tier pricing, hence the honest
- * mid confidence.
+ * (demo/keyboard.jpg) — estimated pricing, hence the honest mid confidence.
  *
  * Render: npx remotion render remotion/index.ts step-publish public/demo/steps/publish.mp4 --crf 26 --muted
  */
@@ -87,9 +86,9 @@ export const PUBLISH_CLICKS: ClickSpec[] = [
 ];
 
 const CHECKS = [
-  "3 photos · cover set",
-  "Title within eBay's 80-char limit",
-  "Item specifics complete",
+  "3 photos · cover photo set",
+  "Title fits eBay's 80-character limit",
+  "Item details complete",
   "Price set · $120 (range $95–$150)",
 ];
 
@@ -126,18 +125,18 @@ function PhotoCard() {
             background: "rgba(19,30,58,0.72)",
             color: "white",
             borderRadius: 8,
-            padding: "4px 9px",
-            fontSize: 10.5,
+            padding: "4px 10px",
+            fontSize: 11.5,
             fontWeight: 600,
           }}
         >
-          cover · 1 of 3
+          cover photo · 1 of 3
         </div>
       </div>
       <div style={{ position: "absolute", left: PHOTO.x, top: 428, display: "flex", gap: 8 }}>
         <Chip text="Good condition" at={14} index={0} tone="plain" />
         <Chip text="Computers & Accessories" at={14} index={1} tone="plain" />
-        <Chip text="Depreciation tier" at={14} index={2} />
+        <Chip text="Estimated price" at={14} index={2} />
       </div>
     </>
   );
@@ -161,7 +160,7 @@ function Checklist() {
         padding: "14px 16px",
       }}
     >
-      <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
         REVIEW CHECKLIST
       </span>
       <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 9 }}>
@@ -192,7 +191,7 @@ function Checklist() {
               )}
               <span
                 style={{
-                  fontSize: 12,
+                  fontSize: 13.5,
                   fontWeight: 600,
                   color: ticked ? INK : FAINT,
                 }}
@@ -233,11 +232,11 @@ function PriceModule() {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
           PRICE
         </span>
-        <span style={{ fontSize: 11.5, color: FAINT }}>
-          retail × condition factor · range $95–$150
+        <span style={{ fontSize: 13, color: FAINT }}>
+          estimated from retail price + condition · range $95–$150
         </span>
       </div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 18 }}>
@@ -253,12 +252,12 @@ function PriceModule() {
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
-              CONFIDENCE
+            <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+              HOW SURE
             </span>
             <span
               style={{
-                fontSize: 15,
+                fontSize: 16.5,
                 fontWeight: 800,
                 color: AMBER,
                 fontVariantNumeric: "tabular-nums",
@@ -285,8 +284,8 @@ function PriceModule() {
               }}
             />
           </div>
-          <div style={{ marginTop: 6, fontSize: 10.5, color: FAINT }}>
-            no exact comps for a custom build — depreciation estimate, seller-editable
+          <div style={{ marginTop: 6, fontSize: 12, color: FAINT }}>
+            no recent sales for a custom build — this is an estimate, and you can change it
           </div>
         </div>
       </div>
@@ -329,8 +328,8 @@ function GateBanner() {
         <path d="M12 17h.01" />
         <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" strokeLinejoin="round" />
       </svg>
-      <span style={{ fontSize: 12, fontWeight: 700, color: AMBER }}>
-        Autopilot held this one: 74% &lt; 85% threshold — your review required before it posts.
+      <span style={{ fontSize: 13.5, fontWeight: 700, color: AMBER }}>
+        Autopilot held this one — only 74% sure, so it waits for your OK before posting.
       </span>
     </div>
   );
@@ -385,7 +384,7 @@ function ConfirmCard() {
       <div style={{ minWidth: 0, flex: 1 }}>
         <div
           style={{
-            fontSize: 13.5,
+            fontSize: 14.5,
             fontWeight: 700,
             color: INK,
             whiteSpace: "nowrap",
@@ -397,7 +396,7 @@ function ConfirmCard() {
         </div>
         <div
           style={{
-            fontSize: 11.5,
+            fontSize: 12.5,
             color: FAINT,
             marginTop: 4,
             fontVariantNumeric: "tabular-nums",
@@ -405,7 +404,7 @@ function ConfirmCard() {
         >
           eBay item #110558203341 · listed just now
         </div>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: VIOLET, marginTop: 4 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: VIOLET, marginTop: 4 }}>
           View on eBay →
         </div>
       </div>
@@ -462,8 +461,8 @@ function PublishAct() {
             justifyContent: "space-between",
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 800, color: INK }}>Review & publish</span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: FAINT }}>
+          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>Review & publish</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>
             everything is editable until you post
           </span>
         </div>
@@ -481,7 +480,7 @@ function PublishAct() {
             display: "flex",
             alignItems: "center",
             padding: "0 14px",
-            fontSize: 14,
+            fontSize: 15.5,
             fontWeight: 700,
             color: INK,
             boxSizing: "border-box",
@@ -516,12 +515,12 @@ function PublishAct() {
               top: PUBLISH.y + PUBLISH.h + 10,
               width: RW,
               textAlign: "center",
-              fontSize: 11,
+              fontSize: 12.5,
               fontWeight: 600,
               color: FAINT,
             }}
           >
-            {frame < POSTING_AT + 45 ? "uploading photos…" : "creating listing via the eBay adapter…"}
+            {frame < POSTING_AT + 45 ? "uploading your photos…" : "creating your eBay listing…"}
           </div>
         ) : null}
         <ConfirmCard />

@@ -28,9 +28,9 @@ import {
 
 /**
  * Step 4 · Write — listing copy writes itself, then the seller flips through
- * the platform tabs: eBay (structured title + item specifics + description),
- * Facebook Marketplace (casual, local) and Mercari (short title, hashtags,
- * shipping). Both tab switches are cursor-accurate clicks.
+ * the marketplace tabs: eBay (search-friendly title + item details +
+ * description), Facebook Marketplace (casual, local) and Mercari (short
+ * title, hashtags, shipping). Both tab switches are cursor-accurate clicks.
  * Product: KitchenAid stand mixer — pink (demo/mixer.jpg).
  *
  * Render: npx remotion render remotion/index.ts step-write public/demo/steps/write.mp4 --crf 26 --muted
@@ -88,10 +88,10 @@ const MC_TITLE = "KitchenAid Stand Mixer Pink";
 const MC_TAGS = ["#KitchenAid", "#standmixer", "#baking", "#kitchenfinds"];
 
 const FEED: FeedEvent[] = [
-  { at: 24, done: 88, tool: "rag.retrieve", text: "grounding on 12 similar sold listings" },
-  { at: 96, done: 252, tool: "listing.write", text: "eBay rendering · keyword title + specifics" },
-  { at: 318, done: 402, tool: "listing.write", text: "Facebook rendering · casual & local" },
-  { at: 466, done: 520, tool: "listing.write", text: "Mercari rendering · hashtags + shipping" },
+  { at: 24, done: 88, text: "Reading 12 similar listings that sold well" },
+  { at: 96, done: 252, text: "Writing the eBay version…" },
+  { at: 318, done: 402, text: "Writing the Facebook version…" },
+  { at: 466, done: 520, text: "Writing the Mercari version…" },
 ];
 
 const FB_C = center(TAB_FB);
@@ -163,19 +163,19 @@ function ItemCard() {
           style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 26%" }}
         />
       </div>
-      <div style={{ marginTop: 12, fontSize: 14.5, fontWeight: 700, color: INK }}>
+      <div style={{ marginTop: 12, fontSize: 15.5, fontWeight: 700, color: INK }}>
         KitchenAid stand mixer — pink
       </div>
       <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
         <span
           style={{
-            fontSize: 11.5,
+            fontSize: 13,
             fontWeight: 700,
             color: INK,
             background: SLAB,
             border: `1px solid ${LINE}`,
             borderRadius: 99,
-            padding: "4px 10px",
+            padding: "4px 11px",
             fontVariantNumeric: "tabular-nums",
           }}
         >
@@ -183,26 +183,26 @@ function ItemCard() {
         </span>
         <span
           style={{
-            fontSize: 11.5,
+            fontSize: 13,
             fontWeight: 600,
             color: FAINT,
             background: SLAB,
             border: `1px solid ${LINE}`,
             borderRadius: 99,
-            padding: "4px 10px",
+            padding: "4px 11px",
           }}
         >
           Good condition
         </span>
         <span
           style={{
-            fontSize: 11.5,
+            fontSize: 13,
             fontWeight: 600,
             color: FAINT,
             background: SLAB,
             border: `1px solid ${LINE}`,
             borderRadius: 99,
-            padding: "4px 10px",
+            padding: "4px 11px",
           }}
         >
           Home & Kitchen
@@ -230,7 +230,7 @@ function Tab({ rect, label, active, doneAt }: { rect: Rect; label: string; activ
         alignItems: "center",
         justifyContent: "center",
         gap: 7,
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: 700,
         color: active ? VIOLET : FAINT,
         boxSizing: "border-box",
@@ -282,7 +282,7 @@ function EbayPane() {
   const { fps } = useVideoConfig();
   return (
     <PaneFrame swapAt={14}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
         TITLE · 80 CHARACTERS MAX
       </div>
       <div
@@ -308,8 +308,8 @@ function EbayPane() {
         <Caret visible={titleTyping && titleN > 0} />
       </div>
 
-      <div style={{ marginTop: 16, fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
-        ITEM SPECIFICS
+      <div style={{ marginTop: 16, fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+        ITEM DETAILS
       </div>
       <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         {EBAY_SPECS.map(([k, v], i) => {
@@ -338,14 +338,14 @@ function EbayPane() {
                 transform: `translateY(${(1 - s) * 8}px)`,
               }}
             >
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: FAINT }}>{k}</span>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{v}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: FAINT }}>{k}</span>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>{v}</span>
             </div>
           );
         })}
       </div>
 
-      <div style={{ marginTop: 16, fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+      <div style={{ marginTop: 16, fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
         DESCRIPTION
       </div>
       <div
@@ -357,14 +357,14 @@ function EbayPane() {
           boxShadow: descTyping ? "0 0 0 3px rgba(99,91,255,0.1)" : undefined,
           background: SLAB,
           padding: "11px 13px",
-          fontSize: 12.5,
+          fontSize: 13.5,
           lineHeight: 1.6,
           color: DIM,
           boxSizing: "border-box",
         }}
       >
         {EBAY_DESC.slice(0, descN)}
-        <Caret visible={descTyping} height={12} />
+        <Caret visible={descTyping} height={13} />
       </div>
       {frame >= EBAY_DESC_AT + EBAY_DESC_DUR + 16 ? (
         <div
@@ -373,12 +373,12 @@ function EbayPane() {
             display: "inline-flex",
             alignItems: "center",
             gap: 7,
-            fontSize: 11.5,
+            fontSize: 13,
             fontWeight: 700,
             color: GREEN,
           }}
         >
-          <CheckIcon size={12} /> Follows eBay conventions — keyword title, structured specifics
+          <CheckIcon size={13} /> Written the way eBay buyers search — clear title, full details
         </div>
       ) : null}
     </PaneFrame>
@@ -391,7 +391,7 @@ function FacebookPane() {
   const typing = frame >= FB_TEXT_AT && frame <= FB_TEXT_AT + FB_TEXT_DUR + 12;
   return (
     <PaneFrame swapAt={FB_SWAP}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
         MARKETPLACE POST · CASUAL & LOCAL
       </div>
       <div
@@ -425,16 +425,16 @@ function FacebookPane() {
             display: "inline-flex",
             alignItems: "center",
             gap: 7,
-            fontSize: 11.5,
+            fontSize: 13,
             fontWeight: 700,
             color: GREEN,
           }}
         >
-          <CheckIcon size={12} /> Shorter, friendlier — written for neighbors, not search engines
+          <CheckIcon size={13} /> Shorter, friendlier — written for neighbors, not search engines
         </div>
       ) : null}
-      <div style={{ position: "absolute", left: 18, bottom: 14, fontSize: 10.5, color: FAINT }}>
-        Copy-paste export pack — Facebook Marketplace has no posting API, so SnapList hands you the text.
+      <div style={{ position: "absolute", left: 18, bottom: 14, fontSize: 12, color: FAINT }}>
+        Facebook doesn&apos;t let apps post for you — SnapList hands you this text, ready to paste.
       </div>
     </PaneFrame>
   );
@@ -446,7 +446,7 @@ function MercariPane() {
   const typing = frame >= MC_TITLE_AT && frame <= MC_TITLE_AT + 30;
   return (
     <PaneFrame swapAt={MC_SWAP}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
         MERCARI LISTING · SHORT & SHIPPABLE
       </div>
       <div
@@ -486,9 +486,9 @@ function MercariPane() {
             padding: "11px 14px",
           }}
         >
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>$185</span>
-          <span style={{ fontSize: 11.5, color: FAINT }}>
-            + shipping · ships boxed in 1–2 days · weight ~12 lb
+          <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>$185</span>
+          <span style={{ fontSize: 13, color: FAINT }}>
+            + shipping · ships boxed in 1–2 days · about 12 pounds
           </span>
         </div>
       ) : null}
@@ -499,12 +499,12 @@ function MercariPane() {
             display: "inline-flex",
             alignItems: "center",
             gap: 7,
-            fontSize: 11.5,
+            fontSize: 13,
             fontWeight: 700,
             color: GREEN,
           }}
         >
-          <CheckIcon size={12} /> 3 platforms ready — one attribute core, three native renderings
+          <CheckIcon size={13} /> 3 marketplaces ready — one item, three listings that sound native
         </div>
       ) : null}
     </PaneFrame>
@@ -527,7 +527,7 @@ function WriteAct() {
     <AbsoluteFill style={{ opacity: fadeOut }}>
       <Shell badge="STEP 4 · WRITE">
         <ItemCard />
-        <Feed rect={FEED_RECT} events={FEED} agent="listing generator · grounded" />
+        <Feed rect={FEED_RECT} events={FEED} />
 
         <Tab rect={TAB_EBAY} label="eBay" active={active === 0} doneAt={EBAY_DESC_AT + EBAY_DESC_DUR + 16} />
         <Tab rect={TAB_FB} label="Facebook" active={active === 1} doneAt={FB_META_AT + 22} />

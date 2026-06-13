@@ -1,13 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Easing, Img, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
-import {
-  Caret,
-  CheckIcon,
-  LogoMark,
-  Spinner,
-  typeProgress,
-  type FeedEvent,
-} from "../hero/primitives";
+import { Caret, CheckIcon, LogoMark, Spinner, typeProgress } from "../hero/primitives";
 import {
   DIM,
   FAINT,
@@ -28,7 +21,21 @@ import {
   type Rect,
 } from "./theme";
 
-export { type FeedEvent };
+/**
+ * One row of the live-progress feed. Plain seller language only — no
+ * tool-call tags, no code styling (owner round 6: the audience is a
+ * homeowner, not an engineer).
+ */
+export interface FeedEvent {
+  /** frame the line appears */
+  at: number;
+  /** spinner flips to a check at this frame; omit for an instant check */
+  done?: number;
+  text: string;
+  /** result sub-line (emerald) */
+  sub?: string;
+  subAt?: number;
+}
 
 /* ================= scene scale wrapper ================= */
 
@@ -124,7 +131,7 @@ export function Shell({
             {badge ? (
               <span
                 style={{
-                  fontSize: 10.5,
+                  fontSize: 11.5,
                   fontWeight: 800,
                   letterSpacing: 1.1,
                   color: VIOLET,
@@ -208,7 +215,7 @@ export function SectionLabel({
         position: "absolute",
         left: x,
         top: y,
-        fontSize: 10.5,
+        fontSize: 11.5,
         fontWeight: 800,
         letterSpacing: 1.2,
         color,
@@ -224,12 +231,12 @@ export function SectionLabel({
 export function Feed({
   rect,
   events,
-  agent,
-  title = "AGENT ACTIVITY",
+  agent = "happening live",
+  title = "LIVE PROGRESS",
 }: {
   rect: Rect;
   events: FeedEvent[];
-  agent: string;
+  agent?: string;
   title?: string;
 }) {
   const frame = useCurrentFrame();
@@ -246,14 +253,14 @@ export function Feed({
             opacity: 0.55 + 0.45 * Math.sin(frame / 5),
           }}
         />
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
           {title}
         </span>
-        <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 600, color: FAINT }}>
+        <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: FAINT }}>
           {agent}
         </span>
       </div>
-      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 9 }}>
+      <div style={{ marginTop: 11, display: "flex", flexDirection: "column", gap: 9 }}>
         {events.map((e, i) => {
           if (frame < e.at) return null;
           const enter = spring({
@@ -266,25 +273,13 @@ export function Feed({
           const showSub = e.sub !== undefined && frame >= (e.subAt ?? e.at);
           return (
             <div key={i} style={{ opacity: enter, transform: `translateY(${(1 - enter) * 8}px)` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 {running ? <Spinner deg={frame * 14} /> : <CheckIcon />}
                 <span
                   style={{
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    color: VIOLET,
-                    background: "rgba(99,91,255,0.08)",
-                    border: `1px solid ${VIOLET_BORDER}`,
-                    borderRadius: 6,
-                    padding: "1.5px 6px",
-                    flexShrink: 0,
-                  }}
-                >
-                  {e.tool}
-                </span>
-                <span
-                  style={{
-                    fontSize: 11.5,
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    lineHeight: 1.3,
                     color: DIM,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
@@ -297,14 +292,14 @@ export function Feed({
               {showSub ? (
                 <div
                   style={{
-                    marginLeft: 21,
+                    marginLeft: 22,
                     marginTop: 4,
-                    fontSize: 11.5,
+                    fontSize: 12.5,
                     fontWeight: 700,
                     color: GREEN,
                     background: "rgba(22,163,74,0.08)",
                     borderRadius: 7,
-                    padding: "4px 9px",
+                    padding: "3px 9px",
                     display: "inline-block",
                   }}
                 >
@@ -394,10 +389,10 @@ export function PhotoFrame({
           >
             <CameraIcon />
           </div>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: INK, marginTop: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: INK, marginTop: 10 }}>
             {emptyLabel}
           </div>
-          <div style={{ fontSize: 11.5, color: FAINT, marginTop: 3 }}>{emptySub}</div>
+          <div style={{ fontSize: 13, color: FAINT, marginTop: 3 }}>{emptySub}</div>
         </div>
       ) : (
         <>
@@ -436,8 +431,8 @@ export function PhotoFrame({
                 background: "rgba(19,30,58,0.72)",
                 color: "white",
                 borderRadius: 8,
-                padding: "4px 9px",
-                fontSize: 10.5,
+                padding: "4px 10px",
+                fontSize: 11.5,
                 fontWeight: 600,
               }}
             >
@@ -556,8 +551,8 @@ export function OcrBox({
           background: "rgba(19,30,58,0.85)",
           color: "#4ade80",
           borderRadius: 7,
-          padding: "3.5px 9px",
-          fontSize: 10.5,
+          padding: "4px 10px",
+          fontSize: 12.5,
           fontWeight: 700,
           whiteSpace: "nowrap",
         }}
@@ -640,29 +635,29 @@ export function AttrField({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1.1, color: FAINT }}>
+        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.1, color: FAINT }}>
           {label}
         </span>
         {confShown ? (
           <span
             style={{
-              fontSize: 9.5,
+              fontSize: 10.5,
               fontWeight: 800,
               color: confValue >= 0.9 ? GREEN : VIOLET,
               background: confValue >= 0.9 ? GREEN_SOFT : VIOLET_SOFT,
               borderRadius: 99,
-              padding: "1.5px 7px",
+              padding: "1.5px 8px",
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {confValue.toFixed(2)}
+            {Math.round(confValue * 100)}%
           </span>
         ) : null}
       </div>
       <div
         style={{
-          marginTop: 4,
-          fontSize: 13.5,
+          marginTop: 3,
+          fontSize: 15.5,
           fontWeight: 700,
           color: INK,
           whiteSpace: "nowrap",
@@ -670,7 +665,7 @@ export function AttrField({
         }}
       >
         {value.slice(0, n)}
-        <Caret visible={frame >= at + 6 && n < value.length} height={13} />
+        <Caret visible={frame >= at + 6 && n < value.length} height={15} />
       </div>
     </div>
   );
@@ -709,8 +704,8 @@ export function Chip({
         opacity: s,
         transform: `translateY(${(1 - s) * 10}px) scale(${0.8 + s * 0.2})`,
         borderRadius: 99,
-        padding: "5px 11px",
-        fontSize: 11.5,
+        padding: "5px 12px",
+        fontSize: 13,
         fontWeight: 600,
         whiteSpace: "nowrap",
         ...palette,
@@ -753,7 +748,7 @@ export function StatusLine({
         }}
       >
         {busy ? <Spinner deg={frame * 14} /> : <CheckIcon />}
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: busy ? VIOLET : GREEN }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: busy ? VIOLET : GREEN }}>
           {busy ? busyText : doneText}
         </span>
       </div>
@@ -816,7 +811,7 @@ export function Toast({
       ) : (
         <CheckIcon />
       )}
-      <span style={{ fontSize: 12, fontWeight: 700, color: INK }}>{text}</span>
+      <span style={{ fontSize: 13.5, fontWeight: 700, color: INK }}>{text}</span>
     </div>
   );
 }
@@ -898,7 +893,7 @@ export function PrimaryButton({
             alignItems: "center",
             justifyContent: "center",
             gap: 9,
-            fontSize: 13.5,
+            fontSize: 15,
             fontWeight: 800,
             transform: `scale(${0.92 + doneIn * 0.08})`,
             opacity: doneIn,
@@ -920,7 +915,7 @@ export function PrimaryButton({
             alignItems: "center",
             justifyContent: "center",
             gap: 9,
-            fontSize: 13.5,
+            fontSize: 15,
             fontWeight: 700,
             transform: `scale(${1 - press * 0.04})`,
             boxShadow: `0 ${8 - press * 6}px ${20 - press * 12}px -8px rgba(99,91,255,0.55)`,

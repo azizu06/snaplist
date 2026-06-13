@@ -29,11 +29,11 @@ import {
 } from "./theme";
 
 /**
- * Buyer Q&A — the trust story: a buyer question lands in the inbox, the agent
- * drafts a reply grounded in the item's actual attributes (streamed
- * token-by-token), the seller reviews, makes one edit, and approves before
- * anything sends. Three cursor-accurate clicks: open the conversation, focus
- * the draft, approve & send.
+ * Step 6 · Answer (Buyer Q&A) — the trust story: a buyer question lands in
+ * the inbox, a reply is drafted from the item's real details (streamed in),
+ * the seller reviews, makes one edit, and approves before anything sends.
+ * Three cursor-accurate clicks: open the conversation, focus the draft,
+ * approve & send. Joined the how-it-works pipeline as step 6 (ui-r6).
  * Product: Vintage brass figural chess set on wooden board (demo/chess.jpg).
  *
  * Render: npx remotion render remotion/index.ts buyer-qa public/demo/buyer-qa.mp4 --crf 26 --muted
@@ -156,8 +156,8 @@ function InboxList() {
           justifyContent: "space-between",
         }}
       >
-        <span style={{ fontSize: 15, fontWeight: 800, color: INK }}>Inbox</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>buyer messages · live</span>
+        <span style={{ fontSize: 16.5, fontWeight: 800, color: INK }}>Inbox</span>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: FAINT }}>buyer messages · live</span>
       </div>
 
       {/* the new conversation */}
@@ -199,15 +199,15 @@ function InboxList() {
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: 12.5, fontWeight: 800, color: INK }}>M. Carter</span>
-              <span style={{ fontSize: 10, fontWeight: 600, color: FAINT }}>now</span>
+              <span style={{ fontSize: 13.5, fontWeight: 800, color: INK }}>M. Carter</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>now</span>
             </div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: VIOLET, marginTop: 2 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: VIOLET, marginTop: 2 }}>
               Brass chess set · $75
             </div>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 color: DIM,
                 marginTop: 3,
                 whiteSpace: "nowrap",
@@ -270,10 +270,10 @@ function InboxList() {
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: DIM }}>SnapList tips</span>
-            <span style={{ fontSize: 10, fontWeight: 600, color: FAINT }}>Mon</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: DIM }}>SnapList tips</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>Mon</span>
           </div>
-          <div style={{ fontSize: 11, color: FAINT, marginTop: 3 }}>
+          <div style={{ fontSize: 12, color: FAINT, marginTop: 3 }}>
             Welcome to your live inbox — replies you approve send through eBay.
           </div>
         </div>
@@ -329,7 +329,7 @@ function ThreadHeader() {
       <div style={{ minWidth: 0, flex: 1 }}>
         <div
           style={{
-            fontSize: 13.5,
+            fontSize: 14.5,
             fontWeight: 700,
             color: INK,
             whiteSpace: "nowrap",
@@ -339,18 +339,18 @@ function ThreadHeader() {
         >
           Vintage brass figural chess set on wooden board
         </div>
-        <div style={{ fontSize: 11, color: FAINT, marginTop: 3 }}>
+        <div style={{ fontSize: 12.5, color: FAINT, marginTop: 3 }}>
           $75 · Fair condition · live on eBay
         </div>
       </div>
       <span
         style={{
-          fontSize: 10.5,
+          fontSize: 11.5,
           fontWeight: 800,
           color: GREEN,
           background: GREEN_SOFT,
           borderRadius: 99,
-          padding: "4px 11px",
+          padding: "4px 12px",
           flexShrink: 0,
         }}
       >
@@ -417,17 +417,17 @@ function ThreadBody() {
     >
       {frame >= BUYER_MSG_AT ? (
         <div style={{ opacity: buyerIn, transform: `translateY(${(1 - buyerIn) * 10}px)` }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: FAINT, marginBottom: 5 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: FAINT, marginBottom: 5 }}>
             M. Carter · buyer
           </div>
           <div
             style={{
-              maxWidth: 470,
+              maxWidth: 500,
               background: SLAB,
               border: `1px solid ${LINE}`,
               borderRadius: "4px 14px 14px 14px",
               padding: "11px 14px",
-              fontSize: 13,
+              fontSize: 14.5,
               lineHeight: 1.55,
               color: INK,
             }}
@@ -448,16 +448,16 @@ function ThreadBody() {
             transform: `translateY(${(1 - sentIn) * 12}px)`,
           }}
         >
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: FAINT, marginBottom: 5 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: FAINT, marginBottom: 5 }}>
             You · approved reply
           </div>
           <div
             style={{
-              maxWidth: 520,
+              maxWidth: 560,
               background: VIOLET,
               borderRadius: "14px 4px 14px 14px",
               padding: "11px 14px",
-              fontSize: 12.5,
+              fontSize: 13.5,
               lineHeight: 1.55,
               color: "white",
             }}
@@ -471,12 +471,12 @@ function ThreadBody() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                fontSize: 10.5,
+                fontSize: 11.5,
                 fontWeight: 700,
                 color: GREEN,
               }}
             >
-              <CheckIcon size={11} /> Sent to buyer via eBay messages
+              <CheckIcon size={12} /> Sent to the buyer through eBay messages
             </div>
           ) : null}
         </div>
@@ -527,19 +527,19 @@ function Composer() {
         {sent ? (
           <>
             <CheckIcon size={13} />
-            <span style={{ fontSize: 11.5, fontWeight: 800, color: GREEN }}>
-              Reply sent — logged on the listing
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: GREEN }}>
+              Reply sent — saved with the listing
             </span>
           </>
         ) : (
           <>
             {drafting ? <Spinner deg={frame * 14} /> : grounded ? <CheckIcon size={13} /> : null}
-            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.8, color: FAINT }}>
-              AI DRAFT
+            <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.8, color: FAINT }}>
+              REPLY DRAFTED FOR YOU
             </span>
             {grounded ? (
               <div style={{ display: "flex", gap: 6 }}>
-                {["grounded in: attributes", "listing copy", "condition · Fair"].map((c, i) => {
+                {["uses: the item's details", "your listing", "condition · Fair"].map((c, i) => {
                   if (frame < CHIP_AT[i]) return null;
                   const s = spring({
                     frame: frame - CHIP_AT[i],
@@ -551,7 +551,7 @@ function Composer() {
                     <span
                       key={c}
                       style={{
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: 700,
                         color: VIOLET,
                         background: VIOLET_SOFT,
@@ -572,7 +572,7 @@ function Composer() {
               <span
                 style={{
                   marginLeft: "auto",
-                  fontSize: 10,
+                  fontSize: 11,
                   fontWeight: 800,
                   color: INK,
                   background: SLAB,
@@ -601,7 +601,7 @@ function Composer() {
           boxShadow: focused ? "0 0 0 3px rgba(99,91,255,0.12)" : undefined,
           background: sent ? SLAB : "white",
           padding: "9px 12px",
-          fontSize: 12.5,
+          fontSize: 13.5,
           lineHeight: 1.5,
           color: sent ? FAINT : DIM,
           boxSizing: "border-box",
@@ -609,7 +609,7 @@ function Composer() {
         }}
       >
         {sent ? "Reply delivered. New buyer messages will appear here." : text}
-        <Caret visible={!sent && (drafting || editing || (focused && frame < EDIT_AT))} height={12} />
+        <Caret visible={!sent && (drafting || editing || (focused && frame < EDIT_AT))} height={13} />
       </div>
 
       {/* approval row */}
@@ -626,7 +626,7 @@ function Composer() {
           }}
         >
           <ShieldIcon />
-          <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: FAINT }}>
             Nothing sends without your approval.
           </span>
         </div>
@@ -645,7 +645,7 @@ function Composer() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 12.5,
+            fontSize: 13.5,
             fontWeight: 700,
             transform: `scale(${1 - pressAt(frame, CLICK_APPROVE) * 0.05})`,
             boxShadow: "0 8px 18px -8px rgba(99,91,255,0.55)",
@@ -669,7 +669,7 @@ function Composer() {
             alignItems: "center",
             justifyContent: "center",
             gap: 7,
-            fontSize: 12.5,
+            fontSize: 13.5,
             fontWeight: 800,
             boxSizing: "border-box",
           }}
@@ -705,7 +705,7 @@ function QaAct() {
 
   return (
     <AbsoluteFill style={{ opacity: fadeOut }}>
-      <Shell active={2} badge="BUYER Q&A">
+      <Shell active={2} badge="STEP 6 · ANSWER BUYERS">
         <InboxList />
         <ThreadBody />
         <ThreadHeader />

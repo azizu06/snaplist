@@ -12,13 +12,14 @@ import {
 } from "remotion";
 import { CheckIcon } from "../hero/primitives";
 import { AttrField, Feed, OcrBox, PhotoFrame, Scene, Shell, StatusLine, type FeedEvent } from "./primitives";
-import { DIM, FAINT, INK, LINE, SLAB, type ClickSpec, type Rect } from "./theme";
+import { DIM, FAINT, GREEN, GREEN_SOFT, INK, LINE, SLAB, type ClickSpec, type Rect } from "./theme";
 
 /**
- * Step 2 · Identify — the vision scan in full: sweep + OCR boxes over the
- * camera's actual printed text (“Canon”, “EOS 80D”), structured attributes
- * with per-field confidence, the ID-confidence composite, and the validated
- * structured output. Pure agent theater — no cursor, no clicks.
+ * Step 2 · Identify — the photo-reading moment in full: sweep + detection
+ * boxes over the camera's actual printed text (“Canon”, “EOS 80D”), the
+ * extracted details with per-field certainty, the how-sure composite, and a
+ * plain-language item summary (ui-r6: the dark JSON “structured output”
+ * panel is gone — sellers, not engineers). No cursor, no clicks.
  * Product: Canon EOS 80D DSLR with 50mm lens (demo/camera.jpg).
  *
  * Render: npx remotion render remotion/index.ts step-identify public/demo/steps/identify.mp4 --crf 26 --muted
@@ -32,7 +33,7 @@ export const IDENTIFY_CLICKS: ClickSpec[] = []; // intentionally cursor-free
 /* ---------- layout ---------- */
 
 const PHOTO: Rect = { x: 64, y: 112, w: 460, h: 345 };
-const FEED_RECT: Rect = { x: 64, y: 506, w: 460, h: 156 };
+const FEED_RECT: Rect = { x: 64, y: 502, w: 460, h: 164 };
 const RX = 556;
 const RW = 652;
 const COL2 = RX + 334;
@@ -40,7 +41,7 @@ const FIELD_W = 318;
 const FIELD_H = 56;
 const ROW_Y = [150, 216, 282];
 const CONF: Rect = { x: RX, y: 360, w: RW, h: 142 };
-const JSON_PANEL: Rect = { x: RX, y: 518, w: RW, h: 144 };
+const SUMMARY_PANEL: Rect = { x: RX, y: 518, w: RW, h: 148 };
 
 /* ---------- choreography ---------- */
 
@@ -50,22 +51,21 @@ const SCAN_END = 95;
 const FIELD_AT = [165, 182, 199, 214, 229, 244];
 const CONF_AT = 260;
 const SIGNAL_AT = [272, 286, 300];
-const JSON_AT = 318;
-const JSON_TYPE = 330;
-const VALID_AT = 412;
+const SUMMARY_AT = 318;
+const SUMMARY_TYPE = 330;
+const CONFIRMED_AT = 412;
 
 const FEED: FeedEvent[] = [
-  { at: 34, done: 100, tool: "vision.extract", text: "analyzing photo · 1 image" },
+  { at: 34, done: 100, text: "Looking at your photo…" },
   {
     at: 108,
     done: 150,
-    tool: "ocr.read",
-    text: "reading printed text on the body…",
-    sub: "“Canon” · “EOS 80D”",
+    text: "Reading the printed text on the body…",
+    sub: "Found “Canon” and “EOS 80D”",
     subAt: 154,
   },
-  { at: 162, done: 248, tool: "attr.schema", text: "extracting structured attributes" },
-  { at: 258, done: 322, tool: "confidence.compose", text: "composing ID confidence from signals" },
+  { at: 162, done: 248, text: "Pulling out the details" },
+  { at: 258, done: 322, text: "Working out how sure it is" },
 ];
 
 const FIELDS = [
@@ -74,18 +74,17 @@ const FIELDS = [
   { label: "CATEGORY", value: "Cameras & Photo", conf: 0.96 },
   { label: "CONDITION", value: "Good · light grip wear", conf: 0.86 },
   { label: "LENS", value: "50mm prime", conf: 0.91 },
-  { label: "MOUNT", value: "EF-S", conf: 0.93 },
+  { label: "LENS MOUNT", value: "Canon EF-S", conf: 0.93 },
 ];
 
 const SIGNALS = [
-  "Brand + model resolved from the photo",
-  "Printed text read cleanly",
-  "Category unambiguous",
+  "Brand and model read straight from the photo",
+  "Printed text came through cleanly",
+  "Category is clear-cut",
 ];
 
-const JSON_TEXT = `{ "brand": "Canon", "model": "EOS 80D",
-  "category": "Cameras & Photo", "condition": "good",
-  "lens": "50mm prime", "text_read": ["Canon", "EOS 80D"] }`;
+const SUMMARY_TEXT =
+  "Canon EOS 80D digital camera with a 50mm lens. Good condition with light grip wear. Ready to price under Cameras & Photo.";
 
 /* ---------- pieces ---------- */
 
@@ -137,12 +136,12 @@ function ConfidenceModule() {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
-          ID CONFIDENCE
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+          HOW SURE IS THE MATCH
         </span>
         <span
           style={{
-            fontSize: 22,
+            fontSize: 24,
             fontWeight: 800,
             color: INK,
             fontVariantNumeric: "tabular-nums",
@@ -189,8 +188,8 @@ function ConfidenceModule() {
                 transform: `translateX(${(1 - sIn) * -8}px)`,
               }}
             >
-              <CheckIcon size={12} />
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: DIM }}>{s}</span>
+              <CheckIcon size={13} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: DIM }}>{s}</span>
             </div>
           );
         })}
@@ -199,18 +198,19 @@ function ConfidenceModule() {
   );
 }
 
-function StructuredOutput() {
+/** plain-language recap of what was found — the seller-facing "record" */
+function ItemSummary() {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  if (frame < JSON_AT) return null;
+  if (frame < SUMMARY_AT) return null;
   const enter = spring({
-    frame: frame - JSON_AT,
+    frame: frame - SUMMARY_AT,
     fps,
     config: { damping: 15, stiffness: 130 },
     durationInFrames: 22,
   });
   const n = Math.round(
-    interpolate(frame, [JSON_TYPE, JSON_TYPE + 72], [0, JSON_TEXT.length], {
+    interpolate(frame, [SUMMARY_TYPE, SUMMARY_TYPE + 72], [0, SUMMARY_TEXT.length], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
     }),
@@ -219,72 +219,66 @@ function StructuredOutput() {
     <div
       style={{
         position: "absolute",
-        left: JSON_PANEL.x,
-        top: JSON_PANEL.y,
-        width: JSON_PANEL.w,
-        height: JSON_PANEL.h,
+        left: SUMMARY_PANEL.x,
+        top: SUMMARY_PANEL.y,
+        width: SUMMARY_PANEL.w,
+        height: SUMMARY_PANEL.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "#0f172a",
-        padding: "12px 16px",
+        background: "white",
+        boxShadow: "0 12px 30px -14px rgba(19,30,58,0.18)",
+        padding: "14px 18px",
         boxSizing: "border-box",
         opacity: enter,
         transform: `translateY(${(1 - enter) * 12}px)`,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 800,
-            letterSpacing: 1.2,
-            color: "rgba(255,255,255,0.55)",
-          }}
-        >
-          STRUCTURED OUTPUT
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+          WHAT IT FOUND, IN PLAIN WORDS
         </span>
-        {frame >= VALID_AT ? (
+        {frame >= CONFIRMED_AT ? (
           <span
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 5,
-              fontSize: 10,
+              gap: 6,
+              fontSize: 11.5,
               fontWeight: 800,
-              color: "#4ade80",
-              background: "rgba(74,222,128,0.12)",
+              color: GREEN,
+              background: GREEN_SOFT,
               borderRadius: 99,
-              padding: "3px 9px",
+              padding: "3px 10px",
             }}
           >
-            ✓ schema valid
+            ✓ every detail double-checked
           </span>
         ) : null}
       </div>
-      <pre
+      <div
         style={{
-          margin: "10px 0 0",
-          fontSize: 12,
-          lineHeight: 1.65,
-          color: "#a5b4fc",
-          fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-          whiteSpace: "pre-wrap",
+          marginTop: 11,
+          fontSize: 15,
+          lineHeight: 1.6,
+          fontWeight: 600,
+          color: DIM,
         }}
       >
-        {JSON_TEXT.slice(0, n)}
-        {n < JSON_TEXT.length ? (
+        {SUMMARY_TEXT.slice(0, n)}
+        {n < SUMMARY_TEXT.length ? (
           <span
             style={{
               display: "inline-block",
-              width: 7,
-              height: 13,
-              background: "#a5b4fc",
+              width: 1.6,
+              height: 15,
+              background: INK,
               verticalAlign: "text-bottom",
+              marginLeft: 1,
               opacity: frame % 18 < 11 ? 1 : 0,
             }}
           />
         ) : null}
-      </pre>
+      </div>
     </div>
   );
 }
@@ -327,28 +321,28 @@ function IdentifyAct() {
         </PhotoFrame>
         <StatusLine
           x={PHOTO.x}
-          y={468}
+          y={466}
           startAt={SCAN_START}
           doneAt={250}
-          busyText="Vision model reading the photo…"
-          doneText="Identified · Canon EOS 80D"
+          busyText="Reading your photo…"
+          doneText="Found it · Canon EOS 80D"
         />
-        <Feed rect={FEED_RECT} events={FEED} agent="vision pipeline · live" />
+        <Feed rect={FEED_RECT} events={FEED} />
 
         <div
           style={{
             position: "absolute",
             left: RX,
-            top: 112,
+            top: 110,
             width: RW,
             display: "flex",
             alignItems: "baseline",
             justifyContent: "space-between",
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 800, color: INK }}>What the model sees</span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: FAINT }}>
-            structured extraction · Zod-validated
+          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What SnapList sees</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>
+            every detail checked before it&apos;s used
           </span>
         </div>
         {FIELDS.map((f, i) => (
@@ -367,7 +361,7 @@ function IdentifyAct() {
           />
         ))}
         <ConfidenceModule />
-        <StructuredOutput />
+        <ItemSummary />
       </Shell>
     </AbsoluteFill>
   );
