@@ -35,7 +35,7 @@ const FIXTURE_ROWS: DashboardRow[] = [
   {
     itemId: "fx-2",
     listingId: "l-2",
-    title: "LEGO Star Wars Millennium Falcon 75257 — complete in box",
+    title: "LEGO Star Wars Millennium Falcon 75257, complete in box",
     status: "queued",
     createdAt: "2026-06-11T13:30:00Z",
     price: 112,
@@ -84,14 +84,14 @@ const FIXTURE_REVIEW: ReviewData = {
     { key: "brand", value: "Sony" },
     { key: "model", value: "WH-1000XM4" },
     { key: "category", value: "Consumer electronics" },
-    { key: "condition", value: "Good — light wear on the headband" },
+    { key: "condition", value: "Good, light wear on the headband" },
     { key: "upc", value: "027242919623" },
     { key: "isbn", value: null },
   ],
   listing: {
     id: "l-1",
     platform: "ebay",
-    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
     description:
       "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
     status: "draft",
@@ -127,7 +127,7 @@ const FIXTURE_PUBLISH: PublishData = {
   listingId: "l-1",
   itemId: "fx-1",
   platform: "ebay",
-  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
   description:
     "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
   status: "draft",
@@ -193,7 +193,7 @@ export default async function PreviewPage({
             </h1>
             <p className="mt-0.5 text-[13px] text-muted">
               Questions from buyers appear here live. We draft a reply from the
-              listing — you approve or edit before anything sends.
+              listing, then you approve or edit before anything sends.
             </p>
           </header>
           <section className="flex flex-col gap-3">

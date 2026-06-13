@@ -185,7 +185,7 @@ function DashboardEmpty() {
         List your first item
       </p>
       <p className="max-w-sm text-sm text-muted">
-        Take a photo of something you want to sell — we&apos;ll identify it,
+        Take a photo of something you want to sell and we&apos;ll identify it,
         research the price, and write the listing for you.
       </p>
       <div className="mt-1">
@@ -322,7 +322,7 @@ export function DashboardView({
                 </p>
               ) : (
                 <p className="px-4 py-10 text-center text-sm text-muted">
-                  Nothing under “{activeFilter.label}” — items move here as their
+                  Nothing under “{activeFilter.label}” yet. Items move here as their
                   status changes.
                 </p>
               )
@@ -365,7 +365,7 @@ export function DashboardView({
                             ) : null}
                           </td>
                           <td className="px-2 py-2 text-right text-[13px] text-fg" data-nums>
-                            {row.price != null ? PRICE_FMT.format(row.price) : "—"}
+                            {row.price != null ? PRICE_FMT.format(row.price) : "–"}
                           </td>
                           {/* suppressHydrationWarning: relative dates are
                               computed in the server's TZ during SSR and the
@@ -376,7 +376,7 @@ export function DashboardView({
                             data-nums
                             suppressHydrationWarning
                           >
-                            {row.createdAt ? relativeDay(row.createdAt) : "—"}
+                            {row.createdAt ? relativeDay(row.createdAt) : "–"}
                           </td>
                           <td className="py-2 pl-1 pr-3">
                             <svg

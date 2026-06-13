@@ -20,7 +20,7 @@ const PREVIEW_USER: ProfileUser = {
 };
 const PREVIEW_SEARCH_FIXTURES: PaletteHit[] = [
   { itemId: "fx-1", title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones", status: "draft", createdAt: "2026-06-11T15:00:00Z" },
-  { itemId: "fx-2", title: "LEGO Star Wars Millennium Falcon 75257 — complete in box", status: "queued", createdAt: "2026-06-11T13:30:00Z" },
+  { itemId: "fx-2", title: "LEGO Star Wars Millennium Falcon 75257, complete in box", status: "queued", createdAt: "2026-06-11T13:30:00Z" },
   { itemId: "fx-3", title: "Patagonia Better Sweater Fleece Jacket, Men's M", status: "published", createdAt: "2026-06-10T19:12:00Z" },
   { itemId: "fx-4", title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red", status: "failed", createdAt: "2026-06-10T16:40:00Z" },
   { itemId: "fx-5", title: "The Pragmatic Programmer (20th Anniversary, hardcover)", status: "new", createdAt: "2026-06-09T11:05:00Z" },

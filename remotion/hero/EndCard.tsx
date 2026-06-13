@@ -34,7 +34,7 @@ const LISTINGS: Array<{ img: string; pos: string; title: string; price: string }
   {
     img: "demo/sneakers.jpg",
     pos: "50% 55%",
-    title: "Nike Free RN Flyknit — Men's US 10",
+    title: "Nike Free RN Flyknit, Men's US 10",
     price: "$92",
   },
 ];

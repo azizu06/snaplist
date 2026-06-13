@@ -251,7 +251,7 @@ export function PublishView({
           <CardBody className="flex flex-col gap-3">
             {data.failed ? (
               <Banner variant="error" title="The last attempt failed">
-                eBay rejected or errored on this listing. The draft is untouched —
+                eBay rejected or errored on this listing. The draft is untouched, so
                 fix anything that needs it on the review page, then retry.
               </Banner>
             ) : (

@@ -193,7 +193,7 @@ export function SettingsView({
             </div>
           </div>
           <p className="text-xs text-faint">
-            Your name and photo come from your sign-in provider — update them
+            Your name and photo come from your sign-in provider. Update them
             there and they follow you here.
           </p>
         </CardBody>
@@ -265,7 +265,7 @@ export function SettingsView({
             exceptions.
           </p>
           <p className="text-xs text-faint">
-            Changing this affects new uploads — it never rewrites why a past
+            Changing this affects new uploads; it never rewrites why a past
             listing was queued or held.
           </p>
         </CardBody>
@@ -317,7 +317,7 @@ export function SettingsView({
             <>
               <p className="text-sm leading-relaxed text-muted">
                 Connect your eBay account to publish listings under your own
-                identity. You approve access on eBay’s consent screen — SnapList
+                identity. You approve access on eBay’s consent screen, and SnapList
                 never sees your eBay password.
               </p>
               <a

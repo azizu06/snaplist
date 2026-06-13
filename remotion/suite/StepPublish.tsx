@@ -32,7 +32,7 @@ import {
  * autopilot gate explains *why* this one waits for a human (only 74% sure),
  * then a cursor-accurate Publish click → posting state → live confirmation
  * card with the listing id.
- * Product: Custom 65% mechanical keyboard — green & white keycaps
+ * Product: Custom 65% mechanical keyboard, green & white keycaps
  * (demo/keyboard.jpg) — estimated pricing, hence the honest mid confidence.
  *
  * Render: npx remotion render remotion/index.ts step-publish public/demo/steps/publish.mp4 --crf 26 --muted
@@ -285,7 +285,7 @@ function PriceModule() {
             />
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: FAINT }}>
-            no recent sales for a custom build — this is an estimate, and you can change it
+            no recent sales for a custom build, so this is an estimate, and you can change it
           </div>
         </div>
       </div>
@@ -329,7 +329,7 @@ function GateBanner() {
         <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" strokeLinejoin="round" />
       </svg>
       <span style={{ fontSize: 13.5, fontWeight: 700, color: AMBER }}>
-        Autopilot held this one — only 74% sure, so it waits for your OK before posting.
+        Autopilot held this one: only 74% sure, so it waits for your OK before posting.
       </span>
     </div>
   );
@@ -392,7 +392,7 @@ function ConfirmCard() {
             textOverflow: "ellipsis",
           }}
         >
-          Custom 65% mechanical keyboard — green & white keycaps
+          Custom 65% mechanical keyboard, green & white keycaps
         </div>
         <div
           style={{
@@ -487,7 +487,7 @@ function PublishAct() {
             opacity: titleIn,
           }}
         >
-          Custom 65% mechanical keyboard — green & white keycaps
+          Custom 65% mechanical keyboard, green & white keycaps
         </div>
         <div style={{ position: "absolute", left: RX, top: 208, display: "flex", gap: 8 }}>
           <Chip text="Brand · Custom build" at={24} index={0} />

@@ -300,7 +300,7 @@ export const StageIdentify: React.FC = () => {
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
                 <span style={{ fontSize: 14.5, fontWeight: 800, color: GREEN }}>
-                  Identified — 92% confidence
+                  Identified · 92% confidence
                 </span>
               </div>
             </div>

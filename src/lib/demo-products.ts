@@ -51,7 +51,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "sneakers",
     image: "/demo/sneakers.jpg",
-    title: "Nike Free RN Flyknit — University Red",
+    title: "Nike Free RN Flyknit, University Red",
     shortName: "Nike Free RN",
     price: 48,
     condition: "Good",
@@ -87,7 +87,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "gameboy",
     image: "/demo/gameboy.jpg",
-    title: "Nintendo Game Boy Color — Dandelion",
+    title: "Nintendo Game Boy Color, Dandelion",
     shortName: "Game Boy Color",
     price: 95,
     condition: "Good",
@@ -99,7 +99,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "keyboard",
     image: "/demo/keyboard.jpg",
-    title: "Custom 65% mechanical keyboard — green & white keycaps",
+    title: "Custom 65% mechanical keyboard, green & white keycaps",
     shortName: "65% mech keyboard",
     price: 120,
     condition: "Like new",
@@ -147,7 +147,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "mixer",
     image: "/demo/mixer.jpg",
-    title: "KitchenAid stand mixer — pink",
+    title: "KitchenAid stand mixer, pink",
     shortName: "KitchenAid mixer",
     price: 185,
     condition: "Good",
@@ -171,7 +171,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "turntable",
     image: "/demo/turntable.jpg",
-    title: "Victrola belt-drive turntable — silver",
+    title: "Victrola belt-drive turntable, silver",
     shortName: "Victrola turntable",
     price: 68,
     condition: "Good",
@@ -209,7 +209,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "macbook",
     image: "/demo/macbook.jpg",
-    title: "Apple MacBook Pro 13-inch — Retina display",
+    title: "Apple MacBook Pro 13-inch, Retina display",
     shortName: "MacBook Pro 13″",
     price: 295,
     condition: "Good",
@@ -221,7 +221,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "boots",
     image: "/demo/boots.jpg",
-    title: "Tan leather lace-up boots — broken in",
+    title: "Tan leather lace-up boots, broken in",
     shortName: "Leather boots",
     price: 58,
     condition: "Fair",
@@ -257,7 +257,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "skateboard",
     image: "/demo/skateboard.jpg",
-    title: "Complete skateboard — multicolor graphic deck",
+    title: "Complete skateboard, multicolor graphic deck",
     shortName: "Skateboard",
     price: 45,
     condition: "Fair",
@@ -269,7 +269,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
   {
     slug: "crt-tv",
     image: "/demo/crt-tv.jpg",
-    title: "Vintage Sampo solid-state CRT TV — orange",
+    title: "Vintage Sampo solid-state CRT TV, orange",
     shortName: "Sampo CRT TV",
     price: 85,
     condition: "Fair",

@@ -120,7 +120,7 @@ export async function publishListingToEbay(
   const price = log?.price == null ? NaN : Number(log.price);
   if (!Number.isFinite(price) || price <= 0) {
     throw new Error(
-      `Listing ${listingId} has no usable price — run the pipeline (or set a price) before publishing.`,
+      `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
     );
   }
 
@@ -140,10 +140,10 @@ export async function publishListingToEbay(
     await markPublishFailed(supabase, listingId);
     throw new Error(
       photoPaths.length === 0
-        ? `Listing ${listingId} has no photos — eBay requires at least one image. ` +
+        ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
           "Add a photo to the item before publishing."
         : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
-          "signed into a fetchable URL — eBay requires at least one image. " +
+          "signed into a fetchable URL, and eBay requires at least one image. " +
           "Re-upload the item's photos before publishing.",
     );
   }

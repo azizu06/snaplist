@@ -29,9 +29,9 @@ const font =
 const CARD_SHADOW = "0 4px 12px rgba(19,30,58,0.08)";
 
 const SOURCES: Array<[label: string, price: string, dot: string]> = [
-  ["eBay sold — EOS 80D body + kit lens", "$575", "#e53238"],
-  ["Mercari — listed, good condition", "$610", "#5356ee"],
-  ["KEH — used grade EX", "$589", "#0d9488"],
+  ["eBay sold · EOS 80D body + kit lens", "$575", "#e53238"],
+  ["Mercari · listed, good condition", "$610", "#5356ee"],
+  ["KEH · used grade EX", "$589", "#0d9488"],
 ];
 
 // semicircle arc r=54 → length ≈ 169.6

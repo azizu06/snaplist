@@ -34,7 +34,7 @@ export default function InboxDevPreviewPage() {
         </h1>
         <p className="mt-0.5 text-[13px] text-muted">
           Questions from buyers appear here live. We draft a reply from the
-          listing — you approve or edit before anything sends.
+          listing, then you approve or edit before anything sends.
         </p>
       </header>
 

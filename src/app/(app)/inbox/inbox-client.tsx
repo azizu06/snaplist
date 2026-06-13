@@ -351,7 +351,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                 {undelivered ? (
                   <div className="ml-auto flex w-full max-w-[88%] flex-col gap-2 rounded-2xl rounded-br-md border border-danger-border bg-danger-soft px-3.5 py-2.5">
                     <p className="text-[10.5px] font-semibold text-danger-soft-fg">
-                      Reply not delivered — delivery failed after your approval
+                      Reply not delivered. Delivery failed after your approval.
                     </p>
                     {message.draft_reply ? (
                       <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-fg">
@@ -372,7 +372,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                 ) : message.status === "draft_failed" ? (
                   <div className="ml-auto flex w-full max-w-[88%] flex-col gap-2 rounded-2xl rounded-br-md border border-danger-border bg-danger-soft px-3.5 py-2.5">
                     <p className="text-[10.5px] font-semibold text-danger-soft-fg">
-                      Draft failed — we couldn&apos;t write a reply for this one
+                      Draft failed. We couldn&apos;t write a reply for this one.
                     </p>
                     <div className="flex justify-end">
                       <button
@@ -402,7 +402,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] font-semibold text-accent-soft-fg"
                       >
                         <SparkleIcon className="size-3 shrink-0" />
-                        drafted from item attributes — awaiting your approval
+                        drafted from item attributes, awaiting your approval
                         {message.draft_model ? (
                           <span className="font-normal text-accent-soft-fg/70">
                             · {message.draft_model}

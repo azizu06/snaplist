@@ -66,7 +66,7 @@ const FEED: FeedEvent[] = [
 
 const TITLE = "Canon EOS 80D DSLR Camera Body";
 const DESC =
-  "Canon EOS 80D DSLR body in good condition. Shutter count ~12k, minor wear on the grip. Includes battery and charger — tested and fully working.";
+  "Canon EOS 80D DSLR body in good condition. Shutter count ~12k, minor wear on the grip. Includes battery and charger, tested and fully working.";
 
 export const ActCamera: React.FC = () => {
   const frame = useCurrentFrame();

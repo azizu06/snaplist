@@ -217,9 +217,9 @@ const ACT_GAMEBOY: ActConfig = {
     { at: 204, done: 264, text: "Double-checking every detail it found" },
     { at: 282, done: 392, text: "Writing your listing draft…" },
   ],
-  title: "Nintendo Game Boy Color — Dandelion",
+  title: "Nintendo Game Boy Color, Dandelion",
   specifics: ["Brand · Nintendo", "Type · Handheld console", "Color · Dandelion"],
-  desc: "Nintendo Game Boy Color in the Dandelion colorway. Good condition — clear screen, clicky buttons, everything works. A pocketful of the late 90s.",
+  desc: "Nintendo Game Boy Color in the Dandelion colorway. Good condition: clear screen, clicky buttons, everything works. A pocketful of the late 90s.",
   price: 95,
 };
 
@@ -256,7 +256,7 @@ const ACT_GSHOCK: ActConfig = {
   ],
   title: "Casio G-Shock DW-5600 digital watch",
   specifics: ["Brand · Casio", "Model · DW-5600", "Type · Digital watch"],
-  desc: "Casio G-Shock DW-5600 in good condition. Tough, tested and keeping perfect time — the classic square case that survives everything.",
+  desc: "Casio G-Shock DW-5600 in good condition. Tough, tested and keeping perfect time, the classic square case that survives everything.",
   price: 42,
 };
 
@@ -407,7 +407,7 @@ function DraftPanel({ act }: { act: ActConfig }) {
               }),
             }}
           >
-            Suggested price · ${act.price} — from recent sales
+            Suggested price · ${act.price} · from recent sales
           </span>
         ) : (
           <span />
@@ -532,7 +532,7 @@ function VisionAct({ act, isFirst }: { act: ActConfig; isFirst?: boolean }) {
 
 const END_ITEMS = [
   { img: "demo/polaroid.jpg", pos: "50% 50%", title: "Polaroid Supercolor 645 CL instant camera", price: 65 },
-  { img: "demo/gameboy.jpg", pos: "50% 45%", title: "Nintendo Game Boy Color — Dandelion", price: 95 },
+  { img: "demo/gameboy.jpg", pos: "50% 45%", title: "Nintendo Game Boy Color, Dandelion", price: 95 },
   { img: "demo/gshock.jpg", pos: "50% 50%", title: "Casio G-Shock DW-5600 digital watch", price: 42 },
 ];
 

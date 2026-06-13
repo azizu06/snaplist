@@ -65,9 +65,9 @@ const FEED: FeedEvent[] = [
   { at: 302, tool: "price.match", text: "suggested $88 · confidence 81%" },
 ];
 
-const TITLE = "Nike Free RN Flyknit Running Shoes — Men's US 10";
+const TITLE = "Nike Free RN Flyknit Running Shoes, Men's US 10";
 const DESC =
-  "Nike Free RN Flyknit running shoes, men's US 10 in university red. Very good condition with minimal sole wear. No box — from a smoke-free home.";
+  "Nike Free RN Flyknit running shoes, men's US 10 in university red. Very good condition with minimal sole wear. No box, from a smoke-free home.";
 
 export const ActSneakers: React.FC = () => {
   const frame = useCurrentFrame();

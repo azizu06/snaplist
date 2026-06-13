@@ -41,7 +41,7 @@ export function buyerQuestionCandidates(grounding: ReplyGrounding): string[] {
 
   if (attributes.condition) {
     candidates.push(
-      `The listing says the condition is "${attributes.condition}" — can you tell me more about any wear or damage?`,
+      `The listing says the condition is "${attributes.condition}". Can you tell me more about any wear or damage?`,
     );
   }
   if (attributes.brand && attributes.model) {
@@ -52,7 +52,7 @@ export function buyerQuestionCandidates(grounding: ReplyGrounding): string[] {
   const firstSpec = attributes.specs?.[0];
   if (firstSpec) {
     candidates.push(
-      `The listing mentions "${firstSpec}" — can you confirm that works as expected?`,
+      `The listing mentions "${firstSpec}". Can you confirm that works as expected?`,
     );
   }
 

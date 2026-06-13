@@ -188,7 +188,7 @@ function ListingCard({ listing }: { listing: LoopListing }) {
 const LOOP_ITEMS: LogoItem[] = LISTINGS.map((listing) => ({
   node: <ListingCard listing={listing} />,
   title: DEMO_PRODUCTS_BY_SLUG[listing.slug].title,
-  ariaLabel: `${DEMO_PRODUCTS_BY_SLUG[listing.slug].title} — $${
+  ariaLabel: `${DEMO_PRODUCTS_BY_SLUG[listing.slug].title}, $${
     DEMO_PRODUCTS_BY_SLUG[listing.slug].price
   } on ${listing.marketplace}`,
 }));

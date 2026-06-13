@@ -54,7 +54,7 @@ const TIERS: {
   {
     id: "llm",
     name: "Best-guess estimate",
-    when: "The last resort — always flagged for your review",
+    when: "The last resort: always flagged for your review",
     confidence: 30,
     label: "Low",
   },
@@ -108,17 +108,17 @@ function IsbnExample() {
       </div>
       <div className="mt-4 space-y-2.5">
         <SourceRow i={0} value="exact edition found">
-          Open Library — book database
+          Open Library: book database
         </SourceRow>
         <SourceRow i={1} value="title &amp; year confirmed">
-          Google Books — book database
+          Google Books: book database
         </SourceRow>
         <SourceRow i={2} value="sale prices found">
           Recent sales of this exact book
         </SourceRow>
       </div>
       <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
-        When we know the exact book, there is no guessing involved — that is
+        When we know the exact book, there is no guessing involved, which is
         why books and media get the most accurate prices of anything you can
         snap.
       </p>
@@ -151,7 +151,7 @@ function CompsExample() {
           Sold on Reverb
         </SourceRow>
         <SourceRow i={1} value="$925 · 4 days ago">
-          Sold on eBay — same koa cutaway
+          Sold on eBay, same koa cutaway
         </SourceRow>
         <SourceRow i={2} value="$850 · last week">
           Sold on Mercari
@@ -160,7 +160,7 @@ function CompsExample() {
       <p className="mt-3.5 text-[13.5px] leading-relaxed text-flash-faint">
         Similar guitars sold for{" "}
         <span className="nums font-semibold text-flash-dim">$780–$960</span>{" "}
-        recently. Real sale prices count more than asking prices — what
+        recently. Real sale prices count more than asking prices: what
         something sold for beats what someone hoped to get.
       </p>
     </div>
@@ -253,7 +253,7 @@ function DepreciationExample() {
       <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
         When nothing like your item has sold recently, we start from what it
         cost new and mark it down for its age and condition. It is clearly
-        labeled an estimate — and it always waits for your approval before
+        labeled an estimate, and it always waits for your approval before
         anything goes live.
       </p>
     </div>
@@ -312,7 +312,7 @@ function LlmExample() {
         <div className="relative mt-3 pb-1 pt-10">
           <div className="absolute left-[46%] top-0 flex -translate-x-1/2 flex-col items-center">
             <span className="whitespace-nowrap rounded-full bg-iris/12 px-3 py-1.5 text-[12.5px] font-semibold text-iris">
-              Our best guess — <span className="nums font-bold">$35</span>
+              Our best guess: <span className="nums font-bold">$35</span>
             </span>
             <span aria-hidden className="h-3.5 w-px bg-iris/50" />
           </div>
@@ -357,8 +357,8 @@ function LlmExample() {
           <path d="M4 22v-7" />
         </svg>
         <p className="text-[12.5px] leading-snug text-flash-faint">
-          <span className="font-semibold text-flash">Flagged for your review</span>{" "}
-          — a guess this rough never goes live; you set the final price first.
+          <span className="font-semibold text-flash">Flagged for your review</span>.{" "}
+          A guess this rough never goes live; you set the final price first.
         </p>
       </motion.div>
     </div>

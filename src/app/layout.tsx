@@ -25,7 +25,7 @@ const schibsted = Schibsted_Grotesk({
 export const metadata: Metadata = {
   metadataBase: new URL("https://snaplist.dev"),
   title: {
-    default: "SnapList — photo to priced listing",
+    default: "SnapList: photo to priced listing",
     template: "%s · SnapList",
   },
   description:

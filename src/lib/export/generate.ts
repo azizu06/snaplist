@@ -389,7 +389,7 @@ export function packsHallucinateAttributes(
 export const MERCARI_SHIPPING_SUFFIX = "Shipping available.";
 
 /** The deterministic Facebook local-pickup line — always the block's last line. */
-export const FACEBOOK_PICKUP_LINE = "Local pickup — message me if interested!";
+export const FACEBOOK_PICKUP_LINE = "Local pickup, message me if interested!";
 
 /**
  * Repair the Mercari description so the returned pack is ALWAYS ≤ the cap AND
