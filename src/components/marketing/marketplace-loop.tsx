@@ -11,13 +11,15 @@
  * thing here as in the app.
  *
  * Text stays crisp because LogoLoop snaps its track transform to whole CSS
- * pixels (the LogoLoop fix); nothing inside a card transforms on hover —
- * hovering only pauses the drift.
+ * pixels (the LogoLoop fix); nothing inside a card transforms on hover, and
+ * the drift never pauses (owner r6: it should just keep scrolling).
  *
- * Product pool note: the landing page owns camera/book/sneakers/keyboard/
- * chess/headphones. The keyboard headlines the "one photo, three
- * storefronts" section, so this loop runs the other five — no product
- * repeats anywhere on the page.
+ * Product pool note (r6): ten cards, tilted hard toward VISIBLY USED items
+ * (worn boots, dusty drill, vintage Peugeot, CRT TV) — secondhand is the
+ * product's whole point, so the band should look like a real closet, not a
+ * showroom. Ten cards ≈ 3480px of sequence, wider than any common viewport,
+ * so the same product can't appear twice on one screen. The keyboard stays
+ * reserved for "one photo, three storefronts" below.
  */
 
 import Image from "next/image";
@@ -39,10 +41,16 @@ type LoopListing = {
 
 const LISTINGS: LoopListing[] = [
   {
-    slug: "camera",
+    slug: "macbook",
     marketplace: "eBay",
-    confidence: "Priced from recent sales · 92% sure",
+    confidence: "Priced from recent sales · 91% sure",
     tone: "high",
+  },
+  {
+    slug: "boots",
+    marketplace: "Mercari",
+    confidence: "Priced from recent sales · 84% sure",
+    tone: "solid",
   },
   {
     slug: "book",
@@ -51,10 +59,16 @@ const LISTINGS: LoopListing[] = [
     tone: "high",
   },
   {
-    slug: "sneakers",
-    marketplace: "Mercari",
-    confidence: "Priced from recent sales · 87% sure",
+    slug: "bicycle",
+    marketplace: "Facebook",
+    confidence: "Priced from recent sales · 88% sure",
     tone: "solid",
+  },
+  {
+    slug: "drill",
+    marketplace: "eBay",
+    confidence: "Priced from recent sales · 93% sure",
+    tone: "high",
   },
   {
     slug: "chess",
@@ -63,10 +77,28 @@ const LISTINGS: LoopListing[] = [
     tone: "review",
   },
   {
+    slug: "crt-tv",
+    marketplace: "Mercari",
+    confidence: "Priced from recent sales · 82% sure",
+    tone: "solid",
+  },
+  {
     slug: "headphones",
     marketplace: "Mercari",
     confidence: "Priced from recent sales · 89% sure",
     tone: "solid",
+  },
+  {
+    slug: "skateboard",
+    marketplace: "Facebook",
+    confidence: "Waiting for your review",
+    tone: "review",
+  },
+  {
+    slug: "backpack",
+    marketplace: "eBay",
+    confidence: "Estimated from condition · 74% sure",
+    tone: "review",
   },
 ];
 
@@ -113,7 +145,7 @@ export function MarketplaceBadge({
  *  (was a 56px thumb nobody could read), 13px+ body text, fewer cards per
  *  view. Round 5: wider card so the confidence chip breathes (real padding,
  *  no cramped leading-none), and the marketplace wordmark reads at a glance
- *  (15px, was 12px). Nothing inside transforms on hover; the loop pauses. */
+ *  (15px, was 12px). Nothing inside transforms on hover. */
 function ListingCard({ listing }: { listing: LoopListing }) {
   const product = DEMO_PRODUCTS_BY_SLUG[listing.slug];
   return (
@@ -169,11 +201,14 @@ export function MarketplaceLoop() {
       // scrollbar nub. Breathing room for those shadows comes from py-2.
       className="overflow-y-hidden py-2"
       logos={LOOP_ITEMS}
-      speed={32}
+      // r6: 32 → 44 px/s (owner: "a little bit" faster). NOTE: pauseOnHover
+      // must be explicitly false — LogoLoop's effectiveHoverSpeed defaults
+      // to 0 (pause) when the prop is merely omitted.
+      speed={44}
       direction="left"
       logoHeight={14}
       gap={24}
-      pauseOnHover
+      pauseOnHover={false}
       fadeOut
       // The fade gradient must match whatever the band sits on — the canvas
       // token, not a hardcoded white, so the dark theme flips it for free.

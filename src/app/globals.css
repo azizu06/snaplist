@@ -986,3 +986,22 @@
   }
 }
 /* --- end ui-r5-marketing --- */
+
+/* --- ui-r6-landing --------------------------------------------------------
+   Prism canvas enters on a quiet fade once the browser goes idle — without
+   this the WebGL layer pops in abruptly a beat after first paint. The `from`
+   keyframe alone is enough: CSS fills the `to` side with the element's own
+   computed opacity (0.55 light / 0.70 dark). */
+@keyframes prism-canvas-enter {
+  from {
+    opacity: 0;
+  }
+}
+.prism-canvas-enter {
+  animation: prism-canvas-enter 0.9s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prism-canvas-enter {
+    animation: none;
+  }
+}

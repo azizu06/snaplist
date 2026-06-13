@@ -204,6 +204,92 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     details: ["Casio G-Shock DW-5600", "Classic square case", "Digital display, resin strap"],
     alt: "Hand holding a black Casio G-Shock DW-5600 digital watch",
   },
+  // --- r6: visibly-USED items (owner: the carousel should reinforce that ---
+  // --- SnapList sells secondhand — worn, dusty, broken-in, not showroom) ---
+  {
+    slug: "macbook",
+    image: "/demo/macbook.jpg",
+    title: "Apple MacBook Pro 13-inch — Retina display",
+    shortName: "MacBook Pro 13″",
+    price: 295,
+    condition: "Good",
+    category: "Computers & Accessories",
+    pricingStory: "comps",
+    details: ["Apple MacBook Pro 13-inch", "macOS menu bar on screen", "Silver aluminum unibody"],
+    alt: "Open Apple MacBook Pro 13-inch sitting on an outdoor wooden table",
+  },
+  {
+    slug: "boots",
+    image: "/demo/boots.jpg",
+    title: "Tan leather lace-up boots — broken in",
+    shortName: "Leather boots",
+    price: 58,
+    condition: "Fair",
+    category: "Clothing & Shoes",
+    pricingStory: "comps",
+    details: ["Tan leather lace-up boots", "Visible wear at the toes", "Lug rubber outsoles"],
+    alt: "Person lacing up a pair of worn tan leather boots on asphalt",
+  },
+  {
+    slug: "bicycle",
+    image: "/demo/bicycle.jpg",
+    title: "Vintage Peugeot single-speed road bike",
+    shortName: "Peugeot road bike",
+    price: 240,
+    condition: "Good",
+    category: "Sporting Goods",
+    pricingStory: "comps",
+    details: ["Peugeot decal on the frame", "Single-speed drivetrain", "Brown leather saddle and grips"],
+    alt: "Silver vintage Peugeot single-speed bicycle leaning against a dark wall",
+  },
+  {
+    slug: "drill",
+    image: "/demo/drill.jpg",
+    title: "Milwaukee M18 cordless drill with XC battery",
+    shortName: "Milwaukee M18 drill",
+    price: 79,
+    condition: "Good",
+    category: "Tools & Workshop",
+    pricingStory: "comps",
+    details: ["Milwaukee M18 cordless drill", "REDLITHIUM XC battery pack", "Honest jobsite dust and wear"],
+    alt: "Red Milwaukee M18 cordless drill lying on a dusty workshop floor",
+  },
+  {
+    slug: "skateboard",
+    image: "/demo/skateboard.jpg",
+    title: "Complete skateboard — multicolor graphic deck",
+    shortName: "Skateboard",
+    price: 45,
+    condition: "Fair",
+    category: "Sporting Goods",
+    pricingStory: "depreciation",
+    details: ["Complete with trucks and wheels", "Multicolor graphic deck", "Wear consistent with regular use"],
+    alt: "Skateboard with a colorful graphic deck leaning against a yellow wall",
+  },
+  {
+    slug: "crt-tv",
+    image: "/demo/crt-tv.jpg",
+    title: "Vintage Sampo solid-state CRT TV — orange",
+    shortName: "Sampo CRT TV",
+    price: 85,
+    condition: "Fair",
+    category: "Vintage Electronics",
+    pricingStory: "comps",
+    details: ["Sampo solid-state CRT set", "Bright orange cabinet", "Dial tuner and side speaker grille"],
+    alt: "Retro orange Sampo solid-state CRT television on a wooden shelf",
+  },
+  {
+    slug: "backpack",
+    image: "/demo/backpack.jpg",
+    title: "Navy multi-pocket everyday backpack",
+    shortName: "Navy backpack",
+    price: 38,
+    condition: "Good",
+    category: "Bags & Luggage",
+    pricingStory: "depreciation",
+    details: ["Navy multi-pocket backpack", "Top carry handle", "Front zip organizer pocket"],
+    alt: "Navy backpack standing on a tiled floor against a white wall",
+  },
 ];
 
 export const DEMO_PRODUCTS_BY_SLUG: Record<string, DemoProduct> =
@@ -223,7 +309,23 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   "step-publish": ["keyboard"], // public/demo/steps/publish.mp4
   "buyer-qa": ["chess"], // public/demo/buyer-qa.mp4
   // --- Static page surfaces (post v3 passes; reflects actual usage) ---
-  "landing-carousel": ["camera", "book", "sneakers", "chess", "headphones"],
+  // r6: ten cards (a 5-card sequence was narrower than wide viewports, so the
+  // loop's second copy showed the same product twice on one screen) and a
+  // deliberate USED tilt — worn boots, dusty drill, vintage bike/TV — because
+  // selling secondhand IS the product. Camera + sneakers freed (they already
+  // star in step clips and the scan montage).
+  "landing-carousel": [
+    "macbook",
+    "boots",
+    "book",
+    "bicycle",
+    "drill",
+    "chess",
+    "crt-tv",
+    "headphones",
+    "skateboard",
+    "backpack",
+  ],
   "landing-storefronts": ["keyboard"],
   // /features was deleted in r5 (redirects to /how-it-works); the waterfall
   // explorer now lives only on /how-it-works, last section before the CTA.

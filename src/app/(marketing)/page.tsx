@@ -269,11 +269,9 @@ export default function Landing() {
         <HeroPrism />
         <div className="relative mx-auto w-full max-w-6xl px-5 sm:px-8">
           <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white/85 px-3.5 py-1.5 text-[12px] font-semibold text-flash shadow-xs backdrop-blur dark:border dark:border-white/10 dark:bg-white/10">
-              <span className="size-1.5 rounded-full bg-iris" />
-              AI-priced listings, live on eBay
-            </span>
-            <h1 className="mt-6 font-display text-[clamp(40px,6vw,68px)] font-bold leading-[1.02] tracking-tight text-flash">
+            {/* r6: the "AI-priced listings, live on eBay" status pill was cut
+                (owner) — the headline carries the claim on its own. */}
+            <h1 className="font-display text-[clamp(40px,6vw,68px)] font-bold leading-[1.02] tracking-tight text-flash">
               <SplitText
                 text="Snap a photo."
                 tag="span"
@@ -386,6 +384,9 @@ export default function Landing() {
           <div className="mx-auto mt-12 w-full max-w-5xl sm:mt-16">
             <video
               src="/hero-demo.mp4"
+              // First-frame poster: the slot paints instantly instead of
+              // sitting blank while the mp4 buffers — one less load "pop".
+              poster="/hero-demo-poster.jpg"
               autoPlay
               muted
               loop

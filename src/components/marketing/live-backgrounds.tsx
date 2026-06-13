@@ -59,6 +59,26 @@ function useIsDesktop(): boolean {
   );
 }
 
+/** r6 (load jank): hold the Prism mount until the browser is idle so the GL
+ *  context + shader compile never compete with the hero video, headline
+ *  animation, and listing-band images in the first frames. The static CSS
+ *  prism gradient carries the hero alone for that beat, and the canvas
+ *  fades in over it (see .prism-canvas-enter). */
+function useIdleMounted(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(() => setReady(true), {
+        timeout: 1500,
+      });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = setTimeout(() => setReady(true), 400);
+    return () => clearTimeout(t);
+  }, []);
+  return ready;
+}
+
 /**
  * The Prism shader behind the hero headline — the brand identity made
  * literal. One canvas only (it replaced the earlier LightRays layer; two
@@ -71,14 +91,15 @@ function useIsDesktop(): boolean {
 export function HeroPrism() {
   const reduced = usePrefersReducedMotion();
   const desktop = useIsDesktop();
+  const idle = useIdleMounted();
   const { resolvedTheme } = useTheme();
-  if (reduced || !desktop) return null;
+  if (reduced || !desktop || !idle) return null;
   const dark = resolvedTheme === "dark";
 
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-x-0 top-0 hidden h-[520px] opacity-55 sm:h-[620px] md:block dark:opacity-70"
+      className="prism-canvas-enter pointer-events-none absolute inset-x-0 top-0 hidden h-[520px] opacity-55 sm:h-[620px] md:block dark:opacity-70"
     >
       <Prism
         animationType="rotate"
