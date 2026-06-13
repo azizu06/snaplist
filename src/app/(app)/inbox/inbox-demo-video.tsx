@@ -66,7 +66,7 @@ function PosterScene() {
           reply drafted in seconds
         </p>
         <p className="mt-0.5 text-[12px] leading-snug text-fg sm:text-[13.5px]">
-          Yes, it&apos;s available — light wear only, photos show every angle.
+          Yes, it&apos;s available, light wear only, photos show every angle.
         </p>
       </div>
       <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-[#131e3a]/70 px-3.5 py-1.5 text-[11px] font-semibold text-white sm:mt-1 sm:text-[12px]">

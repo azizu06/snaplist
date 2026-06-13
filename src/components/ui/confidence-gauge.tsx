@@ -64,7 +64,7 @@ export function ConfidenceGauge({
           fontWeight="700"
           style={{ fontVariantNumeric: "tabular-nums" }}
         >
-          {pct != null ? `${pct}%` : "—"}
+          {pct != null ? `${pct}%` : "–"}
         </text>
       </svg>
     </div>

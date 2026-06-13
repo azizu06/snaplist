@@ -55,7 +55,7 @@ export function classifyCallback(params: CallbackParams): CallbackOutcome {
     return {
       kind: "state_mismatch",
       failMessage:
-        "eBay connection failed: state mismatch — please try again.",
+        "eBay connection failed: state mismatch. Please try again.",
       logFields: {
         reason: "state_mismatch",
         hadCookie: Boolean(expectedState),

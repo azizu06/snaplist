@@ -92,14 +92,14 @@ export default async function ExportPage({
 
       <p className="text-[13px] leading-relaxed text-muted">
         Facebook Marketplace and Mercari don&apos;t allow apps to post for you,
-        so SnapList prepares a ready-to-paste pack for each — written in that
+        so SnapList prepares a ready-to-paste pack for each, written in that
         platform&apos;s style, using only your verified item details
         {price != null ? " and your stored price" : ""}.
       </p>
 
       {error ? (
         <Banner variant="error" title="Couldn’t prepare the export packs">
-          {error} — reload the page to try again.
+          {error}. Reload the page to try again.
         </Banner>
       ) : packs ? (
         <>
@@ -110,7 +110,7 @@ export default async function ExportPage({
               "Copy the pack below.",
               "In the Facebook app: Marketplace → Sell → Item.",
               "Add your photos from your camera roll (photos can't ride the clipboard).",
-              "Paste — first line is the title, the rest is the description — and set the price.",
+              "Paste (first line is the title, the rest is the description) and set the price.",
             ]}
             pack={packs.facebook}
           />

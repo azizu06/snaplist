@@ -107,7 +107,7 @@ export function MiniPriceReport() {
   const sources = [
     ["eBay sold listing", "$179", "3d ago"],
     ["Mercari recent sale", "$192", "5d ago"],
-    ["Facebook ask — down-weighted", "$210", "1w ago"],
+    ["Facebook ask, down-weighted", "$210", "1w ago"],
   ] as const;
   return (
     <div className="glass-panel overflow-hidden rounded-3xl">
@@ -236,10 +236,10 @@ export function BuyerReplyCard() {
           <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.2 2.2m8.4 8.4 2.2 2.2m0-12.8-2.2 2.2M7.8 16.2l-2.2 2.2" />
           </svg>
-          drafted from item attributes — awaiting your approval
+          drafted from item attributes, awaiting your approval
         </p>
         <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
-          Yes — DW-5600E with the EL backlight, and it keeps accurate time.
+          Yes, DW-5600E with the EL backlight, and it keeps accurate time.
           Light wear on the strap, glass is clean. Happy to send more photos!
         </p>
       </div>

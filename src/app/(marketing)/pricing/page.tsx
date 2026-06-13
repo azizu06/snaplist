@@ -8,7 +8,7 @@ import { Eyebrow } from "@/components/marketing/visuals";
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "SnapList is free while in beta — every feature, no credit card. Paid tiers arrive later with honest limits.",
+    "SnapList is free while in beta: every feature, no credit card. Paid tiers arrive later with honest limits.",
 };
 
 /** /pricing (subpages v3) — two uniform tier cards: the live Beta tier
@@ -23,7 +23,7 @@ const PRICING_FAQ = [
   },
   {
     q: "What happens when the beta ends?",
-    a: "Paid tiers arrive with honest limits, and beta users keep early-bird pricing. Nothing you already listed gets held hostage — your items, listings, and history stay yours.",
+    a: "Paid tiers arrive with honest limits, and beta users keep early-bird pricing. Nothing you already listed gets held hostage; your items, listings, and history stay yours.",
   },
   {
     q: "Will I be charged automatically when paid plans launch?",
@@ -31,11 +31,11 @@ const PRICING_FAQ = [
   },
   {
     q: "Are there hidden per-listing fees?",
-    a: "None from SnapList. eBay's own selling fees still apply when something sells — those go to eBay, exactly as if you'd listed by hand.",
+    a: "None from SnapList. eBay's own selling fees still apply when something sells; those go to eBay, exactly as if you'd listed by hand.",
   },
   {
     q: "What will Seller Pro cost?",
-    a: "Undecided — that's why the card says $—. It will be priced for flippers and steady resellers, and beta users will see the number before anyone else, with early-bird pricing locked in.",
+    a: "Still undecided, which is why the card says $TBD. It will be priced for flippers and steady resellers, and beta users will see the number before anyone else, with early-bird pricing locked in.",
   },
 ] as const;
 
@@ -140,7 +140,7 @@ export default function Pricing() {
               For flippers, resellers & steady decluttering
             </p>
             <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash-dim">
-              $—
+              $TBD
               <span className="ml-1.5 text-[16px] font-medium text-flash-faint">
                 / month, after beta
               </span>
@@ -171,7 +171,7 @@ export default function Pricing() {
           <p className="mx-auto max-w-[62ch] text-[15px] leading-relaxed text-flash-dim">
             The honest part: SnapList is a production-real AI engineering
             showcase. Beta is genuinely free because your usage is what makes
-            the pricing engine smarter — when paid tiers land, nothing you
+            the pricing engine smarter. When paid tiers land, nothing you
             already listed gets held hostage.
           </p>
         </Reveal>

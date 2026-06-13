@@ -55,7 +55,7 @@ export default async function InboxPage() {
         </h1>
         <p className="mt-1 text-[14px] text-muted">
           Questions from buyers appear here live. We draft a reply from the
-          listing — you approve or edit before anything sends.
+          listing, then you approve or edit before anything sends.
         </p>
       </header>
 

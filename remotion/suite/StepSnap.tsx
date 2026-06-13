@@ -530,7 +530,7 @@ function SnapAct() {
         ) : null}
 
         <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT1_AT + 6} hold={48} icon="phone" text="Imported from iPhone" />
-        <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT2_AT + 8} hold={44} text="Photo added — 2 angles" />
+        <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT2_AT + 8} hold={44} text="Photo added · 2 angles" />
       </Shell>
 
       {/* desk: phone + file card */}

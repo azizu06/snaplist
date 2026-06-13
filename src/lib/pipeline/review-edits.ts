@@ -58,11 +58,11 @@ export function parseReviewEdits(raw: RawReviewEdits): ReviewEdits {
     const title = asTrimmedString(raw.title, "title");
     const description = asTrimmedString(raw.description, "description");
     if (title === "") {
-      throw new Error("Title can’t be empty — buyers search on it.");
+      throw new Error("Title can’t be empty; buyers search on it.");
     }
     if (title.length > EBAY_TITLE_MAX) {
       throw new Error(
-        `Title is ${title.length} characters — eBay allows at most ${EBAY_TITLE_MAX}.`,
+        `Title is ${title.length} characters; eBay allows at most ${EBAY_TITLE_MAX}.`,
       );
     }
     if (description === "") {

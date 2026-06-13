@@ -69,7 +69,7 @@ for (const video of VIDEOS) {
     if (dx > EPS || dy > EPS) {
       problems.push(
         `cursor at click frame ${click.frame} is (${atClick.x.toFixed(2)}, ${atClick.y.toFixed(2)}), ` +
-          `target center is (${target.x}, ${target.y}) — off by (${dx.toFixed(2)}, ${dy.toFixed(2)})`,
+          `target center is (${target.x}, ${target.y}), off by (${dx.toFixed(2)}, ${dy.toFixed(2)})`,
       );
     }
 

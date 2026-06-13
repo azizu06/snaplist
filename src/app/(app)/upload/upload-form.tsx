@@ -86,7 +86,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
 
       <div className="flex flex-col gap-5 p-5">
         <p className="text-sm font-semibold text-fg-strong">
-          Building your listing — this usually takes under half a minute.
+          Building your listing. This usually takes under half a minute.
         </p>
         <ol className="flex flex-col gap-4">
           {STEPS.map((step, i) => (
@@ -138,7 +138,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
           ))}
         </ol>
         <p className="text-xs text-muted">
-          Keep this page open — you&apos;ll land on the finished draft
+          Keep this page open and you&apos;ll land on the finished draft
           automatically.
         </p>
       </div>
@@ -457,7 +457,7 @@ function FormBody({
                         Add your first photo
                       </span>
                       <span className="mt-1 block text-xs leading-relaxed text-muted">
-                        Drag &amp; drop or click to browse — this becomes the cover
+                        Drag &amp; drop or click to browse. This becomes the cover
                       </span>
                     </span>
                     <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10.5px] font-medium text-faint">
@@ -485,7 +485,7 @@ function FormBody({
         </div>
         <p className="mt-3 text-xs text-muted">
           Good light and a clear view of labels or barcodes make the
-          identification — and the price — much more accurate.
+          identification, and the price, much more accurate.
         </p>
       </section>
 
@@ -621,7 +621,7 @@ export function UploadView({
           List an item
         </h1>
         <p className="mt-0.5 text-[13px] text-muted">
-          Add photos — SnapList fills in the rest for your review.
+          Add photos and SnapList fills in the rest for your review.
         </p>
         <JourneyRail />
       </header>

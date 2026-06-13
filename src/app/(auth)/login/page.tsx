@@ -40,7 +40,7 @@ export default async function LoginPage({
             Welcome back to <em className="text-iris">SnapList</em>
           </h1>
           <p className="mx-auto mt-2.5 max-w-[40ch] text-[14.5px] font-semibold leading-relaxed text-flash">
-            Snap a photo of something you want to sell — we identify it, price
+            Snap a photo of something you want to sell. We identify it, price
             it with sources, and write the listing.
           </p>
         </div>

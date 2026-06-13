@@ -84,7 +84,7 @@ export function AppSidebar() {
         type="button"
         onClick={toggle}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={`${collapsed ? "Expand" : "Collapse"} sidebar — [`}
+        title={`${collapsed ? "Expand" : "Collapse"} sidebar · [`}
         className="absolute -right-3 top-[22px] flex size-6 items-center justify-center rounded-full border border-border bg-surface text-faint shadow-xs transition-all hover:border-border-strong hover:text-fg motion-safe:active:scale-95"
       >
         <svg

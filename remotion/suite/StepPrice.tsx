@@ -34,7 +34,7 @@ import {
  * the suggested price on a real axis, the why-trust-it panel fills in, then
  * the seller applies the suggestion (cursor-accurate click). Plain seller
  * language only (ui-r6) — "recent sales", never "comps".
- * Product: Nike Free RN Flyknit — University Red (demo/sneakers.jpg).
+ * Product: Nike Free RN Flyknit, University Red (demo/sneakers.jpg).
  *
  * Render: npx remotion render remotion/index.ts step-price public/demo/steps/price.mp4 --crf 26 --muted
  */
@@ -100,7 +100,7 @@ const FEED: FeedEvent[] = [
 
 const SIGNAL_ROWS = [
   { label: "Where the price comes from", value: "real sold listings" },
-  { label: "Do the sale prices agree?", value: "yes — tightly grouped" },
+  { label: "Do the sale prices agree?", value: "yes, tightly grouped" },
   { label: "Is the item a sure match?", value: "brand + model found" },
 ];
 
@@ -189,7 +189,7 @@ function ItemCard() {
             textOverflow: "ellipsis",
           }}
         >
-          Nike Free RN Flyknit — University Red
+          Nike Free RN Flyknit, University Red
         </div>
         <div style={{ fontSize: 12.5, color: FAINT, marginTop: 4 }}>
           Good condition · 91% sure of the match
@@ -645,7 +645,7 @@ function PriceAct() {
           appearAt={MARKER_AT + 10}
           pressFrame={CLICK_APPLY}
           doneFrom={APPLIED_AT}
-          doneLabel="Price set · $48 — added to the listing"
+          doneLabel="Price set · $48 · added to the listing"
         />
       </Shell>
       <Cursor x={cursor.x} y={cursor.y} press={press} />

@@ -67,11 +67,11 @@ const PRINCIPLES = [
 const FAQ = [
   {
     q: "Which marketplaces does SnapList support?",
-    a: "eBay is fully integrated — listings publish directly under your own connected eBay account. Facebook Marketplace and Mercari get formatted copy-paste export packs (neither offers a public listing API, and we don't scrape).",
+    a: "eBay is fully integrated: listings publish directly under your own connected eBay account. Facebook Marketplace and Mercari get formatted copy-paste export packs (neither offers a public listing API, and we don't scrape).",
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are strongest — an exact lookup, no guessing. Branded items are priced from what similar items recently sold for, which is solid. Everyday items get an estimate marked down from the new price, clearly labeled as less certain. Every price is editable.",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are strongest: an exact lookup, no guessing. Branded items are priced from what similar items recently sold for, which is solid. Everyday items get an estimate marked down from the new price, clearly labeled as less certain. Every price is editable.",
   },
   {
     q: "Is my data private?",
@@ -79,15 +79,15 @@ const FAQ = [
   },
   {
     q: "Does autopilot post things without asking me?",
-    a: "Only if you turn it on, and only for items above the confidence bar — a score computed from real signals (how the price was found, how closely recent sales agree, and how completely the item was identified), never the AI grading its own work. Everything else queues for your review. You can keep autopilot off entirely.",
+    a: "Only if you turn it on, and only for items above the confidence bar: a score computed from real signals (how the price was found, how closely recent sales agree, and how completely the item was identified), never the AI grading its own work. Everything else queues for your review. You can keep autopilot off entirely.",
   },
   {
     q: "What does it cost?",
-    a: "Nothing during beta — every feature, no credit card. Paid tiers come later; beta users keep early-bird pricing.",
+    a: "Nothing during beta: every feature, no credit card. Paid tiers come later; beta users keep early-bird pricing.",
   },
   {
     q: "Do I need my own eBay account?",
-    a: "Yes — that's a feature. Listings publish under your identity and reputation via OAuth. SnapList never sees your eBay password.",
+    a: "Yes, and that's a feature. Listings publish under your identity and reputation via OAuth. SnapList never sees your eBay password.",
   },
 ] as const;
 
@@ -103,7 +103,7 @@ function AboutPriceReport() {
   const sources = [
     ["Sold on eBay", "$64", "3 days ago"],
     ["Sold on Mercari", "$72", "5 days ago"],
-    ["Facebook asking price — counted less", "$85", "last week"],
+    ["Facebook asking price, counted less", "$85", "last week"],
   ] as const;
   return (
     <div className="glass-panel overflow-hidden rounded-3xl">
@@ -160,10 +160,10 @@ function AboutPriceReport() {
             </div>
             <div className="mt-1.5 flex justify-between text-[11.5px] text-flash-faint">
               <span>
-                <span className="nums font-semibold">$55</span> — lowest sale
+                <span className="nums font-semibold">$55</span> lowest sale
               </span>
               <span>
-                <span className="nums font-semibold">$85</span> — highest sale
+                <span className="nums font-semibold">$85</span> highest sale
               </span>
             </div>
           </div>
@@ -206,13 +206,13 @@ export default function About() {
             <div className="mt-6 max-w-[60ch] space-y-4 text-[16.5px] leading-relaxed text-flash-dim">
               <p>
                 Every item is the same half hour: photograph it, guess what
-                it&apos;s worth used (not retail — good luck finding real sold
+                it&apos;s worth used (not retail; good luck finding real sold
                 prices), write a listing that doesn&apos;t sound desperate,
                 post it, then answer the same three buyer questions.
               </p>
               <p>
                 SnapList collapses that into a photo and a couple of approvals.
-                It was built as a production-real AI engineering showcase —
+                It was built as a production-real AI engineering showcase,
                 which is exactly why it doesn&apos;t cut corners: real eBay
                 integration, real multi-tenant security, real evaluation of its
                 own accuracy.
@@ -235,7 +235,7 @@ export default function About() {
             <em className="text-iris">bend</em>
           </h2>
           <p className="mt-4 max-w-[54ch] text-[16px] leading-relaxed text-flash-dim">
-            Four rules the pipeline is built around — they decide what ships
+            Four rules the pipeline is built around. They decide what ships
             and what gets cut.
           </p>
         </Reveal>
@@ -277,7 +277,7 @@ export default function About() {
             </h2>
             <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-flash-dim">
               Marketplaces, accuracy, privacy, and what autopilot will never
-              do without you — answered straight.
+              do without you, answered straight.
             </p>
           </Reveal>
           <Reveal delay={0.1} className="mt-12">

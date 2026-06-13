@@ -199,7 +199,7 @@ describe("loadOrGenerateExportPacks", () => {
         description: "Stored FB description.",
         copy: {
           copyBlock:
-            "Stored FB title\n\nStored FB description.\n\nCondition: good\nAsking $100\nLocal pickup — message me if interested!",
+            "Stored FB title\n\nStored FB description.\n\nCondition: good\nAsking $100\nLocal pickup, message me if interested!",
         },
       },
       {
@@ -241,7 +241,7 @@ describe("loadOrGenerateExportPacks", () => {
         description: "Stored FB description.",
         copy: {
           copyBlock:
-            "Stored FB title\n\nStored FB description.\n\nAsking $100\nLocal pickup — message me if interested!",
+            "Stored FB title\n\nStored FB description.\n\nAsking $100\nLocal pickup, message me if interested!",
         },
       },
       {

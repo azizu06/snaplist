@@ -52,12 +52,12 @@ const FEED: FeedEvent[] = [
     subAt: 126,
   },
   { at: 152, done: 198, tool: "listing.write", text: "description from edition metadata…" },
-  { at: 206, tool: "autopilot.gate", text: "confidence 96% ≥ threshold — posting" },
+  { at: 206, tool: "autopilot.gate", text: "confidence 96% ≥ threshold, posting" },
 ];
 
 const TITLE = "Python for Unix and Linux System Administration (O'Reilly)";
 const DESC =
-  "Python for Unix and Linux System Administration — O'Reilly, 1st edition (2008). Paperback in good condition: clean pages, light shelf wear.";
+  "Python for Unix and Linux System Administration. O'Reilly, 1st edition (2008). Paperback in good condition: clean pages, light shelf wear.";
 
 /** ISBN detection overlay drawn over the book photo */
 function IsbnDetection() {
@@ -174,7 +174,7 @@ export const ActTextbook: React.FC = () => {
           liveAt={LIVE_AT}
           listingId="eBay item #110554731544 · posted by Autopilot"
           idAt={ID_AT}
-          autopilot={{ at: AUTOPILOT_AT, label: "High confidence — Autopilot posts this one" }}
+          autopilot={{ at: AUTOPILOT_AT, label: "High confidence: Autopilot posts this one" }}
           postingFrom={POSTING_AT}
         />
       </AppShell>

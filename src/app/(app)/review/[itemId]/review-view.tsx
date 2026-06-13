@@ -86,7 +86,7 @@ function AiBadge({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
     <span
-      title="Suggested by SnapList — edit freely"
+      title="Suggested by SnapList; edit freely"
       className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-semibold leading-4 text-accent-soft-fg"
     >
       <SparkleIcon className="size-2.5" />
@@ -229,7 +229,7 @@ export function ReviewView({
         <Banner variant="warning" title="Is this identification right?">
           {data.identification.reason ??
             "We couldn't identify this with certainty."}{" "}
-          Check the details and price before publishing — the research is only
+          Check the details and price before publishing. The research is only
           as good as the identification.
         </Banner>
       ) : null}
@@ -297,7 +297,7 @@ export function ReviewView({
                   <p className="text-xs text-faint">
                     Drafted by SnapList from your verified item details
                     {data.listing.platform ? ` · ${data.listing.platform} format` : ""}
-                    . Edit anything — your words always win.
+                    . Edit anything; your words always win.
                   </p>
                 </div>
               ) : (
@@ -366,7 +366,7 @@ export function ReviewView({
                   </div>
                   {data.override != null && data.suggested != null ? (
                     <p className="mt-1.5 text-xs text-faint" data-nums>
-                      AI suggested ${data.suggested} — clear the field and save
+                      AI suggested ${data.suggested}. Clear the field and save
                       to use it again.
                     </p>
                   ) : null}
@@ -380,7 +380,7 @@ export function ReviewView({
                     <div>
                       <p className="text-xs text-muted">Suggested</p>
                       <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
-                        {data.suggested != null ? `$${data.suggested}` : "—"}
+                        {data.suggested != null ? `$${data.suggested}` : "–"}
                       </p>
                     </div>
                     <div>
@@ -388,7 +388,7 @@ export function ReviewView({
                       <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
                         {data.range?.low != null && data.range?.high != null
                           ? `$${data.range.low}–$${data.range.high}`
-                          : "—"}
+                          : "–"}
                       </p>
                     </div>
                   </div>
@@ -488,7 +488,7 @@ export function ReviewView({
                     name="condition"
                     type="text"
                     value={fields.condition}
-                    placeholder="e.g. Good — light wear"
+                    placeholder="e.g. Good, light wear"
                     onChange={(e) => setField("condition", e.target.value)}
                     className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[13px]`}
                   />
@@ -498,7 +498,7 @@ export function ReviewView({
                     <div key={key}>
                       <dt className="text-xs capitalize text-muted">{key}</dt>
                       <dd className="mt-0.5 rounded-lg border border-border bg-surface-2/50 px-2.5 py-1.5 text-[13px] text-fg">
-                        {value ?? <span className="text-faint">— not detected</span>}
+                        {value ?? <span className="text-faint">Not detected</span>}
                       </dd>
                     </div>
                   ))}

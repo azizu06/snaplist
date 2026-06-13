@@ -31,7 +31,7 @@ import {
  * the marketplace tabs: eBay (search-friendly title + item details +
  * description), Facebook Marketplace (casual, local) and Mercari (short
  * title, hashtags, shipping). Both tab switches are cursor-accurate clicks.
- * Product: KitchenAid stand mixer — pink (demo/mixer.jpg).
+ * Product: KitchenAid stand mixer, pink (demo/mixer.jpg).
  *
  * Render: npx remotion render remotion/index.ts step-write public/demo/steps/write.mp4 --crf 26 --muted
  */
@@ -71,18 +71,18 @@ const MC_TAGS_AT = 500;
 const MC_SHIP_AT = 514;
 const READY_AT = 530;
 
-const EBAY_TITLE = "KitchenAid Stand Mixer — Pink Tilt-Head, Tested & Working";
+const EBAY_TITLE = "KitchenAid Stand Mixer, Pink Tilt-Head, Tested & Working";
 const EBAY_SPECS: Array<[string, string]> = [
   ["Brand", "KitchenAid"],
   ["Type", "Stand mixer"],
   ["Color", "Pink"],
-  ["Condition", "Good — fully working"],
+  ["Condition", "Good, fully working"],
 ];
 const EBAY_DESC =
-  "Pink KitchenAid stand mixer in good working condition. The motor runs strong through every speed and the tilt-head locks tight. Whisk attachment included — comes from a smoke-free kitchen and is cleaned and ready to bake.";
+  "Pink KitchenAid stand mixer in good working condition. The motor runs strong through every speed and the tilt-head locks tight. Whisk attachment included; comes from a smoke-free kitchen and is cleaned and ready to bake.";
 
 const FB_TEXT =
-  "Pink KitchenAid stand mixer, runs strong on every speed. Whisk included, smoke-free home. Pickup this week — $185 OBO.";
+  "Pink KitchenAid stand mixer, runs strong on every speed. Whisk included, smoke-free home. Pickup this week, $185 OBO.";
 
 const MC_TITLE = "KitchenAid Stand Mixer Pink";
 const MC_TAGS = ["#KitchenAid", "#standmixer", "#baking", "#kitchenfinds"];
@@ -164,7 +164,7 @@ function ItemCard() {
         />
       </div>
       <div style={{ marginTop: 12, fontSize: 15.5, fontWeight: 700, color: INK }}>
-        KitchenAid stand mixer — pink
+        KitchenAid stand mixer, pink
       </div>
       <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
         <span
@@ -378,7 +378,7 @@ function EbayPane() {
             color: GREEN,
           }}
         >
-          <CheckIcon size={13} /> Written the way eBay buyers search — clear title, full details
+          <CheckIcon size={13} /> Written the way eBay buyers search: clear title, full details
         </div>
       ) : null}
     </PaneFrame>
@@ -430,11 +430,11 @@ function FacebookPane() {
             color: GREEN,
           }}
         >
-          <CheckIcon size={13} /> Shorter, friendlier — written for neighbors, not search engines
+          <CheckIcon size={13} /> Shorter, friendlier, written for neighbors, not search engines
         </div>
       ) : null}
       <div style={{ position: "absolute", left: 18, bottom: 14, fontSize: 12, color: FAINT }}>
-        Facebook doesn&apos;t let apps post for you — SnapList hands you this text, ready to paste.
+        Facebook doesn&apos;t let apps post for you, so SnapList hands you this text, ready to paste.
       </div>
     </PaneFrame>
   );
@@ -504,7 +504,7 @@ function MercariPane() {
             color: GREEN,
           }}
         >
-          <CheckIcon size={13} /> 3 marketplaces ready — one item, three listings that sound native
+          <CheckIcon size={13} /> 3 marketplaces ready: one item, three listings that sound native
         </div>
       ) : null}
     </PaneFrame>

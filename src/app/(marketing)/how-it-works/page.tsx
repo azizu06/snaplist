@@ -35,9 +35,9 @@ const STEPS = [
     src: "/demo/steps/snap.mp4",
     glyph: "snap",
     title: "Snap",
-    body: "One photo — or up to four if condition matters. Visible barcodes and ISBNs are read automatically, so books and boxed items start with an exact identity.",
+    body: "One photo, or up to four if condition matters. Visible barcodes and ISBNs are read automatically, so books and boxed items start with an exact identity.",
     poster: "Four slots, thirty seconds of your time.",
-    label: "Demo clip — the Snap step of the SnapList pipeline",
+    label: "Demo clip: the Snap step of the SnapList pipeline",
   },
   {
     n: "02",
@@ -46,9 +46,9 @@ const STEPS = [
     src: "/demo/steps/identify.mp4",
     glyph: "identify",
     title: "Identify",
-    body: "SnapList reads your photo and pulls out the brand, model, category, condition, and key details. If it isn't sure what it's looking at, it tells you — it never quietly guesses.",
+    body: "SnapList reads your photo and pulls out the brand, model, category, condition, and key details. If it isn't sure what it's looking at, it tells you. It never quietly guesses.",
     poster: "It knows exactly what it's looking at.",
-    label: "Demo clip — the Identify step of the SnapList pipeline",
+    label: "Demo clip: the Identify step of the SnapList pipeline",
   },
   {
     n: "03",
@@ -57,9 +57,9 @@ const STEPS = [
     src: "/demo/steps/price.mp4",
     glyph: "price",
     title: "Price",
-    body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources it used — real sale prices, not wishful asking prices.",
+    body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources it used: real sale prices, not wishful asking prices.",
     poster: "A defensible number, with its receipts.",
-    label: "Demo clip — the Price step of the SnapList pipeline",
+    label: "Demo clip: the Price step of the SnapList pipeline",
   },
   {
     n: "04",
@@ -70,7 +70,7 @@ const STEPS = [
     title: "Write",
     body: "Your listing is written three ways, one per marketplace: eBay gets full item details and a search-friendly title, Facebook gets a casual local tone, Mercari gets hashtags and shipping details.",
     poster: "Three marketplaces, three native tongues.",
-    label: "Demo clip — the Write step of the SnapList pipeline",
+    label: "Demo clip: the Write step of the SnapList pipeline",
   },
   {
     n: "05",
@@ -81,7 +81,7 @@ const STEPS = [
     title: "Publish",
     body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
     poster: "Live on eBay, under your name.",
-    label: "Demo clip — the Publish step of the SnapList pipeline",
+    label: "Demo clip: the Publish step of the SnapList pipeline",
   },
   {
     n: "06",
@@ -90,9 +90,9 @@ const STEPS = [
     src: "/demo/buyer-qa.mp4",
     glyph: "chat",
     title: "Answer",
-    body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details — edition, condition, what's included. You approve, edit, or rewrite; nothing sends without you.",
+    body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details: edition, condition, what's included. You approve, edit, or rewrite; nothing sends without you.",
     poster: "Drafted from the item's real details, sent by you.",
-    label: "Demo clip — a buyer question arrives and a reply drafted from the item's details awaits approval",
+    label: "Demo clip: a buyer question arrives and a reply drafted from the item's details awaits approval",
   },
 ] as const;
 
@@ -133,7 +133,7 @@ export default function HowItWorks() {
           <p className="mt-4 max-w-[54ch] text-[17px] leading-relaxed text-flash-dim">
             Six steps, one flow: five run every time you snap a photo, and the
             sixth keeps working after the listing is live. Here is each one
-            doing its job — real screens, real items.
+            doing its job, with real screens and real items.
           </p>
         </Reveal>
       </section>
@@ -191,11 +191,11 @@ export default function HowItWorks() {
             <Eyebrow tint="cyan">Where the price comes from</Eyebrow>
             <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
               The best price source that exists for{" "}
-              <em className="text-iris">your</em> item — honestly labeled
+              <em className="text-iris">your</em> item, honestly labeled
             </h2>
             <p className="mt-4 max-w-[58ch] text-[16px] leading-relaxed text-flash-dim">
               Not every item can be priced the same way. SnapList works down
-              this list, uses the best source it can find for your item — and
+              this list, uses the best source it can find for your item, and
               always shows you which one it used. Pick one to see how it works.
             </p>
           </Reveal>
@@ -211,7 +211,7 @@ export default function HowItWorks() {
             See it on your own shelf
           </h2>
           <p className="mx-auto mt-4 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
-            The whole pipeline you just read about, on your first photo —
+            The whole pipeline you just read about, on your first photo,
             free while in beta.
           </p>
           <Link

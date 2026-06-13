@@ -55,12 +55,12 @@ const STEPS = [
   {
     n: "01",
     title: "Snap it",
-    body: "One photo — up to four if condition matters. Barcodes and ISBNs are read automatically.",
+    body: "One photo, up to four if condition matters. Barcodes and ISBNs are read automatically.",
   },
   {
     n: "02",
     title: "We research it",
-    body: "We identify brand, model and condition, then price against what similar items recently sold for — every number cites its sources.",
+    body: "We identify brand, model and condition, then price against what similar items recently sold for. Every number cites its sources.",
   },
   {
     n: "03",
@@ -258,7 +258,7 @@ const BENTO_CARDS = [
     label: "Pricing engine",
     title: "Prices that show their work",
     description:
-      "No black-box numbers. Every suggestion comes as a price, a range, and the cited recent sale prices it was built from — ISBN lookups for books, live web research for the rest.",
+      "No black-box numbers. Every suggestion comes as a price, a range, and the cited recent sale prices it was built from: ISBN lookups for books, live web research for the rest.",
     icon: <BentoIcon d={[...ICONS.tag]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",
@@ -281,7 +281,7 @@ const BENTO_CARDS = [
     label: "Confidence gate",
     title: "Autopilot with a conscience",
     description:
-      "Confidence is computed from real signals — which pricing tier fired, how closely recent sale prices agree, how complete the identification is. High confidence can publish itself; anything murky waits for you.",
+      "Confidence is computed from real signals: which pricing tier fired, how closely recent sale prices agree, how complete the identification is. High confidence can publish itself; anything murky waits for you.",
     icon: <BentoIcon d={[...ICONS.shieldCheck]} />,
     tint: "green" as const,
     className: "lg:col-span-2",
@@ -290,7 +290,7 @@ const BENTO_CARDS = [
     label: "Generation",
     title: "Listings that sound native",
     description:
-      "eBay item specifics, Facebook's casual tone, Mercari's hashtags — one item, three platform-fluent listings.",
+      "eBay item specifics, Facebook's casual tone, Mercari's hashtags. One item, three platform-fluent listings.",
     icon: <BentoIcon d={[...ICONS.sparkles]} />,
     tint: "violet" as const,
   },
@@ -424,7 +424,7 @@ export default function Landing() {
               />
             </h1>
             <BlurText
-              text="SnapList identifies what you're selling, researches a fair used price with cited sources, and writes the listing — eBay, Facebook Marketplace, and Mercari, from one photo."
+              text="SnapList identifies what you're selling, researches a fair used price with cited sources, and writes the listing for eBay, Facebook Marketplace, and Mercari, from one photo."
               animateBy="words"
               delay={18}
               stepDuration={0.3}
@@ -648,7 +648,7 @@ export default function Landing() {
           <Reveal>
             <p className="mt-4 max-w-[54ch] text-[15px] leading-relaxed text-flash-dim">
               Every validated item renders platform-fluent copy for its
-              marketplace — eBay publishes directly, Facebook and Mercari get
+              marketplace. eBay publishes directly, Facebook and Mercari get
               clean copy-paste packs.
             </p>
           </Reveal>
@@ -687,7 +687,7 @@ export default function Landing() {
               <StorefrontListing
                 platform="eBay"
                 delivery="Publishes directly"
-                title="Custom 65% Mechanical Keyboard — Green & White Keycaps — Like New"
+                title="Custom 65% Mechanical Keyboard, Green & White Keycaps, Like New"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
@@ -711,7 +711,7 @@ export default function Landing() {
               <StorefrontListing
                 platform="Facebook"
                 delivery="Copy-paste pack"
-                title="Custom mechanical keyboard — 65% layout, like new"
+                title="Custom mechanical keyboard, 65% layout, like new"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
@@ -739,7 +739,7 @@ export default function Landing() {
               <StorefrontListing
                 platform="Mercari"
                 delivery="Copy-paste pack"
-                title="Custom 65% mech keyboard — green/white keycaps"
+                title="Custom 65% mech keyboard, green/white keycaps"
                 price={
                   <>
                     <span className="nums text-[14px] font-medium text-flash-faint line-through">
@@ -750,7 +750,7 @@ export default function Landing() {
                     </span>
                   </>
                 }
-                detail="Smart pricing keeps it competitive — never below your $95 floor"
+                detail="Smart pricing keeps it competitive, never below your $95 floor"
                 footer={
                   <p className="text-[13px] font-medium text-iris">
                     #mechkeyboard&ensp;#65percent&ensp;#customkeyboard
@@ -778,7 +778,7 @@ export default function Landing() {
             </h2>
             <p className="mx-auto mt-5 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
               Photograph it once. SnapList does the research, the writing, and
-              the posting — you keep the control and the cash.
+              the posting. You keep the control and the cash.
             </p>
             <Magnet padding={80} magnetStrength={18} wrapperClassName="mt-9">
               <ClickSpark

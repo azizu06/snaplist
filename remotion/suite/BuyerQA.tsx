@@ -76,7 +76,7 @@ const SENT_NOTE_AT = 520;
 
 const BUYER_MSG = "Hi! Are all 32 pieces included, and is there any damage I should know about?";
 const DRAFT_TEXT =
-  "Yes — all 32 brass pieces are included, along with the wooden board. Condition is fair: the pieces show honest tarnish and patina from age, but nothing is cracked or missing. Happy to send close-up photos!";
+  "Yes, all 32 brass pieces are included, along with the wooden board. Condition is fair: the pieces show honest tarnish and patina from age, but nothing is cracked or missing. Happy to send close-up photos!";
 const EDIT_TEXT = " Local pickup works too.";
 
 const ROW_C = center(ROW1);
@@ -274,7 +274,7 @@ function InboxList() {
             <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>Mon</span>
           </div>
           <div style={{ fontSize: 12, color: FAINT, marginTop: 3 }}>
-            Welcome to your live inbox — replies you approve send through eBay.
+            Welcome to your live inbox. Replies you approve send through eBay.
           </div>
         </div>
       </div>
@@ -528,7 +528,7 @@ function Composer() {
           <>
             <CheckIcon size={13} />
             <span style={{ fontSize: 12.5, fontWeight: 800, color: GREEN }}>
-              Reply sent — saved with the listing
+              Reply sent · saved with the listing
             </span>
           </>
         ) : (

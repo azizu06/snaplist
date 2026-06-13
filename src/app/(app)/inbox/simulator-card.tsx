@@ -50,7 +50,7 @@ export function SimulatorCard({
       <div className="flex flex-col gap-3 px-4 py-4 sm:px-5">
         {items.length === 0 ? (
           <p className="text-[14.5px] text-fg">
-            No items yet — create a listing first, then simulate a buyer
+            No items yet. Create a listing first, then simulate a buyer
             question about it.
           </p>
         ) : (

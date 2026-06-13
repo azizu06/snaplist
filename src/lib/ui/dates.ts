@@ -6,7 +6,7 @@
  */
 export function relativeDay(iso: string, now: number = Date.now()): string {
   const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "—";
+  if (Number.isNaN(t)) return "–";
 
   const startOfDay = (ms: number) => {
     const d = new Date(ms);
