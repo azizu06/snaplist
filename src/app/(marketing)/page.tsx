@@ -395,6 +395,15 @@ export default function Landing() {
         <div aria-hidden className="prism-gradient" />
         <div aria-hidden className="prism-grain" />
         <HeroPrism />
+        {/* Slab-matched veil so the now-full-presence prism behind the hero
+            never washes out the centred headline + paragraph: opaque on the
+            text column, transparent at the edges/top where the prism glows
+            through. Sits above the canvas, below the text (same approach as
+            CtaIridescence's center wash). */}
+        <div
+          aria-hidden
+          className="hero-text-scrim pointer-events-none absolute inset-x-0 top-0 hidden h-[600px] sm:h-[740px] md:block"
+        />
         <div className="relative mx-auto w-full max-w-6xl px-5 sm:px-8">
           <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
             {/* r6: the "AI-priced listings, live on eBay" status pill was cut

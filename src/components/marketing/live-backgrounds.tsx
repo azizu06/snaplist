@@ -99,22 +99,24 @@ export function HeroPrism() {
   return (
     <div
       aria-hidden
-      className="prism-canvas-enter pointer-events-none absolute inset-x-0 top-0 hidden h-[440px] opacity-50 sm:h-[520px] md:block dark:opacity-58"
+      className="prism-canvas-enter pointer-events-none absolute inset-x-0 top-0 hidden h-[600px] opacity-[0.72] sm:h-[740px] md:block dark:opacity-[0.82]"
     >
       <Prism
         animationType="rotate"
         timeScale={0.35}
-        // Shorter + lifted (r6, owner): the bright base used to land on the
-        // hero PARAGRAPH and wash out that thinner text. A shorter prism with
-        // the core lifted to y:300 parks the glow behind the big bold
-        // headline (which survives it) so the paragraph below sits on a
-        // darker field and reads cleanly.
-        height={2.9}
-        baseWidth={5.2}
-        scale={3.1}
-        offset={{ x: 0, y: 300 }}
-        glow={dark ? 0.78 : 0.78}
-        bloom={dark ? 0.85 : 0.9}
+        // r6 (owner, take 2): the previous round shrank the prism and lifted
+        // its core to y:300 to keep the bright base off the paragraph — but
+        // that exiled the whole body to the top edge, where it read as a
+        // faint cropped artifact, not the brand made literal. Now it's back
+        // to a full, centred, brighter presence; the hero text is protected
+        // by the slab-matched .hero-text-scrim veil instead (same trick the
+        // CTA Iridescence uses), so we get the wow without washing out copy.
+        height={3.5}
+        baseWidth={5.6}
+        scale={3.5}
+        offset={{ x: 0, y: 70 }}
+        glow={dark ? 0.9 : 0.95}
+        bloom={dark ? 0.95 : 1.05}
         noise={dark ? 0.06 : 0.03}
         hueShift={dark ? 0.25 : 0.12}
         colorFrequency={1.1}
