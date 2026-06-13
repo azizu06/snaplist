@@ -29,10 +29,11 @@ import {
 } from "./theme";
 
 /**
- * Step 3 · Price — the comp search made visible: queries fire in the agent
- * feed, sold comps land with sources and prices, a range forms around the
- * suggested price on a real axis, confidence composes from named signals,
- * then the seller applies the suggestion (cursor-accurate click).
+ * Step 3 · Price — the price research made visible: searches fire in the
+ * live feed, recent sales land with sources and prices, a range forms around
+ * the suggested price on a real axis, the why-trust-it panel fills in, then
+ * the seller applies the suggestion (cursor-accurate click). Plain seller
+ * language only (ui-r6) — "recent sales", never "comps".
  * Product: Nike Free RN Flyknit — University Red (demo/sneakers.jpg).
  *
  * Render: npx remotion render remotion/index.ts step-price public/demo/steps/price.mp4 --crf 26 --muted
@@ -57,12 +58,12 @@ const APPLY: Rect = { x: RX, y: 596, w: RW, h: 46 };
 /* ---------- choreography ---------- */
 
 const COMPS: Array<{ at: number; source: string; note: string; price: number; asking?: boolean }> = [
-  { at: 104, source: "eBay", note: "sold · 6d ago", price: 52 },
-  { at: 118, source: "eBay", note: "sold · 11d ago", price: 45 },
-  { at: 132, source: "Mercari", note: "sold · 2w ago", price: 44 },
-  { at: 146, source: "Poshmark", note: "sold · 3w ago", price: 48 },
-  { at: 188, source: "eBay", note: "sold · 1mo ago", price: 55 },
-  { at: 202, source: "Depop", note: "asking · down-weighted", price: 42, asking: true },
+  { at: 104, source: "eBay", note: "sold 6 days ago", price: 52 },
+  { at: 118, source: "eBay", note: "sold 11 days ago", price: 45 },
+  { at: 132, source: "Mercari", note: "sold 2 weeks ago", price: 44 },
+  { at: 146, source: "Poshmark", note: "sold 3 weeks ago", price: 48 },
+  { at: 188, source: "eBay", note: "sold 1 month ago", price: 55 },
+  { at: 202, source: "Depop", note: "asking price · counts less", price: 42, asking: true },
 ];
 
 const RANGE_AT = 248;
@@ -82,27 +83,25 @@ const FEED: FeedEvent[] = [
   {
     at: 36,
     done: 96,
-    tool: "search.comps",
-    text: "“nike free rn flyknit used price sold”",
-    sub: "4 sold comps found",
+    text: "Searching “nike free rn flyknit used sold”",
+    sub: "4 recent sales found",
     subAt: 100,
   },
   {
     at: 116,
     done: 180,
-    tool: "search.refine",
-    text: "“nike free rn flyknit university red sold”",
-    sub: "+3 more · 7 total",
+    text: "Searching “nike free rn flyknit red sold”",
+    sub: "3 more found · 7 total",
     subAt: 184,
   },
-  { at: 212, done: 242, tool: "price.synthesize", text: "clustering comps · trimming outliers" },
-  { at: 250, tool: "price.range", text: "range $40–$58 · suggested $48" },
+  { at: 212, done: 242, text: "Comparing prices · setting odd ones aside" },
+  { at: 250, text: "Range $40–$58 · suggesting $48" },
 ];
 
 const SIGNAL_ROWS = [
-  { label: "Pricing tier", value: "web comps · sold listings" },
-  { label: "Comp agreement", value: "tight cluster (σ low)" },
-  { label: "ID completeness", value: "brand + model resolved" },
+  { label: "Where the price comes from", value: "real sold listings" },
+  { label: "Do the sale prices agree?", value: "yes — tightly grouped" },
+  { label: "Is the item a sure match?", value: "brand + model found" },
 ];
 
 /* range axis: $35 → $65 across the inner width */
@@ -182,7 +181,7 @@ function ItemCard() {
       <div style={{ minWidth: 0, flex: 1 }}>
         <div
           style={{
-            fontSize: 14,
+            fontSize: 15,
             fontWeight: 700,
             color: INK,
             whiteSpace: "nowrap",
@@ -192,8 +191,8 @@ function ItemCard() {
         >
           Nike Free RN Flyknit — University Red
         </div>
-        <div style={{ fontSize: 11.5, color: FAINT, marginTop: 4 }}>
-          Good condition · identified at 91%
+        <div style={{ fontSize: 12.5, color: FAINT, marginTop: 4 }}>
+          Good condition · 91% sure of the match
         </div>
       </div>
       {frame >= PRICE_CHIP_AT ? (
@@ -251,25 +250,25 @@ function CompRow({ comp, index }: { comp: (typeof COMPS)[number]; index: number 
     >
       <span
         style={{
-          fontSize: 10.5,
+          fontSize: 11.5,
           fontWeight: 800,
           color: VIOLET,
           background: VIOLET_SOFT,
           borderRadius: 6,
-          padding: "2.5px 8px",
+          padding: "2.5px 9px",
           flexShrink: 0,
-          minWidth: 58,
+          minWidth: 62,
           textAlign: "center",
         }}
       >
         {comp.source}
       </span>
-      <span style={{ fontSize: 12, color: DIM, flex: 1 }}>
+      <span style={{ fontSize: 13.5, color: DIM, flex: 1 }}>
         Nike Free RN Flyknit · men&apos;s · {comp.note}
       </span>
       <span
         style={{
-          fontSize: 14.5,
+          fontSize: 16,
           fontWeight: 800,
           color: comp.asking ? FAINT : INK,
           fontVariantNumeric: "tabular-nums",
@@ -349,11 +348,11 @@ function RangeModule() {
           alignItems: "baseline",
         }}
       >
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
           PRICE RANGE
         </span>
-        <span style={{ fontSize: 11.5, fontWeight: 600, color: FAINT }}>
-          7 comps · sold-weighted
+        <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>
+          from 7 recent sales · sold prices count most
         </span>
       </div>
 
@@ -436,10 +435,10 @@ function RangeModule() {
                 transform: `translateX(-50%) scale(${0.8 + markerIn * 0.2})`,
                 background: GREEN,
                 color: "white",
-                fontSize: 11.5,
+                fontSize: 13,
                 fontWeight: 800,
                 borderRadius: 7,
-                padding: "2.5px 9px",
+                padding: "3px 10px",
                 whiteSpace: "nowrap",
                 fontVariantNumeric: "tabular-nums",
               }}
@@ -456,7 +455,7 @@ function RangeModule() {
                 position: "absolute",
                 left: toX(RANGE_LOW) - 12,
                 top: 46,
-                fontSize: 10.5,
+                fontSize: 12,
                 fontWeight: 700,
                 color: FAINT,
                 fontVariantNumeric: "tabular-nums",
@@ -469,7 +468,7 @@ function RangeModule() {
                 position: "absolute",
                 left: toX(RANGE_HIGH) - 12,
                 top: 46,
-                fontSize: 10.5,
+                fontSize: 12,
                 fontWeight: 700,
                 color: FAINT,
                 fontVariantNumeric: "tabular-nums",
@@ -504,8 +503,8 @@ function SignalsPanel() {
           justifyContent: "center",
         }}
       >
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: LINE }}>
-          CONFIDENCE SIGNALS
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.2, color: LINE }}>
+          WHY TRUST THIS PRICE
         </span>
       </div>
     );
@@ -537,8 +536,8 @@ function SignalsPanel() {
         opacity: enter,
       }}
     >
-      <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
-        CONFIDENCE SIGNALS
+      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+        WHY TRUST THIS PRICE
       </span>
       <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
         {SIGNAL_ROWS.map((row, i) => {
@@ -560,18 +559,18 @@ function SignalsPanel() {
                 transform: `translateX(${(1 - sIn) * -8}px)`,
               }}
             >
-              <CheckIcon size={12} />
-              <span style={{ fontSize: 11.5, fontWeight: 700, color: INK }}>{row.label}</span>
-              <span style={{ fontSize: 11.5, color: FAINT, marginLeft: "auto" }}>{row.value}</span>
+              <CheckIcon size={13} />
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{row.label}</span>
+              <span style={{ fontSize: 12.5, color: FAINT, marginLeft: "auto" }}>{row.value}</span>
             </div>
           );
         })}
       </div>
       <div style={{ marginTop: 14, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
-          COMPOSITE
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+          HOW SURE OVERALL
         </span>
-        <span style={{ fontSize: 19, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>
+        <span style={{ fontSize: 21, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>
           {Math.round(pct)}%
         </span>
       </div>
@@ -594,8 +593,8 @@ function SignalsPanel() {
         />
       </div>
       {frame >= NOTE_AT ? (
-        <div style={{ marginTop: 9, fontSize: 10.5, fontWeight: 700, color: VIOLET }}>
-          Above the 80% autopilot threshold — eligible to post itself
+        <div style={{ marginTop: 9, fontSize: 12, fontWeight: 700, color: VIOLET }}>
+          Sure enough that autopilot could post this one for you
         </div>
       ) : null}
     </div>
@@ -617,23 +616,23 @@ function PriceAct() {
     <AbsoluteFill style={{ opacity: fadeOut }}>
       <Shell badge="STEP 3 · PRICE">
         <ItemCard />
-        <Feed rect={FEED_RECT} events={FEED} agent="pricing agent · web comps" />
+        <Feed rect={FEED_RECT} events={FEED} />
         <SignalsPanel />
 
         <div
           style={{
             position: "absolute",
             left: RX,
-            top: 112,
+            top: 110,
             width: RW,
             display: "flex",
             alignItems: "baseline",
             justifyContent: "space-between",
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 800, color: INK }}>Sold comps</span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: FAINT }}>
-            {frame >= 184 ? "7 found · 6 sold + 1 asking" : frame >= 100 ? "4 found" : "searching…"}
+          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What similar pairs sold for</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>
+            {frame >= 184 ? "7 found · 6 sold, 1 asking" : frame >= 100 ? "4 found" : "searching…"}
           </span>
         </div>
         {COMPS.map((c, i) => (

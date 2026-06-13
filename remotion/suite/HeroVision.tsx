@@ -40,11 +40,11 @@ import {
 } from "./theme";
 
 /**
- * Hero video v4 — pure vision-model showcase. Three products, one arc each:
- * photo arrives → live agent feed streams the analysis (scan sweep, OCR boxes
- * over the *actual printed text* in the photo, structured attributes with
- * confidence chips) → the attributes assemble into a listing draft before
- * your eyes. Pricing appears only as a one-chip coda.
+ * Hero video v5 — the photo-to-listing showcase. Three products, one arc
+ * each: photo arrives → the live feed narrates in plain seller language
+ * (scan sweep, detection boxes over the *actual printed text* in the photo,
+ * extracted details with how-sure chips) → the details assemble into a
+ * listing draft before your eyes. Pricing appears only as a one-chip coda.
  *
  *   Act 1 · Polaroid Supercolor 645 CL — model name printed on the body; the
  *           only cursor act (click to add the photo).
@@ -64,7 +64,7 @@ export const HERO_VISION_LEN = ACT_LEN * 3 + END_LEN; // 1470 = 49s @30fps
 /* ---------- layout ---------- */
 
 const PHOTO: Rect = { x: 64, y: 112, w: 460, h: 345 };
-const FEED_RECT: Rect = { x: 64, y: 506, w: 460, h: 156 };
+const FEED_RECT: Rect = { x: 64, y: 502, w: 460, h: 164 };
 const RX = 556;
 const RW = 652;
 const COL2 = RX + 334; // field grid col 2
@@ -145,7 +145,7 @@ const ACT_POLAROID: ActConfig = {
   fileName: "IMG_5102.jpg",
   arrival: "click",
   step: "1 of 3 · instant cameras",
-  statusDone: "Identified · Polaroid Supercolor 645 CL",
+  statusDone: "Found it · Polaroid Supercolor 645 CL",
   ocr: [
     { at: 158, box: { x: 152, y: 39, w: 64, h: 25 }, label: "brand mark · “Polaroid”" },
     {
@@ -161,23 +161,22 @@ const ACT_POLAROID: ActConfig = {
     { label: "CATEGORY", value: "Cameras & Photo", conf: 0.95 },
     { label: "CONDITION", value: "Good · light wear", conf: 0.87 },
     { label: "COLOR", value: "Red / black", conf: 0.98 },
-    { label: "TEXT READ", value: "SUPERCOLOR 645 CL", conf: 0.96 },
+    { label: "PRINTED ON IT", value: "SUPERCOLOR 645 CL", conf: 0.96 },
   ],
   feed: [
-    { at: 84, done: 146, tool: "vision.extract", text: "analyzing photo · 1 image" },
+    { at: 84, done: 146, text: "Looking at your photo…" },
     {
       at: 152,
       done: 192,
-      tool: "ocr.read",
-      text: "reading printed text on the body…",
-      sub: "“Supercolor 645 CL” · brand mark “Polaroid”",
+      text: "Reading the printed text on the body…",
+      sub: "Found “Supercolor 645 CL” and “Polaroid”",
       subAt: 196,
     },
-    { at: 204, done: 264, tool: "attr.schema", text: "validating attributes against schema" },
-    { at: 282, done: 392, tool: "draft.write", text: "assembling listing draft…" },
+    { at: 204, done: 264, text: "Double-checking every detail it found" },
+    { at: 282, done: 392, text: "Writing your listing draft…" },
   ],
   title: "Polaroid Supercolor 645 CL instant camera",
-  specifics: ["Brand · Polaroid", "Type · Instant camera", "Cond. · Good"],
+  specifics: ["Brand · Polaroid", "Type · Instant camera", "Condition · Good"],
   desc: "Vintage Polaroid Supercolor 645 CL in good working order. Iconic red-and-black body with built-in flash. Light wear consistent with age.",
   price: 65,
 };
@@ -188,7 +187,7 @@ const ACT_GAMEBOY: ActConfig = {
   fileName: "IMG_5147.jpg",
   arrival: "sync",
   step: "2 of 3 · video games",
-  statusDone: "Identified · Nintendo Game Boy Color",
+  statusDone: "Found it · Nintendo Game Boy Color",
   ocr: [
     {
       at: 158,
@@ -204,20 +203,19 @@ const ACT_GAMEBOY: ActConfig = {
     { label: "CATEGORY", value: "Video Games & Consoles", conf: 0.96 },
     { label: "CONDITION", value: "Good · tested", conf: 0.85 },
     { label: "COLOR", value: "Dandelion yellow", conf: 0.98 },
-    { label: "TEXT READ", value: "GAME BOY COLOR", conf: 0.97 },
+    { label: "PRINTED ON IT", value: "GAME BOY COLOR", conf: 0.97 },
   ],
   feed: [
-    { at: 84, done: 146, tool: "vision.extract", text: "analyzing photo · 1 image" },
+    { at: 84, done: 146, text: "Looking at your photo…" },
     {
       at: 152,
       done: 192,
-      tool: "ocr.read",
-      text: "reading on-device branding…",
-      sub: "“GAME BOY COLOR” · “Nintendo”",
+      text: "Reading the name printed on it…",
+      sub: "Found “GAME BOY COLOR” and “Nintendo”",
       subAt: 196,
     },
-    { at: 204, done: 264, tool: "attr.schema", text: "validating attributes against schema" },
-    { at: 282, done: 392, tool: "draft.write", text: "assembling listing draft…" },
+    { at: 204, done: 264, text: "Double-checking every detail it found" },
+    { at: 282, done: 392, text: "Writing your listing draft…" },
   ],
   title: "Nintendo Game Boy Color — Dandelion",
   specifics: ["Brand · Nintendo", "Type · Handheld console", "Color · Dandelion"],
@@ -231,7 +229,7 @@ const ACT_GSHOCK: ActConfig = {
   fileName: "IMG_5201.jpg",
   arrival: "sync",
   step: "3 of 3 · watches",
-  statusDone: "Identified · Casio G-Shock DW-5600",
+  statusDone: "Found it · Casio G-Shock DW-5600",
   ocr: [
     { at: 158, box: { x: 208, y: 57, w: 43, h: 16 }, label: "brand · “CASIO”" },
     { at: 184, box: { x: 185, y: 163, w: 88, h: 21 }, label: "line · “G-SHOCK”" },
@@ -242,20 +240,19 @@ const ACT_GSHOCK: ActConfig = {
     { label: "CATEGORY", value: "Watches", conf: 0.97 },
     { label: "CONDITION", value: "Good", conf: 0.88 },
     { label: "COLOR", value: "Black", conf: 0.99 },
-    { label: "TEXT READ", value: "CASIO · G-SHOCK", conf: 0.95 },
+    { label: "PRINTED ON IT", value: "CASIO · G-SHOCK", conf: 0.95 },
   ],
   feed: [
-    { at: 84, done: 146, tool: "vision.extract", text: "analyzing photo · 1 image" },
+    { at: 84, done: 146, text: "Looking at your photo…" },
     {
       at: 152,
       done: 192,
-      tool: "ocr.read",
-      text: "reading case text…",
-      sub: "“CASIO” · “G-SHOCK” on the case",
+      text: "Reading the text on the case…",
+      sub: "Found “CASIO” and “G-SHOCK”",
       subAt: 196,
     },
-    { at: 204, done: 264, tool: "attr.schema", text: "validating attributes against schema" },
-    { at: 282, done: 392, tool: "draft.write", text: "assembling listing draft…" },
+    { at: 204, done: 264, text: "Double-checking every detail it found" },
+    { at: 282, done: 392, text: "Writing your listing draft…" },
   ],
   title: "Casio G-Shock DW-5600 digital watch",
   specifics: ["Brand · Casio", "Model · DW-5600", "Type · Digital watch"],
@@ -285,8 +282,8 @@ function DraftPanel({ act }: { act: ActConfig }) {
           justifyContent: "center",
         }}
       >
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: LINE }}>
-          LISTING DRAFT
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1.2, color: LINE }}>
+          YOUR LISTING DRAFT
         </span>
       </div>
     );
@@ -321,11 +318,11 @@ function DraftPanel({ act }: { act: ActConfig }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
-          LISTING DRAFT
+        <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: FAINT }}>
+          YOUR LISTING DRAFT
         </span>
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: FAINT }}>
-          generated from attributes
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: FAINT }}>
+          written from the photo
         </span>
       </div>
 
@@ -341,7 +338,7 @@ function DraftPanel({ act }: { act: ActConfig }) {
           display: "flex",
           alignItems: "center",
           padding: "0 13px",
-          fontSize: 14,
+          fontSize: 15.5,
           fontWeight: 700,
           color: INK,
           boxSizing: "border-box",
@@ -370,14 +367,14 @@ function DraftPanel({ act }: { act: ActConfig }) {
           boxShadow: descStreaming ? "0 0 0 3px rgba(99,91,255,0.1)" : undefined,
           background: SLAB,
           padding: "10px 13px",
-          fontSize: 12.5,
+          fontSize: 13.5,
           lineHeight: 1.55,
           color: DIM,
           boxSizing: "border-box",
         }}
       >
         {act.desc.slice(0, descN)}
-        <Caret visible={descStreaming} height={12} />
+        <Caret visible={descStreaming} height={13} />
       </div>
 
       {/* coda: price hint + ready pill */}
@@ -395,7 +392,7 @@ function DraftPanel({ act }: { act: ActConfig }) {
         {frame >= PRICE_AT ? (
           <span
             style={{
-              fontSize: 11.5,
+              fontSize: 13,
               fontWeight: 700,
               color: VIOLET,
               background: VIOLET_SOFT,
@@ -410,7 +407,7 @@ function DraftPanel({ act }: { act: ActConfig }) {
               }),
             }}
           >
-            Pricing agent suggests ${act.price}
+            Suggested price · ${act.price} — from recent sales
           </span>
         ) : (
           <span />
@@ -421,7 +418,7 @@ function DraftPanel({ act }: { act: ActConfig }) {
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
-              fontSize: 11.5,
+              fontSize: 13,
               fontWeight: 800,
               color: GREEN,
               background: GREEN_SOFT,
@@ -486,28 +483,28 @@ function VisionAct({ act, isFirst }: { act: ActConfig; isFirst?: boolean }) {
         ) : null}
         <StatusLine
           x={PHOTO.x}
-          y={468}
+          y={466}
           startAt={STATUS_AT}
           doneAt={STATUS_DONE}
-          busyText="Vision model reading the photo…"
+          busyText="Reading your photo…"
           doneText={act.statusDone}
         />
-        <Feed rect={FEED_RECT} events={act.feed} agent="vision pipeline · live" />
+        <Feed rect={FEED_RECT} events={act.feed} />
 
         {/* right column */}
         <div
           style={{
             position: "absolute",
             left: RX,
-            top: 112,
+            top: 110,
             width: RW,
             display: "flex",
             alignItems: "baseline",
             justifyContent: "space-between",
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 800, color: INK }}>Vision analysis</span>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: FAINT }}>{act.step}</span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What SnapList sees</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>{act.step}</span>
         </div>
         {act.fields.map((f, i) => (
           <AttrField
@@ -588,7 +585,7 @@ function EndCard() {
             letterSpacing: -0.5,
           }}
         >
-          The vision model writes the listing.
+          The listing writes itself.
         </div>
       </div>
 
@@ -604,7 +601,7 @@ function EndCard() {
             <div
               key={l.title}
               style={{
-                width: 480,
+                width: 520,
                 display: "flex",
                 alignItems: "center",
                 gap: 14,
@@ -635,7 +632,7 @@ function EndCard() {
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div
                   style={{
-                    fontSize: 13.5,
+                    fontSize: 14.5,
                     fontWeight: 700,
                     color: INK,
                     whiteSpace: "nowrap",
@@ -645,8 +642,8 @@ function EndCard() {
                 >
                   {l.title}
                 </div>
-                <div style={{ fontSize: 11.5, color: FAINT, marginTop: 3 }}>
-                  Identified & drafted by the vision model
+                <div style={{ fontSize: 12.5, color: FAINT, marginTop: 3 }}>
+                  Identified and written from one photo
                 </div>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>

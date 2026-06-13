@@ -17,7 +17,7 @@ target's center at the click frame, with a ≥12-frame dwell.
 | --- | --- | --- | --- | --- |
 | `hero-demo` | `public/hero-demo.mp4` | 49.0s (1470f) | `polaroid`, `gameboy`, `gshock` | **14.3s** (act-1 draft assembled) |
 | `step-snap` | `public/demo/steps/snap.mp4` | 16.0s (480f) | `guitar` | **13.3s** (3 photos · ready) |
-| `step-identify` | `public/demo/steps/identify.mp4` | 15.0s (450f) | `camera` | **14.0s** (attributes + 94% + schema-valid) |
+| `step-identify` | `public/demo/steps/identify.mp4` | 15.0s (450f) | `camera` | **14.0s** (details + 94% + plain summary) |
 | `step-price` | `public/demo/steps/price.mp4` | 18.0s (540f) | `sneakers` | **16.6s** (price applied) |
 | `step-write` | `public/demo/steps/write.mp4` | 18.7s (560f) | `mixer` | **9.3s** (eBay rendering complete) |
 | `step-publish` | `public/demo/steps/publish.mp4` | 16.0s (480f) | `keyboard` | **13.3s** (live + confirmation card) |
@@ -28,46 +28,55 @@ Poster extraction example:
 
 ## What each clip shows
 
-- **hero-demo** — pure vision-model showcase, three acts. Photo arrives
+- **hero-demo** — photo-to-listing showcase, three acts. Photo arrives
   (act 1 is the only cursor act: a verified click on the dropzone), scan sweep
-  + OCR boxes land on the *actual printed text* in each photo (“Polaroid /
-  Supercolor 645 CL”, “GAME BOY COLOR / Nintendo”, “CASIO / G-SHOCK”),
-  structured attributes populate with per-field confidence chips, then the
-  attributes assemble into a listing draft (title types itself, specifics
+  + detection boxes land on the *actual printed text* in each photo
+  (“Polaroid / Supercolor 645 CL”, “GAME BOY COLOR / Nintendo”,
+  “CASIO / G-SHOCK”), the extracted details populate with per-field how-sure
+  chips, then they assemble into a listing draft (title types itself, detail
   chips, streamed description). Pricing appears only as a one-chip coda.
   Ends on a three-draft end card that crossfades into the loop.
 - **step-snap** — whole photo-adding flow: phone-frame capture (shutter →
   flash → photo flies into the rail), an OS drag-drop of a Finder-style file
   card onto the dropzone (press + release cursor-verified), and a “+ Add”
   click for a third angle. Ends “3 photos · ready to identify”.
-- **step-identify** — vision scan → OCR boxes on “Canon” / “EOS 80D” →
-  six structured attributes with confidence chips → ID-confidence composite
-  (94%) with named signals → dark structured-output panel that types the JSON
-  and stamps “schema valid”. Cursor-free by design.
-- **step-price** — comp search visualized: two queries fire in the agent feed,
-  six comp rows land with sources (eBay/Mercari/Poshmark/Depop — the lone
-  *asking* price visibly down-weighted), dots scatter on a price axis, the
-  $40–$58 band forms around the $48 suggestion, confidence composes from
-  named signals to 84%, then a verified click applies the price.
-- **step-write** — listing copy writes itself per platform: eBay (keyword
-  title, item-specifics grid, streamed description), then verified tab clicks
-  to Facebook Marketplace (casual/local, copy-paste export note) and Mercari
-  (short title, hashtag chips, shipping line). Ends “3 platforms ready”.
+- **step-identify** — photo scan → detection boxes on “Canon” / “EOS 80D” →
+  six extracted details with how-sure chips → “how sure is the match” (94%)
+  with named reasons → a plain-language item summary that types itself and
+  stamps “every detail double-checked”. Cursor-free by design.
+- **step-price** — price research visualized: two searches fire in the live
+  feed, six recent-sale rows land with sources (eBay/Mercari/Poshmark/Depop —
+  the lone *asking* price visibly counts less), dots scatter on a price axis,
+  the $40–$58 band forms around the $48 suggestion, “why trust this price”
+  fills to 84%, then a verified click applies the price.
+- **step-write** — listing copy writes itself per marketplace: eBay
+  (search-friendly title, item-details grid, streamed description), then
+  verified tab clicks to Facebook Marketplace (casual/local, copy-paste note)
+  and Mercari (short title, hashtag chips, shipping line). Ends
+  “3 marketplaces ready”.
 - **step-publish** — review screen: checklist ticks, amber autopilot gate
-  (“74% < 85% threshold — your review required”), verified Publish click →
+  (“only 74% sure, so it waits for your OK”), verified Publish click →
   posting state → green “Live on eBay” + confirmation card with listing id.
-- **buyer-qa** — trust story: buyer question lands in the inbox (verified row
-  click), the agent streams a grounded draft (grounding chips: attributes /
-  listing copy / condition · Fair), seller clicks into the draft (verified)
-  and appends one edit, then a verified “Approve & send” click delivers the
-  reply into the thread (“Sent to buyer via eBay messages”).
+- **buyer-qa** — trust story (badged STEP 6 · ANSWER BUYERS — it is the sixth
+  step of the how-it-works pipeline): buyer question lands in the inbox
+  (verified row click), a reply drafts itself from the item's real details
+  (chips: the item's details / your listing / condition · Fair), seller
+  clicks into the draft (verified) and appends one edit, then a verified
+  “Approve & send” click delivers the reply into the thread (“Sent to the
+  buyer through eBay messages”).
 
 ## Set consistency
 
 All clips share the same Prism-style shell (white canvas, navy `#131e3a` ink,
 violet `#635bff` accent, `#f4f6fb` backdrop), the same top bar with a
-step-identity badge (`STEP 1 · SNAP` … `BUYER Q&A`), the same agent-feed,
-chip, confidence and cursor primitives — they read as one set in a carousel.
+step-identity badge (`STEP 1 · SNAP` … `STEP 6 · ANSWER BUYERS`), the same
+live-progress feed, chip, how-sure and cursor primitives — they read as one
+set in a carousel.
+
+**Plain-language rule (ui-r6):** every word rendered inside a clip is seller
+language. No tool-call tags, no JSON, no “comps”/“conf”/“schema”/“pipeline”/
+“structured output”, no abbreviations (“6 days ago”, never “6d”). The
+audience is a homeowner, not an engineer.
 
 ## Re-rendering
 

@@ -14,53 +14,85 @@ export const metadata: Metadata = {
 };
 
 /**
- * /how-it-works (ui-r5-marketing) — the pipeline walkthrough at demo scale.
- * Owner round-5 feedback killed the repetition: HiwJourneyRail ("the short
- * version") and HiwPipelineNav ("the pipeline, up close") are gone — both
- * restated what the five step clips already show. In their place a single
- * plain heading block introduces the steps. Section order: hero (ScanShowcase)
- * → step-intro header → five step clips (/demo/steps/*.mp4, 1920×1080 loops
- * via DemoClip, near-content-width, alternating sides) → buyer-Q&A → pricing
- * waterfall LAST → CTA. The WaterfallExplorer mirrors the real
- * PricingProvider router tiers — keep in sync. The step clips embed their own
- * assigned items (see DEMO_SURFACE_ASSIGNMENTS).
+ * /how-it-works (ui-r6-remotion) — the pipeline walkthrough at demo scale.
+ * Owner round-6 feedback: the step clips were too small ("the user shouldn't
+ * have to squint") and the buyer-Q&A band duplicated the step format. Now the
+ * pipeline section breaks out of the content column (max-w-[1720px]) and the
+ * clip takes ~3/4 of each row; buyer Q&A joined the same section as step 06
+ * ("After it's live") in the identical alternating text/video format. Section
+ * order: hero (ScanShowcase) → step-intro header → SIX step clips
+ * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4, 1920×1080 loops via DemoClip,
+ * alternating sides) → pricing waterfall LAST → CTA. The WaterfallExplorer
+ * mirrors the real PricingProvider router tiers — keep in sync. The step
+ * clips embed their own assigned items (see DEMO_SURFACE_ASSIGNMENTS).
  */
 
 const STEPS = [
   {
     n: "01",
-    id: "snap",
+    eyebrow: "Step 1",
+    tint: undefined,
+    src: "/demo/steps/snap.mp4",
+    glyph: "snap",
     title: "Snap",
     body: "One photo — or up to four if condition matters. Visible barcodes and ISBNs are read automatically, so books and boxed items start with an exact identity.",
     poster: "Four slots, thirty seconds of your time.",
+    label: "Demo clip — the Snap step of the SnapList pipeline",
   },
   {
     n: "02",
-    id: "identify",
+    eyebrow: "Step 2",
+    tint: undefined,
+    src: "/demo/steps/identify.mp4",
+    glyph: "identify",
     title: "Identify",
     body: "SnapList reads your photo and pulls out the brand, model, category, condition, and key details. If it isn't sure what it's looking at, it tells you — it never quietly guesses.",
     poster: "It knows exactly what it's looking at.",
+    label: "Demo clip — the Identify step of the SnapList pipeline",
   },
   {
     n: "03",
-    id: "price",
+    eyebrow: "Step 3",
+    tint: undefined,
+    src: "/demo/steps/price.mp4",
+    glyph: "price",
     title: "Price",
     body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources it used — real sale prices, not wishful asking prices.",
     poster: "A defensible number, with its receipts.",
+    label: "Demo clip — the Price step of the SnapList pipeline",
   },
   {
     n: "04",
-    id: "write",
+    eyebrow: "Step 4",
+    tint: undefined,
+    src: "/demo/steps/write.mp4",
+    glyph: "write",
     title: "Write",
-    body: "Your listing is written three ways, one per marketplace: eBay gets detailed item specifics and a search-friendly title, Facebook gets a casual local tone, Mercari gets hashtags and shipping details.",
+    body: "Your listing is written three ways, one per marketplace: eBay gets full item details and a search-friendly title, Facebook gets a casual local tone, Mercari gets hashtags and shipping details.",
     poster: "Three marketplaces, three native tongues.",
+    label: "Demo clip — the Write step of the SnapList pipeline",
   },
   {
     n: "05",
-    id: "publish",
+    eyebrow: "Step 5",
+    tint: undefined,
+    src: "/demo/steps/publish.mp4",
+    glyph: "publish",
     title: "Publish",
     body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
     poster: "Live on eBay, under your name.",
+    label: "Demo clip — the Publish step of the SnapList pipeline",
+  },
+  {
+    n: "06",
+    eyebrow: "After it's live",
+    tint: "rose",
+    src: "/demo/buyer-qa.mp4",
+    glyph: "chat",
+    title: "Answer",
+    body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details — edition, condition, what's included. You approve, edit, or rewrite; nothing sends without you.",
+    poster: "Drafted from the item's real details, sent by you.",
+    label: "Demo clip — a buyer question arrives and a reply drafted from the item's details awaits approval",
   },
 ] as const;
 
@@ -99,27 +131,33 @@ export default function HowItWorks() {
             The pipeline, <em className="text-iris">step by step</em>
           </h2>
           <p className="mt-4 max-w-[54ch] text-[17px] leading-relaxed text-flash-dim">
-            Five steps run every time you snap a photo. Here is each one doing
-            its job — real screens, real items.
+            Six steps, one flow: five run every time you snap a photo, and the
+            sixth keeps working after the listing is live. Here is each one
+            doing its job — real screens, real items.
           </p>
         </Reveal>
       </section>
 
-      {/* the five steps — demo clips at readable scale, alternating sides */}
-      <section className="mx-auto w-full max-w-7xl px-5 pb-24 pt-16 sm:px-8 sm:pb-28 sm:pt-20">
+      {/* the six steps — demo clips at full demo scale, alternating sides.
+          ui-r6: this section deliberately breaks out of the page's content
+          column (max-w-[1720px]) and gives the clip ~3/4 of the row so the
+          in-video UI is readable without squinting. */}
+      <section className="mx-auto w-full max-w-[1720px] px-5 pb-24 pt-16 sm:px-8 sm:pb-28 sm:pt-20">
         <div className="space-y-24 sm:space-y-32">
-          {STEPS.map(({ n, id, title, body, poster }, i) => (
+          {STEPS.map(({ n, eyebrow, tint, src, glyph, title, body, poster, label }, i) => (
             <Reveal key={n} delay={0.05}>
               <div
-                id={`step-${id}`}
-                className={`grid scroll-mt-24 items-center gap-9 lg:gap-16 ${
+                id={`step-${glyph === "chat" ? "qa" : glyph}`}
+                className={`grid scroll-mt-24 items-center gap-9 lg:gap-12 ${
                   i % 2 === 0
-                    ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]"
-                    : "lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]"
+                    ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,2.9fr)]"
+                    : "lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,2.9fr)_minmax(0,1fr)]"
                 }`}
               >
                 <div className={i % 2 === 0 ? "" : "lg:order-2"}>
-                  <Eyebrow n={n}>{`Step ${i + 1}`}</Eyebrow>
+                  <Eyebrow n={n} tint={tint}>
+                    {eyebrow}
+                  </Eyebrow>
                   <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
                     {title}
                   </h2>
@@ -129,50 +167,18 @@ export default function HowItWorks() {
                 </div>
                 <div className={i % 2 === 0 ? "" : "lg:order-1"}>
                   <DemoClip
-                    src={`/demo/steps/${id}.mp4`}
-                    label={`Demo clip — the ${title} step of the SnapList pipeline`}
+                    src={src}
+                    label={label}
                     n={n}
                     title={title}
                     caption={poster}
-                    glyph={HIW_GLYPHS[id]}
+                    glyph={HIW_GLYPHS[glyph]}
                     className="rounded-3xl"
                   />
                 </div>
               </div>
             </Reveal>
           ))}
-        </div>
-      </section>
-
-      {/* buyer messaging — same demo scale as the steps */}
-      <section className="border-t border-line">
-        <div className="mx-auto w-full max-w-7xl px-5 py-24 sm:px-8 sm:py-28">
-        <Reveal>
-          <div className="grid items-center gap-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)] lg:gap-16">
-            <div>
-              <Eyebrow n="06" tint="rose">
-                After it&apos;s live
-              </Eyebrow>
-              <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
-                Buyer questions, pre-answered
-              </h2>
-              <p className="mt-4 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
-                Incoming messages land in a live inbox with a reply already
-                drafted from the item&apos;s real details — edition, condition,
-                what&apos;s included. You approve, edit, or rewrite; nothing
-                sends without you.
-              </p>
-            </div>
-            <DemoClip
-              src="/demo/buyer-qa.mp4"
-              label="Demo clip — a buyer question arrives and a grounded reply is drafted for approval"
-              title="Buyer Q&A"
-              caption="Drafted from attributes, sent by you."
-              glyph={HIW_GLYPHS.chat}
-              className="rounded-3xl"
-            />
-          </div>
-        </Reveal>
         </div>
       </section>
 
