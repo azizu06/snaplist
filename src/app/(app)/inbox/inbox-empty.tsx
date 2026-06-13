@@ -54,7 +54,12 @@ export function InboxEmptyState() {
 
       <div className="px-6">
         {/* ---- stacked ghost conversation ---- */}
-        <div aria-hidden className="relative mx-auto h-52 w-full max-w-md select-none">
+        {/* h-64 (was h-52): the front card is ~190px tall, so the old 64px
+            bottom fade sat ON the reply's last line and greyed out "cables
+            included" (owner). The extra height puts clear space under the
+            card and the slimmer fade lives only there — every word of the
+            thread stays fully legible, and the soft fade-out remains. */}
+        <div aria-hidden className="relative mx-auto h-64 w-full max-w-md select-none">
           <GhostCard className="top-3 -rotate-3 opacity-40" />
           <GhostCard className="top-1.5 rotate-2 opacity-60" />
 
@@ -78,8 +83,9 @@ export function InboxEmptyState() {
             </div>
           </div>
 
-          {/* fade the composition into the copy below */}
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface to-transparent" />
+          {/* fade the composition into the copy below — kept BELOW the
+              card text (see h-64 note above) */}
+          <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-surface to-transparent" />
         </div>
 
         {/* ---- copy: one headline, one sentence, one hint ---- */}
