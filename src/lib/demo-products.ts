@@ -30,6 +30,8 @@ export type DemoProduct = {
   category: string;
   /** Which pricing tier the pipeline would plausibly fire for this item. */
   pricingStory: "barcode" | "comps" | "depreciation";
+  /** 2-3 short attribute bullets — only what is actually visible in the photo. */
+  details: string[];
   alt: string;
 };
 
@@ -43,6 +45,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Cameras & Photo",
     pricingStory: "comps",
+    details: ["Canon EOS 80D digital SLR", "50mm prime lens included", "Model badge readable on the body"],
     alt: "Black Canon EOS 80D DSLR camera with a prime lens on a wooden table",
   },
   {
@@ -54,6 +57,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Clothing & Shoes",
     pricingStory: "comps",
+    details: ["Nike Free RN Flyknit upper", "University Red colorway", "Knit texture in clean shape"],
     alt: "Red Nike Free RN Flyknit running shoe on a red background",
   },
   {
@@ -65,6 +69,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Books",
     pricingStory: "barcode",
+    details: ["O'Reilly programming paperback", "Title fully readable on the cover", "Standard trade-paperback format"],
     alt: "Person holding the O'Reilly Python for Unix and Linux System Administration book",
   },
   {
@@ -76,6 +81,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Like new",
     category: "Music & Vinyl",
     pricingStory: "comps",
+    details: ["LP pressed in translucent teal", "Limited color pressing", "Photographed on a turntable"],
     alt: "Teal colored vinyl record spinning on a turntable in warm light",
   },
   {
@@ -87,6 +93,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Video Games & Consoles",
     pricingStory: "comps",
+    details: ["Nintendo Game Boy Color", "Dandelion yellow shell", "Screen and buttons intact"],
     alt: "Yellow Nintendo Game Boy Color handheld console on a yellow background",
   },
   {
@@ -98,6 +105,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Like new",
     category: "Computers & Accessories",
     pricingStory: "depreciation",
+    details: ["Compact 65% layout", "Green and white keycap set", "Custom-built mechanical board"],
     alt: "Custom 65 percent mechanical keyboard with green and white keycaps on a desk mat",
   },
   {
@@ -109,6 +117,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Consumer Electronics",
     pricingStory: "comps",
+    details: ["AfterShokz bone-conduction set", "Trekz Air wraparound frame", "Midnight blue finish"],
     alt: "Blue AfterShokz bone-conduction headphones on a white background",
   },
   {
@@ -120,6 +129,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Like new",
     category: "Musical Instruments",
     pricingStory: "comps",
+    details: ["Taylor acoustic-electric", "Gloss koa top with cutaway", "Taylor logo on the headstock"],
     alt: "Taylor koa-wood acoustic-electric guitar on a stand beside a window",
   },
   {
@@ -131,6 +141,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Cameras & Photo",
     pricingStory: "comps",
+    details: ["Polaroid Supercolor 645 CL", "Classic red-and-black body", "Instant film camera"],
     alt: "Red and black Polaroid Supercolor 645 CL instant camera on a white surface",
   },
   {
@@ -142,6 +153,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Home & Kitchen",
     pricingStory: "comps",
+    details: ["KitchenAid stand mixer", "Pink enamel finish", "Brand band visible on the head"],
     alt: "Close-up of a pink KitchenAid stand mixer whipping batter",
   },
   {
@@ -153,6 +165,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Fair",
     category: "Toys & Games",
     pricingStory: "depreciation",
+    details: ["Vintage brass figural pieces", "Wooden chessboard included", "Ornate cast detailing"],
     alt: "Ornate vintage brass chess pieces standing on a wooden chessboard",
   },
   {
@@ -164,6 +177,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Audio & Hi-Fi",
     pricingStory: "comps",
+    details: ["Victrola belt-drive turntable", "Silver plinth, brand printed", "Record shown on the platter"],
     alt: "Silver Victrola belt-drive turntable with a vinyl record on the platter, beside a sketchpad",
   },
   {
@@ -175,6 +189,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Home & Kitchen",
     pricingStory: "comps",
+    details: ["Slim stainless espresso machine", "Portafilter and drip tray shown", "Compact single-group design"],
     alt: "Stainless-steel slim espresso machine pulling a shot into a white cup on a wooden counter",
   },
   {
@@ -186,6 +201,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     condition: "Good",
     category: "Watches",
     pricingStory: "comps",
+    details: ["Casio G-Shock DW-5600", "Classic square case", "Digital display, resin strap"],
     alt: "Hand holding a black Casio G-Shock DW-5600 digital watch",
   },
 ];
@@ -224,7 +240,7 @@ export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
     "headphones",
     "guitar",
     "polaroid",
-    "mixer",
+    "espresso",
     "gshock",
   ],
   // ui-r4: mixer.jpg is an extreme close-up that doesn't read as a sellable

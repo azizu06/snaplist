@@ -49,7 +49,7 @@ export function SimulatorCard({
       </header>
       <div className="flex flex-col gap-3 px-4 py-4 sm:px-5">
         {items.length === 0 ? (
-          <p className="text-sm text-muted">
+          <p className="text-[14.5px] text-fg">
             No items yet — create a listing first, then simulate a buyer
             question about it.
           </p>
@@ -88,7 +88,7 @@ export function SimulatorCard({
             </button>
           </div>
         )}
-        <p className="text-xs text-faint">
+        <p className="text-[13px] text-muted">
           Sandbox: replies are drafted by the agent, approved by you, and
           delivery is a logged no-op until the eBay adapter lands.
         </p>

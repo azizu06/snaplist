@@ -46,12 +46,14 @@ export default async function InboxPage() {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+    // max-w-5xl (was 2xl): the 672px column made the demo video — and the
+    // whole messaging area — read cramped and illegible (owner, twice).
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
       <header>
-        <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
+        <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
           Buyer inbox
         </h1>
-        <p className="mt-0.5 text-[13px] text-muted">
+        <p className="mt-1 text-[14px] text-muted">
           Questions from buyers appear here live. We draft a reply from the
           listing — you approve or edit before anything sends.
         </p>

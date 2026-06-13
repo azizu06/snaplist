@@ -186,7 +186,7 @@ export default async function PreviewPage({
       );
     case "inbox-empty":
       return (
-        <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+        <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
           <header>
             <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
               Buyer inbox

@@ -165,10 +165,12 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
 
 function DashboardEmpty() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-14 text-center">
-      {/* mt-36: headroom so the opened previews stay inside the dashed card
-          at the larger folder scale */}
-      <div className="mb-12 mt-36">
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 pb-14 pt-10 text-center">
+      {/* mt-28 keeps just enough headroom for the opened previews at the
+          2.2 folder scale; the old mt-36 + py-14 read as an off-center
+          void above the closed folder (owner). mb-16 separates the folder
+          from the title. */}
+      <div className="mb-16 mt-28">
         <Folder
           color="#6d4aff"
           size={2.2}

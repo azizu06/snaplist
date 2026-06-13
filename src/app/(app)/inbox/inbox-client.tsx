@@ -281,7 +281,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
+          <h2 className="text-[14px] font-semibold text-fg-strong">Messages</h2>
           {inbound.length > 0 ? (
             <span
               data-nums
@@ -338,7 +338,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
-                    <p className="text-[10.5px] font-semibold text-faint">
+                    <p className="text-[11.5px] font-semibold text-muted">
                       buyer · via eBay
                     </p>
                     <p className="mt-1 text-[13px] leading-relaxed text-fg">
@@ -432,7 +432,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   </div>
                 ) : (
                   <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md border border-dashed border-border bg-surface-2/60 px-3.5 py-2.5">
-                    <p className="text-[12.5px] text-faint">
+                    <p className="text-[13px] text-muted">
                       Drafting a reply from your listing…
                     </p>
                   </div>

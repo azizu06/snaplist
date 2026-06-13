@@ -119,7 +119,7 @@ export function InboxDemoVideo() {
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
-          <span className="ml-2 flex items-center gap-1.5 text-[12px] font-semibold text-muted">
+          <span className="ml-2 flex items-center gap-1.5 text-[13px] font-semibold text-fg">
             <span aria-hidden className="relative flex size-2">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60 motion-reduce:animate-none" />
               <span className="relative inline-flex size-2 rounded-full bg-success" />
@@ -149,7 +149,7 @@ export function InboxDemoVideo() {
           ) : null}
         </div>
       </div>
-      <figcaption className="mt-2.5 text-center text-[12.5px] leading-relaxed text-faint">
+      <figcaption className="mt-2.5 text-center text-[13.5px] leading-relaxed text-muted">
         A buyer asks · the agent drafts from your listing · you approve &amp; send.
       </figcaption>
     </figure>

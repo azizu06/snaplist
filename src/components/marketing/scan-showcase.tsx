@@ -26,7 +26,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
 
 /** Ten montage entries — the keyboard sits out (it stars in the storefronts
- *  section) and chess sits out (it rides the listings carousel). */
+ *  section), chess sits out (it rides the listings carousel), and the mixer
+ *  sits out (its extreme close-up doesn't read as a product at a glance). */
 const SCAN_SLUGS = [
   "camera",
   "book",
@@ -36,7 +37,7 @@ const SCAN_SLUGS = [
   "headphones",
   "guitar",
   "polaroid",
-  "mixer",
+  "espresso",
   "gshock",
 ] as const;
 
@@ -84,6 +85,12 @@ function AnalyzingPanel() {
         <span className="scan-skel block h-[26px] w-24 rounded-full" />
       </div>
       <span aria-hidden className="scan-skel mt-3 block h-[13px] w-2/5 rounded-md" />
+      {/* mirror the detail bullets so the reveal doesn't jump */}
+      <div aria-hidden className="mt-5 space-y-2.5">
+        <span className="scan-skel block h-[13px] w-1/2 rounded-md" />
+        <span className="scan-skel block h-[13px] w-2/5 rounded-md" />
+        <span className="scan-skel block h-[13px] w-[45%] rounded-md" />
+      </div>
       <div className="mt-auto space-y-2.5 border-t border-line pt-5">
         {[
           "Reading the photo",
@@ -220,6 +227,23 @@ export function ScanShowcase() {
             <p className="mt-2.5 text-[12.5px] font-medium text-flash-faint">
               {listing.category} · suggested from the used market
             </p>
+
+            {/* What the model pulled out of the photo — fills the panel with
+                real extracted attributes instead of dead space (owner). */}
+            <ul className="mt-5 space-y-2">
+              {listing.details.map((detail) => (
+                <li
+                  key={detail}
+                  className="flex items-center gap-2.5 text-[13.5px] text-flash-dim"
+                >
+                  <span
+                    aria-hidden
+                    className="size-1.5 shrink-0 rounded-full bg-iris/70"
+                  />
+                  {detail}
+                </li>
+              ))}
+            </ul>
 
             <div className="mt-auto space-y-2.5 border-t border-line pt-5">
               <CheckRow>Identified from the photo — brand, model, condition</CheckRow>
