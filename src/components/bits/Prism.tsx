@@ -19,6 +19,11 @@ type PrismProps = {
   bloom?: number;
   suspendWhenOffscreen?: boolean;
   timeScale?: number;
+  /** Cap the canvas device-pixel-ratio. This is a per-pixel raymarched
+   *  fragment shader, so on a 2x (retina) display it does 4x the work of a
+   *  1x render. For a soft decorative background, capping to ~1.5 roughly
+   *  halves the GPU cost with no visible loss. Default 2 preserves callers. */
+  maxDpr?: number;
 };
 
 const Prism: React.FC<PrismProps> = ({
@@ -36,7 +41,8 @@ const Prism: React.FC<PrismProps> = ({
   inertia = 0.05,
   bloom = 1,
   suspendWhenOffscreen = false,
-  timeScale = 0.5
+  timeScale = 0.5,
+  maxDpr = 2
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -63,7 +69,7 @@ const Prism: React.FC<PrismProps> = ({
     const HOVSTR = Math.max(0, hoverStrength || 1);
     const INERT = Math.max(0, Math.min(1, inertia || 0.12));
 
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(maxDpr, window.devicePixelRatio || 1);
     const renderer = new Renderer({
       dpr,
       alpha: transparent,
@@ -450,7 +456,8 @@ const Prism: React.FC<PrismProps> = ({
     hoverStrength,
     inertia,
     bloom,
-    suspendWhenOffscreen
+    suspendWhenOffscreen,
+    maxDpr
   ]);
 
   return <div className="w-full h-full relative" ref={containerRef} />;

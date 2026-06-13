@@ -99,24 +99,31 @@ export function HeroPrism() {
   return (
     <div
       aria-hidden
-      className="prism-canvas-enter pointer-events-none absolute inset-x-0 top-0 hidden h-[520px] opacity-55 sm:h-[620px] md:block dark:opacity-70"
+      className="prism-canvas-enter pointer-events-none absolute inset-x-0 top-0 hidden h-[440px] opacity-50 sm:h-[520px] md:block dark:opacity-58"
     >
       <Prism
         animationType="rotate"
         timeScale={0.35}
-        height={3.4}
+        // Shorter + lifted (r6, owner): the bright base used to land on the
+        // hero PARAGRAPH and wash out that thinner text. A shorter prism with
+        // the core lifted to y:300 parks the glow behind the big bold
+        // headline (which survives it) so the paragraph below sits on a
+        // darker field and reads cleanly.
+        height={2.9}
         baseWidth={5.2}
         scale={3.1}
-        // +y lifts the bright core up behind the headline — at center it sat
-        // right behind the hero paragraph and washed it out in dark mode.
-        offset={{ x: 0, y: 110 }}
-        glow={dark ? 0.95 : 0.9}
-        bloom={dark ? 1.05 : 1}
+        offset={{ x: 0, y: 300 }}
+        glow={dark ? 0.78 : 0.78}
+        bloom={dark ? 0.85 : 0.9}
         noise={dark ? 0.06 : 0.03}
         hueShift={dark ? 0.25 : 0.12}
         colorFrequency={1.1}
         suspendWhenOffscreen
         transparent
+        // Decorative soft glow — cap the raymarched shader at 1.5x so retina
+        // displays don't pay 4x the fragment cost (perf: owner felt the home
+        // page render lag). Suspends entirely once scrolled past.
+        maxDpr={1.5}
       />
     </div>
   );

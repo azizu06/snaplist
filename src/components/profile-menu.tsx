@@ -118,7 +118,7 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
               Settings
             </MenuItem>
             <MenuItem
-              href="/how-it-works"
+              href="/tour"
               onNavigate={close}
               icon={
                 <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

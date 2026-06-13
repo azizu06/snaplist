@@ -165,14 +165,12 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
 
 function DashboardEmpty() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 pb-14 pt-10 text-center">
-      {/* mt-60 (r6): the opened previews pop ~225px UP from the folder, so
-          the folder's closed top needs ~280px of clear space above it
-          (pt-10 + mt-60) for the popped cards to land comfortably inside the
-          container instead of spilling toward the header (owner). With more
-          room above (280px) than below (~220px), the folder settles just
-          below the container's vertical center. mb-16 → title. */}
-      <div className="mb-16 mt-60">
+    <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+      {/* r6 (owner): the folder block is vertically CENTERED in the container
+          (justify-center + min-h), not pushed down with a void above it.
+          mb-14 sets the gap to the title. The whole section is nudged down
+          from the nav at the <main> level (pt-16). */}
+      <div className="mb-14">
         <Folder
           color="#6d4aff"
           size={2.2}
@@ -227,7 +225,7 @@ export function DashboardView({
   const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 py-7 sm:px-6">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-10 pt-24 sm:px-6">
       {/* ---- page header (Stripe: 24px bold title; primary lives in topbar) ---- */}
       <header className="flex items-center justify-between gap-3">
         <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">

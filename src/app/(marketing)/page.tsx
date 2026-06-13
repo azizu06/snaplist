@@ -469,7 +469,7 @@ export default function Landing() {
                 </ClickSpark>
               </Magnet>
               <Link
-                href="/how-it-works"
+                href="/tour"
                 className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[15px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
               >
                 <svg
@@ -589,7 +589,7 @@ export default function Landing() {
         </Reveal>
         <Reveal className="mt-10">
           <Link
-            href="/how-it-works"
+            href="/tour"
             className="group inline-flex items-center gap-2 text-[14.5px] font-semibold text-iris"
           >
             Walk through the whole pipeline
