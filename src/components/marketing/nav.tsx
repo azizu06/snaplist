@@ -6,6 +6,9 @@ import { Logo } from "@/components/logo";
 import { ThemeIconToggle } from "@/components/theme-toggle";
 
 const LINKS = [
+  // Explicit Home tab (owner): the logo links home, but not everyone knows
+  // that — a labelled tab makes it discoverable.
+  { href: "/", label: "Home" },
   { href: "/how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },
   { href: "/about", label: "About" },
