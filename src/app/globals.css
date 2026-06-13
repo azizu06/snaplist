@@ -1005,3 +1005,28 @@
     animation: none;
   }
 }
+
+/* --- ui-r6-login -----------------------------------------------------------
+   Auth atmosphere: the login screen reuses the marketing hero's prism slab +
+   grain verbatim (same classes, same themes, same reduced-motion gates), but
+   reshaped for a centered card composition — a calm top band that fades out
+   before mid-screen instead of the old hard diagonal clip slashing the whole
+   viewport. The card then sits on quiet canvas in both themes. */
+.auth-hero .prism-gradient,
+.auth-hero .prism-grain {
+  inset: 0 0 auto 0;
+  height: 62vh;
+  clip-path: none;
+  -webkit-mask-image: linear-gradient(to bottom, black 30%, transparent 97%);
+  mask-image: linear-gradient(to bottom, black 30%, transparent 97%);
+}
+/* Light: ease the wash so the navy headline stays effortless to read. */
+.auth-hero .prism-gradient {
+  opacity: 0.72;
+}
+/* Dark: the slab is already dim navy — keep it near full so the violet
+   pools still glow behind the headline. */
+.dark .auth-hero .prism-gradient {
+  opacity: 0.92;
+}
+/* --- end ui-r6-login --- */

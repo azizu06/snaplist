@@ -25,7 +25,7 @@ export default async function LoginPage({
   if (userId) redirect(safeNext(next));
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pb-20 pt-6">
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pb-16 pt-2">
       {/* react-bits FadeContent: one soft blur-up entrance for the whole card */}
       <FadeContent
         blur
@@ -33,15 +33,15 @@ export default async function LoginPage({
         className="flex w-full flex-col items-center gap-7"
       >
         <div className="text-center">
-          <h1 className="font-display text-[26px] font-bold tracking-tight text-flash">
-            Welcome back to{" "}
-            <em className="text-iris">
-              SnapList
-            </em>
+          {/* Landing-hero type treatment: display face, tight tracking, the
+              em/italic iris accent. Copy sits on the prism band, so it stays
+              full-ink (text-flash) like the hero's BlurText paragraph. */}
+          <h1 className="font-display text-[clamp(28px,4.5vw,34px)] font-bold leading-tight tracking-tight text-flash">
+            Welcome back to <em className="text-iris">SnapList</em>
           </h1>
-          <p className="mt-2 max-w-[38ch] text-[13.5px] leading-relaxed text-flash-dim">
-            Snap a photo of something you want to sell — we identify it, price it
-            with sources, and write the listing.
+          <p className="mx-auto mt-2.5 max-w-[40ch] text-[14px] font-medium leading-relaxed text-flash/85">
+            Snap a photo of something you want to sell — we identify it, price
+            it with sources, and write the listing.
           </p>
         </div>
         <SignIn
@@ -49,6 +49,27 @@ export default async function LoginPage({
           fallbackRedirectUrl={safeNext(next)}
           signUpFallbackRedirectUrl={safeNext(next)}
         />
+        {/* Trust strip — the landing hero's glass pill, condensed to the two
+            points that matter at the door. */}
+        <p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 rounded-full border border-white/55 bg-white/70 px-4.5 py-1.5 text-[12px] font-semibold text-flash shadow-xs backdrop-blur dark:border-white/10 dark:bg-white/10">
+          {["Free while in beta", "No credit card required"].map((point) => (
+            <span key={point} className="flex items-center gap-1.5">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden
+                className="size-3 text-iris"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              {point}
+            </span>
+          ))}
+        </p>
       </FadeContent>
     </main>
   );
