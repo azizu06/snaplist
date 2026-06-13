@@ -37,6 +37,7 @@ import {
   center,
   type ClickSpec,
   type Rect,
+  SURFACE,
 } from "./theme";
 
 /**
@@ -309,7 +310,7 @@ function DraftPanel({ act }: { act: ActConfig }) {
         height: DRAFT.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxShadow: "0 12px 30px -14px rgba(19,30,58,0.18)",
         boxSizing: "border-box",
         padding: "14px 16px",
@@ -605,7 +606,7 @@ function EndCard() {
                 display: "flex",
                 alignItems: "center",
                 gap: 14,
-                background: "white",
+                background: SURFACE,
                 border: `1px solid ${LINE}`,
                 borderRadius: 14,
                 padding: 11,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useThemedVideoSrc } from "@/lib/use-themed-video-src";
 
 /**
  * "Watch how replies work" teaser inside the inbox empty state.
@@ -85,6 +86,8 @@ export function InboxDemoVideo() {
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
   const reduced = useReducedMotion();
+  // Follow the app theme: swap in the dark render of the buyer-Q&A clip.
+  const themedSrc = useThemedVideoSrc("/demo/buyer-qa.mp4");
 
   // Lazy mount: only attach the <video> once the frame scrolls into view.
   useEffect(() => {
@@ -131,12 +134,14 @@ export function InboxDemoVideo() {
           <PosterScene />
           {showVideo ? (
             <video
-              src="/demo/buyer-qa.mp4"
+              key={themedSrc}
+              src={themedSrc}
               muted
               loop
               playsInline
               autoPlay
               preload="metadata"
+              onLoadStart={() => setPlaying(false)}
               onCanPlay={(e) => {
                 void e.currentTarget.play().catch(() => {});
                 setPlaying(true);

@@ -24,6 +24,7 @@ import {
   TOPBAR_H,
   VIOLET,
   WIN,
+  SURFACE,
 } from "./theme";
 
 /* ================= cursor ================= */
@@ -228,7 +229,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           top: WIN.y,
           width: WIN.w,
           height: WIN.h,
-          background: "white",
+          background: SURFACE,
           borderRadius: 16,
           border: `1px solid ${LINE}`,
           boxShadow: "0 18px 40px -12px rgba(19,30,58,0.18)",
@@ -360,7 +361,7 @@ export function PhotoPanel({
         height: PHOTO_BOX.h,
         borderRadius: 14,
         border: photoIn > 0.05 ? `1px solid ${LINE}` : `2px dashed ${LINE}`,
-        background: photoIn > 0.05 ? "white" : SLAB,
+        background: photoIn > 0.05 ? SURFACE : SLAB,
         overflow: "hidden",
         display: "flex",
         alignItems: "center",
@@ -547,7 +548,7 @@ export function FeedPanel({ events, agent }: { events: FeedEvent[]; agent: strin
         height: FEED_BOX.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         padding: "14px 16px",
         overflow: "hidden",
       }}
@@ -907,7 +908,7 @@ export function PriceModule({
           borderRadius: 10,
           border: `1px solid ${focused ? "rgba(109,74,255,0.55)" : LINE}`,
           boxShadow: focused ? "0 0 0 3px rgba(109,74,255,0.12)" : undefined,
-          background: "white",
+          background: SURFACE,
           display: "flex",
           alignItems: "center",
           padding: "0 13px",
@@ -965,7 +966,7 @@ export function PriceModule({
             marginTop: 7,
             height: 7,
             borderRadius: 99,
-            background: "white",
+            background: SURFACE,
             border: `1px solid ${LINE}`,
             overflow: "hidden",
           }}
@@ -1007,7 +1008,7 @@ export function PriceModule({
           style={{
             height: 7,
             borderRadius: 99,
-            background: "white",
+            background: SURFACE,
             border: `1px solid ${LINE}`,
             overflow: "hidden",
           }}

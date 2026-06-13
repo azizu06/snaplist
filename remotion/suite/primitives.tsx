@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Easing, Img, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Easing, Img, getInputProps, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { Caret, CheckIcon, LogoMark, Spinner, typeProgress } from "../hero/primitives";
 import {
   DIM,
@@ -12,13 +12,16 @@ import {
   LOGICAL_W,
   SCALE,
   SLAB,
+  SURFACE,
   TOPBAR_H,
   VIOLET,
   VIOLET_BORDER,
   VIOLET_SOFT,
   WIN,
   font,
+  paletteVars,
   type Rect,
+  type VideoTheme,
 } from "./theme";
 
 /**
@@ -45,8 +48,18 @@ export interface FeedEvent {
  * valid in logical coordinates.
  */
 export function Scene({ children }: { children: React.ReactNode }) {
+  // Theme comes from the render's input props (`--props '{"theme":"dark"}'`).
+  // Light injects no vars, so the existing light renders stay byte-identical;
+  // dark sets the --sl-* palette here and it cascades to every descendant,
+  // including the shared remotion/hero chrome.
+  const theme: VideoTheme =
+    (getInputProps() as { theme?: VideoTheme }).theme === "dark"
+      ? "dark"
+      : "light";
   return (
-    <AbsoluteFill style={{ background: SLAB, fontFamily: font }}>
+    <AbsoluteFill
+      style={{ background: SLAB, fontFamily: font, ...paletteVars(theme) }}
+    >
       <div
         style={{
           position: "absolute",
@@ -90,7 +103,7 @@ export function Shell({
           top: win.y,
           width: win.w,
           height: win.h,
-          background: "white",
+          background: SURFACE,
           borderRadius: 16,
           border: `1px solid ${LINE}`,
           boxShadow: "0 18px 40px -12px rgba(19,30,58,0.18)",
@@ -188,7 +201,7 @@ export function Panel({
         height: rect.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         ...style,
       }}
@@ -366,7 +379,7 @@ export function PhotoFrame({
         height: rect.h,
         borderRadius: 14,
         border: photoIn > 0.05 ? `1px solid ${LINE}` : `2px dashed ${LINE}`,
-        background: photoIn > 0.05 ? "white" : SLAB,
+        background: photoIn > 0.05 ? SURFACE : SLAB,
         overflow: "hidden",
         display: "flex",
         alignItems: "center",
@@ -794,7 +807,7 @@ export function Toast({
         display: "flex",
         alignItems: "center",
         gap: 8,
-        background: "white",
+        background: SURFACE,
         border: `1px solid ${LINE}`,
         borderRadius: 12,
         padding: "9px 14px",

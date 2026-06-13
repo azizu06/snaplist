@@ -26,6 +26,7 @@ import {
   center,
   type ClickSpec,
   type Rect,
+  SURFACE,
 } from "./theme";
 
 /**
@@ -154,7 +155,7 @@ function ItemCard() {
         height: ITEM.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         display: "flex",
         alignItems: "center",
         gap: 14,
@@ -238,7 +239,7 @@ function CompRow({ comp, index }: { comp: (typeof COMPS)[number]; index: number 
         height: COMP_H,
         borderRadius: 10,
         border: `1px solid ${LINE}`,
-        background: comp.asking ? SLAB : "white",
+        background: comp.asking ? SLAB : SURFACE,
         display: "flex",
         alignItems: "center",
         gap: 12,
@@ -405,7 +406,7 @@ function RangeModule() {
                 width: 10,
                 height: 10,
                 borderRadius: 99,
-                background: c.asking ? "white" : VIOLET,
+                background: c.asking ? SURFACE : VIOLET,
                 border: `2px solid ${c.asking ? FAINT : VIOLET}`,
                 boxSizing: "border-box",
                 transform: `scale(${s})`,
@@ -530,7 +531,7 @@ function SignalsPanel() {
         height: SIGNALS.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         padding: "14px 16px",
         boxSizing: "border-box",
         opacity: enter,

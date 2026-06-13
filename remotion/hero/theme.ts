@@ -7,13 +7,21 @@
  * never render anywhere the cursor isn't.
  */
 
-export const INK = "#131e3a";
-export const DIM = "#3d4a68";
-export const FAINT = "#5f6b88";
-export const LINE = "#dfe4ee";
-export const SLAB = "#f4f6fb";
-export const VIOLET = "#6d4aff";
-export const GREEN = "#16a34a";
+/**
+ * Themeable palette (r6): same CSS-var-with-light-fallback scheme as
+ * remotion/suite/theme.ts. The shared chrome in hero/primitives.tsx is used
+ * by the suite videos, so it must follow the same `--sl-*` variables the
+ * suite Scene injects in dark mode. Light is unchanged (fallbacks = old hex).
+ */
+export const INK = "var(--sl-ink, #131e3a)";
+export const DIM = "var(--sl-dim, #3d4a68)";
+export const FAINT = "var(--sl-faint, #5f6b88)";
+export const LINE = "var(--sl-line, #dfe4ee)";
+export const SLAB = "var(--sl-slab, #f4f6fb)";
+/** card / window / panel surface — replaces hardcoded "white" fills. */
+export const SURFACE = "var(--sl-surface, #ffffff)";
+export const VIOLET = "var(--sl-violet, #6d4aff)";
+export const GREEN = "var(--sl-green, #16a34a)";
 
 export const font =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif';

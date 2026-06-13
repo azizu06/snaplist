@@ -25,6 +25,7 @@ import {
   center,
   type ClickSpec,
   type Rect,
+  SURFACE,
 } from "./theme";
 
 /**
@@ -155,7 +156,7 @@ function Checklist() {
         height: CHECKLIST.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         padding: "14px 16px",
       }}
@@ -271,7 +272,7 @@ function PriceModule() {
               marginTop: 6,
               height: 7,
               borderRadius: 99,
-              background: "white",
+              background: SURFACE,
               border: `1px solid ${LINE}`,
               overflow: "hidden",
             }}
@@ -355,7 +356,7 @@ function ConfirmCard() {
         height: CONFIRM.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxShadow: "0 14px 30px -14px rgba(19,30,58,0.2)",
         display: "flex",
         alignItems: "center",

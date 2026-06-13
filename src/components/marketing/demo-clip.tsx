@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
+import { useThemedVideoSrc } from "@/lib/use-themed-video-src";
 
 export function DemoClip({
   src,
@@ -41,6 +42,18 @@ export function DemoClip({
   const [near, setNear] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Follow the app theme: same clip, dark render swapped in when dark.
+  const themedSrc = useThemedVideoSrc(src);
+
+  // On a theme flip the src changes; reload the element so the new (dark or
+  // light) file actually plays instead of keeping the stale source buffered.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !near) return;
+    setPlaying(false);
+    video.load();
+    video.play().catch(() => {});
+  }, [themedSrc, near]);
 
   // Mount the <video> when the frame approaches the viewport; play/pause it
   // as the frame crosses 35% visibility so off-screen clips don't burn CPU.
@@ -116,7 +129,7 @@ export function DemoClip({
         {near && !failed ? (
           <video
             ref={videoRef}
-            src={src}
+            src={themedSrc}
             muted
             loop
             playsInline

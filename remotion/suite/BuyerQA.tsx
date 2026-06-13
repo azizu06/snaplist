@@ -26,6 +26,7 @@ import {
   center,
   type ClickSpec,
   type Rect,
+  SURFACE,
 } from "./theme";
 
 /**
@@ -143,7 +144,7 @@ function InboxList() {
         height: LIST.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         padding: "14px 0",
       }}
@@ -302,7 +303,7 @@ function ThreadHeader() {
         height: THREAD_HEAD.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         display: "flex",
         alignItems: "center",
         gap: 13,
@@ -409,7 +410,7 @@ function ThreadBody() {
         height: 292,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         padding: "16px 18px",
         overflow: "hidden",
@@ -516,7 +517,7 @@ function Composer() {
         height: COMPOSER.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         padding: "12px 16px",
         opacity: enter,
@@ -599,7 +600,7 @@ function Composer() {
           borderRadius: 10,
           border: `1px solid ${focused ? "rgba(99,91,255,0.55)" : LINE}`,
           boxShadow: focused ? "0 0 0 3px rgba(99,91,255,0.12)" : undefined,
-          background: sent ? SLAB : "white",
+          background: sent ? SLAB : SURFACE,
           padding: "9px 12px",
           fontSize: 13.5,
           lineHeight: 1.5,

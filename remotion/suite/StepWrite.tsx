@@ -24,6 +24,7 @@ import {
   center,
   type ClickSpec,
   type Rect,
+  SURFACE,
 } from "./theme";
 
 /**
@@ -143,7 +144,7 @@ function ItemCard() {
         height: ITEM.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         padding: 14,
         opacity: enter,
@@ -225,7 +226,7 @@ function Tab({ rect, label, active, doneAt }: { rect: Rect; label: string; activ
         height: rect.h,
         borderRadius: 11,
         border: `1px solid ${active ? "rgba(99,91,255,0.45)" : LINE}`,
-        background: active ? VIOLET_SOFT : "white",
+        background: active ? VIOLET_SOFT : SURFACE,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -261,7 +262,7 @@ function PaneFrame({ children, swapAt }: { children: React.ReactNode; swapAt: nu
         height: PANE.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxSizing: "border-box",
         padding: "16px 18px",
         opacity: enter,

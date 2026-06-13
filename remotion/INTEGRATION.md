@@ -90,6 +90,28 @@ npx remotion render remotion/index.ts step-publish   public/demo/steps/publish.m
 npx remotion render remotion/index.ts buyer-qa       public/demo/buyer-qa.mp4       --crf 26 --muted
 ```
 
+### Dark variants (theme-aware videos)
+
+Every suite clip also ships a dark render so the videos follow the app's
+light/dark toggle (the app swaps `foo.mp4` ↔ `foo-dark.mp4` via
+`useThemedVideoSrc`). The dark palette is injected by the Scene from the
+`theme` input prop — see `suite/theme.ts` (`paletteVars`); light is the var
+fallback, so the light renders above are unchanged. Re-render the dark set
+with `--props '{"theme":"dark"}'` and the `-dark` filenames:
+
+```sh
+npx remotion render remotion/index.ts hero-demo      public/hero-demo-dark.mp4            --crf 28 --muted --props '{"theme":"dark"}'
+npx remotion render remotion/index.ts step-snap      public/demo/steps/snap-dark.mp4     --crf 26 --muted --props '{"theme":"dark"}'
+npx remotion render remotion/index.ts step-identify  public/demo/steps/identify-dark.mp4 --crf 26 --muted --props '{"theme":"dark"}'
+npx remotion render remotion/index.ts step-price     public/demo/steps/price-dark.mp4    --crf 26 --muted --props '{"theme":"dark"}'
+npx remotion render remotion/index.ts step-write     public/demo/steps/write-dark.mp4    --crf 26 --muted --props '{"theme":"dark"}'
+npx remotion render remotion/index.ts step-publish   public/demo/steps/publish-dark.mp4  --crf 26 --muted --props '{"theme":"dark"}'
+npx remotion render remotion/index.ts buyer-qa       public/demo/buyer-qa-dark.mp4       --crf 26 --muted --props '{"theme":"dark"}'
+```
+
+The hero's dark first-frame poster is a still:
+`npx remotion still remotion/index.ts hero-demo public/hero-demo-poster-dark.jpg --frame 0 --props '{"theme":"dark"}'`.
+
 `--muted` matters: the landing `<video>`s are muted anyway and a silent AAC
 track inflates file size. After changing any choreography constants, run
 `pnpm exec tsx remotion/suite/assert-clicks.ts` before re-rendering.

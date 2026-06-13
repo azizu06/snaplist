@@ -12,7 +12,7 @@ import {
 } from "remotion";
 import { CheckIcon } from "../hero/primitives";
 import { AttrField, Feed, OcrBox, PhotoFrame, Scene, Shell, StatusLine, type FeedEvent } from "./primitives";
-import { DIM, FAINT, GREEN, GREEN_SOFT, INK, LINE, SLAB, type ClickSpec, type Rect } from "./theme";
+import { DIM, FAINT, GREEN, GREEN_SOFT, INK, LINE, SLAB, SURFACE, type ClickSpec, type Rect } from "./theme";
 
 /**
  * Step 2 · Identify — the photo-reading moment in full: sweep + detection
@@ -155,7 +155,7 @@ function ConfidenceModule() {
           marginTop: 8,
           height: 7,
           borderRadius: 99,
-          background: "white",
+          background: SURFACE,
           border: `1px solid ${LINE}`,
           overflow: "hidden",
         }}
@@ -225,7 +225,7 @@ function ItemSummary() {
         height: SUMMARY_PANEL.h,
         borderRadius: 14,
         border: `1px solid ${LINE}`,
-        background: "white",
+        background: SURFACE,
         boxShadow: "0 12px 30px -14px rgba(19,30,58,0.18)",
         padding: "14px 18px",
         boxSizing: "border-box",

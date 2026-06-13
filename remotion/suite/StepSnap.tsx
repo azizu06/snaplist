@@ -12,7 +12,7 @@ import {
 } from "remotion";
 import { CheckIcon, Cursor, arriveAndDwell, path, pressAt } from "../hero/primitives";
 import { PhotoFrame, Scene, Shell, Toast } from "./primitives";
-import { FAINT, GREEN, INK, LINE, VIOLET, center, type ClickSpec, type Rect } from "./theme";
+import { FAINT, GREEN, INK, LINE, SURFACE, VIOLET, center, type ClickSpec, type Rect } from "./theme";
 
 /**
  * Step 1 · Snap — the whole photo-adding process, unrushed:
@@ -347,7 +347,7 @@ function FileCard({ x, y, ghost }: { x: number; y: number; ghost?: boolean }) {
         width: FILE.w,
         height: FILE.h,
         borderRadius: 12,
-        background: "white",
+        background: SURFACE,
         border: `1px solid ${LINE}`,
         boxShadow: ghost
           ? "0 22px 40px -12px rgba(19,30,58,0.45)"
@@ -459,7 +459,7 @@ function SnapAct() {
                 fontSize: 13.5,
                 fontWeight: 800,
                 color: VIOLET,
-                background: "white",
+                background: SURFACE,
                 borderRadius: 99,
                 padding: "7px 15px",
                 boxShadow: "0 6px 18px -6px rgba(19,30,58,0.25)",
