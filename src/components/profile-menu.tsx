@@ -35,7 +35,7 @@ function MenuItem({
       href={href}
       role="menuitem"
       onClick={onNavigate}
-      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-fg transition-colors hover:bg-surface-2"
+      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium text-fg transition-colors hover:bg-surface-2"
     >
       <span className="text-faint">{icon}</span>
       {children}
@@ -74,7 +74,7 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
         aria-expanded={open}
         aria-label="Account menu"
         onClick={() => setOpen((v) => !v)}
-        className={`flex size-8 items-center justify-center overflow-hidden rounded-full text-[12px] font-bold text-white ring-2 ring-offset-2 ring-offset-surface transition-shadow ${
+        className={`flex size-8 items-center justify-center overflow-hidden rounded-full text-[13.5px] font-bold text-white ring-2 ring-offset-2 ring-offset-surface transition-shadow ${
           open ? "ring-accent" : "ring-border hover:ring-border-strong"
         }`}
       >
@@ -92,13 +92,13 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
         <div
           role="menu"
           aria-label="Account"
-          className="menu-pop absolute right-0 top-full z-40 mt-2 w-60 origin-top-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+          className="menu-pop absolute right-0 top-full z-40 mt-4 w-60 origin-top-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
         >
           <div className="border-b border-border px-2.5 pb-2.5 pt-1.5">
-            <p className="truncate text-[13px] font-semibold text-fg-strong">
+            <p className="truncate text-[14px] font-semibold text-fg-strong">
               {user.name}
             </p>
-            <p className="truncate text-[12px] text-muted">{user.email}</p>
+            <p className="truncate text-[13.5px] text-muted">{user.email}</p>
           </div>
 
           <div className="flex flex-col gap-0.5 py-1">
@@ -137,7 +137,7 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
           </div>
 
           <div className="border-t border-border pt-1">
-            <AppSignOutButton className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg">
+            <AppSignOutButton className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg">
               <svg viewBox="0 0 24 24" className="size-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                 <path d="m16 17 5-5-5-5" />

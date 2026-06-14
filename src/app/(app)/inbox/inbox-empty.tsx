@@ -68,25 +68,25 @@ export function InboxEmptyState() {
               brighter labels — the dimmed preview was unreadable (owner). */}
           <div className="absolute inset-x-0 top-0 rounded-2xl border border-accent/15 bg-surface p-4 text-left shadow-md">
             <div className="max-w-[78%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
-              <p className="text-[11.5px] font-semibold text-muted">buyer · via eBay</p>
-              <p className="mt-0.5 text-[14px] leading-snug text-fg-strong">
+              <p className="text-[12.5px] font-semibold text-muted">buyer · via eBay</p>
+              <p className="mt-0.5 text-[15px] leading-snug text-fg-strong">
                 Hi! Does it come with the original box and cables?
               </p>
             </div>
             <div className="ml-auto mt-2.5 max-w-[80%] rounded-2xl rounded-br-md border border-accent/20 bg-accent-soft/60 px-3.5 py-2.5">
-              <p className="flex items-center gap-1 text-[11.5px] font-semibold text-accent-soft-fg">
+              <p className="flex items-center gap-1 text-[12.5px] font-semibold text-accent-soft-fg">
                 <SparkleIcon className="size-3" />
                 reply drafted, awaiting your approval
               </p>
-              <p className="mt-0.5 text-[14px] leading-snug text-fg-strong">
+              <p className="mt-0.5 text-[15px] leading-snug text-fg-strong">
                 Yes, it ships in the original box with both cables included.
               </p>
             </div>
             {/* trailing stub — the gradient below dissolves this, giving the
                 fade something visible to act on while the reply stays crisp */}
             <div className="mt-2.5 max-w-[72%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
-              <p className="text-[11.5px] font-semibold text-muted">buyer · via eBay</p>
-              <p className="mt-0.5 text-[14px] leading-snug text-fg-strong">
+              <p className="text-[12.5px] font-semibold text-muted">buyer · via eBay</p>
+              <p className="mt-0.5 text-[15px] leading-snug text-fg-strong">
                 Perfect, would you take $90 shipped?
               </p>
             </div>
@@ -102,11 +102,11 @@ export function InboxEmptyState() {
         <h3 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
           No buyer questions yet
         </h3>
-        <p className="mx-auto mt-2 max-w-lg text-[15.5px] leading-relaxed text-fg">
+        <p className="mx-auto mt-2 max-w-lg text-[16.5px] leading-relaxed text-fg">
           When a buyer asks about one of your listings, it lands here live, with
           a reply already drafted for your approval.
         </p>
-        <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-3.5 py-1.5 text-[13px] font-medium text-fg">
+        <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-3.5 py-1.5 text-[14px] font-medium text-fg">
           <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M21 12a9 9 0 1 1-9-9" />
             <path d="M21 3v6h-6" />

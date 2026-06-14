@@ -5,7 +5,11 @@ import { SeamlessThemeVideo } from "@/components/seamless-theme-video";
 /**
  * "Watch how replies work" teaser inside the inbox empty state.
  *
- * The clip (/demo/buyer-qa.mp4, 1920×1080 muted loop) runs through
+ * Uses /demo/inbox-qa.mp4 — a buyer-Q&A clip on a DIFFERENT item (brass chess
+ * set) than the marketing tour's step 6 (Canon AE-1), so a logged-in user who
+ * already watched the tour sees a fresh scenario here, not a repeat.
+ *
+ * The clip (/demo/inbox-qa.mp4, 1920×1080 muted loop) runs through
  * SeamlessThemeVideo inside a mini app-window frame: it lazy-mounts on scroll,
  * swaps in the dark render on dark mode and recolours in place on a toggle (no
  * restart), and only ever fetches the active theme on the critical path. The
@@ -38,23 +42,23 @@ function PosterScene() {
         }}
       />
       <div className="relative max-w-[62%] rounded-2xl rounded-bl-md border border-border bg-surface px-3.5 py-2 shadow-xs sm:py-2.5">
-        <p className="text-[10px] font-semibold text-faint sm:text-[11px]">
+        <p className="text-[10px] font-semibold text-faint sm:text-[12px]">
           buyer · via eBay
         </p>
-        <p className="mt-0.5 text-[12px] leading-snug text-fg sm:text-[13.5px]">
+        <p className="mt-0.5 text-[13.5px] leading-snug text-fg sm:text-[15px]">
           Is this still available? Any scratches?
         </p>
       </div>
       <div className="relative ml-auto max-w-[68%] rounded-2xl rounded-br-md border border-accent/25 bg-accent-soft/70 px-3.5 py-2 shadow-xs sm:py-2.5">
-        <p className="flex items-center gap-1 text-[10px] font-semibold text-accent-soft-fg sm:text-[11px]">
+        <p className="flex items-center gap-1 text-[10px] font-semibold text-accent-soft-fg sm:text-[12px]">
           <SparkleIcon className="size-3" />
           reply drafted in seconds
         </p>
-        <p className="mt-0.5 text-[12px] leading-snug text-fg sm:text-[13.5px]">
+        <p className="mt-0.5 text-[13.5px] leading-snug text-fg sm:text-[15px]">
           Yes, it&apos;s available, light wear only, photos show every angle.
         </p>
       </div>
-      <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-[#131e3a]/70 px-3.5 py-1.5 text-[11px] font-semibold text-white sm:mt-1 sm:text-[12px]">
+      <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-[#131e3a]/70 px-3.5 py-1.5 text-[11px] font-semibold text-white sm:mt-1 sm:text-[13.5px]">
         <svg viewBox="0 0 24 24" className="size-3" fill="currentColor" aria-hidden>
           <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86Z" />
         </svg>
@@ -76,7 +80,7 @@ export function InboxDemoVideo() {
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
-          <span className="ml-2 flex items-center gap-1.5 text-[13px] font-semibold text-fg">
+          <span className="ml-2 flex items-center gap-1.5 text-[14px] font-semibold text-fg">
             <span aria-hidden className="relative flex size-2">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60 motion-reduce:animate-none" />
               <span className="relative inline-flex size-2 rounded-full bg-success" />
@@ -85,7 +89,7 @@ export function InboxDemoVideo() {
           </span>
         </div>
         <SeamlessThemeVideo
-          src="/demo/buyer-qa.mp4"
+          src="/demo/inbox-qa.mp4"
           label="Demo: a buyer question answered with a drafted reply"
           lazy
           rootMargin="160px"
@@ -94,7 +98,7 @@ export function InboxDemoVideo() {
           <PosterScene />
         </SeamlessThemeVideo>
       </div>
-      <figcaption className="mt-2.5 text-center text-[13.5px] leading-relaxed text-muted">
+      <figcaption className="mt-2.5 text-center text-[15px] leading-relaxed text-muted">
         A buyer asks · the agent drafts from your listing · you approve &amp; send.
       </figcaption>
     </figure>

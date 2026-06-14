@@ -14,7 +14,6 @@ import {
 import { CheckIcon, Cursor, arriveAndDwell, path, pressAt } from "../hero/primitives";
 import { Chip, LivePulse, PrimaryButton, Scene, Shell } from "./primitives";
 import {
-  AMBER,
   FAINT,
   GREEN,
   GREEN_SOFT,
@@ -30,11 +29,12 @@ import {
 
 /**
  * Step 5 · Publish — the review screen in full: checklist ticks, the
- * autopilot gate explains *why* this one waits for a human (only 74% sure),
- * then a cursor-accurate Publish click → posting state → live confirmation
- * card with the listing id.
- * Product: Custom 65% mechanical keyboard, green & white keycaps
- * (demo/keyboard.jpg) — estimated pricing, hence the honest mid confidence.
+ * autopilot gate confirms this one cleared the bar (91% sure, priced from real
+ * sales), then a cursor-accurate Publish click → posting state → live
+ * confirmation card with the listing id.
+ * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * the same item the whole how-it-works pipeline follows. Its price came from
+ * real recent sales, so the confidence is high and consistent with step 3.
  *
  * Render: npx remotion render remotion/index.ts step-publish public/demo/steps/publish.mp4 --crf 26 --muted
  */
@@ -90,7 +90,7 @@ const CHECKS = [
   "3 photos · cover photo set",
   "Title fits eBay's 80-character limit",
   "Item details complete",
-  "Price set · $120 (range $95–$150)",
+  "Price set · $165 (range $140–$195)",
 ];
 
 /* ---------- pieces ---------- */
@@ -115,8 +115,8 @@ function PhotoCard() {
         }}
       >
         <Img
-          src={staticFile("demo/keyboard.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 42%" }}
+          src={staticFile("demo/filmcamera.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
         <div
           style={{
@@ -136,8 +136,8 @@ function PhotoCard() {
       </div>
       <div style={{ position: "absolute", left: PHOTO.x, top: 428, display: "flex", gap: 8 }}>
         <Chip text="Good condition" at={14} index={0} tone="plain" />
-        <Chip text="Computers & Accessories" at={14} index={1} tone="plain" />
-        <Chip text="Estimated price" at={14} index={2} />
+        <Chip text="Cameras & Photo" at={14} index={1} tone="plain" />
+        <Chip text="Priced from real sales" at={14} index={2} />
       </div>
     </>
   );
@@ -211,7 +211,7 @@ function PriceModule() {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const enter = spring({ frame: frame - 28, fps, config: { damping: 15 }, durationInFrames: 22 });
-  const pct = interpolate(frame, [40, 96], [0, 74], {
+  const pct = interpolate(frame, [40, 96], [0, 91], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: Easing.out(Easing.cubic),
@@ -237,7 +237,7 @@ function PriceModule() {
           PRICE
         </span>
         <span style={{ fontSize: 13, color: FAINT }}>
-          estimated from retail price + condition · range $95–$150
+          set from 7 recent sales · range $140–$195
         </span>
       </div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 18 }}>
@@ -249,7 +249,7 @@ function PriceModule() {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          $120
+          $165
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -260,7 +260,7 @@ function PriceModule() {
               style={{
                 fontSize: 16.5,
                 fontWeight: 800,
-                color: AMBER,
+                color: GREEN,
                 fontVariantNumeric: "tabular-nums",
               }}
             >
@@ -281,12 +281,12 @@ function PriceModule() {
               style={{
                 height: "100%",
                 width: `${pct}%`,
-                background: "linear-gradient(90deg, #d97706, #f59e0b)",
+                background: "linear-gradient(90deg, #5147f5, #635bff)",
               }}
             />
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: FAINT }}>
-            no recent sales for a custom build, so this is an estimate, and you can change it
+            priced from real recent sales, and you can still change it before it posts
           </div>
         </div>
       </div>
@@ -313,8 +313,8 @@ function GateBanner() {
         width: GATE.w,
         height: GATE.h,
         borderRadius: 12,
-        background: "rgba(217,119,6,0.08)",
-        border: "1px solid rgba(217,119,6,0.3)",
+        background: GREEN_SOFT,
+        border: "1px solid rgba(22,163,74,0.3)",
         display: "flex",
         alignItems: "center",
         gap: 10,
@@ -324,13 +324,12 @@ function GateBanner() {
         transform: `translateY(${(1 - enter) * 10}px)`,
       }}
     >
-      <svg viewBox="0 0 24 24" width={15} fill="none" stroke={AMBER} strokeWidth="2" strokeLinecap="round">
-        <path d="M12 9v4" />
-        <path d="M12 17h.01" />
-        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" strokeLinejoin="round" />
+      <svg viewBox="0 0 24 24" width={15} fill="none" stroke={GREEN} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2 4 5.5V11c0 5 3.4 9.2 8 10.5 4.6-1.3 8-5.5 8-10.5V5.5L12 2z" />
+        <path d="m9 11 2 2 4-4" />
       </svg>
-      <span style={{ fontSize: 13.5, fontWeight: 700, color: AMBER }}>
-        Autopilot held this one: only 74% sure, so it waits for your OK before posting.
+      <span style={{ fontSize: 13.5, fontWeight: 700, color: GREEN }}>
+        Cleared autopilot at 91% sure — you can post it yourself or let it go out automatically.
       </span>
     </div>
   );
@@ -378,8 +377,8 @@ function ConfirmCard() {
         }}
       >
         <Img
-          src={staticFile("demo/keyboard.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 42%" }}
+          src={staticFile("demo/filmcamera.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -393,7 +392,7 @@ function ConfirmCard() {
             textOverflow: "ellipsis",
           }}
         >
-          Custom 65% mechanical keyboard, green & white keycaps
+          Canon AE-1 35mm film camera with 50mm lens
         </div>
         <div
           style={{
@@ -411,7 +410,7 @@ function ConfirmCard() {
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         <div style={{ fontSize: 17, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>
-          $120
+          $165
         </div>
         <div
           style={{
@@ -488,12 +487,12 @@ function PublishAct() {
             opacity: titleIn,
           }}
         >
-          Custom 65% mechanical keyboard, green & white keycaps
+          Canon AE-1 35mm film camera with 50mm lens
         </div>
         <div style={{ position: "absolute", left: RX, top: 208, display: "flex", gap: 8 }}>
-          <Chip text="Brand · Custom build" at={24} index={0} />
-          <Chip text="Layout · 65%" at={24} index={1} />
-          <Chip text="Keycaps · green & white" at={24} index={2} />
+          <Chip text="Brand · Canon" at={24} index={0} />
+          <Chip text="Model · AE-1" at={24} index={1} />
+          <Chip text="Lens · FD 50mm f/1.8" at={24} index={2} />
         </div>
 
         <PriceModule />

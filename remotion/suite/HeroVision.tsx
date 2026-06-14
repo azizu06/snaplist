@@ -142,27 +142,19 @@ interface ActConfig {
 
 const ACT_POLAROID: ActConfig = {
   img: "demo/polaroid.jpg",
-  objectPosition: "50% 50%",
+  objectPosition: "50% 82%",
   fileName: "IMG_5102.jpg",
   arrival: "click",
   step: "1 of 3 · instant cameras",
-  statusDone: "Found it · Polaroid Supercolor 645 CL",
-  ocr: [
-    { at: 158, box: { x: 152, y: 39, w: 64, h: 25 }, label: "brand mark · “Polaroid”" },
-    {
-      at: 184,
-      box: { x: 146, y: 259, w: 163, h: 26 },
-      label: "model · “Supercolor 645 CL”",
-      labelSide: "above",
-    },
-  ],
+  statusDone: "Found it · Polaroid 636 CloseUp",
+  ocr: [],
   fields: [
     { label: "BRAND", value: "Polaroid", conf: 0.99 },
-    { label: "MODEL", value: "Supercolor 645 CL", conf: 0.97 },
+    { label: "MODEL", value: "636 CloseUp", conf: 0.96 },
     { label: "CATEGORY", value: "Cameras & Photo", conf: 0.95 },
     { label: "CONDITION", value: "Good · light wear", conf: 0.87 },
-    { label: "COLOR", value: "Red / black", conf: 0.98 },
-    { label: "PRINTED ON IT", value: "SUPERCOLOR 645 CL", conf: 0.96 },
+    { label: "COLOR", value: "Black", conf: 0.98 },
+    { label: "PRINTED ON IT", value: "636 CLOSEUP", conf: 0.96 },
   ],
   feed: [
     { at: 84, done: 146, text: "Looking at your photo…" },
@@ -170,40 +162,32 @@ const ACT_POLAROID: ActConfig = {
       at: 152,
       done: 192,
       text: "Reading the printed text on the body…",
-      sub: "Found “Supercolor 645 CL” and “Polaroid”",
+      sub: "Found “636 CloseUp” and “Polaroid”",
       subAt: 196,
     },
     { at: 204, done: 264, text: "Double-checking every detail it found" },
     { at: 282, done: 392, text: "Writing your listing draft…" },
   ],
-  title: "Polaroid Supercolor 645 CL instant camera",
+  title: "Polaroid 636 CloseUp instant camera",
   specifics: ["Brand · Polaroid", "Type · Instant camera", "Condition · Good"],
-  desc: "Vintage Polaroid Supercolor 645 CL in good working order. Iconic red-and-black body with built-in flash. Light wear consistent with age.",
+  desc: "Vintage Polaroid 636 CloseUp in good working order. Classic black 600-series body with a built-in flash. Light wear consistent with age.",
   price: 65,
 };
 
 const ACT_GAMEBOY: ActConfig = {
   img: "demo/gameboy.jpg",
-  objectPosition: "50% 45%",
+  objectPosition: "50% 50%",
   fileName: "IMG_5147.jpg",
   arrival: "sync",
   step: "2 of 3 · video games",
   statusDone: "Found it · Nintendo Game Boy Color",
-  ocr: [
-    {
-      at: 158,
-      box: { x: 187, y: 137, w: 81, h: 19 },
-      label: "model · “GAME BOY COLOR”",
-      labelSide: "above",
-    },
-    { at: 184, box: { x: 208, y: 162, w: 43, h: 17 }, label: "brand · “Nintendo”" },
-  ],
+  ocr: [],
   fields: [
     { label: "BRAND", value: "Nintendo", conf: 0.99 },
     { label: "MODEL", value: "Game Boy Color", conf: 0.97 },
     { label: "CATEGORY", value: "Video Games & Consoles", conf: 0.96 },
     { label: "CONDITION", value: "Good · tested", conf: 0.85 },
-    { label: "COLOR", value: "Dandelion yellow", conf: 0.98 },
+    { label: "COLOR", value: "Yellow · Pokémon ed.", conf: 0.97 },
     { label: "PRINTED ON IT", value: "GAME BOY COLOR", conf: 0.97 },
   ],
   feed: [
@@ -218,10 +202,10 @@ const ACT_GAMEBOY: ActConfig = {
     { at: 204, done: 264, text: "Double-checking every detail it found" },
     { at: 282, done: 392, text: "Writing your listing draft…" },
   ],
-  title: "Nintendo Game Boy Color, Dandelion",
-  specifics: ["Brand · Nintendo", "Type · Handheld console", "Color · Dandelion"],
-  desc: "Nintendo Game Boy Color in the Dandelion colorway. Good condition: clear screen, clicky buttons, everything works. A pocketful of the late 90s.",
-  price: 95,
+  title: "Nintendo Game Boy Color, Pokémon edition",
+  specifics: ["Brand · Nintendo", "Type · Handheld console", "Color · Yellow"],
+  desc: "Yellow Pokémon-edition Nintendo Game Boy Color. Good condition: clear screen, clicky buttons, everything works. A pocketful of the late 90s.",
+  price: 110,
 };
 
 const ACT_GSHOCK: ActConfig = {
@@ -532,8 +516,8 @@ function VisionAct({ act, isFirst }: { act: ActConfig; isFirst?: boolean }) {
 /* ---------- end card ---------- */
 
 const END_ITEMS = [
-  { img: "demo/polaroid.jpg", pos: "50% 50%", title: "Polaroid Supercolor 645 CL instant camera", price: 65 },
-  { img: "demo/gameboy.jpg", pos: "50% 45%", title: "Nintendo Game Boy Color, Dandelion", price: 95 },
+  { img: "demo/polaroid.jpg", pos: "50% 82%", title: "Polaroid 636 CloseUp instant camera", price: 65 },
+  { img: "demo/gameboy.jpg", pos: "50% 50%", title: "Nintendo Game Boy Color, Pokémon edition", price: 110 },
   { img: "demo/gshock.jpg", pos: "50% 50%", title: "Casio G-Shock DW-5600 digital watch", price: 42 },
 ];
 

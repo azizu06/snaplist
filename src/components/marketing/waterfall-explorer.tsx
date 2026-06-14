@@ -5,7 +5,7 @@
  * Selecting a tier shows that tier's worked example — animated fills,
  * counting numbers, and source rows that appear in sequence. Stays honest by
  * design: the recent-sales tier uses a real catalog product whose plausible
- * pricing path IS recent sales (Taylor guitar); the other tiers show their
+ * pricing path IS recent sales (Le Creuset Dutch oven); the other tiers show their
  * mechanism with concrete worked numbers rather than pinning a product onto
  * a tier that wouldn't fire for it.
  *
@@ -77,14 +77,14 @@ function SourceRow({
       transition={{ duration: 0.4, delay: 0.15 + i * 0.14 }}
       className="flex items-center justify-between rounded-xl border border-line bg-night-2 px-4 py-3"
     >
-      <span className="flex items-center gap-2.5 text-[13.5px] text-flash-dim">
+      <span className="flex items-center gap-2.5 text-[15px] text-flash-dim">
         <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
         </svg>
         {children}
       </span>
-      <span className="nums text-[13.5px] font-semibold text-flash">{value}</span>
+      <span className="nums text-[15px] font-semibold text-flash">{value}</span>
     </motion.div>
   );
 }
@@ -100,10 +100,10 @@ function IsbnExample() {
           ))}
         </svg>
         <div>
-          <p className="nums text-[15.5px] font-semibold tracking-wide text-flash">
+          <p className="nums text-[16.5px] font-semibold tracking-wide text-flash">
             978-0-596-51582-9
           </p>
-          <p className="mt-0.5 text-[12.5px] text-flash-faint">read straight off the cover photo</p>
+          <p className="mt-0.5 text-[14px] text-flash-faint">read straight off the cover photo</p>
         </div>
       </div>
       <div className="mt-4 space-y-2.5">
@@ -117,7 +117,7 @@ function IsbnExample() {
           Recent sales of this exact book
         </SourceRow>
       </div>
-      <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
+      <p className="mt-4 text-[15px] leading-relaxed text-flash-faint">
         When we know the exact book, there is no guessing involved, which is
         why books and media get the most accurate prices of anything you can
         snap.
@@ -127,7 +127,7 @@ function IsbnExample() {
 }
 
 function CompsExample() {
-  const p = DEMO_PRODUCTS_BY_SLUG.guitar;
+  const p = DEMO_PRODUCTS_BY_SLUG.dutchoven;
   return (
     <div>
       <div className="flex items-center gap-4">
@@ -137,8 +137,8 @@ function CompsExample() {
         {/* flex-1 + min-w-0 keeps the long title truncating INSIDE the card —
             without it the row overflows and pushes the price off-canvas. */}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-semibold text-flash">{p.title}</p>
-          <p className="mt-0.5 text-[13px] text-flash-faint">
+          <p className="truncate text-[16px] font-semibold text-flash">{p.title}</p>
+          <p className="mt-0.5 text-[14px] text-flash-faint">
             {p.condition} · {p.category}
           </p>
         </div>
@@ -147,19 +147,19 @@ function CompsExample() {
         </p>
       </div>
       <div className="mt-4 space-y-2.5">
-        <SourceRow i={0} value="$870 · 2 days ago">
-          Sold on Reverb
+        <SourceRow i={0} value="$195 · 3 days ago">
+          Sold on eBay
         </SourceRow>
-        <SourceRow i={1} value="$925 · 4 days ago">
-          Sold on eBay, same koa cutaway
+        <SourceRow i={1} value="$180 · last week">
+          Sold on Facebook, same teal 4.5qt
         </SourceRow>
-        <SourceRow i={2} value="$850 · last week">
+        <SourceRow i={2} value="$172 · last week">
           Sold on Mercari
         </SourceRow>
       </div>
-      <p className="mt-3.5 text-[13.5px] leading-relaxed text-flash-faint">
-        Similar guitars sold for{" "}
-        <span className="nums font-semibold text-flash-dim">$780–$960</span>{" "}
+      <p className="mt-3.5 text-[15px] leading-relaxed text-flash-faint">
+        Similar Le Creuset Dutch ovens sold for{" "}
+        <span className="nums font-semibold text-flash-dim">$165–$210</span>{" "}
         recently. Real sale prices count more than asking prices: what
         something sold for beats what someone hoped to get.
       </p>
@@ -183,7 +183,7 @@ function DepreciationExample() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
         <div>
-          <p className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
             Bought new in 2021
           </p>
           <p className="nums mt-0.5 font-display text-[26px] font-bold leading-none text-flash-dim">
@@ -203,7 +203,7 @@ function DepreciationExample() {
           <path d="M5 12h14M13 6l6 6-6 6" />
         </svg>
         <div className="text-right">
-          <p className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-iris">
+          <p className="text-[12.5px] font-semibold uppercase tracking-[0.12em] text-iris">
             Worth now · Good condition
           </p>
           <p className="nums mt-0.5 font-display text-[30px] font-bold leading-none text-flash">
@@ -220,7 +220,7 @@ function DepreciationExample() {
             return (
               <div key={year} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
                 <span
-                  className={`nums text-[12px] font-semibold ${
+                  className={`nums text-[13.5px] font-semibold ${
                     today ? "text-iris" : "text-flash-faint"
                   }`}
                 >
@@ -238,7 +238,7 @@ function DepreciationExample() {
                   }`}
                 />
                 <span
-                  className={`text-[12px] ${
+                  className={`text-[13.5px] ${
                     today ? "font-semibold text-flash-dim" : "text-flash-faint"
                   }`}
                 >
@@ -250,7 +250,7 @@ function DepreciationExample() {
         </div>
       </div>
 
-      <p className="mt-4 text-[13.5px] leading-relaxed text-flash-faint">
+      <p className="mt-4 text-[15px] leading-relaxed text-flash-faint">
         When nothing like your item has sold recently, we start from what it
         cost new and mark it down for its age and condition. It is clearly
         labeled an estimate, and it always waits for your approval before
@@ -272,7 +272,7 @@ function LlmExample() {
   ] as const;
   return (
     <div>
-      <p className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+      <p className="text-[12.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
         What we tried first
       </p>
       <div className="mt-2 space-y-1.5">
@@ -284,7 +284,7 @@ function LlmExample() {
             transition={{ duration: 0.4, delay: 0.1 + i * 0.12 }}
             className="flex items-center justify-between gap-3 rounded-xl border border-line bg-night-2 px-4 py-1.5"
           >
-            <span className="flex items-center gap-2.5 text-[13px] text-flash-dim">
+            <span className="flex items-center gap-2.5 text-[14px] text-flash-dim">
               <svg
                 viewBox="0 0 24 24"
                 className="size-3 shrink-0 text-flash-faint"
@@ -298,20 +298,20 @@ function LlmExample() {
               </svg>
               {source}
             </span>
-            <span className="text-right text-[12.5px] text-flash-faint">{result}</span>
+            <span className="text-right text-[14px] text-flash-faint">{result}</span>
           </motion.div>
         ))}
       </div>
 
       <div className="mt-3 rounded-2xl border border-line bg-night-2 p-4">
-        <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+        <p className="text-[13.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
           An honestly wide range
         </p>
 
         {/* the suggested price, labeled and tethered to its spot on the range */}
         <div className="relative mt-3 pb-1 pt-10">
           <div className="absolute left-[46%] top-0 flex -translate-x-1/2 flex-col items-center">
-            <span className="whitespace-nowrap rounded-full bg-iris/12 px-3 py-1.5 text-[12.5px] font-semibold text-iris">
+            <span className="whitespace-nowrap rounded-full bg-iris/12 px-3 py-1.5 text-[14px] font-semibold text-iris">
               Our best guess: <span className="nums font-bold">$35</span>
             </span>
             <span aria-hidden className="h-3.5 w-px bg-iris/50" />
@@ -325,7 +325,7 @@ function LlmExample() {
             />
             <span className="absolute left-[46%] top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris" />
           </div>
-          <div className="mt-2.5 flex justify-between gap-3 text-[12.5px] leading-snug text-flash-faint">
+          <div className="mt-2.5 flex justify-between gap-3 text-[14px] leading-snug text-flash-faint">
             <span>
               could sell for as little as{" "}
               <span className="nums font-semibold text-flash-dim">$10</span>
@@ -356,7 +356,7 @@ function LlmExample() {
           <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
           <path d="M4 22v-7" />
         </svg>
-        <p className="text-[12.5px] leading-snug text-flash-faint">
+        <p className="text-[14px] leading-snug text-flash-faint">
           <span className="font-semibold text-flash">Flagged for your review</span>.{" "}
           A guess this rough never goes live; you set the final price first.
         </p>
@@ -407,14 +407,14 @@ export function WaterfallExplorer() {
                   {name}
                 </span>
                 <span
-                  className={`nums text-[13px] font-semibold transition-colors ${
+                  className={`nums text-[14px] font-semibold transition-colors ${
                     selected ? "text-iris" : "text-flash-faint"
                   }`}
                 >
                   {label} · {confidence}%
                 </span>
               </div>
-              <p className="mt-1.5 text-[14px] text-flash-faint">{when}</p>
+              <p className="mt-1.5 text-[15px] text-flash-faint">{when}</p>
               <div className="mt-3.5 h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
                 <div
                   className={`h-full rounded-full transition-[width,opacity] duration-700 ease-out ${
@@ -437,14 +437,14 @@ export function WaterfallExplorer() {
         {/* ui-r6: the label gets its own line; the tier name + "how sure"
             chip sit on a second row, so nothing crowds onto one line */}
         <div>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
+          <p className="text-[13.5px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
             What this looks like on a real item
           </p>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
             <h3 className="font-display text-[19px] font-semibold leading-snug text-flash">
               {tier.name}
             </h3>
-            <span className="nums rounded-full bg-iris/12 px-3 py-1 text-[12.5px] font-bold text-iris">
+            <span className="nums rounded-full bg-iris/12 px-3 py-1 text-[14px] font-bold text-iris">
               <CountUp key={tier.id} to={tier.confidence} duration={0.9} />% sure
             </span>
           </div>

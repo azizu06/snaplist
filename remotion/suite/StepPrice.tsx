@@ -35,7 +35,8 @@ import {
  * the suggested price on a real axis, the why-trust-it panel fills in, then
  * the seller applies the suggestion (cursor-accurate click). Plain seller
  * language only (ui-r6) — "recent sales", never "comps".
- * Product: Nike Free RN Flyknit, University Red (demo/sneakers.jpg).
+ * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-price public/demo/steps/price.mp4 --crf 26 --muted
  */
@@ -59,12 +60,12 @@ const APPLY: Rect = { x: RX, y: 596, w: RW, h: 46 };
 /* ---------- choreography ---------- */
 
 const COMPS: Array<{ at: number; source: string; note: string; price: number; asking?: boolean }> = [
-  { at: 104, source: "eBay", note: "sold 6 days ago", price: 52 },
-  { at: 118, source: "eBay", note: "sold 11 days ago", price: 45 },
-  { at: 132, source: "Mercari", note: "sold 2 weeks ago", price: 44 },
-  { at: 146, source: "Poshmark", note: "sold 3 weeks ago", price: 48 },
-  { at: 188, source: "eBay", note: "sold 1 month ago", price: 55 },
-  { at: 202, source: "Depop", note: "asking price · counts less", price: 42, asking: true },
+  { at: 104, source: "eBay", note: "sold 5 days ago", price: 172 },
+  { at: 118, source: "eBay", note: "sold 12 days ago", price: 158 },
+  { at: 132, source: "Mercari", note: "sold 2 weeks ago", price: 150 },
+  { at: 146, source: "eBay", note: "sold 3 weeks ago", price: 185 },
+  { at: 188, source: "eBay", note: "sold 1 month ago", price: 162 },
+  { at: 202, source: "Etsy", note: "asking price · counts less", price: 210, asking: true },
 ];
 
 const RANGE_AT = 248;
@@ -84,19 +85,19 @@ const FEED: FeedEvent[] = [
   {
     at: 36,
     done: 96,
-    text: "Searching “nike free rn flyknit used sold”",
+    text: "Searching “canon ae-1 50mm used sold”",
     sub: "4 recent sales found",
     subAt: 100,
   },
   {
     at: 116,
     done: 180,
-    text: "Searching “nike free rn flyknit red sold”",
+    text: "Searching “canon ae-1 film camera sold”",
     sub: "3 more found · 7 total",
     subAt: 184,
   },
   { at: 212, done: 242, text: "Comparing prices · setting odd ones aside" },
-  { at: 250, text: "Range $40–$58 · suggesting $48" },
+  { at: 250, text: "Range $140–$195 · suggesting $165" },
 ];
 
 const SIGNAL_ROWS = [
@@ -105,12 +106,12 @@ const SIGNAL_ROWS = [
   { label: "Is the item a sure match?", value: "brand + model found" },
 ];
 
-/* range axis: $35 → $65 across the inner width */
-const AXIS_MIN = 35;
-const AXIS_MAX = 65;
-const RANGE_LOW = 40;
-const RANGE_HIGH = 58;
-const SUGGESTED = 48;
+/* range axis: $110 → $230 across the inner width */
+const AXIS_MIN = 110;
+const AXIS_MAX = 230;
+const RANGE_LOW = 140;
+const RANGE_HIGH = 195;
+const SUGGESTED = 165;
 
 const APPLY_C = center(APPLY);
 
@@ -125,7 +126,7 @@ export const priceCursorAt = (frame: number) => path(frame, PRICE_WAYPOINTS);
 
 export const PRICE_CLICKS: ClickSpec[] = [
   {
-    label: "price: click “Apply suggested price · $48”",
+    label: "price: click “Apply suggested price · $165”",
     frame: CLICK_APPLY,
     target: APPLY,
     arrive: ARRIVE_APPLY,
@@ -175,8 +176,8 @@ function ItemCard() {
         }}
       >
         <Img
-          src={staticFile("demo/sneakers.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 55%" }}
+          src={staticFile("demo/filmcamera.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -190,10 +191,10 @@ function ItemCard() {
             textOverflow: "ellipsis",
           }}
         >
-          Nike Free RN Flyknit, University Red
+          Canon AE-1 35mm film camera with 50mm lens
         </div>
         <div style={{ fontSize: 12.5, color: FAINT, marginTop: 4 }}>
-          Good condition · 91% sure of the match
+          Good condition · 94% sure of the match
         </div>
       </div>
       {frame >= PRICE_CHIP_AT ? (
@@ -211,7 +212,7 @@ function ItemCard() {
             transform: `scale(${0.8 + chipIn * 0.2})`,
           }}
         >
-          $48
+          $165
         </span>
       ) : null}
     </div>
@@ -265,7 +266,7 @@ function CompRow({ comp, index }: { comp: (typeof COMPS)[number]; index: number 
         {comp.source}
       </span>
       <span style={{ fontSize: 13.5, color: DIM, flex: 1 }}>
-        Nike Free RN Flyknit · men&apos;s · {comp.note}
+        Canon AE-1 · with 50mm lens · {comp.note}
       </span>
       <span
         style={{
@@ -444,7 +445,7 @@ function RangeModule() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              $48 suggested
+              $165 suggested
             </div>
           </div>
         ) : null}
@@ -462,7 +463,7 @@ function RangeModule() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              $40
+              $140
             </span>
             <span
               style={{
@@ -475,7 +476,7 @@ function RangeModule() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              $58
+              $195
             </span>
           </>
         ) : null}
@@ -631,7 +632,7 @@ function PriceAct() {
             justifyContent: "space-between",
           }}
         >
-          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What similar pairs sold for</span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What similar cameras sold for</span>
           <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>
             {frame >= 184 ? "7 found · 6 sold, 1 asking" : frame >= 100 ? "4 found" : "searching…"}
           </span>
@@ -642,11 +643,11 @@ function PriceAct() {
         <RangeModule />
         <PrimaryButton
           rect={APPLY}
-          label="Apply suggested price · $48"
+          label="Apply suggested price · $165"
           appearAt={MARKER_AT + 10}
           pressFrame={CLICK_APPLY}
           doneFrom={APPLIED_AT}
-          doneLabel="Price set · $48 · added to the listing"
+          doneLabel="Price set · $165 · added to the listing"
         />
       </Shell>
       <Cursor x={cursor.x} y={cursor.y} press={press} />

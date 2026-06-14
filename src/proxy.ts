@@ -20,6 +20,7 @@ const isPublic = createRouteMatcher([
   "/pricing",
   "/about",
   "/login(.*)",
+  "/signup(.*)",
   "/api/health",
   "/api/ebay/account-deletion",
   "/dev(.*)",

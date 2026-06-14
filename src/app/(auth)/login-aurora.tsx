@@ -56,7 +56,16 @@ export function LoginAurora() {
   return (
     <div
       aria-hidden
-      className={`pointer-events-none absolute inset-x-0 top-0 h-[72vh] ${
+      // Full-height curtain (was 72vh) so the aurora drapes the whole screen,
+      // not just the top band. A soft bottom mask dissolves the WebGL canvas
+      // into the page — without it the shader would stop on a hard horizon line.
+      style={{
+        WebkitMaskImage:
+          "linear-gradient(to bottom, black 0%, black 45%, transparent 92%)",
+        maskImage:
+          "linear-gradient(to bottom, black 0%, black 45%, transparent 92%)",
+      }}
+      className={`pointer-events-none absolute inset-x-0 top-0 h-screen ${
         dark ? "opacity-100" : "opacity-45"
       }`}
     >

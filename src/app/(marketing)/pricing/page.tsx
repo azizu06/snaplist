@@ -19,11 +19,11 @@ export const metadata: Metadata = {
 const PRICING_FAQ = [
   {
     q: "What does the beta actually cost?",
-    a: "Nothing. Every feature, no credit card, no listing caps, no trial timer. Beta is genuinely free because real usage is what makes the pricing engine smarter.",
+    a: "Nothing. Every feature, no credit card, no listing caps, no trial timer. Beta is free because the more people actually use it, the better the pricing gets.",
   },
   {
     q: "What happens when the beta ends?",
-    a: "Paid tiers arrive with honest limits, and beta users keep early-bird pricing. Nothing you already listed gets held hostage; your items, listings, and history stay yours.",
+    a: "Paid tiers arrive with honest limits, and beta users keep early-bird pricing. Nothing you already listed gets held hostage. Your items, listings, and history stay yours.",
   },
   {
     q: "Will I be charged automatically when paid plans launch?",
@@ -35,7 +35,7 @@ const PRICING_FAQ = [
   },
   {
     q: "What will Seller Pro cost?",
-    a: "Still undecided, which is why the card says $TBD. It will be priced for flippers and steady resellers, and beta users will see the number before anyone else, with early-bird pricing locked in.",
+    a: "Still undecided, which is why the card says $TBD. It'll be priced for flippers and steady resellers, and beta users see the number first, with early-bird pricing locked in.",
   },
 ] as const;
 
@@ -65,7 +65,7 @@ export default function Pricing() {
       <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <div className="mx-auto w-full max-w-6xl text-center">
           <Reveal>
-            <p className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
+            <p className="text-[14px] font-semibold uppercase tracking-[0.16em] text-iris">
               Pricing
             </p>
             <h1 className="mx-auto mt-4 max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
@@ -75,8 +75,8 @@ export default function Pricing() {
               </em>
             </h1>
             <p className="mx-auto mt-5 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
-              All of it. No credit card, no listing caps, no surprise
-              paywall mid-flow. You sell, we learn.
+              All of it. No credit card, no listing caps, no paywall
+              sprung on you halfway through. You sell, we learn.
             </p>
           </Reveal>
         </div>
@@ -98,7 +98,7 @@ export default function Pricing() {
                 Live now
               </span>
               <h2 className="font-display text-[24px] font-bold text-flash">Beta</h2>
-              <p className="mt-1.5 text-[15px] text-flash-faint">
+              <p className="mt-1.5 text-[16px] text-flash-faint">
                 Everything SnapList can do today
               </p>
               <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash">
@@ -109,7 +109,7 @@ export default function Pricing() {
               </p>
               <ul className="mb-8 mt-7 space-y-3.5">
                 {INCLUDED.map((line) => (
-                  <li key={line} className="flex items-start gap-3 text-[15px] text-flash-dim">
+                  <li key={line} className="flex items-start gap-3 text-[16px] text-flash-dim">
                     <svg viewBox="0 0 24 24" className="mt-0.5 size-[18px] shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 6 9 17l-5-5" />
                     </svg>
@@ -119,12 +119,12 @@ export default function Pricing() {
               </ul>
               <Link
                 href="/login"
-                className="group mt-auto inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
+                className="group mt-auto inline-flex w-full items-center justify-center gap-2 rounded-full bg-iris px-6 py-3.5 text-[16.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.02]"
               >
                 Start selling free
                 <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
               </Link>
-              <p className="mt-3.5 text-center text-[13px] text-flash-faint">
+              <p className="mt-3.5 text-center text-[14px] text-flash-faint">
                 No credit card · cancel nothing, there&apos;s nothing to cancel
               </p>
             </div>
@@ -136,7 +136,7 @@ export default function Pricing() {
               Coming soon
             </span>
             <h2 className="font-display text-[24px] font-bold text-flash">Seller Pro</h2>
-            <p className="mt-1.5 text-[15px] text-flash-faint">
+            <p className="mt-1.5 text-[16px] text-flash-faint">
               For flippers, resellers & steady decluttering
             </p>
             <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash-dim">
@@ -147,7 +147,7 @@ export default function Pricing() {
             </p>
             <ul className="mb-8 mt-7 space-y-3.5">
               {PRO_INCLUDED.map((line) => (
-                <li key={line} className="flex items-start gap-3 text-[15px] text-flash-dim">
+                <li key={line} className="flex items-start gap-3 text-[16px] text-flash-dim">
                   <svg viewBox="0 0 24 24" className="mt-0.5 size-[18px] shrink-0 text-flash-faint" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
@@ -157,22 +157,22 @@ export default function Pricing() {
             </ul>
             <p
               aria-disabled="true"
-              className="mt-auto inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-full border border-line bg-night-2 px-6 py-3.5 text-[15.5px] font-semibold text-flash-faint"
+              className="mt-auto inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-full border border-line bg-night-2 px-6 py-3.5 text-[16.5px] font-semibold text-flash-faint"
             >
               Notify me when it lands
             </p>
-            <p className="mt-3.5 text-center text-[13px] text-flash-faint">
+            <p className="mt-3.5 text-center text-[14px] text-flash-faint">
               Beta users keep early-bird pricing
             </p>
           </div>
         </Reveal>
 
         <Reveal className="mt-14 rounded-2xl border border-line bg-night-2 p-8 text-center">
-          <p className="mx-auto max-w-[62ch] text-[15px] leading-relaxed text-flash-dim">
-            The honest part: SnapList is a production-real AI engineering
-            showcase. Beta is genuinely free because your usage is what makes
-            the pricing engine smarter. When paid tiers land, nothing you
-            already listed gets held hostage.
+          <p className="mx-auto max-w-[62ch] text-[16px] leading-relaxed text-flash-dim">
+            Here&apos;s the honest part. Beta is free because the more people
+            actually use it, the better the pricing gets. When paid plans land,
+            nothing you already listed gets held hostage, and your items and
+            history stay yours.
           </p>
         </Reveal>
       </section>
@@ -190,7 +190,7 @@ export default function Pricing() {
             <FaqAccordion items={PRICING_FAQ} />
           </Reveal>
           <Reveal className="mt-10 text-center">
-            <p className="text-[14.5px] text-flash-dim">
+            <p className="text-[15.5px] text-flash-dim">
               Product questions live on the{" "}
               <Link href="/about#faq" className="link-underline font-semibold text-iris">
                 general FAQ

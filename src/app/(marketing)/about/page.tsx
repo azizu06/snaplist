@@ -1,25 +1,22 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import SpotlightCard from "@/components/bits/SpotlightCard";
 import { Reveal } from "@/components/marketing/reveal";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
 import { Eyebrow, LensRings } from "@/components/marketing/visuals";
-import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
+import { LogoMark } from "@/components/logo";
 
 export const metadata: Metadata = {
   title: "About & FAQ",
   description:
-    "Why SnapList exists, the engineering principles behind it, and answers to the questions everyone asks.",
+    "Why SnapList exists, what we promise sellers, and answers to the questions sellers ask most.",
 };
 
-/** /about (ui-r5-marketing) — story beside a full-size price report (the
- * verified Victrola turntable: large legible product photo, suggested price,
- * a self-explaining sold-price range with labeled endpoints, confidence chip,
- * cited sources — a miniature of the real product experience), numbered
- * principle cards (SpotlightCard), and a single clean centered FAQ list (the
- * espresso anchor card is gone — owner round-5: "It should just be the list
- * of questions"). */
+/** /about (ui-r6-marketing) — a seller-facing story beside a short, signed
+ * founder's note (no product demo: Home and Tour already show the product),
+ * numbered principle cards (SpotlightCard), and a single clean centered FAQ
+ * list. Copy is intentionally seller-voiced — no engineering/showcase framing,
+ * which belongs in the README/resume, not in front of sellers. */
 
 const PRINCIPLES = [
   {
@@ -44,7 +41,7 @@ const PRINCIPLES = [
   },
   {
     title: "You own the send button",
-    body: "Autopilot is opt-in and gated on computed confidence. Nothing posts, replies, or changes price without a rule you set.",
+    body: "Autopilot is opt-in and only ever acts on items it's confident about. Nothing posts, replies, or changes a price without a rule you set.",
     icon: (
       <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="m22 2-7 20-4-9-9-4Z" />
@@ -67,123 +64,59 @@ const PRINCIPLES = [
 const FAQ = [
   {
     q: "Which marketplaces does SnapList support?",
-    a: "eBay is fully integrated: listings publish directly under your own connected eBay account. Facebook Marketplace and Mercari get formatted copy-paste export packs (neither offers a public listing API, and we don't scrape).",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape anything.",
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are strongest: an exact lookup, no guessing. Branded items are priced from what similar items recently sold for, which is solid. Everyday items get an estimate marked down from the new price, clearly labeled as less certain. Every price is editable.",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest, an exact lookup with no guessing. Branded items are priced from what similar ones recently sold for, which is solid. Everyday items get a rougher estimate marked down from the new price, and we label it as less certain. Every price is yours to edit.",
   },
   {
     q: "Is my data private?",
-    a: "Yes. Photos live in private storage behind expiring signed URLs, every database row is isolated to your account and enforced at the database layer, and eBay tokens are encrypted at rest. eBay account-deletion requests are verified cryptographically and honored end-to-end.",
+    a: "Yes. Your photos are private, and only you can reach them. Your account's data is walled off from everyone else's, and your eBay connection is stored encrypted. If you ask eBay to remove your account, that request is honored end to end.",
   },
   {
     q: "Does autopilot post things without asking me?",
-    a: "Only if you turn it on, and only for items above the confidence bar: a score computed from real signals (how the price was found, how closely recent sales agree, and how completely the item was identified), never the AI grading its own work. Everything else queues for your review. You can keep autopilot off entirely.",
+    a: "Only if you turn it on, and only for items it's genuinely sure about. That confidence comes from how the price was found, how closely recent sales agree, and how well it pinned down the item, never the AI grading its own work. Everything else waits for your review, and you can keep autopilot off entirely.",
   },
   {
     q: "What does it cost?",
-    a: "Nothing during beta: every feature, no credit card. Paid tiers come later; beta users keep early-bird pricing.",
+    a: "Nothing during beta. Every feature, no credit card. Paid tiers come later, and beta users keep early-bird pricing.",
   },
   {
     q: "Do I need my own eBay account?",
-    a: "Yes, and that's a feature. Listings publish under your identity and reputation via OAuth. SnapList never sees your eBay password.",
+    a: "Yes, and that's a feature. Listings publish under your own identity and reputation. You connect your account once, and SnapList never sees your eBay password.",
   },
 ] as const;
 
 /**
- * Full-size price report for the About hero — the verified Victrola
- * turntable from the demo catalog, priced its honest way (recent sale
- * prices): large product photo, suggested price, a sold-price range with
- * labeled endpoints and a captioned suggested-price marker, confidence
- * chip, cited sources.
+ * Founder's note for the About hero — a short, human "why I built this" in the
+ * seller's voice (application-voice: no em dashes, concrete, plain words),
+ * signed with the shared LogoMark so the monogram matches the nav exactly.
+ * Replaces the old turntable price report, which only duplicated the product
+ * demos already on Home and Tour.
  */
-function AboutPriceReport() {
-  const p = DEMO_PRODUCTS_BY_SLUG.turntable;
-  const sources = [
-    ["Sold on eBay", "$64", "3 days ago"],
-    ["Sold on Mercari", "$72", "5 days ago"],
-    ["Facebook asking price, counted less", "$85", "last week"],
-  ] as const;
+function AboutFounderNote() {
   return (
-    <div className="glass-panel overflow-hidden rounded-3xl">
-      <div className="relative h-[230px]">
-        <Image
-          src={p.image}
-          alt={p.alt}
-          fill
-          sizes="(min-width: 1024px) 440px, 100vw"
-          className="object-cover"
-        />
-        <span className="absolute left-4 top-4 rounded-full bg-night/85 px-3 py-1.5 text-[12px] font-semibold text-flash backdrop-blur">
-          {p.category}
+    <div className="glass-panel relative flex h-full flex-col justify-between gap-8 overflow-hidden rounded-3xl p-8 sm:p-10">
+      <div>
+        <span className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-iris">
+          From the founder
         </span>
-      </div>
-      <div className="p-6">
-        <p className="text-[15px] font-semibold leading-snug text-flash">
-          {p.title}
+        <p className="mt-5 text-[18px] leading-relaxed text-flash-dim sm:text-[18.5px]">
+          SnapList started with one frustration. Every item I sold cost the same
+          half hour of price research and copywriting before it ever went live.
+          So I built the tool that gives that time back. You snap the photo and
+          approve what matters. SnapList does the rest.
         </p>
-        <div className="mt-4 flex items-end justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
-              Suggested price
-            </p>
-            <p className="nums font-display text-[38px] font-bold leading-tight text-flash">
-              ${p.price}
-            </p>
-          </div>
-          <span className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-iris/12 px-3 py-1.5 text-[12px] font-semibold text-iris">
-            <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-            82% confidence
+      </div>
+      <div className="flex items-center gap-3.5">
+        <LogoMark className="size-11 shrink-0" />
+        <span className="flex flex-col leading-tight">
+          <span className="font-display text-[16px] font-semibold text-flash">
+            Aziz
           </span>
-        </div>
-        {/* what similar items sold for — labeled endpoints, suggested price
-            marked and captioned, so the band explains itself at a glance */}
-        <div className="mt-5">
-          <p className="text-[12.5px] font-medium leading-snug text-flash-dim">
-            Similar turntables sold from{" "}
-            <span className="nums font-semibold text-flash">$55</span> to{" "}
-            <span className="nums font-semibold text-flash">$85</span> recently
-          </p>
-          <div className="relative mt-9">
-            <div className="absolute bottom-full left-[43%] flex -translate-x-1/2 flex-col items-center">
-              <span className="nums whitespace-nowrap rounded-full bg-iris/12 px-2.5 py-1 text-[11.5px] font-semibold text-iris">
-                ${p.price} suggested
-              </span>
-              <span aria-hidden className="h-2.5 w-px bg-iris/50" />
-            </div>
-            <div className="relative h-2">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-r from-iris-deep/70 to-iris" />
-              <span className="absolute left-[43%] top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-night bg-iris shadow-sm" />
-            </div>
-            <div className="mt-1.5 flex justify-between text-[11.5px] text-flash-faint">
-              <span>
-                <span className="nums font-semibold">$55</span> lowest sale
-              </span>
-              <span>
-                <span className="nums font-semibold">$85</span> highest sale
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="mt-5 space-y-2.5 border-t border-line pt-4">
-          {sources.map(([src, price, age]) => (
-            <div key={src} className="flex items-center justify-between text-[13px]">
-              <span className="flex items-center gap-2 text-flash-dim">
-                <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                </svg>
-                {src}
-              </span>
-              <span className="nums font-semibold text-flash">
-                {price} <span className="font-normal text-flash-faint">· {age}</span>
-              </span>
-            </div>
-          ))}
-        </div>
+          <span className="text-[13px] text-flash-faint">Founder, SnapList</span>
+        </span>
       </div>
     </div>
   );
@@ -205,27 +138,27 @@ export default function About() {
             </h1>
             <div className="mt-6 max-w-[60ch] space-y-4 text-[16.5px] leading-relaxed text-flash-dim">
               <p>
-                Every item is the same half hour: photograph it, guess what
-                it&apos;s worth used (not retail; good luck finding real sold
-                prices), write a listing that doesn&apos;t sound desperate,
-                post it, then answer the same three buyer questions.
+                Every item is the same half hour. You photograph it, then try to
+                guess what it&apos;s worth used, which is harder than it sounds
+                because real sold prices are tough to find. You write a listing
+                that doesn&apos;t sound desperate, post it, and then answer the
+                same three buyer questions.
               </p>
               <p>
                 SnapList collapses that into a photo and a couple of approvals.
-                It was built as a production-real AI engineering showcase,
-                which is exactly why it doesn&apos;t cut corners: real eBay
-                integration, real multi-tenant security, real evaluation of its
-                own accuracy.
+                It identifies the item and prices it from what similar things
+                actually sold for, then writes the listing for you. You review
+                what matters, and nothing goes live without you.
               </p>
             </div>
           </Reveal>
-          <Reveal delay={0.15} className="hidden lg:block">
-            <AboutPriceReport />
+          <Reveal delay={0.15} className="h-full">
+            <AboutFounderNote />
           </Reveal>
         </div>
       </section>
 
-      <section className="relative mx-auto w-full max-w-6xl px-5 pb-24 sm:px-8">
+      <section className="relative mx-auto w-full max-w-6xl px-5 pb-20 sm:px-8">
         <Reveal>
           <Eyebrow n="01" tint="indigo">
             Principles
@@ -235,8 +168,8 @@ export default function About() {
             <em className="text-iris">bend</em>
           </h2>
           <p className="mt-4 max-w-[54ch] text-[16px] leading-relaxed text-flash-dim">
-            Four rules the pipeline is built around. They decide what ships
-            and what gets cut.
+            Four rules we hold to, even when bending them would be easier. They
+            shape every price and every listing you see.
           </p>
         </Reveal>
         <Reveal stagger className="mt-10 grid gap-5 sm:grid-cols-2">
@@ -250,14 +183,14 @@ export default function About() {
                 <span className="flex size-11 items-center justify-center rounded-xl bg-iris/10 text-iris transition-colors duration-300 group-hover:bg-iris group-hover:text-iris-ink">
                   {icon}
                 </span>
-                <span className="nums font-display text-[14px] font-bold text-iris/70">
+                <span className="nums font-display text-[15px] font-bold text-iris/70">
                   0{i + 1}
                 </span>
               </div>
               <h3 className="mt-5 font-display text-[20px] font-semibold text-flash">
                 {title}
               </h3>
-              <p className="mt-3 text-[15px] leading-relaxed text-flash-dim">
+              <p className="mt-3 text-[16px] leading-relaxed text-flash-dim">
                 {body}
               </p>
             </SpotlightCard>
@@ -267,7 +200,7 @@ export default function About() {
 
       {/* one clean question list — no anchor card, no side column (ui-r5) */}
       <section id="faq" className="border-t border-line bg-night-2">
-        <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8 sm:py-28">
+        <div className="mx-auto w-full max-w-3xl px-5 py-20 sm:px-8 sm:py-24">
           <Reveal className="flex flex-col items-center text-center">
             <Eyebrow n="02" tint="cyan">
               FAQ
@@ -286,14 +219,14 @@ export default function About() {
         </div>
       </section>
 
-      <section className="mx-auto w-full max-w-3xl px-5 py-24 text-center sm:px-8">
+      <section className="mx-auto w-full max-w-3xl px-5 py-16 text-center sm:px-8 sm:py-20">
         <Reveal>
           <h2 className="font-display text-[clamp(28px,4vw,42px)] font-bold tracking-tight text-flash">
             Got something to sell?
           </h2>
           <Link
             href="/login"
-            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
+            className="group mt-8 inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[16.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
           >
             Snap your first photo
             <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>

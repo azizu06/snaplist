@@ -28,7 +28,7 @@ export function CardHeader({
 }) {
   return (
     <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
-      <h2 className="text-[13px] font-semibold text-fg-strong">{title}</h2>
+      <h2 className="text-[14px] font-semibold text-fg-strong">{title}</h2>
       {aside ? <div className="flex items-center gap-2">{aside}</div> : null}
     </header>
   );

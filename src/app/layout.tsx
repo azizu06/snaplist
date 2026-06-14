@@ -72,14 +72,25 @@ export default function RootLayout({
               "var(--font-display), var(--font-geist-sans), ui-sans-serif, sans-serif",
             letterSpacing: "-0.01em",
           },
-          // Primary action matches the site's rounded-full CTAs.
-          formButtonPrimary: { borderRadius: "9999px" },
+          // Primary action matches the site's rounded-full CTAs; height tracks
+          // the taller inputs so the form reads as one consistent stack.
+          formButtonPrimary: { borderRadius: "9999px", minHeight: "46px" },
+          // Taller fields so the email / password / Google row breathes instead
+          // of feeling cramped (owner) — Clerk's default control is ~36px.
+          formFieldInput: {
+            minHeight: "46px",
+            paddingTop: "11px",
+            paddingBottom: "11px",
+          },
           // The visible control "border" (input + Google button) is a Clerk
           // box-shadow ring keyed to colorBorder at ~11% alpha — invisible on
           // both themes. The appearance API can't override that ring, so it's
           // forced via .cl- class rules in globals.css (ui-r6-login-borders).
           socialButtonsBlockButton: {
             background: "var(--clerk-bg)",
+            minHeight: "46px",
+            paddingTop: "11px",
+            paddingBottom: "11px",
           },
           footer: { background: "var(--clerk-footer-bg)" },
         },

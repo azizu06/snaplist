@@ -62,7 +62,7 @@ export function Eyebrow({
   const t = TINT_VAR[tint];
   return (
     <p
-      className="eyebrow-rule inline-flex items-baseline gap-2 text-[12px] font-semibold uppercase tracking-[0.16em]"
+      className="eyebrow-rule inline-flex items-baseline gap-2 text-[13.5px] font-semibold uppercase tracking-[0.16em]"
       style={{ color: t.ink, "--eyebrow-tint": t.ink } as React.CSSProperties}
     >
       {n ? <span className="nums opacity-60">{n}</span> : null}
@@ -83,7 +83,7 @@ export function PointChip({
 }) {
   const t = TINT_VAR[tint];
   return (
-    <span className="inline-flex items-center gap-2.5 rounded-xl border border-line bg-panel py-2 pl-2 pr-3.5 text-[13px] font-medium text-flash-dim shadow-xs">
+    <span className="inline-flex items-center gap-2.5 rounded-xl border border-line bg-panel py-2 pl-2 pr-3.5 text-[14px] font-medium text-flash-dim shadow-xs">
       <span
         className="flex size-7 items-center justify-center rounded-lg"
         style={{ background: t.soft, color: t.ink }}
@@ -124,7 +124,7 @@ export function MiniPriceReport() {
         </span>
       </div>
       <div className="p-5">
-        <p className="text-[13px] font-semibold leading-snug text-flash">
+        <p className="text-[14px] font-semibold leading-snug text-flash">
           {p.title}
         </p>
         <div className="mt-3.5 flex items-end justify-between">
@@ -155,7 +155,7 @@ export function MiniPriceReport() {
         </div>
         <div className="mt-4 space-y-1.5 border-t border-line pt-3.5">
           {sources.map(([src, price, age]) => (
-            <div key={src} className="flex items-center justify-between text-[11.5px]">
+            <div key={src} className="flex items-center justify-between text-[12.5px]">
               <span className="flex items-center gap-2 text-flash-dim">
                 <svg viewBox="0 0 24 24" className="size-3 shrink-0 text-iris" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
@@ -209,8 +209,8 @@ export function SnapIdentityCard() {
         ))}
       </div>
       <div className="mt-3 flex items-center justify-between rounded-xl bg-night-2 px-3 py-2.5">
-        <span className="text-[11.5px] text-flash-faint">Priced from recent sales</span>
-        <span className="nums text-[14px] font-bold text-flash">${p.price}</span>
+        <span className="text-[12.5px] text-flash-faint">Priced from recent sales</span>
+        <span className="nums text-[15px] font-bold text-flash">${p.price}</span>
       </div>
     </div>
   );
@@ -227,7 +227,7 @@ export function BuyerReplyCard() {
     <div className="glass-panel h-full rounded-2xl p-5">
       <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-line bg-night-2 px-3.5 py-2.5">
         <p className="text-[10.5px] font-semibold text-flash-faint">buyer · via eBay</p>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
+        <p className="mt-1 text-[14px] leading-relaxed text-flash-dim">
           Is this the DW-5600 with the backlight? Does it keep time okay?
         </p>
       </div>
@@ -238,7 +238,7 @@ export function BuyerReplyCard() {
           </svg>
           drafted from item attributes, awaiting your approval
         </p>
-        <p className="mt-1 text-[12.5px] leading-relaxed text-flash-dim">
+        <p className="mt-1 text-[14px] leading-relaxed text-flash-dim">
           Yes, DW-5600E with the EL backlight, and it keeps accurate time.
           Light wear on the strap, glass is clean. Happy to send more photos!
         </p>
@@ -259,7 +259,7 @@ export function BuyerReplyCard() {
 export function IsolationCard() {
   return (
     <div className="glass-panel h-full rounded-2xl p-5">
-      <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
+      <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-flash-faint">
         <svg viewBox="0 0 24 24" className="size-3.5 text-iris" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -268,7 +268,7 @@ export function IsolationCard() {
       </p>
       <div className="mt-3 space-y-2">
         <div className="flex items-center justify-between rounded-lg border border-iris/35 bg-iris/8 px-3 py-2.5">
-          <span className="flex items-center gap-2.5 text-[12.5px] font-medium text-flash">
+          <span className="flex items-center gap-2.5 text-[14px] font-medium text-flash">
             <span className="flex size-6 items-center justify-center rounded-full bg-iris text-[10px] font-bold text-iris-ink">
               you
             </span>
@@ -281,7 +281,7 @@ export function IsolationCard() {
             key={u}
             className="flex items-center justify-between rounded-lg border border-line px-3 py-2.5 opacity-50"
           >
-            <span className="flex items-center gap-2.5 text-[12.5px] text-flash-faint">
+            <span className="flex items-center gap-2.5 text-[14px] text-flash-faint">
               <span className="flex size-6 items-center justify-center rounded-full bg-panel-2 text-[10px] font-bold text-flash-faint">
                 {u}
               </span>

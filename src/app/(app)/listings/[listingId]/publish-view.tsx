@@ -110,7 +110,7 @@ function StatusStepper({ active, failed }: { active: number; failed: boolean }) 
                 <span className="flex size-7 rounded-full border-2 border-border bg-surface" />
               )}
               <span
-                className={`text-[11px] font-medium ${
+                className={`text-[12px] font-medium ${
                   danger
                     ? "text-danger"
                     : current
@@ -177,7 +177,7 @@ export function PublishView({
         {data.published ? (
           /* Live chip with a subtle pulse dot — same shell as the
              success-solid StatusBadge, plus the animate-ping inner span. */
-          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-success-solid bg-success-solid px-2.5 py-0.5 text-xs font-medium text-white">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-success-solid bg-success-solid px-2.5 py-0.5 text-[13.5px] font-medium text-white">
             <span aria-hidden className="relative flex size-1.5 shrink-0">
               <span className="absolute inline-flex h-full w-full rounded-full bg-white/80 motion-safe:animate-ping" />
               <span className="relative inline-flex size-1.5 rounded-full bg-white" />
@@ -216,14 +216,14 @@ export function PublishView({
           <CardHeader
             title="Listing preview"
             aside={
-              <span className="text-xs uppercase tracking-wide text-faint">
+              <span className="text-[13.5px] uppercase tracking-wide text-faint">
                 {data.platform}
               </span>
             }
           />
           <CardBody>
-            <p className="text-sm font-semibold text-fg-strong">{data.title}</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">
+            <p className="text-[15px] font-semibold text-fg-strong">{data.title}</p>
+            <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-muted">
               {data.description}
             </p>
           </CardBody>
@@ -255,7 +255,7 @@ export function PublishView({
                 fix anything that needs it on the review page, then retry.
               </Banner>
             ) : (
-              <p className="text-sm text-muted">
+              <p className="text-[15px] text-muted">
                 Publishing creates the live eBay listing from this draft. You can
                 still edit the price on the review page first.
               </p>

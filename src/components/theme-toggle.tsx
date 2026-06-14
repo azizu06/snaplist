@@ -82,7 +82,7 @@ export function ThemeMenuToggle() {
       type="button"
       role="menuitem"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-fg transition-colors hover:bg-surface-2"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] font-medium text-fg transition-colors hover:bg-surface-2"
     >
       <span className="text-faint">{isDark ? <SunIcon /> : <MoonIcon />}</span>
       {isDark ? "Light mode" : "Dark mode"}
@@ -118,7 +118,7 @@ export function ThemeSegmented() {
             role="radio"
             aria-checked={selected}
             onClick={() => setTheme(value)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[14px] font-medium transition-colors ${
               selected
                 ? "bg-surface text-fg-strong shadow-xs"
                 : "text-muted hover:text-fg"

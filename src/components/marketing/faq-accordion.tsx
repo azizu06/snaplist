@@ -56,7 +56,7 @@ export function FaqAccordion({
             </h3>
             <div className="faq-panel" data-open={isOpen} id={panelId}>
               <div>
-                <p className="faq-panel-content px-7 pb-7 text-[15px] leading-relaxed text-flash-dim">
+                <p className="faq-panel-content px-7 pb-7 text-[16px] leading-relaxed text-flash-dim">
                   {a}
                 </p>
               </div>

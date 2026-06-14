@@ -125,16 +125,16 @@ function SpotlightStatLink({
  * label — round-5 owner trust fix). The opened folder reads as "this is what
  * your listings will become". Click/hover plays with the papers.
  *
- * Items picked for variety against other surfaces (round 5): turntable,
- * espresso, gshock — none headline the landing carousel/storefronts or the
- * new-listing examples.
+ * Items picked exclusive to the dashboard (r6.1): kettlebell, binoculars,
+ * sewing machine — none appear on any marketing surface (the old gshock/
+ * espresso/turntable also headlined the home scan).
  */
 const FOLDER_ITEMS: DemoProduct[] = [
-  // Order matters: paper 0 is the narrowest, paper 2 the widest — the
-  // longest short-name (turntable) rides the wide paper so nothing truncates.
-  DEMO_PRODUCTS_BY_SLUG.gshock,
-  DEMO_PRODUCTS_BY_SLUG.espresso,
-  DEMO_PRODUCTS_BY_SLUG.turntable,
+  // Order matters: paper 0 is the narrowest, paper 2 the widest — the longest
+  // short-name (Sewing machine) rides the wide paper so nothing truncates.
+  DEMO_PRODUCTS_BY_SLUG.kettlebell,
+  DEMO_PRODUCTS_BY_SLUG.binoculars,
+  DEMO_PRODUCTS_BY_SLUG.sewingmachine,
 ];
 
 function MiniListingCard({ product }: { product: DemoProduct }) {
@@ -182,14 +182,14 @@ function DashboardEmpty() {
       <p className="text-base font-semibold text-fg-strong">
         List your first item
       </p>
-      <p className="max-w-sm text-sm text-muted">
+      <p className="max-w-sm text-[15px] text-muted">
         Take a photo of something you want to sell and we&apos;ll identify it,
         research the price, and write the listing for you.
       </p>
       <div className="mt-1">
         <Link
           href="/upload"
-          className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
+          className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
         >
           New listing
         </Link>
@@ -231,7 +231,7 @@ export function DashboardView({
         <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
           Listings
         </h1>
-        <span className="text-[12.5px] text-muted" data-nums>
+        <span className="text-[14px] text-muted" data-nums>
           <CountUp to={rows.length} duration={0.7} /> item
           {rows.length === 1 ? "" : "s"}
         </span>
@@ -256,7 +256,7 @@ export function DashboardView({
                   active={active}
                 >
                   <span
-                    className={`block text-[12px] font-medium ${
+                    className={`block text-[13.5px] font-medium ${
                       active ? "text-accent-soft-fg" : "text-muted"
                     }`}
                   >
@@ -274,7 +274,7 @@ export function DashboardView({
           <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
             {/* toolbar: inline search over the active tab */}
             <div className="flex items-center gap-3 border-b border-border px-3 py-2.5">
-              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[13px] focus-within:ring-2 focus-within:ring-accent/40 sm:max-w-xs">
+              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[14px] focus-within:ring-2 focus-within:ring-accent/40 sm:max-w-xs">
                 <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="8" />
                   <path d="m21 21-4.3-4.3" />
@@ -300,7 +300,7 @@ export function DashboardView({
                 ) : null}
               </label>
               {searching ? (
-                <span className="shrink-0 text-[12px] text-muted" data-nums>
+                <span className="shrink-0 text-[13.5px] text-muted" data-nums>
                   {visible.length} match{visible.length === 1 ? "" : "es"}
                 </span>
               ) : null}
@@ -308,7 +308,7 @@ export function DashboardView({
 
             {visible.length === 0 ? (
               searching ? (
-                <p className="px-4 py-10 text-center text-sm text-muted">
+                <p className="px-4 py-10 text-center text-[15px] text-muted">
                   No titles match “{query.trim()}”.{" "}
                   <button
                     type="button"
@@ -319,7 +319,7 @@ export function DashboardView({
                   </button>
                 </p>
               ) : (
-                <p className="px-4 py-10 text-center text-sm text-muted">
+                <p className="px-4 py-10 text-center text-[15px] text-muted">
                   Nothing under “{activeFilter.label}” yet. Items move here as their
                   status changes.
                 </p>
@@ -329,7 +329,7 @@ export function DashboardView({
                 {/* desktop: Shopify data table */}
                 <table className="hidden w-full sm:table">
                   <thead>
-                    <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+                    <tr className="border-b border-border text-left text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">
                       <th className="py-2.5 pl-4 pr-2 font-semibold">Product</th>
                       <th className="px-2 py-2.5 font-semibold">Status</th>
                       <th className="px-2 py-2.5 text-right font-semibold">Price</th>
@@ -352,7 +352,7 @@ export function DashboardView({
                               className="flex items-center gap-3"
                             >
                               <Thumb url={row.thumbUrl} />
-                              <span className="truncate text-[13px] font-semibold text-fg-strong group-hover:underline">
+                              <span className="truncate text-[14px] font-semibold text-fg-strong group-hover:underline">
                                 {row.title}
                               </span>
                             </Link>
@@ -362,7 +362,7 @@ export function DashboardView({
                               <StatusBadge label={chip.label} tone={chip.tone} dot={false} />
                             ) : null}
                           </td>
-                          <td className="px-2 py-2 text-right text-[13px] text-fg" data-nums>
+                          <td className="px-2 py-2 text-right text-[14px] text-fg" data-nums>
                             {row.price != null ? PRICE_FMT.format(row.price) : "–"}
                           </td>
                           {/* suppressHydrationWarning: relative dates are
@@ -370,7 +370,7 @@ export function DashboardView({
                               user's TZ after hydration — they may differ
                               around midnight, by design. */}
                           <td
-                            className="py-2 pl-2 text-right text-[13px] text-muted"
+                            className="py-2 pl-2 text-right text-[14px] text-muted"
                             data-nums
                             suppressHydrationWarning
                           >
@@ -412,11 +412,11 @@ export function DashboardView({
                         >
                           <Thumb url={row.thumbUrl} />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold text-fg-strong">
+                            <span className="block truncate text-[15px] font-semibold text-fg-strong">
                               {row.title}
                             </span>
                             <span
-                              className="mt-0.5 block text-xs text-muted"
+                              className="mt-0.5 block text-[13.5px] text-muted"
                               data-nums
                               suppressHydrationWarning
                             >

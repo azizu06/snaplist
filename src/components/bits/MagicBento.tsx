@@ -593,13 +593,13 @@ const MagicBento: React.FC<BentoProps> = ({
               >
                 {card.icon ?? <span className="size-1.5 rounded-full bg-current" />}
               </span>
-              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-flash-faint">
+              <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-flash-faint">
                 {card.label}
               </span>
             </div>
             <div className="relative mt-4 flex flex-col">
               <h3 className="font-display text-[19px] font-semibold leading-snug text-flash">{card.title}</h3>
-              <p className="mt-2 text-[13.5px] leading-relaxed text-flash-dim">{card.description}</p>
+              <p className="mt-2 text-[15px] leading-relaxed text-flash-dim">{card.description}</p>
             </div>
           </ParticleCard>
         ))}

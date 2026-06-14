@@ -21,8 +21,10 @@ import { FAINT, GREEN, INK, LINE, SURFACE, VIOLET, center, type ClickSpec, type 
  *   2. a real OS drag-drop: the cursor picks up a Finder-style file card on
  *      the desk and drops it on the dropzone (press + release both asserted),
  *   3. a click on the “+ Add” tile for a third angle.
- * Ends on “3 photos · ready to identify”. Product: Taylor koa
- * acoustic-electric guitar (demo/guitar.jpg) — three crops play as angles.
+ * Ends on “3 photos · ready to identify”. Product: Canon AE-1 35mm film SLR
+ * (demo/filmcamera.jpg) — three crops play as angles. This is the SAME item
+ * carried through every how-it-works step (snap → identify → price → write →
+ * publish → answer) so the pipeline tells one coherent story.
  *
  * Render: npx remotion render remotion/index.ts step-snap public/demo/steps/snap.mp4 --crf 26 --muted
  */
@@ -42,14 +44,15 @@ const slotRect = (i: number): Rect => ({ x: 64 + i * 176, y: SLOT_Y, w: SLOT_W, 
 const PHONE: Rect = { x: 940, y: 56, w: 230, h: 470 };
 const FILE: Rect = { x: 952, y: 566, w: 206, h: 64 };
 
-const IMG = "demo/guitar.jpg";
-/** three crops of the verified guitar photo standing in for angles: body, headstock, bridge */
-const ANGLES = ["50% 68%", "50% 16%", "50% 92%"];
-/** rail-thumbnail zoom framing so the guitar fills each tile */
+const IMG = "demo/filmcamera.jpg";
+/** three crops of the verified Canon AE-1 photo standing in for angles:
+ *  full body, front lens + "Canon" badge, top deck with the AE-1 nameplate */
+const ANGLES = ["50% 50%", "55% 60%", "32% 45%"];
+/** rail-thumbnail zoom framing so the camera fills each tile */
 const THUMB_VIEW = [
-  { origin: "55% 62%", zoom: 1.9 },
-  { origin: "40% 22%", zoom: 2.1 },
-  { origin: "56% 80%", zoom: 1.9 },
+  { origin: "50% 50%", zoom: 1.5 },
+  { origin: "56% 58%", zoom: 2.0 },
+  { origin: "33% 46%", zoom: 2.1 },
 ];
 
 /* ---------- choreography ---------- */

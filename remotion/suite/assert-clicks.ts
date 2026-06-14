@@ -16,6 +16,7 @@
 
 import { BUYER_QA_LEN, QA_CLICKS, qaCursorAt } from "./BuyerQA";
 import { HERO_CLICKS, HERO_VISION_LEN, heroCursorAt } from "./HeroVision";
+import { INBOX_QA_CLICKS, INBOX_QA_LEN, inboxQaCursorAt } from "./InboxQA";
 import { IDENTIFY_CLICKS, STEP_IDENTIFY_LEN } from "./StepIdentify";
 import { PRICE_CLICKS, STEP_PRICE_LEN, priceCursorAt } from "./StepPrice";
 import { PUBLISH_CLICKS, STEP_PUBLISH_LEN, publishCursorAt } from "./StepPublish";
@@ -41,6 +42,7 @@ const VIDEOS: VideoSpec[] = [
   { id: "step-write", len: STEP_WRITE_LEN, clicks: WRITE_CLICKS, cursorAt: writeCursorAt },
   { id: "step-publish", len: STEP_PUBLISH_LEN, clicks: PUBLISH_CLICKS, cursorAt: publishCursorAt },
   { id: "buyer-qa", len: BUYER_QA_LEN, clicks: QA_CLICKS, cursorAt: qaCursorAt },
+  { id: "inbox-qa", len: INBOX_QA_LEN, clicks: INBOX_QA_CLICKS, cursorAt: inboxQaCursorAt },
 ];
 
 let failures = 0;

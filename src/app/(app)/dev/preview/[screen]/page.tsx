@@ -191,13 +191,13 @@ export default async function PreviewPage({
             <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
               Buyer inbox
             </h1>
-            <p className="mt-0.5 text-[13px] text-muted">
+            <p className="mt-0.5 text-[14px] text-muted">
               Questions from buyers appear here live. We draft a reply from the
               listing, then you approve or edit before anything sends.
             </p>
           </header>
           <section className="flex flex-col gap-3">
-            <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
+            <h2 className="text-[14px] font-semibold text-fg-strong">Messages</h2>
             <InboxEmptyState />
           </section>
         </main>

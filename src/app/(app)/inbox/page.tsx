@@ -53,7 +53,7 @@ export default async function InboxPage() {
         <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
           Buyer inbox
         </h1>
-        <p className="mt-1 text-[14px] text-muted">
+        <p className="mt-1 text-[15px] text-muted">
           Questions from buyers appear here live. We draft a reply from the
           listing, then you approve or edit before anything sends.
         </p>

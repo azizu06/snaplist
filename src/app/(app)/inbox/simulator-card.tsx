@@ -28,7 +28,7 @@ export function SimulatorCard({
   return (
     <section className="rounded-xl border border-border bg-surface shadow-xs">
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
-        <span className="flex items-center gap-2.5 text-[13px] font-semibold text-fg-strong">
+        <span className="flex items-center gap-2.5 text-[14px] font-semibold text-fg-strong">
           <span
             aria-hidden
             className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-soft-fg"
@@ -49,7 +49,7 @@ export function SimulatorCard({
       </header>
       <div className="flex flex-col gap-3 px-4 py-4 sm:px-5">
         {items.length === 0 ? (
-          <p className="text-[14.5px] text-fg">
+          <p className="text-[15.5px] text-fg">
             No items yet. Create a listing first, then simulate a buyer
             question about it.
           </p>
@@ -62,7 +62,7 @@ export function SimulatorCard({
               id="simulate-item"
               value={selectedItem}
               onChange={(e) => onSelectItem(e.target.value)}
-              className="min-w-0 max-w-full flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg sm:max-w-[280px] sm:flex-none"
+              className="min-w-0 max-w-full flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg sm:max-w-[280px] sm:flex-none"
             >
               {items.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -78,7 +78,7 @@ export function SimulatorCard({
               // is active, leaving the question invisible until refresh.
               disabled={simulating || !live}
               title={live ? undefined : "Waiting for the live connection…"}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+              className="rounded-lg bg-primary px-4 py-2 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
             >
               {simulating
                 ? "Asking…"
@@ -88,7 +88,7 @@ export function SimulatorCard({
             </button>
           </div>
         )}
-        <p className="text-[13px] text-muted">
+        <p className="text-[14px] text-muted">
           Sandbox: replies are drafted by the agent, approved by you, and
           delivery is a logged no-op until the eBay adapter lands.
         </p>

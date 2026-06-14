@@ -47,3 +47,9 @@ next-env.d.ts
 
 # Claude Code agent worktrees (local only — never track)
 .claude/worktrees/
+
+# temporary asset-intake (raw archive, not shipped)
+asset-intake/
+
+# local render/review scratch
+.review-shots/

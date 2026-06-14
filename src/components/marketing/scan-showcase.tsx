@@ -2,8 +2,8 @@
 
 /**
  * Hero showcase — "one photo in, a defensible listing out", performed live.
- * A photo frame cycles through ten verified catalog products (this is a
- * montage surface: reuse across the catalog is deliberate) while a scanning
+ * A photo frame cycles through a montage of verified catalog products (this
+ * is a montage surface: reuse across the catalog is deliberate) while a scanning
  * beam sweeps each photo like the vision model reading it; when a scan
  * completes, the output panel updates to that product's real title / price /
  * condition from src/lib/demo-products (labels stay truthful — every entry
@@ -23,25 +23,18 @@
 
 import Image from "next/image";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
+import {
+  DEMO_PRODUCTS_BY_SLUG,
+  DEMO_SURFACE_ASSIGNMENTS,
+} from "@/lib/demo-products";
 
-/** Ten montage entries — the keyboard sits out (it stars in the storefronts
- *  section), chess sits out (it rides the listings carousel), and the mixer
- *  sits out (its extreme close-up doesn't read as a product at a glance). */
-const SCAN_SLUGS = [
-  "camera",
-  "book",
-  "sneakers",
-  "vinyl",
-  "gameboy",
-  "headphones",
-  "guitar",
-  "polaroid",
-  "espresso",
-  "gshock",
-] as const;
-
-const PRODUCTS = SCAN_SLUGS.map((slug) => DEMO_PRODUCTS_BY_SLUG[slug]);
+/** The montage products are data-driven from DEMO_SURFACE_ASSIGNMENTS so the
+ *  scan set stays in sync with the rest of the catalog and never repeats a
+ *  photo another surface already uses. The assigned eight are deliberately
+ *  disjoint from the landing carousel and the how-it-works step clips. */
+const PRODUCTS = DEMO_SURFACE_ASSIGNMENTS["landing-hero-scan"].map(
+  (slug) => DEMO_PRODUCTS_BY_SLUG[slug],
+);
 
 /** Beam sweep duration — must match --scan-beam duration in globals.css. */
 const SCAN_MS = 2100;
@@ -50,7 +43,7 @@ const HOLD_MS = 1900;
 
 function CheckRow({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex items-center gap-2.5 text-[13px] text-flash-dim">
+    <p className="flex items-center gap-2.5 text-[14px] text-flash-dim">
       <svg
         viewBox="0 0 24 24"
         aria-hidden
@@ -99,7 +92,7 @@ function AnalyzingPanel() {
         ].map((label, i) => (
           <p
             key={label}
-            className="flex items-center gap-2.5 text-[13px] text-flash-faint"
+            className="flex items-center gap-2.5 text-[14px] text-flash-faint"
           >
             <span
               aria-hidden
@@ -197,7 +190,7 @@ export function ScanShowcase() {
 
       {/* ----------------------------------------- a defensible listing out */}
       <div className="flex flex-col border-t border-line bg-panel p-6 sm:p-7 md:border-l md:border-t-0">
-        <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-flash-faint">
+        <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.16em] text-flash-faint">
           <span
             aria-hidden
             className={`size-1.5 rounded-full bg-iris ${analyzing ? "animate-pulse" : ""}`}
@@ -220,11 +213,11 @@ export function ScanShowcase() {
               <span className="nums font-display text-[36px] font-bold leading-none tracking-tight text-flash">
                 ${listing.price}
               </span>
-              <span className="rounded-full border border-line bg-night-2 px-3 py-1 text-[12px] font-semibold text-flash-dim">
+              <span className="rounded-full border border-line bg-night-2 px-3 py-1 text-[13.5px] font-semibold text-flash-dim">
                 {listing.condition}
               </span>
             </div>
-            <p className="mt-2.5 text-[12.5px] font-medium text-flash-faint">
+            <p className="mt-2.5 text-[14px] font-medium text-flash-faint">
               {listing.category} · suggested from the used market
             </p>
 
@@ -234,7 +227,7 @@ export function ScanShowcase() {
               {listing.details.map((detail) => (
                 <li
                   key={detail}
-                  className="flex items-center gap-2.5 text-[13.5px] text-flash-dim"
+                  className="flex items-center gap-2.5 text-[15px] text-flash-dim"
                 >
                   <span
                     aria-hidden

@@ -60,7 +60,7 @@ export interface ReviewData {
 const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
 
 const INPUT_CLASSES =
-  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20";
+  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20";
 
 type FieldKey = "title" | "description" | "category" | "condition" | "price";
 
@@ -111,7 +111,7 @@ function FieldLabel({
       <span className="flex items-center gap-1.5">
         <label
           htmlFor={htmlFor}
-          className="text-[13px] font-medium text-fg"
+          className="text-[14px] font-medium text-fg"
         >
           {label}
         </label>
@@ -198,14 +198,14 @@ export function ReviewView({
         <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
           <Link
             href={`/export/${data.itemId}`}
-            className="inline-flex items-center rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[13px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
+            className="inline-flex items-center rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
           >
             Export pack
           </Link>
           {data.listing ? (
             <Link
               href={`/listings/${data.listing.id}`}
-              className="inline-flex items-center rounded-lg bg-primary px-3.5 py-1.5 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
+              className="inline-flex items-center rounded-lg bg-primary px-3.5 py-1.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
             >
               {data.listing.status === "published"
                 ? "View on eBay"
@@ -246,7 +246,7 @@ export function ReviewView({
           <div className="flex min-w-0 flex-col gap-4">
             {/* Listing card: title + description as REAL fields */}
             <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
-              <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">
+              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">
                 Listing
               </h2>
               {data.listing ? (
@@ -258,7 +258,7 @@ export function ReviewView({
                       ai={ai("title")}
                       aside={
                         <span
-                          className={`text-[11px] ${
+                          className={`text-[12px] ${
                             fields.title.length > EBAY_TITLE_MAX
                               ? "font-semibold text-danger-soft-fg"
                               : "text-faint"
@@ -294,20 +294,20 @@ export function ReviewView({
                       className={`${INPUT_CLASSES} min-h-32 resize-y leading-relaxed`}
                     />
                   </div>
-                  <p className="text-xs text-faint">
+                  <p className="text-[13.5px] text-faint">
                     Drafted by SnapList from your verified item details
                     {data.listing.platform ? ` · ${data.listing.platform} format` : ""}
                     . Edit anything; your words always win.
                   </p>
                 </div>
               ) : (
-                <p className="text-sm text-muted">No listing generated yet.</p>
+                <p className="text-[15px] text-muted">No listing generated yet.</p>
               )}
             </section>
 
             {/* Media card */}
             <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
-              <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">Media</h2>
+              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">Media</h2>
               {data.photoUrls.length > 0 ? (
                 /* react-bits FadeContent: one soft blur-up entrance for the
                    photo grid (reduced-motion safe inside the component). */
@@ -327,7 +327,7 @@ export function ReviewView({
                   ))}
                 </FadeContent>
               ) : (
-                <p className="text-sm text-muted">No photos.</p>
+                <p className="text-[15px] text-muted">No photos.</p>
               )}
             </section>
 
@@ -338,7 +338,7 @@ export function ReviewView({
               spotlightColor="rgba(109, 74, 255, 0.09)"
               className="p-4 sm:p-5"
             >
-              <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">Pricing</h2>
+              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">Pricing</h2>
               <div className="flex flex-col gap-4">
                 <div className="max-w-56">
                   <FieldLabel
@@ -347,7 +347,7 @@ export function ReviewView({
                     ai={ai("price")}
                   />
                   <div className="flex items-center rounded-lg border border-border-strong bg-surface transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
-                    <span className="pl-3 text-sm text-muted">$</span>
+                    <span className="pl-3 text-[15px] text-muted">$</span>
                     <input
                       id="review-price"
                       name="price"
@@ -360,12 +360,12 @@ export function ReviewView({
                         data.suggested != null ? String(data.suggested) : "0.00"
                       }
                       aria-label="Price (USD)"
-                      className="w-full rounded-lg bg-transparent px-2 py-2 text-sm text-fg outline-none"
+                      className="w-full rounded-lg bg-transparent px-2 py-2 text-[15px] text-fg outline-none"
                       data-nums
                     />
                   </div>
                   {data.override != null && data.suggested != null ? (
-                    <p className="mt-1.5 text-xs text-faint" data-nums>
+                    <p className="mt-1.5 text-[13.5px] text-faint" data-nums>
                       AI suggested ${data.suggested}. Clear the field and save
                       to use it again.
                     </p>
@@ -378,14 +378,14 @@ export function ReviewView({
                   <ConfidenceGauge value={data.confidence} size={120} />
                   <div className="grid flex-1 grid-cols-2 gap-3">
                     <div>
-                      <p className="text-xs text-muted">Suggested</p>
-                      <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
+                      <p className="text-[13.5px] text-muted">Suggested</p>
+                      <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
                         {data.suggested != null ? `$${data.suggested}` : "–"}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted">Typical range</p>
-                      <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
+                      <p className="text-[13.5px] text-muted">Typical range</p>
+                      <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
                         {data.range?.low != null && data.range?.high != null
                           ? `$${data.range.low}–$${data.range.high}`
                           : "–"}
@@ -401,7 +401,7 @@ export function ReviewView({
                       tone={confidenceChip.tone}
                       dot={false}
                     />
-                    <span className="text-xs text-muted">
+                    <span className="text-[13.5px] text-muted">
                       {confidenceChip.detail}
                       {tier ? ` · based on: ${tier}` : ""}
                     </span>
@@ -415,14 +415,14 @@ export function ReviewView({
           <div className="flex flex-col gap-4">
             {/* Status card */}
             <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
-              <h2 className="mb-2 text-[13px] font-semibold text-fg-strong">Status</h2>
+              <h2 className="mb-2 text-[14px] font-semibold text-fg-strong">Status</h2>
               {statusChip ? (
                 <StatusBadge label={statusChip.label} tone={statusChip.tone} dot={false} />
               ) : (
-                <p className="text-sm text-muted">No sale listing yet.</p>
+                <p className="text-[15px] text-muted">No sale listing yet.</p>
               )}
               {data.banner ? (
-                <p className="mt-2 text-xs leading-relaxed text-muted">
+                <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
                   {data.banner.detail}
                 </p>
               ) : null}
@@ -432,7 +432,7 @@ export function ReviewView({
             {data.identification ? (
               <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <h2 className="text-[13px] font-semibold text-fg-strong">
+                  <h2 className="text-[14px] font-semibold text-fg-strong">
                     Identification
                   </h2>
                   {data.identification.confident ? (
@@ -441,13 +441,13 @@ export function ReviewView({
                     <StatusBadge label="Needs confirmation" tone="warning" dot={false} />
                   )}
                 </div>
-                <p className="text-sm font-medium text-fg">{data.identification.label}</p>
+                <p className="text-[15px] font-medium text-fg">{data.identification.label}</p>
                 {data.identification.candidates.length > 0 ? (
-                  <p className="mt-1.5 text-xs text-muted">
+                  <p className="mt-1.5 text-[13.5px] text-muted">
                     Possible matches: {data.identification.candidates.join(", ")}
                   </p>
                 ) : (
-                  <p className="mt-1.5 text-xs text-faint">
+                  <p className="mt-1.5 text-[13.5px] text-faint">
                     {(data.identification.evidence * 100).toFixed(0)}% of strong
                     identifiers resolved
                   </p>
@@ -457,7 +457,7 @@ export function ReviewView({
 
             {/* Item details card — category + condition are REAL fields too */}
             <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
-              <h2 className="mb-3 text-[13px] font-semibold text-fg-strong">
+              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">
                 Item details
               </h2>
               <div className="flex flex-col gap-3.5">
@@ -474,7 +474,7 @@ export function ReviewView({
                     value={fields.category}
                     placeholder="e.g. Consumer electronics"
                     onChange={(e) => setField("category", e.target.value)}
-                    className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[13px]`}
+                    className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[14px]`}
                   />
                 </div>
                 <div>
@@ -490,14 +490,14 @@ export function ReviewView({
                     value={fields.condition}
                     placeholder="e.g. Good, light wear"
                     onChange={(e) => setField("condition", e.target.value)}
-                    className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[13px]`}
+                    className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[14px]`}
                   />
                 </div>
                 <dl className="flex flex-col gap-2.5 border-t border-border pt-3">
                   {readOnlyAttrs.map(({ key, value }) => (
                     <div key={key}>
-                      <dt className="text-xs capitalize text-muted">{key}</dt>
-                      <dd className="mt-0.5 rounded-lg border border-border bg-surface-2/50 px-2.5 py-1.5 text-[13px] text-fg">
+                      <dt className="text-[13.5px] capitalize text-muted">{key}</dt>
+                      <dd className="mt-0.5 rounded-lg border border-border bg-surface-2/50 px-2.5 py-1.5 text-[14px] text-fg">
                         {value ?? <span className="text-faint">Not detected</span>}
                       </dd>
                     </div>
@@ -514,7 +514,7 @@ export function ReviewView({
             {/* Pinned ink navy (bg-fg-strong flips near-white in dark, which
                 would break the white inner text); dark gets a raised navy. */}
             <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#131e3a] px-3 py-2 text-white shadow-lg dark:border-white/15 dark:bg-[#20294e]">
-              <span className="flex items-center gap-2 pl-1 text-[13px] font-medium text-white/85">
+              <span className="flex items-center gap-2 pl-1 text-[14px] font-medium text-white/85">
                 <span aria-hidden className="size-1.5 rounded-full bg-warning" />
                 Unsaved changes
               </span>
@@ -522,7 +522,7 @@ export function ReviewView({
                 <button
                   type="button"
                   onClick={discard}
-                  className="rounded-lg border border-white/20 px-3 py-1.5 text-[12.5px] font-semibold text-white/90 transition-colors hover:bg-white/10"
+                  className="rounded-lg border border-white/20 px-3 py-1.5 text-[14px] font-semibold text-white/90 transition-colors hover:bg-white/10"
                 >
                   Discard
                 </button>

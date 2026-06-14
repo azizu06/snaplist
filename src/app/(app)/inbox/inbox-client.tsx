@@ -273,7 +273,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
       {error ? (
         <p
           role="alert"
-          className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-sm text-danger-soft-fg"
+          className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[15px] text-danger-soft-fg"
         >
           {error}
         </p>
@@ -281,7 +281,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-[14px] font-semibold text-fg-strong">Messages</h2>
+          <h2 className="text-[15px] font-semibold text-fg-strong">Messages</h2>
           {inbound.length > 0 ? (
             <span
               data-nums
@@ -338,10 +338,10 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
-                    <p className="text-[11.5px] font-semibold text-muted">
+                    <p className="text-[12.5px] font-semibold text-muted">
                       buyer · via eBay
                     </p>
-                    <p className="mt-1 text-[13px] leading-relaxed text-fg">
+                    <p className="mt-1 text-[14px] leading-relaxed text-fg">
                       {message.body}
                     </p>
                   </div>
@@ -354,7 +354,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                       Reply not delivered. Delivery failed after your approval.
                     </p>
                     {message.draft_reply ? (
-                      <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-fg">
+                      <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-fg">
                         {message.draft_reply}
                       </p>
                     ) : null}
@@ -363,7 +363,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => retryDelivery(message)}
                         disabled={busy === `retry:${message.id}`}
-                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[14px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `retry:${message.id}` ? "Retrying…" : "Retry delivery"}
                       </button>
@@ -379,7 +379,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => retryDraft(message)}
                         disabled={busy === `redraft:${message.id}`}
-                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[14px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `redraft:${message.id}` ? "Retrying…" : "Retry draft"}
                       </button>
@@ -390,7 +390,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                     <p className="text-[10.5px] font-semibold text-accent-soft-fg">
                       Your reply{sentReply?.sent_at ? " · sent (stubbed delivery)" : ""}
                     </p>
-                    <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-fg">
+                    <p className="mt-1 whitespace-pre-wrap text-[14px] leading-relaxed text-fg">
                       {sentReply?.body ?? message.draft_reply}
                     </p>
                   </div>
@@ -416,7 +416,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                           setEdits((prev) => ({ ...prev, [message.id]: e.target.value }))
                         }
                         rows={3}
-                        className="mt-1.5 w-full resize-y rounded-lg border border-accent/20 bg-surface/80 px-3 py-2 text-[13px] leading-relaxed text-fg"
+                        className="mt-1.5 w-full resize-y rounded-lg border border-accent/20 bg-surface/80 px-3 py-2 text-[14px] leading-relaxed text-fg"
                       />
                     </div>
                     <div className="flex justify-end">
@@ -424,7 +424,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => approveAndSend(message)}
                         disabled={busy === `send:${message.id}`}
-                        className="rounded-full bg-primary px-4 py-1.5 text-[12.5px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-full bg-primary px-4 py-1.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `send:${message.id}` ? "Sending…" : "Approve & send"}
                       </button>
@@ -432,7 +432,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   </div>
                 ) : (
                   <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md border border-dashed border-border bg-surface-2/60 px-3.5 py-2.5">
-                    <p className="text-[13px] text-muted">
+                    <p className="text-[14px] text-muted">
                       Drafting a reply from your listing…
                     </p>
                   </div>

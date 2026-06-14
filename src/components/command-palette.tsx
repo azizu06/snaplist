@@ -160,7 +160,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
       <button
         type="button"
         onClick={openPalette}
-        className="hidden max-w-md flex-1 items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-left text-[13px] text-faint transition-colors hover:bg-surface-3 hover:text-muted sm:flex"
+        className="hidden max-w-md flex-1 items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-left text-[14px] text-faint transition-colors hover:bg-surface-3 hover:text-muted sm:flex"
       >
         <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="11" cy="11" r="8" />
@@ -213,7 +213,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                 onKeyDown={onInputKeyDown}
                 placeholder="Search your listings…"
                 aria-label="Search your listings"
-                className="h-[52px] w-full bg-transparent text-[15px] text-fg-strong outline-none placeholder:text-faint"
+                className="h-[52px] w-full bg-transparent text-[16px] text-fg-strong outline-none placeholder:text-faint"
               />
               <kbd className="shrink-0 rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-faint">
                 esc
@@ -223,7 +223,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
             <div role="listbox" aria-label="Results" className="max-h-[44vh] overflow-y-auto p-2">
               {showActions ? (
                 <>
-                  <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+                  <p className="px-2.5 pb-1 pt-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">
                     Quick actions
                   </p>
                   {QUICK_ACTIONS.map((a, i) => (
@@ -234,19 +234,19 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                       aria-selected={selected === i}
                       onClick={() => navigate(a.href)}
                       onPointerMove={() => setSelected(i)}
-                      className={`flex w-full items-baseline gap-2 rounded-lg px-3 py-2.5 text-left text-[13.5px] transition-colors ${
+                      className={`flex w-full items-baseline gap-2 rounded-lg px-3 py-2.5 text-left text-[15px] transition-colors ${
                         selected === i ? "bg-accent-soft" : ""
                       }`}
                     >
                       <span className={`font-medium ${selected === i ? "text-accent-soft-fg" : "text-fg"}`}>
                         {a.label}
                       </span>
-                      <span className="text-[12.5px] text-faint">{a.hint}</span>
+                      <span className="text-[14px] text-faint">{a.hint}</span>
                     </button>
                   ))}
                 </>
               ) : hits.length === 0 ? (
-                <p className="px-2.5 py-6 text-center text-[13px] text-muted">
+                <p className="px-2.5 py-6 text-center text-[14px] text-muted">
                   No listings match “{query.trim()}”.
                 </p>
               ) : (
@@ -265,7 +265,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                       }`}
                     >
                       <span
-                        className={`min-w-0 flex-1 truncate text-[13.5px] font-medium ${
+                        className={`min-w-0 flex-1 truncate text-[15px] font-medium ${
                           selected === i ? "text-accent-soft-fg" : "text-fg"
                         }`}
                       >

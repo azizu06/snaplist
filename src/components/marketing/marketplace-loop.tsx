@@ -14,17 +14,19 @@
  * pixels (the LogoLoop fix); nothing inside a card transforms on hover, and
  * the drift never pauses (owner r6: it should just keep scrolling).
  *
- * Product pool note (r6): ten cards, tilted hard toward VISIBLY USED items
- * (worn boots, dusty drill, vintage Peugeot, CRT TV) — secondhand is the
- * product's whole point, so the band should look like a real closet, not a
- * showroom. Ten cards ≈ 3480px of sequence, wider than any common viewport,
- * so the same product can't appear twice on one screen. The keyboard stays
- * reserved for "one photo, three storefronts" below.
+ * Product pool note (r6): the card list is DERIVED from the
+ * "landing-carousel" assignment in demo-products.ts (single source of truth),
+ * tilted hard toward VISIBLY USED items — secondhand is the product's whole
+ * point, so the band should look like a real closet, not a showroom. The list
+ * is kept disjoint from the video clips and the scan montage so no image
+ * repeats across surfaces. To add/remove a card, edit that one array; the
+ * marketplace + confidence chip below are computed from each product so
+ * nothing has to be hand-kept in sync.
  */
 
 import Image from "next/image";
 import LogoLoop, { type LogoItem } from "@/components/bits/LogoLoop";
-import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
+import { DEMO_PRODUCTS_BY_SLUG, DEMO_SURFACE_ASSIGNMENTS } from "@/lib/demo-products";
 
 type Marketplace = "eBay" | "Facebook" | "Mercari";
 
@@ -39,68 +41,45 @@ type LoopListing = {
   tone: "high" | "solid" | "review";
 };
 
-const LISTINGS: LoopListing[] = [
-  {
-    slug: "macbook",
-    marketplace: "eBay",
-    confidence: "Priced from recent sales · 91% sure",
-    tone: "high",
-  },
-  {
-    slug: "boots",
-    marketplace: "Mercari",
-    confidence: "Priced from recent sales · 84% sure",
-    tone: "solid",
-  },
-  {
-    slug: "book",
-    marketplace: "eBay",
-    confidence: "ISBN match · 97% sure",
-    tone: "high",
-  },
-  {
-    slug: "bicycle",
-    marketplace: "Facebook",
-    confidence: "Priced from recent sales · 88% sure",
-    tone: "solid",
-  },
-  {
-    slug: "drill",
-    marketplace: "eBay",
-    confidence: "Priced from recent sales · 93% sure",
-    tone: "high",
-  },
-  {
-    slug: "chess",
-    marketplace: "Facebook",
-    confidence: "Waiting for your review",
-    tone: "review",
-  },
-  {
-    slug: "crt-tv",
-    marketplace: "Mercari",
-    confidence: "Priced from recent sales · 82% sure",
-    tone: "solid",
-  },
-  {
-    slug: "headphones",
-    marketplace: "Mercari",
-    confidence: "Priced from recent sales · 89% sure",
-    tone: "solid",
-  },
-  {
-    slug: "skateboard",
-    marketplace: "Facebook",
-    confidence: "Waiting for your review",
-    tone: "review",
-  },
-  {
-    slug: "backpack",
-    marketplace: "eBay",
-    confidence: "Estimated from condition · 74% sure",
-    tone: "review",
-  },
-];
+const MARKETPLACES: Marketplace[] = ["eBay", "Facebook", "Mercari"];
+
+/** Stable per-slug number so a card's marketplace + confidence don't change
+ *  between renders (no Math.random) but still vary product to product. */
+function stableHash(slug: string): number {
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) h = (h + slug.charCodeAt(i) * (i + 1)) % 997;
+  return h;
+}
+
+/** Derive a card's marketplace + confidence chip from the product itself, so
+ *  the chip stays truthful to how the price was found (pricingStory) without
+ *  any hand-maintained per-card table. */
+function deriveListing(slug: string, index: number): LoopListing {
+  const { pricingStory } = DEMO_PRODUCTS_BY_SLUG[slug];
+  const h = stableHash(slug);
+  const marketplace = MARKETPLACES[index % MARKETPLACES.length];
+  if (pricingStory === "barcode") {
+    return { slug, marketplace, confidence: `ISBN match · ${96 + (h % 3)}% sure`, tone: "high" };
+  }
+  if (pricingStory === "depreciation") {
+    return {
+      slug,
+      marketplace,
+      confidence: `Estimated from condition · ${70 + (h % 9)}% sure`,
+      tone: "review",
+    };
+  }
+  const conf = 82 + (h % 12); // comps
+  return {
+    slug,
+    marketplace,
+    confidence: `Priced from recent sales · ${conf}% sure`,
+    tone: conf >= 89 ? "high" : "solid",
+  };
+}
+
+const LISTINGS: LoopListing[] =
+  DEMO_SURFACE_ASSIGNMENTS["landing-carousel"].map(deriveListing);
 
 const TONE_CLASSES: Record<LoopListing["tone"], string> = {
   high: "bg-success-soft text-success-soft-fg",
@@ -112,7 +91,7 @@ const TONE_CLASSES: Record<LoopListing["tone"], string> = {
  *  storefront trio so both surfaces speak one marketplace language. */
 export function MarketplaceBadge({
   marketplace,
-  className = "text-[11px]",
+  className = "text-[12px]",
 }: {
   marketplace: Marketplace;
   className?: string;
@@ -163,7 +142,7 @@ function ListingCard({ listing }: { listing: LoopListing }) {
         </span>
       </div>
       <div className="p-4">
-        <p className="truncate text-[13.5px] font-semibold leading-snug text-flash">
+        <p className="truncate text-[15px] font-semibold leading-snug text-flash">
           {product.title}
         </p>
         <div className="mt-2.5 flex items-center gap-2.5">
@@ -173,10 +152,10 @@ function ListingCard({ listing }: { listing: LoopListing }) {
           <span aria-hidden className="text-line-2">
             ·
           </span>
-          <MarketplaceBadge marketplace={listing.marketplace} className="text-[15px]" />
+          <MarketplaceBadge marketplace={listing.marketplace} className="text-[16px]" />
         </div>
         <span
-          className={`mt-3.5 inline-block max-w-full rounded-full px-3.5 py-1.5 text-[12px] font-semibold leading-snug ${TONE_CLASSES[listing.tone]}`}
+          className={`mt-3.5 inline-block max-w-full rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold leading-snug ${TONE_CLASSES[listing.tone]}`}
         >
           {listing.confidence}
         </span>

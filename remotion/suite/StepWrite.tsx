@@ -32,7 +32,8 @@ import {
  * the marketplace tabs: eBay (search-friendly title + item details +
  * description), Facebook Marketplace (casual, local) and Mercari (short
  * title, hashtags, shipping). Both tab switches are cursor-accurate clicks.
- * Product: KitchenAid stand mixer, pink (demo/mixer.jpg).
+ * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-write public/demo/steps/write.mp4 --crf 26 --muted
  */
@@ -72,21 +73,26 @@ const MC_TAGS_AT = 500;
 const MC_SHIP_AT = 514;
 const READY_AT = 530;
 
-const EBAY_TITLE = "KitchenAid Stand Mixer, Pink Tilt-Head, Tested & Working";
+// Copy is grounded in what the photos/attributes actually show: model + included
+// items are visible, condition is cosmetic. No "fully working / shutter fires at
+// every speed / meter responds" — those are hands-on facts a photo can't verify,
+// so the copy leaves them to the seller (see the success line) rather than the
+// system guaranteeing them.
+const EBAY_TITLE = "Canon AE-1 35mm Film SLR Camera w/ FD 50mm f/1.8 Lens";
 const EBAY_SPECS: Array<[string, string]> = [
-  ["Brand", "KitchenAid"],
-  ["Type", "Stand mixer"],
-  ["Color", "Pink"],
-  ["Condition", "Good, fully working"],
+  ["Brand", "Canon"],
+  ["Model", "AE-1"],
+  ["Format", "35mm film SLR"],
+  ["Condition", "Good · light brassing"],
 ];
 const EBAY_DESC =
-  "Pink KitchenAid stand mixer in good working condition. The motor runs strong through every speed and the tilt-head locks tight. Whisk attachment included; comes from a smoke-free kitchen and is cleaned and ready to bake.";
+  "Canon AE-1 35mm film SLR, shown with the Canon FD 50mm f/1.8 lens, front cap, and original strap. Cosmetically good — light brassing on the edges from honest use, no dents or cracks visible in the photos.";
 
 const FB_TEXT =
-  "Pink KitchenAid stand mixer, runs strong on every speed. Whisk included, smoke-free home. Pickup this week, $185 OBO.";
+  "Canon AE-1 film camera with the 50mm f/1.8 lens — strap and cap included. Body's in good shape, light brassing from age. Pickup this week, $165 OBO.";
 
-const MC_TITLE = "KitchenAid Stand Mixer Pink";
-const MC_TAGS = ["#KitchenAid", "#standmixer", "#baking", "#kitchenfinds"];
+const MC_TITLE = "Canon AE-1 35mm Film Camera";
+const MC_TAGS = ["#CanonAE1", "#35mm", "#filmcamera", "#vintagecamera"];
 
 const FEED: FeedEvent[] = [
   { at: 24, done: 88, text: "Reading 12 similar listings that sold well" },
@@ -160,12 +166,12 @@ function ItemCard() {
         }}
       >
         <Img
-          src={staticFile("demo/mixer.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 26%" }}
+          src={staticFile("demo/filmcamera.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>
       <div style={{ marginTop: 12, fontSize: 15.5, fontWeight: 700, color: INK }}>
-        KitchenAid stand mixer, pink
+        Canon AE-1 35mm film camera
       </div>
       <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
         <span
@@ -180,7 +186,7 @@ function ItemCard() {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          $185
+          $165
         </span>
         <span
           style={{
@@ -206,7 +212,7 @@ function ItemCard() {
             padding: "4px 11px",
           }}
         >
-          Home & Kitchen
+          Cameras & Photo
         </span>
       </div>
     </div>
@@ -379,7 +385,7 @@ function EbayPane() {
             color: GREEN,
           }}
         >
-          <CheckIcon size={13} /> Written the way eBay buyers search: clear title, full details
+          <CheckIcon size={13} /> Grounded in your photos — you add hands-on notes like how it shoots
         </div>
       ) : null}
     </PaneFrame>
@@ -416,8 +422,8 @@ function FacebookPane() {
       </div>
       <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
         <Chip text="Local pickup" at={FB_META_AT} index={0} tone="plain" />
-        <Chip text="Price: $185 · open to offers" at={FB_META_AT} index={1} tone="plain" />
-        <Chip text="Category: Home goods" at={FB_META_AT} index={2} tone="plain" />
+        <Chip text="Price: $165 · open to offers" at={FB_META_AT} index={1} tone="plain" />
+        <Chip text="Category: Cameras" at={FB_META_AT} index={2} tone="plain" />
       </div>
       {frame >= FB_META_AT + 22 ? (
         <div
@@ -487,9 +493,9 @@ function MercariPane() {
             padding: "11px 14px",
           }}
         >
-          <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>$185</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>$165</span>
           <span style={{ fontSize: 13, color: FAINT }}>
-            + shipping · ships boxed in 1–2 days · about 12 pounds
+            + shipping · ships boxed in 1–2 days · about 3 pounds
           </span>
         </div>
       ) : null}

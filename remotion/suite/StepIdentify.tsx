@@ -16,11 +16,12 @@ import { DIM, FAINT, GREEN, GREEN_SOFT, INK, LINE, SLAB, SURFACE, type ClickSpec
 
 /**
  * Step 2 · Identify — the photo-reading moment in full: sweep + detection
- * boxes over the camera's actual printed text (“Canon”, “EOS 80D”), the
+ * boxes over the camera's actual printed text (“Canon”, “AE-1”), the
  * extracted details with per-field certainty, the how-sure composite, and a
  * plain-language item summary (ui-r6: the dark JSON “structured output”
  * panel is gone — sellers, not engineers). No cursor, no clicks.
- * Product: Canon EOS 80D DSLR with 50mm lens (demo/camera.jpg).
+ * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-identify public/demo/steps/identify.mp4 --crf 26 --muted
  */
@@ -61,7 +62,7 @@ const FEED: FeedEvent[] = [
     at: 108,
     done: 150,
     text: "Reading the printed text on the body…",
-    sub: "Found “Canon” and “EOS 80D”",
+    sub: "Found “Canon” and “AE-1”",
     subAt: 154,
   },
   { at: 162, done: 248, text: "Pulling out the details" },
@@ -70,11 +71,11 @@ const FEED: FeedEvent[] = [
 
 const FIELDS = [
   { label: "BRAND", value: "Canon", conf: 0.99 },
-  { label: "MODEL", value: "EOS 80D", conf: 0.97 },
+  { label: "MODEL", value: "AE-1", conf: 0.97 },
   { label: "CATEGORY", value: "Cameras & Photo", conf: 0.96 },
-  { label: "CONDITION", value: "Good · light grip wear", conf: 0.86 },
-  { label: "LENS", value: "50mm prime", conf: 0.91 },
-  { label: "LENS MOUNT", value: "Canon EF-S", conf: 0.93 },
+  { label: "CONDITION", value: "Good · light brassing", conf: 0.86 },
+  { label: "LENS", value: "FD 50mm f/1.8", conf: 0.91 },
+  { label: "FORMAT", value: "35mm film SLR", conf: 0.94 },
 ];
 
 const SIGNALS = [
@@ -84,7 +85,7 @@ const SIGNALS = [
 ];
 
 const SUMMARY_TEXT =
-  "Canon EOS 80D digital camera with a 50mm lens. Good condition with light grip wear. Ready to price under Cameras & Photo.";
+  "Canon AE-1 35mm film SLR with a 50mm f/1.8 lens. Good condition with light brassing. Ready to price under Cameras & Photo.";
 
 /* ---------- pieces ---------- */
 
@@ -305,17 +306,26 @@ function IdentifyAct() {
       <Shell badge="STEP 2 · IDENTIFY">
         <PhotoFrame
           rect={PHOTO}
-          src={staticFile("demo/camera.jpg")}
+          src={staticFile("demo/filmcamera.jpg")}
           fileName="IMG_4032.jpg"
           photoIn={photoIn}
           scanStart={SCAN_START}
           scanEnd={SCAN_END}
+          objectPosition="50% 50%"
         >
-          <OcrBox at={110} box={{ x: 219, y: 68, w: 61, h: 25 }} label="brand · “Canon”" />
+          {/* boxes sit over the AE-1's printed marks: the "Canon" badge on the
+              prism and the "AE-1" nameplate on the top deck. Coords are local
+              to the 460×345 photo frame (image is 1600×1200 = 4:3, same aspect
+              → object-fit:cover does not crop, so 1px = 1px·460/1600 of source).
+              Measured on a clean pre-box still (5px grid): "Canon" letters span
+              local x233–300 / y122–150, "AE-1" spans x129–189 / y151–171. Boxes
+              pad those by ~4–5px on every side so each mark is fully bracketed
+              (the prior boxes sat ~7px low and clipped the letter tops). */}
+          <OcrBox at={110} box={{ x: 228, y: 118, w: 76, h: 35 }} label="brand · “Canon”" labelSide="above" />
           <OcrBox
             at={135}
-            box={{ x: 305, y: 106, w: 38, h: 38 }}
-            label="model · “EOS 80D”"
+            box={{ x: 124, y: 147, w: 70, h: 28 }}
+            label="model · “AE-1”"
             labelSide="below"
           />
         </PhotoFrame>
@@ -325,7 +335,7 @@ function IdentifyAct() {
           startAt={SCAN_START}
           doneAt={250}
           busyText="Reading your photo…"
-          doneText="Found it · Canon EOS 80D"
+          doneText="Found it · Canon AE-1"
         />
         <Feed rect={FEED_RECT} events={FEED} />
 

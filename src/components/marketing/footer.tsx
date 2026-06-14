@@ -39,15 +39,15 @@ export function MarketingFooter() {
         <div className="flex flex-col justify-between gap-12 sm:flex-row">
           <div className="max-w-xs">
             <Logo className="footer-logo-glow text-flash" markClassName="size-7" />
-            <p className="mt-3 text-[13.5px] leading-relaxed text-flash-faint">
-              Snap a photo of something you want to sell. We identify it, price
-              it with sources, and write the listing.
+            <p className="mt-3 text-[15px] leading-relaxed text-flash-faint">
+              Snap a photo of something you want to sell. We figure out what it
+              is, price it from real sales, and write the listing.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-10 sm:grid-cols-3">
             {COLUMNS.map(({ heading, links }) => (
               <div key={heading}>
-                <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+                <p className="text-[13.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
                   {heading}
                 </p>
                 <ul className="mt-3.5 space-y-2.5">
@@ -55,7 +55,7 @@ export function MarketingFooter() {
                     <li key={`${href}-${label}`}>
                       <Link
                         href={href}
-                        className="link-underline inline-block text-[13.5px] text-flash-dim transition-colors hover:text-flash"
+                        className="link-underline inline-block text-[15px] text-flash-dim transition-colors hover:text-flash"
                       >
                         {label}
                       </Link>
@@ -67,9 +67,9 @@ export function MarketingFooter() {
           </div>
         </div>
 
-        <div className="mt-14 flex items-center justify-between border-t border-line pt-6 text-[12.5px] text-flash-faint">
+        <div className="mt-14 flex items-center justify-between border-t border-line pt-6 text-[14px] text-flash-faint">
           <p>© {new Date().getFullYear()} SnapList</p>
-          <p>Built as a production-real AI engineering showcase</p>
+          <p>Built for sellers, not paperwork</p>
         </div>
       </div>
 

@@ -6,6 +6,7 @@ import { StagePrice } from "./StagePrice";
 import { StagePublish } from "./StagePublish";
 import { BUYER_QA_LEN, BuyerQA } from "./suite/BuyerQA";
 import { HERO_VISION_LEN, HeroVision } from "./suite/HeroVision";
+import { INBOX_QA_LEN, InboxQA } from "./suite/InboxQA";
 import { STEP_IDENTIFY_LEN, StepIdentify } from "./suite/StepIdentify";
 import { STEP_PRICE_LEN, StepPrice } from "./suite/StepPrice";
 import { STEP_PUBLISH_LEN, StepPublish } from "./suite/StepPublish";
@@ -59,6 +60,15 @@ export const RemotionRoot: React.FC = () => {
         id="buyer-qa"
         component={BuyerQA}
         durationInFrames={BUYER_QA_LEN}
+        {...SUITE_SIZE}
+      />
+      {/* logged-in dashboard inbox teaser — buyer-Q&A on a DIFFERENT item than
+          the tour (brass chess set vs the tour's Canon AE-1) so a user who
+          already watched the tour gets a fresh scenario. */}
+      <Composition
+        id="inbox-qa"
+        component={InboxQA}
+        durationInFrames={INBOX_QA_LEN}
         {...SUITE_SIZE}
       />
 

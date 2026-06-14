@@ -54,7 +54,7 @@ export function DemoClip({
               {glyph}
             </span>
             {n ? (
-              <span className="nums font-display text-[13px] font-bold text-flash-faint">
+              <span className="nums font-display text-[14px] font-bold text-flash-faint">
                 {n}
               </span>
             ) : null}
@@ -63,7 +63,7 @@ export function DemoClip({
             <p className="font-display text-[19px] font-bold tracking-tight text-flash sm:text-[22px]">
               {title}
             </p>
-            <p className="mt-1 max-w-[40ch] text-[12.5px] leading-relaxed text-flash-faint sm:text-[13.5px]">
+            <p className="mt-1 max-w-[40ch] text-[14px] leading-relaxed text-flash-faint sm:text-[15px]">
               {caption}
             </p>
             {/* faux player rail so the slate reads as a deliberate still */}

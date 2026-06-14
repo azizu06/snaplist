@@ -51,13 +51,21 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           : "border-b border-transparent bg-transparent"
       }`}
     >
+      {/* 1fr auto 1fr grid (was flex justify-between): justify-between centers
+          the middle group in the GAP between logo and actions, so unequal side
+          widths (actions ≫ logo) shoved the links ~80px left of the hero's
+          center. Equal 1fr side tracks center the links column on the bar —
+          which is itself centered on the viewport (= the hero's center) — and
+          the tracks just compress instead of overlapping on narrow widths.
+          Explicit col-start keeps placement correct when md: hides the desktop
+          groups and shows the mobile cluster. */}
       <nav
         data-docked={scrolled}
-        className="nav-dock mx-auto flex h-16 w-full items-center justify-between px-5 sm:px-8"
+        className="nav-dock mx-auto grid h-16 w-full grid-cols-[1fr_auto_1fr] items-center px-5 sm:px-8"
       >
         <Link
           href="/"
-          className="text-flash"
+          className="col-start-1 justify-self-start text-flash"
           onClick={() => setOpen(false)}
         >
           <Logo markClassName="size-8" />
@@ -65,24 +73,24 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
 
         {/* r6: primary wayfinding links bumped to 15px (was 13.5) with more
             padding + gap so they carry real presence in the bar (owner). */}
-        <div className="hidden items-center gap-1.5 md:flex">
+        <div className="col-start-2 hidden items-center justify-self-center gap-1.5 md:flex">
           {LINKS.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
-              className="rounded-full px-4 py-2 text-[15px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
+              className="rounded-full px-4 py-2 text-[16px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
             >
               {label}
             </Link>
           ))}
         </div>
 
-        <div className="hidden items-center gap-2.5 md:flex">
+        <div className="col-start-3 hidden items-center justify-self-end gap-2.5 md:flex">
           <ThemeIconToggle />
           {signedIn ? (
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Open app
               <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -91,13 +99,13 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
             <>
               <Link
                 href="/login"
-                className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
+                className="rounded-full px-3.5 py-2 text-[15px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
               >
                 Log in
               </Link>
               <Link
-                href="/login"
-                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                href="/signup"
+                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
               >
                 Start selling
                 <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -107,7 +115,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
         </div>
 
         {/* mobile: theme toggle + menu burger */}
-        <div className="flex items-center gap-1 md:hidden">
+        <div className="col-start-3 flex items-center justify-self-end gap-1 md:hidden">
         <ThemeIconToggle />
         <button
           type="button"
@@ -130,15 +138,15 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
               key={href}
               href={href}
               onClick={() => setOpen(false)}
-              className="block rounded-lg px-2 py-2.5 text-[15px] font-medium text-flash-dim"
+              className="block rounded-lg px-2 py-2.5 text-[16px] font-medium text-flash-dim"
             >
               {label}
             </Link>
           ))}
           <Link
-            href={signedIn ? "/dashboard" : "/login"}
+            href={signedIn ? "/dashboard" : "/signup"}
             onClick={() => setOpen(false)}
-            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[14px] font-semibold text-iris-ink"
+            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
           >
             {signedIn ? "Open app →" : "Start selling →"}
           </Link>

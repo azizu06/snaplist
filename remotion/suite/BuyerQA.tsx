@@ -35,7 +35,10 @@ import {
  * the seller reviews, makes one edit, and approves before anything sends.
  * Three cursor-accurate clicks: open the conversation, focus the draft,
  * approve & send. Joined the how-it-works pipeline as step 6 (ui-r6).
- * Product: Vintage brass figural chess set on wooden board (demo/chess.jpg).
+ * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * the same item the whole how-it-works pipeline follows, now fielding a buyer
+ * question. (The logged-in dashboard inbox uses a DIFFERENT item; see
+ * InboxQA / public/demo/inbox-qa.mp4.)
  *
  * Render: npx remotion render remotion/index.ts buyer-qa public/demo/buyer-qa.mp4 --crf 26 --muted
  */
@@ -75,10 +78,15 @@ const CLICK_APPROVE = 484;
 const SENT_AT = 496;
 const SENT_NOTE_AT = 520;
 
-const BUYER_MSG = "Hi! Are all 32 pieces included, and is there any damage I should know about?";
+const BUYER_MSG = "Hi! Does the shutter fire at all speeds, and is the 50mm lens included?";
+// Honest grounding: the draft asserts only what the photos/listing support —
+// the lens is visibly mounted (included), and the cosmetic condition is visible.
+// Shutter timing is a hands-on check no photo can verify, so the draft stops and
+// hands that part to the seller; EDIT_TEXT is the seller filling in their own
+// tested answer before approving. (No claim the system can't back up.)
 const DRAFT_TEXT =
-  "Yes, all 32 brass pieces are included, along with the wooden board. Condition is fair: the pieces show honest tarnish and patina from age, but nothing is cracked or missing. Happy to send close-up photos!";
-const EDIT_TEXT = " Local pickup works too.";
+  "Yes — the FD 50mm f/1.8 lens shown in the photos is included, along with the front cap and original strap. Cosmetically it's in good shape, with light brassing on the edges from honest use. On whether the shutter fires at every speed:";
+const EDIT_TEXT = " I ran a roll through it last week and all speeds fired cleanly.";
 
 const ROW_C = center(ROW1);
 const BOX_C = center(TEXTBOX);
@@ -204,7 +212,7 @@ function InboxList() {
               <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>now</span>
             </div>
             <div style={{ fontSize: 12, fontWeight: 600, color: VIOLET, marginTop: 2 }}>
-              Brass chess set · $75
+              Canon AE-1 · $165
             </div>
             <div
               style={{
@@ -216,7 +224,7 @@ function InboxList() {
                 textOverflow: "ellipsis",
               }}
             >
-              Are all 32 pieces included, and is…
+              Does the shutter fire at all speeds, and…
             </div>
           </div>
           {answered ? (
@@ -323,8 +331,8 @@ function ThreadHeader() {
         }}
       >
         <Img
-          src={staticFile("demo/chess.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "38% 50%" }}
+          src={staticFile("demo/filmcamera.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -338,10 +346,10 @@ function ThreadHeader() {
             textOverflow: "ellipsis",
           }}
         >
-          Vintage brass figural chess set on wooden board
+          Canon AE-1 35mm film camera with 50mm lens
         </div>
         <div style={{ fontSize: 12.5, color: FAINT, marginTop: 3 }}>
-          $75 · Fair condition · live on eBay
+          $165 · Good condition · live on eBay
         </div>
       </div>
       <span
@@ -535,12 +543,21 @@ function Composer() {
         ) : (
           <>
             {drafting ? <Spinner deg={frame * 14} /> : grounded ? <CheckIcon size={13} /> : null}
-            <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.8, color: FAINT }}>
-              REPLY DRAFTED FOR YOU
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: 0.8,
+                color: FAINT,
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+              }}
+            >
+              DRAFTED FROM YOUR PHOTOS
             </span>
             {grounded ? (
-              <div style={{ display: "flex", gap: 6 }}>
-                {["uses: the item's details", "your listing", "condition · Fair"].map((c, i) => {
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                {["your listing", "you confirm specifics"].map((c, i) => {
                   if (frame < CHIP_AT[i]) return null;
                   const s = spring({
                     frame: frame - CHIP_AT[i],
@@ -559,6 +576,7 @@ function Composer() {
                         border: `1px solid ${VIOLET_BORDER}`,
                         borderRadius: 99,
                         padding: "2.5px 9px",
+                        whiteSpace: "nowrap",
                         opacity: s,
                         transform: `scale(${0.85 + s * 0.15})`,
                       }}
@@ -580,9 +598,11 @@ function Composer() {
                   border: `1px solid ${LINE}`,
                   borderRadius: 99,
                   padding: "2.5px 9px",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
                 }}
               >
-                edited by you
+                your answer added
               </span>
             ) : null}
           </>
@@ -628,7 +648,7 @@ function Composer() {
         >
           <ShieldIcon />
           <span style={{ fontSize: 12.5, fontWeight: 600, color: FAINT }}>
-            Nothing sends without your approval.
+            SnapList states only what it can see — you confirm the rest.
           </span>
         </div>
       ) : null}

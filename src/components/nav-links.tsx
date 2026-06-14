@@ -81,7 +81,7 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
             href={href}
             aria-current={active ? "page" : undefined}
             title={collapsed ? label : undefined}
-            className={`flex items-center gap-2.5 rounded-lg py-2 text-[13px] ${
+            className={`flex items-center gap-2.5 rounded-lg py-2 text-[14px] ${
               collapsed ? "justify-center px-0" : "px-2.5"
             } ${
               active

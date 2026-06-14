@@ -14,20 +14,21 @@ import {
   CtaIridescence,
   HeroPrism,
 } from "@/components/marketing/live-backgrounds";
-import { HeroDemoVideo } from "@/components/marketing/hero-demo-video";
 import {
   MarketplaceBadge,
   MarketplaceLoop,
 } from "@/components/marketing/marketplace-loop";
 import { Reveal } from "@/components/marketing/reveal";
+import { ScanShowcase } from "@/components/marketing/scan-showcase";
 import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
 
 /**
- * Landing (v3 pass): the demo video IS the hero — flat, large, full-width
- * under the headline, never interrupted. Atmosphere comes from the Prism
- * shader behind the headline (the brand made literal) and an iridescent
- * violet field behind the final CTA; persistent product proof comes from
- * the finished-listings marquee and the MagicBento features grid.
+ * Landing (v3 pass): the live scanning showcase IS the hero — a scan beam
+ * sweeps authentic seller photos and flips an output panel to each item's
+ * real title, price, and condition, full-width under the headline. Atmosphere
+ * comes from the Prism shader behind the headline (the brand made literal) and
+ * an iridescent violet field behind the final CTA; persistent product proof
+ * comes from the finished-listings marquee and the MagicBento features grid.
  *
  * Affordance system (purple-pill fatigue fix): ONE glass pill in the hero
  * (status badge), dash-accented small-caps eyebrows on sections, numbered
@@ -55,148 +56,186 @@ const TRUST_POINTS = [
 const STEPS = [
   {
     n: "01",
+    kicker: "Capture",
     title: "Snap it",
     body: "One photo, up to four if condition matters. Barcodes and ISBNs are read automatically.",
   },
   {
     n: "02",
+    kicker: "Pricing",
     title: "We research it",
-    body: "We identify brand, model and condition, then price against what similar items recently sold for. Every number cites its sources.",
+    body: "We work out the brand, model and condition, then price it against what similar items recently sold for. Every number shows where it came from.",
   },
   {
     n: "03",
+    kicker: "Listing",
     title: "You approve it",
     body: "A ready-to-post eBay listing, plus packs for Facebook and Mercari. Edit anything, or let autopilot publish.",
   },
 ] as const;
 
 /* ---------------------------------------------------------------------------
- * r6 — "From shelf to sold" step visuals (Open Design concept, adapted).
- * One REAL item carries through all three cards — the $48 sneakers from the
- * verified catalog — so the row reads as a single product moving through the
- * pipeline, not three decorative illustrations: snapped in the viewfinder →
- * priced at $48 with its honest range → approved as a ready-to-post listing.
- * A gradient journey rail connects the step numbers (desktop); a slow pulse
- * travels it left→right (killed under prefers-reduced-motion).
+ * r6.1 — "From shelf to sold" step cards (Mobbin "how it works" reference:
+ * the Hims / HODINKEE pattern of equal cards each led by one large image).
+ * Every card opens with a media frame of the SAME dimensions (aspect-[4/3]);
+ * the same used item (roller skates, exclusive to this surface) fills the top
+ * of all three at the same size, with a step-specific detail panel docked inside
+ * the frame — the listing card visibly growing stage by stage: captured →
+ * priced → ready to post. Consistent imagery, no tiny boxed thumbnails. This
+ * is the short teaser; /tour expands each stage into its full video step.
  * ------------------------------------------------------------------------- */
 
-const STEP_PRODUCT = DEMO_PRODUCTS_BY_SLUG.sneakers;
+const STEP_PRODUCT = DEMO_PRODUCTS_BY_SLUG.rollerskates;
 
-/** Shared stage chrome: fixed-height visual slot at the top of each card. */
-function StepStage({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+/** The media frame every step shares: a tall photo region + a fixed-height
+ *  detail panel. Both dimensions are identical across all three cards, so the
+ *  row is perfectly uniform (owner: "even throughout, not cramped"). */
+function StepFrame({ children }: { children: React.ReactNode }) {
   return (
     <div
       aria-hidden
-      className={`relative flex h-44 items-center justify-center overflow-hidden rounded-xl border border-line bg-night-2 ${className}`}
+      className="relative flex w-full flex-col overflow-hidden rounded-2xl border border-line bg-night-2"
     >
       {children}
     </div>
   );
 }
 
-function SnapStage() {
+/** The item photo region — same item, same fixed height, SAME crop in every
+ *  frame (owner: keep it uniform/symmetric, give the photo room to breathe).
+ *  Overlays (the viewfinder) come in via children. */
+function StepPhoto({ children }: { children?: React.ReactNode }) {
   return (
-    <StepStage>
-      <div className="relative aspect-[4/3] w-[188px]">
-        <div className="relative size-full overflow-hidden rounded-lg">
-          <Image
-            src={STEP_PRODUCT.image}
-            alt=""
-            fill
-            sizes="188px"
-            className="object-cover"
-          />
-        </div>
-        {/* iris viewfinder brackets, hung just outside the photo edges */}
-        <span className="absolute -left-[7px] -top-[7px] size-[18px] rounded-tl-[5px] border-l-2 border-t-2 border-iris" />
-        <span className="absolute -right-[7px] -top-[7px] size-[18px] rounded-tr-[5px] border-r-2 border-t-2 border-iris" />
-        <span className="absolute -bottom-[7px] -left-[7px] size-[18px] rounded-bl-[5px] border-b-2 border-l-2 border-iris" />
-        <span className="absolute -bottom-[7px] -right-[7px] size-[18px] rounded-br-[5px] border-b-2 border-r-2 border-iris" />
-        <span className="absolute bottom-2 left-2 rounded-md bg-night/70 px-2 py-1 font-mono text-[10.5px] text-flash backdrop-blur dark:bg-night/80">
-          IMG_2041.jpg
-        </span>
-      </div>
-    </StepStage>
+    <div className="relative h-56 w-full shrink-0 overflow-hidden">
+      <Image
+        src={STEP_PRODUCT.image}
+        alt=""
+        fill
+        sizes="(max-width: 768px) 100vw, 440px"
+        className="object-cover"
+        style={{ objectPosition: "50% 44%" }}
+      />
+      {children}
+    </div>
   );
 }
 
-function PriceStage() {
+/** The detail panel docked beneath the photo — fixed height + generous padding
+ *  so nothing (range labels, platform chips) crowds the frame edge. */
+function StepPanel({ children }: { children: React.ReactNode }) {
   return (
-    <StepStage className="flex-col !items-stretch !justify-center px-6">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-flash-faint">
-        Suggested price
-      </p>
-      <p className="nums mt-0.5 font-display text-[36px] font-bold leading-tight tracking-tight text-flash">
-        ${STEP_PRODUCT.price}
-      </p>
-      <div className="relative mt-3 h-1.5 rounded-full bg-line">
-        <span className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-55" />
-        <span className="absolute left-[52%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(109,74,255,0.22)]" />
-      </div>
-      <div className="nums mt-1.5 flex justify-between px-[8%] text-[11px] font-medium text-flash-faint">
-        <span>$35</span>
-        <span>$60</span>
-      </div>
-      <span className="mt-3.5 inline-flex items-center gap-1.5 self-start rounded-full border border-line bg-panel px-2.5 py-1 text-[11px] font-medium text-flash-dim">
-        <svg viewBox="0 0 10 10" className="size-2.5 text-success-soft-fg" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M1.5 5.5l2.2 2.2L8.5 2.9" />
-        </svg>
-        3 sources cited
-      </span>
-    </StepStage>
+    <div className="flex h-36 flex-col justify-center gap-2.5 border-t border-line bg-panel px-5 py-4">
+      {children}
+    </div>
   );
 }
 
-function ApproveStage() {
+function StepEyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <StepStage className="px-5">
-      <div className="w-full rounded-[10px] border border-line bg-panel p-3 shadow-card">
-        <div className="flex items-center gap-2.5">
-          <span className="relative size-[42px] shrink-0 overflow-hidden rounded-[7px]">
-            <Image
-              src={STEP_PRODUCT.image}
-              alt=""
-              fill
-              sizes="42px"
-              className="object-cover"
-            />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold text-flash">
-              {STEP_PRODUCT.title}
-            </span>
-            <span className="nums mt-0.5 block truncate text-[11.5px] text-flash-dim">
-              ${STEP_PRODUCT.price} · {STEP_PRODUCT.condition} condition
-            </span>
-          </span>
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-1 text-[10.5px] font-semibold text-success-soft-fg">
-            <span className="size-1.5 rounded-full bg-current" />
-            Ready to post
+    <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-flash-faint">
+      {children}
+    </p>
+  );
+}
+
+function CaptureFrame() {
+  return (
+    <StepFrame>
+      <StepPhoto>
+        {/* viewfinder brackets framing the whole photo */}
+        <span className="absolute left-2.5 top-2.5 size-5 rounded-tl-[5px] border-l-2 border-t-2 border-iris" />
+        <span className="absolute right-2.5 top-2.5 size-5 rounded-tr-[5px] border-r-2 border-t-2 border-iris" />
+        <span className="absolute bottom-2.5 left-2.5 size-5 rounded-bl-[5px] border-b-2 border-l-2 border-iris" />
+        <span className="absolute bottom-2.5 right-2.5 size-5 rounded-br-[5px] border-b-2 border-r-2 border-iris" />
+      </StepPhoto>
+      <StepPanel>
+        <StepEyebrow>Captured</StepEyebrow>
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[12.5px] text-flash-dim">IMG_2041.jpg</span>
+          <span className="nums rounded-full border border-line bg-night-2 px-2 py-0.5 text-[11px] font-medium text-flash-dim">
+            1 of 4
           </span>
         </div>
-        <div className="mt-2.5 flex items-center gap-3 border-t border-line pt-2.5">
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-[12.5px] font-semibold text-iris-ink">
-            <svg viewBox="0 0 10 10" className="size-[11px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <div className="flex gap-1">
+          <span className="h-1 flex-1 rounded-full bg-iris" />
+          <span className="h-1 flex-1 rounded-full bg-iris" />
+          <span className="h-1 flex-1 rounded-full bg-line" />
+          <span className="h-1 flex-1 rounded-full bg-line" />
+        </div>
+      </StepPanel>
+    </StepFrame>
+  );
+}
+
+function PriceFrame() {
+  return (
+    <StepFrame>
+      <StepPhoto />
+      <StepPanel>
+        <StepEyebrow>Suggested price</StepEyebrow>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="nums font-display text-[30px] font-bold leading-none tracking-tight text-flash">
+            ${STEP_PRODUCT.price}
+          </p>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-night-2 px-2.5 py-1 text-[11px] font-medium text-flash-dim">
+            <svg viewBox="0 0 10 10" className="size-2.5 text-success-soft-fg" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M1.5 5.5l2.2 2.2L8.5 2.9" />
             </svg>
-            Approve listing
-          </span>
-          <span className="text-[12px] font-medium text-flash-dim">
-            Edit first
+            3 sources
           </span>
         </div>
-      </div>
-    </StepStage>
+        <div>
+          <div className="relative h-1.5 rounded-full bg-line">
+            <span className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-60" />
+            <span className="absolute left-[52%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(109,74,255,0.22)]" />
+          </div>
+          <div className="nums mt-1.5 flex justify-between text-[11px] font-medium text-flash-faint">
+            <span>$35</span>
+            <span>$60</span>
+          </div>
+        </div>
+      </StepPanel>
+    </StepFrame>
   );
 }
 
-const STEP_STAGES = [<SnapStage key="snap" />, <PriceStage key="price" />, <ApproveStage key="approve" />];
+const PLATFORMS = ["eBay", "Facebook", "Mercari"] as const;
+
+function ListingFrame() {
+  return (
+    <StepFrame>
+      <StepPhoto />
+      <StepPanel>
+        <div className="flex items-center justify-between gap-2">
+          <StepEyebrow>Ready to post</StepEyebrow>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success-soft px-2 py-0.5 text-[10.5px] font-semibold text-success-soft-fg">
+            <span className="size-1.5 rounded-full bg-current" />
+            Live-ready
+          </span>
+        </div>
+        <p className="nums truncate text-[13.5px] font-semibold text-flash">
+          {STEP_PRODUCT.title} · ${STEP_PRODUCT.price}
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {PLATFORMS.map((p) => (
+            <span
+              key={p}
+              className="rounded-md border border-line bg-night-2 px-2 py-0.5 text-[11px] font-medium text-flash-dim"
+            >
+              {p}
+            </span>
+          ))}
+        </div>
+      </StepPanel>
+    </StepFrame>
+  );
+}
+
+const STEP_FRAMES = [
+  <CaptureFrame key="capture" />,
+  <PriceFrame key="price" />,
+  <ListingFrame key="listing" />,
+];
 
 /* ---------------------------------------------------------------------------
  * Small inline icons (lucide outlines) for the bento duotone chips + hero
@@ -259,7 +298,7 @@ const BENTO_CARDS = [
     label: "Pricing engine",
     title: "Prices that show their work",
     description:
-      "No black-box numbers. Every suggestion comes as a price, a range, and the cited recent sale prices it was built from: ISBN lookups for books, live web research for the rest.",
+      "No black-box numbers. Every suggestion comes with a price, a range, and the recent sale prices behind it. Books are matched by their ISBN, everything else is researched on the web.",
     icon: <BentoIcon d={[...ICONS.tag]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",
@@ -282,7 +321,7 @@ const BENTO_CARDS = [
     label: "Confidence gate",
     title: "Autopilot with a conscience",
     description:
-      "Confidence is computed from real signals: which pricing tier fired, how closely recent sale prices agree, how complete the identification is. High confidence can publish itself; anything murky waits for you.",
+      "How sure we are isn't a guess. It comes from where the price was found, how closely recent sales agree, and how much we could pin down about the item. When we're sure, it can post on its own. When we're not, it waits for you.",
     icon: <BentoIcon d={[...ICONS.shieldCheck]} />,
     tint: "green" as const,
     className: "lg:col-span-2",
@@ -291,7 +330,7 @@ const BENTO_CARDS = [
     label: "Generation",
     title: "Listings that sound native",
     description:
-      "eBay item specifics, Facebook's casual tone, Mercari's hashtags. One item, three platform-fluent listings.",
+      "eBay gets its item specifics, Facebook gets a casual tone, Mercari gets hashtags. One item, written three ways so each one looks like it belongs there.",
     icon: <BentoIcon d={[...ICONS.sparkles]} />,
     tint: "violet" as const,
   },
@@ -299,7 +338,7 @@ const BENTO_CARDS = [
     label: "Security",
     title: "Yours, privately",
     description:
-      "Your own eBay account over OAuth with encrypted tokens, photos in private storage, every row isolated per account.",
+      "Listings post from your own eBay account, never ours. Your photos stay private, and your account's data is only ever yours.",
     icon: <BentoIcon d={[...ICONS.lock]} />,
     tint: "blue" as const,
   },
@@ -308,7 +347,7 @@ const BENTO_CARDS = [
 /** Dash-accented small-caps section eyebrow — the non-pill affordance. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex items-center gap-3 text-[12px] font-semibold uppercase tracking-[0.18em] text-flash-dim">
+    <p className="flex items-center gap-3 text-[13.5px] font-semibold uppercase tracking-[0.18em] text-flash-dim">
       <span aria-hidden className="h-[2px] w-7 rounded-full bg-iris" />
       {children}
     </p>
@@ -317,10 +356,10 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 
 /* ---------------------------------------------------------------------------
  * "One photo, three storefronts" — the single instance of the motif on the
- * whole site. One verified catalog product (the keyboard — reserved for this
- * section; the marquee runs the other five) rendered three platform-fluent
+ * whole site. One verified catalog product (the Nintendo Switch — reserved
+ * for this section, exclusive to it) rendered three platform-fluent
  * ways. Round 5 (owner): the photo goes full-width at its natural wide
- * aspect so the WHOLE keyboard is visible (the old 400px column cropped it
+ * aspect so the WHOLE item is visible (the old 400px column cropped it
  * to a sliver), and the three cards share one identical structural skeleton
  * — platform header row → listing title → price row → one platform-detail
  * line → one platform-flavored footer element — with only the CONTENT of
@@ -330,7 +369,7 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
  * photo carries no glyphs.
  * ------------------------------------------------------------------------- */
 
-const STOREFRONT_PRODUCT = DEMO_PRODUCTS_BY_SLUG.keyboard;
+const STOREFRONT_PRODUCT = DEMO_PRODUCTS_BY_SLUG.console;
 
 const STOREFRONT_CARD =
   "group/sf flex flex-col rounded-2xl border border-line bg-panel p-6 shadow-card transition-all duration-200 hover:-translate-y-1 hover:border-iris/40 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0";
@@ -374,13 +413,13 @@ function StorefrontListing({
   return (
     <div className={STOREFRONT_CARD}>
       <StorefrontHeader platform={platform} delivery={delivery} />
-      <p className="mt-4 text-[14.5px] font-semibold leading-snug text-flash lg:min-h-[3.75em]">
+      <p className="mt-4 text-[15.5px] font-semibold leading-snug text-flash lg:min-h-[3.75em]">
         {title}
       </p>
       <div className="mt-3 flex min-h-[34px] flex-wrap items-center gap-x-3 gap-y-2">
         {price}
       </div>
-      <p className="mt-2.5 text-[13px] leading-relaxed text-flash-dim">
+      <p className="mt-2.5 text-[14px] leading-relaxed text-flash-dim">
         {detail}
       </p>
       <div className="mt-auto flex min-h-[48px] items-center pt-4">{footer}</div>
@@ -391,7 +430,7 @@ function StorefrontListing({
 export default function Landing() {
   return (
     <>
-      {/* ====== 1 · hero — Prism shader + gradient slab, demo video centerpiece ====== */}
+      {/* ====== 1 · hero — Prism shader + gradient slab, scan-showcase centerpiece ====== */}
       <section className="relative overflow-hidden pb-20 pt-32 sm:pb-24 sm:pt-40">
         <div aria-hidden className="prism-gradient" />
         <div aria-hidden className="prism-grain" />
@@ -434,14 +473,14 @@ export default function Landing() {
               />
             </h1>
             <BlurText
-              text="SnapList identifies what you're selling, researches a fair used price with cited sources, and writes the listing for eBay, Facebook Marketplace, and Mercari, from one photo."
+              text="Take one photo. SnapList figures out what it is, finds a fair used price from what similar things actually sold for, and writes the listing for eBay, Facebook Marketplace, and Mercari."
               animateBy="words"
               delay={18}
               stepDuration={0.3}
               className="mt-6 max-w-[52ch] justify-center text-[16.5px] font-medium leading-relaxed text-flash"
             />
             {/* rotating categories — fixed-width pill, no reflow as words cycle */}
-            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[14px] font-semibold text-flash/90">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[15px] font-semibold text-flash/90">
               <span>Built for</span>
               <RotatingText
                 texts={[...ROTATING_CATEGORIES]}
@@ -469,7 +508,7 @@ export default function Landing() {
                 >
                   <Link
                     href="/login"
-                    className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[15px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98] dark:text-night"
+                    className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[16px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98] dark:text-night"
                   >
                     Start selling free
                     <span aria-hidden className="transition-transform group-hover:translate-x-1">
@@ -480,7 +519,7 @@ export default function Landing() {
               </Magnet>
               <Link
                 href="/tour"
-                className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[15px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm dark:bg-white/10 dark:hover:bg-white/15"
+                className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[16px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm dark:border-iris/25 dark:bg-panel-2 dark:shadow-sm dark:hover:border-iris/45 dark:hover:bg-panel-2"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -495,7 +534,7 @@ export default function Landing() {
             </div>
             {/* Trust strip — glass surface so it stays legible over the
                 gradient slab in both themes (it used to dissolve into it). */}
-            <p className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 rounded-full border border-white/55 bg-white/70 px-5 py-2 text-[12.5px] font-semibold text-flash shadow-xs backdrop-blur dark:border-white/10 dark:bg-white/10">
+            <p className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 rounded-full border border-white/55 bg-white/70 px-5 py-2 text-[14px] font-semibold text-flash shadow-xs backdrop-blur dark:border-white/10 dark:bg-white/10">
               {TRUST_POINTS.map((point) => (
                 <span key={point} className="flex items-center gap-1.5">
                   <svg
@@ -516,18 +555,19 @@ export default function Landing() {
             </p>
           </div>
 
-          {/* The demo video IS the hero (owner directive): pure vision-model
-              showcase, flat and full, SL-branded chrome. The ScanShowcase
-              lives on /how-it-works under its namesake headline. */}
+          {/* The headline, performed live: authentic seller photos cycle under
+              a scanning beam and each finished scan flips the output panel to
+              that item's real title, price, and condition — the product visual
+              IS the photo-to-listing moment, not a pre-rendered clip. */}
           <div className="mx-auto mt-12 w-full max-w-5xl sm:mt-16">
-            <HeroDemoVideo />
+            <ScanShowcase />
           </div>
         </div>
       </section>
 
       {/* ====== 1.5 · finished-listings band — what SnapList produces ====== */}
       <section className="border-b border-line bg-night py-10">
-        <p className="px-5 text-center text-[12px] font-semibold uppercase tracking-[0.18em] text-flash-faint">
+        <p className="px-5 text-center text-[13.5px] font-semibold uppercase tracking-[0.18em] text-flash-faint">
           From camera roll to cash
         </p>
         <div className="mt-6">
@@ -537,61 +577,71 @@ export default function Landing() {
 
       {/* ========================== 2 · how it works ========================== */}
       <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-32">
-        <Reveal>
+        <Reveal className="max-w-2xl">
           <Eyebrow>How it works</Eyebrow>
-          <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
-            From shelf to{" "}
-            <em className="text-iris">sold</em> in
-            three moves
+          <h2 className="mt-4 font-display text-[clamp(28px,4vw,44px)] font-bold leading-[1.1] tracking-tight text-flash">
+            From shelf to <em className="text-iris">sold</em> in three moves
           </h2>
+          <p className="mt-4 text-[16px] leading-relaxed text-flash-dim">
+            One real item, all the way through. You snap it, SnapList prices it
+            against what it actually sold for, and you approve the listing it
+            writes.
+          </p>
         </Reveal>
-        {/* desktop journey rail: gradient track + slow left→right pulse, with
-            the step numbers sitting ON it — reads as one item flowing through
-            the pipeline, not three islands. Hidden on mobile (cards stack). */}
-        <div
-          aria-hidden
-          className="relative mt-14 hidden grid-cols-3 md:grid"
-        >
-          <div className="step-rail-track">
-            <span className="step-rail-pulse" />
-          </div>
-          {STEPS.map(({ n }) => (
-            <span
-              key={n}
-              className="nums relative z-[1] mx-auto grid size-11 place-items-center rounded-full border border-line bg-panel font-display text-[15px] font-bold text-iris shadow-card"
-            >
-              {n}
-            </span>
-          ))}
-        </div>
 
-        <Reveal stagger className="mt-6 grid gap-5 md:grid-cols-3">
-          {STEPS.map(({ n, title, body }, i) => (
-            <SpotlightCard
-              key={n}
-              className="p-6"
-              spotlightColor="rgba(109, 74, 255, 0.12)"
-            >
-              {/* mobile-only step number (the rail above is desktop-only) */}
-              <span className="nums mb-4 inline-grid size-9 place-items-center rounded-full border border-line font-display text-[13px] font-bold text-iris md:hidden">
-                {n}
-              </span>
-              {STEP_STAGES[i]}
-              <h3 className="mt-5 font-display text-[20px] font-semibold text-flash">
-                {title}
-              </h3>
-              <p className="mt-2.5 text-[14px] leading-relaxed text-flash-dim">
-                {body}
-              </p>
-            </SpotlightCard>
+        {/* Each card leads with one media frame of identical size (same item,
+            same crop — uniform across all three), the listing visibly growing
+            across the row. A chevron in each gap signals the next step. Equal
+            height via h-full; the row stacks on mobile (chevrons hidden). */}
+        <Reveal stagger className="mt-14 grid gap-12 md:grid-cols-3">
+          {STEPS.map(({ n, kicker, title, body }, i) => (
+            <div key={n} className="relative">
+              <SpotlightCard
+                className="flex h-full flex-col p-4"
+                spotlightColor="rgba(109, 74, 255, 0.1)"
+              >
+                {STEP_FRAMES[i]}
+                <div className="flex flex-1 flex-col px-2 pb-1 pt-6">
+                  <div className="flex items-center gap-2.5">
+                    <span className="nums grid size-7 shrink-0 place-items-center rounded-full bg-[rgba(109,74,255,0.13)] font-display text-[13px] font-bold text-iris">
+                      {n}
+                    </span>
+                    <span className="text-[11.5px] font-semibold uppercase tracking-[0.16em] text-flash-faint">
+                      {kicker}
+                    </span>
+                  </div>
+                  <h3 className="mt-4 font-display text-[21px] font-semibold tracking-tight text-flash">
+                    {title}
+                  </h3>
+                  <p className="mt-2.5 text-[15px] leading-relaxed text-flash-dim">
+                    {body}
+                  </p>
+                </div>
+              </SpotlightCard>
+              {/* chevron floating in the gap — a glowing "next step" marker.
+                  Centered in the gap-12 column (24px) and on the photo region
+                  (card p-4 16px + photo h-56 224px / 2 = 128px). The glow pulse
+                  is staggered per chevron so it reads left→right. Desktop only. */}
+              {i < STEPS.length - 1 && (
+                <span
+                  aria-hidden
+                  style={{ animationDelay: `${i * 0.9}s` }}
+                  className="step-chevron absolute right-[-24px] top-[128px] z-[2] hidden size-9 -translate-y-1/2 translate-x-1/2 place-items-center rounded-full border border-line bg-panel text-iris md:grid"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </span>
+              )}
+            </div>
           ))}
         </Reveal>
         <Reveal className="mt-10">
           <Link
             href="/tour"
-            className="group inline-flex items-center gap-2 text-[14.5px] font-semibold text-iris"
+            className="group inline-flex items-center gap-2 text-[15.5px] font-semibold text-iris"
           >
-            Walk through the whole pipeline
+            See the whole thing end to end
             <span aria-hidden className="transition-transform group-hover:translate-x-1">
               →
             </span>
@@ -605,9 +655,9 @@ export default function Landing() {
           <Reveal>
             <Eyebrow>Features</Eyebrow>
             <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,4vw,44px)] font-bold leading-tight tracking-tight text-flash">
-              Built like a marketplace pro,{" "}
+              Does the pro work,{" "}
               <em className="text-iris">
-                honest like a friend
+                tells you the truth
               </em>
             </h2>
           </Reveal>
@@ -645,15 +695,15 @@ export default function Landing() {
             One photo, three storefronts
           </ScrollFloat>
           <Reveal>
-            <p className="mt-4 max-w-[54ch] text-[15px] leading-relaxed text-flash-dim">
-              Every validated item renders platform-fluent copy for its
-              marketplace. eBay publishes directly, Facebook and Mercari get
-              clean copy-paste packs.
+            <p className="mt-4 max-w-[54ch] text-[16px] leading-relaxed text-flash-dim">
+              Every item gets copy written for the marketplace it&apos;s going
+              to. eBay posts directly. Facebook and Mercari come as clean
+              copy-paste packs.
             </p>
           </Reveal>
           <Reveal delay={0.1} className="relative mt-12">
             {/* the one photo — full panel width at a wide aspect so the whole
-                keyboard is visible edge to edge; hover zooms the IMAGE inside
+                item is visible edge to edge; hover zooms the IMAGE inside
                 its clipped frame (never the caption) + an iris glow ring */}
             <figure className="group overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
               <div className="relative aspect-[16/10] overflow-hidden sm:aspect-[2.4/1]">
@@ -669,10 +719,10 @@ export default function Landing() {
                 </span>
               </div>
               <figcaption className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5">
-                <span className="truncate text-[13.5px] font-semibold text-flash">
+                <span className="truncate text-[15px] font-semibold text-flash">
                   {STOREFRONT_PRODUCT.shortName}
                 </span>
-                <span className="nums shrink-0 text-[13.5px] font-semibold text-flash-dim">
+                <span className="nums shrink-0 text-[15px] font-semibold text-flash-dim">
                   ${STOREFRONT_PRODUCT.price} · {STOREFRONT_PRODUCT.condition}
                 </span>
               </figcaption>
@@ -686,20 +736,20 @@ export default function Landing() {
               <StorefrontListing
                 platform="eBay"
                 delivery="Publishes directly"
-                title="Custom 65% Mechanical Keyboard, Green & White Keycaps, Like New"
+                title="Nintendo Switch Console, Neon Blue & Red Joy-Cons, Dock Included"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $120.00
+                      $175.00
                     </span>
-                    <span className="rounded-md border border-line bg-night-2 px-2.5 py-1 text-[12px] font-medium text-flash-dim">
-                      Pre-owned · Like new
+                    <span className="rounded-md border border-line bg-night-2 px-2.5 py-1 text-[13.5px] font-medium text-flash-dim">
+                      Pre-owned · Good
                     </span>
                   </>
                 }
                 detail="Free shipping · 30-day returns"
                 footer={
-                  <span className="rounded-full bg-[#3665f3] px-5 py-2 text-[13px] font-semibold text-white">
+                  <span className="rounded-full bg-[#3665f3] px-5 py-2 text-[14px] font-semibold text-white">
                     Buy It Now
                   </span>
                 }
@@ -710,24 +760,24 @@ export default function Landing() {
               <StorefrontListing
                 platform="Facebook"
                 delivery="Copy-paste pack"
-                title="Custom mechanical keyboard, 65% layout, like new"
+                title="Nintendo Switch, neon Joy-Cons, comes with dock"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $120
+                      $175
                     </span>
-                    <span className="text-[13px] font-medium text-flash-dim">
-                      Like new
+                    <span className="text-[14px] font-medium text-flash-dim">
+                      Good condition
                     </span>
                   </>
                 }
                 detail="Listed today · Local pickup · Orlando, FL"
                 footer={
                   <div className="flex w-full items-center justify-between gap-3 rounded-xl bg-night-2 px-3.5 py-2.5">
-                    <span className="truncate text-[13px] font-medium text-flash-dim">
+                    <span className="truncate text-[14px] font-medium text-flash-dim">
                       “Is this available?”
                     </span>
-                    <span className="shrink-0 rounded-full bg-[#1877f2] px-3.5 py-1 text-[12px] font-semibold text-white">
+                    <span className="shrink-0 rounded-full bg-[#1877f2] px-3.5 py-1 text-[13.5px] font-semibold text-white">
                       Reply drafted
                     </span>
                   </div>
@@ -738,21 +788,21 @@ export default function Landing() {
               <StorefrontListing
                 platform="Mercari"
                 delivery="Copy-paste pack"
-                title="Custom 65% mech keyboard, green/white keycaps"
+                title="Nintendo Switch + dock, neon Joy-Cons"
                 price={
                   <>
-                    <span className="nums text-[14px] font-medium text-flash-faint line-through">
-                      $135
+                    <span className="nums text-[15px] font-medium text-flash-faint line-through">
+                      $200
                     </span>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $120
+                      $175
                     </span>
                   </>
                 }
-                detail="Smart pricing keeps it competitive, never below your $95 floor"
+                detail="Smart pricing keeps it competitive, never below your $150 floor"
                 footer={
-                  <p className="text-[13px] font-medium text-iris">
-                    #mechkeyboard&ensp;#65percent&ensp;#customkeyboard
+                  <p className="text-[14px] font-medium text-iris">
+                    #nintendoswitch&ensp;#switch&ensp;#gaming
                   </p>
                 }
               />
@@ -776,8 +826,8 @@ export default function Landing() {
               </GradientText>
             </h2>
             <p className="mx-auto mt-5 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
-              Photograph it once. SnapList does the research, the writing, and
-              the posting. You keep the control and the cash.
+              Photograph it once. SnapList handles the research, the writing,
+              and the posting. You keep control, and you keep the cash.
             </p>
             <Magnet padding={80} magnetStrength={18} wrapperClassName="mt-9">
               <ClickSpark
@@ -790,7 +840,7 @@ export default function Landing() {
               >
                 <Link
                   href="/login"
-                  className="group inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[15.5px] font-semibold text-iris-ink transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
+                  className="group inline-flex items-center gap-2 rounded-full bg-iris px-7 py-3.5 text-[16.5px] font-semibold text-iris-ink transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98]"
                 >
                   <ShinyText
                     text="Snap your first photo"

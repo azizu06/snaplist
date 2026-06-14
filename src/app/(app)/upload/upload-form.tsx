@@ -85,7 +85,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
       ) : null}
 
       <div className="flex flex-col gap-5 p-5">
-        <p className="text-sm font-semibold text-fg-strong">
+        <p className="text-[15px] font-semibold text-fg-strong">
           Building your listing. This usually takes under half a minute.
         </p>
         <ol className="flex flex-col gap-4">
@@ -115,7 +115,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
               </span>
               <span>
                 <span
-                  className={`block text-sm font-medium ${
+                  className={`block text-[15px] font-medium ${
                     i <= stage ? "text-fg-strong" : "text-faint"
                   }`}
                 >
@@ -124,7 +124,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
                 <AnimatePresence>
                   {i === stage ? (
                     <motion.span
-                      className="mt-0.5 block text-xs text-muted"
+                      className="mt-0.5 block text-[13.5px] text-muted"
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
@@ -137,7 +137,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
             </li>
           ))}
         </ol>
-        <p className="text-xs text-muted">
+        <p className="text-[13.5px] text-muted">
           Keep this page open and you&apos;ll land on the finished draft
           automatically.
         </p>
@@ -208,7 +208,7 @@ const FIELD_ROWS = [
 function AutoFieldRow({ label, icon }: { label: string; icon: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between py-3">
-      <span className="flex items-center gap-2.5 text-sm font-medium text-fg">
+      <span className="flex items-center gap-2.5 text-[15px] font-medium text-fg">
         <span
           aria-hidden
           className="flex size-7 items-center justify-center rounded-md bg-surface-2 text-muted"
@@ -250,7 +250,7 @@ function JourneyRail() {
             {i + 1}
           </span>
           <span
-            className={`truncate text-[12px] ${
+            className={`truncate text-[13.5px] ${
               step.state === "active"
                 ? "font-semibold text-fg-strong"
                 : "font-medium text-muted"
@@ -354,7 +354,7 @@ function FormBody({
             </div>
             <span
               aria-hidden
-              className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-solid px-4 py-1.5 text-[12.5px] font-semibold text-accent-fg shadow-md"
+              className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-solid px-4 py-1.5 text-[14px] font-semibold text-accent-fg shadow-md"
             >
               Drop photos to add them
             </span>
@@ -362,8 +362,8 @@ function FormBody({
         ) : null}
 
         <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h2 className="text-[13px] font-semibold text-fg-strong">Photos</h2>
-          <span className="text-xs text-muted" data-nums>
+          <h2 className="text-[14px] font-semibold text-fg-strong">Photos</h2>
+          <span className="text-[13.5px] text-muted" data-nums>
             {photoCount}/{SLOT_COUNT}
           </span>
         </div>
@@ -453,10 +453,10 @@ function FormBody({
                       </svg>
                     </span>
                     <span>
-                      <span className="block text-[15px] font-semibold text-fg-strong">
+                      <span className="block text-[16px] font-semibold text-fg-strong">
                         Add your first photo
                       </span>
-                      <span className="mt-1 block text-xs leading-relaxed text-muted">
+                      <span className="mt-1 block text-[13.5px] leading-relaxed text-muted">
                         Drag &amp; drop or click to browse. This becomes the cover
                       </span>
                     </span>
@@ -483,7 +483,7 @@ function FormBody({
             );
           })}
         </div>
-        <p className="mt-3 text-xs text-muted">
+        <p className="mt-3 text-[13.5px] text-muted">
           Good light and a clear view of labels or barcodes make the
           identification, and the price, much more accurate.
         </p>
@@ -502,10 +502,10 @@ function FormBody({
             </svg>
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-semibold text-fg-strong">
+            <p className="text-[14px] font-semibold text-fg-strong">
               Autofill by SnapList
             </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-muted">
+            <p className="mt-0.5 text-[13.5px] leading-relaxed text-muted">
               We identify the item, research the used price, and write the
               listing from your photos.
             </p>
@@ -520,7 +520,7 @@ function FormBody({
               <AutoFieldRow key={row.label} label={row.label} icon={row.icon} />
             ))}
           </div>
-          <p className="border-t border-border py-3 text-xs text-faint">
+          <p className="border-t border-border py-3 text-[13.5px] text-faint">
             Every field stays a real, editable input on the review screen.
           </p>
         </div>
@@ -540,12 +540,12 @@ function FormBody({
           <button
             type="submit"
             disabled={photoCount === 0}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
           >
             Identify, price &amp; draft
           </button>
         </ClickSpark>
-        <p className="mt-2 text-center text-[11.5px] text-faint">
+        <p className="mt-2 text-center text-[12.5px] text-faint">
           ≈ 30 seconds · nothing posts without your review
         </p>
       </div>
@@ -620,7 +620,7 @@ export function UploadView({
         <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
           List an item
         </h1>
-        <p className="mt-0.5 text-[13px] text-muted">
+        <p className="mt-0.5 text-[14px] text-muted">
           Add photos and SnapList fills in the rest for your review.
         </p>
         <JourneyRail />

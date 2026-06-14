@@ -144,7 +144,7 @@ export function SettingsView({
         <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
           Settings
         </h1>
-        <p className="mt-0.5 text-[13px] text-muted">
+        <p className="mt-0.5 text-[14px] text-muted">
           Your account, autopilot, and marketplace connections.
         </p>
       </header>
@@ -184,15 +184,15 @@ export function SettingsView({
           <div className="flex items-center gap-4">
             <ProfileAvatar user={user} />
             <div className="min-w-0">
-              <p className="truncate text-[15px] font-semibold text-fg-strong">
+              <p className="truncate text-[16px] font-semibold text-fg-strong">
                 {user.name}
               </p>
-              <p className="truncate text-[13px] text-muted">
+              <p className="truncate text-[14px] text-muted">
                 {user.email || "No email on file"}
               </p>
             </div>
           </div>
-          <p className="text-xs text-faint">
+          <p className="text-[13.5px] text-faint">
             Your name and photo come from your sign-in provider. Update them
             there and they follow you here.
           </p>
@@ -215,7 +215,7 @@ export function SettingsView({
           aside={<ThemeSegmented />}
         />
         <CardBody>
-          <p className="text-sm leading-relaxed text-muted">
+          <p className="text-[15px] leading-relaxed text-muted">
             Choose how SnapList looks on this device.{" "}
             <strong className="font-medium text-fg">System</strong> follows
             your OS setting automatically.
@@ -256,7 +256,7 @@ export function SettingsView({
           }
         />
         <CardBody className="flex flex-col gap-4">
-          <p className="text-sm leading-relaxed text-muted">
+          <p className="text-[15px] leading-relaxed text-muted">
             When autopilot is on, items we identify and price with{" "}
             <strong className="font-medium text-fg">high confidence</strong> are
             queued to publish <strong className="font-medium text-fg">without
@@ -264,7 +264,7 @@ export function SettingsView({
             for your review. Turn it off and every listing waits for you, no
             exceptions.
           </p>
-          <p className="text-xs text-faint">
+          <p className="text-[13.5px] text-faint">
             Changing this affects new uploads; it never rewrites why a past
             listing was queued or held.
           </p>
@@ -293,7 +293,7 @@ export function SettingsView({
         <CardBody className="flex flex-col gap-4">
           {ebay.connected ? (
             <>
-              <p className="text-sm leading-relaxed text-muted">
+              <p className="text-[15px] leading-relaxed text-muted">
                 Connected as{" "}
                 {/* react-bits ShinyText: a slow violet shimmer on the live
                     connection — the one celebratory note on this page. */}
@@ -315,7 +315,7 @@ export function SettingsView({
             </>
           ) : (
             <>
-              <p className="text-sm leading-relaxed text-muted">
+              <p className="text-[15px] leading-relaxed text-muted">
                 Connect your eBay account to publish listings under your own
                 identity. You approve access on eBay’s consent screen, and SnapList
                 never sees your eBay password.
@@ -346,12 +346,12 @@ export function SettingsView({
             }
           />
           <CardBody className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm leading-relaxed text-muted">
+            <p className="text-[15px] leading-relaxed text-muted">
               Ends your session on this device. Your items, drafts, and
               connections stay exactly as you left them.
             </p>
             {/* Clerk sign-out (issue #41) — the /auth/signout route is gone. */}
-            <AppSignOutButton className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-danger-border bg-surface px-4 py-2 text-sm font-semibold text-danger-soft-fg shadow-xs transition-colors hover:bg-danger-soft" />
+            <AppSignOutButton className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-danger-border bg-surface px-4 py-2 text-[15px] font-semibold text-danger-soft-fg shadow-xs transition-colors hover:bg-danger-soft" />
           </CardBody>
         </Card>
       </div>
