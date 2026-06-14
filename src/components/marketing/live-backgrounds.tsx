@@ -59,22 +59,44 @@ function useIsDesktop(): boolean {
   );
 }
 
-/** r6 (load jank): hold the Prism mount until the browser is idle so the GL
- *  context + shader compile never compete with the hero video, headline
- *  animation, and listing-band images in the first frames. The static CSS
- *  prism gradient carries the hero alone for that beat, and the canvas
- *  fades in over it (see .prism-canvas-enter). */
+/** r6/r7 (load jank): hold the Prism mount until AFTER the page `load` event,
+ *  THEN until the browser is idle. The GL context + ~100-step shader compile is
+ *  a heavy main-thread/GPU stall; on a fast desktop `requestIdleCallback` alone
+ *  fired mid-load, so the compile thrashed against the headline entrance +
+ *  hydration and made the hero "jitter". Waiting for `load` first moves the
+ *  compile entirely out of the entrance window. The static CSS prism gradient
+ *  carries the hero for that beat and the canvas fades in over it
+ *  (see .prism-canvas-enter). setReady runs only inside callbacks (never sync
+ *  in the effect body), satisfying the repo's set-state-in-effect lint. */
 function useIdleMounted(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if ("requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(() => setReady(true), {
-        timeout: 1500,
-      });
-      return () => window.cancelIdleCallback(id);
+    const w = window as typeof window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      if (w.requestIdleCallback) {
+        idleId = w.requestIdleCallback(() => setReady(true), { timeout: 1200 });
+      } else {
+        timeoutId = setTimeout(() => setReady(true), 300);
+      }
+    };
+    const cancel = () => {
+      if (idleId != null && w.cancelIdleCallback) w.cancelIdleCallback(idleId);
+      if (timeoutId != null) clearTimeout(timeoutId);
+    };
+    if (document.readyState === "complete") {
+      arm();
+    } else {
+      window.addEventListener("load", arm, { once: true });
     }
-    const t = setTimeout(() => setReady(true), 400);
-    return () => clearTimeout(t);
+    return () => {
+      window.removeEventListener("load", arm);
+      cancel();
+    };
   }, []);
   return ready;
 }
