@@ -5,7 +5,7 @@ import {
   tierLimits,
   type Tier,
 } from "./config";
-import { getLimiter, incrDaily, type LimitResult } from "./store";
+import { decrDaily, getLimiter, incrDaily, type LimitResult } from "./store";
 import { logEvent } from "../observability";
 import { captureError } from "../sentry";
 
@@ -116,6 +116,24 @@ export async function checkDailyItemQuota(
   const allowed = used <= limit;
   if (!allowed) logEvent("quota.item.block", { userId, used, limit, tier });
   return { allowed, used, limit };
+}
+
+/**
+ * Give back a daily item slot consumed by `checkDailyItemQuota` when the gated work
+ * (upload/pipeline) FAILED — a transient storage/model error must not permanently
+ * burn the user's daily allowance. Best-effort + fail-open (never breaks the
+ * already-failing request). The global OpenAI budget counter is intentionally NOT
+ * refunded: a failed run can still have cost model calls.
+ */
+export async function refundDailyItem(
+  userId: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  try {
+    await decrDaily(`items:user:${userId}`, env);
+  } catch (err) {
+    logEvent("quota.refund.error", { userId, error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 /**

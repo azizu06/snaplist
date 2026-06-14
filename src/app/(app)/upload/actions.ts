@@ -8,7 +8,11 @@ import { runPipelineAndPersist } from "@/lib/pipeline";
 import { createVisionPipeline } from "@/lib/vision";
 import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
 import { reportServerError } from "@/lib/sentry";
-import { checkDailyItemQuota, recordPipelineRunAndMaybeAlert } from "@/lib/abuse";
+import {
+  checkDailyItemQuota,
+  recordPipelineRunAndMaybeAlert,
+  refundDailyItem,
+} from "@/lib/abuse";
 
 /**
  * Upload server action — the spine wired to the request:
@@ -82,6 +86,8 @@ export async function uploadAndProcess(formData: FormData) {
       // Log the real storage error server-side; show the user a generic message —
       // never leak Supabase internals via the redirect query string (CWE-209, #57).
       reportServerError("upload.store", uploadErr);
+      // Give back the daily item slot — the item never persisted (#58 self-review).
+      await refundDailyItem(userId);
       redirect(`/upload?error=${encodeURIComponent("Upload failed. Please try again.")}`);
     }
     paths.push(path);
@@ -115,6 +121,9 @@ export async function uploadAndProcess(formData: FormData) {
     // Pipeline errors (vision/model/DB) stay server-side; the client gets a
     // generic message (CWE-209, #57).
     reportServerError("upload.process", err);
+    // Give back the daily item slot — no item persisted (#58 self-review). The
+    // global OpenAI budget counter is NOT refunded: the run may have cost calls.
+    await refundDailyItem(userId);
     redirect(
       `/upload?error=${encodeURIComponent("We couldn't process that photo. Please try again.")}`,
     );

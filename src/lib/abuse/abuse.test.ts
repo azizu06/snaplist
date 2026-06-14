@@ -8,6 +8,7 @@ import {
   enforceRateLimit,
   rateLimitAllows,
   recordPipelineRunAndMaybeAlert,
+  refundDailyItem,
 } from "./index";
 
 beforeEach(() => __resetInMemoryStores());
@@ -55,6 +56,15 @@ describe("abuse spend guardrail", () => {
     expect(await checkDailyItemQuota("u1", env)).toMatchObject({ allowed: false, used: 3 });
     // Per-user: a different user is unaffected.
     expect(await checkDailyItemQuota("u2", env)).toMatchObject({ allowed: true, used: 1 });
+  });
+
+  it("refundDailyItem gives back a slot so a failed upload doesn't burn quota", async () => {
+    const env = { QUOTA_FREE_ITEMS_PER_DAY: "2" };
+    await checkDailyItemQuota("u1", env); // consume -> used 1
+    await refundDailyItem("u1", env); // failed upload -> refunded to 0
+    // Both subsequent items are allowed, proving the slot came back.
+    expect(await checkDailyItemQuota("u1", env)).toMatchObject({ allowed: true, used: 1 });
+    expect(await checkDailyItemQuota("u1", env)).toMatchObject({ allowed: true, used: 2 });
   });
 
   it("OpenAI budget alert fires exactly once on the first breach", async () => {

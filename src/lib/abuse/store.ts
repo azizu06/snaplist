@@ -147,6 +147,27 @@ export async function incrDaily(
   return c.count;
 }
 
+/**
+ * Refund one unit from today's count for `key` — used to give back a quota slot
+ * when the work it gated (upload/pipeline) failed, so a transient error never
+ * permanently burns a user's daily allowance. Best-effort; floors at 0 in memory.
+ * (A refund always follows an `incrDaily` within the same request, so the key
+ * exists and won't go negative in practice.)
+ */
+export async function decrDaily(
+  key: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  const dayKey = `${KEY_PREFIX}:daily:${key}:${utcDay(Date.now())}`;
+  if (upstashConfigured(env)) {
+    const { Redis } = await import("@upstash/redis");
+    await Redis.fromEnv().decr(dayKey);
+    return;
+  }
+  const c = memoryCounters.get(dayKey);
+  if (c) c.count = Math.max(0, c.count - 1);
+}
+
 /** Test-only: reset in-memory state so cases don't bleed into each other. */
 export function __resetInMemoryStores(): void {
   limiterCache.clear();
