@@ -47,6 +47,7 @@ const STEPS = [
     eyebrow: "Step 2",
     tint: undefined,
     src: "/demo/steps/identify.mp4",
+    mobile: true,
     glyph: "identify",
     title: "Identify",
     body: "SnapList reads your photo and pulls out the brand, model, category, condition, and the details that matter. If it isn't sure what it's looking at, it says so instead of quietly guessing.",
