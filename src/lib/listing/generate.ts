@@ -317,6 +317,21 @@ async function resolveFewShot(
  * exemplars with `fewShotExamples`. Requires Supabase URL + key and (optionally) an
  * OpenAI key for embeddings in the environment.
  */
+/**
+ * The Supabase key for the request-path corpus read. The reference corpus is
+ * GLOBAL, anon-readable reference data (SELECT policies for both `anon` and
+ * `authenticated`; no write policy) and the RPC is SECURITY INVOKER — so the ANON
+ * key suffices. We deliberately do NOT fall back to the SERVICE-ROLE key here:
+ * this runs inside the authenticated upload request, and a service-role client
+ * bypasses RLS, which must never happen on a per-user request path (#57). Exported
+ * so the "never service role" property is unit-tested.
+ */
+export function corpusReadKey(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  return env.SUPABASE_ANON_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+}
+
 export function createRealFewShotRetrieval(): RetrieveFewShot {
   return async (attributes) => {
     const [{ createClient }, rag] = await Promise.all([
@@ -325,10 +340,7 @@ export function createRealFewShotRetrieval(): RetrieveFewShot {
     ]);
     const url =
       process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ??
-      process.env.SUPABASE_ANON_KEY ??
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const key = corpusReadKey();
     if (!url || !key) {
       throw new Error(
         "Real few-shot retrieval needs SUPABASE_URL + a Supabase key; inject `fewShot` or `retrieve` for offline use.",

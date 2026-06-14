@@ -4,7 +4,10 @@ import { getUserId } from "@/lib/auth";
 import {
   createEbayAdapterForUser,
   publishListingToEbay,
+  PublishValidationError,
+  EbayApiError,
 } from "@/lib/marketplace/ebay";
+import { logServerError, serverErrorJson } from "@/lib/api/errors";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -47,9 +50,22 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Publish failed.";
-    const status = /not found/i.test(message) ? 404 : 502;
-    return NextResponse.json({ error: message }, { status });
+    // User-actionable validation errors carry a SAFE message the seller can act on
+    // (no price, no photo, currency, not found) — surface it. Everything else
+    // (adapter/Supabase/upstream) is redacted to a generic message with the real
+    // error logged server-side (CWE-209, #57).
+    if (err instanceof PublishValidationError) {
+      const status = /not found/i.test(err.message) ? 404 : 422;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+    // EbayApiError carries an author-controlled, user-actionable summary (reconnect
+    // guidance, eBay's own validation message) — surface it; the raw payload
+    // (`.body`) is never exposed. Plain errors (Supabase/internal) are redacted.
+    if (err instanceof EbayApiError) {
+      return NextResponse.json({ error: err.message }, { status: 502 });
+    }
+    logServerError("ebay.publish", err);
+    return NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });
   }
 }
 
@@ -74,7 +90,7 @@ export async function GET(request: NextRequest) {
     .eq("id", listingId)
     .maybeSingle();
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return serverErrorJson("ebay.publish.get", error, "Failed to read listing status.");
   }
   if (!listing) {
     return NextResponse.json({ error: "Listing not found." }, { status: 404 });

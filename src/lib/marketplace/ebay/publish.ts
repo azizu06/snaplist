@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayAdapter } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
+import { PublishValidationError } from "./errors";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -76,10 +77,10 @@ export async function publishListingToEbay(
     throw new Error(`Failed to load listing: ${listingErr.message}`);
   }
   if (!listing) {
-    throw new Error(`Listing ${listingId} not found (or not yours).`);
+    throw new PublishValidationError(`Listing ${listingId} not found (or not yours).`);
   }
   if (listing.platform !== "ebay") {
-    throw new Error(
+    throw new PublishValidationError(
       `Listing ${listingId} targets platform "${listing.platform}", not eBay.`,
     );
   }
@@ -119,7 +120,7 @@ export async function publishListingToEbay(
   }
   const price = log?.price == null ? NaN : Number(log.price);
   if (!Number.isFinite(price) || price <= 0) {
-    throw new Error(
+    throw new PublishValidationError(
       `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
     );
   }
@@ -138,7 +139,7 @@ export async function publishListingToEbay(
   // error takes, with a user-attributable reason.
   if (imageUrls.length === 0) {
     await markPublishFailed(supabase, listingId);
-    throw new Error(
+    throw new PublishValidationError(
       photoPaths.length === 0
         ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
           "Add a photo to the item before publishing."
@@ -157,7 +158,7 @@ export async function publishListingToEbay(
   // are in that currency).
   const currency = marketplaceCurrency(env.EBAY_MARKETPLACE_ID, env.EBAY_CURRENCY);
   if (!env.EBAY_CURRENCY && currency !== PRICING_CURRENCY) {
-    throw new Error(
+    throw new PublishValidationError(
       `Listing ${listingId} cannot publish to ${env.EBAY_MARKETPLACE_ID}: its price ` +
         `was computed in ${PRICING_CURRENCY}, and relabeling the amount as ${currency} ` +
         "would misprice the live listing. Reprice for the target marketplace, or set " +

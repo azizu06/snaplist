@@ -7,6 +7,7 @@ import {
   loadOrGenerateExportPacks,
   type ExportPackView,
 } from "@/lib/export";
+import { logEvent } from "@/lib/observability";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { CopyButton } from "./copy-button";
@@ -70,7 +71,14 @@ export default async function ExportPage({
       price,
     });
   } catch (err) {
-    error = err instanceof Error ? err.message : "Export pack generation failed.";
+    // Server component renders this string to the client — keep the raw Supabase/
+    // generation error server-side and show a generic message (CWE-209, #57).
+    logEvent("export.generate", {
+      ok: false,
+      itemId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    error = "We couldn't generate the export packs. Please try again.";
   }
 
   return (

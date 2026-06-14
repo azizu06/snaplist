@@ -7,6 +7,7 @@ import {
   toEbayPublishRequest,
   type ListingForPublish,
 } from "./map";
+import { PublishValidationError } from "./errors";
 
 /**
  * Pure mapping tests (issue #14): SnapList's persisted listing shape -> the
@@ -70,6 +71,25 @@ describe("toEbayPrice", () => {
     expect(() => toEbayPrice(0)).toThrowError(/non-positive/);
     expect(() => toEbayPrice(-3)).toThrowError(/non-positive/);
     expect(() => toEbayPrice(Number.NaN)).toThrowError(/non-positive/);
+  });
+
+  it("throws a user-actionable PublishValidationError, not a redactable internal error (#57)", () => {
+    // The caller surfaces PublishValidationError.message but redacts plain Errors,
+    // so validation failures must carry this type to remain actionable to the seller.
+    expect(() => toEbayPrice(0)).toThrow(PublishValidationError);
+    expect(() =>
+      toEbayPublishRequest({
+        listingId: "l1",
+        title: "",
+        description: "",
+        copy: {},
+        condition: null,
+        price: 10,
+        imageUrls: ["https://img"],
+        categoryId: "88433",
+        currency: "USD",
+      }),
+    ).toThrow(PublishValidationError);
   });
 });
 

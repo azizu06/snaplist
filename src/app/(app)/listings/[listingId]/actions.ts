@@ -7,7 +7,10 @@ import { getUserId } from "@/lib/auth";
 import {
   createEbayAdapterForUser,
   publishListingToEbay,
+  PublishValidationError,
+  EbayApiError,
 } from "@/lib/marketplace/ebay";
+import { logEvent } from "@/lib/observability";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -35,9 +38,21 @@ export async function publishToEbay(formData: FormData) {
       await createEbayAdapterForUser(supabase),
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Publish failed.";
     revalidatePath(`/listings/${listingId}`);
-    redirect(`/listings/${listingId}?error=${encodeURIComponent(message)}`);
+    // A validation error (no price/photo/currency) or an EbayApiError (reconnect
+    // guidance, eBay's own validation message) carries a SAFE, user-actionable
+    // message — show it so the seller can fix and retry. Internal/Supabase errors
+    // are redacted and logged server-side (CWE-209, #57).
+    if (err instanceof PublishValidationError || err instanceof EbayApiError) {
+      redirect(`/listings/${listingId}?error=${encodeURIComponent(err.message)}`);
+    }
+    logEvent("ebay.publish.action", {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    redirect(
+      `/listings/${listingId}?error=${encodeURIComponent("Failed to publish to eBay. Please try again.")}`,
+    );
   }
 
   revalidatePath(`/listings/${listingId}`);
