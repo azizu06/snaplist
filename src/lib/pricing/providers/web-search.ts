@@ -6,6 +6,7 @@ import type {
   PricingProvider,
   PricingTier,
 } from "../types";
+import { resolveLanguageModel, resolveModelId } from "../../llm";
 
 /**
  * Tiers 2 + 3 — the web-search pricing agent (`upc-aided-web` / `branded-web`),
@@ -224,9 +225,7 @@ export const DEFAULT_PRICING_MODEL = "gpt-5.5";
  * one that actually extracted the comps.
  */
 export function resolvePricingModel(model?: string): string {
-  return (
-    model?.trim() || process.env.PRICING_MODEL?.trim() || DEFAULT_PRICING_MODEL
-  );
+  return resolveModelId("pricingAgent", { modelId: model });
 }
 
 const EXTRACT_SYSTEM_PROMPT =
@@ -244,16 +243,15 @@ const EXTRACT_SYSTEM_PROMPT =
  * `extract.ts` / `generate.ts`) so the SDK never loads on the offline test path.
  */
 export function createOpenAICompExtractor(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
   model?: string,
 ): ExtractComps {
   return async ({ signal, query, results }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
-    const modelId = resolvePricingModel(model);
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("pricingAgent", {
+      modelId: model,
+      apiKey,
+    });
 
     const identity = JSON.stringify(
       {
@@ -278,7 +276,7 @@ export function createOpenAICompExtractor(
       .join("\n\n");
 
     const { object } = await generateObject({
-      model: openai.chat(modelId),
+      model: llmModel,
       schema: webCompListSchema,
       system: EXTRACT_SYSTEM_PROMPT,
       prompt: `Item identity:\n${identity}\n\nSearch query: ${query}\n\nSearch results:\n${hits}`,

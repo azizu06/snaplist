@@ -105,7 +105,7 @@ on eBay. Buyers never see SnapList.
 - Schema (conceptual, not final): `items` (user_id, attributes JSON, condition, photos[], created_at), `listings` (item_id, platform, generated copy, status), `messages` (item_id/listing_id, direction, body, draft_reply, status), `embeddings`/corpus (vector, source ref, metadata), `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Models & LLM access
-- **OpenAI via the Vercel AI SDK.** Strong multimodal model for vision + structured attribute extraction; a cheaper model for lighter text generation. Exact model IDs confirmed against current OpenAI docs at build time.
+- **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). Provider is a config flip via `LLM_PROVIDER`: **dev defaults to Gemini** (generous free tier — protects the OpenAI budget), the **showcase runs on OpenAI**. A strong multimodal model handles vision + structured extraction; model ids are per-role and provider-aware, confirmed against current docs at build time. Embeddings stay on a fixed provider (pgvector `vector(1536)` dimension lock).
 - **Structured outputs** via the AI SDK's `generateObject` + **Zod** schemas (attributes, listing, price recommendation). Validation + retry on schema mismatch.
 - **Cost-aware model routing:** cheap model for easy/high-confidence work, escalate to the strong model for hard/low-confidence items. Routing is itself a showcased technique and feeds the confidence story.
 - Provider stays swappable behind the SDK (config flip).

@@ -3,7 +3,8 @@ import {
   type ListingCopy,
   listingCopySchema,
 } from "../pipeline/types";
-import { DEFAULT_LISTING_MODEL, enforceTitleLength } from "../listing";
+import { enforceTitleLength } from "../listing";
+import { resolveLanguageModel, resolveModelId } from "../llm";
 import {
   FACEBOOK_DESCRIPTION_MAX_LENGTH,
   FACEBOOK_PLATFORM,
@@ -537,12 +538,12 @@ export function mercariPackToListingCopy(
 // ---------------------------------------------------------------------------
 
 function resolveModel(model?: string): string {
-  return (
-    model?.trim() ||
-    process.env.EXPORT_PACK_MODEL?.trim() ||
-    process.env.LISTING_MODEL?.trim() ||
-    DEFAULT_LISTING_MODEL
-  );
+  // Preserve the EXPORT_PACK_MODEL -> LISTING_MODEL fallback BEFORE the provider
+  // default: fold both env vars into the explicit `modelId` so the registry's
+  // role-default only fires when neither override is set.
+  const override =
+    model?.trim() || process.env.EXPORT_PACK_MODEL?.trim() || process.env.LISTING_MODEL?.trim();
+  return resolveModelId("export", { modelId: override });
 }
 
 interface ReconciledPacks {
@@ -715,14 +716,11 @@ const EXPORT_PACK_SYSTEM_PROMPT =
  * `listing/generate.ts`, so the SDK never loads on the offline test path.
  */
 export function createOpenAIExportPackGenerate(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
 ): ExportPackGenerate {
   return async ({ model, attributes, attempt }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("export", { modelId: model, apiKey });
 
     const facts = JSON.stringify(attributes, null, 2);
     const instruction =
@@ -731,7 +729,7 @@ export function createOpenAIExportPackGenerate(
         : `Your previous response violated the platform constraints (Facebook title ≤ ${FACEBOOK_TITLE_MAX_LENGTH}, Mercari title ≤ ${MERCARI_TITLE_MAX_LENGTH}, ≤ ${MERCARI_MAX_HASHTAGS} hashtags drawn only from the given facts, no attributes beyond the validated core, NO prices and NO numbers that do not appear in the given facts). Regenerate strictly using only these facts:\n${facts}`;
 
     const { object } = await generateObject({
-      model: openai.chat(model),
+      model: llmModel,
       schema: rawExportPacksSchema,
       system: EXPORT_PACK_SYSTEM_PROMPT,
       prompt: instruction,

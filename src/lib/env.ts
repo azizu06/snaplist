@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveApiKey, resolveProvider } from "./llm/registry";
 
 /**
  * Environment schema. Everything is env-configurable so that sandbox -> production
@@ -7,8 +8,16 @@ import { z } from "zod";
  * Keep secrets server-only. Only NEXT_PUBLIC_* values reach the browser.
  */
 const envSchema = z.object({
-  // LLM
-  OPENAI_API_KEY: z.string().min(1),
+  // LLM provider registry (issue #55). Provider is a config flip: dev defaults to
+  // Gemini (free tier — protects the OpenAI budget), the showcase runs on OpenAI.
+  // `LLM_PROVIDER` overrides the NODE_ENV default (gemini/google | openai). At least
+  // one provider key is required (enforced below) — OPENAI_API_KEY for the showcase,
+  // GOOGLE_GENERATIVE_AI_API_KEY (or GEMINI_API_KEY) for dev. Keys are never required
+  // together, so a Gemini-only dev env validates without an OpenAI key.
+  LLM_PROVIDER: z.enum(["openai", "google", "gemini"]).optional(),
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  GEMINI_API_KEY: z.string().min(1).optional(),
 
   // Web-search providers (pricing research agent)
   TAVILY_API_KEY: z.string().min(1).optional(),
@@ -66,7 +75,21 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
-});
+}).refine(
+  (e) => {
+    const env = e as Record<string, string | undefined>;
+    // The key for the SELECTED provider must be present — not merely *some* key.
+    // resolveProvider is key-aware (a single-key env selects the usable provider),
+    // so this still accepts a Gemini-only dev box, but rejects an explicit
+    // LLM_PROVIDER with no matching key, or no keys at all (#55 review).
+    return Boolean(resolveApiKey(resolveProvider(env), env));
+  },
+  {
+    message:
+      "Missing the API key for the selected LLM provider. Set OPENAI_API_KEY (OpenAI) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (Gemini), or set LLM_PROVIDER to match the key you have.",
+    path: ["OPENAI_API_KEY"],
+  },
+);
 
 export type Env = z.infer<typeof envSchema>;
 

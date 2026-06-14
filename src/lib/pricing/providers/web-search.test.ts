@@ -221,6 +221,10 @@ describe("branded-web pricing agent", () => {
     expect(resolvePricingModel("explicit")).toBe("explicit");
     expect(resolvePricingModel()).toBe("pricing-gpt-env");
     vi.unstubAllEnvs();
+    // The registry now defaults to the Gemini provider in the test env, so the
+    // bare default id is provider-dependent. Pin the OpenAI provider to assert
+    // the OpenAI-provider default (DEFAULT_PRICING_MODEL).
+    vi.stubEnv("LLM_PROVIDER", "openai");
     expect(resolvePricingModel()).toBe(DEFAULT_PRICING_MODEL);
   });
 

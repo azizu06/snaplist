@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveLanguageModel, resolveModelId } from "../llm";
 import type { ExtractedAttributes } from "../pipeline/types";
 import { normalizeField } from "./metrics";
 import { judgedListingSchema, type JudgedListing } from "./types";
@@ -136,22 +137,21 @@ const JUDGE_SYSTEM_PROMPT =
 
 /**
  * The real LLM judge: a lazy wrapper around the AI SDK's `generateObject` with
- * `schema: judgeScoresSchema`. Imported lazily so the offline test/script path
- * never loads the SDK. `apiKey` defaults to OPENAI_API_KEY.
+ * `schema: judgeScoresSchema`. The model is resolved through the LLM provider
+ * registry (issue #55), so the provider is a `LLM_PROVIDER` config flip; the SDK
+ * is lazy-imported so the offline test/script path never loads it. `apiKey`
+ * defaults to undefined so the registry resolves the provider-appropriate key.
  */
 export function createOpenAIJudge(
   model: string | undefined = process.env.EVAL_JUDGE_MODEL,
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
 ): JudgeFn {
-  const judgeModel = model?.trim() || DEFAULT_JUDGE_MODEL;
+  const judgeModel = resolveModelId("judge", { modelId: model });
   return async ({ listing, attributes }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("judge", { modelId: judgeModel, apiKey });
     const { object } = await generateObject({
-      model: openai.chat(judgeModel),
+      model: llmModel,
       schema: judgeScoresSchema,
       system: JUDGE_SYSTEM_PROMPT,
       prompt:
