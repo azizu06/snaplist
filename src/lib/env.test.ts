@@ -16,10 +16,25 @@ describe("parseEnv", () => {
     expect(env.NODE_ENV).toBe("development");
   });
 
-  it("throws listing the missing required variable", () => {
+  it("throws when NO LLM provider key is present (names OPENAI_API_KEY)", () => {
+    // OPENAI_API_KEY is no longer required on its own (dev runs on Gemini), but at
+    // least one provider key must be set — the guard message names OPENAI_API_KEY.
     const { OPENAI_API_KEY, ...missingKey } = valid;
     void OPENAI_API_KEY;
     expect(() => parseEnv(missingKey)).toThrowError(/OPENAI_API_KEY/);
+  });
+
+  it("accepts a Gemini-only dev env (no OpenAI key) and parses LLM_PROVIDER", () => {
+    const { OPENAI_API_KEY, ...noOpenAI } = valid;
+    void OPENAI_API_KEY;
+    const env = parseEnv({
+      ...noOpenAI,
+      GOOGLE_GENERATIVE_AI_API_KEY: "g-test",
+      LLM_PROVIDER: "gemini",
+    });
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.GOOGLE_GENERATIVE_AI_API_KEY).toBe("g-test");
+    expect(env.LLM_PROVIDER).toBe("gemini");
   });
 
   it("treats web-search and service-role keys as optional", () => {
