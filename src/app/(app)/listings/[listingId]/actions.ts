@@ -10,7 +10,7 @@ import {
   PublishValidationError,
   EbayApiError,
 } from "@/lib/marketplace/ebay";
-import { logEvent } from "@/lib/observability";
+import { reportServerError } from "@/lib/sentry";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -46,10 +46,7 @@ export async function publishToEbay(formData: FormData) {
     if (err instanceof PublishValidationError || err instanceof EbayApiError) {
       redirect(`/listings/${listingId}?error=${encodeURIComponent(err.message)}`);
     }
-    logEvent("ebay.publish.action", {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    reportServerError("ebay.publish.action", err, { listingId });
     redirect(
       `/listings/${listingId}?error=${encodeURIComponent("Failed to publish to eBay. Please try again.")}`,
     );

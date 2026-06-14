@@ -23,6 +23,12 @@ const envSchema = z.object({
   TAVILY_API_KEY: z.string().min(1).optional(),
   EXA_API_KEY: z.string().min(1).optional(),
 
+  // Observability (issue #62). Sentry is OPTIONAL and DSN-gated: with no SENTRY_DSN,
+  // error tracking is inert (structured logging via observability.ts still runs).
+  // Set the DSN in the deploy env to activate grouped, alerted error capture.
+  SENTRY_DSN: z.string().min(1).optional(),
+  SENTRY_ENVIRONMENT: z.string().min(1).optional(),
+
   // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
   // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
   // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier

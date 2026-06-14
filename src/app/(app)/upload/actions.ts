@@ -7,9 +7,7 @@ import { getUserId } from "@/lib/auth";
 import { runPipelineAndPersist } from "@/lib/pipeline";
 import { createVisionPipeline } from "@/lib/vision";
 import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
-import { logEvent } from "@/lib/observability";
-
-const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+import { reportServerError } from "@/lib/sentry";
 
 /**
  * Upload server action — the spine wired to the request:
@@ -72,7 +70,7 @@ export async function uploadAndProcess(formData: FormData) {
     if (uploadErr) {
       // Log the real storage error server-side; show the user a generic message —
       // never leak Supabase internals via the redirect query string (CWE-209, #57).
-      logEvent("upload.store", { ok: false, error: uploadErr.message });
+      reportServerError("upload.store", uploadErr);
       redirect(`/upload?error=${encodeURIComponent("Upload failed. Please try again.")}`);
     }
     paths.push(path);
@@ -101,7 +99,7 @@ export async function uploadAndProcess(formData: FormData) {
   } catch (err) {
     // Pipeline errors (vision/model/DB) stay server-side; the client gets a
     // generic message (CWE-209, #57).
-    logEvent("upload.process", { ok: false, error: errText(err) });
+    reportServerError("upload.process", err);
     redirect(
       `/upload?error=${encodeURIComponent("We couldn't process that photo. Please try again.")}`,
     );
@@ -125,7 +123,7 @@ export async function setAutopilotSetting(formData: FormData) {
   try {
     await setAutopilotEnabled(supabase, userId, enabled);
   } catch (err) {
-    logEvent("settings.autopilot", { ok: false, error: errText(err) });
+    reportServerError("settings.autopilot", err);
     redirect(
       `/settings?error=${encodeURIComponent("Couldn't update autopilot. Please try again.")}`,
     );
