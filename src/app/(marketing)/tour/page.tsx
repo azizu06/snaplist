@@ -33,6 +33,9 @@ const STEPS = [
     eyebrow: "Step 1",
     tint: undefined,
     src: "/demo/steps/snap.mp4",
+    // Portrait mobile render exists for this step (public/demo/steps/snap-mobile.mp4
+    // + -dark). Under 768px /tour swaps to it so the in-clip UI is legible.
+    mobile: true,
     glyph: "snap",
     title: "Snap",
     body: "One photo, or up to four if condition matters. Visible barcodes and ISBNs are read automatically, so books and boxed items start with an exact identity.",
@@ -122,7 +125,15 @@ export default function HowItWorks() {
           in-video UI is readable without squinting. */}
       <section className="mx-auto w-full max-w-[1720px] px-5 pb-24 pt-6 sm:px-8 sm:pb-28 sm:pt-10">
         <div className="space-y-24 sm:space-y-32">
-          {STEPS.map(({ n, eyebrow, src, glyph, title, body, poster, label }, i) => (
+          {STEPS.map((step, i) => {
+            const { n, eyebrow, src, glyph, title, body, poster, label } = step;
+            // Only steps with a portrait render set `mobile`; under 768px the
+            // clip swaps to "<name>-mobile.mp4" (see DemoClip/SeamlessThemeVideo).
+            const mobileSrc =
+              "mobile" in step && step.mobile
+                ? src.replace(/\.mp4$/, "-mobile.mp4")
+                : undefined;
+            return (
             <Reveal key={n} delay={0.05}>
               <div
                 id={`step-${glyph === "chat" ? "qa" : glyph}`}
@@ -156,6 +167,7 @@ export default function HowItWorks() {
                 >
                   <DemoClip
                     src={src}
+                    mobileSrc={mobileSrc}
                     label={label}
                     n={n}
                     title={title}
@@ -166,7 +178,8 @@ export default function HowItWorks() {
                 </div>
               </div>
             </Reveal>
-          ))}
+            );
+          })}
         </div>
       </section>
 

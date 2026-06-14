@@ -12,9 +12,12 @@ import { STEP_PRICE_LEN, StepPrice } from "./suite/StepPrice";
 import { STEP_PUBLISH_LEN, StepPublish } from "./suite/StepPublish";
 import { STEP_SNAP_LEN, StepSnap } from "./suite/StepSnap";
 import { STEP_WRITE_LEN, StepWrite } from "./suite/StepWrite";
+import { STEP_SNAP_MOBILE_LEN, StepSnapMobile } from "./suite/mobile/StepSnapMobile";
 
 const STAGE_SIZE = { fps: 30, width: 800, height: 600 } as const;
 const SUITE_SIZE = { fps: 30, width: 1920, height: 1080 } as const;
+/** Portrait (4:5) renders of the how-it-works steps for phones. */
+const MOBILE_SIZE = { fps: 30, width: 1080, height: 1350 } as const;
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -70,6 +73,15 @@ export const RemotionRoot: React.FC = () => {
         component={InboxQA}
         durationInFrames={INBOX_QA_LEN}
         {...SUITE_SIZE}
+      />
+
+      {/* ---- portrait mobile renders (ui-r7-mobile): /tour swaps to these
+              under 768px so the in-clip UI is legible on phones ---- */}
+      <Composition
+        id="step-snap-mobile"
+        component={StepSnapMobile}
+        durationInFrames={STEP_SNAP_MOBILE_LEN}
+        {...MOBILE_SIZE}
       />
 
       {/* ---- legacy builds (kept for reference; superseded by the suite) ---- */}

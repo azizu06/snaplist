@@ -16,6 +16,7 @@ import { SeamlessThemeVideo } from "@/components/seamless-theme-video";
 
 export function DemoClip({
   src,
+  mobileSrc,
   label,
   n,
   title,
@@ -24,6 +25,10 @@ export function DemoClip({
   className,
 }: {
   src: string;
+  /** Optional portrait render shown under 768px (with its `-dark` sibling).
+   *  When set, the frame switches to a 4:5 box on mobile so the portrait clip
+   *  fills it without cropping; desktop keeps the 16:9 panel. */
+  mobileSrc?: string;
   /** Accessible description of the clip's content. */
   label: string;
   /** Step number for the poster slate (e.g. "03"). */
@@ -38,7 +43,13 @@ export function DemoClip({
     <div
       className={`glass-panel relative overflow-hidden rounded-2xl ${className ?? ""}`}
     >
-      <SeamlessThemeVideo src={src} label={label} lazy className="aspect-video">
+      <SeamlessThemeVideo
+        src={src}
+        mobileSrc={mobileSrc}
+        label={label}
+        lazy
+        className={mobileSrc ? "aspect-[4/5] md:aspect-video" : "aspect-video"}
+      >
         {/* designed poster / fallback slate */}
         <div className="absolute inset-0 flex flex-col justify-between overflow-hidden bg-night-2 p-5 sm:p-7">
           <div

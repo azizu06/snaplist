@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
 import { useReducedMotion } from "motion/react";
 
@@ -8,6 +8,19 @@ import { useReducedMotion } from "motion/react";
 function darkVariant(src: string) {
   return src.replace(/\.mp4$/, "-dark.mp4");
 }
+
+/** Under 768px, prefer a portrait `-mobile` render when one is supplied — a
+ *  16:9 desktop-app clip is illegible on a phone. SSR snapshot is desktop so
+ *  the markup is stable; the real width takes over right after mount (videos
+ *  only attach post-mount, so no wrong-variant fetch). */
+const MOBILE_CLIP_QUERY = "(max-width: 767px)";
+const subscribeMobileClip = (onChange: () => void) => {
+  const m = window.matchMedia(MOBILE_CLIP_QUERY);
+  m.addEventListener("change", onChange);
+  return () => m.removeEventListener("change", onChange);
+};
+const getMobileClip = () => window.matchMedia(MOBILE_CLIP_QUERY).matches;
+const getMobileClipServer = () => false;
 
 type Theme = "light" | "dark";
 
@@ -38,6 +51,7 @@ type Theme = "light" | "dark";
  */
 export function SeamlessThemeVideo({
   src,
+  mobileSrc,
   label,
   className,
   videoClassName = "object-cover",
@@ -48,6 +62,9 @@ export function SeamlessThemeVideo({
 }: {
   /** Light-theme clip; the dark sibling is `<name>-dark.mp4`. */
   src: string;
+  /** Optional portrait render used under 768px; its dark sibling is
+   *  `<name>-dark.mp4`. Falls back to `src` when omitted. */
+  mobileSrc?: string;
   label: string;
   /** Classes for the relative container (set the aspect ratio + clipping here). */
   className?: string;
@@ -63,7 +80,13 @@ export function SeamlessThemeVideo({
 }) {
   const { resolvedTheme } = useTheme();
   const reduced = useReducedMotion();
-  const darkSrc = darkVariant(src);
+  const isSmallClip = useSyncExternalStore(
+    subscribeMobileClip,
+    getMobileClip,
+    getMobileClipServer,
+  );
+  const effectiveSrc = isSmallClip && mobileSrc ? mobileSrc : src;
+  const darkSrc = darkVariant(effectiveSrc);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const lightRef = useRef<HTMLVideoElement>(null);
@@ -157,7 +180,7 @@ export function SeamlessThemeVideo({
       }
       void otherEl.play().catch(() => {});
     }
-  }, [themeReady, visible, active, idlePreloaded, attachLight, attachDark]);
+  }, [themeReady, visible, active, idlePreloaded, attachLight, attachDark, effectiveSrc]);
 
   // The crossfade is driven by the `.dark` CLASS, not React state — next-themes
   // flips that class synchronously (the same thing that recolours the page
@@ -178,7 +201,7 @@ export function SeamlessThemeVideo({
       {children}
       <video
         ref={lightRef}
-        src={attachLight ? src : undefined}
+        src={attachLight ? effectiveSrc : undefined}
         preload={attachLight ? "auto" : "none"}
         muted
         loop
