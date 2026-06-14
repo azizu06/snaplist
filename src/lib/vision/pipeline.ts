@@ -159,11 +159,17 @@ function hasSoldComp(price: PriceResult): boolean {
  * source (web tier) restores the high `isbn` trust.
  *
  * #32 calibration (same principle, web tier): the pricing contract permits `branded-web`
- * to cite asking-only / scattered sources, so it does NOT automatically deserve the tight
- * (high-trust) `web_tight` tier. Earn `web_tight` ONLY with a real sold comp; otherwise
- * map to `web_wide`. Without this, a fully-identified branded item with a single asking
- * comp scores 0.6·0.8 + 0.25·1 + 0.15·0.4 = 0.79 and clears the 0.75 autopilot gate with
- * no sold comp or demonstrated clustering; `web_wide` lands it at 0.67, safely sub-gate.
+ * to cite asking-only / scattered sources, so it does NOT automatically deserve a high-trust
+ * tier. Earn the sold-grounded `sold` tier ONLY with a real sold comp AND a tight cluster;
+ * otherwise map to `web_wide`. Without this, a fully-identified branded item with a single
+ * asking comp scores 0.6·0.8 + 0.25·1 + 0.15·0.4 = 0.79 and clears the 0.75 autopilot gate
+ * with no sold comp or demonstrated clustering; `web_wide` lands it at 0.67, safely sub-gate.
+ *
+ * #60: a completed-SALE comp ("sold beats asking", ADR-0001) earns the first-class `sold`
+ * confidence tier — ranked ABOVE the asking-based web tiers — instead of being folded onto
+ * `web_tight`. A scattered sold set still degrades to `web_wide` (real evidence of *a*
+ * market, not a defensible tight price), so a wide sale spread cannot ride the label past
+ * the gate; tightness rides on the provider's judged `compAgreement`.
  */
 function pricingTierToConfidenceTier(
   price: PriceResult,
@@ -173,22 +179,21 @@ function pricingTierToConfidenceTier(
       return hasSoldComp(price) ? "isbn" : "depreciation";
     case "ebay-sold":
       // eBay sold comps are completed sales — sold-grounded by construction, so
-      // the only question is tightness. A tight cluster earns the high-trust
-      // web_tight bucket; a scattered sold set stays web_wide (real evidence of
-      // *a* market, not a defensible tight price). #60 calibrates this against
-      // the gold set and may give the sold tier its own bucket above web_tight.
-      return tightAgreement(price) ? "web_tight" : "web_wide";
+      // the only question is tightness. A tight cluster earns the first-class
+      // `sold` tier (above the asking-based web tiers, #60); a scattered sold set
+      // stays `web_wide` (real evidence of *a* market, not a defensible tight price).
+      return tightAgreement(price) ? "sold" : "web_wide";
     case "upc-aided-web":
       return "web_wide";
     case "branded-web":
-      // #10 round-4 calibration: web_tight needs BOTH sold grounding AND the
+      // #10 round-4 calibration: the `sold` tier needs BOTH sold grounding AND the
       // provider's judged tight agreement. A scattered sold set ($60/$185/$420)
       // is real evidence of *a* market but not of a defensible tight price —
       // it stays web_wide and cannot ride the sold-comp label past the
       // autopilot gate. Providers that don't report agreement (e.g. injected
       // test pricers) keep the sold-comp-only behavior.
       return hasSoldComp(price) && tightAgreement(price)
-        ? "web_tight"
+        ? "sold"
         : "web_wide";
     case "depreciation":
       return "depreciation";

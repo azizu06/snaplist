@@ -337,18 +337,19 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
 
     // Asking-only branded-web evidence cannot auto-post on identification alone (#32)...
     expect(asking.confidence.autopilotEligible).toBe(false);
-    // ...while a real sold comp earns the tight tier, scores strictly higher, and IS eligible.
+    // ...while a real sold comp earns the first-class `sold` tier (#60), scores strictly
+    // higher, and IS eligible.
     expect(sold.confidence.score).toBeGreaterThan(asking.confidence.score);
     expect(sold.confidence.autopilotEligible).toBe(true);
   });
 
   it("#10 round-4: a SCATTERED sold set stays web_wide and cannot auto-post", async () => {
     // $60/$185/$420 sold comps: real sold evidence, but spread (max-min)/median
-    // = 1.95 → judged agreement 0. Pre-fix, the sold-comp label alone earned
-    // web_tight with a fixed 0.7 agreement (score 0.7725 ≥ 0.75 gate). Now the
+    // = 1.95 → judged agreement 0. Pre-fix, the sold-comp label alone earned the
+    // high tier with a fixed 0.7 agreement (score ≥ 0.75 gate). Now the
     // provider's judged tightness rides on the result: a wide sold set maps to
     // web_wide (0.6·0.6 + 0.25·1 + 0.15·0 = 0.61) and stays sub-gate, while a
-    // tight cluster keeps web_tight and clears it.
+    // tight cluster earns the first-class `sold` tier (#60) and clears it.
     const brandedItem: ExtractItemAttributesResult = {
       attributes: {
         brand: "Sony",
