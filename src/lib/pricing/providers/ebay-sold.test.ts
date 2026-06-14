@@ -5,8 +5,10 @@ import {
   EBAY_SOLD_MIN_COMPS,
   assertSafeEbayUrl,
   buildSoldSearchUrl,
+  createDefaultFetchPage,
   createEbaySoldPricingProvider,
   ebaySoldConfigured,
+  filterRelevantComps,
   isAllowedEbayHost,
   isPrivateOrInternalHost,
   parsePrice,
@@ -40,10 +42,17 @@ const FIXTURE_HTML = readFileSync(
   "utf8",
 );
 
-/** The five real sold prices the fixture contains (placeholder + no-price skipped). */
+/** The five RELEVANT sold prices for the Sony WH-1000XM4 in the fixture. */
 const FIXTURE_PRICES = [169.99, 175.0, 178.0, 185.5, 199.95];
 const sortedFixturePrices = [...FIXTURE_PRICES].sort((a, b) => a - b);
-const FIXTURE_MEDIAN = sortedFixturePrices[2]; // 178.00 (5 comps → middle)
+const FIXTURE_MEDIAN = sortedFixturePrices[2]; // 178.00 (5 relevant comps → middle)
+/**
+ * Priced NOISE the fixture also contains: an aftermarket ear-pad accessory
+ * ($21.50) and a wrong-model Bose listing ($150). The HTML parser is identity-
+ * agnostic and returns these too; the relevance filter / provider must drop them.
+ */
+const NOISE_PRICES = [21.5, 150.0];
+const sortedAllParsed = [...FIXTURE_PRICES, ...NOISE_PRICES].sort((a, b) => a - b);
 
 const BRANDED_SIGNAL: ItemSignal = {
   brand: "Sony",
@@ -148,6 +157,14 @@ describe("buildSoldSearchUrl", () => {
     ).toBe("Nike Air Max 90 Men's Shoes");
   });
 
+  it("uses an ISBN as the query for a book the structured ISBN tier couldn't price", () => {
+    // The ISBN tier runs first; when it declines (identified but no USD price),
+    // the book reaches this tier and should still get an exact eBay sold lookup.
+    expect(new URL(buildSoldSearchUrl({ isbn: "9780140328721" })!).searchParams.get("_nkw")).toBe(
+      "9780140328721",
+    );
+  });
+
   it("declines (null) for an unidentifiable signal or a bare brand", () => {
     expect(buildSoldSearchUrl({})).toBeNull();
     // A bare brand ("Sony") is not a product — its sold search returns arbitrary
@@ -181,11 +198,15 @@ describe("parsePrice", () => {
 describe("parseSoldComps (saved fixture)", () => {
   const comps = parseSoldComps(FIXTURE_HTML);
 
-  it("extracts exactly the real sold comps, skipping the placeholder and price-less cards", () => {
-    expect(comps).toHaveLength(FIXTURE_PRICES.length);
-    expect(comps.map((c) => c.price).sort((a, b) => a - b)).toEqual(sortedFixturePrices);
-    // The "Shop on eBay" placeholder never becomes a comp.
+  it("extracts every PRICED card (identity-agnostic), skipping the placeholder and price-less cards", () => {
+    // The parser does NOT judge relevance — it returns all priced cards (the 5
+    // real comps PLUS the priced accessory and the wrong-model Bose). Relevance
+    // is a separate, testable stage.
+    expect(comps).toHaveLength(sortedAllParsed.length);
+    expect(comps.map((c) => c.price).sort((a, b) => a - b)).toEqual(sortedAllParsed);
+    // The "Shop on eBay" placeholder and the price-less "ear pads ONLY" card never become comps.
     expect(comps.some((c) => /shop on ebay/i.test(c.title ?? ""))).toBe(false);
+    expect(comps.some((c) => /ONLY \(no headphones\)/.test(c.title ?? ""))).toBe(false);
   });
 
   it("cites a real eBay item URL and a cleaned title for every comp", () => {
@@ -195,6 +216,65 @@ describe("parseSoldComps (saved fixture)", () => {
       // The "New Listing" badge text is stripped from the title.
       expect(c.title!.startsWith("New Listing")).toBe(false);
     }
+  });
+});
+
+describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () => {
+  it("keeps the real item comps and drops the priced accessory + wrong-model listings", () => {
+    const relevant = filterRelevantComps(parseSoldComps(FIXTURE_HTML), BRANDED_SIGNAL);
+    expect(relevant.map((c) => c.price).sort((a, b) => a - b)).toEqual(sortedFixturePrices);
+    // The $21.50 ear-pad accessory and the $150 Bose never survive.
+    expect(relevant.some((c) => /ear ?pad|replacement/i.test(c.title ?? ""))).toBe(false);
+    expect(relevant.some((c) => /bose/i.test(c.title ?? ""))).toBe(false);
+  });
+
+  it("requires the model token in the title when a model is known", () => {
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/2", title: "Sony WH-1000XM3 Headphones", price: 120 }, // wrong model
+    ];
+    const r = filterRelevantComps(comps, BRANDED_SIGNAL);
+    expect(r).toHaveLength(1);
+    expect(r[0].price).toBe(180);
+  });
+
+  it("without a known model, trusts the exact eBay query but still drops parts/accessories", () => {
+    const upcSignal = { upc: "027242920569" } as ItemSignal;
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/2", title: "WH-1000XM4 replacement ear pads", price: 20 },
+      { url: "https://www.ebay.com/itm/3", title: "Headphones for parts not working", price: 30 },
+    ];
+    const r = filterRelevantComps(comps, upcSignal);
+    expect(r.map((c) => c.price)).toEqual([180]);
+  });
+});
+
+describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {
+  it("enforces the SSRF guard BEFORE issuing any request", async () => {
+    let called = false;
+    const spyFetch = (async () => {
+      called = true;
+      return new Response("<html></html>");
+    }) as unknown as typeof fetch;
+    const fetchPage = createDefaultFetchPage({ fetchImpl: spyFetch });
+    await expect(fetchPage("https://evil.com/sch")).rejects.toThrow();
+    expect(called).toBe(false); // rejected by the guard, never reached the network
+  });
+
+  it("aborts a stalled request after the timeout so the provider can decline (not hang)", async () => {
+    // A fetch that accepts the connection but never sends a body — it only
+    // settles when its AbortSignal fires.
+    const hangingFetch = ((_input: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      })) as unknown as typeof fetch;
+    const fetchPage = createDefaultFetchPage({ timeoutMs: 10, fetchImpl: hangingFetch });
+    await expect(
+      fetchPage("https://www.ebay.com/sch/i.html?_nkw=x&LH_Sold=1"),
+    ).rejects.toThrow();
   });
 });
 
@@ -239,6 +319,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(provider.tier).toBe("ebay-sold");
     expect(provider.canHandle?.(BRANDED_SIGNAL)).toBe(true);
     expect(provider.canHandle?.({ upc: "027242920569" })).toBe(true);
+    expect(provider.canHandle?.({ isbn: "9780140328721" })).toBe(true);
     expect(provider.canHandle?.({})).toBe(false);
     expect(provider.canHandle?.({ brand: "Sony" })).toBe(false); // bare brand
   });

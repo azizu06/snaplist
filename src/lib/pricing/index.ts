@@ -40,9 +40,11 @@ export {
 } from "./providers/web-search";
 export {
   createEbaySoldPricingProvider,
+  createDefaultFetchPage,
   buildSoldSearchUrl,
   parseSoldComps,
   parsePrice,
+  filterRelevantComps,
   synthesizeSoldResult,
   assertSafeEbayUrl,
   isAllowedEbayHost,

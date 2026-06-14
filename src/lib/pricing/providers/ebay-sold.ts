@@ -63,6 +63,8 @@ export interface EbaySoldPricingProviderOptions {
   maxResults?: number;
   /** Outbound User-Agent; defaults to `EBAY_SOLD_USER_AGENT` env or a desktop UA. */
   userAgent?: string;
+  /** Per-fetch timeout (ms); defaults to `EBAY_SOLD_TIMEOUT_MS` env or 8000. */
+  fetchTimeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +83,14 @@ export const EBAY_SOLD_MAX_RESULTS = 60;
 /** Fewer than this many sold comps = "nothing useful" → decline. */
 export const EBAY_SOLD_MIN_COMPS = 2;
 
+/**
+ * Per-fetch timeout. A stalled eBay response (connection accepted, body never
+ * sent) must ABORT so the provider's catch can decline — otherwise the request
+ * hangs until the serverless deadline and the promised graceful fallback never
+ * runs (#56 review). Overridable via `EBAY_SOLD_TIMEOUT_MS`.
+ */
+export const EBAY_SOLD_FETCH_TIMEOUT_MS = 8000;
+
 /** The only host family this provider will ever fetch. */
 export const EBAY_ALLOWED_HOST = "ebay.com";
 
@@ -90,6 +100,11 @@ function resolveBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 
 function resolveUserAgent(env: NodeJS.ProcessEnv = process.env): string {
   return env.EBAY_SOLD_USER_AGENT?.trim() || EBAY_SOLD_USER_AGENT_DEFAULT;
+}
+
+function resolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const v = Number(env.EBAY_SOLD_TIMEOUT_MS);
+  return Number.isFinite(v) && v > 0 ? v : EBAY_SOLD_FETCH_TIMEOUT_MS;
 }
 
 /**
@@ -169,7 +184,9 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
 
 /**
  * The search query identifying the item: brand+model is the most precise; a
- * resolved product name is next; a bare UPC is a fine exact key. A bare brand
+ * resolved product name is next; a bare UPC is a fine exact key; and an ISBN is
+ * a fine exact key for a book the structured ISBN tier identified but couldn't
+ * price (it declines → the book reaches this tier; #56 review). A bare brand
  * ("Sony") is NOT a product — its sold search returns arbitrary same-brand
  * items, the same false precision the branded-web tier refuses — so it yields
  * no query (→ the provider declines).
@@ -182,6 +199,8 @@ function identityQuery(signal: ItemSignal): string | null {
   if (resolved) return resolved;
   const upc = signal.upc?.trim();
   if (upc) return upc;
+  const isbn = signal.isbn?.trim();
+  if (isbn) return isbn;
   return null;
 }
 
@@ -276,6 +295,52 @@ export function parseSoldComps(
 }
 
 // ---------------------------------------------------------------------------
+// Relevance filtering — drop accessories / parts / wrong-model noise (#56 review)
+// ---------------------------------------------------------------------------
+
+/**
+ * Titles that mark a listing as an accessory, a part, a broken / for-parts unit,
+ * or a multi-unit lot — NOT the sellable item. Pricing the main item off these
+ * would be badly wrong (a $20 ear-pad sale must never anchor a $180 headphone
+ * price). Precision over recall is deliberate here: a borderline-legit listing
+ * dropped is far safer than an accessory priced as the item. The set is tunable;
+ * condition-aware relevance is refined against the gold set in #60/#61.
+ */
+const ACCESSORY_OR_PARTS_RE =
+  /\b(ear ?pads?|earpads?|cushions?|replacement|spare|for parts|parts only|not working|broken|faulty|as[- ]?is|repair|cable|cord|charger|adapter|bundle|lot of)\b/i;
+
+function normalizeToken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Does the comp plausibly refer to the SAME product as the signal? When a model
+ * is known it MUST appear in the title (normalized, so "WH-1000XM4" matches
+ * "WH 1000XM4"). For identity by resolved name / UPC / ISBN we can't token-match
+ * the title reliably, so we trust eBay's exact-query result set and rely on the
+ * accessory/parts filter alone.
+ */
+export function matchesIdentity(title: string, signal: ItemSignal): boolean {
+  const model = signal.model?.trim();
+  if (signal.brand?.trim() && model) {
+    return normalizeToken(title).includes(normalizeToken(model));
+  }
+  return true;
+}
+
+/** Keep only comps that match the item identity and are not accessories/parts. */
+export function filterRelevantComps(
+  comps: readonly EbaySoldComp[],
+  signal: ItemSignal,
+): EbaySoldComp[] {
+  return comps.filter(
+    (c) =>
+      matchesIdentity(c.title ?? "", signal) &&
+      !ACCESSORY_OR_PARTS_RE.test(c.title ?? ""),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Synthesis — the cited, sold-grounded PriceResult
 // ---------------------------------------------------------------------------
 
@@ -350,25 +415,42 @@ export function synthesizeSoldResult(comps: readonly EbaySoldComp[]): PriceResul
 // The provider
 // ---------------------------------------------------------------------------
 
-/** The real default fetcher: SSRF-guarded `fetch`, no off-host redirects. */
-function defaultFetchPage(userAgent: string): FetchPage {
+/**
+ * The real default fetcher: SSRF-guarded `fetch`, no off-host redirects, and a
+ * bounded timeout so a stalled response aborts (→ the provider declines) instead
+ * of hanging until the serverless deadline. `fetchImpl` is injectable so the
+ * timeout + SSRF behavior are unit-testable without a live network.
+ */
+export function createDefaultFetchPage(
+  opts: { userAgent?: string; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): FetchPage {
+  const userAgent = opts.userAgent ?? resolveUserAgent();
+  const timeoutMs = opts.timeoutMs ?? resolveTimeoutMs();
+  const doFetch = opts.fetchImpl ?? fetch;
   return async (rawUrl) => {
-    const safe = assertSafeEbayUrl(rawUrl); // validate BEFORE the request
-    const res = await fetch(safe, {
-      headers: {
-        "user-agent": userAgent,
-        "accept-language": "en-US,en;q=0.9",
-        accept: "text/html,application/xhtml+xml",
-      },
-      // Never follow an off-host redirect (SSRF). eBay returns 200 directly for
-      // a sold-results query; a redirect (e.g. a consent interstitial) is
-      // treated as "blocked" → the provider declines to the next tier.
-      redirect: "error",
-    });
-    if (!res.ok) {
-      throw new Error(`eBay sold fetch failed: ${res.status} ${res.statusText}`);
+    const safe = assertSafeEbayUrl(rawUrl); // validate BEFORE any request
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await doFetch(safe, {
+        headers: {
+          "user-agent": userAgent,
+          "accept-language": "en-US,en;q=0.9",
+          accept: "text/html,application/xhtml+xml",
+        },
+        // Never follow an off-host redirect (SSRF). eBay returns 200 directly for
+        // a sold-results query; a redirect (e.g. a consent interstitial) is
+        // treated as "blocked" → the provider declines to the next tier.
+        redirect: "error",
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        throw new Error(`eBay sold fetch failed: ${res.status} ${res.statusText}`);
+      }
+      return await res.text();
+    } finally {
+      clearTimeout(timer);
     }
-    return res.text();
   };
 }
 
@@ -383,7 +465,12 @@ export function createEbaySoldPricingProvider(
 ): PricingProvider {
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
-  const fetchPrimary = options.fetchPage ?? defaultFetchPage(options.userAgent ?? resolveUserAgent());
+  const fetchPrimary =
+    options.fetchPage ??
+    createDefaultFetchPage({
+      userAgent: options.userAgent,
+      timeoutMs: options.fetchTimeoutMs,
+    });
   const fetchFallback = options.fetchPageFallback;
 
   const identifiable = (signal: ItemSignal): boolean =>
@@ -420,8 +507,12 @@ export function createEbaySoldPricingProvider(
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
       const comps = await fetchComps(url);
-      if (comps.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
-      return synthesizeSoldResult(comps);
+      // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
+      // listings eBay returns for the query, so two clustered accessory sales
+      // can't price the main item near an accessory price.
+      const relevant = filterRelevantComps(comps, signal);
+      if (relevant.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
+      return synthesizeSoldResult(relevant);
     },
   };
 }
