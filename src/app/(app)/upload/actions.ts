@@ -8,6 +8,11 @@ import { runPipelineAndPersist } from "@/lib/pipeline";
 import { createVisionPipeline } from "@/lib/vision";
 import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
 import { reportServerError } from "@/lib/sentry";
+import {
+  checkDailyItemQuota,
+  recordPipelineRunAndMaybeAlert,
+  refundDailyItem,
+} from "@/lib/abuse";
 
 /**
  * Upload server action — the spine wired to the request:
@@ -59,6 +64,16 @@ export async function uploadAndProcess(formData: FormData) {
     }
   }
 
+  // Spend guardrail (#58): the per-user/day ITEM cap — gate the expensive vision +
+  // pricing + listing run BEFORE uploading photos or calling any model. (A friendlier
+  // limit screen is UI polish tracked to the frontend issue.)
+  const quota = await checkDailyItemQuota(userId);
+  if (!quota.allowed) {
+    redirect(
+      `/upload?error=${encodeURIComponent(`Daily limit reached (${quota.limit} items/day on the free plan). Please try again tomorrow.`)}`,
+    );
+  }
+
   // User-scoped object paths: first segment MUST be the user's id (storage policy).
   const paths: string[] = [];
   for (const photo of photos) {
@@ -71,6 +86,8 @@ export async function uploadAndProcess(formData: FormData) {
       // Log the real storage error server-side; show the user a generic message —
       // never leak Supabase internals via the redirect query string (CWE-209, #57).
       reportServerError("upload.store", uploadErr);
+      // Give back the daily item slot — the item never persisted (#58 self-review).
+      await refundDailyItem(userId);
       redirect(`/upload?error=${encodeURIComponent("Upload failed. Please try again.")}`);
     }
     paths.push(path);
@@ -82,6 +99,10 @@ export async function uploadAndProcess(formData: FormData) {
     // confidence gate, so when it is off NOTHING is autopilot-eligible and every
     // listing queues as a draft for review.
     const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
+
+    // Spend guardrail (#58): count this model-backed run toward the global daily
+    // OpenAI budget; fires a one-time alert on the first breach (warns, doesn't block).
+    await recordPipelineRunAndMaybeAlert();
 
     // Real vision pipeline: the user-scoped server client signs the private photo
     // URLs and the same client persists every row under RLS.
@@ -100,6 +121,9 @@ export async function uploadAndProcess(formData: FormData) {
     // Pipeline errors (vision/model/DB) stay server-side; the client gets a
     // generic message (CWE-209, #57).
     reportServerError("upload.process", err);
+    // Give back the daily item slot — no item persisted (#58 self-review). The
+    // global OpenAI budget counter is NOT refunded: the run may have cost calls.
+    await refundDailyItem(userId);
     redirect(
       `/upload?error=${encodeURIComponent("We couldn't process that photo. Please try again.")}`,
     );

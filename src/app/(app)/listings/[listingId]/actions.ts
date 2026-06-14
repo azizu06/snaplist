@@ -11,6 +11,7 @@ import {
   EbayApiError,
 } from "@/lib/marketplace/ebay";
 import { reportServerError } from "@/lib/sentry";
+import { rateLimitAllows } from "@/lib/abuse";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -28,6 +29,15 @@ export async function publishToEbay(formData: FormData) {
   const supabase = await createClient();
   const userId = await getUserId();
   if (!userId) redirect(`/login?next=/listings/${listingId}`);
+
+  // Rate-limit the eBay write here too — this server action is the path the
+  // "Publish" button actually uses; the API route's limit alone would be bypassed
+  // (#58, ADR-0004). Shares the per-user metered bucket with the route.
+  if (!(await rateLimitAllows(userId))) {
+    redirect(
+      `/listings/${listingId}?error=${encodeURIComponent("Too many requests. Please slow down and try again shortly.")}`,
+    );
+  }
 
   try {
     // Per-user tokens when the seller connected eBay (issue #17), env sandbox
