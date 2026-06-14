@@ -108,6 +108,9 @@ describe("confidenceLabel", () => {
 describe("tierLabel", () => {
   it("translates every pricing tier to the audited human label (R-1)", () => {
     expect(tierLabel("isbn-lookup")).toBe("Exact match: ISBN lookup");
+    // The eBay-sold tier must surface its real evidence, not the "AI estimate"
+    // fallback (#56 review): a sold-grounded price is the strongest comp signal.
+    expect(tierLabel("ebay-sold")).toBe("Verified eBay sold comps");
     expect(tierLabel("web_tight")).toBe("Strong market comps");
     expect(tierLabel("web_wide")).toBe("Mixed market comps");
     expect(tierLabel("depreciation")).toBe("Estimated from retail price");

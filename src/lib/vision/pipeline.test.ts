@@ -451,6 +451,14 @@ describe("#11 — createDefaultPricer fallthrough (offline fakes)", () => {
           return null; // Neither catalog API matches → tier 1 declines.
         },
       },
+      // Inject the eBay-sold fetch seam so this OFFLINE suite never hits the
+      // network: an empty results page → no sold comps → the tier declines.
+      ebaySold: {
+        fetchPage: async () => {
+          calls.push("ebay-sold");
+          return "";
+        },
+      },
       webSearch: { searchClient: emptyWebSearch },
       depreciation: {
         searchClient: retailSearch,
@@ -493,6 +501,7 @@ describe("#11 — createDefaultPricer fallthrough (offline fakes)", () => {
     const order = calls.filter((label, i) => calls.indexOf(label) === i);
     expect(order).toEqual([
       "isbn-lookup",
+      "ebay-sold",
       "web-search",
       "retail-search",
       "llm-estimate",
