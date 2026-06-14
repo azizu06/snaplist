@@ -13,6 +13,7 @@ import {
   type ReplyGrounding,
 } from "@/lib/inbox";
 import { logServerError } from "@/lib/api/errors";
+import { enforceRateLimit } from "@/lib/abuse";
 
 /**
  * POST /api/inbox/simulate — simulate an incoming buyer question for one of the
@@ -46,6 +47,8 @@ export async function POST(request: Request) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = await enforceRateLimit(request, userId);
+  if (limited) return limited;
 
   let json: unknown;
   try {

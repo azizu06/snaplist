@@ -29,6 +29,18 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().min(1).optional(),
   SENTRY_ENVIRONMENT: z.string().min(1).optional(),
 
+  // Abuse & cost protection (issue #58). Upstash Redis powers rate limiting + the
+  // daily spend guardrail; with both unset, an in-memory fallback keeps dev/offline
+  // working (per-instance, not shared). Limits are env-tunable (defaults in
+  // src/lib/abuse/config.ts); the numeric ones are parsed there.
+  UPSTASH_REDIS_REST_URL: z.string().min(1).optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
+  RATE_LIMIT_FREE_PER_MINUTE: z.string().min(1).optional(),
+  RATE_LIMIT_PAID_PER_MINUTE: z.string().min(1).optional(),
+  QUOTA_FREE_ITEMS_PER_DAY: z.string().min(1).optional(),
+  QUOTA_PAID_ITEMS_PER_DAY: z.string().min(1).optional(),
+  OPENAI_DAILY_CALL_BUDGET: z.string().min(1).optional(),
+
   // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
   // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
   // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier

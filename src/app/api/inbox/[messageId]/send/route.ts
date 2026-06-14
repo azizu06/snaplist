@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { ReplySendConflictError, approveAndSendReply } from "@/lib/inbox";
 import { serverErrorJson } from "@/lib/api/errors";
+import { enforceRateLimit } from "@/lib/abuse";
 
 /**
  * POST /api/inbox/[messageId]/send — the seller approved (or edited) the drafted
@@ -28,6 +29,8 @@ export async function POST(
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = await enforceRateLimit(request, userId);
+  if (limited) return limited;
 
   const params = paramsSchema.safeParse(await context.params);
   if (!params.success) {

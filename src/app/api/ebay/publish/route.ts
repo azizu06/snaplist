@@ -8,6 +8,7 @@ import {
   EbayApiError,
 } from "@/lib/marketplace/ebay";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
+import { enforceRateLimit } from "@/lib/abuse";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -30,6 +31,8 @@ export async function POST(request: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
+  const limited = await enforceRateLimit(request, userId);
+  if (limited) return limited;
 
   const body: unknown = await request.json().catch(() => undefined);
   const listingId = (body as { listingId?: unknown } | undefined)?.listingId;
