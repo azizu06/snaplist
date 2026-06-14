@@ -248,6 +248,44 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
     const r = filterRelevantComps(comps, upcSignal);
     expect(r.map((c) => c.price)).toEqual([180]);
   });
+
+  it("drops new/sealed comps for a USED item, keeps them when the seller's item is new", () => {
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/2", title: "Sony WH-1000XM4 Brand New Sealed", price: 280 },
+    ];
+    // BRANDED_SIGNAL is condition "good" → the $280 new/sealed comp would inflate
+    // the median, so it is dropped.
+    expect(filterRelevantComps(comps, BRANDED_SIGNAL).map((c) => c.price)).toEqual([180]);
+    // If the seller's OWN item is new, new comps are valid and kept.
+    const newSignal: ItemSignal = { ...BRANDED_SIGNAL, condition: "new" };
+    expect(filterRelevantComps(comps, newSignal).map((c) => c.price).sort((a, b) => a - b)).toEqual([
+      180, 280,
+    ]);
+  });
+
+  it("treats an accessory term as noise UNLESS it is part of the item's own identity", () => {
+    // Selling a PS5 console: a DualSense Controller sale is an accessory → dropped.
+    const consoleSignal: ItemSignal = { brand: "Sony", model: "PS5" };
+    const consoleComps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/a", title: "Sony PS5 Console Disc Edition", price: 400 },
+      { url: "https://www.ebay.com/itm/b", title: "Sony PS5 DualSense Controller", price: 55 },
+    ];
+    expect(filterRelevantComps(consoleComps, consoleSignal).map((c) => c.price)).toEqual([400]);
+    // Selling the controller ITSELF: "controller" is identity, so those comps stay.
+    const controllerSignal: ItemSignal = {
+      brand: "Sony",
+      model: "DualSense",
+      resolvedName: "Sony DualSense Wireless Controller",
+    };
+    const controllerComps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/c", title: "Sony DualSense Wireless Controller", price: 55 },
+      { url: "https://www.ebay.com/itm/d", title: "Sony DualSense Controller White", price: 50 },
+    ];
+    expect(
+      filterRelevantComps(controllerComps, controllerSignal).map((c) => c.price).sort((a, b) => a - b),
+    ).toEqual([50, 55]);
+  });
 });
 
 describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {

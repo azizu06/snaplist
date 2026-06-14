@@ -299,15 +299,27 @@ export function parseSoldComps(
 // ---------------------------------------------------------------------------
 
 /**
- * Titles that mark a listing as an accessory, a part, a broken / for-parts unit,
- * or a multi-unit lot — NOT the sellable item. Pricing the main item off these
- * would be badly wrong (a $20 ear-pad sale must never anchor a $180 headphone
- * price). Precision over recall is deliberate here: a borderline-legit listing
- * dropped is far safer than an accessory priced as the item. The set is tunable;
- * condition-aware relevance is refined against the gold set in #60/#61.
+ * Titles that mark a listing as an accessory, a part, a broken/for-parts unit, or
+ * a multi-unit lot — NOT the sellable item. Pricing the main item off these would
+ * be badly wrong (a $20 ear-pad or $15 case sale must never anchor a $180
+ * headphone price; two clustered accessory sales would otherwise fire the sold
+ * tier). Precision over recall is deliberate. Covers common hero-domain
+ * accessories/item-only qualifiers (case, dock, controller, empty box, …); an
+ * accessory term is IGNORED when it is part of the item's OWN identity (see
+ * `isAccessoryOrParts`), so a seller actually selling a "DualSense Controller"
+ * keeps controller comps. The set is gold-set-tuned (#60/#61).
  */
 const ACCESSORY_OR_PARTS_RE =
-  /\b(ear ?pads?|earpads?|cushions?|replacement|spare|for parts|parts only|not working|broken|faulty|as[- ]?is|repair|cable|cord|charger|adapter|bundle|lot of)\b/i;
+  /\b(ear ?pads?|earpads?|cushions?|replacement|spare|for parts|parts only|not working|broken|faulty|as[- ]?is|repair|cable|cord|charger|adapter|bundle|lot of|case|cover|pouch|sleeve|skin|sticker|decal|strap|grip|stand|mount|holder|dock|screen protector|protector|empty box|box only|manual only|disc only|game only|controller|accessor(?:y|ies))\b/i;
+
+/**
+ * New/sealed-condition markers. SnapList prices USED goods, so a brand-new sold
+ * listing is not a valid comp for a used item and would inflate the median —
+ * UNLESS the seller's own item is new/like-new (then new comps are kept). Note
+ * "Like New" (a used grade) is intentionally NOT matched here.
+ */
+const NEW_CONDITION_RE =
+  /\b(brand[- ]?new|new sealed|new in box|factory sealed|sealed|bnib|nib|nwt|never used|unopened)\b/i;
 
 function normalizeToken(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -328,16 +340,48 @@ export function matchesIdentity(title: string, signal: ItemSignal): boolean {
   return true;
 }
 
-/** Keep only comps that match the item identity and are not accessories/parts. */
+/** The seller's item identity as a lowercase string, for the accessory carve-out. */
+function identityText(signal: ItemSignal): string {
+  return [signal.brand, signal.model, signal.resolvedName, signal.category]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Is the seller's OWN item new/like-new (so new-condition comps are valid)? */
+function sellerItemIsNew(signal: ItemSignal): boolean {
+  return (signal.condition?.toLowerCase() ?? "").includes("new");
+}
+
+/**
+ * Is the comp an accessory/part rather than the item itself? True when an
+ * accessory term is in the title AND that term is NOT part of the item's own
+ * identity — so a seller actually selling a "Controller"/"Dock" keeps those comps,
+ * while a controller sale leaking into a console search is dropped.
+ */
+export function isAccessoryOrParts(title: string, signal: ItemSignal): boolean {
+  const m = ACCESSORY_OR_PARTS_RE.exec(title);
+  if (!m) return false;
+  return !identityText(signal).includes(m[1].toLowerCase());
+}
+
+/**
+ * Keep only comps that (a) match the item identity, (b) aren't accessories/parts,
+ * and (c) aren't new/sealed when the seller's item is used (#56 review: new sold
+ * listings would otherwise inflate a used item's median past the autopilot gate).
+ */
 export function filterRelevantComps(
   comps: readonly EbaySoldComp[],
   signal: ItemSignal,
 ): EbaySoldComp[] {
-  return comps.filter(
-    (c) =>
-      matchesIdentity(c.title ?? "", signal) &&
-      !ACCESSORY_OR_PARTS_RE.test(c.title ?? ""),
-  );
+  const keepNew = sellerItemIsNew(signal);
+  return comps.filter((c) => {
+    const title = c.title ?? "";
+    if (!matchesIdentity(title, signal)) return false;
+    if (isAccessoryOrParts(title, signal)) return false;
+    if (!keepNew && NEW_CONDITION_RE.test(title)) return false;
+    return true;
+  });
 }
 
 // ---------------------------------------------------------------------------
