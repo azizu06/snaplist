@@ -8,6 +8,7 @@ import {
   createEbayAdapterForUser,
   publishListingToEbay,
   PublishValidationError,
+  EbayApiError,
 } from "@/lib/marketplace/ebay";
 import { logEvent } from "@/lib/observability";
 
@@ -38,10 +39,11 @@ export async function publishToEbay(formData: FormData) {
     );
   } catch (err) {
     revalidatePath(`/listings/${listingId}`);
-    // A validation error is user-actionable (no price, no photo, currency) — show
-    // it so the seller can fix and retry. Internal/adapter errors are redacted and
-    // logged server-side (CWE-209, #57).
-    if (err instanceof PublishValidationError) {
+    // A validation error (no price/photo/currency) or an EbayApiError (reconnect
+    // guidance, eBay's own validation message) carries a SAFE, user-actionable
+    // message — show it so the seller can fix and retry. Internal/Supabase errors
+    // are redacted and logged server-side (CWE-209, #57).
+    if (err instanceof PublishValidationError || err instanceof EbayApiError) {
       redirect(`/listings/${listingId}?error=${encodeURIComponent(err.message)}`);
     }
     logEvent("ebay.publish.action", {

@@ -5,6 +5,7 @@ import {
   createEbayAdapterForUser,
   publishListingToEbay,
   PublishValidationError,
+  EbayApiError,
 } from "@/lib/marketplace/ebay";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 
@@ -56,6 +57,12 @@ export async function POST(request: NextRequest) {
     if (err instanceof PublishValidationError) {
       const status = /not found/i.test(err.message) ? 404 : 422;
       return NextResponse.json({ error: err.message }, { status });
+    }
+    // EbayApiError carries an author-controlled, user-actionable summary (reconnect
+    // guidance, eBay's own validation message) — surface it; the raw payload
+    // (`.body`) is never exposed. Plain errors (Supabase/internal) are redacted.
+    if (err instanceof EbayApiError) {
+      return NextResponse.json({ error: err.message }, { status: 502 });
     }
     logServerError("ebay.publish", err);
     return NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });

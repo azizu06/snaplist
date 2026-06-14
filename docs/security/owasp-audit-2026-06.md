@@ -2,13 +2,16 @@
 
 Issue #57. Audit across eight dimensions, each finding adversarially verified against the
 codebase's actual protections (so RLS-/Zod-/Clerk-guarded paths are not reported as false
-positives). Scope: `src/app/api/**` route handlers, `"use server"` actions, the LLM/pricing/inbox
-libraries, and the outbound-fetch surfaces.
+positives). Scope: every client-facing error boundary — `src/app/api/**` route handlers, `"use server"`
+actions, **user-facing Server Components**, the OAuth flow, the LLM/pricing/inbox/export libraries, and
+the outbound-fetch surfaces.
 
 ## Posture summary
 
-The multi-tenant security model held up under audit. The verified result was **three findings**
-(one LOW, two MEDIUM), all now fixed; the architecture's core controls are sound:
+The multi-tenant security model held up under audit. Findings: one **RLS-bypass** (MEDIUM) and one
+**verbose-error / CWE-209** class spanning API routes, server actions, a server component, and the
+OAuth callback's persistence path (LOW–MEDIUM) — all now fixed; the architecture's core controls are
+sound:
 
 - **Tenant isolation (RLS).** Per-user data paths run on the RLS-enforced Supabase client (Clerk
   identity via `public.clerk_user_id()`); a foreign id is indistinguishable from a missing one (404).
@@ -48,12 +51,19 @@ type-cast failures, RLS hints). Auth-gated and RLS-scoped, so no cross-tenant or
 impact is verbose-error reconnaissance to an already-authenticated user. The same pattern existed in
 `src/app/api/ebay/publish` (the confirmed finding's class).
 
+The same class reaches the client through **three** boundaries, all addressed: API routes, the OAuth
+callback's persistence path (`saveEbayConnection` wraps the raw Supabase upsert error into the
+`/settings?error=` redirect), and a **server component** (`export/[itemId]/page.tsx` rendered
+`err.message` from `loadOrGenerateExportPacks`).
+
 **Fix.** A single chokepoint, `src/lib/api/errors.ts` (`logServerError` / `serverErrorJson`), logs
-the real error server-side and returns a generic client message. Wired into the inbox routes and the
-publish route; the not-found → 404 distinction is preserved with a clean message. (The structured-
-logging / Sentry sink replaces `console.error` in #62.) Controlled application messages — 409
-conflict errors, the account-deletion server-side `logEvent`, and the `parseReviewEdits` validation
-messages — were left intact (no raw internals).
+the real error server-side and returns a generic client message; the callback and export page log via
+`logEvent` + show generic text. The not-found → 404 distinction is preserved. **Safe vs. redacted:**
+*typed* errors carry author-controlled, user-actionable messages and are SURFACED — `PublishValidationError`
+(no price/photo, currency) and `EbayApiError` (eBay's own validation message, and the *reconnect* guidance
+when a refresh token is revoked; its raw `.body` is never exposed). Plain `Error`s (Supabase/internal) are
+redacted. Controlled messages left intact: 409 conflicts, `parseReviewEdits` validation, the
+account-deletion server-side `logEvent`. (The structured-logging / Sentry sink replaces `console.error` in #62.)
 
 ### F-2 (MEDIUM) — Service-role client on a per-user request path (RLS bypass)
 
@@ -73,11 +83,11 @@ The `uploadAndProcess` (storage + pipeline), `saveReview` (Supabase), `publishTo
 `disconnectEbay` server actions put raw `err.message` into the `?error=` redirect query string and
 did **not** log it server-side — strictly worse than F-1 (the detail reached the client and nowhere
 else). **Fix.** Each now records the real error with `logEvent(...)` and redirects a generic message.
-(OAuth `connect`/`callback` already `logEvent` and surface user-actionable OAuth-flow feedback — left
-as-is.)
+The OAuth `callback` was also split (F-1): its `EbayApiError` OAuth feedback is surfaced, its Supabase
+persistence error redacted.
 
 ## Not changed (by design)
 
-OAuth `connect`/`callback` redirects surface user-actionable OAuth-flow feedback and already log
-server-side — left for UX. Live `s-card` markup handling for the scraper is tracked to #59;
-pricing-precision tuning to #61.
+The OAuth `connect` route surfaces *config-level* setup feedback (e.g. a missing `EBAY_CLIENT_ID` — a
+variable name, never a value/secret/DB detail) and already `logEvent`s it; left for operator UX. Live
+`s-card` markup handling for the scraper is tracked to #59; pricing-precision tuning to #61.
