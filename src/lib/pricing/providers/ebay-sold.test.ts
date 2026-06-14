@@ -177,6 +177,17 @@ describe("buildSoldSearchUrl", () => {
     const url = buildSoldSearchUrl(BRANDED_SIGNAL, "https://ebay.com");
     expect(new URL(url!).hostname).toBe("ebay.com");
   });
+
+  it("declines (null) — never throws — on a malformed base URL (round-4)", () => {
+    // A bad EBAY_SOLD_BASE_URL (no scheme) must NOT throw out of `canHandle`/this
+    // precheck and abort the whole pricing pipeline — it declines to web search.
+    expect(buildSoldSearchUrl(BRANDED_SIGNAL, "www.ebay.com")).toBeNull();
+    expect(buildSoldSearchUrl(BRANDED_SIGNAL, "")).toBeNull();
+    // And the provider's `canHandle` stays total with a malformed base URL.
+    const provider = createEbaySoldPricingProvider({ baseUrl: "not a url" });
+    expect(() => provider.canHandle?.(BRANDED_SIGNAL)).not.toThrow();
+    expect(provider.canHandle?.(BRANDED_SIGNAL)).toBe(false);
+  });
 });
 
 describe("parsePrice", () => {
@@ -273,6 +284,9 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
     ];
     expect(filterRelevantComps(consoleComps, consoleSignal).map((c) => c.price)).toEqual([400]);
     // Selling the controller ITSELF: "controller" is identity, so those comps stay.
+    // NOTE: `resolvedName` here models a CATALOG-RESOLVED identity (e.g. a future UPC
+    // lookup). The current vision pipeline's `attributesToSignal` does NOT set it —
+    // see the "declines ... as PRODUCTION sees it" test below for that reality (#61).
     const controllerSignal: ItemSignal = {
       brand: "Sony",
       model: "DualSense",
@@ -328,6 +342,66 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
     expect(filterRelevantComps(nb, nbSignal).map((c) => c.price).sort((a, b) => a - b)).toEqual([
       45, 50,
     ]);
+  });
+
+  it("requires a model match at TOKEN BOUNDARIES, not as a prefix (round-4)", () => {
+    // signal model "574" must NOT accept "New Balance 5740" (a different shoe) —
+    // the old whole-title `.includes()` did, letting wrong-model comps price the item.
+    const nbSignal: ItemSignal = { brand: "New Balance", model: "574", condition: "good" };
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "New Balance 574 Grey", price: 50 },
+      { url: "https://www.ebay.com/itm/2", title: "New Balance 5740 Black", price: 95 },
+    ];
+    expect(filterRelevantComps(comps, nbSignal).map((c) => c.price)).toEqual([50]);
+    // Separator-insensitivity is preserved: "WH 1000XM4" still matches "WH-1000XM4".
+    const spaced: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/3", title: "Sony WH 1000XM4 Headphones", price: 180 },
+    ];
+    expect(filterRelevantComps(spaced, BRANDED_SIGNAL).map((c) => c.price)).toEqual([180]);
+  });
+
+  it("drops multi-unit lots (2-pack / set of N / N pcs) for a single item (round-4)", () => {
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/2", title: "Sony WH-1000XM4 Headphones 2-Pack", price: 360 },
+      { url: "https://www.ebay.com/itm/3", title: "Sony WH-1000XM4 Set of 2", price: 350 },
+      { url: "https://www.ebay.com/itm/4", title: "Sony WH-1000XM4 Lot 4 pcs", price: 700 },
+    ];
+    // Each multi-unit lot clears identity + price agreement and would inflate the
+    // median past the autopilot gate; only the genuine single unit survives.
+    expect(filterRelevantComps(comps, BRANDED_SIGNAL).map((c) => c.price)).toEqual([180]);
+  });
+
+  it("flags a standalone NEW even when the brand itself contains 'new' (round-4)", () => {
+    // "New Balance" used-shoe seller: a genuine new-inventory comp must be dropped,
+    // not masked by the brand's own "New" (#56 review: idText.includes('new') was).
+    const nbSignal: ItemSignal = { brand: "New Balance", model: "574", condition: "good" };
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "New Balance 574 Grey Used", price: 50 },
+      { url: "https://www.ebay.com/itm/2", title: "NEW New Balance 574 Black", price: 110 },
+      { url: "https://www.ebay.com/itm/3", title: "New Balance 574 Brand New In Box", price: 120 },
+    ];
+    expect(filterRelevantComps(comps, nbSignal).map((c) => c.price)).toEqual([50]);
+  });
+
+  it("declines a generic-category item whose own type is an accessory noun, as PRODUCTION sees it (round-4)", () => {
+    // attributesToSignal (the real pipeline) sets NO resolvedName, so a DualSense
+    // controller arrives as { brand, model, category } with "controller" NOT in its
+    // identity. The accessory filter drops "...Controller" comps and the sold tier
+    // declines (→ web-search tier). This is the documented precision-over-recall
+    // behavior; a category-aware carve-out so genuine accessory-CATEGORY items keep
+    // their own comps is gold-set work (#61). Pinning the real behavior here so the
+    // resolvedName-based tests above can't give false confidence (#56 review).
+    const productionSignal: ItemSignal = {
+      brand: "Sony",
+      model: "DualSense",
+      category: "electronics",
+    };
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony DualSense Wireless Controller", price: 55 },
+      { url: "https://www.ebay.com/itm/2", title: "Sony DualSense Controller White", price: 50 },
+    ];
+    expect(filterRelevantComps(comps, productionSignal)).toEqual([]);
   });
 });
 

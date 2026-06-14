@@ -215,12 +215,21 @@ export function buildSoldSearchUrl(
 ): string | null {
   const q = identityQuery(signal);
   if (!q) return null;
-  const url = new URL("/sch/i.html", baseUrl);
-  url.searchParams.set("_nkw", q);
-  url.searchParams.set("LH_Sold", "1");
-  url.searchParams.set("LH_Complete", "1");
-  url.searchParams.set("_ipg", String(EBAY_SOLD_RESULTS_PER_PAGE));
-  return url.toString();
+  // A malformed EBAY_SOLD_BASE_URL (e.g. "www.ebay.com" with no scheme) makes the
+  // URL constructor throw. This runs inside the router's `canHandle` precheck —
+  // OUTSIDE the guarded fetch path — so a throw would abort the entire pricing
+  // pipeline instead of declining as documented. Keep it TOTAL: a bad base URL →
+  // decline (null), and the router falls through to the web-search tier (#56 review).
+  try {
+    const url = new URL("/sch/i.html", baseUrl);
+    url.searchParams.set("_nkw", q);
+    url.searchParams.set("LH_Sold", "1");
+    url.searchParams.set("LH_Complete", "1");
+    url.searchParams.set("_ipg", String(EBAY_SOLD_RESULTS_PER_PAGE));
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -317,28 +326,60 @@ const ACCESSORY_OR_PARTS_RE =
  * USED goods, so a new sold listing is not a valid comp for a used item and
  * inflates the median — UNLESS the seller's OWN item is new (see `sellerItemIsNew`).
  * Group 1 captures a leading "like " so `isNewConditionComp` SKIPS "Like New" (a
- * used grade); the bare "new" alternative is also skipped when "new" is part of
- * the item's identity (e.g. brand "New Balance"). No `g` flag — callers build a
- * global copy for `matchAll`, avoiding shared `lastIndex` state.
+ * used grade). Identity uses of "new" (e.g. brand "New Balance") are handled by
+ * STRIPPING the identity phrases from the title before scanning, not by a substring
+ * skip — so a genuine standalone "NEW" elsewhere is still caught. No `g` flag —
+ * callers build a global copy for `matchAll`, avoiding shared `lastIndex` state.
  */
 const NEW_CONDITION_RE =
   /\b(like[ -])?(brand[- ]?new|new sealed|new in box|factory sealed|sealed|bnib|nib|nwt|never used|unopened|new)\b/i;
 
-function normalizeToken(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+/**
+ * Multi-unit / lot markers: a sold listing for MORE THAN ONE unit (2-pack, set of
+ * 2, 4 pcs) whose price is a multiple of the single-item price. Two clustered
+ * multi-unit sales would otherwise pass agreement and clear the autopilot gate at
+ * 2–3× the true price (#56 review). The accessory filter already covers "bundle"
+ * and "lot of"; this adds the unambiguous remaining forms. "2x" and "pair of" are
+ * deliberately EXCLUDED as ambiguous — "10x zoom" is a feature and a single "pair
+ * of" shoes/headphones is ONE item — so nuanced quantity parsing rides with the
+ * gold-set eval (#61). Precision over recall.
+ */
+const MULTI_UNIT_RE =
+  /\b(\d+\s*[- ]?pack|pack of \d+|set of \d+|\d+\s*pcs?|\d+\s*pieces?)\b/i;
+
+/** Is the comp a multi-unit lot rather than a single item? Pure and total. */
+export function isMultiUnitLot(title: string): boolean {
+  return MULTI_UNIT_RE.test(title);
+}
+
+/**
+ * Match the model at TOKEN BOUNDARIES, separator-insensitively. The model is split
+ * into alphanumeric tokens that may be rejoined by spaces / hyphens / underscores
+ * in the title (so "WH-1000XM4" still matches "WH 1000XM4"), but the whole match
+ * must NOT be flanked by further alphanumerics — so a model that is a PREFIX of a
+ * longer token is rejected: signal model "574" must not match "New Balance 5740"
+ * (#56 review: a whole-title `.includes()` accepted the wrong variant). A model
+ * with no alphanumeric tokens is unmatchable, so we trust eBay's exact query.
+ */
+function modelMatchesTitle(title: string, model: string): boolean {
+  const tokens = model.match(/[A-Za-z0-9]+/g);
+  if (!tokens || tokens.length === 0) return true;
+  const pattern =
+    "(?<![A-Za-z0-9])" + tokens.join("[\\s\\-_]*") + "(?![A-Za-z0-9])";
+  return new RegExp(pattern, "i").test(title);
 }
 
 /**
  * Does the comp plausibly refer to the SAME product as the signal? When a model
- * is known it MUST appear in the title (normalized, so "WH-1000XM4" matches
- * "WH 1000XM4"). For identity by resolved name / UPC / ISBN we can't token-match
- * the title reliably, so we trust eBay's exact-query result set and rely on the
- * accessory/parts filter alone.
+ * is known it MUST appear in the title at a token boundary (separator-insensitive,
+ * so "WH-1000XM4" matches "WH 1000XM4"). For identity by resolved name / UPC /
+ * ISBN we can't token-match the title reliably, so we trust eBay's exact-query
+ * result set and rely on the accessory/parts filter alone.
  */
 export function matchesIdentity(title: string, signal: ItemSignal): boolean {
   const model = signal.model?.trim();
   if (signal.brand?.trim() && model) {
-    return normalizeToken(title).includes(normalizeToken(model));
+    return modelMatchesTitle(title, model);
   }
   return true;
 }
@@ -349,6 +390,23 @@ function identityText(signal: ItemSignal): string {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+/**
+ * The title with the item's identity PHRASES (brand / model / resolvedName) removed,
+ * so condition scanning can't be fooled by an identity that contains a condition
+ * word — a "New Balance" brand must not mask a genuine standalone "NEW" elsewhere
+ * in the title (#56 review). Each phrase is matched literally, case-insensitively.
+ */
+function stripIdentity(title: string, signal: ItemSignal): string {
+  let out = title;
+  for (const phrase of [signal.brand, signal.model, signal.resolvedName]) {
+    const p = phrase?.trim();
+    if (!p) continue;
+    const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(escaped, "gi"), " ");
+  }
+  return out;
 }
 
 /**
@@ -383,12 +441,14 @@ export function isAccessoryOrParts(title: string, signal: ItemSignal): boolean {
  * Balance" product name) so those are not mistaken for new condition (#56 review).
  */
 export function isNewConditionComp(title: string, signal: ItemSignal): boolean {
-  const idText = identityText(signal);
+  // Scan the title with identity phrases REMOVED, so a brand/model that contains
+  // "new" (e.g. "New Balance") can't mask a genuine standalone "NEW" condition
+  // marker elsewhere: "NEW New Balance 574" must still be flagged new, while
+  // "New Balance 574" must not (#56 review).
+  const residual = stripIdentity(title, signal);
   const re = new RegExp(NEW_CONDITION_RE.source, "gi");
-  for (const m of title.matchAll(re)) {
+  for (const m of residual.matchAll(re)) {
     if (m[1]) continue; // leading "like " → used grade, not a new marker
-    const term = m[2].toLowerCase();
-    if (term === "new" && idText.includes("new")) continue; // identity use (New Balance)
     return true;
   }
   return false;
@@ -396,8 +456,9 @@ export function isNewConditionComp(title: string, signal: ItemSignal): boolean {
 
 /**
  * Keep only comps that (a) match the item identity, (b) aren't accessories/parts,
- * and (c) aren't new/sealed when the seller's item is used (#56 review: new sold
- * listings would otherwise inflate a used item's median past the autopilot gate).
+ * (c) aren't multi-unit lots, and (d) aren't new/sealed when the seller's item is
+ * used (#56 review: accessory, multi-unit, and new sold listings would otherwise
+ * skew a used item's median past the autopilot gate).
  */
 export function filterRelevantComps(
   comps: readonly EbaySoldComp[],
@@ -408,6 +469,7 @@ export function filterRelevantComps(
     const title = c.title ?? "";
     if (!matchesIdentity(title, signal)) return false;
     if (isAccessoryOrParts(title, signal)) return false;
+    if (isMultiUnitLot(title)) return false;
     if (!keepNew && isNewConditionComp(title, signal)) return false;
     return true;
   });
