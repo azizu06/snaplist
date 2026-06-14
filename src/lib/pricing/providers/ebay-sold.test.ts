@@ -191,12 +191,24 @@ describe("buildSoldSearchUrl", () => {
 });
 
 describe("parsePrice", () => {
-  it("parses plain, comma-grouped, currency-prefixed and ranged prices", () => {
+  it("parses plain, comma-grouped and ranged USD prices", () => {
     expect(parsePrice("$178.00")).toBeCloseTo(178, 2);
     expect(parsePrice("$1,299.99")).toBeCloseTo(1299.99, 2);
-    expect(parsePrice("C $99.00")).toBeCloseTo(99, 2);
-    // A variation listing shows a range — take the midpoint.
+    // A variation listing shows a range — take the midpoint. "to" must NOT be
+    // mistaken for a currency prefix (round-5).
     expect(parsePrice("$120.00 to $150.00")).toBeCloseTo(135, 2);
+    // "US $" is USD and stays accepted.
+    expect(parsePrice("US $178.00")).toBeCloseTo(178, 2);
+  });
+
+  it("rejects NON-USD amounts so a foreign price can't anchor a USD median (round-5)", () => {
+    expect(parsePrice("C $99.00")).toBeNull(); // CAD
+    expect(parsePrice("AU $150.00")).toBeNull(); // AUD
+    expect(parsePrice("£99.00")).toBeNull(); // GBP symbol
+    expect(parsePrice("€99,00")).toBeNull(); // EUR symbol
+    expect(parsePrice("EUR 99.00")).toBeNull(); // EUR code
+    // The nightmare case: a foreign price with an approx USD must NOT be averaged.
+    expect(parsePrice("C $99.00 (approx US $73.00)")).toBeNull();
   });
 
   it("returns null for empty / non-numeric text", () => {
@@ -218,6 +230,15 @@ describe("parseSoldComps (saved fixture)", () => {
     // The "Shop on eBay" placeholder and the price-less "ear pads ONLY" card never become comps.
     expect(comps.some((c) => /shop on ebay/i.test(c.title ?? ""))).toBe(false);
     expect(comps.some((c) => /ONLY \(no headphones\)/.test(c.title ?? ""))).toBe(false);
+  });
+
+  it("excludes active + sponsored cards that reuse li.s-item (round-5)", () => {
+    // An ACTIVE listing inside .srp-results ($250, no Sold caption) and a
+    // SPONSORED card OUTSIDE .srp-results ($999, even WITH a Sold caption) must
+    // both be excluded — an asking price must never be counted as a sold comp.
+    expect(comps.some((c) => c.price === 250)).toBe(false);
+    expect(comps.some((c) => c.price === 999)).toBe(false);
+    expect(comps.some((c) => /sponsored|buy it now/i.test(c.title ?? ""))).toBe(false);
   });
 
   it("cites a real eBay item URL and a cleaned title for every comp", () => {

@@ -233,13 +233,32 @@ export function buildSoldSearchUrl(
 }
 
 /**
- * Parse a price cell into a number. Handles `$178.00`, comma-grouped
- * `$1,299.99`, currency prefixes (`C $99.00`), and variation RANGES
- * (`$120.00 to $150.00` → the midpoint). Returns `null` for empty / non-priced
- * text (`Free`, ``). Pure and total — never throws.
+ * Currency markers eBay US renders for international listings. `C $99.00` (CAD),
+ * `AU $150.00` (AUD), `£99.00`, `EUR 99,00` must NOT anchor a USD median — and a
+ * `C $99 (approx US $73)` cell must not be averaged as a range (#56 review). A
+ * letter-prefixed `$` is foreign EXCEPT `US $` (which IS USD).
+ */
+const NON_USD_SYMBOL_RE = /[£€¥₹₩]/;
+const FOREIGN_DOLLAR_RE = /\b(?!US\b)[A-Z]{1,3}\s*\$/;
+const FOREIGN_CODE_RE =
+  /\b(?:EUR|GBP|CAD|AUD|JPY|CHF|CNY|INR|MXN|BRL|KRW|SEK|NOK|DKK|PLN|HKD|SGD|NZD)\b/;
+
+/**
+ * Parse a USD price cell into a number. Handles `$178.00`, comma-grouped
+ * `$1,299.99`, and variation RANGES (`$120.00 to $150.00` → the midpoint).
+ * Returns `null` for empty / non-priced text (`Free`, ``) AND for any NON-USD
+ * amount (`C $99.00`, `£99.00`, `EUR 99,00`) so a foreign price never silently
+ * anchors a USD recommendation. Pure and total — never throws.
  */
 export function parsePrice(text: string | undefined): number | null {
   if (!text) return null;
+  if (
+    NON_USD_SYMBOL_RE.test(text) ||
+    FOREIGN_DOLLAR_RE.test(text) ||
+    FOREIGN_CODE_RE.test(text)
+  ) {
+    return null;
+  }
   const groups = text.replace(/,/g, "").match(/\d+(?:\.\d+)?/g);
   if (!groups) return null;
   const values = groups.map(Number).filter((n) => Number.isFinite(n) && n > 0);
@@ -251,10 +270,18 @@ export function parsePrice(text: string | undefined): number | null {
 /**
  * Parse the sold-results HTML into comps. Reads eBay's classic SRP card markup
  * (`ul.srp-results > li.s-item` with `.s-item__title`, `.s-item__price`,
- * `a.s-item__link`), skipping the leading "Shop on eBay" placeholder and any
- * card without a parseable price or item link, and deduping by URL. Pure and
- * TOTAL: any malformed page yields `[]`, never a throw — so the provider's fetch
- * `catch` can stay narrow (around the network only) and not mask real bugs.
+ * `a.s-item__link`), and is SCOPED to verified sold cards two ways (#56 review):
+ *   (1) only `li.s-item` INSIDE `.srp-results` — eBay reuses `li.s-item` for
+ *       sponsored / "results matching fewer words" / recommendation carousels
+ *       that live OUTSIDE the results list; and
+ *   (2) each card must carry a `Sold` caption (`.s-item__caption`) — on an
+ *       LH_Sold page every completed sale shows one; an active/sponsored card
+ *       injected INTO the list does not, so its ASKING price is never labeled a
+ *       sold comp.
+ * Also skips the leading "Shop on eBay" placeholder and any card without a
+ * parseable price or item link, and dedupes by URL. Pure and TOTAL: any
+ * malformed page yields `[]`, never a throw — so the provider's fetch `catch`
+ * can stay narrow (around the network only) and not mask real bugs.
  *
  * NOTE: eBay's markup can change. The selectors are validated by the saved
  * fixture contract test; live-page validation + a refresh strategy ride with
@@ -269,7 +296,7 @@ export function parseSoldComps(
   const comps: EbaySoldComp[] = [];
   const seen = new Set<string>();
 
-  $("li.s-item").each((_i, el) => {
+  $(".srp-results li.s-item").each((_i, el) => {
     if (comps.length >= max) return false; // hit the cap — stop iterating
 
     const card = $(el);
@@ -282,6 +309,10 @@ export function parseSoldComps(
       .replace(/^New Listing/i, "")
       .trim();
     if (!title || /^shop on ebay$/i.test(title)) return; // placeholder / empty
+
+    // Require the "Sold" caption — an active/sponsored card reusing li.s-item
+    // (no completed-sale caption) must never be counted as a sold comp.
+    if (!/\bsold\b/i.test(card.find(".s-item__caption").text())) return;
 
     const price = parsePrice(card.find(".s-item__price").first().text());
     if (price == null) return;

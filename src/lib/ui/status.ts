@@ -121,6 +121,8 @@ export function tierLabel(tier: string | null | undefined): string | null {
   switch (tier) {
     case "isbn-lookup":
       return "Exact match: ISBN lookup";
+    case "ebay-sold":
+      return "Verified eBay sold comps";
     case "web_tight":
       return "Strong market comps";
     case "web_wide":
