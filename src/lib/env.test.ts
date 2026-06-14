@@ -37,6 +37,14 @@ describe("parseEnv", () => {
     expect(env.LLM_PROVIDER).toBe("gemini");
   });
 
+  it("rejects a provider/key mismatch (LLM_PROVIDER=google but only OPENAI_API_KEY)", () => {
+    // The "at least one key" check isn't enough: the SELECTED provider needs its
+    // own key, or every request fails at runtime (#55 review).
+    expect(() => parseEnv({ ...valid, LLM_PROVIDER: "google" })).toThrowError(
+      /selected LLM provider/,
+    );
+  });
+
   it("treats web-search and service-role keys as optional", () => {
     const env = parseEnv(valid);
     expect(env.TAVILY_API_KEY).toBeUndefined();

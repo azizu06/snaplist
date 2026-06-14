@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveApiKey, resolveProvider } from "./llm/registry";
 
 /**
  * Environment schema. Everything is env-configurable so that sandbox -> production
@@ -65,15 +66,17 @@ const envSchema = z.object({
     .enum(["development", "test", "production"])
     .default("development"),
 }).refine(
-  (e) =>
-    Boolean(
-      e.OPENAI_API_KEY || e.GOOGLE_GENERATIVE_AI_API_KEY || e.GEMINI_API_KEY,
-    ),
+  (e) => {
+    const env = e as Record<string, string | undefined>;
+    // The key for the SELECTED provider must be present — not merely *some* key.
+    // resolveProvider is key-aware (a single-key env selects the usable provider),
+    // so this still accepts a Gemini-only dev box, but rejects an explicit
+    // LLM_PROVIDER with no matching key, or no keys at all (#55 review).
+    return Boolean(resolveApiKey(resolveProvider(env), env));
+  },
   {
-    // At least one LLM provider key must be present — otherwise no model can run.
-    // OPENAI_API_KEY for the showcase; GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY for dev.
     message:
-      "At least one LLM provider key is required: OPENAI_API_KEY (showcase) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (dev).",
+      "Missing the API key for the selected LLM provider. Set OPENAI_API_KEY (OpenAI) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (Gemini), or set LLM_PROVIDER to match the key you have.",
     path: ["OPENAI_API_KEY"],
   },
 );

@@ -33,6 +33,18 @@ describe("resolveProvider", () => {
       resolveProvider({ LLM_PROVIDER: "openai", NODE_ENV: "development" }),
     ).toBe("openai");
   });
+
+  it("is key-aware: falls back to the provider whose key is present", () => {
+    // Dev default is Gemini, but with only an OpenAI key it picks OpenAI (usable)
+    // instead of a keyless Gemini (#55 review).
+    expect(resolveProvider({ NODE_ENV: "development", OPENAI_API_KEY: "x" })).toBe("openai");
+    // Prod default is OpenAI, but with only a Gemini key it picks Gemini.
+    expect(resolveProvider({ NODE_ENV: "production", GEMINI_API_KEY: "y" })).toBe("google");
+    // Explicit LLM_PROVIDER still wins even against the available key.
+    expect(
+      resolveProvider({ LLM_PROVIDER: "google", OPENAI_API_KEY: "x" }),
+    ).toBe("google");
+  });
 });
 
 describe("resolveModelId", () => {

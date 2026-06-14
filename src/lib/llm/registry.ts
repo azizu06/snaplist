@@ -81,16 +81,24 @@ const MODEL_DEFAULTS: Record<LlmProvider, Record<LlmRole, string>> = {
 };
 
 /**
- * Resolve the active provider: explicit `LLM_PROVIDER` (accepting the friendly
- * alias `gemini` for `google`) wins; otherwise default to Gemini in dev and
- * OpenAI in production — "Gemini dev / OpenAI showcase" with zero config, while a
- * showcase/preview deploy just sets `LLM_PROVIDER=openai`.
+ * Resolve the active provider. Explicit `LLM_PROVIDER` (accepting the friendly
+ * alias `gemini` for `google`) always wins. Otherwise the NODE_ENV default —
+ * Gemini in dev, OpenAI in production ("Gemini dev / OpenAI showcase" with zero
+ * config) — but it is KEY-AWARE: if the preferred provider has no key while the
+ * other does, fall back to the one that's actually usable. So a single-key env
+ * (e.g. an existing dev box with only OPENAI_API_KEY) selects the provider it can
+ * run, instead of defaulting to a keyless one (#55 review). With neither key set
+ * it returns the preferred default (the env guard then rejects the config).
  */
 export function resolveProvider(env: EnvLike = process.env): LlmProvider {
   const explicit = env.LLM_PROVIDER?.trim().toLowerCase();
   if (explicit === "openai") return "openai";
   if (explicit === "google" || explicit === "gemini") return "google";
-  return env.NODE_ENV === "production" ? "openai" : "google";
+  const preferred: LlmProvider = env.NODE_ENV === "production" ? "openai" : "google";
+  const fallback: LlmProvider = preferred === "openai" ? "google" : "openai";
+  if (resolveApiKey(preferred, env)) return preferred;
+  if (resolveApiKey(fallback, env)) return fallback;
+  return preferred;
 }
 
 /**
