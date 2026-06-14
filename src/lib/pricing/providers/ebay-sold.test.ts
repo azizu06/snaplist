@@ -286,6 +286,49 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
       filterRelevantComps(controllerComps, controllerSignal).map((c) => c.price).sort((a, b) => a - b),
     ).toEqual([50, 55]);
   });
+
+  it("treats LIKE-NEW as a used grade — new/sealed comps are still dropped (round-3)", () => {
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/2", title: "Sony WH-1000XM4 Brand New Sealed", price: 280 },
+    ];
+    const likeNew: ItemSignal = { ...BRANDED_SIGNAL, condition: "like-new" };
+    // "like-new".includes("new") used to wrongly keep the $280 new comp.
+    expect(filterRelevantComps(comps, likeNew).map((c) => c.price)).toEqual([180]);
+  });
+
+  it("rejects a comp with a SECOND accessory term even if the first is in identity (round-3)", () => {
+    // Selling a DualSense controller: "DualSense Controller Case" matches
+    // "Controller" (identity) first, but "Case" must still reject it.
+    const controllerSignal: ItemSignal = {
+      brand: "Sony",
+      model: "DualSense",
+      resolvedName: "Sony DualSense Wireless Controller",
+    };
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony DualSense Wireless Controller", price: 55 },
+      { url: "https://www.ebay.com/itm/2", title: "Sony DualSense Controller Case", price: 12 },
+    ];
+    expect(filterRelevantComps(comps, controllerSignal).map((c) => c.price)).toEqual([55]);
+  });
+
+  it("catches a standalone NEW marker but keeps identity uses like 'New Balance' (round-3)", () => {
+    // Used headphones: a standalone "NEW" comp is dropped.
+    const xm4 = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/2", title: "NEW Sony WH-1000XM4 Headphones", price: 300 },
+    ];
+    expect(filterRelevantComps(xm4, BRANDED_SIGNAL).map((c) => c.price)).toEqual([180]);
+    // A "New Balance" product name is NOT a new-condition marker.
+    const nbSignal: ItemSignal = { brand: "New Balance", model: "574", condition: "good" };
+    const nb = [
+      { url: "https://www.ebay.com/itm/3", title: "New Balance 574 Sneakers Used", price: 45 },
+      { url: "https://www.ebay.com/itm/4", title: "New Balance 574 Grey", price: 50 },
+    ];
+    expect(filterRelevantComps(nb, nbSignal).map((c) => c.price).sort((a, b) => a - b)).toEqual([
+      45, 50,
+    ]);
+  });
 });
 
 describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {

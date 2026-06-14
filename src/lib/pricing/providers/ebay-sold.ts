@@ -313,13 +313,16 @@ const ACCESSORY_OR_PARTS_RE =
   /\b(ear ?pads?|earpads?|cushions?|replacement|spare|for parts|parts only|not working|broken|faulty|as[- ]?is|repair|cable|cord|charger|adapter|bundle|lot of|case|cover|pouch|sleeve|skin|sticker|decal|strap|grip|stand|mount|holder|dock|screen protector|protector|empty box|box only|manual only|disc only|game only|controller|accessor(?:y|ies))\b/i;
 
 /**
- * New/sealed-condition markers. SnapList prices USED goods, so a brand-new sold
- * listing is not a valid comp for a used item and would inflate the median —
- * UNLESS the seller's own item is new/like-new (then new comps are kept). Note
- * "Like New" (a used grade) is intentionally NOT matched here.
+ * New/sealed-condition markers, INCLUDING the standalone "NEW". SnapList prices
+ * USED goods, so a new sold listing is not a valid comp for a used item and
+ * inflates the median — UNLESS the seller's OWN item is new (see `sellerItemIsNew`).
+ * Group 1 captures a leading "like " so `isNewConditionComp` SKIPS "Like New" (a
+ * used grade); the bare "new" alternative is also skipped when "new" is part of
+ * the item's identity (e.g. brand "New Balance"). No `g` flag — callers build a
+ * global copy for `matchAll`, avoiding shared `lastIndex` state.
  */
 const NEW_CONDITION_RE =
-  /\b(brand[- ]?new|new sealed|new in box|factory sealed|sealed|bnib|nib|nwt|never used|unopened)\b/i;
+  /\b(like[ -])?(brand[- ]?new|new sealed|new in box|factory sealed|sealed|bnib|nib|nwt|never used|unopened|new)\b/i;
 
 function normalizeToken(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -348,21 +351,47 @@ function identityText(signal: ItemSignal): string {
     .toLowerCase();
 }
 
-/** Is the seller's OWN item new/like-new (so new-condition comps are valid)? */
+/**
+ * Is the seller's OWN item new (so new-condition comps are valid)? Matches the
+ * EXACT new grade only — "like-new" / "like new" is a USED grade and must not
+ * exempt new comps (#56 review: a substring `.includes("new")` wrongly did).
+ */
 function sellerItemIsNew(signal: ItemSignal): boolean {
-  return (signal.condition?.toLowerCase() ?? "").includes("new");
+  const c = signal.condition?.trim().toLowerCase() ?? "";
+  return c === "new" || c === "brand new" || c === "brand-new";
 }
 
 /**
- * Is the comp an accessory/part rather than the item itself? True when an
- * accessory term is in the title AND that term is NOT part of the item's own
- * identity — so a seller actually selling a "Controller"/"Dock" keeps those comps,
- * while a controller sale leaking into a console search is dropped.
+ * Is the comp an accessory/part rather than the item itself? True when ANY
+ * accessory term in the title is NOT part of the item's own identity. Checking
+ * EVERY match (not just the first) is essential: "DualSense Controller Case" for
+ * a DualSense controller matches "Controller" (in identity) AND "Case" (not) —
+ * the case marker must still reject it (#56 review).
  */
 export function isAccessoryOrParts(title: string, signal: ItemSignal): boolean {
-  const m = ACCESSORY_OR_PARTS_RE.exec(title);
-  if (!m) return false;
-  return !identityText(signal).includes(m[1].toLowerCase());
+  const idText = identityText(signal);
+  const re = new RegExp(ACCESSORY_OR_PARTS_RE.source, "gi");
+  for (const m of title.matchAll(re)) {
+    if (!idText.includes(m[1].toLowerCase())) return true;
+  }
+  return false;
+}
+
+/**
+ * Is the comp a NEW/sealed listing? Handles the standalone "NEW" marker, while
+ * skipping "Like New" (a used grade) and identity uses of "new" (e.g. a "New
+ * Balance" product name) so those are not mistaken for new condition (#56 review).
+ */
+export function isNewConditionComp(title: string, signal: ItemSignal): boolean {
+  const idText = identityText(signal);
+  const re = new RegExp(NEW_CONDITION_RE.source, "gi");
+  for (const m of title.matchAll(re)) {
+    if (m[1]) continue; // leading "like " → used grade, not a new marker
+    const term = m[2].toLowerCase();
+    if (term === "new" && idText.includes("new")) continue; // identity use (New Balance)
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -379,7 +408,7 @@ export function filterRelevantComps(
     const title = c.title ?? "";
     if (!matchesIdentity(title, signal)) return false;
     if (isAccessoryOrParts(title, signal)) return false;
-    if (!keepNew && NEW_CONDITION_RE.test(title)) return false;
+    if (!keepNew && isNewConditionComp(title, signal)) return false;
     return true;
   });
 }
