@@ -6,11 +6,13 @@ import {
 import {
   PriceRouter,
   createIsbnPricingProvider,
+  createEbaySoldPricingProvider,
   createUpcWebPricingProvider,
   createBrandedWebPricingProvider,
   createDepreciationPricingProvider,
   createLlmOnlyPricingProvider,
   type DepreciationPricingProviderOptions,
+  type EbaySoldPricingProviderOptions,
   type IsbnPricingProviderOptions,
   type ItemSignal,
   type LlmOnlyPricingProviderOptions,
@@ -87,7 +89,9 @@ export interface CreateVisionPipelineOptions {
 export interface CreateDefaultPricerOptions {
   /** Tier-1 ISBN lookup deps (offline tests inject `fetchJson`). */
   isbn?: IsbnPricingProviderOptions;
-  /** Tier-2/3 web-search agent deps (shared by the UPC-aided and branded tiers). */
+  /** eBay-sold scraper deps (offline tests inject `fetchPage`; #56). */
+  ebaySold?: EbaySoldPricingProviderOptions;
+  /** Web-search agent deps (shared by the UPC-aided and branded tiers). */
   webSearch?: WebSearchPricingProviderOptions;
   /** Tier-4 depreciation deps (retail search + extraction). */
   depreciation?: DepreciationPricingProviderOptions;
@@ -97,18 +101,21 @@ export interface CreateDefaultPricerOptions {
 
 /**
  * The default real pricer in PRD priority order: ISBN structured lookup, then the
- * #10 web-search agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction,
- * env-key gated — a keyless deployment makes those tiers decline gracefully), then
- * the #11 fallback tiers: depreciation (retail anchor × condition factor, low
- * confidence) and last the LLM-only floor, which never declines — so the router
- * always returns a schema-valid price. Exported so the fallthrough ORDER itself
- * is testable end-to-end with injected fakes.
+ * #56 eBay PUBLIC sold-comps scraper (real completed sales — the strongest used
+ * signal, declining gracefully when disabled/blocked), then the #10 web-search
+ * agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction, env-key gated —
+ * a keyless deployment makes those tiers decline gracefully), then the #11 fallback
+ * tiers: depreciation (retail anchor × condition factor, low confidence) and last
+ * the LLM-only floor, which never declines — so the router always returns a
+ * schema-valid price. Exported so the fallthrough ORDER itself is testable
+ * end-to-end with injected fakes.
  */
 export function createDefaultPricer(
   options: CreateDefaultPricerOptions = {},
 ): (signal: ItemSignal) => Promise<PriceResult> {
   const router = new PriceRouter([
     createIsbnPricingProvider(options.isbn),
+    createEbaySoldPricingProvider(options.ebaySold),
     createUpcWebPricingProvider(options.webSearch),
     createBrandedWebPricingProvider(options.webSearch),
     createDepreciationPricingProvider(options.depreciation),
@@ -164,6 +171,13 @@ function pricingTierToConfidenceTier(
   switch (price.tier) {
     case "isbn-lookup":
       return hasSoldComp(price) ? "isbn" : "depreciation";
+    case "ebay-sold":
+      // eBay sold comps are completed sales — sold-grounded by construction, so
+      // the only question is tightness. A tight cluster earns the high-trust
+      // web_tight bucket; a scattered sold set stays web_wide (real evidence of
+      // *a* market, not a defensible tight price). #60 calibrates this against
+      // the gold set and may give the sold tier its own bucket above web_tight.
+      return tightAgreement(price) ? "web_tight" : "web_wide";
     case "upc-aided-web":
       return "web_wide";
     case "branded-web":

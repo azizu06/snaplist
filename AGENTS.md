@@ -18,9 +18,12 @@ adapter and is **not on the Phase 1 critical path**.
   (dev → Gemini for the free tier, showcase → OpenAI) — never construct a provider inline at a call
   site. Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
   Embeddings are excluded from the switch (pgvector `vector(1536)` dimension lock).
-- **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → web-search
-  agent → depreciation → LLM fallback). Every result is `{ suggested, range, confidence, sources[] }`
-  and is user-editable. Never collapse this to a single source.
+- **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → **eBay public
+  sold comps** → web-search agent → depreciation → LLM fallback; see `docs/adr/0001`). Every result is
+  `{ suggested, range, confidence, sources[] }` and is user-editable. Never collapse this to a single
+  source. The eBay-sold scraper is **read-only price research** — distinct from the transactional eBay
+  **adapter**, which remains the only path for posting/messaging. Sold prices are **live-fetched**
+  (cache-on-miss + age-decay, #59); the pgvector corpus is never the price oracle.
 - **Confidence is a signal-based composite** (tier fired + comp agreement + ID completeness), **never**
   raw LLM self-report. The autopilot gate is a threshold on it.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
@@ -44,8 +47,8 @@ adapter and is **not on the Phase 1 critical path**.
 
 ## Stack
 Next.js (App Router) + TypeScript · Vercel AI SDK (OpenAI showcase / Gemini dev, via a role-keyed
-provider registry) · Tavily (primary) / Exa (secondary) web
-search · Clerk (auth) · Supabase (Postgres + pgvector + Realtime + Storage + cron) · Zod · Tailwind +
+provider registry) · Tavily (primary) / Exa (secondary) web search · eBay public sold-page scraper
+(cheerio) · Clerk (auth) · Supabase (Postgres + pgvector + Realtime + Storage + cron) · Zod · Tailwind +
 shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, via adapter).
 
 ## Conventions

@@ -23,6 +23,16 @@ const envSchema = z.object({
   TAVILY_API_KEY: z.string().min(1).optional(),
   EXA_API_KEY: z.string().min(1).optional(),
 
+  // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
+  // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
+  // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier
+  // (it then declines and the router degrades to the web-search tier). The base
+  // host and outbound User-Agent are overridable for testing; the provider's SSRF
+  // guard restricts every fetch to https *.ebay.com regardless.
+  EBAY_SOLD_ENABLED: z.string().min(1).optional(),
+  EBAY_SOLD_BASE_URL: z.string().min(1).optional(),
+  EBAY_SOLD_USER_AGENT: z.string().min(1).optional(),
+
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
