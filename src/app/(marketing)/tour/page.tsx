@@ -95,6 +95,7 @@ const STEPS = [
     eyebrow: "Step 6",
     tint: undefined,
     src: "/demo/buyer-qa.mp4",
+    mobile: true,
     glyph: "chat",
     title: "Answer",
     body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details, like edition, condition, and what's included. You approve, edit, or rewrite, and nothing sends without you.",
