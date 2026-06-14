@@ -5,6 +5,7 @@ import {
   createEbayAdapterForUser,
   publishListingToEbay,
 } from "@/lib/marketplace/ebay";
+import { logServerError, serverErrorJson } from "@/lib/api/errors";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -47,9 +48,14 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Publish failed.";
-    const status = /not found/i.test(message) ? 404 : 502;
-    return NextResponse.json({ error: message }, { status });
+    logServerError("ebay.publish", err);
+    // Preserve the not-found → 404 distinction with a clean message; every other
+    // adapter/upstream failure is a generic 502 so raw eBay/Supabase error text
+    // never reaches the client (CWE-209, #57).
+    const notFound = err instanceof Error && /not found/i.test(err.message);
+    return notFound
+      ? NextResponse.json({ error: "Listing not found." }, { status: 404 })
+      : NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });
   }
 }
 
@@ -74,7 +80,7 @@ export async function GET(request: NextRequest) {
     .eq("id", listingId)
     .maybeSingle();
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return serverErrorJson("ebay.publish.get", error, "Failed to read listing status.");
   }
   if (!listing) {
     return NextResponse.json({ error: "Listing not found." }, { status: 404 });
