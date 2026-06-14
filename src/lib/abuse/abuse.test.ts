@@ -6,6 +6,7 @@ import {
   checkDailyItemQuota,
   checkRateLimit,
   enforceRateLimit,
+  rateLimitAllows,
   recordPipelineRunAndMaybeAlert,
 } from "./index";
 
@@ -76,6 +77,20 @@ describe("abuse rate limiting", () => {
     const env = { RATE_LIMIT_FREE_PER_MINUTE: "1" };
     expect((await checkRateLimit("id", "free", env)).success).toBe(true);
     expect((await checkRateLimit("id", "free", env)).success).toBe(false);
+  });
+
+  it("rateLimitAllows (server-action seam) blocks over the cap and fails OPEN on error", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.stubEnv("RATE_LIMIT_FREE_PER_MINUTE", "1");
+    expect(await rateLimitAllows("user_a")).toBe(true); // 1st allowed
+    expect(await rateLimitAllows("user_a")).toBe(false); // 2nd blocked (shares user bucket)
+    // Store outage -> allow (availability > strictness).
+    vi.spyOn(store, "getLimiter").mockReturnValue({
+      limit: async () => {
+        throw new Error("redis unreachable");
+      },
+    });
+    expect(await rateLimitAllows("user_b")).toBe(true);
   });
 
   it("enforceRateLimit returns a 429 with Retry-After once over the limit", async () => {

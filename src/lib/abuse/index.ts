@@ -66,6 +66,26 @@ export async function enforceRateLimit(
   );
 }
 
+/**
+ * Server-action equivalent of `enforceRateLimit` — a server action can't return a
+ * `429`, so this returns whether the call is ALLOWED (caller redirects on false).
+ * Uses the SAME `user:<id>` key + metered limiter as the route, so an operation
+ * exposed through both a route and an action shares one per-user bucket. Fails OPEN.
+ */
+export async function rateLimitAllows(
+  userId: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<boolean> {
+  try {
+    const result = await checkRateLimit(`user:${userId}`, resolveTier(userId), env);
+    if (!result.success) logEvent("ratelimit.block", { id: `user:${userId}`, limit: result.limit });
+    return result.success;
+  } catch (err) {
+    logEvent("ratelimit.error", { id: `user:${userId}`, error: err instanceof Error ? err.message : String(err) });
+    return true; // fail open
+  }
+}
+
 export interface QuotaResult {
   allowed: boolean;
   used: number;
