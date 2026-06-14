@@ -71,6 +71,7 @@ const STEPS = [
     eyebrow: "Step 4",
     tint: undefined,
     src: "/demo/steps/write.mp4",
+    mobile: true,
     glyph: "write",
     title: "Write",
     body: "Your listing gets written once for each marketplace. eBay gets full item details and a title built for search. Facebook stays casual and local. Mercari leans on hashtags and shipping details.",
