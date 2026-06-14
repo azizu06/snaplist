@@ -42,7 +42,7 @@ export function EmptyState({
         </svg>
       </span>
       <p className="text-base font-semibold text-fg-strong">{title}</p>
-      {detail ? <p className="max-w-sm text-sm text-muted">{detail}</p> : null}
+      {detail ? <p className="max-w-sm text-[15px] text-muted">{detail}</p> : null}
       {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );

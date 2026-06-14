@@ -9,6 +9,11 @@ import {
   PublishView,
   type PublishData,
 } from "@/app/(app)/listings/[listingId]/publish-view";
+import {
+  SettingsView,
+  type SettingsData,
+} from "@/app/(app)/settings/settings-view";
+import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -30,7 +35,7 @@ const FIXTURE_ROWS: DashboardRow[] = [
   {
     itemId: "fx-2",
     listingId: "l-2",
-    title: "LEGO Star Wars Millennium Falcon 75257 — complete in box",
+    title: "LEGO Star Wars Millennium Falcon 75257, complete in box",
     status: "queued",
     createdAt: "2026-06-11T13:30:00Z",
     price: 112,
@@ -79,14 +84,14 @@ const FIXTURE_REVIEW: ReviewData = {
     { key: "brand", value: "Sony" },
     { key: "model", value: "WH-1000XM4" },
     { key: "category", value: "Consumer electronics" },
-    { key: "condition", value: "Good — light wear on the headband" },
+    { key: "condition", value: "Good, light wear on the headband" },
     { key: "upc", value: "027242919623" },
     { key: "isbn", value: null },
   ],
   listing: {
     id: "l-1",
     platform: "ebay",
-    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
     description:
       "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
     status: "draft",
@@ -106,11 +111,23 @@ const FIXTURE_REVIEW: ReviewData = {
   actionError: null,
 };
 
+const FIXTURE_SETTINGS: SettingsData = {
+  user: {
+    name: "Aziz Umarov",
+    email: "preview@snaplist.dev",
+    imageUrl: null,
+  },
+  autopilotEnabled: true,
+  ebay: { connected: true, ebayUsername: "aziz_resells" },
+  error: null,
+  ebayBanner: null,
+};
+
 const FIXTURE_PUBLISH: PublishData = {
   listingId: "l-1",
   itemId: "fx-1",
   platform: "ebay",
-  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
+  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
   description:
     "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
   status: "draft",
@@ -146,7 +163,45 @@ export default async function PreviewPage({
         <DashboardView rows={[]} counts={{ draft: 0, attention: 0, live: 0 }} filter="all" />
       );
     case "review":
-      return <ReviewView data={FIXTURE_REVIEW} overrideAction={noopAction} />;
+      return <ReviewView data={FIXTURE_REVIEW} saveAction={noopAction} />;
+    case "settings":
+      return (
+        <SettingsView
+          data={FIXTURE_SETTINGS}
+          autopilotAction={noopAction}
+          disconnectEbayAction={noopAction}
+        />
+      );
+    case "settings-disconnected":
+      return (
+        <SettingsView
+          data={{
+            ...FIXTURE_SETTINGS,
+            autopilotEnabled: false,
+            ebay: { connected: false, ebayUsername: null },
+          }}
+          autopilotAction={noopAction}
+          disconnectEbayAction={noopAction}
+        />
+      );
+    case "inbox-empty":
+      return (
+        <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+          <header>
+            <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
+              Buyer inbox
+            </h1>
+            <p className="mt-0.5 text-[14px] text-muted">
+              Questions from buyers appear here live. We draft a reply from the
+              listing, then you approve or edit before anything sends.
+            </p>
+          </header>
+          <section className="flex flex-col gap-3">
+            <h2 className="text-[14px] font-semibold text-fg-strong">Messages</h2>
+            <InboxEmptyState />
+          </section>
+        </main>
+      );
     case "upload":
       return <UploadView action={noopAction} actionError={null} />;
     case "publish":
@@ -189,7 +244,7 @@ export default async function PreviewPage({
             displayPrice: 45,
             range: { low: 30, high: 70 },
           }}
-          overrideAction={noopAction}
+          saveAction={noopAction}
         />
       );
     default:

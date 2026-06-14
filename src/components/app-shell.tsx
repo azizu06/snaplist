@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ClickSpark from "./bits/ClickSpark";
 import { MobileNav } from "./nav-links";
 import { AppSidebar } from "./app-sidebar";
 import { ProfileMenu, type ProfileUser } from "./profile-menu";
@@ -37,7 +38,7 @@ export function AppShell({
             {/* brand on mobile / signed-out */}
             <Link
               href={signedIn ? "/dashboard" : "/"}
-              className={`flex items-center gap-2 text-sm font-bold tracking-tight text-fg-strong ${
+              className={`flex items-center gap-2 text-[15px] font-bold tracking-tight text-fg-strong ${
                 signedIn ? "sm:hidden" : ""
               }`}
             >
@@ -49,16 +50,29 @@ export function AppShell({
               <>
                 <CommandPalette fixtures={searchFixtures} />
 
-                <div className="ml-auto flex items-center gap-2.5">
-                  <Link
-                    href="/upload"
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover motion-safe:active:scale-[0.98]"
+                {/* gap-4: breathing room between the primary action and the
+                    avatar (round 5 — they sat nearly touching). */}
+                <div className="ml-auto flex items-center gap-4">
+                  {/* react-bits ClickSpark: a small violet burst on the primary
+                      action — subtle, product-dashboard scale. */}
+                  <ClickSpark
+                    className="inline-block"
+                    sparkColor="#6d4aff"
+                    sparkSize={7}
+                    sparkRadius={16}
+                    sparkCount={8}
+                    duration={400}
                   >
-                    <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    New listing
-                  </Link>
+                    <Link
+                      href="/upload"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover motion-safe:active:scale-[0.98]"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                      New listing
+                    </Link>
+                  </ClickSpark>
                   {user ? <ProfileMenu user={user} /> : null}
                 </div>
               </>
@@ -66,7 +80,8 @@ export function AppShell({
           </div>
         </header>
 
-        <div className="flex min-w-0 flex-1 flex-col pb-16 sm:pb-0">{children}</div>
+        {/* pb-20: clearance for the floating mobile Dock (react-bits app pass) */}
+        <div className="flex min-w-0 flex-1 flex-col pb-20 sm:pb-0">{children}</div>
       </div>
 
       {signedIn ? <MobileNav /> : null}

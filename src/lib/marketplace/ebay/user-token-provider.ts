@@ -90,7 +90,7 @@ export class UserTokenProvider implements EbayTokenProvider {
     const body: unknown = await res.json().catch(() => undefined);
     if (!res.ok) {
       throw new EbayApiError(
-        `eBay user-token refresh failed (HTTP ${res.status}) — the seller may need to reconnect their eBay account in Settings`,
+        `eBay user-token refresh failed (HTTP ${res.status}); the seller may need to reconnect their eBay account in Settings`,
         res.status,
         body,
       );

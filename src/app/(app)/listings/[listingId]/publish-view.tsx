@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
+import GlareHover from "@/components/bits/GlareHover";
 import { StatusBadge } from "@/components/ui/badge";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -109,7 +110,7 @@ function StatusStepper({ active, failed }: { active: number; failed: boolean }) 
                 <span className="flex size-7 rounded-full border-2 border-border bg-surface" />
               )}
               <span
-                className={`text-[11px] font-medium ${
+                className={`text-[12px] font-medium ${
                   danger
                     ? "text-danger"
                     : current
@@ -176,7 +177,7 @@ export function PublishView({
         {data.published ? (
           /* Live chip with a subtle pulse dot — same shell as the
              success-solid StatusBadge, plus the animate-ping inner span. */
-          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-success-solid bg-success-solid px-2.5 py-0.5 text-xs font-medium text-white">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-success-solid bg-success-solid px-2.5 py-0.5 text-[13.5px] font-medium text-white">
             <span aria-hidden className="relative flex size-1.5 shrink-0">
               <span className="absolute inline-flex h-full w-full rounded-full bg-white/80 motion-safe:animate-ping" />
               <span className="relative inline-flex size-1.5 rounded-full bg-white" />
@@ -208,22 +209,26 @@ export function PublishView({
         </Banner>
       ) : null}
 
-      <Card>
-        <CardHeader
-          title="Listing preview"
-          aside={
-            <span className="text-xs uppercase tracking-wide text-faint">
-              {data.platform}
-            </span>
-          }
-        />
-        <CardBody>
-          <p className="text-sm font-semibold text-fg-strong">{data.title}</p>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">
-            {data.description}
-          </p>
-        </CardBody>
-      </Card>
+      {/* react-bits GlareHover (app pass): violet glare sweep on hover over
+          the preview of what buyers will see. */}
+      <GlareHover>
+        <Card>
+          <CardHeader
+            title="Listing preview"
+            aside={
+              <span className="text-[13.5px] uppercase tracking-wide text-faint">
+                {data.platform}
+              </span>
+            }
+          />
+          <CardBody>
+            <p className="text-[15px] font-semibold text-fg-strong">{data.title}</p>
+            <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-muted">
+              {data.description}
+            </p>
+          </CardBody>
+        </Card>
+      </GlareHover>
 
       {data.published ? (
         <Card>
@@ -246,11 +251,11 @@ export function PublishView({
           <CardBody className="flex flex-col gap-3">
             {data.failed ? (
               <Banner variant="error" title="The last attempt failed">
-                eBay rejected or errored on this listing. The draft is untouched —
+                eBay rejected or errored on this listing. The draft is untouched, so
                 fix anything that needs it on the review page, then retry.
               </Banner>
             ) : (
-              <p className="text-sm text-muted">
+              <p className="text-[15px] text-muted">
                 Publishing creates the live eBay listing from this draft. You can
                 still edit the price on the review page first.
               </p>

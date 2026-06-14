@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AppSignOutButton } from "./sign-out-button";
+import { ThemeMenuToggle } from "./theme-toggle";
 
 /**
  * ProfileMenu — the topbar avatar opens an account dropdown (dashboard v2).
@@ -34,7 +35,7 @@ function MenuItem({
       href={href}
       role="menuitem"
       onClick={onNavigate}
-      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-fg transition-colors hover:bg-surface-2"
+      className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[14px] font-medium text-fg transition-colors hover:bg-surface-2"
     >
       <span className="text-faint">{icon}</span>
       {children}
@@ -73,8 +74,8 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
         aria-expanded={open}
         aria-label="Account menu"
         onClick={() => setOpen((v) => !v)}
-        className={`flex size-8 items-center justify-center overflow-hidden rounded-full text-[12px] font-bold text-white ring-offset-2 transition-shadow ${
-          open ? "ring-2 ring-accent" : "hover:ring-2 hover:ring-border-strong"
+        className={`flex size-8 items-center justify-center overflow-hidden rounded-full text-[13.5px] font-bold text-white ring-2 ring-offset-2 ring-offset-surface transition-shadow ${
+          open ? "ring-accent" : "ring-border hover:ring-border-strong"
         }`}
       >
         {user.imageUrl ? (
@@ -91,42 +92,33 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
         <div
           role="menu"
           aria-label="Account"
-          className="menu-pop absolute right-0 top-full z-40 mt-2 w-60 origin-top-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+          className="menu-pop absolute right-0 top-full z-40 mt-4 w-60 origin-top-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
         >
           <div className="border-b border-border px-2.5 pb-2.5 pt-1.5">
-            <p className="truncate text-[13px] font-semibold text-fg-strong">
+            <p className="truncate text-[14px] font-semibold text-fg-strong">
               {user.name}
             </p>
-            <p className="truncate text-[12px] text-muted">{user.email}</p>
+            <p className="truncate text-[13.5px] text-muted">{user.email}</p>
           </div>
 
           <div className="flex flex-col gap-0.5 py-1">
+            {/* r6 (owner): proper gear glyph — the old icon was a sun, which
+                reads as a theme control. "eBay connection" was removed: it
+                pointed at the same /settings page Settings already opens. */}
             <MenuItem
               href="/settings"
               onNavigate={close}
               icon={
                 <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                   <circle cx="12" cy="12" r="3" />
-                  <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
                 </svg>
               }
             >
               Settings
             </MenuItem>
             <MenuItem
-              href="/settings"
-              onNavigate={close}
-              icon={
-                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                </svg>
-              }
-            >
-              eBay connection
-            </MenuItem>
-            <MenuItem
-              href="/how-it-works"
+              href="/tour"
               onNavigate={close}
               icon={
                 <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -136,12 +128,16 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
                 </svg>
               }
             >
-              How it works
+              Tour
             </MenuItem>
+            {/* Quick light/dark flip — full Light/Dark/System lives in
+                Settings → Appearance. Doesn't close the menu: flipping is
+                something you want to see happen. */}
+            <ThemeMenuToggle />
           </div>
 
           <div className="border-t border-border pt-1">
-            <AppSignOutButton className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg">
+            <AppSignOutButton className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg">
               <svg viewBox="0 0 24 24" className="size-4 text-faint" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                 <path d="m16 17 5-5-5-5" />

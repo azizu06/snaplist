@@ -201,7 +201,7 @@ export const StagePublish: React.FC = () => {
                   lineHeight: 1.3,
                 }}
               >
-                Canon EOS 80D DSLR Camera Body — Tested
+                Canon EOS 80D DSLR Camera Body, Tested
               </div>
               <div
                 style={{
@@ -314,7 +314,7 @@ export const StagePublish: React.FC = () => {
                     }}
                   />
                 </span>
-                Live on eBay — view listing
+                Live on eBay · view listing
               </div>
             )}
           </div>

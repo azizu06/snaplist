@@ -17,11 +17,11 @@ import {
 describe("lifecycleLabel", () => {
   it("translates every persisted listing status to a labeled tone", () => {
     expect(lifecycleLabel("draft")).toEqual({
-      label: "Draft — needs review",
+      label: "Draft: needs review",
       tone: "warning",
     });
     expect(lifecycleLabel("queued")).toEqual({
-      label: "Queued — autopilot will post",
+      label: "Queued: autopilot will post",
       tone: "success",
     });
     expect(lifecycleLabel("published")).toEqual({

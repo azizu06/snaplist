@@ -18,7 +18,7 @@ describe("relativeDay", () => {
 
   it("falls back to a short date beyond a week, and for bad input", () => {
     expect(relativeDay("2026-05-20T12:00:00Z", now)).toMatch(/May/);
-    expect(relativeDay("", now)).toBe("—");
-    expect(relativeDay("not-a-date", now)).toBe("—");
+    expect(relativeDay("", now)).toBe("–");
+    expect(relativeDay("not-a-date", now)).toBe("–");
   });
 });

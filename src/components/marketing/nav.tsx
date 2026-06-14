@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/logo";
+import { ThemeIconToggle } from "@/components/theme-toggle";
 
 const LINKS = [
-  { href: "/how-it-works", label: "How it works" },
-  { href: "/features", label: "Features" },
+  // Explicit Home tab (owner): the logo links home, but not everyone knows
+  // that — a labelled tab makes it discoverable.
+  { href: "/", label: "Home" },
+  { href: "/tour", label: "Tour" },
   { href: "/pricing", label: "Pricing" },
   { href: "/about", label: "About" },
 ] as const;
@@ -15,6 +18,19 @@ const LINKS = [
  * Marketing nav (issue #49). Transparent over the hero; gains a glass blur +
  * hairline once the page scrolls. Signed-in visitors get "Open app" instead
  * of the login/signup pair.
+ *
+ * ui-r6-nav:
+ * - Link hover/focus pills use `flash/10` (ink at 10%) instead of
+ *   `panel-2/70` — panel-2 is near-identical to the scrolled bar color in
+ *   both themes, so the old hover was invisible exactly when the bar turned
+ *   solid. Ink-derived tint reads on transparent AND solid, light AND dark.
+ * - Dock-out animation: at rest the nav content sits in the centered
+ *   max-w-6xl cluster; once scrolled the container's max-width animates to
+ *   100% (see .nav-dock in globals.css), sliding the logo left and the
+ *   actions right toward the viewport edges so the bar reads as full-width
+ *   app chrome. Pure layout (no transforms), so text stays crisp; padding
+ *   keeps a 20–32px edge margin; on small screens the viewport is already
+ *   narrower than the max-width so nothing moves; reduced-motion jumps.
  */
 export function MarketingNav({ signedIn }: { signedIn: boolean }) {
   const [scrolled, setScrolled] = useState(false);
@@ -35,32 +51,46 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           : "border-b border-transparent bg-transparent"
       }`}
     >
-      <nav className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-5 sm:px-8">
+      {/* 1fr auto 1fr grid (was flex justify-between): justify-between centers
+          the middle group in the GAP between logo and actions, so unequal side
+          widths (actions ≫ logo) shoved the links ~80px left of the hero's
+          center. Equal 1fr side tracks center the links column on the bar —
+          which is itself centered on the viewport (= the hero's center) — and
+          the tracks just compress instead of overlapping on narrow widths.
+          Explicit col-start keeps placement correct when md: hides the desktop
+          groups and shows the mobile cluster. */}
+      <nav
+        data-docked={scrolled}
+        className="nav-dock mx-auto grid h-16 w-full grid-cols-[1fr_auto_1fr] items-center px-5 sm:px-8"
+      >
         <Link
           href="/"
-          className="text-flash"
+          className="col-start-1 justify-self-start text-flash"
           onClick={() => setOpen(false)}
         >
           <Logo markClassName="size-8" />
         </Link>
 
-        <div className="hidden items-center gap-1 md:flex">
+        {/* r6: primary wayfinding links bumped to 15px (was 13.5) with more
+            padding + gap so they carry real presence in the bar (owner). */}
+        <div className="col-start-2 hidden items-center justify-self-center gap-1.5 md:flex">
           {LINKS.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
-              className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:bg-panel-2/70 hover:text-flash"
+              className="rounded-full px-4 py-2 text-[16px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
             >
               {label}
             </Link>
           ))}
         </div>
 
-        <div className="hidden items-center gap-2.5 md:flex">
+        <div className="col-start-3 hidden items-center justify-self-end gap-2.5 md:flex">
+          <ThemeIconToggle />
           {signedIn ? (
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Open app
               <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -69,13 +99,13 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
             <>
               <Link
                 href="/login"
-                className="rounded-full px-3.5 py-2 text-[13.5px] font-medium text-flash-dim transition-colors hover:text-flash"
+                className="rounded-full px-3.5 py-2 text-[15px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
               >
                 Log in
               </Link>
               <Link
-                href="/login"
-                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[13.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+                href="/signup"
+                className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
               >
                 Start selling
                 <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
@@ -84,18 +114,21 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           )}
         </div>
 
-        {/* mobile toggle */}
+        {/* mobile: theme toggle + menu burger */}
+        <div className="col-start-3 flex items-center justify-self-end gap-1 md:hidden">
+        <ThemeIconToggle />
         <button
           type="button"
           aria-expanded={open}
           aria-label="Toggle menu"
           onClick={() => setOpen((v) => !v)}
-          className="flex size-9 items-center justify-center rounded-lg text-flash md:hidden"
+          className="flex size-9 items-center justify-center rounded-lg text-flash"
         >
           <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             {open ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
           </svg>
         </button>
+        </div>
       </nav>
 
       {open ? (
@@ -105,15 +138,15 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
               key={href}
               href={href}
               onClick={() => setOpen(false)}
-              className="block rounded-lg px-2 py-2.5 text-[15px] font-medium text-flash-dim"
+              className="block rounded-lg px-2 py-2.5 text-[16px] font-medium text-flash-dim"
             >
               {label}
             </Link>
           ))}
           <Link
-            href={signedIn ? "/dashboard" : "/login"}
+            href={signedIn ? "/dashboard" : "/signup"}
             onClick={() => setOpen(false)}
-            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[14px] font-semibold text-iris-ink"
+            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
           >
             {signedIn ? "Open app →" : "Start selling →"}
           </Link>

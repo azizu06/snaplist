@@ -98,7 +98,7 @@ export class HttpEbayAdapter implements EbayAdapter {
     if (request.imageUrls.length === 0) {
       throw new Error(
         `Cannot publish listing ${request.sku} to eBay: no image URLs were provided. ` +
-          "eBay requires at least one photo — add or re-upload the item's photos and retry.",
+          "eBay requires at least one photo. Add or re-upload the item's photos and retry.",
       );
     }
 

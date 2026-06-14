@@ -5,7 +5,7 @@ import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification } from "@/lib/vision";
-import { overridePrice } from "./actions";
+import { saveReview } from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
 
 /**
@@ -109,9 +109,9 @@ export default async function ReviewPage({
       case "queued":
         return {
           variant: "success" as const,
-          title: "Queued — autopilot will post",
+          title: "Queued: autopilot will post",
           detail:
-            "High confidence and autopilot was on — this listing is eligible to post without manual approval.",
+            "High confidence and autopilot was on, so this listing is eligible to post without manual approval.",
         };
       case "draft":
         return {
@@ -122,7 +122,7 @@ export default async function ReviewPage({
               ? "Autopilot was off when this listing was generated, so it waits for you."
               : confidenceFellShort
                 ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
-                : "Autopilot didn't auto-post this listing — it waits for your approval.",
+                : "Autopilot didn't auto-post this listing, so it waits for your approval.",
         };
       case "published":
         return {
@@ -135,7 +135,7 @@ export default async function ReviewPage({
           variant: "error" as const,
           title: "Publish failed",
           detail:
-            "The marketplace rejected or errored on this listing — review it and retry from the publish page.",
+            "The marketplace rejected or errored on this listing. Review it and retry from the publish page.",
         };
       default:
         return null;
@@ -180,5 +180,5 @@ export default async function ReviewPage({
     actionError: actionError ?? null,
   };
 
-  return <ReviewView data={data} overrideAction={overridePrice} />;
+  return <ReviewView data={data} saveAction={saveReview} />;
 }

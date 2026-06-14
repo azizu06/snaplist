@@ -5,6 +5,8 @@ import { motion, useReducedMotion } from "motion/react";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { StatusBadge } from "@/components/ui/badge";
+import { InboxEmptyState } from "./inbox-empty";
+import { SimulatorCard } from "./simulator-card";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -259,80 +261,38 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
   return (
     <div className="flex flex-col gap-6">
-      <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[13px] font-semibold text-fg-strong">
-            Simulate a buyer question
-          </h2>
-          <StatusBadge
-            label={live ? "Live" : "Connecting…"}
-            tone={live ? "success" : "neutral"}
-          />
-        </div>
-        {items.length === 0 ? (
-          <p className="text-sm text-muted">
-            No items yet — create a listing first, then simulate a buyer question
-            about it.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={selectedItem}
-              onChange={(e) => setSelectedItem(e.target.value)}
-              className="rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
-              aria-label="Item to ask about"
-            >
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={simulate}
-              // Disabled until the Realtime subscription is live: simulating
-              // before SUBSCRIBED could let the INSERT land before the listener
-              // is active, leaving the question invisible until refresh.
-              disabled={busy === "simulate" || !live}
-              title={live ? undefined : "Waiting for the live connection…"}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
-            >
-              {busy === "simulate"
-                ? "Asking…"
-                : live
-                  ? "Simulate buyer question"
-                  : "Connecting…"}
-            </button>
-          </div>
-        )}
-        <p className="text-xs text-faint">
-          Sandbox: replies are drafted by the agent, approved by you, and delivery
-          is a logged no-op until the eBay adapter lands.
-        </p>
-      </section>
+      <SimulatorCard
+        items={items}
+        selectedItem={selectedItem}
+        onSelectItem={setSelectedItem}
+        onSimulate={simulate}
+        live={live}
+        simulating={busy === "simulate"}
+      />
 
       {error ? (
         <p
           role="alert"
-          className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-sm text-danger-soft-fg"
+          className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[15px] text-danger-soft-fg"
         >
           {error}
         </p>
       ) : null}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-[13px] font-semibold text-fg-strong">Messages</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-[15px] font-semibold text-fg-strong">Messages</h2>
+          {inbound.length > 0 ? (
+            <span
+              data-nums
+              className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
+            >
+              {inbound.length}
+            </span>
+          ) : null}
+        </div>
         {inbound.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-            <p className="text-base font-semibold text-fg-strong">
-              No buyer questions yet
-            </p>
-            <p className="max-w-sm text-sm text-muted">
-              The moment one arrives we&apos;ll draft a reply for your approval —
-              it will appear here without a refresh. Try the simulator above.
-            </p>
-          </div>
+          <InboxEmptyState />
         ) : (
           inbound.map((message, index) => {
             const sentReply = repliesByQuestion.get(message.id);
@@ -378,10 +338,10 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
-                    <p className="text-[10.5px] font-semibold text-faint">
+                    <p className="text-[12.5px] font-semibold text-muted">
                       buyer · via eBay
                     </p>
-                    <p className="mt-1 text-[13px] leading-relaxed text-fg">
+                    <p className="mt-1 text-[14px] leading-relaxed text-fg">
                       {message.body}
                     </p>
                   </div>
@@ -391,10 +351,10 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                 {undelivered ? (
                   <div className="ml-auto flex w-full max-w-[88%] flex-col gap-2 rounded-2xl rounded-br-md border border-danger-border bg-danger-soft px-3.5 py-2.5">
                     <p className="text-[10.5px] font-semibold text-danger-soft-fg">
-                      Reply not delivered — delivery failed after your approval
+                      Reply not delivered. Delivery failed after your approval.
                     </p>
                     {message.draft_reply ? (
-                      <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-fg">
+                      <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-fg">
                         {message.draft_reply}
                       </p>
                     ) : null}
@@ -403,7 +363,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => retryDelivery(message)}
                         disabled={busy === `retry:${message.id}`}
-                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[14px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `retry:${message.id}` ? "Retrying…" : "Retry delivery"}
                       </button>
@@ -412,14 +372,14 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                 ) : message.status === "draft_failed" ? (
                   <div className="ml-auto flex w-full max-w-[88%] flex-col gap-2 rounded-2xl rounded-br-md border border-danger-border bg-danger-soft px-3.5 py-2.5">
                     <p className="text-[10.5px] font-semibold text-danger-soft-fg">
-                      Draft failed — we couldn&apos;t write a reply for this one
+                      Draft failed. We couldn&apos;t write a reply for this one.
                     </p>
                     <div className="flex justify-end">
                       <button
                         type="button"
                         onClick={() => retryDraft(message)}
                         disabled={busy === `redraft:${message.id}`}
-                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-full bg-danger-solid px-4 py-1.5 text-[14px] font-semibold text-white shadow-xs transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `redraft:${message.id}` ? "Retrying…" : "Retry draft"}
                       </button>
@@ -430,7 +390,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                     <p className="text-[10.5px] font-semibold text-accent-soft-fg">
                       Your reply{sentReply?.sent_at ? " · sent (stubbed delivery)" : ""}
                     </p>
-                    <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed text-fg">
+                    <p className="mt-1 whitespace-pre-wrap text-[14px] leading-relaxed text-fg">
                       {sentReply?.body ?? message.draft_reply}
                     </p>
                   </div>
@@ -442,7 +402,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10.5px] font-semibold text-accent-soft-fg"
                       >
                         <SparkleIcon className="size-3 shrink-0" />
-                        drafted from item attributes — awaiting your approval
+                        drafted from item attributes, awaiting your approval
                         {message.draft_model ? (
                           <span className="font-normal text-accent-soft-fg/70">
                             · {message.draft_model}
@@ -456,7 +416,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                           setEdits((prev) => ({ ...prev, [message.id]: e.target.value }))
                         }
                         rows={3}
-                        className="mt-1.5 w-full resize-y rounded-lg border border-accent/20 bg-surface/80 px-3 py-2 text-[13px] leading-relaxed text-fg"
+                        className="mt-1.5 w-full resize-y rounded-lg border border-accent/20 bg-surface/80 px-3 py-2 text-[14px] leading-relaxed text-fg"
                       />
                     </div>
                     <div className="flex justify-end">
@@ -464,7 +424,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                         type="button"
                         onClick={() => approveAndSend(message)}
                         disabled={busy === `send:${message.id}`}
-                        className="rounded-full bg-primary px-4 py-1.5 text-[12.5px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+                        className="rounded-full bg-primary px-4 py-1.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
                       >
                         {busy === `send:${message.id}` ? "Sending…" : "Approve & send"}
                       </button>
@@ -472,7 +432,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   </div>
                 ) : (
                   <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-md border border-dashed border-border bg-surface-2/60 px-3.5 py-2.5">
-                    <p className="text-[12.5px] text-faint">
+                    <p className="text-[14px] text-muted">
                       Drafting a reply from your listing…
                     </p>
                   </div>

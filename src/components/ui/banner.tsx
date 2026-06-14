@@ -29,8 +29,8 @@ export function Banner({
       role={variant === "error" ? "alert" : "status"}
       className={`rounded-lg border px-4 py-3 ${VARIANT_CLASSES[variant]}`}
     >
-      <p className="text-sm font-medium">{title}</p>
-      {children ? <div className="mt-0.5 text-xs opacity-90">{children}</div> : null}
+      <p className="text-[15px] font-medium">{title}</p>
+      {children ? <div className="mt-0.5 text-[13.5px] opacity-90">{children}</div> : null}
       {action ? <div className="mt-2.5">{action}</div> : null}
     </section>
   );

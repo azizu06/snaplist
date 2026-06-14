@@ -90,16 +90,16 @@ export default async function ExportPage({
         </h1>
       </header>
 
-      <p className="text-[13px] leading-relaxed text-muted">
+      <p className="text-[14px] leading-relaxed text-muted">
         Facebook Marketplace and Mercari don&apos;t allow apps to post for you,
-        so SnapList prepares a ready-to-paste pack for each — written in that
+        so SnapList prepares a ready-to-paste pack for each, written in that
         platform&apos;s style, using only your verified item details
         {price != null ? " and your stored price" : ""}.
       </p>
 
       {error ? (
         <Banner variant="error" title="Couldn’t prepare the export packs">
-          {error} — reload the page to try again.
+          {error}. Reload the page to try again.
         </Banner>
       ) : packs ? (
         <>
@@ -110,7 +110,7 @@ export default async function ExportPage({
               "Copy the pack below.",
               "In the Facebook app: Marketplace → Sell → Item.",
               "Add your photos from your camera roll (photos can't ride the clipboard).",
-              "Paste — first line is the title, the rest is the description — and set the price.",
+              "Paste (first line is the title, the rest is the description) and set the price.",
             ]}
             pack={packs.facebook}
           />
@@ -125,7 +125,7 @@ export default async function ExportPage({
             pack={packs.mercari}
           />
           {packs.model ? (
-            <p className="text-xs text-faint">
+            <p className="text-[13.5px] text-faint">
               Logged for evaluation · model: {packs.model}
             </p>
           ) : null}
@@ -157,11 +157,11 @@ function PackCard({
         aside={<CopyButton text={pack.copyBlock} label={`Copy the ${heading} pack`} />}
       />
       <CardBody className="flex flex-col gap-3">
-        <p className="text-xs text-muted">{note}</p>
-        <pre className="whitespace-pre-wrap rounded-lg border border-border bg-surface-2/60 p-4 font-sans text-sm leading-relaxed text-fg">
+        <p className="text-[13.5px] text-muted">{note}</p>
+        <pre className="whitespace-pre-wrap rounded-lg border border-border bg-surface-2/60 p-4 font-sans text-[15px] leading-relaxed text-fg">
           {pack.copyBlock}
         </pre>
-        <ol className="flex list-decimal flex-col gap-1 pl-5 text-xs text-muted">
+        <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13.5px] text-muted">
           {steps.map((step) => (
             <li key={step}>{step}</li>
           ))}

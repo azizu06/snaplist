@@ -30,8 +30,8 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
       onClick={copy}
       className={
         copied
-          ? "rounded-md border border-success-border bg-success-soft px-3 py-1.5 text-xs font-medium text-success-soft-fg"
-          : "rounded-md border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg shadow-xs transition-colors hover:bg-surface-2"
+          ? "rounded-md border border-success-border bg-success-soft px-3 py-1.5 text-[13.5px] font-medium text-success-soft-fg"
+          : "rounded-md border border-border-strong bg-surface px-3 py-1.5 text-[13.5px] font-medium text-fg shadow-xs transition-colors hover:bg-surface-2"
       }
       aria-label={label}
     >

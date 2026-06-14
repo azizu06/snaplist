@@ -3,18 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
+import ClickSpark from "@/components/bits/ClickSpark";
+import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Banner } from "@/components/ui/banner";
 import { Spinner } from "@/components/ui/spinner";
 
 /**
- * Sell sheet — Mercari "List an item" replica (issue #40 round 2; Mobbin
- * Mercari sell-flow references): photo-slot strip up top, an AI-autofill
- * callout row (Mercari's auto-fill toggle analog — ours is always on), then
- * Mercari-style field-list rows (label left, "Auto" pill right, hairline
- * dividers) for the fields the pipeline fills, and a sticky bottom bar with
- * the full-width primary CTA.
+ * Sell sheet — app-surfaces v3. The default state is composed as "the start
+ * of the pipeline", not a form (owner: "the default area still not improved
+ * too much"):
+ * - a journey rail under the title (add photos → AI identifies & prices →
+ *   review & post) so the three-step promise is visible before any photo;
+ * - the dropzone is the hero: a large cover slot (drag-drop or browse) over
+ *   three labeled angle slots (back/detail/label), ElectricBorder + violet
+ *   wash on drag-over;
+ * - the Mercari field rows live under an "Autofill by SnapList" card header,
+ *   each with a leading glyph + the sparkle "AI suggests" pill.
  *
- * Mechanism is unchanged from round 1 (audit U-1/U-2/U-3): four slot inputs
+ * Mechanism is UNCHANGED from round 1 (audit U-1/U-2/U-3): four slot inputs
  * all named `photo` (the server action reads formData.getAll("photo")), slot
  * 1 required, object-URL previews, and the PROCESSING view that paces the
  * live pipeline stages while the single server action runs.
@@ -22,6 +28,9 @@ import { Spinner } from "@/components/ui/spinner";
 
 const ACCEPT = "image/png,image/jpeg,image/webp";
 const SLOT_COUNT = 4;
+
+/** Angle hints for the three secondary slots (cover is slot 0). */
+const ANGLE_HINTS = ["Back", "Detail", "Label"] as const;
 
 const STEPS = [
   {
@@ -76,8 +85,8 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
       ) : null}
 
       <div className="flex flex-col gap-5 p-5">
-        <p className="text-sm font-semibold text-fg-strong">
-          Building your listing — this usually takes under half a minute.
+        <p className="text-[15px] font-semibold text-fg-strong">
+          Building your listing. This usually takes under half a minute.
         </p>
         <ol className="flex flex-col gap-4">
           {STEPS.map((step, i) => (
@@ -106,7 +115,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
               </span>
               <span>
                 <span
-                  className={`block text-sm font-medium ${
+                  className={`block text-[15px] font-medium ${
                     i <= stage ? "text-fg-strong" : "text-faint"
                   }`}
                 >
@@ -115,7 +124,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
                 <AnimatePresence>
                   {i === stage ? (
                     <motion.span
-                      className="mt-0.5 block text-xs text-muted"
+                      className="mt-0.5 block text-[13.5px] text-muted"
                       initial={{ opacity: 0, y: -4 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
@@ -128,8 +137,8 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
             </li>
           ))}
         </ol>
-        <p className="text-xs text-muted">
-          Keep this page open — you&apos;ll land on the finished draft
+        <p className="text-[13.5px] text-muted">
+          Keep this page open and you&apos;ll land on the finished draft
           automatically.
         </p>
       </div>
@@ -137,20 +146,122 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
   );
 }
 
-/** Mercari field-list row: label left, "Auto" pill + chevron right. */
-function AutoFieldRow({ label }: { label: string }) {
+function SparkleIcon({ className }: { className?: string }) {
   return (
-    <div className="flex items-center justify-between py-3.5">
-      <span className="text-sm font-medium text-fg">{label}</span>
-      <span className="flex items-center gap-1.5">
-        <span className="rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-semibold text-muted">
-          Auto
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M12 2.5c.3 0 .57.2.66.49l1.4 4.6a3 3 0 0 0 1.99 1.99l4.6 1.4a.69.69 0 0 1 0 1.32l-4.6 1.4a3 3 0 0 0-1.99 1.99l-1.4 4.6a.69.69 0 0 1-1.32 0l-1.4-4.6a3 3 0 0 0-1.99-1.99l-4.6-1.4a.69.69 0 0 1 0-1.32l4.6-1.4a3 3 0 0 0 1.99-1.99l1.4-4.6c.09-.29.36-.49.66-.49Z" />
+    </svg>
+  );
+}
+
+const FIELD_ICON_PROPS = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  className: "size-3.5",
+} as const;
+
+const FIELD_ROWS = [
+  {
+    label: "Title",
+    icon: (
+      <svg {...FIELD_ICON_PROPS}>
+        <path d="M5 7V5h14v2M12 5v14M9 19h6" />
+      </svg>
+    ),
+  },
+  {
+    label: "Category",
+    icon: (
+      <svg {...FIELD_ICON_PROPS}>
+        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+      </svg>
+    ),
+  },
+  {
+    label: "Condition",
+    icon: (
+      <svg {...FIELD_ICON_PROPS}>
+        <path d="M12 3l2.7 5.5 6.1.9-4.4 4.3 1 6-5.4-2.8-5.4 2.8 1-6L3.2 9.4l6.1-.9L12 3z" />
+      </svg>
+    ),
+  },
+  {
+    label: "Price",
+    icon: (
+      <svg {...FIELD_ICON_PROPS}>
+        <path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17c0 .53.21 1.04.59 1.42l8.7 8.7a2.43 2.43 0 0 0 3.42 0l6.58-6.58a2.43 2.43 0 0 0 0-3.42l-8.7-8.7z" />
+        <circle cx="7.5" cy="7.5" r="0.5" fill="currentColor" />
+      </svg>
+    ),
+  },
+] as const;
+
+/**
+ * Field-list row for the fields the pipeline pre-fills. The sparkle badge
+ * says the AI *suggests* a value (never locks it) — every one is a real,
+ * editable input on the review screen.
+ */
+function AutoFieldRow({ label, icon }: { label: string; icon: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-3">
+      <span className="flex items-center gap-2.5 text-[15px] font-medium text-fg">
+        <span
+          aria-hidden
+          className="flex size-7 items-center justify-center rounded-md bg-surface-2 text-muted"
+        >
+          {icon}
         </span>
-        <svg viewBox="0 0 24 24" className="size-4 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m9 18 6-6-6-6" />
-        </svg>
+        {label}
+      </span>
+      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-soft-fg">
+        <SparkleIcon className="size-2.5" />
+        AI suggests
       </span>
     </div>
+  );
+}
+
+/** Journey rail — the three-step promise, visible before any photo exists. */
+function JourneyRail() {
+  const steps = [
+    { short: "Photos", long: "Add photos", state: "active" as const },
+    { short: "AI drafts", long: "AI identifies & prices", state: "next" as const },
+    { short: "You review", long: "You review & post", state: "next" as const },
+  ];
+  return (
+    <ol aria-label="How listing works" className="mt-4 flex items-center gap-2">
+      {steps.map((step, i) => (
+        <li key={step.long} className="flex min-w-0 items-center gap-2">
+          {i > 0 ? (
+            <span aria-hidden className="h-px w-4 shrink-0 bg-border-strong sm:w-7" />
+          ) : null}
+          <span
+            aria-hidden
+            className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold ${
+              step.state === "active"
+                ? "bg-accent-solid text-accent-fg"
+                : "border border-border-strong bg-surface text-muted"
+            }`}
+          >
+            {i + 1}
+          </span>
+          <span
+            className={`truncate text-[13.5px] ${
+              step.state === "active"
+                ? "font-semibold text-fg-strong"
+                : "font-medium text-muted"
+            }`}
+          >
+            <span className="sm:hidden">{step.short}</span>
+            <span className="hidden sm:inline">{step.long}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -168,33 +279,118 @@ function FormBody({
   const { pending } = useFormStatus();
   const photoCount = previews.filter(Boolean).length;
 
+  // Drag-and-drop onto the photo card: dropped images fill the empty slots
+  // in order (the same inputs the click flow uses, so the server action sees
+  // identical FormData). dragDepth tracks nested dragenter/leave pairs.
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepth = useRef(0);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragActive(false);
+    const dropped = Array.from(e.dataTransfer.files).filter((f) =>
+      ACCEPT.split(",").includes(f.type),
+    );
+    if (dropped.length === 0) return;
+    const emptySlots = previews
+      .map((p, slot) => (p ? null : slot))
+      .filter((s): s is number => s !== null);
+    dropped.slice(0, emptySlots.length).forEach((file, i) => {
+      const slot = emptySlots[i];
+      const input = inputRefs.current[slot];
+      if (input) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+      }
+      onPick(slot, file);
+    });
+  };
+
   if (pending) return <ProcessingView coverUrl={previews[0]} />;
+
+  const firstEmpty = previews.findIndex((p) => !p);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ---- photo strip (Mercari: rounded squares, camera on slot 1) ---- */}
-      <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
+      {/* ---- the dropzone hero: large cover slot + three labeled angle
+           slots. While dragging files anywhere over the card, a react-bits
+           ElectricBorder + violet wash (pointer-events-none overlays — the
+           inputs never remount) signal the drop target. ---- */}
+      <section
+        onDragEnter={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDragActive(true);
+        }}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={() => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragActive(false);
+        }}
+        onDrop={handleDrop}
+        className="relative rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5"
+      >
+        {dragActive ? (
+          <>
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-10 rounded-xl bg-accent/5"
+            />
+            <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+              <ElectricBorder
+                color="#6d4aff"
+                speed={1.2}
+                chaos={0.08}
+                borderRadius={14}
+                className="size-full"
+              />
+            </div>
+            <span
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-solid px-4 py-1.5 text-[14px] font-semibold text-accent-fg shadow-md"
+            >
+              Drop photos to add them
+            </span>
+          </>
+        ) : null}
+
         <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h2 className="text-[13px] font-semibold text-fg-strong">Photos</h2>
-          <span className="text-xs text-muted" data-nums>
-            {photoCount}/{SLOT_COUNT} · first photo is the cover
+          <h2 className="text-[14px] font-semibold text-fg-strong">Photos</h2>
+          <span className="text-[13.5px] text-muted" data-nums>
+            {photoCount}/{SLOT_COUNT}
           </span>
         </div>
-        <div className="grid grid-cols-4 gap-2 sm:gap-3">
+
+        {/* ---- slots: one map, two shapes — slot 0 renders as the
+             full-width cover hero, slots 1–3 as labeled angle tiles. ---- */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           {Array.from({ length: SLOT_COUNT }, (_, slot) => {
             const preview = previews[slot];
-            const firstEmpty = previews.findIndex((p) => !p);
-            const enabled = preview != null || slot === firstEmpty || slot === 0;
+            const isCover = slot === 0;
+            const enabled = preview != null || slot === firstEmpty || isCover;
             return (
               <div
                 key={slot}
-                className={`relative aspect-square overflow-hidden rounded-2xl border ${
-                  preview
-                    ? "border-border"
-                    : slot === 0
-                      ? "border-2 border-dashed border-accent/50 bg-accent-soft/40"
-                      : "border-2 border-dashed border-border-strong bg-surface-2"
-                }`}
+                className={
+                  isCover
+                    ? `relative col-span-3 h-44 overflow-hidden rounded-2xl sm:h-52 ${
+                        preview
+                          ? "border border-border"
+                          : "border-2 border-dashed border-accent/45 bg-accent-soft/35"
+                      }`
+                    : `relative aspect-[4/3] overflow-hidden rounded-xl ${
+                        preview
+                          ? "border border-border"
+                          : "border-2 border-dashed border-border-strong bg-surface-2"
+                      }`
+                }
               >
                 <input
                   ref={(el) => {
@@ -204,7 +400,7 @@ function FormBody({
                   type="file"
                   name="photo"
                   accept={ACCEPT}
-                  required={slot === 0}
+                  required={isCover}
                   disabled={!enabled}
                   onChange={(e) => onPick(slot, e.target.files?.[0] ?? null)}
                   className="sr-only"
@@ -214,45 +410,72 @@ function FormBody({
                     {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
                     <img
                       src={preview}
-                      alt={`Photo ${slot + 1}`}
+                      alt={isCover ? "Cover photo" : `Photo ${slot + 1}`}
                       className="size-full object-cover"
                     />
                     <button
                       type="button"
                       onClick={() => onClear(slot)}
-                      aria-label={`Remove photo ${slot + 1}`}
-                      className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-fg-strong/70 text-white transition-colors hover:bg-fg-strong"
+                      aria-label={
+                        isCover ? "Remove cover photo" : `Remove photo ${slot + 1}`
+                      }
+                      className={`absolute flex items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a] ${
+                        isCover ? "right-2 top-2 size-7" : "right-1 top-1 size-6"
+                      }`}
                     >
                       <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                         <path d="M18 6 6 18M6 6l12 12" />
                       </svg>
                     </button>
-                    <span className="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-fg-strong/70 text-[10px] font-semibold text-white">
-                      {slot + 1}
-                    </span>
+                    {/* Pinned ink scrim badges — right in both themes on a photo. */}
+                    {isCover ? (
+                      <span className="absolute left-2 top-2 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[10.5px] font-semibold text-white">
+                        Cover
+                      </span>
+                    ) : (
+                      <span className="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-[#131e3a]/70 text-[10px] font-semibold text-white">
+                        {slot + 1}
+                      </span>
+                    )}
                   </>
+                ) : isCover ? (
+                  <label
+                    htmlFor={`photo-slot-${slot}`}
+                    className="flex size-full cursor-pointer flex-col items-center justify-center gap-2.5 px-6 text-center"
+                  >
+                    <span
+                      aria-hidden
+                      className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-fg shadow-md"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                        <circle cx="12" cy="13" r="3" />
+                      </svg>
+                    </span>
+                    <span>
+                      <span className="block text-[16px] font-semibold text-fg-strong">
+                        Add your first photo
+                      </span>
+                      <span className="mt-1 block text-[13.5px] leading-relaxed text-muted">
+                        Drag &amp; drop or click to browse. This becomes the cover
+                      </span>
+                    </span>
+                    <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10.5px] font-medium text-faint">
+                      PNG · JPG · WEBP
+                    </span>
+                  </label>
                 ) : (
                   <label
                     htmlFor={`photo-slot-${slot}`}
-                    className={`flex size-full cursor-pointer flex-col items-center justify-center gap-1 ${
+                    className={`flex size-full cursor-pointer flex-col items-center justify-center gap-1 text-faint ${
                       enabled ? "" : "pointer-events-none opacity-40"
-                    } ${slot === 0 ? "text-accent-soft-fg" : "text-faint"}`}
+                    }`}
                   >
-                    <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      {slot === 0 ? (
-                        <>
-                          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                          <circle cx="12" cy="13" r="3" />
-                        </>
-                      ) : (
-                        <>
-                          <path d="M12 5v14" />
-                          <path d="M5 12h14" />
-                        </>
-                      )}
+                    <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M12 5v14M5 12h14" />
                     </svg>
-                    <span className="text-[10px] font-medium">
-                      {slot === 0 ? "Add photo" : `Photo ${slot + 1}`}
+                    <span className="text-[10.5px] font-medium">
+                      {ANGLE_HINTS[slot - 1]}
                     </span>
                   </label>
                 )}
@@ -260,60 +483,71 @@ function FormBody({
             );
           })}
         </div>
-        <p className="mt-3 text-xs text-muted">
+        <p className="mt-3 text-[13.5px] text-muted">
           Good light and a clear view of labels or barcodes make the
-          identification — and the price — much more accurate.
+          identification, and the price, much more accurate.
         </p>
       </section>
 
-      {/* ---- AI autofill callout (Mercari's auto-fill toggle analog) ---- */}
-      <section className="flex items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft/50 px-4 py-3">
-        <span
-          aria-hidden
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-solid text-accent-fg"
-        >
-          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold text-fg-strong">
-            Autofill by SnapList
-          </p>
-          <p className="mt-0.5 text-xs leading-relaxed text-muted">
-            We identify the item, research the used price, and write the
-            listing from your photos.
+      {/* ---- Autofill card: callout header + the field rows it fills ---- */}
+      <section className="rounded-xl border border-border bg-surface shadow-xs">
+        <header className="flex items-center gap-3 rounded-t-xl border-b border-accent/20 bg-accent-soft/50 px-4 py-3 sm:px-5">
+          <span
+            aria-hidden
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-solid text-accent-fg"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-semibold text-fg-strong">
+              Autofill by SnapList
+            </p>
+            <p className="mt-0.5 text-[13.5px] leading-relaxed text-muted">
+              We identify the item, research the used price, and write the
+              listing from your photos.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-accent-solid px-2.5 py-0.5 text-[11px] font-semibold text-accent-fg">
+            On
+          </span>
+        </header>
+        <div className="px-4 sm:px-5">
+          <div className="divide-y divide-border">
+            {FIELD_ROWS.map((row) => (
+              <AutoFieldRow key={row.label} label={row.label} icon={row.icon} />
+            ))}
+          </div>
+          <p className="border-t border-border py-3 text-[13.5px] text-faint">
+            Every field stays a real, editable input on the review screen.
           </p>
         </div>
-        <span className="shrink-0 rounded-full bg-accent-solid px-2.5 py-0.5 text-[11px] font-semibold text-accent-fg">
-          On
-        </span>
       </section>
 
-      {/* ---- field list (Mercari rows the pipeline fills) ---- */}
-      <section className="rounded-xl border border-border bg-surface px-4 shadow-xs sm:px-5">
-        <div className="divide-y divide-border">
-          <AutoFieldRow label="Title" />
-          <AutoFieldRow label="Category" />
-          <AutoFieldRow label="Condition" />
-          <AutoFieldRow label="Price" />
-        </div>
-        <p className="pb-3 text-xs text-faint">
-          Filled automatically once your photos are analyzed — you review
-          everything before it posts.
+      {/* ---- sticky bottom CTA bar ---- */}
+      <div className="sticky bottom-20 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-xl sm:border sm:shadow-md">
+        {/* react-bits ClickSpark: violet burst on the one action that starts
+            the whole pipeline. */}
+        <ClickSpark
+          className="block w-full"
+          sparkColor="#6d4aff"
+          sparkSize={8}
+          sparkRadius={20}
+          sparkCount={10}
+        >
+          <button
+            type="submit"
+            disabled={photoCount === 0}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+          >
+            Identify, price &amp; draft
+          </button>
+        </ClickSpark>
+        <p className="mt-2 text-center text-[12.5px] text-faint">
+          ≈ 30 seconds · nothing posts without your review
         </p>
-      </section>
-
-      {/* ---- sticky bottom CTA bar (Mercari "List" bar) ---- */}
-      <div className="sticky bottom-16 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-xl sm:border sm:shadow-md">
-        <button
-          type="submit"
-          disabled={photoCount === 0}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
-        >
-          Identify, price &amp; draft
-        </button>
       </div>
     </div>
   );
@@ -370,8 +604,8 @@ export function UploadForm({
 }
 
 /**
- * Full sell-sheet surface (header + error banner + form) so the page and the
- * dev preview harness render the identical screen.
+ * Full sell-sheet surface (header + journey rail + error banner + form) so
+ * the page and the dev preview harness render the identical screen.
  */
 export function UploadView({
   action,
@@ -381,14 +615,15 @@ export function UploadView({
   actionError: string | null;
 }) {
   return (
-    <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
       <header>
         <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
           List an item
         </h1>
-        <p className="mt-0.5 text-[13px] text-muted">
-          Add photos — SnapList fills in the rest for your review.
+        <p className="mt-0.5 text-[14px] text-muted">
+          Add photos and SnapList fills in the rest for your review.
         </p>
+        <JourneyRail />
       </header>
 
       {actionError ? (

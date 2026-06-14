@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import CountUp from "@/components/bits/CountUp";
+import Folder from "@/components/bits/Folder";
+import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
-import { EmptyState } from "@/components/ui/empty-state";
 import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
 import { matchesQuery } from "@/lib/ui/search";
 import { relativeDay } from "@/lib/ui/dates";
@@ -67,6 +69,135 @@ function Thumb({ url }: { url: string | null }) {
   );
 }
 
+/**
+ * Stat-tab filter card with the react-bits SpotlightCard treatment adapted
+ * onto a real <Link> (the vendored SpotlightCard is a div — wrapping the Link
+ * would bury navigation semantics). A violet radial spotlight tracks the
+ * cursor; the active card keeps its violet border + ring untouched.
+ */
+function SpotlightStatLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [lit, setLit] = useState(false);
+
+  return (
+    <Link
+      ref={ref}
+      href={href}
+      aria-current={active ? "page" : undefined}
+      onMouseMove={(e) => {
+        const rect = ref.current?.getBoundingClientRect();
+        if (rect) setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      }}
+      onMouseEnter={() => setLit(true)}
+      onMouseLeave={() => setLit(false)}
+      className={`relative min-w-[124px] shrink-0 overflow-hidden rounded-xl border bg-surface px-3.5 py-2.5 transition-all motion-safe:active:scale-[0.98] sm:min-w-0 ${
+        active
+          ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
+          : "border-border hover:-translate-y-px hover:border-border-strong hover:shadow-xs"
+      }`}
+    >
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 transition-opacity duration-300 ease-in-out"
+        style={{
+          opacity: lit ? 1 : 0,
+          background: `radial-gradient(circle at ${pos.x}px ${pos.y}px, rgba(109, 74, 255, 0.10), transparent 80%)`,
+        }}
+      />
+      {children}
+    </Link>
+  );
+}
+
+/**
+ * Empty dashboard — react-bits Folder (violet) holding miniature LISTING
+ * PREVIEWS pulled straight from the demo catalog (image + name + price always
+ * come from the SAME DemoProduct, so a photo can never carry another item's
+ * label — round-5 owner trust fix). The opened folder reads as "this is what
+ * your listings will become". Click/hover plays with the papers.
+ *
+ * Items picked exclusive to the dashboard (r6.1): kettlebell, binoculars,
+ * sewing machine — none appear on any marketing surface (the old gshock/
+ * espresso/turntable also headlined the home scan).
+ */
+const FOLDER_ITEMS: DemoProduct[] = [
+  // Order matters: paper 0 is the narrowest, paper 2 the widest — the longest
+  // short-name (Sewing machine) rides the wide paper so nothing truncates.
+  DEMO_PRODUCTS_BY_SLUG.kettlebell,
+  DEMO_PRODUCTS_BY_SLUG.binoculars,
+  DEMO_PRODUCTS_BY_SLUG.sewingmachine,
+];
+
+function MiniListingCard({ product }: { product: DemoProduct }) {
+  return (
+    /* The folder papers stay literal white paper in both themes, so their ink
+       is pinned (fg-strong / accent-soft-fg flip light in dark mode and would
+       wash out on the white card). Sizes look tiny here but render ~2.2× via
+       the Folder scale transform. */
+    <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm dark:border-white/20">
+      {/* eslint-disable-next-line @next/next/no-img-element -- tiny static demo thumbnail inside the folder animation */}
+      <img
+        src={product.image}
+        alt=""
+        aria-hidden
+        className="h-[58%] w-full object-cover"
+      />
+      <span className="flex min-h-0 flex-1 flex-col justify-center gap-[2px] px-[5px]">
+        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#131e3a]">
+          {product.shortName}
+        </span>
+        <span className="block text-[7.5px] font-bold leading-none text-[#5a36f0]" data-nums>
+          ${product.price}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function DashboardEmpty() {
+  return (
+    <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+      {/* r6 (owner): the folder block is vertically CENTERED in the container
+          (justify-center + min-h), not pushed down with a void above it.
+          mb-14 sets the gap to the title. The whole section is nudged down
+          from the nav at the <main> level (pt-16). */}
+      <div className="mb-14">
+        <Folder
+          color="#6d4aff"
+          size={2.2}
+          items={FOLDER_ITEMS.map((product) => (
+            <MiniListingCard key={product.slug} product={product} />
+          ))}
+        />
+      </div>
+      <p className="text-base font-semibold text-fg-strong">
+        List your first item
+      </p>
+      <p className="max-w-sm text-[15px] text-muted">
+        Take a photo of something you want to sell and we&apos;ll identify it,
+        research the price, and write the listing for you.
+      </p>
+      <div className="mt-1">
+        <Link
+          href="/upload"
+          className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
+        >
+          New listing
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 // `counts` stays in the props API for the page/preview callers, but the
 // stat-tab cards compute per-filter counts from `rows` directly.
 export function DashboardView({
@@ -94,30 +225,20 @@ export function DashboardView({
   const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 py-7 sm:px-6">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-10 pt-24 sm:px-6">
       {/* ---- page header (Stripe: 24px bold title; primary lives in topbar) ---- */}
       <header className="flex items-center justify-between gap-3">
         <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
           Listings
         </h1>
-        <span className="text-[12.5px] text-muted" data-nums>
-          {rows.length} item{rows.length === 1 ? "" : "s"}
+        <span className="text-[14px] text-muted" data-nums>
+          <CountUp to={rows.length} duration={0.7} /> item
+          {rows.length === 1 ? "" : "s"}
         </span>
       </header>
 
       {rows.length === 0 ? (
-        <EmptyState
-          title="List your first item"
-          detail="Take a photo of something you want to sell — we'll identify it, research the price, and write the listing for you."
-          action={
-            <Link
-              href="/upload"
-              className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[13px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
-            >
-              New listing
-            </Link>
-          }
-        />
+        <DashboardEmpty />
       ) : (
         <>
           {/* ---- stat-tab cards (Stripe Transactions pattern: the filters ARE
@@ -129,27 +250,22 @@ export function DashboardView({
             {DASHBOARD_FILTERS.map((f) => {
               const active = f.key === filter;
               return (
-                <Link
+                <SpotlightStatLink
                   key={f.key}
                   href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
-                  aria-current={active ? "page" : undefined}
-                  className={`min-w-[124px] shrink-0 rounded-xl border bg-surface px-3.5 py-2.5 transition-all motion-safe:active:scale-[0.98] sm:min-w-0 ${
-                    active
-                      ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
-                      : "border-border hover:-translate-y-px hover:border-border-strong hover:shadow-xs"
-                  }`}
+                  active={active}
                 >
                   <span
-                    className={`block text-[12px] font-medium ${
+                    className={`block text-[13.5px] font-medium ${
                       active ? "text-accent-soft-fg" : "text-muted"
                     }`}
                   >
                     {f.label}
                   </span>
                   <span className="mt-0.5 block text-[18px] font-bold text-fg-strong" data-nums>
-                    {filterCount(f)}
+                    <CountUp to={filterCount(f)} duration={0.7} />
                   </span>
-                </Link>
+                </SpotlightStatLink>
               );
             })}
           </nav>
@@ -158,7 +274,7 @@ export function DashboardView({
           <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
             {/* toolbar: inline search over the active tab */}
             <div className="flex items-center gap-3 border-b border-border px-3 py-2.5">
-              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[13px] focus-within:ring-2 focus-within:ring-accent/40 sm:max-w-xs">
+              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[14px] focus-within:ring-2 focus-within:ring-accent/40 sm:max-w-xs">
                 <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="8" />
                   <path d="m21 21-4.3-4.3" />
@@ -184,7 +300,7 @@ export function DashboardView({
                 ) : null}
               </label>
               {searching ? (
-                <span className="shrink-0 text-[12px] text-muted" data-nums>
+                <span className="shrink-0 text-[13.5px] text-muted" data-nums>
                   {visible.length} match{visible.length === 1 ? "" : "es"}
                 </span>
               ) : null}
@@ -192,7 +308,7 @@ export function DashboardView({
 
             {visible.length === 0 ? (
               searching ? (
-                <p className="px-4 py-10 text-center text-sm text-muted">
+                <p className="px-4 py-10 text-center text-[15px] text-muted">
                   No titles match “{query.trim()}”.{" "}
                   <button
                     type="button"
@@ -203,8 +319,8 @@ export function DashboardView({
                   </button>
                 </p>
               ) : (
-                <p className="px-4 py-10 text-center text-sm text-muted">
-                  Nothing under “{activeFilter.label}” — items move here as their
+                <p className="px-4 py-10 text-center text-[15px] text-muted">
+                  Nothing under “{activeFilter.label}” yet. Items move here as their
                   status changes.
                 </p>
               )
@@ -213,7 +329,7 @@ export function DashboardView({
                 {/* desktop: Shopify data table */}
                 <table className="hidden w-full sm:table">
                   <thead>
-                    <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+                    <tr className="border-b border-border text-left text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">
                       <th className="py-2.5 pl-4 pr-2 font-semibold">Product</th>
                       <th className="px-2 py-2.5 font-semibold">Status</th>
                       <th className="px-2 py-2.5 text-right font-semibold">Price</th>
@@ -236,7 +352,7 @@ export function DashboardView({
                               className="flex items-center gap-3"
                             >
                               <Thumb url={row.thumbUrl} />
-                              <span className="truncate text-[13px] font-semibold text-fg-strong group-hover:underline">
+                              <span className="truncate text-[14px] font-semibold text-fg-strong group-hover:underline">
                                 {row.title}
                               </span>
                             </Link>
@@ -246,19 +362,19 @@ export function DashboardView({
                               <StatusBadge label={chip.label} tone={chip.tone} dot={false} />
                             ) : null}
                           </td>
-                          <td className="px-2 py-2 text-right text-[13px] text-fg" data-nums>
-                            {row.price != null ? PRICE_FMT.format(row.price) : "—"}
+                          <td className="px-2 py-2 text-right text-[14px] text-fg" data-nums>
+                            {row.price != null ? PRICE_FMT.format(row.price) : "–"}
                           </td>
                           {/* suppressHydrationWarning: relative dates are
                               computed in the server's TZ during SSR and the
                               user's TZ after hydration — they may differ
                               around midnight, by design. */}
                           <td
-                            className="py-2 pl-2 text-right text-[13px] text-muted"
+                            className="py-2 pl-2 text-right text-[14px] text-muted"
                             data-nums
                             suppressHydrationWarning
                           >
-                            {row.createdAt ? relativeDay(row.createdAt) : "—"}
+                            {row.createdAt ? relativeDay(row.createdAt) : "–"}
                           </td>
                           <td className="py-2 pl-1 pr-3">
                             <svg
@@ -296,11 +412,11 @@ export function DashboardView({
                         >
                           <Thumb url={row.thumbUrl} />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-semibold text-fg-strong">
+                            <span className="block truncate text-[15px] font-semibold text-fg-strong">
                               {row.title}
                             </span>
                             <span
-                              className="mt-0.5 block text-xs text-muted"
+                              className="mt-0.5 block text-[13.5px] text-muted"
                               data-nums
                               suppressHydrationWarning
                             >

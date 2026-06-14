@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { WordmarkGlow } from "@/components/marketing/wordmark-glow";
 
 const COLUMNS = [
   {
     heading: "Product",
     links: [
-      { href: "/how-it-works", label: "How it works" },
-      { href: "/features", label: "Features" },
+      { href: "/tour", label: "Tour" },
       { href: "/pricing", label: "Pricing" },
     ],
   },
@@ -27,8 +27,10 @@ const COLUMNS = [
 ] as const;
 
 /**
- * Marketing footer (issue #49) — oversized wordmark as the closing visual,
- * Mercury-style link columns above it.
+ * Marketing footer (issue #49, subpages v3) — oversized wordmark as the
+ * closing visual, Mercury-style link columns above it. Column links carry an
+ * animated accent underline (.link-underline: scale-x from the left) plus an
+ * ink shift on hover; the iris token keeps it correct in both themes.
  */
 export function MarketingFooter() {
   return (
@@ -36,16 +38,16 @@ export function MarketingFooter() {
       <div className="mx-auto w-full max-w-6xl px-5 pb-10 pt-16 sm:px-8">
         <div className="flex flex-col justify-between gap-12 sm:flex-row">
           <div className="max-w-xs">
-            <Logo className="text-flash" markClassName="size-7" />
-            <p className="mt-3 text-[13.5px] leading-relaxed text-flash-faint">
-              Snap a photo of something you want to sell. We identify it, price
-              it with sources, and write the listing.
+            <Logo className="footer-logo-glow text-flash" markClassName="size-7" />
+            <p className="mt-3 text-[15px] leading-relaxed text-flash-faint">
+              Snap a photo of something you want to sell. We figure out what it
+              is, price it from real sales, and write the listing.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-10 sm:grid-cols-3">
             {COLUMNS.map(({ heading, links }) => (
               <div key={heading}>
-                <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+                <p className="text-[13.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
                   {heading}
                 </p>
                 <ul className="mt-3.5 space-y-2.5">
@@ -53,7 +55,7 @@ export function MarketingFooter() {
                     <li key={`${href}-${label}`}>
                       <Link
                         href={href}
-                        className="text-[13.5px] text-flash-dim transition-colors hover:text-flash"
+                        className="link-underline inline-block text-[15px] text-flash-dim transition-colors hover:text-flash"
                       >
                         {label}
                       </Link>
@@ -65,21 +67,18 @@ export function MarketingFooter() {
           </div>
         </div>
 
-        <div className="mt-14 flex items-center justify-between border-t border-line pt-6 text-[12.5px] text-flash-faint">
+        <div className="mt-14 flex items-center justify-between border-t border-line pt-6 text-[14px] text-flash-faint">
           <p>© {new Date().getFullYear()} SnapList</p>
-          <p>Built as a production-real AI engineering showcase</p>
+          <p>Built for sellers, not paperwork</p>
         </div>
       </div>
 
-      {/* oversized clipped wordmark */}
-      <div
-        aria-hidden
-        className="pointer-events-none select-none overflow-hidden"
-      >
-        <p className="-mb-[0.23em] bg-gradient-to-b from-line to-night bg-clip-text text-center font-display text-[clamp(96px,18vw,260px)] font-bold leading-none tracking-tight text-transparent">
-          SnapList
-        </p>
-      </div>
+      {/* oversized clipped wordmark — the cursor acts as a flashlight,
+          lighting up the letters under it (rAF-lerped mask; see
+          wordmark-glow.tsx + .wordmark-flashlight in globals.css).
+          Decorative/aria-hidden, but pointer events stay on so the
+          flashlight can land. */}
+      <WordmarkGlow />
     </footer>
   );
 }

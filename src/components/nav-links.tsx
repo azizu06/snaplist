@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Dock from "@/components/bits/Dock";
 
 /**
  * Navigation (issue #40 round 2). Desktop: Shopify-style sidebar items — 13px,
  * icon + label, active item is a white pill with a hairline shadow. Mobile:
- * Mercari/Depop bottom tab bar. Client-only for pathname-driven active state.
+ * react-bits Dock (app pass) — same 4 routes and active logic as the old tab
+ * grid, rendered as a floating dock with a violet active pill; items magnify
+ * for pointer devices only. Client-only for pathname-driven active state.
  */
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -40,13 +43,17 @@ const LINKS = [
     href: "/dashboard",
     label: "Home",
     icon: "home",
-    match: (p: string) => p.startsWith("/dashboard"),
+    // The /dev/preview prefixes keep active states realistic in the dev-only
+    // screenshot harness (the route 404s in production).
+    match: (p: string) =>
+      p.startsWith("/dashboard") || p.startsWith("/dev/preview/dashboard"),
   },
   {
     href: "/upload",
     label: "New listing",
     icon: "plus",
-    match: (p: string) => p.startsWith("/upload"),
+    match: (p: string) =>
+      p.startsWith("/upload") || p.startsWith("/dev/preview/upload"),
   },
   {
     href: "/inbox",
@@ -74,7 +81,7 @@ export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
             href={href}
             aria-current={active ? "page" : undefined}
             title={collapsed ? label : undefined}
-            className={`flex items-center gap-2.5 rounded-lg py-2 text-[13px] ${
+            className={`flex items-center gap-2.5 rounded-lg py-2 text-[14px] ${
               collapsed ? "justify-center px-0" : "px-2.5"
             } ${
               active
@@ -104,26 +111,17 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 backdrop-blur sm:hidden"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-2.5 sm:hidden"
     >
-      <div className="mx-auto grid max-w-md grid-cols-4">
-        {LINKS.map(({ href, label, icon, match }) => {
-          const active = match(pathname);
-          return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? "page" : undefined}
-              className={`flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium ${
-                active ? "text-fg-strong" : "text-faint"
-              }`}
-            >
-              <span className="[&>svg]:size-5">{ICONS[icon]}</span>
-              {label === "New listing" ? "Sell" : label}
-            </Link>
-          );
-        })}
-      </div>
+      <Dock
+        className="pointer-events-auto mx-auto w-fit [&_svg]:size-5"
+        items={LINKS.map(({ href, label, icon, match }) => ({
+          href,
+          label: label === "New listing" ? "Sell" : label,
+          icon: ICONS[icon],
+          active: match(pathname),
+        }))}
+      />
     </nav>
   );
 }

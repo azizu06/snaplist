@@ -38,3 +38,18 @@ next-env.d.ts
 
 # graphify (local knowledge-graph index; regenerate with `graphify update .`)
 /graphify-out
+
+# clerk configuration (can include secrets)
+/.clerk/
+
+# local design iteration screenshots
+.design-iterations/
+
+# Claude Code agent worktrees (local only — never track)
+.claude/worktrees/
+
+# temporary asset-intake (raw archive, not shipped)
+asset-intake/
+
+# local render/review scratch
+.review-shots/

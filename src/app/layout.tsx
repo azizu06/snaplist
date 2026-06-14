@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Schibsted_Grotesk } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,7 +25,7 @@ const schibsted = Schibsted_Grotesk({
 export const metadata: Metadata = {
   metadataBase: new URL("https://snaplist.dev"),
   title: {
-    default: "SnapList — photo to priced listing",
+    default: "SnapList: photo to priced listing",
     template: "%s · SnapList",
   },
   description:
@@ -44,37 +45,74 @@ export default function RootLayout({
   return (
     <ClerkProvider
       appearance={{
+        // var() refs resolve in the browser, so the card follows the .dark
+        // class live (values defined at the end of globals.css).
         variables: {
-          colorPrimary: "#6d4aff",
+          colorPrimary: "var(--clerk-primary)",
           colorPrimaryForeground: "#ffffff",
-          colorBackground: "#ffffff",
-          colorForeground: "#131e3a",
-          colorMutedForeground: "#5f6b88",
-          colorInput: "#ffffff",
-          colorInputForeground: "#131e3a",
-          colorBorder: "#dfe4ee",
-          colorRing: "#6d4aff",
+          colorBackground: "var(--clerk-bg)",
+          colorForeground: "var(--clerk-fg)",
+          colorMutedForeground: "var(--clerk-muted)",
+          colorInput: "var(--clerk-input-bg)",
+          colorInputForeground: "var(--clerk-fg)",
+          colorBorder: "var(--clerk-border)",
+          colorRing: "var(--clerk-primary)",
           borderRadius: "0.5rem",
           fontFamily: "var(--font-geist-sans), ui-sans-serif, sans-serif",
         },
         elements: {
+          // rounded-2xl card on the landing's floating-panel shadow — the
+          // same surface idiom as the marketing cards (ui-r6-login pass).
           cardBox: {
-            boxShadow:
-              "0 13px 27px -5px rgba(19,30,58,0.18), 0 8px 16px -8px rgba(19,30,58,0.22)",
+            boxShadow: "var(--clerk-card-shadow)",
+            borderRadius: "20px",
           },
+          headerTitle: {
+            fontFamily:
+              "var(--font-display), var(--font-geist-sans), ui-sans-serif, sans-serif",
+            letterSpacing: "-0.01em",
+          },
+          // Primary action matches the site's rounded-full CTAs; height tracks
+          // the taller inputs so the form reads as one consistent stack.
+          formButtonPrimary: { borderRadius: "9999px", minHeight: "46px" },
+          // Taller fields so the email / password / Google row breathes instead
+          // of feeling cramped (owner) — Clerk's default control is ~36px.
+          formFieldInput: {
+            minHeight: "46px",
+            paddingTop: "11px",
+            paddingBottom: "11px",
+          },
+          // The visible control "border" (input + Google button) is a Clerk
+          // box-shadow ring keyed to colorBorder at ~11% alpha — invisible on
+          // both themes. The appearance API can't override that ring, so it's
+          // forced via .cl- class rules in globals.css (ui-r6-login-borders).
           socialButtonsBlockButton: {
-            background: "#ffffff",
-            border: "1px solid #dfe4ee",
+            background: "var(--clerk-bg)",
+            minHeight: "46px",
+            paddingTop: "11px",
+            paddingBottom: "11px",
           },
-          footer: { background: "#f4f6fb" },
+          footer: { background: "var(--clerk-footer-bg)" },
         },
       }}
     >
+      {/* suppressHydrationWarning: next-themes mutates <html> class before
+          hydration (its inline script kills the FOUC) — expected mismatch. */}
       <html
         lang="en"
+        suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} ${schibsted.variable} h-full antialiased`}
       >
-        <body className="min-h-full">{children}</body>
+        <body className="min-h-full">
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="light"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+          </ThemeProvider>
+        </body>
       </html>
     </ClerkProvider>
   );
