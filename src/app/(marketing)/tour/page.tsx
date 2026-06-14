@@ -59,6 +59,7 @@ const STEPS = [
     eyebrow: "Step 3",
     tint: undefined,
     src: "/demo/steps/price.mp4",
+    mobile: true,
     glyph: "price",
     title: "Price",
     body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources behind it. Real sale prices, not wishful asking prices.",

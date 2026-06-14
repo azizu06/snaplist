@@ -14,6 +14,7 @@ import { STEP_SNAP_LEN, StepSnap } from "./suite/StepSnap";
 import { STEP_WRITE_LEN, StepWrite } from "./suite/StepWrite";
 import { STEP_SNAP_MOBILE_LEN, StepSnapMobile } from "./suite/mobile/StepSnapMobile";
 import { STEP_IDENTIFY_MOBILE_LEN, StepIdentifyMobile } from "./suite/mobile/StepIdentifyMobile";
+import { STEP_PRICE_MOBILE_LEN, StepPriceMobile } from "./suite/mobile/StepPriceMobile";
 
 const STAGE_SIZE = { fps: 30, width: 800, height: 600 } as const;
 const SUITE_SIZE = { fps: 30, width: 1920, height: 1080 } as const;
@@ -88,6 +89,12 @@ export const RemotionRoot: React.FC = () => {
         id="step-identify-mobile"
         component={StepIdentifyMobile}
         durationInFrames={STEP_IDENTIFY_MOBILE_LEN}
+        {...MOBILE_SIZE}
+      />
+      <Composition
+        id="step-price-mobile"
+        component={StepPriceMobile}
+        durationInFrames={STEP_PRICE_MOBILE_LEN}
         {...MOBILE_SIZE}
       />
 
