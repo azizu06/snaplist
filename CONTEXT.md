@@ -22,13 +22,18 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   source. "Barcode" is the umbrella term.
 - **PricingProvider** — the interface every pricing strategy implements. Returns a **price
   recommendation**. Never bypass it with an inline price lookup.
-- **Tier** — one PricingProvider strategy in the routing pipeline: *ISBN lookup* → *web-search agent*
-  → *depreciation estimate* → *LLM fallback*. "Which tier fired" is a logged, confidence-bearing fact.
+- **Tier** — one PricingProvider strategy in the routing pipeline: *ISBN lookup* → *eBay sold comps*
+  → *web-search agent* → *depreciation estimate* → *LLM fallback*. "Which tier fired" is a logged,
+  confidence-bearing fact.
+- **eBay-sold scraper** — the `ebay-sold` tier (ADR-0001): reads eBay's PUBLIC sold/completed pages
+  (`LH_Sold=1&LH_Complete=1`) for real **sold comps**. Read-only price research — distinct from the
+  transactional eBay **adapter** (posting/messaging). Never used to post.
 - **Pricing (research) agent** — the bounded tool-calling **agent** that searches the web for
   used/resale comps and synthesizes a cited range. One of two agents in the system.
-- **Comp** — a comparable price point found for an item. **Comp agreement** (tight vs scattered) is a
-  confidence signal. Open-web comps are usually *asking* prices, not *sold* prices — down-weight
-  accordingly.
+- **Comp** — a comparable price point found for an item. A **sold comp** is a completed sale (eBay
+  public sold pages, the `ebay-sold` tier) — the strongest used signal; an **asking comp** is an
+  active listing (open-web, the web-search tier) and is down-weighted. **Comp agreement** (tight vs
+  scattered) is a confidence signal.
 - **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
   user-editable. Never a bare number.
 - **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
@@ -47,7 +52,10 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
 - **Inbox** — the seller's live view of buyer **messages**, fed DB→Supabase Realtime. The seller is
   the only SnapList user; buyers stay on eBay.
 - **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to
-  ground pricing and few-shot listing generation (avoids cold-start).
+  ground listing generation (few-shot) and to *corroborate* pricing. Never the price oracle.
+- **Freshness** — sold prices drift, so pricing is **live-fetched** at query time; a TTL
+  cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The
+  **reference corpus** never serves a stored price as current truth.
 - **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
   for every pipeline execution. The **eval harness** depends on it.
 - **Eval harness** — the offline quality measurement over a fixed **gold set**: ID accuracy,

@@ -1,0 +1,342 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  EBAY_SOLD_MIN_COMPS,
+  assertSafeEbayUrl,
+  buildSoldSearchUrl,
+  createEbaySoldPricingProvider,
+  ebaySoldConfigured,
+  isAllowedEbayHost,
+  isPrivateOrInternalHost,
+  parsePrice,
+  parseSoldComps,
+  synthesizeSoldResult,
+  type EbaySoldComp,
+  type FetchPage,
+} from "./ebay-sold";
+import { PriceRouter } from "../router";
+import { priceResultSchema, type ItemSignal, type PricingProvider } from "../types";
+import { TIGHT_AGREEMENT_MIN } from "./web-search";
+
+/**
+ * Tier "ebay-sold" — the public eBay sold-listings scraper (issue #56). Every
+ * test runs fully OFFLINE: the page fetch is an injected `FetchPage` fake that
+ * serves a SAVED sold-results HTML fixture, matching the repo-wide DI pattern.
+ *
+ * Acceptance criteria covered:
+ *  - implements `PricingProvider` → a schema-valid `{ suggested, range,
+ *    confidence, sources[] }` tagged tier "ebay-sold";
+ *  - parses the sold-results page with cheerio (skips the "Shop on eBay"
+ *    placeholder and price-less cards);
+ *  - SSRF hardening: only eBay hosts, https only, no userinfo, internal /
+ *    private addresses blocked, constructed URLs validated;
+ *  - a Playwright-style fallback `FetchPage` is tried when the primary is blocked;
+ *  - declines gracefully (null → router falls through) when blocked or thin.
+ */
+
+const FIXTURE_HTML = readFileSync(
+  fileURLToPath(new URL("./fixtures/ebay-sold.sample.html", import.meta.url)),
+  "utf8",
+);
+
+/** The five real sold prices the fixture contains (placeholder + no-price skipped). */
+const FIXTURE_PRICES = [169.99, 175.0, 178.0, 185.5, 199.95];
+const sortedFixturePrices = [...FIXTURE_PRICES].sort((a, b) => a - b);
+const FIXTURE_MEDIAN = sortedFixturePrices[2]; // 178.00 (5 comps → middle)
+
+const BRANDED_SIGNAL: ItemSignal = {
+  brand: "Sony",
+  model: "WH-1000XM4",
+  category: "electronics",
+  condition: "good",
+  conditionKnown: true,
+};
+
+/** A FetchPage fake that records the URLs it was asked to fetch. */
+function fakeFetch(html: string): FetchPage & { urls: string[] } {
+  const urls: string[] = [];
+  const fn = (async (url: string) => {
+    urls.push(url);
+    return html;
+  }) as FetchPage & { urls: string[] };
+  fn.urls = urls;
+  return fn;
+}
+
+/** A FetchPage fake that always fails — models a blocked / CAPTCHA'd request. */
+function blockedFetch(): FetchPage & { urls: string[] } {
+  const urls: string[] = [];
+  const fn = (async (url: string): Promise<string> => {
+    urls.push(url);
+    throw new Error("eBay sold fetch failed: 429");
+  }) as FetchPage & { urls: string[] };
+  fn.urls = urls;
+  return fn;
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("SSRF hardening", () => {
+  it("accepts only eBay hosts (exact ebay.com or a *.ebay.com subdomain)", () => {
+    expect(isAllowedEbayHost("ebay.com")).toBe(true);
+    expect(isAllowedEbayHost("www.ebay.com")).toBe(true);
+    // Look-alikes and other domains are rejected.
+    expect(isAllowedEbayHost("notebay.com")).toBe(false);
+    expect(isAllowedEbayHost("ebay.com.evil.com")).toBe(false);
+    expect(isAllowedEbayHost("evil.com")).toBe(false);
+    // International eBay TLDs are out of scope (USD .com only in v1).
+    expect(isAllowedEbayHost("www.ebay.de")).toBe(false);
+  });
+
+  it("flags internal / private / loopback / link-local hosts (and bare IP literals)", () => {
+    for (const h of [
+      "localhost",
+      "intranet.local",
+      "127.0.0.1",
+      "10.0.0.5",
+      "172.16.4.4",
+      "192.168.1.1",
+      "169.254.10.10",
+      "0.0.0.0",
+      "::1",
+      "1.2.3.4", // a public IP literal is still rejected — eBay is reached by name
+    ]) {
+      expect(isPrivateOrInternalHost(h)).toBe(true);
+    }
+    expect(isPrivateOrInternalHost("www.ebay.com")).toBe(false);
+  });
+
+  it("assertSafeEbayUrl accepts a real eBay https URL and returns a URL", () => {
+    const u = assertSafeEbayUrl("https://www.ebay.com/sch/i.html?_nkw=sony&LH_Sold=1");
+    expect(u).toBeInstanceOf(URL);
+    expect(u.hostname).toBe("www.ebay.com");
+  });
+
+  it("assertSafeEbayUrl rejects non-https, userinfo, non-eBay, and internal hosts", () => {
+    expect(() => assertSafeEbayUrl("http://www.ebay.com/sch")).toThrow();
+    expect(() => assertSafeEbayUrl("https://user:pass@www.ebay.com/sch")).toThrow();
+    expect(() => assertSafeEbayUrl("https://evil.com/sch")).toThrow();
+    expect(() => assertSafeEbayUrl("https://127.0.0.1/sch")).toThrow();
+    expect(() => assertSafeEbayUrl("https://ebay.com.evil.com/sch")).toThrow();
+    expect(() => assertSafeEbayUrl("not a url")).toThrow();
+  });
+});
+
+describe("buildSoldSearchUrl", () => {
+  it("targets the sold + completed results page with the identity as the query", () => {
+    const url = buildSoldSearchUrl(BRANDED_SIGNAL);
+    expect(url).not.toBeNull();
+    const u = new URL(url!);
+    expect(u.hostname).toBe("www.ebay.com");
+    expect(u.pathname).toBe("/sch/i.html");
+    // The two flags that make the page show SOLD/COMPLETED comps, not active asks.
+    expect(u.searchParams.get("LH_Sold")).toBe("1");
+    expect(u.searchParams.get("LH_Complete")).toBe("1");
+    expect(u.searchParams.get("_nkw")).toBe("Sony WH-1000XM4");
+  });
+
+  it("uses a UPC as the query when that is the only identity, and a resolved name otherwise", () => {
+    expect(new URL(buildSoldSearchUrl({ upc: "027242920569" })!).searchParams.get("_nkw")).toBe(
+      "027242920569",
+    );
+    expect(
+      new URL(buildSoldSearchUrl({ brand: "Nike", resolvedName: "Nike Air Max 90 Men's Shoes" })!)
+        .searchParams.get("_nkw"),
+    ).toBe("Nike Air Max 90 Men's Shoes");
+  });
+
+  it("declines (null) for an unidentifiable signal or a bare brand", () => {
+    expect(buildSoldSearchUrl({})).toBeNull();
+    // A bare brand ("Sony") is not a product — its sold search returns arbitrary
+    // same-brand items, exactly the false-precision the branded-web tier avoids.
+    expect(buildSoldSearchUrl({ brand: "Sony", category: "electronics" })).toBeNull();
+    expect(buildSoldSearchUrl({ brand: "Sony", model: "  " })).toBeNull();
+  });
+
+  it("respects a configured base URL (host still SSRF-checked at fetch time)", () => {
+    const url = buildSoldSearchUrl(BRANDED_SIGNAL, "https://ebay.com");
+    expect(new URL(url!).hostname).toBe("ebay.com");
+  });
+});
+
+describe("parsePrice", () => {
+  it("parses plain, comma-grouped, currency-prefixed and ranged prices", () => {
+    expect(parsePrice("$178.00")).toBeCloseTo(178, 2);
+    expect(parsePrice("$1,299.99")).toBeCloseTo(1299.99, 2);
+    expect(parsePrice("C $99.00")).toBeCloseTo(99, 2);
+    // A variation listing shows a range — take the midpoint.
+    expect(parsePrice("$120.00 to $150.00")).toBeCloseTo(135, 2);
+  });
+
+  it("returns null for empty / non-numeric text", () => {
+    expect(parsePrice("")).toBeNull();
+    expect(parsePrice(undefined)).toBeNull();
+    expect(parsePrice("Free")).toBeNull();
+  });
+});
+
+describe("parseSoldComps (saved fixture)", () => {
+  const comps = parseSoldComps(FIXTURE_HTML);
+
+  it("extracts exactly the real sold comps, skipping the placeholder and price-less cards", () => {
+    expect(comps).toHaveLength(FIXTURE_PRICES.length);
+    expect(comps.map((c) => c.price).sort((a, b) => a - b)).toEqual(sortedFixturePrices);
+    // The "Shop on eBay" placeholder never becomes a comp.
+    expect(comps.some((c) => /shop on ebay/i.test(c.title ?? ""))).toBe(false);
+  });
+
+  it("cites a real eBay item URL and a cleaned title for every comp", () => {
+    for (const c of comps) {
+      expect(c.url.startsWith("https://www.ebay.com/itm/")).toBe(true);
+      expect(c.title).toBeTruthy();
+      // The "New Listing" badge text is stripped from the title.
+      expect(c.title!.startsWith("New Listing")).toBe(false);
+    }
+  });
+});
+
+describe("synthesizeSoldResult", () => {
+  const comps: EbaySoldComp[] = FIXTURE_PRICES.map((price, i) => ({
+    url: `https://www.ebay.com/itm/${i}`,
+    title: `comp ${i}`,
+    price,
+  }));
+  const result = synthesizeSoldResult(comps);
+
+  it("produces a schema-valid, sold-grounded ebay-sold price recommendation", () => {
+    expect(() => priceResultSchema.parse(result)).not.toThrow();
+    expect(result.tier).toBe("ebay-sold");
+    // Suggested = median of the sold prices; band = min..max.
+    expect(result.suggested).toBeCloseTo(FIXTURE_MEDIAN, 2);
+    expect(result.range.min).toBeCloseTo(sortedFixturePrices[0], 2);
+    expect(result.range.max).toBeCloseTo(sortedFixturePrices.at(-1)!, 2);
+    // Completed eBay sales are SOLD ground truth — every source is a sold-comp.
+    expect(result.sources).toHaveLength(comps.length);
+    expect(result.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+    // No LLM is involved, so no model provenance is claimed.
+    expect(result.model).toBeUndefined();
+  });
+
+  it("reports comp agreement so the confidence composite sees tightness, not a constant", () => {
+    expect(result.compAgreement).toBeGreaterThanOrEqual(TIGHT_AGREEMENT_MIN);
+    const scattered = synthesizeSoldResult([
+      { url: "https://www.ebay.com/itm/a", price: 60, title: "a" },
+      { url: "https://www.ebay.com/itm/b", price: 185, title: "b" },
+      { url: "https://www.ebay.com/itm/c", price: 420, title: "c" },
+    ]);
+    expect(scattered.compAgreement!).toBeLessThan(TIGHT_AGREEMENT_MIN);
+    // A scattered sold set is honestly less confident than a tight one.
+    expect(scattered.confidence).toBeLessThan(result.confidence);
+  });
+});
+
+describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
+  it("declares its tier and only handles identifiable signals", () => {
+    const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(FIXTURE_HTML) });
+    expect(provider.tier).toBe("ebay-sold");
+    expect(provider.canHandle?.(BRANDED_SIGNAL)).toBe(true);
+    expect(provider.canHandle?.({ upc: "027242920569" })).toBe(true);
+    expect(provider.canHandle?.({})).toBe(false);
+    expect(provider.canHandle?.({ brand: "Sony" })).toBe(false); // bare brand
+  });
+
+  it("prices a branded item from the scraped sold page (median + cited sold comps)", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({ fetchPage });
+    const result = await provider.price(BRANDED_SIGNAL);
+
+    expect(result).not.toBeNull();
+    expect(() => priceResultSchema.parse(result)).not.toThrow();
+    expect(result!.tier).toBe("ebay-sold");
+    expect(result!.suggested).toBeCloseTo(FIXTURE_MEDIAN, 2);
+    expect(result!.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+    // It fetched the SOLD/COMPLETED results page for this identity.
+    expect(fetchPage.urls).toHaveLength(1);
+    expect(fetchPage.urls[0]).toContain("LH_Sold=1");
+    expect(fetchPage.urls[0]).toContain("Sony");
+  });
+
+  it("declines (null) — never throws — when the page fetch is blocked", async () => {
+    const fetchPage = blockedFetch();
+    const provider = createEbaySoldPricingProvider({ fetchPage });
+    // A blocked scraper is an EXPECTED, recoverable condition: decline so the
+    // router falls through to the legal web-search tier, don't hard-fail.
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(1);
+  });
+
+  it("falls back to the Playwright-style fetcher when the primary is blocked", async () => {
+    const primary = blockedFetch();
+    const fallback = fakeFetch(FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({
+      fetchPage: primary,
+      fetchPageFallback: fallback,
+    });
+    const result = await provider.price(BRANDED_SIGNAL);
+    expect(result).not.toBeNull();
+    expect(result!.tier).toBe("ebay-sold");
+    expect(primary.urls).toHaveLength(1); // primary tried first
+    expect(fallback.urls).toHaveLength(1); // then the fallback rescued it
+  });
+
+  it("declines when fewer than MIN_COMPS sold comps are found", async () => {
+    const thin = `<ul class="srp-results"><li class="s-item">
+      <a class="s-item__link" href="https://www.ebay.com/itm/1"><div class="s-item__title">Sony WH-1000XM4</div></a>
+      <span class="s-item__price">$178.00</span></li></ul>`;
+    expect(EBAY_SOLD_MIN_COMPS).toBeGreaterThan(1);
+    const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(thin) });
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
+  });
+
+  it("declines an unidentifiable signal without fetching at all", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({ fetchPage });
+    expect(await provider.price({})).toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
+  it("is disabled by EBAY_SOLD_ENABLED=false (declines without fetching)", async () => {
+    vi.stubEnv("EBAY_SOLD_ENABLED", "false");
+    expect(ebaySoldConfigured()).toBe(false);
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({ fetchPage });
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+});
+
+describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
+  const declineIsbn: PricingProvider = {
+    tier: "isbn-lookup",
+    canHandle: (s) => Boolean(s.isbn),
+    price: async () => null,
+  };
+  const brandedStub: PricingProvider = {
+    tier: "branded-web",
+    price: async () => ({
+      suggested: 150,
+      range: { min: 120, max: 180 },
+      confidence: 0.6,
+      sources: [{ url: "https://www.ebay.com/itm/asking", kind: "asking-comp" }],
+      tier: "branded-web" as const,
+    }),
+  };
+
+  it("wins over the branded web tier when sold comps are found (sold beats asking)", async () => {
+    const ebaySold = createEbaySoldPricingProvider({ fetchPage: fakeFetch(FIXTURE_HTML) });
+    const router = new PriceRouter([declineIsbn, ebaySold, brandedStub]);
+    const result = await router.price(BRANDED_SIGNAL);
+    expect(result.tier).toBe("ebay-sold");
+    expect(result.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+  });
+
+  it("falls through to the web tier when the scrape is blocked", async () => {
+    const ebaySold = createEbaySoldPricingProvider({ fetchPage: blockedFetch() });
+    const router = new PriceRouter([declineIsbn, ebaySold, brandedStub]);
+    const result = await router.price(BRANDED_SIGNAL);
+    expect(result.tier).toBe("branded-web");
+  });
+});

@@ -1,0 +1,113 @@
+<!--
+  Saved eBay public SOLD-listings results page (trimmed), used as the offline,
+  deterministic contract fixture for the `ebay-sold` PricingProvider (issue #56).
+
+  Captured from a `LH_Sold=1&LH_Complete=1` search results page. Only the
+  structure the parser reads is kept: the `ul.srp-results > li.s-item` cards
+  with `.s-item__title`, `.s-item__price`, and `a.s-item__link`.
+
+  The parser MUST:
+   - skip the leading "Shop on eBay" placeholder card,
+   - skip a card with no parseable price,
+   - keep the five real sold comps below
+     (169.99, 175.00, 178.00, 185.50, 199.95).
+-->
+<html>
+  <body>
+    <ul class="srp-results srp-list clearfix">
+      <li class="s-item s-item__pl-on-bottom">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/123456789?placeholder=1">
+            <div class="s-item__title"><span role="heading" aria-level="3">Shop on eBay</span></div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price">$20.00</span>
+          </div>
+        </div>
+      </li>
+
+      <li class="s-item s-item__pl-on-bottom">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/235511110001?hash=item1a">
+            <div class="s-item__title">
+              <span class="LIGHT_HIGHLIGHT">New Listing</span>Sony WH-1000XM4 Wireless Noise Cancelling Headphones - Black
+            </div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price">$178.00</span>
+          </div>
+          <div class="s-item__caption">
+            <span class="s-item__caption--signal POSITIVE"><span>Sold&nbsp;Jun 3, 2026</span></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="s-item">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/235511110002?hash=item2b">
+            <div class="s-item__title"><span role="heading" aria-level="3">Sony WH-1000XM4 Headphones (Silver) - Very Good</span></div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price">$185.50</span>
+          </div>
+          <div class="s-item__caption">
+            <span class="s-item__caption--signal POSITIVE"><span>Sold&nbsp;Jun 1, 2026</span></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="s-item">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/235511110003?hash=item3c">
+            <div class="s-item__title"><span role="heading" aria-level="3">Sony WH-1000XM4 Over-Ear Wireless Headphones</span></div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price">$169.99</span>
+          </div>
+          <div class="s-item__caption">
+            <span class="s-item__caption--signal POSITIVE"><span>Sold&nbsp;May 29, 2026</span></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="s-item">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/235511110004?hash=item4d">
+            <div class="s-item__title"><span role="heading" aria-level="3">Sony WH-1000XM4 Bluetooth Headphones - Midnight Blue</span></div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price">$199.95</span>
+          </div>
+          <div class="s-item__caption">
+            <span class="s-item__caption--signal POSITIVE"><span>Sold&nbsp;May 27, 2026</span></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="s-item">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/235511110005?hash=item5e">
+            <div class="s-item__title"><span role="heading" aria-level="3">Sony WH-1000XM4 Wireless Headphones - Used Good</span></div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price">$175.00</span>
+          </div>
+          <div class="s-item__caption">
+            <span class="s-item__caption--signal POSITIVE"><span>Sold&nbsp;May 25, 2026</span></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="s-item">
+        <div class="s-item__info clearfix">
+          <a class="s-item__link" href="https://www.ebay.com/itm/235511110006?hash=item6f">
+            <div class="s-item__title"><span role="heading" aria-level="3">Sony WH-1000XM4 Replacement Ear Pads ONLY (no headphones)</span></div>
+          </a>
+          <div class="s-item__detail s-item__detail--primary">
+            <span class="s-item__price"></span>
+          </div>
+        </div>
+      </li>
+    </ul>
+  </body>
+</html>

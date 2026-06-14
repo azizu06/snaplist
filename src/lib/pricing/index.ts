@@ -39,6 +39,22 @@ export {
   type WebSearchPricingProviderOptions,
 } from "./providers/web-search";
 export {
+  createEbaySoldPricingProvider,
+  buildSoldSearchUrl,
+  parseSoldComps,
+  parsePrice,
+  synthesizeSoldResult,
+  assertSafeEbayUrl,
+  isAllowedEbayHost,
+  isPrivateOrInternalHost,
+  ebaySoldConfigured,
+  EBAY_SOLD_MIN_COMPS,
+  EBAY_SOLD_BASE_URL_DEFAULT,
+  type FetchPage,
+  type EbaySoldComp,
+  type EbaySoldPricingProviderOptions,
+} from "./providers/ebay-sold";
+export {
   createDepreciationPricingProvider,
   createOpenAIRetailExtractor,
   buildRetailQueries,

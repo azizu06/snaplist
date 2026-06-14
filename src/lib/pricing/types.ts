@@ -16,14 +16,18 @@ import { z } from "zod";
  * the (separately built) confidence composite consumes.
  *
  *  1. isbn-lookup   — books/media via ISBN → true structured lookup. Highest confidence.
- *  2. upc-aided-web — UPC decoded as an identification/query AID into the web-search
+ *  2. ebay-sold     — recognizable/identifiable item priced from eBay PUBLIC sold comps
+ *                     (the strongest used signal: real completed sales). Slots above the
+ *                     web-search tiers — sold beats asking (ADR-0001, issue #56).
+ *  3. upc-aided-web — UPC decoded as an identification/query AID into the web-search
  *                     agent (never a price oracle; the barcode-tier split).
- *  3. branded-web   — recognizable branded item priced from real web comps.
- *  4. depreciation  — only retail found → retail × condition depreciation. Low confidence.
- *  5. llm-only      — ultimate fallback, LLM estimate. Lowest confidence.
+ *  4. branded-web   — recognizable branded item priced from real web comps.
+ *  5. depreciation  — only retail found → retail × condition depreciation. Low confidence.
+ *  6. llm-only      — ultimate fallback, LLM estimate. Lowest confidence.
  */
 export const PRICING_TIERS = [
   "isbn-lookup",
+  "ebay-sold",
   "upc-aided-web",
   "branded-web",
   "depreciation",

@@ -113,11 +113,13 @@ on eBay. Buyers never see SnapList.
 ### Pricing pipeline (behind a `PricingProvider` interface; routing pipeline, not one source)
 Routing by item signal, each result always `{ suggested, range, confidence, sources[] }`, always user-editable:
 1. **ISBN present** → true structured lookup (Open Library + Google Books, free). Highest confidence.
-2. **UPC present** → decode as a strong **identification/query aid** (not a price oracle — no reliable free UPC price API). Feed decoded code + resolved product name into the web-search agent; price comes from comps.
-3. **Recognizable branded item** → **bounded tool-calling web-search pricing agent** (see below).
-4. **Generic, only retail found** → retail × condition-based depreciation factor, labeled low-confidence estimate.
-5. **Ultimate fallback** → LLM-only estimate, lowest confidence.
-- eBay **Browse** API dropped; eBay **Marketplace Insights** (true sold prices) is gated/unavailable to solo devs — not used. Open-web comps are mostly *asking* prices; the agent seeks resale/sold signals and **down-weights confidence when only asking prices are found**. Honest ceiling: a *smart suggestion*, not an oracle.
+2. **Identifiable item → eBay public sold comps** → scrape eBay's PUBLIC sold/completed results pages (`LH_Sold=1&LH_Complete=1`) for real **completed-sale** comps — the strongest used signal, no API/login needed. Slots **above** the web-search tiers (sold beats asking). Read-only price research, never a posting mechanism. See **ADR-0001**.
+3. **UPC present** → decode as a strong **identification/query aid** (not a price oracle — no reliable free UPC price API). Feed decoded code + resolved product name into the web-search agent; price comes from comps.
+4. **Recognizable branded item** → **bounded tool-calling web-search pricing agent** (see below).
+5. **Generic, only retail found** → retail × condition-based depreciation factor, labeled low-confidence estimate.
+6. **Ultimate fallback** → LLM-only estimate, lowest confidence.
+- eBay **Browse** API dropped; eBay **Marketplace Insights** (true sold prices) is gated/unavailable to solo devs — not used **as an API**. Instead, eBay's PUBLIC sold-listings *pages* are scraped (ADR-0001) for real sold comps. Open-web comps (web-search tier) remain mostly *asking* prices; the agent seeks resale/sold signals and **down-weights confidence when only asking prices are found**. Honest ceiling: a *smart, sold-grounded suggestion*, not an oracle.
+- **Freshness:** sold prices drift, so the source of truth is a **live fetch at query time**; a TTL cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The pgvector **reference corpus** grounds listing copy and *corroborates* pricing — it is **never** the price oracle.
 
 ### Pricing research agent
 - **Genuine but bounded tool-calling loop:** formulate targeted queries (e.g. `"{brand} {model} used resale price sold"`) → search → judge coverage/agreement → optionally refine **once** → synthesize a **cited** range. Capped at ~2–3 search iterations for cost/latency.
@@ -197,9 +199,9 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 
 ## Out of Scope
 
-- Auto-posting to Poshmark / Mercari / Facebook / OfferUp (no public write APIs → **export packs**; never scraping).
+- Auto-posting to Poshmark / Mercari / Facebook / OfferUp (no public write APIs → **export packs**; never scraping **to post**). Read-only scraping of eBay's PUBLIC *sold* pages for price research is in scope (ADR-0001) — the prohibition is on automating *posting* via scraping, not on reading public price data.
 - Cross-platform unified inbox / order tracking (no APIs → eBay-only for live messaging).
-- True sold-price data (gated eBay Marketplace Insights) and eBay **Browse** API (dropped).
+- Sold-price *APIs* (gated eBay Marketplace Insights) and eBay **Browse** API (dropped). Sold-price *data* is obtained instead by scraping eBay's PUBLIC sold pages (ADR-0001).
 - Real users / growth / marketing as a success metric (showcase first).
 - Payment, checkout, shipping (these stay on eBay).
 - A universal "price anything" guarantee — accuracy concentrates on the hero domain; generics are honestly low-confidence.
