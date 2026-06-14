@@ -50,6 +50,12 @@ export interface EbaySoldComp {
   title?: string;
   /** The sold price in the page's currency (USD on the .com base). */
   price: number;
+  /**
+   * Card condition metadata from eBay's subtitle/SECONDARY_INFO ("Brand New",
+   * "Pre-Owned", "Open Box", …). The seller-written title often omits the grade,
+   * so this is the authoritative new-vs-used signal when present (#56 review).
+   */
+  condition?: string;
 }
 
 export interface EbaySoldPricingProviderOptions {
@@ -233,32 +239,36 @@ export function buildSoldSearchUrl(
 }
 
 /**
- * Currency markers eBay US renders for international listings. `C $99.00` (CAD),
- * `AU $150.00` (AUD), `£99.00`, `EUR 99,00` must NOT anchor a USD median — and a
- * `C $99 (approx US $73)` cell must not be averaged as a range (#56 review). A
- * letter-prefixed `$` is foreign EXCEPT `US $` (which IS USD).
+ * Non-USD currency detection. Rather than enumerate foreign codes (whack-a-mole:
+ * ILS, RUB, THB, ₪, ₺ … always escape a finite list), REQUIRE an unambiguous USD
+ * amount and reject everything else (#56 review):
+ *  - any currency SYMBOL that isn't `$` (the Unicode `\p{Sc}` class — £ € ¥ ₪ ₺
+ *    ₹ ₩ ฿ … — tested after stripping `$`);
+ *  - any 3-letter ISO currency code other than `USD` (EUR, GBP, ILS, RUB, THB …);
+ *  - a letter-prefixed dollar (`C $`, `AU $`) EXCEPT `US $` (which IS USD).
  */
-const NON_USD_SYMBOL_RE = /[£€¥₹₩]/;
+const NON_DOLLAR_SYMBOL_RE = /\p{Sc}/u;
+const FOREIGN_ISO_CODE_RE = /\b(?!USD\b)[A-Z]{3}\b/;
 const FOREIGN_DOLLAR_RE = /\b(?!US\b)[A-Z]{1,3}\s*\$/;
-const FOREIGN_CODE_RE =
-  /\b(?:EUR|GBP|CAD|AUD|JPY|CHF|CNY|INR|MXN|BRL|KRW|SEK|NOK|DKK|PLN|HKD|SGD|NZD)\b/;
 
 /**
  * Parse a USD price cell into a number. Handles `$178.00`, comma-grouped
  * `$1,299.99`, and variation RANGES (`$120.00 to $150.00` → the midpoint).
- * Returns `null` for empty / non-priced text (`Free`, ``) AND for any NON-USD
- * amount (`C $99.00`, `£99.00`, `EUR 99,00`) so a foreign price never silently
- * anchors a USD recommendation. Pure and total — never throws.
+ * Returns `null` for empty / non-priced text (`Free`, ``) AND for any amount
+ * that is not unambiguously USD (`C $99.00`, `£99.00`, `EUR 99,00`, `ILS 500`)
+ * so a foreign price never silently anchors a USD recommendation. Pure and total.
  */
 export function parsePrice(text: string | undefined): number | null {
   if (!text) return null;
   if (
-    NON_USD_SYMBOL_RE.test(text) ||
-    FOREIGN_DOLLAR_RE.test(text) ||
-    FOREIGN_CODE_RE.test(text)
+    NON_DOLLAR_SYMBOL_RE.test(text.replace(/\$/g, "")) ||
+    FOREIGN_ISO_CODE_RE.test(text) ||
+    FOREIGN_DOLLAR_RE.test(text)
   ) {
     return null;
   }
+  // Require an explicit USD marker so a bare number ("500.00") isn't assumed USD.
+  if (!/\$/.test(text) && !/\bUSD\b/.test(text)) return null;
   const groups = text.replace(/,/g, "").match(/\d+(?:\.\d+)?/g);
   if (!groups) return null;
   const values = groups.map(Number).filter((n) => Number.isFinite(n) && n > 0);
@@ -328,7 +338,13 @@ export function parseSoldComps(
     if (seen.has(url)) return;
     seen.add(url);
 
-    comps.push({ url, title, price });
+    // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
+    // authoritative grade even when the title omits it (#56 review).
+    const condition =
+      card.find(".s-item__subtitle, .SECONDARY_INFO").first().text().replace(/\s+/g, " ").trim() ||
+      undefined;
+
+    comps.push({ url, title, price, ...(condition ? { condition } : {}) });
   });
 
   return comps;
@@ -395,8 +411,18 @@ export function isMultiUnitLot(title: string): boolean {
 function modelMatchesTitle(title: string, model: string): boolean {
   const tokens = model.match(/[A-Za-z0-9]+/g);
   if (!tokens || tokens.length === 0) return true;
+  // The token-boundary match alone still accepts a longer VARIANT, because the
+  // separating whitespace satisfies the trailing boundary: "iPhone 14 Pro" would
+  // match "iPhone 14 Pro Max", "PlayStation 5" → "PlayStation 5 Slim". Reject when
+  // a known product-tier suffix the signal didn't ask for follows the match (their
+  // resale values differ materially). A tight, well-known suffix set stops the
+  // common, costly confusions; exhaustive variant disambiguation is gold-set work
+  // (#61), and a false reject only declines to the web tier (#56 review).
   const pattern =
-    "(?<![A-Za-z0-9])" + tokens.join("[\\s\\-_]*") + "(?![A-Za-z0-9])";
+    "(?<![A-Za-z0-9])" +
+    tokens.join("[\\s\\-_]*") +
+    "(?![A-Za-z0-9])" +
+    "(?!\\s+(?:max|plus|pro|ultra|mini|se|slim|lite|air|xl|xs|xr)\\b)";
   return new RegExp(pattern, "i").test(title);
 }
 
@@ -466,23 +492,32 @@ export function isAccessoryOrParts(title: string, signal: ItemSignal): boolean {
   return false;
 }
 
-/**
- * Is the comp a NEW/sealed listing? Handles the standalone "NEW" marker, while
- * skipping "Like New" (a used grade) and identity uses of "new" (e.g. a "New
- * Balance" product name) so those are not mistaken for new condition (#56 review).
- */
-export function isNewConditionComp(title: string, signal: ItemSignal): boolean {
-  // Scan the title with identity phrases REMOVED, so a brand/model that contains
-  // "new" (e.g. "New Balance") can't mask a genuine standalone "NEW" condition
-  // marker elsewhere: "NEW New Balance 574" must still be flagged new, while
-  // "New Balance 574" must not (#56 review).
-  const residual = stripIdentity(title, signal);
+/** Does the text carry a NEW/sealed marker (skipping the "Like New" used grade)? */
+function hasNewMarker(text: string): boolean {
   const re = new RegExp(NEW_CONDITION_RE.source, "gi");
-  for (const m of residual.matchAll(re)) {
+  for (const m of text.matchAll(re)) {
     if (m[1]) continue; // leading "like " → used grade, not a new marker
     return true;
   }
   return false;
+}
+
+/**
+ * Is the comp a NEW/sealed listing? Prefers the eBay CONDITION METADATA when
+ * present — the seller-written title often omits the grade, so a brand-new sale
+ * with a plain title ("Sony WH-1000XM4 Headphones") would otherwise be kept as a
+ * used comp (#56 review). Falls back to the identity-stripped TITLE for cards
+ * without metadata, so a brand that contains "new" (e.g. "New Balance") can't
+ * mask a genuine standalone "NEW" elsewhere. "Open Box" counts as not-used.
+ */
+export function isNewConditionComp(
+  title: string,
+  signal: ItemSignal,
+  conditionText?: string,
+): boolean {
+  const cond = conditionText?.toLowerCase() ?? "";
+  if (cond && (/\bopen box\b/.test(cond) || hasNewMarker(cond))) return true;
+  return hasNewMarker(stripIdentity(title, signal));
 }
 
 /**
@@ -501,7 +536,7 @@ export function filterRelevantComps(
     if (!matchesIdentity(title, signal)) return false;
     if (isAccessoryOrParts(title, signal)) return false;
     if (isMultiUnitLot(title)) return false;
-    if (!keepNew && isNewConditionComp(title, signal)) return false;
+    if (!keepNew && isNewConditionComp(title, signal, c.condition)) return false;
     return true;
   });
 }
@@ -649,6 +684,15 @@ export function createEbaySoldPricingProvider(
    * is blocked or returns too few comps.
    */
   async function fetchComps(url: string): Promise<EbaySoldComp[]> {
+    // SSRF guard at the PROVIDER boundary so BOTH the default primary fetcher AND
+    // an injected Playwright-style fallback are protected — a non-eBay/internal
+    // EBAY_SOLD_BASE_URL must never reach EITHER seam (#56 review). Declines on a
+    // bad URL rather than throwing, so the router falls through to web search.
+    try {
+      assertSafeEbayUrl(url);
+    } catch {
+      return [];
+    }
     let comps: EbaySoldComp[] = [];
     try {
       comps = parseSoldComps(await fetchPrimary(url), baseUrl, maxResults);

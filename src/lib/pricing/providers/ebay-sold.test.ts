@@ -201,7 +201,7 @@ describe("parsePrice", () => {
     expect(parsePrice("US $178.00")).toBeCloseTo(178, 2);
   });
 
-  it("rejects NON-USD amounts so a foreign price can't anchor a USD median (round-5)", () => {
+  it("rejects NON-USD amounts so a foreign price can't anchor a USD median (round-5/6)", () => {
     expect(parsePrice("C $99.00")).toBeNull(); // CAD
     expect(parsePrice("AU $150.00")).toBeNull(); // AUD
     expect(parsePrice("£99.00")).toBeNull(); // GBP symbol
@@ -209,6 +209,14 @@ describe("parsePrice", () => {
     expect(parsePrice("EUR 99.00")).toBeNull(); // EUR code
     // The nightmare case: a foreign price with an approx USD must NOT be averaged.
     expect(parsePrice("C $99.00 (approx US $73.00)")).toBeNull();
+    // Generic detection (round-6): currencies OUTSIDE any finite list still reject.
+    expect(parsePrice("ILS 500.00")).toBeNull();
+    expect(parsePrice("RUB 500.00")).toBeNull();
+    expect(parsePrice("THB 500.00")).toBeNull();
+    expect(parsePrice("₪500.00")).toBeNull(); // shekel symbol
+    expect(parsePrice("₺500.00")).toBeNull(); // lira symbol
+    // A bare number with no currency marker is not assumed to be USD.
+    expect(parsePrice("500.00")).toBeNull();
   });
 
   it("returns null for empty / non-numeric text", () => {
@@ -248,6 +256,20 @@ describe("parseSoldComps (saved fixture)", () => {
       // The "New Listing" badge text is stripped from the title.
       expect(c.title!.startsWith("New Listing")).toBe(false);
     }
+  });
+
+  it("extracts card condition metadata from the subtitle/SECONDARY_INFO (round-6)", () => {
+    const html = `<ul class="srp-results">
+      <li class="s-item">
+        <a class="s-item__link" href="https://www.ebay.com/itm/1"><div class="s-item__title">Sony WH-1000XM4 Headphones</div></a>
+        <span class="s-item__price">$300.00</span>
+        <div class="s-item__caption"><span>Sold May 1, 2026</span></div>
+        <div class="s-item__subtitle"><span class="SECONDARY_INFO">Brand New</span></div>
+      </li>
+    </ul>`;
+    const parsed = parseSoldComps(html);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].condition).toBe("Brand New");
   });
 });
 
@@ -424,6 +446,39 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
     ];
     expect(filterRelevantComps(comps, productionSignal)).toEqual([]);
   });
+
+  it("rejects a longer product VARIANT a token-prefix would otherwise match (round-6)", () => {
+    // "iPhone 14 Pro" must not be priced off "iPhone 14 Pro Max" comps, nor
+    // "PlayStation 5" off "PlayStation 5 Slim" — materially different resale values.
+    const iphone: ItemSignal = { brand: "Apple", model: "iPhone 14 Pro", condition: "good" };
+    const iphoneComps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Apple iPhone 14 Pro 256GB Space Black", price: 720 },
+      { url: "https://www.ebay.com/itm/2", title: "Apple iPhone 14 Pro Max 256GB", price: 950 },
+    ];
+    expect(filterRelevantComps(iphoneComps, iphone).map((c) => c.price)).toEqual([720]);
+    const ps5: ItemSignal = { brand: "Sony", model: "PlayStation 5", condition: "good" };
+    const ps5Comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/3", title: "Sony PlayStation 5 Disc Console", price: 400 },
+      { url: "https://www.ebay.com/itm/4", title: "Sony PlayStation 5 Slim Disc", price: 450 },
+    ];
+    expect(filterRelevantComps(ps5Comps, ps5).map((c) => c.price)).toEqual([400]);
+  });
+
+  it("uses card CONDITION metadata to drop a new comp whose title omits 'new' (round-6)", () => {
+    // The seller-written title says nothing about condition; the card metadata
+    // does. A USED-item seller must not be priced off a brand-new sale (#56 review).
+    const comps: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180, condition: "Pre-Owned" },
+      { url: "https://www.ebay.com/itm/2", title: "Sony WH-1000XM4 Headphones", price: 300, condition: "Brand New" },
+      { url: "https://www.ebay.com/itm/3", title: "Sony WH-1000XM4 Headphones", price: 260, condition: "Open Box" },
+    ];
+    expect(filterRelevantComps(comps, BRANDED_SIGNAL).map((c) => c.price)).toEqual([180]);
+    // "Like New" in metadata is a USED grade — kept.
+    const likeNew: EbaySoldComp[] = [
+      { url: "https://www.ebay.com/itm/4", title: "Sony WH-1000XM4 Headphones", price: 175, condition: "Like New" },
+    ];
+    expect(filterRelevantComps(likeNew, BRANDED_SIGNAL).map((c) => c.price)).toEqual([175]);
+  });
 });
 
 describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {
@@ -542,7 +597,8 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
   it("declines when fewer than MIN_COMPS sold comps are found", async () => {
     const thin = `<ul class="srp-results"><li class="s-item">
       <a class="s-item__link" href="https://www.ebay.com/itm/1"><div class="s-item__title">Sony WH-1000XM4</div></a>
-      <span class="s-item__price">$178.00</span></li></ul>`;
+      <span class="s-item__price">$178.00</span>
+      <div class="s-item__caption"><span>Sold May 1, 2026</span></div></li></ul>`;
     expect(EBAY_SOLD_MIN_COMPS).toBeGreaterThan(1);
     const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(thin) });
     expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
@@ -562,6 +618,22 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     const provider = createEbaySoldPricingProvider({ fetchPage });
     expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     expect(fetchPage.urls).toHaveLength(0);
+  });
+
+  it("guards BOTH fetch seams with the SSRF validator (round-6)", async () => {
+    // A non-eBay/internal EBAY_SOLD_BASE_URL must reach NEITHER the primary nor the
+    // injected fallback — the guard lives at the provider boundary, not just inside
+    // the default fetcher.
+    const primary = fakeFetch(FIXTURE_HTML);
+    const fallback = fakeFetch(FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({
+      baseUrl: "https://evil.example.com",
+      fetchPage: primary,
+      fetchPageFallback: fallback,
+    });
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
+    expect(primary.urls).toHaveLength(0);
+    expect(fallback.urls).toHaveLength(0);
   });
 });
 
