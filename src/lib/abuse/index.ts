@@ -48,7 +48,15 @@ export async function enforceRateLimit(
 ): Promise<NextResponse | null> {
   const tier = userId ? resolveTier(userId) : "free";
   const id = requestIdentifier(request, userId);
-  const result = await checkRateLimit(id, tier);
+  let result: LimitResult;
+  try {
+    result = await checkRateLimit(id, tier);
+  } catch (err) {
+    // FAIL OPEN: a limiter/store (Upstash) outage must not take down the metered
+    // routes — degrade to "no rate limiting" and move on, logging the failure.
+    logEvent("ratelimit.error", { id, error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
   if (result.success) return null;
   const retrySec = Math.ceil(result.resetMs / 1000);
   logEvent("ratelimit.block", { id, limit: result.limit, retrySec });
@@ -76,7 +84,15 @@ export async function checkDailyItemQuota(
 ): Promise<QuotaResult> {
   const tier = resolveTier(userId);
   const limit = tierLimits(tier, env).itemsPerDay;
-  const used = await incrDaily(`items:user:${userId}`, env);
+  let used: number;
+  try {
+    used = await incrDaily(`items:user:${userId}`, env);
+  } catch (err) {
+    // FAIL OPEN: never block a paying-the-cost-anyway upload because the counter
+    // store is down — log and allow (the global budget alert still backstops cost).
+    logEvent("quota.error", { userId, error: err instanceof Error ? err.message : String(err) });
+    return { allowed: true, used: 0, limit };
+  }
   const allowed = used <= limit;
   if (!allowed) logEvent("quota.item.block", { userId, used, limit, tier });
   return { allowed, used, limit };
@@ -91,7 +107,14 @@ export async function recordPipelineRunAndMaybeAlert(
   env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
   const budget = openAiDailyCallBudget(env);
-  const count = await incrDaily("openai:global", env);
+  let count: number;
+  try {
+    count = await incrDaily("openai:global", env);
+  } catch (err) {
+    // Best-effort alerting — a counter-store outage must not break the pipeline run.
+    logEvent("openai.budget.error", { error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
   if (count === budget + 1) {
     logEvent("openai.budget.exceeded", { count, budget });
     captureError(new Error(`OpenAI daily call budget exceeded: ${count}/${budget}`), {

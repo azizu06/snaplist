@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openAiDailyCallBudget, resolveTier, tierLimits } from "./config";
+import * as store from "./store";
 import { getLimiter, incrDaily, __resetInMemoryStores } from "./store";
 import {
   checkDailyItemQuota,
@@ -88,5 +89,24 @@ describe("abuse rate limiting", () => {
     expect(blocked!.headers.get("Retry-After")).toBeTruthy();
     const body = await blocked!.json();
     expect(body.error).toMatch(/too many requests/i);
+  });
+});
+
+describe("abuse fails OPEN when the store errors (availability > strictness)", () => {
+  it("checkDailyItemQuota allows the request when the counter store throws", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(store, "incrDaily").mockRejectedValue(new Error("redis unreachable"));
+    expect(await checkDailyItemQuota("u1", {})).toMatchObject({ allowed: true });
+  });
+
+  it("enforceRateLimit returns null (allow) when the limiter throws", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(store, "getLimiter").mockReturnValue({
+      limit: async () => {
+        throw new Error("redis unreachable");
+      },
+    });
+    const req = new Request("https://snaplist.app/api/inbox/send", { method: "POST" });
+    expect(await enforceRateLimit(req, "user_a")).toBeNull();
   });
 });
