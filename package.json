@@ -22,6 +22,7 @@
     "@remotion/bundler": "^4.0.475",
     "@remotion/cli": "^4.0.475",
     "@remotion/renderer": "^4.0.475",
+    "@sentry/node": "^10.57.0",
     "@supabase/supabase-js": "^2.108.1",
     "ai": "^6.0.199",
     "cheerio": "^1.2.0",

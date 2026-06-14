@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { deleteEbayConnection } from "@/lib/marketplace/ebay";
-import { logEvent } from "@/lib/observability";
+import { reportServerError } from "@/lib/sentry";
 
 /**
  * Disconnect the seller's eBay account (issue #17): deletes the stored
@@ -20,10 +20,7 @@ export async function disconnectEbay() {
   try {
     await deleteEbayConnection(supabase);
   } catch (err) {
-    logEvent("ebay.disconnect", {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    reportServerError("ebay.disconnect", err);
     redirect(
       `/settings?error=${encodeURIComponent("Failed to disconnect eBay. Please try again.")}`,
     );

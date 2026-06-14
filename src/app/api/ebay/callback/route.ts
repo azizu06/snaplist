@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { getUserId } from "@/lib/auth";
 import { logEvent } from "@/lib/observability";
+import { reportServerError } from "@/lib/sentry";
 import { createClient } from "@/lib/supabase/server";
 import {
   exchangeAuthorizationCode,
@@ -76,11 +77,7 @@ export async function GET(request: NextRequest) {
       logEvent("ebay.callback", { ok: false, reason: "exchange_failed", message: err.message });
       return fail(err.message);
     }
-    logEvent("ebay.callback", {
-      ok: false,
-      reason: "persist_failed",
-      error: err instanceof Error ? err.message : String(err),
-    });
+    reportServerError("ebay.callback", err, { reason: "persist_failed" });
     return fail("Couldn't save your eBay connection. Please try again.");
   }
 
