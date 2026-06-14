@@ -5,7 +5,8 @@ import {
   SAMPLE_PREDICTIONS,
   parsePredictions,
 } from "./fixtures";
-import { createHeuristicJudge, createOpenAIJudge, DEFAULT_JUDGE_MODEL } from "./judge";
+import { createHeuristicJudge, createOpenAIJudge } from "./judge";
+import { resolveModelId } from "../llm";
 import { formatReport, runEval } from "./report";
 import {
   judgedListingSchema,
@@ -252,7 +253,10 @@ export async function main(argv: readonly string[]): Promise<void> {
 
   const judge = args.realJudge ? createOpenAIJudge() : createHeuristicJudge();
   const judgeName = args.realJudge
-    ? `llm:${process.env.EVAL_JUDGE_MODEL?.trim() || DEFAULT_JUDGE_MODEL}`
+    // Provider-aware: label the model that ACTUALLY ran (gemini-2.5-flash on the
+    // dev/Gemini default), not a hardcoded OpenAI default — else the eval report
+    // attributes scores to a model that never ran (#55 review).
+    ? `llm:${resolveModelId("judge")}`
     : "heuristic-offline";
 
   const report = await runEval({
