@@ -1,4 +1,5 @@
 import type { EbayCondition, EbayPublishRequest } from "./types";
+import { PublishValidationError } from "./errors";
 
 /**
  * Pure mapping from SnapList's persisted listing shape onto the provider-shaped
@@ -134,7 +135,9 @@ export function marketplaceContentLanguage(
 /** Format a price for the Sell API money type (decimal string, 2 places). */
 export function toEbayPrice(price: number, currency = "USD"): { value: string; currency: string } {
   if (!Number.isFinite(price) || price <= 0) {
-    throw new Error(`Cannot publish to eBay with a non-positive price (got ${price}).`);
+    throw new PublishValidationError(
+      `Cannot publish to eBay with a non-positive price (got ${price}).`,
+    );
   }
   return { value: price.toFixed(2), currency };
 }
@@ -142,7 +145,9 @@ export function toEbayPrice(price: number, currency = "USD"): { value: string; c
 /** Assemble the full publish request. Throws on unpublishable input (no price). */
 export function toEbayPublishRequest(listing: ListingForPublish): EbayPublishRequest {
   if (!listing.title.trim() || !listing.description.trim()) {
-    throw new Error("Cannot publish to eBay: listing is missing a title or description.");
+    throw new PublishValidationError(
+      "Cannot publish to eBay: listing is missing a title or description.",
+    );
   }
   return {
     sku: listing.listingId,

@@ -4,6 +4,7 @@ import { getUserId } from "@/lib/auth";
 import {
   createEbayAdapterForUser,
   publishListingToEbay,
+  PublishValidationError,
 } from "@/lib/marketplace/ebay";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 
@@ -48,14 +49,16 @@ export async function POST(request: NextRequest) {
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {
+    // User-actionable validation errors carry a SAFE message the seller can act on
+    // (no price, no photo, currency, not found) — surface it. Everything else
+    // (adapter/Supabase/upstream) is redacted to a generic message with the real
+    // error logged server-side (CWE-209, #57).
+    if (err instanceof PublishValidationError) {
+      const status = /not found/i.test(err.message) ? 404 : 422;
+      return NextResponse.json({ error: err.message }, { status });
+    }
     logServerError("ebay.publish", err);
-    // Preserve the not-found → 404 distinction with a clean message; every other
-    // adapter/upstream failure is a generic 502 so raw eBay/Supabase error text
-    // never reaches the client (CWE-209, #57).
-    const notFound = err instanceof Error && /not found/i.test(err.message);
-    return notFound
-      ? NextResponse.json({ error: "Listing not found." }, { status: 404 })
-      : NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });
+    return NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });
   }
 }
 

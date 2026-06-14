@@ -7,6 +7,7 @@ import { getUserId } from "@/lib/auth";
 import {
   createEbayAdapterForUser,
   publishListingToEbay,
+  PublishValidationError,
 } from "@/lib/marketplace/ebay";
 import { logEvent } from "@/lib/observability";
 
@@ -36,13 +37,17 @@ export async function publishToEbay(formData: FormData) {
       await createEbayAdapterForUser(supabase),
     );
   } catch (err) {
-    // Raw eBay/Supabase error stays server-side; the client gets a generic
-    // message via the redirect (CWE-209, #57).
+    revalidatePath(`/listings/${listingId}`);
+    // A validation error is user-actionable (no price, no photo, currency) — show
+    // it so the seller can fix and retry. Internal/adapter errors are redacted and
+    // logged server-side (CWE-209, #57).
+    if (err instanceof PublishValidationError) {
+      redirect(`/listings/${listingId}?error=${encodeURIComponent(err.message)}`);
+    }
     logEvent("ebay.publish.action", {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
-    revalidatePath(`/listings/${listingId}`);
     redirect(
       `/listings/${listingId}?error=${encodeURIComponent("Failed to publish to eBay. Please try again.")}`,
     );

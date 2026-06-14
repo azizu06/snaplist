@@ -15,10 +15,15 @@ The multi-tenant security model held up under audit. The verified result was **t
   The audit found **one exception** — the few-shot corpus retrieval on the authenticated upload path
   preferred the `SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS (F-2, fixed). The corpus is global
   anon-readable reference data, so no cross-tenant data leaked, but a service-role client must never
-  run on a request path; it now uses the anon key. The only remaining service-role use is the
-  server-side cross-tenant eval script (the honest credential for that job).
-- **AuthN/AuthZ.** API routes and server actions gate on Clerk (`getUserId` → 401) before any side
-  effect; ownership is proven through RLS rather than client-supplied ids (no IDOR found).
+  run on a request path; it now uses the anon key. **Legitimate service-role uses** (verified
+  appropriate): the server-side cross-tenant eval script, and the eBay account-deletion webhook
+  (`POST /api/ebay/account-deletion`) which calls `createAdminClient()` only *after* verifying eBay's
+  signature — a non-Clerk, signature-authenticated webhook that must erase a user's data across
+  tables, so the admin client is the correct credential there.
+- **AuthN/AuthZ.** The user-facing API routes and server actions gate on Clerk (`getUserId` → 401)
+  before any side effect; ownership is proven through RLS rather than client-supplied ids (no IDOR
+  found). The single non-Clerk route is the eBay account-deletion webhook, which authenticates by
+  verifying eBay's signed challenge/notification instead (the correct model for a third-party webhook).
 - **Input validation.** External inputs are Zod-validated at the trust boundary (route bodies,
   params, env). The eBay account-deletion webhook verifies eBay's SHA-256 challenge-response with the
   verification token before acting.
