@@ -83,6 +83,7 @@ const STEPS = [
     eyebrow: "Step 5",
     tint: undefined,
     src: "/demo/steps/publish.mp4",
+    mobile: true,
     glyph: "publish",
     title: "Publish",
     body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
