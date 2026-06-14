@@ -37,7 +37,10 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
 - **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
   user-editable. Never a bare number.
 - **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
-  completeness}. Never raw LLM self-report. Drives the **autopilot gate**.
+  completeness}. Never raw LLM self-report. Drives the **autopilot gate**. The tier-trust ordering
+  encodes "sold beats asking": a tight **sold**-comp cluster ranks above the asking-based web tiers
+  and below only an exact ISBN lookup (issue #60); a scattered sold set degrades to the wide-comp
+  tier so a noisy sale spread cannot ride the sold label past the gate.
 - **Autopilot** — the confidence-gated posting behavior: high-confidence items are eligible to post
   automatically; low-confidence items **queue for review**. Toggleable off.
 - **Listing** — generated, platform-specific sale copy for an item (title, item specifics,
