@@ -93,6 +93,11 @@ export default function RootLayout({
             paddingBottom: "11px",
           },
           footer: { background: "var(--clerk-footer-bg)" },
+          // Kill the full-width "or" separator row — it wastes a line between
+          // the form and the social button. (The email-first vs social order is
+          // handled by CSS order in the (auth) layout — provider-level
+          // appearance.layout.socialButtonsPlacement isn't honored here.)
+          dividerRow: { display: "none" },
         },
       }}
     >

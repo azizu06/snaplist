@@ -212,14 +212,23 @@ export function SettingsView({
               Appearance
             </span>
           }
-          aside={<ThemeSegmented />}
+          aside={
+            <div className="hidden sm:block">
+              <ThemeSegmented />
+            </div>
+          }
         />
-        <CardBody>
+        <CardBody className="flex flex-col gap-4">
           <p className="text-[15px] leading-relaxed text-muted">
             Choose how SnapList looks on this device.{" "}
             <strong className="font-medium text-fg">System</strong> follows
             your OS setting automatically.
           </p>
+          {/* Mobile: a 3-option segmented control can't fit beside the title
+              without clipping "System", so it sits here full-width instead. */}
+          <div className="sm:hidden">
+            <ThemeSegmented />
+          </div>
         </CardBody>
       </Card>
       </GlareHover>

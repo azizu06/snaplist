@@ -138,14 +138,22 @@ export default function HowItWorks() {
                       and step 6 was a different rose color — owner). The
                       numeral still rides the clip badge via DemoClip n={n}. */}
                   <Eyebrow>{eyebrow}</Eyebrow>
-                  <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
+                  <h2 className="mt-3 font-display text-[clamp(23px,3.4vw,40px)] font-bold tracking-tight text-flash sm:mt-4">
                     {title}
                   </h2>
-                  <p className="mt-4 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
+                  <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-flash-dim sm:mt-4 sm:text-[16px]">
                     {body}
                   </p>
                 </div>
-                <div className={i % 2 === 0 ? "" : "lg:order-1"}>
+                {/* Mobile: the clip goes full-bleed edge-to-edge (escaping the
+                    section's px-5) so a wide 16:9 desktop render is as large as
+                    the screen allows and clearly leads the step, instead of a
+                    small box dwarfed by the heading. Desktop keeps the framed,
+                    rounded panel. (True in-frame legibility needs mobile-framed
+                    renders — tracked separately.) */}
+                <div
+                  className={`-mx-5 sm:mx-0 ${i % 2 === 0 ? "" : "lg:order-1"}`}
+                >
                   <DemoClip
                     src={src}
                     label={label}
@@ -153,7 +161,7 @@ export default function HowItWorks() {
                     title={title}
                     caption={poster}
                     glyph={HIW_GLYPHS[glyph]}
-                    className="rounded-3xl"
+                    className="!rounded-none border-x-0 sm:!rounded-3xl sm:border-x"
                   />
                 </div>
               </div>

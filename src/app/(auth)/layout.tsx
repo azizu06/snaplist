@@ -46,7 +46,15 @@ export default function AuthLayout({
           __html: `
 .cl-formFieldInput{outline:1.5px solid var(--clerk-border-strong)!important;outline-offset:-1.5px!important;}
 .cl-formFieldInput:focus,.cl-formFieldInput:focus-visible{outline:2px solid var(--clerk-primary)!important;outline-offset:-2px!important;}
-.cl-socialButtonsBlockButton{outline:1.5px solid var(--clerk-border-strong)!important;outline-offset:-1.5px!important;}`,
+.cl-socialButtonsBlockButton{outline:1.5px solid var(--clerk-border-strong)!important;outline-offset:-1.5px!important;}
+/* Email-first order: the email/password form leads and "Continue with Google"
+   drops below it (owner: the old social-top + full-width "or" row wasted space
+   and read as two disjoint blocks). .cl-main is Clerk's flex column holding
+   [socialButtonsRoot, dividerRow(hidden), form]; reorder its children directly
+   since provider-level appearance.layout.socialButtonsPlacement is ignored in
+   this Clerk version. Semantic .cl-* classes only (no volatile .cl-internal-*). */
+.cl-main .cl-form{order:1!important;}
+.cl-main .cl-socialButtonsRoot{order:2!important;margin-top:1.5rem!important;}`,
         }}
       />
     </div>
