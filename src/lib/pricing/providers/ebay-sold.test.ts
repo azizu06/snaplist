@@ -191,14 +191,17 @@ describe("buildSoldSearchUrl", () => {
 });
 
 describe("parsePrice", () => {
-  it("parses plain, comma-grouped and ranged USD prices", () => {
+  it("parses a single plain or comma-grouped USD price", () => {
     expect(parsePrice("$178.00")).toBeCloseTo(178, 2);
     expect(parsePrice("$1,299.99")).toBeCloseTo(1299.99, 2);
-    // A variation listing shows a range — take the midpoint. "to" must NOT be
-    // mistaken for a currency prefix (round-5).
-    expect(parsePrice("$120.00 to $150.00")).toBeCloseTo(135, 2);
     // "US $" is USD and stays accepted.
     expect(parsePrice("US $178.00")).toBeCloseTo(178, 2);
+  });
+
+  it("declines a variation RANGE instead of fabricating a midpoint (round-7)", () => {
+    // "$120 to $150" is a multi-variation listing — different variants, not one
+    // unit sold at $135; a fabricated midpoint would contaminate the median.
+    expect(parsePrice("$120.00 to $150.00")).toBeNull();
   });
 
   it("rejects NON-USD amounts so a foreign price can't anchor a USD median (round-5/6)", () => {
@@ -270,6 +273,24 @@ describe("parseSoldComps (saved fixture)", () => {
     const parsed = parseSoldComps(html);
     expect(parsed).toHaveLength(1);
     expect(parsed[0].condition).toBe("Brand New");
+  });
+
+  it("skips Best-Offer-accepted cards (their shown price may be the list price) (round-7)", () => {
+    const html = `<ul class="srp-results">
+      <li class="s-item">
+        <a class="s-item__link" href="https://www.ebay.com/itm/1"><div class="s-item__title">Sony WH-1000XM4 Headphones</div></a>
+        <span class="s-item__price">$300.00</span>
+        <div class="s-item__caption"><span>Sold May 1, 2026</span></div>
+        <div class="s-item__detail">Best offer accepted</div>
+      </li>
+      <li class="s-item">
+        <a class="s-item__link" href="https://www.ebay.com/itm/2"><div class="s-item__title">Sony WH-1000XM4 Headphones</div></a>
+        <span class="s-item__price">$180.00</span>
+        <div class="s-item__caption"><span>Sold May 2, 2026</span></div>
+      </li>
+    </ul>`;
+    const parsed = parseSoldComps(html);
+    expect(parsed.map((c) => c.price)).toEqual([180]);
   });
 });
 

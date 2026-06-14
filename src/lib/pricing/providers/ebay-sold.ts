@@ -252,11 +252,12 @@ const FOREIGN_ISO_CODE_RE = /\b(?!USD\b)[A-Z]{3}\b/;
 const FOREIGN_DOLLAR_RE = /\b(?!US\b)[A-Z]{1,3}\s*\$/;
 
 /**
- * Parse a USD price cell into a number. Handles `$178.00`, comma-grouped
- * `$1,299.99`, and variation RANGES (`$120.00 to $150.00` → the midpoint).
- * Returns `null` for empty / non-priced text (`Free`, ``) AND for any amount
- * that is not unambiguously USD (`C $99.00`, `£99.00`, `EUR 99,00`, `ILS 500`)
- * so a foreign price never silently anchors a USD recommendation. Pure and total.
+ * Parse a single USD sold price into a number. Handles `$178.00` and comma-grouped
+ * `$1,299.99`. Returns `null` for empty / non-priced text (`Free`, ``), for any
+ * amount that is not unambiguously USD (`C $99.00`, `£99.00`, `EUR 99,00`, `ILS
+ * 500`), AND for a variation RANGE (`$120.00 to $150.00`): a range is a multi-
+ * variation listing — different variants, not one unit that sold at the midpoint —
+ * so inventing `$135` would contaminate the median (#56 review). Pure and total.
  */
 export function parsePrice(text: string | undefined): number | null {
   if (!text) return null;
@@ -273,8 +274,10 @@ export function parsePrice(text: string | undefined): number | null {
   if (!groups) return null;
   const values = groups.map(Number).filter((n) => Number.isFinite(n) && n > 0);
   if (values.length === 0) return null;
-  // A range cell ("$120 to $150") → midpoint; a single price → itself.
-  return values.length >= 2 ? (values[0] + values[1]) / 2 : values[0];
+  // A multi-number cell is a variation RANGE ("$120 to $150") — different variants,
+  // not one sold unit. Decline rather than fabricate a midpoint comp (#56 review).
+  if (values.length > 1) return null;
+  return values[0];
 }
 
 /**
@@ -293,9 +296,12 @@ export function parsePrice(text: string | undefined): number | null {
  * malformed page yields `[]`, never a throw — so the provider's fetch `catch`
  * can stay narrow (around the network only) and not mask real bugs.
  *
- * NOTE: eBay's markup can change. The selectors are validated by the saved
- * fixture contract test; live-page validation + a refresh strategy ride with
- * the freshness slice (#59) and the Playwright fallback.
+ * NOTE: this parses the classic `srp-results > s-item` layout (the saved fixture).
+ * eBay also serves a MODERN `li.s-card` layout to some clients; adding that
+ * selector set + a CAPTURED modern fixture is live-validation work tracked to the
+ * freshness slice (#59) — writing it blind (guessed class names, untested against
+ * real markup) would be dead code. Until #59 lands, the provider declines
+ * gracefully (→ web tier) on markup it doesn't recognize, never a wrong price.
  */
 export function parseSoldComps(
   html: string,
@@ -323,6 +329,12 @@ export function parseSoldComps(
     // Require the "Sold" caption — an active/sponsored card reusing li.s-item
     // (no completed-sale caption) must never be counted as a sold comp.
     if (!/\bsold\b/i.test(card.find(".s-item__caption").text())) return;
+
+    // Skip Best-Offer-accepted cards: the public card can show the LIST price, not
+    // the accepted transaction amount (the true amount is gated in Product
+    // Research), so its price is unreliable as a sold comp (#56 review). Honest
+    // ceiling: open-web sold pages can't always reveal the real offer price.
+    if (/best\s*offer\s*accepted/i.test(card.text())) return;
 
     const price = parsePrice(card.find(".s-item__price").first().text());
     if (price == null) return;
