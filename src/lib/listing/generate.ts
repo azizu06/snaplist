@@ -1,3 +1,4 @@
+import { resolveLanguageModel, resolveModelId } from "../llm";
 import {
   type ExtractedAttributes,
   type ListingCopy,
@@ -187,9 +188,7 @@ export function enforceTitleLength(
 // ---------------------------------------------------------------------------
 
 function resolveModel(model?: string): string {
-  return (
-    model?.trim() || process.env.LISTING_MODEL?.trim() || DEFAULT_LISTING_MODEL
-  );
+  return resolveModelId("listing", { modelId: model });
 }
 
 /**
@@ -370,17 +369,16 @@ const LISTING_SYSTEM_PROMPT =
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject` with
  * `schema: ebayListingSchema`. Imported lazily (like `embedding.ts` / `extract.ts`) so
- * the SDK never loads on the offline test path. `apiKey` defaults to OPENAI_API_KEY.
+ * the SDK never loads on the offline test path. The model is resolved through the LLM
+ * provider registry (`resolveLanguageModel("listing", …)`), so the provider/key follow
+ * `LLM_PROVIDER`; `apiKey`, when supplied, overrides the registry-resolved key.
  */
 export function createOpenAIListingGenerate(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
 ): ListingGenerate {
   return async ({ model, attributes, fewShot, attempt }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("listing", { modelId: model, apiKey });
 
     const examples = fewShot.examples
       .map((e, i) => `Example ${i + 1}:\n${e}`)
@@ -396,7 +394,7 @@ export function createOpenAIListingGenerate(
     // repair/whitelist; the repaired candidate is then validated against the strict
     // `ebayListingSchema` in `generateEbayListing`.
     const { object } = await generateObject({
-      model: openai.chat(model),
+      model: llmModel,
       schema: ebayListingRawSchema,
       system: LISTING_SYSTEM_PROMPT,
       prompt: instruction,

@@ -13,6 +13,7 @@ import {
   type SearchClient,
   type SearchResult,
 } from "./web-search";
+import { resolveLanguageModel } from "../../llm";
 
 /**
  * Tier 4 — the depreciation `PricingProvider` (`depreciation`), issue #11.
@@ -143,16 +144,15 @@ const RETAIL_EXTRACT_SYSTEM_PROMPT =
  * as `createOpenAICompExtractor`).
  */
 export function createOpenAIRetailExtractor(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
   model?: string,
 ): ExtractRetail {
   return async ({ signal, query, results }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
-    const modelId = resolvePricingModel(model);
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("pricingAgent", {
+      modelId: model,
+      apiKey,
+    });
 
     const identity = JSON.stringify(
       {
@@ -174,7 +174,7 @@ export function createOpenAIRetailExtractor(
       .join("\n\n");
 
     const { object } = await generateObject({
-      model: openai.chat(modelId),
+      model: llmModel,
       schema: retailFindingListSchema,
       system: RETAIL_EXTRACT_SYSTEM_PROMPT,
       prompt: `Item identity:\n${identity}\n\nSearch query: ${query}\n\nSearch results:\n${hits}`,

@@ -13,8 +13,11 @@ adapter and is **not on the Phase 1 critical path**.
 - **Multi-tenant from day one:** Clerk auth (Supabase third-party JWTs; issue #41), text `user_id`
   (the Clerk id) on every domain table, Postgres **RLS** enforces isolation via
   `public.clerk_user_id()`. Never write a query path that bypasses tenant isolation.
-- **OpenAI via the Vercel AI SDK.** All model calls go through the SDK; provider stays swappable.
-  Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
+- **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). All model
+  calls resolve through `resolveLanguageModel(role, …)`; the provider is a `LLM_PROVIDER` flip
+  (dev → Gemini for the free tier, showcase → OpenAI) — never construct a provider inline at a call
+  site. Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
+  Embeddings are excluded from the switch (pgvector `vector(1536)` dimension lock).
 - **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → web-search
   agent → depreciation → LLM fallback). Every result is `{ suggested, range, confidence, sources[] }`
   and is user-editable. Never collapse this to a single source.
@@ -40,7 +43,8 @@ adapter and is **not on the Phase 1 critical path**.
 - Validate the LLM-judge against a small human-labeled subset before trusting it.
 
 ## Stack
-Next.js (App Router) + TypeScript · Vercel AI SDK + OpenAI · Tavily (primary) / Exa (secondary) web
+Next.js (App Router) + TypeScript · Vercel AI SDK (OpenAI showcase / Gemini dev, via a role-keyed
+provider registry) · Tavily (primary) / Exa (secondary) web
 search · Clerk (auth) · Supabase (Postgres + pgvector + Realtime + Storage + cron) · Zod · Tailwind +
 shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, via adapter).
 

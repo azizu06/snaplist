@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ItemSignal, PriceResult, PricingProvider } from "../types";
 import { resolvePricingModel } from "./web-search";
+import { resolveLanguageModel } from "../../llm";
 
 /**
  * Tier 5 — the LLM-only `PricingProvider` (`llm-only`), issue #11.
@@ -75,16 +76,15 @@ const ESTIMATE_SYSTEM_PROMPT =
  * as the web tiers' extractors).
  */
 export function createOpenAIPriceEstimator(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
   model?: string,
 ): EstimatePrice {
   return async ({ signal }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
-    const modelId = resolvePricingModel(model);
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("pricingAgent", {
+      modelId: model,
+      apiKey,
+    });
 
     const attributes = JSON.stringify(
       {
@@ -101,7 +101,7 @@ export function createOpenAIPriceEstimator(
     );
 
     const { object } = await generateObject({
-      model: openai.chat(modelId),
+      model: llmModel,
       schema: llmPriceEstimateSchema,
       system: ESTIMATE_SYSTEM_PROMPT,
       prompt: `Known item attributes:\n${attributes}`,

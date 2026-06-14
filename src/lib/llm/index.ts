@@ -14,3 +14,7 @@ export {
   type LlmRole,
   type ResolveLanguageModelOptions,
 } from "./registry";
+// Recorded-response fixtures for offline replay + cross-provider contract tests.
+// (`contracts.ts` is deliberately NOT re-exported here — it imports the role
+// modules, which import this barrel, so re-exporting it would create a cycle.)
+export { loadLlmFixture, replayFixture } from "./fixtures";
