@@ -132,8 +132,26 @@ export function ScanShowcase() {
    *  shows the placeholder — stale listings are never visible during a scan. */
   const [output, setOutput] = useState<number | null>(null);
 
+  // Hold the auto-cycle until the page has loaded. The first photo is the hero's
+  // LCP element; starting the scan/crossfade immediately makes each faded-in
+  // frame a fresh, equally-large LCP candidate, which pushes the measured LCP
+  // later and later during load. Deferring the cycle to `load` locks the LCP to
+  // the eager first frame, then the showcase animates as a post-load
+  // enhancement. (Reduced motion never starts it — the static frame stands.)
+  const [started, setStarted] = useState(false);
   useEffect(() => {
     if (reduced) return;
+    if (document.readyState === "complete") {
+      const id = requestAnimationFrame(() => setStarted(true));
+      return () => cancelAnimationFrame(id);
+    }
+    const onLoad = () => setStarted(true);
+    window.addEventListener("load", onLoad, { once: true });
+    return () => window.removeEventListener("load", onLoad);
+  }, [reduced]);
+
+  useEffect(() => {
+    if (reduced || !started) return;
     // Beam lands → reveal this product's listing; hold; then advance the
     // frame (which restarts the sweep and flips the panel back to analyzing).
     const reveal = setTimeout(() => setOutput(active), SCAN_MS);
@@ -145,7 +163,7 @@ export function ScanShowcase() {
       clearTimeout(reveal);
       clearTimeout(advance);
     };
-  }, [active, reduced]);
+  }, [active, reduced, started]);
 
   const photo = reduced ? 0 : active;
   const listing = PRODUCTS[reduced ? 0 : (output ?? 0)];
