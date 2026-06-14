@@ -7,13 +7,16 @@ libraries, and the outbound-fetch surfaces.
 
 ## Posture summary
 
-The multi-tenant security model held up under audit. The verified result was **one LOW-severity
-finding** (now fixed); the architecture's core controls are sound:
+The multi-tenant security model held up under audit. The verified result was **three findings**
+(one LOW, two MEDIUM), all now fixed; the architecture's core controls are sound:
 
-- **Tenant isolation (RLS).** Every per-user data path runs on the RLS-enforced Supabase client
-  (Clerk identity via `public.clerk_user_id()`); a foreign id is indistinguishable from a missing
-  one (404). No service-role client is reachable from a request path — the only service-role use is
-  the server-side cross-tenant eval script, which is the honest credential for that job.
+- **Tenant isolation (RLS).** Per-user data paths run on the RLS-enforced Supabase client (Clerk
+  identity via `public.clerk_user_id()`); a foreign id is indistinguishable from a missing one (404).
+  The audit found **one exception** — the few-shot corpus retrieval on the authenticated upload path
+  preferred the `SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS (F-2, fixed). The corpus is global
+  anon-readable reference data, so no cross-tenant data leaked, but a service-role client must never
+  run on a request path; it now uses the anon key. The only remaining service-role use is the
+  server-side cross-tenant eval script (the honest credential for that job).
 - **AuthN/AuthZ.** API routes and server actions gate on Clerk (`getUserId` → 401) before any side
   effect; ownership is proven through RLS rather than client-supplied ids (no IDOR found).
 - **Input validation.** External inputs are Zod-validated at the trust boundary (route bodies,
@@ -44,10 +47,32 @@ impact is verbose-error reconnaissance to an already-authenticated user. The sam
 the real error server-side and returns a generic client message. Wired into the inbox routes and the
 publish route; the not-found → 404 distinction is preserved with a clean message. (The structured-
 logging / Sentry sink replaces `console.error` in #62.) Controlled application messages — 409
-conflict errors, the account-deletion server-side `logEvent` — were left intact (no raw internals).
+conflict errors, the account-deletion server-side `logEvent`, and the `parseReviewEdits` validation
+messages — were left intact (no raw internals).
+
+### F-2 (MEDIUM) — Service-role client on a per-user request path (RLS bypass)
+
+`createRealFewShotRetrieval` (`src/lib/listing/generate.ts`) — invoked from the authenticated upload
+pipeline — built its Supabase client preferring `SUPABASE_SERVICE_ROLE_KEY`, which **bypasses RLS**.
+The data read is the *global, anon-readable* reference corpus (SELECT policies for both `anon` and
+`authenticated`; no write policy; RPC is `SECURITY INVOKER`), so no tenant data was exposed — but a
+service-role client must never be reachable from a request path (a latent footgun the moment that
+client touches a tenant-scoped table). **Fix.** Extracted `corpusReadKey()` which returns the **anon**
+key only (never the service role) and unit-tested that property; the request-path read is now
+RLS-respecting. (My initial audit wrongly claimed no service-role client was request-reachable —
+Codex review on #71 caught it.)
+
+### F-3 (LOW, CWE-209) — Server actions redirected raw errors WITHOUT logging
+
+The `uploadAndProcess` (storage + pipeline), `saveReview` (Supabase), `publishToEbay`, and
+`disconnectEbay` server actions put raw `err.message` into the `?error=` redirect query string and
+did **not** log it server-side — strictly worse than F-1 (the detail reached the client and nowhere
+else). **Fix.** Each now records the real error with `logEvent(...)` and redirects a generic message.
+(OAuth `connect`/`callback` already `logEvent` and surface user-actionable OAuth-flow feedback — left
+as-is.)
 
 ## Not changed (by design)
 
-OAuth/connect/callback and server-action redirects surface their own error text to the *user's own*
-flow (low sensitivity, user-actionable, server-logged) — left for UX. Live `s-card` markup handling
-for the scraper is tracked to #59; pricing-precision tuning to #61.
+OAuth `connect`/`callback` redirects surface user-actionable OAuth-flow feedback and already log
+server-side — left for UX. Live `s-card` markup handling for the scraper is tracked to #59;
+pricing-precision tuning to #61.

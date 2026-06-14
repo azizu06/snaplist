@@ -8,6 +8,7 @@ import {
   createEbayAdapterForUser,
   publishListingToEbay,
 } from "@/lib/marketplace/ebay";
+import { logEvent } from "@/lib/observability";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -35,9 +36,16 @@ export async function publishToEbay(formData: FormData) {
       await createEbayAdapterForUser(supabase),
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Publish failed.";
+    // Raw eBay/Supabase error stays server-side; the client gets a generic
+    // message via the redirect (CWE-209, #57).
+    logEvent("ebay.publish.action", {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
     revalidatePath(`/listings/${listingId}`);
-    redirect(`/listings/${listingId}?error=${encodeURIComponent(message)}`);
+    redirect(
+      `/listings/${listingId}?error=${encodeURIComponent("Failed to publish to eBay. Please try again.")}`,
+    );
   }
 
   revalidatePath(`/listings/${listingId}`);

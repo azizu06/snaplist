@@ -7,6 +7,9 @@ import { getUserId } from "@/lib/auth";
 import { runPipelineAndPersist } from "@/lib/pipeline";
 import { createVisionPipeline } from "@/lib/vision";
 import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
+import { logEvent } from "@/lib/observability";
+
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
  * Upload server action — the spine wired to the request:
@@ -67,9 +70,10 @@ export async function uploadAndProcess(formData: FormData) {
       .from("photos")
       .upload(path, photo, { contentType: photo.type, upsert: false });
     if (uploadErr) {
-      redirect(
-        `/upload?error=${encodeURIComponent(`Upload failed: ${uploadErr.message}`)}`,
-      );
+      // Log the real storage error server-side; show the user a generic message —
+      // never leak Supabase internals via the redirect query string (CWE-209, #57).
+      logEvent("upload.store", { ok: false, error: uploadErr.message });
+      redirect(`/upload?error=${encodeURIComponent("Upload failed. Please try again.")}`);
     }
     paths.push(path);
   }
@@ -95,8 +99,12 @@ export async function uploadAndProcess(formData: FormData) {
     );
     itemId = res.itemId;
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Processing failed.";
-    redirect(`/upload?error=${encodeURIComponent(message)}`);
+    // Pipeline errors (vision/model/DB) stay server-side; the client gets a
+    // generic message (CWE-209, #57).
+    logEvent("upload.process", { ok: false, error: errText(err) });
+    redirect(
+      `/upload?error=${encodeURIComponent("We couldn't process that photo. Please try again.")}`,
+    );
   }
 
   redirect(`/review/${itemId}`);
@@ -117,8 +125,10 @@ export async function setAutopilotSetting(formData: FormData) {
   try {
     await setAutopilotEnabled(supabase, userId, enabled);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to update autopilot.";
-    redirect(`/settings?error=${encodeURIComponent(message)}`);
+    logEvent("settings.autopilot", { ok: false, error: errText(err) });
+    redirect(
+      `/settings?error=${encodeURIComponent("Couldn't update autopilot. Please try again.")}`,
+    );
   }
 
   // The switch lives on the Settings surface (issue #40, X-11 — moved out of
