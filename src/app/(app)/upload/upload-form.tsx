@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import ClickSpark from "@/components/bits/ClickSpark";
-import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Banner } from "@/components/ui/banner";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -15,8 +14,8 @@ import { Spinner } from "@/components/ui/spinner";
  * - a journey rail under the title (add photos → AI identifies & prices →
  *   review & post) so the three-step promise is visible before any photo;
  * - the dropzone is the hero: a large cover slot (drag-drop or browse) over
- *   three labeled angle slots (back/detail/label), ElectricBorder + violet
- *   wash on drag-over;
+ *   three labeled angle slots (back/detail/label), with a soft breathing
+ *   violet glow ring + wash on drag-over;
  * - the Mercari field rows live under an "Autofill by SnapList" card header,
  *   each with a leading glyph + the sparkle "AI suggests" pill.
  *
@@ -67,8 +66,22 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
       {/* The seller's own photo under the scanner — the pipeline made visible. */}
       {coverUrl ? (
         <div className="relative h-60 overflow-hidden border-b border-border bg-surface-2">
+          {/* Blurred fill + object-contain so the scanner shows the seller's
+              photo in full (as framed), not a cropped strip. */}
           {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
-          <img src={coverUrl} alt="" aria-hidden className="size-full object-cover" />
+          <img
+            src={coverUrl}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 size-full scale-110 object-cover blur-xl"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
+          <img
+            src={coverUrl}
+            alt=""
+            aria-hidden
+            className="relative size-full object-contain"
+          />
           <motion.div
             aria-hidden
             className="absolute inset-x-0 h-16 bg-gradient-to-b from-transparent via-accent/25 to-transparent"
@@ -315,9 +328,9 @@ function FormBody({
   return (
     <div className="flex flex-col gap-4">
       {/* ---- the dropzone hero: large cover slot + three labeled angle
-           slots. While dragging files anywhere over the card, a react-bits
-           ElectricBorder + violet wash (pointer-events-none overlays — the
-           inputs never remount) signal the drop target. ---- */}
+           slots. While dragging files anywhere over the card, a soft
+           breathing violet glow ring + wash (pointer-events-none overlays —
+           the inputs never remount) signal the drop target. ---- */}
       <section
         onDragEnter={(e) => {
           if (!e.dataTransfer.types.includes("Files")) return;
@@ -339,19 +352,26 @@ function FormBody({
       >
         {dragActive ? (
           <>
+            {/* Calm drop affordance (owner: the old animated lightning edge
+                read as chaotic). A soft violet wash + one gently breathing
+                glow ring — reads as a glowing border, not a storm. */}
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-0 z-10 rounded-xl bg-accent/5"
+              className="pointer-events-none absolute inset-0 z-10 rounded-xl bg-accent/10"
             />
-            <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
-              <ElectricBorder
-                color="#6d4aff"
-                speed={1.2}
-                chaos={0.08}
-                borderRadius={14}
-                className="size-full"
-              />
-            </div>
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-2 ring-accent/70"
+              animate={{
+                opacity: [0.6, 1, 0.6],
+                boxShadow: [
+                  "0 0 10px 1px rgba(109,74,255,0.25)",
+                  "0 0 20px 4px rgba(109,74,255,0.45)",
+                  "0 0 10px 1px rgba(109,74,255,0.25)",
+                ],
+              }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+            />
             <span
               aria-hidden
               className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-solid px-4 py-1.5 text-[14px] font-semibold text-accent-fg shadow-md"
@@ -407,12 +427,36 @@ function FormBody({
                 />
                 {preview ? (
                   <>
-                    {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-                    <img
-                      src={preview}
-                      alt={isCover ? "Cover photo" : `Photo ${slot + 1}`}
-                      className="size-full object-cover"
-                    />
+                    {isCover ? (
+                      <>
+                        {/* Blurred fill behind an object-contain image: the
+                            cover shows the seller's photo in full — exactly as
+                            framed, never cropped — at any aspect ratio. The
+                            angle tiles below stay object-cover (thumbnails). */}
+                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+                        <img
+                          src={preview}
+                          alt=""
+                          aria-hidden
+                          className="absolute inset-0 size-full scale-110 object-cover blur-xl"
+                        />
+                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+                        <img
+                          src={preview}
+                          alt="Cover photo"
+                          className="relative size-full object-contain"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+                        <img
+                          src={preview}
+                          alt={`Photo ${slot + 1}`}
+                          className="size-full object-cover"
+                        />
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={() => onClear(slot)}
@@ -483,9 +527,8 @@ function FormBody({
             );
           })}
         </div>
-        <p className="mt-3 text-[13.5px] text-muted">
-          Good light and a clear view of labels or barcodes make the
-          identification, and the price, much more accurate.
+        <p className="mt-3 text-[13px] text-faint">
+          Good light and a clear shot of any label or barcode improve accuracy.
         </p>
       </section>
 
@@ -515,14 +558,11 @@ function FormBody({
           </span>
         </header>
         <div className="px-4 sm:px-5">
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-border py-1">
             {FIELD_ROWS.map((row) => (
               <AutoFieldRow key={row.label} label={row.label} icon={row.icon} />
             ))}
           </div>
-          <p className="border-t border-border py-3 text-[13.5px] text-faint">
-            Every field stays a real, editable input on the review screen.
-          </p>
         </div>
       </section>
 
