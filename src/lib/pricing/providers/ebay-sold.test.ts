@@ -530,6 +530,50 @@ describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {
       fetchPage("https://www.ebay.com/sch/i.html?_nkw=x&LH_Sold=1"),
     ).rejects.toThrow();
   });
+
+  it("routes through a proxy template when configured (eBay 403s direct server fetches)", async () => {
+    let requestedUrl = "";
+    const spyFetch = (async (input: unknown) => {
+      requestedUrl = String(input);
+      return new Response("<html>sold page via proxy</html>");
+    }) as unknown as typeof fetch;
+    const fetchPage = createDefaultFetchPage({
+      fetchImpl: spyFetch,
+      proxyTemplate: "https://proxy.example/get?token=K&url={url}",
+    });
+    const ebayUrl = "https://www.ebay.com/sch/i.html?_nkw=sony&LH_Sold=1";
+    const html = await fetchPage(ebayUrl);
+    expect(html).toContain("via proxy");
+    // The request went to the PROXY host, carrying the (SSRF-validated) eBay URL encoded.
+    expect(requestedUrl.startsWith("https://proxy.example/get?token=K&url=")).toBe(true);
+    expect(requestedUrl).toContain(encodeURIComponent(ebayUrl));
+  });
+
+  it("still SSRF-validates the eBay target before routing through a proxy", async () => {
+    let called = false;
+    const spyFetch = (async () => {
+      called = true;
+      return new Response("<html></html>");
+    }) as unknown as typeof fetch;
+    const fetchPage = createDefaultFetchPage({
+      fetchImpl: spyFetch,
+      proxyTemplate: "https://proxy.example/get?url={url}",
+    });
+    await expect(fetchPage("https://evil.com/sch")).rejects.toThrow();
+    expect(called).toBe(false); // guard rejects the non-eBay target before any egress
+  });
+
+  it("fetches eBay directly when no proxy template is configured", async () => {
+    let requestedUrl = "";
+    const spyFetch = (async (input: unknown) => {
+      requestedUrl = String(input);
+      return new Response("<html>direct</html>");
+    }) as unknown as typeof fetch;
+    const fetchPage = createDefaultFetchPage({ fetchImpl: spyFetch });
+    const ebayUrl = "https://www.ebay.com/sch/i.html?_nkw=sony&LH_Sold=1";
+    await fetchPage(ebayUrl);
+    expect(requestedUrl).toBe(ebayUrl);
+  });
 });
 
 describe("synthesizeSoldResult", () => {

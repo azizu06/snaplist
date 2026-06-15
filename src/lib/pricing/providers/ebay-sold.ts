@@ -148,6 +148,21 @@ function resolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(v) && v > 0 ? v : EBAY_SOLD_FETCH_TIMEOUT_MS;
 }
 
+/**
+ * Optional scraping-proxy egress. eBay bot-blocks direct server-side fetches
+ * (Akamai fingerprints the TLS/HTTP2 handshake → 403 before any markup, regardless
+ * of UA/headers), so a plain `fetch` from a server NEVER returns the sold page.
+ * `EBAY_SOLD_PROXY_TEMPLATE` is a vendor-agnostic egress: any URL template with a
+ * `{url}` placeholder (ScraperAPI, ScrapingBee, Zyte, Bright Data Web Unlocker, a
+ * self-hosted headless-browser endpoint, …). When set, the fetch routes the eBay
+ * URL through it; the target eBay URL is still SSRF-validated first, and the proxy
+ * endpoint itself is TRUSTED operator config. Unset → direct fetch (today's
+ * behavior; the tier simply declines to the web-search tier when blocked).
+ */
+function resolveProxyTemplate(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.EBAY_SOLD_PROXY_TEMPLATE?.trim() || undefined;
+}
+
 /** Freshness TTL/cutoff/half-life — env-tunable (#59); each falls back to its default. */
 export const EBAY_SOLD_CACHE_TTL_HOURS_DEFAULT = 72; // ~3 days: "reuse for a few days"
 
@@ -743,26 +758,42 @@ export function synthesizeSoldResult(
  * timeout + SSRF behavior are unit-testable without a live network.
  */
 export function createDefaultFetchPage(
-  opts: { userAgent?: string; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+  opts: {
+    userAgent?: string;
+    timeoutMs?: number;
+    fetchImpl?: typeof fetch;
+    proxyTemplate?: string;
+  } = {},
 ): FetchPage {
   const userAgent = opts.userAgent ?? resolveUserAgent();
   const timeoutMs = opts.timeoutMs ?? resolveTimeoutMs();
   const doFetch = opts.fetchImpl ?? fetch;
+  const proxyTemplate = opts.proxyTemplate ?? resolveProxyTemplate();
   return async (rawUrl) => {
-    const safe = assertSafeEbayUrl(rawUrl); // validate BEFORE any request
+    const safe = assertSafeEbayUrl(rawUrl); // validate the eBay TARGET before any request
+    // When a scraping-proxy egress is configured, route the request THROUGH it:
+    // eBay 403s direct server fetches, so the proxy (residential IP + real browser
+    // fingerprint) is how the sold page is actually retrieved. The eBay URL is
+    // SSRF-validated above; the proxy endpoint is trusted operator config. Unset →
+    // fetch eBay directly (unchanged behavior).
+    const usingProxy = Boolean(proxyTemplate);
+    const requestUrl: string | URL = usingProxy
+      ? proxyTemplate!.replace("{url}", encodeURIComponent(safe.toString()))
+      : safe;
+    const followRedirect = usingProxy; // proxies may 30x to the rendered page
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await doFetch(safe, {
+      const res = await doFetch(requestUrl, {
         headers: {
           "user-agent": userAgent,
           "accept-language": "en-US,en;q=0.9",
           accept: "text/html,application/xhtml+xml",
         },
-        // Never follow an off-host redirect (SSRF). eBay returns 200 directly for
-        // a sold-results query; a redirect (e.g. a consent interstitial) is
-        // treated as "blocked" → the provider declines to the next tier.
-        redirect: "error",
+        // Direct eBay path: never follow an off-host redirect (SSRF) — a redirect
+        // (e.g. a consent interstitial) means "blocked" → decline to the next tier.
+        // Proxy path: the proxy is trusted, and some return the page via a redirect.
+        redirect: followRedirect ? "follow" : "error",
         signal: controller.signal,
       });
       if (!res.ok) {
@@ -823,15 +854,30 @@ export function createEbaySoldPricingProvider(
     let comps: EbaySoldComp[] = [];
     try {
       comps = parseSoldComps(await fetchPrimary(url), baseUrl, maxResults);
-    } catch {
+    } catch (err) {
+      // A block/rate-limit/timeout — declines, but is NO LONGER SILENT: without
+      // this the tier vanished into a generic "declined" and the real reason (eBay
+      // 403s direct server fetches) was invisible until someone dug into the logs.
+      logEvent("pricing.ebay_sold.fetch_blocked", {
+        reason: err instanceof Error ? err.message : String(err),
+        viaProxy: resolveProxyTemplate() != null,
+        hasFallback: fetchFallback != null,
+      });
       comps = [];
     }
     if (comps.length < EBAY_SOLD_MIN_COMPS && fetchFallback) {
       try {
         comps = parseSoldComps(await fetchFallback(url), baseUrl, maxResults);
-      } catch {
-        // Fallback also blocked → decline below.
+      } catch (err) {
+        logEvent("pricing.ebay_sold.fallback_blocked", {
+          reason: err instanceof Error ? err.message : String(err),
+        });
       }
+    }
+    if (comps.length < EBAY_SOLD_MIN_COMPS) {
+      // Distinguish "blocked/thin" (declining to web search) from "found comps" so
+      // the pricing spine is auditable: which tier actually fired, and why not this one.
+      logEvent("pricing.ebay_sold.declined_thin", { compsFound: comps.length });
     }
     return comps;
   }
