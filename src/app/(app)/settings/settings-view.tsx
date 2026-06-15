@@ -25,6 +25,15 @@ export interface SettingsData {
   user: ProfileUser;
   autopilotEnabled: boolean;
   ebay: { connected: boolean; ebayUsername: string | null };
+  /**
+   * Plan & billing surface (#64, frontend). `tier` is the live `resolveTier`
+   * seam from `src/lib/abuse/config.ts` — everyone is `free` until the Stripe
+   * backend flips paid subscribers. `itemsPerDay` is the current tier's real
+   * enforced daily allowance; `proItemsPerDay` is the paid tier's, for the
+   * free→Pro teaser. Limits come straight from `tierLimits`, so the number
+   * shown is the number actually enforced.
+   */
+  billing: { tier: "free" | "paid"; itemsPerDay: number; proItemsPerDay: number };
   error: string | null;
   ebayBanner: "connected" | "disconnected" | null;
 }
@@ -78,6 +87,15 @@ function LinkIcon() {
     <svg {...ICON_SVG_PROPS}>
       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function CreditCardIcon() {
+  return (
+    <svg {...ICON_SVG_PROPS}>
+      <rect width="20" height="14" x="2" y="5" rx="2" />
+      <path d="M2 10h20" />
     </svg>
   );
 }
@@ -136,7 +154,8 @@ export function SettingsView({
   autopilotAction: (formData: FormData) => Promise<void>;
   disconnectEbayAction: (formData: FormData) => Promise<void>;
 }) {
-  const { user, autopilotEnabled, ebay } = data;
+  const { user, autopilotEnabled, ebay, billing } = data;
+  const isPaid = billing.tier === "paid";
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
@@ -196,6 +215,75 @@ export function SettingsView({
             Your name and photo come from your sign-in provider. Update them
             there and they follow you here.
           </p>
+        </CardBody>
+      </Card>
+      </GlareHover>
+
+      {/* ---- Plan & billing: current tier, real daily allowance, upgrade path.
+              The tier comes from the live `resolveTier` seam; today everyone is
+              `free`, so the paid branch is the shape the Stripe backend (#64)
+              will light up — `Manage billing` targets the portal route it adds. ---- */}
+      <GlareHover>
+      <Card>
+        <CardHeader
+          title={
+            <span className="flex items-center gap-2.5">
+              <SectionIcon>
+                <CreditCardIcon />
+              </SectionIcon>
+              Plan &amp; billing
+            </span>
+          }
+          aside={
+            <StatusBadge
+              label={isPaid ? "Seller Pro" : "Free"}
+              tone={isPaid ? "success" : "neutral"}
+            />
+          }
+        />
+        <CardBody className="flex flex-col gap-4">
+          {isPaid ? (
+            <>
+              <p className="text-[15px] leading-relaxed text-muted">
+                You&apos;re on{" "}
+                <strong className="font-medium text-fg">Seller Pro</strong>. Identify,
+                price, and list up to{" "}
+                <strong className="font-medium text-fg">
+                  {billing.itemsPerDay} items a day
+                </strong>
+                , with priority research and bulk uploads.
+              </p>
+              <a
+                href="/api/billing/portal"
+                className={`${buttonClasses("secondary", "md")} self-start`}
+              >
+                Manage billing
+              </a>
+            </>
+          ) : (
+            <>
+              <p className="text-[15px] leading-relaxed text-muted">
+                You&apos;re on the{" "}
+                <strong className="font-medium text-fg">Free</strong> plan — every core
+                feature, up to{" "}
+                <strong className="font-medium text-fg">
+                  {billing.itemsPerDay} items a day
+                </strong>
+                .
+              </p>
+              <p className="text-[13.5px] text-faint">
+                Seller Pro lifts that to {billing.proItemsPerDay} a day with priority
+                research and bulk uploads. It arrives after beta, and beta users keep
+                early-bird pricing.
+              </p>
+              <a
+                href="/pricing"
+                className={`${buttonClasses("primary", "md")} self-start`}
+              >
+                See plans
+              </a>
+            </>
+          )}
         </CardBody>
       </Card>
       </GlareHover>
