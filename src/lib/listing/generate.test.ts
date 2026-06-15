@@ -3,6 +3,7 @@ import { listingCopySchema, type ExtractedAttributes } from "../pipeline/types";
 import type { FewShotExamples, ReferenceMatch } from "../rag";
 import { EBAY_TITLE_MAX_LENGTH, ebayListingSchema, type EbayListing } from "./schema";
 import {
+  corpusReadKey,
   enforceTitleLength,
   generateEbayListing,
   listingHallucinatesAttributes,
@@ -81,6 +82,27 @@ function scriptedGenerate(results: EbayListing[]): {
   };
   return { generate, calls };
 }
+
+describe("listing/generate — corpusReadKey never uses the service role (#57)", () => {
+  it("reads the global corpus with the ANON key, never the RLS-bypassing service role", () => {
+    // The request-path retrieval must not bypass RLS even when the service-role
+    // secret is configured (it is, for the eval/seed jobs).
+    expect(
+      corpusReadKey({
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-secret",
+        SUPABASE_ANON_KEY: "anon-key",
+      }),
+    ).toBe("anon-key");
+    expect(
+      corpusReadKey({
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-secret",
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: "public-anon",
+      }),
+    ).toBe("public-anon");
+    // With ONLY a service-role key, it declines (no anon) rather than bypass RLS.
+    expect(corpusReadKey({ SUPABASE_SERVICE_ROLE_KEY: "service-role-secret" })).toBeUndefined();
+  });
+});
 
 describe("listing/generate — valid output maps onto ListingCopy (ebay)", () => {
   it("returns a schema-valid eBay listing mapped onto the ListingCopy seam", async () => {

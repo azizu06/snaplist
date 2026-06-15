@@ -163,6 +163,7 @@ describe("replyAssertsUngroundedNumbers", () => {
 
 describe("draftBuyerReply", () => {
   it("passes the question and the FULL grounding to the injected model call", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openai");
     const calls: Parameters<ReplyGenerate>[0][] = [];
     const generate: ReplyGenerate = async (args) => {
       calls.push(args);
@@ -300,6 +301,10 @@ describe("draftBuyerReply", () => {
     vi.stubEnv("REPLY_MODEL", "env-model");
     await draftBuyerReply({ question, grounding, generate });
     vi.unstubAllEnvs();
+    // No override and no role env → the active provider's default. Pin the
+    // provider to OpenAI so the bare default is DEFAULT_REPLY_MODEL (the test
+    // env otherwise defaults to the Gemini provider).
+    vi.stubEnv("LLM_PROVIDER", "openai");
     await draftBuyerReply({ question, grounding, generate });
 
     expect(seen).toEqual(["explicit-model", "env-model", DEFAULT_REPLY_MODEL]);

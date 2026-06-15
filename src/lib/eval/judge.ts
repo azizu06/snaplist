@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  oppositeProvider,
+  resolveApiKey,
+  resolveLanguageModel,
+  resolveModelId,
+  resolveProvider,
+  type LlmProvider,
+} from "../llm";
 import type { ExtractedAttributes } from "../pipeline/types";
 import { normalizeField } from "./metrics";
 import { judgedListingSchema, type JudgedListing } from "./types";
@@ -134,24 +142,58 @@ const JUDGE_SYSTEM_PROMPT =
   "Judge only against the supplied attributes; do not reward confident-sounding " +
   "fabrication.";
 
+type EnvLike = Record<string, string | undefined>;
+
 /**
- * The real LLM judge: a lazy wrapper around the AI SDK's `generateObject` with
- * `schema: judgeScoresSchema`. Imported lazily so the offline test/script path
- * never loads the SDK. `apiKey` defaults to OPENAI_API_KEY.
+ * The provider the cross-family judge should use: the OPPOSITE family from the
+ * active generation provider (#61). If the listings were generated on OpenAI
+ * (showcase), the judge runs on Gemini, and vice versa — so the listing-quality
+ * metric isn't a model grading its own family's output.
  */
-export function createOpenAIJudge(
-  model: string | undefined = process.env.EVAL_JUDGE_MODEL,
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
-): JudgeFn {
-  const judgeModel = model?.trim() || DEFAULT_JUDGE_MODEL;
+export function judgeProviderFor(env: EnvLike = process.env): LlmProvider {
+  return oppositeProvider(resolveProvider(env));
+}
+
+/**
+ * Can the cross-family LLM judge actually run? Only if the OPPOSITE provider's
+ * API key is present. A dev box with a single provider key (the common case)
+ * can't run a cross-family judge — callers fall back to the heuristic and say so,
+ * keeping the eval offline-safe and honest rather than silently self-grading.
+ */
+export function crossFamilyJudgeAvailable(env: EnvLike = process.env): boolean {
+  return Boolean(resolveApiKey(judgeProviderFor(env), env));
+}
+
+export interface CrossFamilyJudgeOptions {
+  /** The GENERATION provider to judge against the opposite of (default: active). */
+  genProvider?: LlmProvider;
+  /** Explicit judge model id (else the opposite provider's `judge` default). */
+  modelId?: string;
+  /** Explicit API key (else resolved for the opposite provider from env). */
+  apiKey?: string;
+  env?: EnvLike;
+}
+
+/**
+ * The real, CROSS-FAMILY LLM judge (#61): a lazy `generateObject` over the rubric
+ * schema, run on the OPPOSITE provider family from the generator to remove
+ * same-family self-bias. The model is resolved through the registry (issue #55)
+ * with an explicit `provider` so it does NOT follow the active `LLM_PROVIDER`; the
+ * SDK is lazy-imported so the offline test/script path never loads it.
+ */
+export function createCrossFamilyJudge(opts: CrossFamilyJudgeOptions = {}): JudgeFn {
+  const env = opts.env ?? process.env;
+  const provider = oppositeProvider(opts.genProvider ?? resolveProvider(env));
+  const judgeModel = resolveModelId("judge", { provider, modelId: opts.modelId, env });
   return async ({ listing, attributes }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("judge", {
+      provider,
+      modelId: judgeModel,
+      apiKey: opts.apiKey,
+    });
     const { object } = await generateObject({
-      model: openai.chat(judgeModel),
+      model: llmModel,
       schema: judgeScoresSchema,
       system: JUDGE_SYSTEM_PROMPT,
       prompt:

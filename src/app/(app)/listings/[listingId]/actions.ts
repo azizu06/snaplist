@@ -7,7 +7,11 @@ import { getUserId } from "@/lib/auth";
 import {
   createEbayAdapterForUser,
   publishListingToEbay,
+  PublishValidationError,
+  EbayApiError,
 } from "@/lib/marketplace/ebay";
+import { reportServerError } from "@/lib/sentry";
+import { rateLimitAllows } from "@/lib/abuse";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -26,6 +30,15 @@ export async function publishToEbay(formData: FormData) {
   const userId = await getUserId();
   if (!userId) redirect(`/login?next=/listings/${listingId}`);
 
+  // Rate-limit the eBay write here too — this server action is the path the
+  // "Publish" button actually uses; the API route's limit alone would be bypassed
+  // (#58, ADR-0004). Shares the per-user metered bucket with the route.
+  if (!(await rateLimitAllows(userId))) {
+    redirect(
+      `/listings/${listingId}?error=${encodeURIComponent("Too many requests. Please slow down and try again shortly.")}`,
+    );
+  }
+
   try {
     // Per-user tokens when the seller connected eBay (issue #17), env sandbox
     // credentials otherwise.
@@ -35,9 +48,18 @@ export async function publishToEbay(formData: FormData) {
       await createEbayAdapterForUser(supabase),
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Publish failed.";
     revalidatePath(`/listings/${listingId}`);
-    redirect(`/listings/${listingId}?error=${encodeURIComponent(message)}`);
+    // A validation error (no price/photo/currency) or an EbayApiError (reconnect
+    // guidance, eBay's own validation message) carries a SAFE, user-actionable
+    // message — show it so the seller can fix and retry. Internal/Supabase errors
+    // are redacted and logged server-side (CWE-209, #57).
+    if (err instanceof PublishValidationError || err instanceof EbayApiError) {
+      redirect(`/listings/${listingId}?error=${encodeURIComponent(err.message)}`);
+    }
+    reportServerError("ebay.publish.action", err, { listingId });
+    redirect(
+      `/listings/${listingId}?error=${encodeURIComponent("Failed to publish to eBay. Please try again.")}`,
+    );
   }
 
   revalidatePath(`/listings/${listingId}`);

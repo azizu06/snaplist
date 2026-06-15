@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { ReplySendConflictError, approveAndSendReply } from "@/lib/inbox";
+import { serverErrorJson } from "@/lib/api/errors";
+import { enforceRateLimit } from "@/lib/abuse";
 
 /**
  * POST /api/inbox/[messageId]/send — the seller approved (or edited) the drafted
@@ -27,6 +29,8 @@ export async function POST(
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = await enforceRateLimit(request, userId);
+  if (limited) return limited;
 
   const params = paramsSchema.safeParse(await context.params);
   if (!params.success) {
@@ -84,7 +88,7 @@ export async function POST(
     if (err instanceof ReplySendConflictError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    const msg = err instanceof Error ? err.message : "Send failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    // Never leak the raw Supabase/delivery error to the client (CWE-209, #57).
+    return serverErrorJson("inbox.send", err, "Failed to send reply.");
   }
 }

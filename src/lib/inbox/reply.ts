@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ReplyGrounding } from "./types";
 import { itemLabel } from "./simulate";
+import { resolveLanguageModel, resolveModelId } from "../llm";
 
 /**
  * Buyer-Q&A reply agent (issue #13). Drafts a seller reply to a buyer question,
@@ -284,7 +285,7 @@ export function fallbackBuyerReply(grounding: ReplyGrounding): string {
 // ---------------------------------------------------------------------------
 
 function resolveModel(model?: string): string {
-  return model?.trim() || process.env.REPLY_MODEL?.trim() || DEFAULT_REPLY_MODEL;
+  return resolveModelId("reply", { modelId: model });
 }
 
 /**
@@ -358,18 +359,16 @@ const REPLY_SYSTEM_PROMPT =
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject`
  * with `schema: buyerReplyRawSchema`. Imported lazily (like listing/generate.ts)
- * so the SDK never loads on the offline test path. `apiKey` defaults to
- * OPENAI_API_KEY.
+ * so the SDK never loads on the offline test path. The model instance is resolved
+ * through the LLM provider registry ("reply" role); `apiKey` is optional and,
+ * when omitted, the registry resolves the provider-appropriate key.
  */
 export function createOpenAIReplyGenerate(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
 ): ReplyGenerate {
   return async ({ model, question, grounding, attempt }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("reply", { modelId: model, apiKey });
 
     const facts = JSON.stringify(grounding.attributes, null, 2);
     const listing = grounding.listing
@@ -381,7 +380,7 @@ export function createOpenAIReplyGenerate(
         : `Your previous reply asserted facts (numbers) that are not in the supplied grounding. Regenerate strictly using only the given facts.\n\nBuyer question:\n${question}\n\nValidated item facts:\n${facts}\n\n${listing}`;
 
     const { object } = await generateObject({
-      model: openai.chat(model),
+      model: llmModel,
       schema: buyerReplyRawSchema,
       system: REPLY_SYSTEM_PROMPT,
       prompt: instruction,

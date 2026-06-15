@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { resolveApiKey, resolveProvider } from "./llm/registry";
 
 /**
  * Environment schema. Everything is env-configurable so that sandbox -> production
@@ -7,12 +8,58 @@ import { z } from "zod";
  * Keep secrets server-only. Only NEXT_PUBLIC_* values reach the browser.
  */
 const envSchema = z.object({
-  // LLM
-  OPENAI_API_KEY: z.string().min(1),
+  // LLM provider registry (issue #55). Provider is a config flip: dev defaults to
+  // Gemini (free tier — protects the OpenAI budget), the showcase runs on OpenAI.
+  // `LLM_PROVIDER` overrides the NODE_ENV default (gemini/google | openai). At least
+  // one provider key is required (enforced below) — OPENAI_API_KEY for the showcase,
+  // GOOGLE_GENERATIVE_AI_API_KEY (or GEMINI_API_KEY) for dev. Keys are never required
+  // together, so a Gemini-only dev env validates without an OpenAI key.
+  LLM_PROVIDER: z.enum(["openai", "google", "gemini"]).optional(),
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
+  GEMINI_API_KEY: z.string().min(1).optional(),
 
   // Web-search providers (pricing research agent)
   TAVILY_API_KEY: z.string().min(1).optional(),
   EXA_API_KEY: z.string().min(1).optional(),
+
+  // Observability (issue #62). Sentry is OPTIONAL and DSN-gated: with no SENTRY_DSN,
+  // error tracking is inert (structured logging via observability.ts still runs).
+  // Set the DSN in the deploy env to activate grouped, alerted error capture.
+  SENTRY_DSN: z.string().min(1).optional(),
+  SENTRY_ENVIRONMENT: z.string().min(1).optional(),
+
+  // Abuse & cost protection (issue #58). Upstash Redis powers rate limiting + the
+  // daily spend guardrail; with both unset, an in-memory fallback keeps dev/offline
+  // working (per-instance, not shared). Limits are env-tunable (defaults in
+  // src/lib/abuse/config.ts); the numeric ones are parsed there.
+  UPSTASH_REDIS_REST_URL: z.string().min(1).optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
+  RATE_LIMIT_FREE_PER_MINUTE: z.string().min(1).optional(),
+  RATE_LIMIT_PAID_PER_MINUTE: z.string().min(1).optional(),
+  QUOTA_FREE_ITEMS_PER_DAY: z.string().min(1).optional(),
+  QUOTA_PAID_ITEMS_PER_DAY: z.string().min(1).optional(),
+  OPENAI_DAILY_CALL_BUDGET: z.string().min(1).optional(),
+
+  // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
+  // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
+  // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier
+  // (it then declines and the router degrades to the web-search tier). The base
+  // host and outbound User-Agent are overridable for testing; the provider's SSRF
+  // guard restricts every fetch to https *.ebay.com regardless.
+  EBAY_SOLD_ENABLED: z.string().min(1).optional(),
+  EBAY_SOLD_BASE_URL: z.string().min(1).optional(),
+  EBAY_SOLD_USER_AGENT: z.string().min(1).optional(),
+  // Pricing freshness (#59). All OPTIONAL with sane defaults (parsed in
+  // src/lib/pricing/providers/ebay-sold.ts + freshness.ts). The TTL cache of
+  // sold-comp scrapes reuses a pull for a few days (cuts scrape footprint; the
+  // live page stays the source of truth); the staleness cutoff drops sales older
+  // than N days; the half-life sets how fast a sale's influence on the suggested
+  // price decays. With Upstash unset the cache degrades to a per-instance
+  // in-memory fallback (offline-safe).
+  EBAY_SOLD_CACHE_TTL_HOURS: z.string().min(1).optional(),
+  EBAY_SOLD_STALE_DAYS: z.string().min(1).optional(),
+  EBAY_SOLD_HALFLIFE_DAYS: z.string().min(1).optional(),
 
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
@@ -56,7 +103,21 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
-});
+}).refine(
+  (e) => {
+    const env = e as Record<string, string | undefined>;
+    // The key for the SELECTED provider must be present — not merely *some* key.
+    // resolveProvider is key-aware (a single-key env selects the usable provider),
+    // so this still accepts a Gemini-only dev box, but rejects an explicit
+    // LLM_PROVIDER with no matching key, or no keys at all (#55 review).
+    return Boolean(resolveApiKey(resolveProvider(env), env));
+  },
+  {
+    message:
+      "Missing the API key for the selected LLM provider. Set OPENAI_API_KEY (OpenAI) or GOOGLE_GENERATIVE_AI_API_KEY / GEMINI_API_KEY (Gemini), or set LLM_PROVIDER to match the key you have.",
+    path: ["OPENAI_API_KEY"],
+  },
+);
 
 export type Env = z.infer<typeof envSchema>;
 

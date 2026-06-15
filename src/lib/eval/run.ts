@@ -5,7 +5,13 @@ import {
   SAMPLE_PREDICTIONS,
   parsePredictions,
 } from "./fixtures";
-import { createHeuristicJudge, createOpenAIJudge, DEFAULT_JUDGE_MODEL } from "./judge";
+import {
+  createCrossFamilyJudge,
+  createHeuristicJudge,
+  crossFamilyJudgeAvailable,
+  judgeProviderFor,
+} from "./judge";
+import { resolveModelId, resolveProvider } from "../llm";
 import { formatReport, runEval } from "./report";
 import {
   judgedListingSchema,
@@ -26,14 +32,17 @@ import {
  *                         local/linked Supabase (SUPABASE_URL + a key in env);
  *                         rows are matched to gold items by `GoldItem.itemId`
  *                         and listing copy is joined from `listings`
- *   --real-judge          use the LLM judge (OPENAI_API_KEY; model via
- *                         EVAL_JUDGE_MODEL, default gpt-5.5) instead of the
- *                         offline heuristic
+ *   --real-judge          use the CROSS-FAMILY LLM judge (#61): the OPPOSITE
+ *                         provider family from the generator, to strip same-family
+ *                         self-bias. Needs the opposite provider's key (e.g. a
+ *                         Gemini-generated set is judged on OpenAI); without it the
+ *                         run falls back to the offline heuristic and says so.
  *   --json                emit the raw report JSON instead of the text table
  *
  * Every run validates the active judge against the human-labeled fixture and
  * reports the agreement metric alongside the listing scores. CI wiring is
- * deliberately out of scope here (issue #18).
+ * deliberately out of scope here (issue #18). The gold set's price bands are
+ * (re)built from live sold comps by `pnpm eval:build-gold` (build-gold-set.ts).
  */
 
 interface CliArgs {
@@ -250,10 +259,26 @@ export async function main(argv: readonly string[]): Promise<void> {
       ? await loadPredictionsFile(args.predictionsPath)
       : SAMPLE_PREDICTIONS;
 
-  const judge = args.realJudge ? createOpenAIJudge() : createHeuristicJudge();
-  const judgeName = args.realJudge
-    ? `llm:${process.env.EVAL_JUDGE_MODEL?.trim() || DEFAULT_JUDGE_MODEL}`
-    : "heuristic-offline";
+  // Listing-quality judge. `--real-judge` runs the CROSS-FAMILY LLM judge (#61):
+  // the OPPOSITE provider family from the generator, to strip same-family self-bias.
+  // It needs the opposite provider's key; without it we fall back to the heuristic
+  // and SAY SO in the judge label (no silent same-family self-grading).
+  const wantsRealJudge = args.realJudge;
+  const canCrossFamily = wantsRealJudge && crossFamilyJudgeAvailable();
+  if (wantsRealJudge && !canCrossFamily) {
+    console.warn(
+      `[eval] --real-judge requested but no ${judgeProviderFor()} key is set for a ` +
+        `cross-family judge (the generator runs on ${resolveProvider()}); falling ` +
+        `back to the offline heuristic judge.`,
+    );
+  }
+  const judge = canCrossFamily ? createCrossFamilyJudge() : createHeuristicJudge();
+  const judgeName = canCrossFamily
+    ? `llm:${resolveModelId("judge", { provider: judgeProviderFor() })} ` +
+      `(cross-family: ${judgeProviderFor()} vs ${resolveProvider()} generator)`
+    : wantsRealJudge
+      ? `heuristic-offline (cross-family judge unavailable: no ${judgeProviderFor()} key)`
+      : "heuristic-offline";
 
   const report = await runEval({
     gold: GOLD_SET,

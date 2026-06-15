@@ -1,3 +1,4 @@
+import { resolveLanguageModel, resolveModelId } from "../llm";
 import {
   type ExtractedAttributes,
   type ListingCopy,
@@ -187,9 +188,7 @@ export function enforceTitleLength(
 // ---------------------------------------------------------------------------
 
 function resolveModel(model?: string): string {
-  return (
-    model?.trim() || process.env.LISTING_MODEL?.trim() || DEFAULT_LISTING_MODEL
-  );
+  return resolveModelId("listing", { modelId: model });
 }
 
 /**
@@ -318,6 +317,21 @@ async function resolveFewShot(
  * exemplars with `fewShotExamples`. Requires Supabase URL + key and (optionally) an
  * OpenAI key for embeddings in the environment.
  */
+/**
+ * The Supabase key for the request-path corpus read. The reference corpus is
+ * GLOBAL, anon-readable reference data (SELECT policies for both `anon` and
+ * `authenticated`; no write policy) and the RPC is SECURITY INVOKER — so the ANON
+ * key suffices. We deliberately do NOT fall back to the SERVICE-ROLE key here:
+ * this runs inside the authenticated upload request, and a service-role client
+ * bypasses RLS, which must never happen on a per-user request path (#57). Exported
+ * so the "never service role" property is unit-tested.
+ */
+export function corpusReadKey(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  return env.SUPABASE_ANON_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+}
+
 export function createRealFewShotRetrieval(): RetrieveFewShot {
   return async (attributes) => {
     const [{ createClient }, rag] = await Promise.all([
@@ -326,10 +340,7 @@ export function createRealFewShotRetrieval(): RetrieveFewShot {
     ]);
     const url =
       process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ??
-      process.env.SUPABASE_ANON_KEY ??
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const key = corpusReadKey();
     if (!url || !key) {
       throw new Error(
         "Real few-shot retrieval needs SUPABASE_URL + a Supabase key; inject `fewShot` or `retrieve` for offline use.",
@@ -370,17 +381,16 @@ const LISTING_SYSTEM_PROMPT =
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject` with
  * `schema: ebayListingSchema`. Imported lazily (like `embedding.ts` / `extract.ts`) so
- * the SDK never loads on the offline test path. `apiKey` defaults to OPENAI_API_KEY.
+ * the SDK never loads on the offline test path. The model is resolved through the LLM
+ * provider registry (`resolveLanguageModel("listing", …)`), so the provider/key follow
+ * `LLM_PROVIDER`; `apiKey`, when supplied, overrides the registry-resolved key.
  */
 export function createOpenAIListingGenerate(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
 ): ListingGenerate {
   return async ({ model, attributes, fewShot, attempt }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("listing", { modelId: model, apiKey });
 
     const examples = fewShot.examples
       .map((e, i) => `Example ${i + 1}:\n${e}`)
@@ -396,7 +406,7 @@ export function createOpenAIListingGenerate(
     // repair/whitelist; the repaired candidate is then validated against the strict
     // `ebayListingSchema` in `generateEbayListing`.
     const { object } = await generateObject({
-      model: openai.chat(model),
+      model: llmModel,
       schema: ebayListingRawSchema,
       system: LISTING_SYSTEM_PROMPT,
       prompt: instruction,

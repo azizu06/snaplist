@@ -12,6 +12,8 @@ import {
   simulateBuyerQuestion,
   type ReplyGrounding,
 } from "@/lib/inbox";
+import { logServerError } from "@/lib/api/errors";
+import { enforceRateLimit } from "@/lib/abuse";
 
 /**
  * POST /api/inbox/simulate — simulate an incoming buyer question for one of the
@@ -45,6 +47,8 @@ export async function POST(request: Request) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = await enforceRateLimit(request, userId);
+  if (limited) return limited;
 
   let json: unknown;
   try {
@@ -135,9 +139,9 @@ export async function POST(request: Request) {
         );
       }
       await markDraftFailed(supabase, existing.id);
-      const message = err instanceof Error ? err.message : "Draft failed";
+      logServerError("inbox.simulate.redraft", err); // keep internals out of the client (#57)
       return NextResponse.json(
-        { messageId: existing.id, status: "draft_failed", error: message },
+        { messageId: existing.id, status: "draft_failed", error: "Failed to draft a reply." },
         { status: 500 },
       );
     }
@@ -155,8 +159,11 @@ export async function POST(request: Request) {
       body: question,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Simulation failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    logServerError("inbox.simulate.create", err); // keep internals out of the client (#57)
+    return NextResponse.json(
+      { error: "Failed to simulate a buyer question." },
+      { status: 500 },
+    );
   }
 
   try {
@@ -179,9 +186,9 @@ export async function POST(request: Request) {
     // inbox renders a RETRYABLE failure instead of "drafting…" forever; the
     // messageId in the response (and the row itself) feeds the recovery path.
     await markDraftFailed(supabase, message.id);
-    const msg = err instanceof Error ? err.message : "Simulation failed";
+    logServerError("inbox.simulate.draft", err); // keep internals out of the client (#57)
     return NextResponse.json(
-      { messageId: message.id, status: "draft_failed", error: msg },
+      { messageId: message.id, status: "draft_failed", error: "Failed to draft a reply." },
       { status: 500 },
     );
   }

@@ -23,17 +23,23 @@ import { z } from "zod";
  * confidence-bearing fact (CONTEXT.md "Tier").
  *
  * - `isbn`         — true structured ISBN lookup (Open Library / Google Books). Highest.
- * - `web_tight`    — web-search agent found a tight, agreeing comp cluster.
+ * - `sold`         — a real COMPLETED-SALE comp cluster (eBay public sold pages, ADR-0001).
+ *                    The strongest used-price signal: "sold beats asking", so it ranks
+ *                    ABOVE the asking-based web tiers and below only the exact ISBN lookup
+ *                    (issue #60). The bridge routes a sold comp here only when its cluster
+ *                    is tight; a scattered sold set degrades to `web_wide` upstream.
+ * - `web_tight`    — web-search agent found a tight, agreeing comp cluster (asking prices).
  * - `web_wide`     — web-search agent found comps, but scattered / asking-only.
  * - `depreciation` — retail × condition-based depreciation factor. Low-confidence estimate.
  * - `llm_only`     — ultimate LLM-only fallback. Lowest.
  *
- * Note `web_tight`/`web_wide` are a hint the router supplies about its own comp
- * cluster; `compAgreement` below carries the continuous version of the same idea.
- * Keeping both lets the tier set a floor while agreement fine-tunes within it.
+ * Note the tier is a hint the router supplies about its own comp cluster;
+ * `compAgreement` below carries the continuous version of the same idea. Keeping
+ * both lets the tier set a floor while agreement fine-tunes within it.
  */
 export const PRICING_TIERS = [
   "isbn",
+  "sold",
   "web_tight",
   "web_wide",
   "depreciation",
@@ -46,11 +52,19 @@ export type PricingTier = (typeof PRICING_TIERS)[number];
  * Per-tier base trust in [0,1]. These are the dominant term in the composite:
  * an ISBN lookup is structurally reliable, an LLM-only guess is not, regardless
  * of how the other signals land. Spacing is intentionally non-uniform — the gap
- * from a real lookup/comp (isbn, web_tight) down to an estimate (depreciation,
+ * from a real lookup/comp (isbn, sold, web_tight) down to an estimate (depreciation,
  * llm_only) is the meaningful cliff, so estimates can never reach the high band.
+ *
+ * `sold` sits between `isbn` and `web_tight`: a completed-sale comp is real
+ * used-market evidence (above any asking-based tier — "sold beats asking",
+ * ADR-0001 / issue #60), but a structured ISBN identity match is still firmer.
+ * The base is high enough that a tight, well-identified sold cluster clears the
+ * autopilot gate; the bridge already withholds this tier from a scattered sold
+ * set (→ `web_wide`), so a wide sale spread cannot ride the label past the gate.
  */
 const TIER_BASE: Record<PricingTier, number> = {
   isbn: 0.95,
+  sold: 0.85,
   web_tight: 0.8,
   web_wide: 0.6,
   depreciation: 0.4,

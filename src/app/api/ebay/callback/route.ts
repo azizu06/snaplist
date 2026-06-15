@@ -2,11 +2,13 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { getUserId } from "@/lib/auth";
 import { logEvent } from "@/lib/observability";
+import { reportServerError } from "@/lib/sentry";
 import { createClient } from "@/lib/supabase/server";
 import {
   exchangeAuthorizationCode,
   fetchEbayIdentity,
   saveEbayConnection,
+  EbayApiError,
 } from "@/lib/marketplace/ebay";
 import { classifyCallback } from "@/lib/marketplace/ebay/callback-outcome";
 import { STATE_COOKIE } from "../connect/route";
@@ -67,10 +69,16 @@ export async function GET(request: NextRequest) {
       scopes: grant.scopes.length,
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "eBay connection failed.";
-    logEvent("ebay.callback", { ok: false, reason: "exchange_failed", message });
-    return fail(message);
+    // The OAuth exchange/identity steps throw EbayApiError with an author-controlled,
+    // user-actionable message — safe to surface. saveEbayConnection throws a plain
+    // Error wrapping the raw Supabase upsert error (column/constraint/RLS detail),
+    // which must NOT reach the client via the redirect param (CWE-209, #57).
+    if (err instanceof EbayApiError) {
+      logEvent("ebay.callback", { ok: false, reason: "exchange_failed", message: err.message });
+      return fail(err.message);
+    }
+    reportServerError("ebay.callback", err, { reason: "persist_failed" });
+    return fail("Couldn't save your eBay connection. Please try again.");
   }
 
   return NextResponse.redirect(new URL("/settings?ebay=connected", request.url));

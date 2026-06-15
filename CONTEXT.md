@@ -22,17 +22,25 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   source. "Barcode" is the umbrella term.
 - **PricingProvider** — the interface every pricing strategy implements. Returns a **price
   recommendation**. Never bypass it with an inline price lookup.
-- **Tier** — one PricingProvider strategy in the routing pipeline: *ISBN lookup* → *web-search agent*
-  → *depreciation estimate* → *LLM fallback*. "Which tier fired" is a logged, confidence-bearing fact.
+- **Tier** — one PricingProvider strategy in the routing pipeline: *ISBN lookup* → *eBay sold comps*
+  → *web-search agent* → *depreciation estimate* → *LLM fallback*. "Which tier fired" is a logged,
+  confidence-bearing fact.
+- **eBay-sold scraper** — the `ebay-sold` tier (ADR-0001): reads eBay's PUBLIC sold/completed pages
+  (`LH_Sold=1&LH_Complete=1`) for real **sold comps**. Read-only price research — distinct from the
+  transactional eBay **adapter** (posting/messaging). Never used to post.
 - **Pricing (research) agent** — the bounded tool-calling **agent** that searches the web for
   used/resale comps and synthesizes a cited range. One of two agents in the system.
-- **Comp** — a comparable price point found for an item. **Comp agreement** (tight vs scattered) is a
-  confidence signal. Open-web comps are usually *asking* prices, not *sold* prices — down-weight
-  accordingly.
+- **Comp** — a comparable price point found for an item. A **sold comp** is a completed sale (eBay
+  public sold pages, the `ebay-sold` tier) — the strongest used signal; an **asking comp** is an
+  active listing (open-web, the web-search tier) and is down-weighted. **Comp agreement** (tight vs
+  scattered) is a confidence signal.
 - **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
   user-editable. Never a bare number.
 - **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
-  completeness}. Never raw LLM self-report. Drives the **autopilot gate**.
+  completeness}. Never raw LLM self-report. Drives the **autopilot gate**. The tier-trust ordering
+  encodes "sold beats asking": a tight **sold**-comp cluster ranks above the asking-based web tiers
+  and below only an exact ISBN lookup (issue #60); a scattered sold set degrades to the wide-comp
+  tier so a noisy sale spread cannot ride the sold label past the gate.
 - **Autopilot** — the confidence-gated posting behavior: high-confidence items are eligible to post
   automatically; low-confidence items **queue for review**. Toggleable off.
 - **Listing** — generated, platform-specific sale copy for an item (title, item specifics,
@@ -47,12 +55,20 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
 - **Inbox** — the seller's live view of buyer **messages**, fed DB→Supabase Realtime. The seller is
   the only SnapList user; buyers stay on eBay.
 - **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to
-  ground pricing and few-shot listing generation (avoids cold-start).
+  ground listing generation (few-shot) and to *corroborate* pricing. Never the price oracle.
+- **Freshness** — sold prices drift, so pricing is **live-fetched** at query time; a TTL
+  cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The
+  **reference corpus** never serves a stored price as current truth.
 - **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
   for every pipeline execution. The **eval harness** depends on it.
 - **Eval harness** — the offline quality measurement over a fixed **gold set**: ID accuracy,
-  pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge).
+  pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge). The
+  judge is **cross-family** (`--real-judge` runs the OPPOSITE provider from the generator, #61) to
+  strip same-family self-bias; it falls back to the offline heuristic — and says so — when the
+  opposite provider's key is absent.
 - **Gold set** — the fixed, labeled set of items used by the eval harness; doubles as the demo set.
+  Truth is **independent of the pipeline**; price bands are (re)built from live eBay sold comps by
+  `pnpm eval:build-gold` (#61), emitted for a human spot-check rather than auto-overwriting.
 - **Hero domain** — the item categories SnapList excels at (books/media, electronics, board games,
   branded gear). Generic items still flow through but honestly show low confidence.
 

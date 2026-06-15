@@ -6,17 +6,24 @@ import {
 import {
   PriceRouter,
   createIsbnPricingProvider,
+  createEbaySoldPricingProvider,
   createUpcWebPricingProvider,
   createBrandedWebPricingProvider,
   createDepreciationPricingProvider,
   createLlmOnlyPricingProvider,
   type DepreciationPricingProviderOptions,
+  type EbaySoldPricingProviderOptions,
   type IsbnPricingProviderOptions,
   type ItemSignal,
   type LlmOnlyPricingProviderOptions,
   type PriceResult,
   type WebSearchPricingProviderOptions,
 } from "../pricing";
+import { getTtlCache } from "../pricing/comp-cache";
+import {
+  resolveSoldCacheTtlMs,
+  type EbaySoldComp,
+} from "../pricing/providers/ebay-sold";
 import { generateEbayListing, createRealFewShotRetrieval } from "../listing";
 import type {
   ExtractedAttributes,
@@ -87,7 +94,9 @@ export interface CreateVisionPipelineOptions {
 export interface CreateDefaultPricerOptions {
   /** Tier-1 ISBN lookup deps (offline tests inject `fetchJson`). */
   isbn?: IsbnPricingProviderOptions;
-  /** Tier-2/3 web-search agent deps (shared by the UPC-aided and branded tiers). */
+  /** eBay-sold scraper deps (offline tests inject `fetchPage`; #56). */
+  ebaySold?: EbaySoldPricingProviderOptions;
+  /** Web-search agent deps (shared by the UPC-aided and branded tiers). */
   webSearch?: WebSearchPricingProviderOptions;
   /** Tier-4 depreciation deps (retail search + extraction). */
   depreciation?: DepreciationPricingProviderOptions;
@@ -97,18 +106,37 @@ export interface CreateDefaultPricerOptions {
 
 /**
  * The default real pricer in PRD priority order: ISBN structured lookup, then the
- * #10 web-search agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction,
- * env-key gated — a keyless deployment makes those tiers decline gracefully), then
- * the #11 fallback tiers: depreciation (retail anchor × condition factor, low
- * confidence) and last the LLM-only floor, which never declines — so the router
- * always returns a schema-valid price. Exported so the fallthrough ORDER itself
- * is testable end-to-end with injected fakes.
+ * #56 eBay PUBLIC sold-comps scraper (real completed sales — the strongest used
+ * signal, declining gracefully when disabled/blocked), then the #10 web-search
+ * agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction, env-key gated —
+ * a keyless deployment makes those tiers decline gracefully), then the #11 fallback
+ * tiers: depreciation (retail anchor × condition factor, low confidence) and last
+ * the LLM-only floor, which never declines — so the router always returns a
+ * schema-valid price. Exported so the fallthrough ORDER itself is testable
+ * end-to-end with injected fakes.
  */
+/**
+ * Activate the #59 freshness layer on the eBay-sold tier for PRODUCTION: the real
+ * wall clock (age-decay) + a shared TTL cache of sold-comp scrapes. Both are opt-in
+ * at the raw provider so unit tests stay deterministic; this composition root is the
+ * one place they're turned on. A caller-supplied `now`/`cache` (tests) is preserved.
+ */
+function withSoldFreshness(
+  opts: EbaySoldPricingProviderOptions = {},
+): EbaySoldPricingProviderOptions {
+  return {
+    ...opts,
+    now: opts.now ?? (() => Date.now()),
+    cache: opts.cache ?? getTtlCache<EbaySoldComp[]>("sold", resolveSoldCacheTtlMs()),
+  };
+}
+
 export function createDefaultPricer(
   options: CreateDefaultPricerOptions = {},
 ): (signal: ItemSignal) => Promise<PriceResult> {
   const router = new PriceRouter([
     createIsbnPricingProvider(options.isbn),
+    createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold)),
     createUpcWebPricingProvider(options.webSearch),
     createBrandedWebPricingProvider(options.webSearch),
     createDepreciationPricingProvider(options.depreciation),
@@ -152,11 +180,17 @@ function hasSoldComp(price: PriceResult): boolean {
  * source (web tier) restores the high `isbn` trust.
  *
  * #32 calibration (same principle, web tier): the pricing contract permits `branded-web`
- * to cite asking-only / scattered sources, so it does NOT automatically deserve the tight
- * (high-trust) `web_tight` tier. Earn `web_tight` ONLY with a real sold comp; otherwise
- * map to `web_wide`. Without this, a fully-identified branded item with a single asking
- * comp scores 0.6·0.8 + 0.25·1 + 0.15·0.4 = 0.79 and clears the 0.75 autopilot gate with
- * no sold comp or demonstrated clustering; `web_wide` lands it at 0.67, safely sub-gate.
+ * to cite asking-only / scattered sources, so it does NOT automatically deserve a high-trust
+ * tier. Earn the sold-grounded `sold` tier ONLY with a real sold comp AND a tight cluster;
+ * otherwise map to `web_wide`. Without this, a fully-identified branded item with a single
+ * asking comp scores 0.6·0.8 + 0.25·1 + 0.15·0.4 = 0.79 and clears the 0.75 autopilot gate
+ * with no sold comp or demonstrated clustering; `web_wide` lands it at 0.67, safely sub-gate.
+ *
+ * #60: a completed-SALE comp ("sold beats asking", ADR-0001) earns the first-class `sold`
+ * confidence tier — ranked ABOVE the asking-based web tiers — instead of being folded onto
+ * `web_tight`. A scattered sold set still degrades to `web_wide` (real evidence of *a*
+ * market, not a defensible tight price), so a wide sale spread cannot ride the label past
+ * the gate; tightness rides on the provider's judged `compAgreement`.
  */
 function pricingTierToConfidenceTier(
   price: PriceResult,
@@ -164,17 +198,23 @@ function pricingTierToConfidenceTier(
   switch (price.tier) {
     case "isbn-lookup":
       return hasSoldComp(price) ? "isbn" : "depreciation";
+    case "ebay-sold":
+      // eBay sold comps are completed sales — sold-grounded by construction, so
+      // the only question is tightness. A tight cluster earns the first-class
+      // `sold` tier (above the asking-based web tiers, #60); a scattered sold set
+      // stays `web_wide` (real evidence of *a* market, not a defensible tight price).
+      return tightAgreement(price) ? "sold" : "web_wide";
     case "upc-aided-web":
       return "web_wide";
     case "branded-web":
-      // #10 round-4 calibration: web_tight needs BOTH sold grounding AND the
+      // #10 round-4 calibration: the `sold` tier needs BOTH sold grounding AND the
       // provider's judged tight agreement. A scattered sold set ($60/$185/$420)
       // is real evidence of *a* market but not of a defensible tight price —
       // it stays web_wide and cannot ride the sold-comp label past the
       // autopilot gate. Providers that don't report agreement (e.g. injected
       // test pricers) keep the sold-comp-only behavior.
       return hasSoldComp(price) && tightAgreement(price)
-        ? "web_tight"
+        ? "sold"
         : "web_wide";
     case "depreciation":
       return "depreciation";

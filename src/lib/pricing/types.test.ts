@@ -59,6 +59,7 @@ describe("PriceResult contract", () => {
   it("exposes the tiers in PRD priority order", () => {
     expect(PRICING_TIERS).toEqual([
       "isbn-lookup",
+      "ebay-sold",
       "upc-aided-web",
       "branded-web",
       "depreciation",

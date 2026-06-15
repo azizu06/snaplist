@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { parseReviewEdits } from "@/lib/pipeline";
+import { reportServerError } from "@/lib/sentry";
 
 /**
  * Review-page actions (issue #12 + UI pass): the seller's edits.
@@ -70,7 +71,8 @@ export async function saveReview(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   if (readError) {
-    backTo(id, `Failed to save: ${readError.message}`);
+    reportServerError("review.save.read", readError);
+    backTo(id, "Failed to save changes. Please try again.");
   }
   if (!item) {
     backTo(id, "Item not found.");
@@ -91,7 +93,8 @@ export async function saveReview(formData: FormData) {
     .eq("id", id)
     .select("id");
   if (itemError) {
-    backTo(id, `Failed to save: ${itemError.message}`);
+    reportServerError("review.save.item", itemError);
+    backTo(id, "Failed to save changes. Please try again.");
   }
   if (!updated || updated.length === 0) {
     backTo(id, "Item not found.");
@@ -108,7 +111,8 @@ export async function saveReview(formData: FormData) {
       .eq("item_id", id)
       .select("id");
     if (listingError) {
-      backTo(id, `Failed to save the listing copy: ${listingError.message}`);
+      reportServerError("review.save.listing", listingError);
+      backTo(id, "Failed to save the listing copy. Please try again.");
     }
     if (!updatedListing || updatedListing.length === 0) {
       backTo(id, "Listing not found.");

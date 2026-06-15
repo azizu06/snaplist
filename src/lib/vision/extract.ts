@@ -4,6 +4,7 @@ import {
   type ExtractedAttributes,
   type Identification,
 } from "../pipeline/types";
+import { resolveLanguageModel, resolveModelId } from "../llm";
 
 /**
  * Real single-shot multimodal vision extraction (issue #6).
@@ -172,11 +173,7 @@ export function deriveIdentification(
 // ---------------------------------------------------------------------------
 
 function resolveModel(model?: string): string {
-  return (
-    model?.trim() ||
-    process.env.VISION_MODEL?.trim() ||
-    DEFAULT_VISION_MODEL
-  );
+  return resolveModelId("vision", { modelId: model });
 }
 
 /**
@@ -258,7 +255,7 @@ export async function extractItemAttributes(
  * gate; this just makes the single real call actually succeed and lets the model
  * also TELL us when it's unsure.
  */
-const visionResponseSchema = z.object({
+export const visionResponseSchema = z.object({
   brand: z.string().nullable(),
   model: z.string().nullable(),
   category: z.string().nullable(),
@@ -314,14 +311,11 @@ const EXTRACTION_SYSTEM_PROMPT =
  * offline test path. `apiKey` defaults to OPENAI_API_KEY.
  */
 export function createOpenAIVisionGenerate(
-  apiKey: string | undefined = process.env.OPENAI_API_KEY,
+  apiKey: string | undefined = undefined,
 ): VisionGenerate {
   return async ({ model, images, attempt }) => {
-    const [{ generateObject }, { createOpenAI }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const openai = createOpenAI(apiKey ? { apiKey } : {});
+    const { generateObject } = await import("ai");
+    const llmModel = await resolveLanguageModel("vision", { modelId: model, apiKey });
 
     // One user message: instruction text + N image parts → a SINGLE multimodal call.
     const imageParts = images.map((img) =>
@@ -335,7 +329,7 @@ export function createOpenAIVisionGenerate(
         : "Your previous response was not valid. Re-extract, strictly matching the schema.";
 
     const { object } = await generateObject({
-      model: openai.chat(model),
+      model: llmModel,
       schema: visionResponseSchema,
       system: EXTRACTION_SYSTEM_PROMPT,
       messages: [

@@ -61,13 +61,50 @@ describe("computeConfidence — bands by pricing tier", () => {
 });
 
 describe("computeConfidence — tier ordering", () => {
-  it("ranks tiers ISBN > web_tight > web_wide > depreciation > llm_only when other signals are equal", () => {
+  it("ranks tiers ISBN > sold > web_tight > web_wide > depreciation > llm_only when other signals are equal", () => {
     const at = (tier: ConfidenceSignals["tier"]) =>
       computeConfidence({ ...ideal, tier, compAgreement: 0.5 }).score;
-    expect(at("isbn")).toBeGreaterThan(at("web_tight"));
+    expect(at("isbn")).toBeGreaterThan(at("sold"));
+    expect(at("sold")).toBeGreaterThan(at("web_tight"));
     expect(at("web_tight")).toBeGreaterThan(at("web_wide"));
     expect(at("web_wide")).toBeGreaterThan(at("depreciation"));
     expect(at("depreciation")).toBeGreaterThan(at("llm_only"));
+  });
+});
+
+describe("computeConfidence — sold-comp tier (issue #60)", () => {
+  // The signature outcome of #60: a real completed-sale comp is the strongest
+  // USED-price signal, so the `sold` tier must outrank the asking/web tiers in
+  // the composite (ADR-0001: "sold beats asking"). The pricing→confidence bridge
+  // only routes a sold comp here when its cluster is TIGHT; a scattered sold set
+  // degrades to `web_wide` upstream (tested in vision/pipeline), so within the
+  // composite the `sold` tier represents a tight, sold-grounded price.
+  it("a sold comp outranks a strong asking comp at identical other signals", () => {
+    const sold = computeConfidence({ ...ideal, tier: "sold", compAgreement: 0.8 });
+    const asking = computeConfidence({ ...ideal, tier: "web_tight", compAgreement: 0.8 });
+    expect(sold.score).toBeGreaterThan(asking.score);
+  });
+
+  it("ranks below a structured ISBN lookup (exact identity still beats a sale comp)", () => {
+    const sold = computeConfidence({ ...ideal, tier: "sold", compAgreement: 1 });
+    const isbn = computeConfidence({ ...ideal, tier: "isbn", compAgreement: 1 });
+    expect(sold.score).toBeLessThan(isbn.score);
+  });
+
+  it("a tight, fully-identified sold cluster is high-band and autopilot eligible", () => {
+    const r = computeConfidence({ ...ideal, tier: "sold", compAgreement: 1 });
+    expect(r.band).toBe("high");
+    expect(r.autopilotEligible).toBe(true);
+  });
+
+  it("tighter sold agreement yields a higher score (the tight-vs-scattered signal)", () => {
+    const looser = computeConfidence({ ...ideal, tier: "sold", compAgreement: 0.5 });
+    const tighter = computeConfidence({ ...ideal, tier: "sold", compAgreement: 1 });
+    expect(tighter.score).toBeGreaterThan(looser.score);
+  });
+
+  it("parseSignals accepts the sold tier", () => {
+    expect(() => parseSignals({ ...ideal, tier: "sold" })).not.toThrow();
   });
 });
 

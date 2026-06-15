@@ -1,0 +1,13 @@
+{
+  "brand": "Sony",
+  "model": "WH-1000XM4",
+  "category": "electronics",
+  "condition": "good",
+  "isbn": null,
+  "upc": "027242920866",
+  "specs": ["wireless", "noise-cancelling", "over-ear"],
+  "title": "Sony WH-1000XM4 Wireless Noise-Cancelling Headphones",
+  "ambiguous": false,
+  "uncertaintyReason": null,
+  "candidates": null
+}
