@@ -119,7 +119,7 @@ const FIXTURE_SETTINGS: SettingsData = {
   },
   autopilotEnabled: true,
   ebay: { connected: true, ebayUsername: "aziz_resells" },
-  billing: { tier: "free", itemsPerDay: 15, proItemsPerDay: 200 },
+  billing: { tier: "free", itemsPerDay: 15, proItemsPerDay: 200, billingEnabled: true },
   error: null,
   ebayBanner: null,
 };

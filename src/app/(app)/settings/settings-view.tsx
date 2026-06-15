@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSegmented } from "@/components/theme-toggle";
 import type { ProfileUser } from "@/components/profile-menu";
+import { BillingCta } from "./billing-cta";
 
 /**
  * Settings — presentational surface (UI pass: the page was "Account + Sign
@@ -26,14 +27,22 @@ export interface SettingsData {
   autopilotEnabled: boolean;
   ebay: { connected: boolean; ebayUsername: string | null };
   /**
-   * Plan & billing surface (#64, frontend). `tier` is the live `resolveTier`
-   * seam from `src/lib/abuse/config.ts` — everyone is `free` until the Stripe
-   * backend flips paid subscribers. `itemsPerDay` is the current tier's real
+   * Plan & billing surface (#64). `tier` is the REAL entitlement from
+   * `getEntitlement` (the Supabase mirror the Stripe webhook writes), so a Pro
+   * subscriber actually shows Pro. `itemsPerDay` is the current tier's real
    * enforced daily allowance; `proItemsPerDay` is the paid tier's, for the
-   * free→Pro teaser. Limits come straight from `tierLimits`, so the number
-   * shown is the number actually enforced.
+   * free→Pro teaser. Limits come straight from `tierLimits`, so the number shown
+   * is the number actually enforced. `billingEnabled` (Stripe configured) decides
+   * whether the free CTA starts a live checkout or links to marketing `/pricing`.
    */
-  billing: { tier: "free" | "paid"; itemsPerDay: number; proItemsPerDay: number };
+  billing: {
+    tier: "free" | "paid";
+    itemsPerDay: number;
+    proItemsPerDay: number;
+    /** Whether direct-Stripe billing is configured (#64). When false, the free
+     *  CTA points at marketing `/pricing` instead of starting a live checkout. */
+    billingEnabled: boolean;
+  };
   error: string | null;
   ebayBanner: "connected" | "disconnected" | null;
 }
@@ -219,10 +228,10 @@ export function SettingsView({
       </Card>
       </GlareHover>
 
-      {/* ---- Plan & billing: current tier, real daily allowance, upgrade path.
-              The tier comes from the live `resolveTier` seam; today everyone is
-              `free`, so the paid branch is the shape the Stripe backend (#64)
-              will light up — `Manage billing` targets the portal route it adds. ---- */}
+      {/* ---- Plan & billing: real entitlement, daily allowance, upgrade path.
+              The tier is the live `getEntitlement` mirror (#64); the CTAs POST the
+              billing routes via <BillingCta> — Upgrade → /api/billing/checkout,
+              Manage billing → /api/billing/portal — the single billing interface. ---- */}
       <GlareHover>
       <Card>
         <CardHeader
@@ -253,12 +262,11 @@ export function SettingsView({
                 </strong>
                 , with priority research and bulk uploads.
               </p>
-              <a
-                href="/api/billing/portal"
-                className={`${buttonClasses("secondary", "md")} self-start`}
-              >
-                Manage billing
-              </a>
+              <BillingCta
+                endpoint="/api/billing/portal"
+                label="Manage billing"
+                variant="secondary"
+              />
             </>
           ) : (
             <>
@@ -273,15 +281,25 @@ export function SettingsView({
               </p>
               <p className="text-[13.5px] text-faint">
                 Seller Pro lifts that to {billing.proItemsPerDay} a day with priority
-                research and bulk uploads. It arrives after beta, and beta users keep
-                early-bird pricing.
+                research and bulk uploads.
+                {billing.billingEnabled
+                  ? " Beta users keep early-bird pricing."
+                  : " It arrives after beta, and beta users keep early-bird pricing."}
               </p>
-              <a
-                href="/pricing"
-                className={`${buttonClasses("primary", "md")} self-start`}
-              >
-                See plans
-              </a>
+              {billing.billingEnabled ? (
+                <BillingCta
+                  endpoint="/api/billing/checkout"
+                  label="Upgrade to Seller Pro"
+                  variant="primary"
+                />
+              ) : (
+                <a
+                  href="/pricing"
+                  className={`${buttonClasses("primary", "md")} self-start`}
+                >
+                  See plans
+                </a>
+              )}
             </>
           )}
         </CardBody>

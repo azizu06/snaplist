@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { getEbayConnectionStatus } from "@/lib/marketplace/ebay";
-import { resolveTier, tierLimits } from "@/lib/abuse/config";
+import { tierLimits } from "@/lib/abuse/config";
+import { getEntitlement, stripeConfigured } from "@/lib/billing";
 import { setAutopilotSetting } from "@/app/(app)/upload/actions";
 import { disconnectEbay } from "./actions";
 import { SettingsView, type SettingsData } from "./settings-view";
@@ -26,16 +27,16 @@ export default async function SettingsPage({
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/settings");
 
-  const [autopilotEnabled, ebayConnection, clerkUser] = await Promise.all([
+  // #64: resolve the caller's REAL billing entitlement from the Supabase mirror
+  // (getEntitlement) — not the pure resolveTier default — so a Pro subscriber sees
+  // Pro and the 200/day cap. getEntitlement is fail-safe (defaults free), reusing
+  // the request's user-scoped client (RLS read-own).
+  const [autopilotEnabled, ebayConnection, clerkUser, tier] = await Promise.all([
     getAutopilotEnabled(supabase, userId),
     getEbayConnectionStatus(supabase),
     currentUser(),
+    getEntitlement(userId, supabase),
   ]);
-
-  // #64: resolve the caller's billing tier from the live `resolveTier` seam so
-  // the settings UI shows the real plan + the daily allowance actually enforced.
-  // Everyone is `free` until the Stripe backend flips paid subscribers.
-  const tier = resolveTier(userId);
 
   const data: SettingsData = {
     user: {
@@ -58,6 +59,7 @@ export default async function SettingsPage({
       tier,
       itemsPerDay: tierLimits(tier).itemsPerDay,
       proItemsPerDay: tierLimits("paid").itemsPerDay,
+      billingEnabled: stripeConfigured(),
     },
     error: error ?? null,
     ebayBanner:
