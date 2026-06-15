@@ -19,6 +19,11 @@ import {
   type PriceResult,
   type WebSearchPricingProviderOptions,
 } from "../pricing";
+import { getTtlCache } from "../pricing/comp-cache";
+import {
+  resolveSoldCacheTtlMs,
+  type EbaySoldComp,
+} from "../pricing/providers/ebay-sold";
 import { generateEbayListing, createRealFewShotRetrieval } from "../listing";
 import type {
   ExtractedAttributes,
@@ -110,12 +115,28 @@ export interface CreateDefaultPricerOptions {
  * schema-valid price. Exported so the fallthrough ORDER itself is testable
  * end-to-end with injected fakes.
  */
+/**
+ * Activate the #59 freshness layer on the eBay-sold tier for PRODUCTION: the real
+ * wall clock (age-decay) + a shared TTL cache of sold-comp scrapes. Both are opt-in
+ * at the raw provider so unit tests stay deterministic; this composition root is the
+ * one place they're turned on. A caller-supplied `now`/`cache` (tests) is preserved.
+ */
+function withSoldFreshness(
+  opts: EbaySoldPricingProviderOptions = {},
+): EbaySoldPricingProviderOptions {
+  return {
+    ...opts,
+    now: opts.now ?? (() => Date.now()),
+    cache: opts.cache ?? getTtlCache<EbaySoldComp[]>("sold", resolveSoldCacheTtlMs()),
+  };
+}
+
 export function createDefaultPricer(
   options: CreateDefaultPricerOptions = {},
 ): (signal: ItemSignal) => Promise<PriceResult> {
   const router = new PriceRouter([
     createIsbnPricingProvider(options.isbn),
-    createEbaySoldPricingProvider(options.ebaySold),
+    createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold)),
     createUpcWebPricingProvider(options.webSearch),
     createBrandedWebPricingProvider(options.webSearch),
     createDepreciationPricingProvider(options.depreciation),

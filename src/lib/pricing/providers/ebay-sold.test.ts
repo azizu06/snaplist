@@ -13,10 +13,12 @@ import {
   isPrivateOrInternalHost,
   parsePrice,
   parseSoldComps,
+  parseSoldDate,
   synthesizeSoldResult,
   type EbaySoldComp,
   type FetchPage,
 } from "./ebay-sold";
+import { createInMemoryTtlCache, type TtlCache } from "../comp-cache";
 import { PriceRouter } from "../router";
 import { priceResultSchema, type ItemSignal, type PricingProvider } from "../types";
 import { TIGHT_AGREEMENT_MIN } from "./web-search";
@@ -688,5 +690,180 @@ describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
     const router = new PriceRouter([declineIsbn, ebaySold, brandedStub]);
     const result = await router.price(BRANDED_SIGNAL);
     expect(result.tier).toBe("branded-web");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Freshness: sale-date capture, TTL cache, staleness drop, recency weighting (#59)
+// ---------------------------------------------------------------------------
+
+const DAY = 86_400_000;
+const NOW = Date.UTC(2026, 5, 14); // fixed "now" for deterministic age-decay
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Mon D, YYYY" for a sale `daysAgo` before NOW (matches eBay's caption format). */
+function soldDateText(daysAgo: number): string {
+  const d = new Date(NOW - daysAgo * DAY);
+  return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}
+function soldCard(href: string, price: number, daysAgo: number): string {
+  return `<li class="s-item">
+    <a class="s-item__link" href="${href}"><div class="s-item__title">Sony WH-1000XM4 Headphones</div></a>
+    <span class="s-item__price">$${price.toFixed(2)}</span>
+    <div class="s-item__caption"><span>Sold ${soldDateText(daysAgo)}</span></div>
+    <div class="s-item__subtitle"><span class="SECONDARY_INFO">Pre-Owned</span></div>
+  </li>`;
+}
+const srp = (cards: string[]) => `<ul class="srp-results">${cards.join("")}</ul>`;
+
+/** A FetchPage whose body can be swapped mid-test (to simulate a block→recover). */
+function mutableFetch(initial: string): FetchPage & { urls: string[]; set: (b: string) => void } {
+  let body = initial;
+  const urls: string[] = [];
+  const fn = (async (url: string) => {
+    urls.push(url);
+    return body;
+  }) as FetchPage & { urls: string[]; set: (b: string) => void };
+  fn.urls = urls;
+  fn.set = (b) => {
+    body = b;
+  };
+  return fn;
+}
+
+describe("parseSoldDate", () => {
+  it("parses an &nbsp;-separated caption to an epoch ms", () => {
+    expect(parseSoldDate("Sold Jun 3, 2026")).toBe(Date.parse("Jun 3, 2026"));
+  });
+
+  it("parses a plain-space caption", () => {
+    expect(parseSoldDate("Sold Jun 3, 2026")).toBe(Date.parse("Jun 3, 2026"));
+  });
+
+  it("returns undefined for a missing or unparseable date (kept as neutral)", () => {
+    expect(parseSoldDate(undefined)).toBeUndefined();
+    expect(parseSoldDate("Sold")).toBeUndefined();
+    expect(parseSoldDate("Completed listing")).toBeUndefined();
+  });
+});
+
+describe("parseSoldComps — sale-date capture (#59)", () => {
+  it("populates soldAt from the card caption when present", () => {
+    const html = srp([soldCard("https://www.ebay.com/itm/1", 180, 5)]);
+    const [comp] = parseSoldComps(html);
+    expect(comp.soldAt).toBe(Date.parse(soldDateText(5)));
+  });
+});
+
+describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
+  it("cache-miss → fetch; cache-hit within TTL → reuse (no second fetch)", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    const first = await provider.price(BRANDED_SIGNAL);
+    const second = await provider.price(BRANDED_SIGNAL);
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(second!.suggested).toBe(first!.suggested);
+    expect(fetchPage.urls).toHaveLength(1); // second served from cache
+  });
+
+  it("does NOT cache an empty (blocked) scrape — the next request retries", async () => {
+    const fetchPage = mutableFetch(""); // blocked first
+    const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull(); // declined, nothing cached
+    fetchPage.set(FIXTURE_HTML);
+    expect(await provider.price(BRANDED_SIGNAL)).not.toBeNull(); // retried, got comps
+    expect(fetchPage.urls).toHaveLength(2);
+  });
+
+  it("does NOT cache a thin (<MIN raw comps) scrape — likely a block, retried next time", async () => {
+    const thin = srp([soldCard("https://www.ebay.com/itm/1", 178, 5)]); // 1 raw comp < MIN
+    const fetchPage = mutableFetch(thin);
+    const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull(); // <MIN → declines, not cached
+    fetchPage.set(FIXTURE_HTML);
+    expect(await provider.price(BRANDED_SIGNAL)).not.toBeNull(); // retried, found comps
+    expect(fetchPage.urls).toHaveLength(2);
+  });
+
+  it("degrades gracefully when the cache throws — an outage must not hard-fail the call", async () => {
+    // A cache (Upstash) outage must DEGRADE to a live fetch, never propagate: the
+    // router treats a thrown provider error as hard, which would crash the whole
+    // listing run instead of declining to the web tier (#59 review).
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const throwingCache: TtlCache<EbaySoldComp[]> = {
+      async get() {
+        throw new Error("upstash unreachable");
+      },
+      async set() {
+        throw new Error("upstash unreachable");
+      },
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache: throwingCache });
+
+    const result = await provider.price(BRANDED_SIGNAL);
+    expect(result).not.toBeNull(); // read threw → treated as miss → live-fetched
+    expect(result!.tier).toBe("ebay-sold"); // write threw → swallowed, result still returned
+    expect(fetchPage.urls).toHaveLength(1);
+  });
+});
+
+describe("createEbaySoldPricingProvider — age-decay (#59, now injected)", () => {
+  it("drops stale comps so an ancient sale can't anchor today's price", async () => {
+    const html = srp([
+      soldCard("https://www.ebay.com/itm/1", 170, 3),
+      soldCard("https://www.ebay.com/itm/2", 180, 6),
+      soldCard("https://www.ebay.com/itm/3", 190, 9),
+      soldCard("https://www.ebay.com/itm/4", 500, 1000), // ~3y old → stale
+      soldCard("https://www.ebay.com/itm/5", 520, 1100), // ~3y old → stale
+    ]);
+    const fresh = await createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(html),
+      now: () => NOW,
+    }).price(BRANDED_SIGNAL);
+    const noFreshness = await createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(html),
+    }).price(BRANDED_SIGNAL);
+
+    // With freshness on, the two ancient $500/$520 sales are dropped → the band
+    // tops out at the recent cluster; without it, they widen the band and lift the median.
+    expect(fresh!.range.max).toBe(190);
+    expect(noFreshness!.range.max).toBe(520);
+    expect(fresh!.suggested).toBeLessThan(noFreshness!.suggested);
+  });
+
+  it("declines when every comp is stale (too thin after the cutoff)", async () => {
+    const html = srp([
+      soldCard("https://www.ebay.com/itm/1", 500, 900),
+      soldCard("https://www.ebay.com/itm/2", 520, 950),
+    ]);
+    const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(html), now: () => NOW });
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
+  });
+
+  it("recency-weights the suggested price toward more recent sales", async () => {
+    // All fresh (within the cutoff), but the priciest sale is the most recent and
+    // the cheapest is the oldest → the weighted median lifts above the plain median.
+    const html = srp([
+      soldCard("https://www.ebay.com/itm/1", 100, 130), // old + cheap
+      soldCard("https://www.ebay.com/itm/2", 150, 60),
+      soldCard("https://www.ebay.com/itm/3", 200, 2), // recent + pricey
+    ]);
+    const weighted = await createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(html),
+      now: () => NOW,
+    }).price(BRANDED_SIGNAL);
+    const plain = await createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(html),
+    }).price(BRANDED_SIGNAL);
+
+    expect(plain!.suggested).toBe(150); // plain median of [100,150,200]
+    expect(weighted!.suggested).toBeGreaterThan(plain!.suggested);
   });
 });

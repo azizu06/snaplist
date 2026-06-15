@@ -6,6 +6,15 @@ import type {
   PricingProvider,
 } from "../types";
 import { TIGHT_AGREEMENT_MIN, spreadToAgreement } from "./web-search";
+import {
+  recencyWeight,
+  selectFreshComps,
+  weightedMedian,
+  SOLD_HALFLIFE_DAYS_DEFAULT,
+  SOLD_STALE_DAYS_DEFAULT,
+} from "../freshness";
+import type { TtlCache } from "../comp-cache";
+import { logEvent } from "../../observability";
 
 /**
  * Tier "ebay-sold" — a scraper over eBay's PUBLIC sold-listings pages (issue #56).
@@ -56,6 +65,13 @@ export interface EbaySoldComp {
    * so this is the authoritative new-vs-used signal when present (#56 review).
    */
   condition?: string;
+  /**
+   * Completed-sale timestamp (epoch ms) parsed from the card's "Sold &lt;date&gt;"
+   * caption, when present. Drives the freshness layer (#59): the recency/age-decay
+   * weighting and the staleness cutoff. Absent when the caption date is missing or
+   * unparseable — an undated comp is treated as neutral (never expired, full weight).
+   */
+  soldAt?: number;
 }
 
 export interface EbaySoldPricingProviderOptions {
@@ -71,6 +87,25 @@ export interface EbaySoldPricingProviderOptions {
   userAgent?: string;
   /** Per-fetch timeout (ms); defaults to `EBAY_SOLD_TIMEOUT_MS` env or 8000. */
   fetchTimeoutMs?: number;
+  // -- Freshness (#59). All OPT-IN: the raw provider stays clock-free and
+  //    cache-free (so unit tests are deterministic); `createDefaultPricer` wires
+  //    the real clock + shared cache for production. --
+  /**
+   * TTL cache of sold-comp scrapes keyed by the resolved search URL (= product
+   * identity). A hit within the TTL is reused (no fetch); a miss live-fetches and
+   * stores. Omitted → always live-fetch (the live page is the source of truth).
+   */
+  cache?: TtlCache<EbaySoldComp[]>;
+  /**
+   * Clock for the age-decay layer (injected for deterministic tests). When set,
+   * stale comps are dropped and the suggested price is recency-weighted; when
+   * omitted, no freshness adjustment is applied (raw median over all comps).
+   */
+  now?: () => number;
+  /** Staleness cutoff in days; defaults to `EBAY_SOLD_STALE_DAYS` env or 180. */
+  staleDays?: number;
+  /** Recency half-life in days; defaults to `EBAY_SOLD_HALFLIFE_DAYS` env or 45. */
+  halfLifeDays?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +146,26 @@ function resolveUserAgent(env: NodeJS.ProcessEnv = process.env): string {
 function resolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const v = Number(env.EBAY_SOLD_TIMEOUT_MS);
   return Number.isFinite(v) && v > 0 ? v : EBAY_SOLD_FETCH_TIMEOUT_MS;
+}
+
+/** Freshness TTL/cutoff/half-life — env-tunable (#59); each falls back to its default. */
+export const EBAY_SOLD_CACHE_TTL_HOURS_DEFAULT = 72; // ~3 days: "reuse for a few days"
+
+function posNum(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export function resolveSoldCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
+  return posNum(env.EBAY_SOLD_CACHE_TTL_HOURS, EBAY_SOLD_CACHE_TTL_HOURS_DEFAULT) * 3_600_000;
+}
+
+function resolveStaleDays(env: NodeJS.ProcessEnv = process.env): number {
+  return posNum(env.EBAY_SOLD_STALE_DAYS, SOLD_STALE_DAYS_DEFAULT);
+}
+
+function resolveHalfLifeDays(env: NodeJS.ProcessEnv = process.env): number {
+  return posNum(env.EBAY_SOLD_HALFLIFE_DAYS, SOLD_HALFLIFE_DAYS_DEFAULT);
 }
 
 /**
@@ -303,6 +358,24 @@ export function parsePrice(text: string | undefined): number | null {
  * real markup) would be dead code. Until #59 lands, the provider declines
  * gracefully (→ web tier) on markup it doesn't recognize, never a wrong price.
  */
+/**
+ * Parse a sold card's caption ("Sold&nbsp;Jun 3, 2026") to an epoch-ms timestamp,
+ * or undefined when the date is absent/unparseable. Pure and total — a bad date
+ * yields undefined (the comp is kept and treated as neutral by the freshness
+ * layer), never a throw. `&nbsp;` decodes to ` `, so both that and a regular
+ * space are accepted as separators.
+ */
+export function parseSoldDate(captionText: string | undefined): number | undefined {
+  if (!captionText) return undefined;
+  const m = captionText.match(
+    /sold\b[\s ]+([A-Za-z]{3,9}\.?[\s ]+\d{1,2},?[\s ]+\d{4})/i,
+  );
+  if (!m) return undefined;
+  const normalized = m[1].replace(/[\s ]+/g, " ").trim();
+  const t = Date.parse(normalized);
+  return Number.isFinite(t) ? t : undefined;
+}
+
 export function parseSoldComps(
   html: string,
   baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
@@ -327,8 +400,10 @@ export function parseSoldComps(
     if (!title || /^shop on ebay$/i.test(title)) return; // placeholder / empty
 
     // Require the "Sold" caption — an active/sponsored card reusing li.s-item
-    // (no completed-sale caption) must never be counted as a sold comp.
-    if (!/\bsold\b/i.test(card.find(".s-item__caption").text())) return;
+    // (no completed-sale caption) must never be counted as a sold comp. The same
+    // caption carries the sale DATE used by the freshness layer (#59).
+    const captionText = card.find(".s-item__caption").text();
+    if (!/\bsold\b/i.test(captionText)) return;
 
     // Skip Best-Offer-accepted cards: the public card can show the LIST price, not
     // the accepted transaction amount (the true amount is gated in Product
@@ -356,7 +431,15 @@ export function parseSoldComps(
       card.find(".s-item__subtitle, .SECONDARY_INFO").first().text().replace(/\s+/g, " ").trim() ||
       undefined;
 
-    comps.push({ url, title, price, ...(condition ? { condition } : {}) });
+    const soldAt = parseSoldDate(captionText);
+
+    comps.push({
+      url,
+      title,
+      price,
+      ...(condition ? { condition } : {}),
+      ...(soldAt != null ? { soldAt } : {}),
+    });
   });
 
   return comps;
@@ -581,19 +664,44 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Freshness inputs for synthesis (#59). Omit to disable age-decay (raw median). */
+export interface SoldSynthesisOptions {
+  /** Reference "now" (epoch ms). When set, the suggested price is recency-weighted. */
+  now?: number;
+  /** Recency half-life in days; defaults to the freshness module default. */
+  halfLifeDays?: number;
+}
+
 /**
- * Synthesize the cited `PriceResult` from sold comps. Suggested = median; range
- * = min..max band; comp agreement = `1 - relativeSpread` (the SAME mapping the
- * web tier uses, so the confidence composite reads tightness identically across
- * tiers). Every source is a `sold-comp` (these are completed sales), and no
+ * Synthesize the cited `PriceResult` from sold comps. Suggested = median (or, when
+ * `opts.now` is given, the RECENCY-WEIGHTED median so newer sales count more — #59);
+ * range = the observed min..max band; comp agreement = `1 - relativeSpread` (the
+ * SAME mapping the web tier uses, so the confidence composite reads tightness
+ * identically across tiers). Every source is a `sold-comp` (completed sales), and no
  * `model` is claimed — the tier is deterministic, no LLM involved.
+ *
+ * Age-decay touches ONLY the point estimate: the band and agreement describe the
+ * observed spread of the (already staleness-filtered) comps, so a tight cluster
+ * stays tight whether or not weighting is on. With no `now`, or when all comps are
+ * undated (equal weights), the weighted median is exactly the plain median.
  */
-export function synthesizeSoldResult(comps: readonly EbaySoldComp[]): PriceResult {
+export function synthesizeSoldResult(
+  comps: readonly EbaySoldComp[],
+  opts: SoldSynthesisOptions = {},
+): PriceResult {
   if (comps.length === 0) {
     throw new Error("synthesizeSoldResult requires at least one comp");
   }
   const prices = comps.map((c) => c.price).sort((a, b) => a - b);
-  const suggested = median(prices);
+  const suggested =
+    opts.now != null
+      ? weightedMedian(
+          comps.map((c) => c.price),
+          comps.map((c) =>
+            recencyWeight(c.soldAt, opts.now as number, opts.halfLifeDays),
+          ),
+        )
+      : median(prices);
   const min = prices[0];
   const max = prices[prices.length - 1];
   const spread = prices.length > 1 && suggested > 0 ? (max - min) / suggested : 0;
@@ -685,6 +793,13 @@ export function createEbaySoldPricingProvider(
       timeoutMs: options.fetchTimeoutMs,
     });
   const fetchFallback = options.fetchPageFallback;
+  // Freshness (#59) — opt-in. `now` activates age-decay; `cache` activates the
+  // TTL request cache. Both default OFF in the raw provider (deterministic unit
+  // tests); `createDefaultPricer` wires the real clock + shared cache.
+  const cache = options.cache;
+  const now = options.now;
+  const staleDays = options.staleDays ?? resolveStaleDays();
+  const halfLifeDays = options.halfLifeDays ?? resolveHalfLifeDays();
 
   const identifiable = (signal: ItemSignal): boolean =>
     buildSoldSearchUrl(signal, baseUrl) !== null;
@@ -728,13 +843,61 @@ export function createEbaySoldPricingProvider(
       if (!ebaySoldConfigured()) return null; // kill-switch → degrade to web tier
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
-      const comps = await fetchComps(url);
+
+      // Freshness cache (#59): a hit within TTL is reused (no fetch); a miss
+      // live-fetches and stores. The live page stays the source of truth. Only a
+      // scrape that yielded ≥ MIN raw comps is cached — a 0/1-comp result is almost
+      // always a block or placeholder page, and caching it would suppress the retry
+      // that the graceful-degradation design depends on. Relevance/freshness are
+      // applied per-request AFTER the cache, so the cache holds the raw scrape keyed
+      // by the resolved search URL (= product identity); age-decay below re-runs on
+      // every read, so a comp that goes stale while cached is still dropped.
+      // The cache is an OPTIMIZATION, never the source of truth: a cache (Upstash)
+      // outage must DEGRADE — treat a read failure as a miss (live-fetch) and a
+      // write failure as a no-op — not propagate, which the router would treat as a
+      // hard error and crash the whole listing run. This preserves the provider's
+      // "never hard-fails the pricing call; declines to the web tier" contract,
+      // mirroring the fail-open rate limiter (#58) and the fetchComps catch (#59 review).
+      let comps: EbaySoldComp[] | null = null;
+      if (cache) {
+        try {
+          comps = await cache.get(url);
+        } catch (err) {
+          logEvent("pricing.cache.error", {
+            op: "get",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      if (comps == null) {
+        comps = await fetchComps(url);
+        if (cache && comps.length >= EBAY_SOLD_MIN_COMPS) {
+          try {
+            await cache.set(url, comps);
+          } catch (err) {
+            logEvent("pricing.cache.error", {
+              op: "set",
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
       const relevant = filterRelevantComps(comps, signal);
-      if (relevant.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
-      return synthesizeSoldResult(relevant);
+
+      // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
+      // then recency-weight the suggested price toward more recent sales.
+      const tNow = now?.();
+      const fresh =
+        tNow != null ? selectFreshComps(relevant, tNow, staleDays) : relevant;
+      if (fresh.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
+      return synthesizeSoldResult(
+        fresh,
+        tNow != null ? { now: tNow, halfLifeDays } : {},
+      );
     },
   };
 }
