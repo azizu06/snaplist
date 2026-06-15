@@ -8,6 +8,7 @@ export {
   resolveProvider,
   resolveModelId,
   resolveApiKey,
+  oppositeProvider,
   LLM_PROVIDERS,
   LLM_ROLES,
   type LlmProvider,

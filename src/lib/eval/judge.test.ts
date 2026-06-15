@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createHeuristicJudge,
+  crossFamilyJudgeAvailable,
   judgeAgreement,
+  judgeProviderFor,
   judgeScoresSchema,
   validateJudge,
   type HumanLabeledListing,
@@ -89,6 +91,39 @@ describe("createHeuristicJudge", () => {
     });
     const normal = await judge({ listing: strongListing, attributes: strongAttrs });
     expect(long.title).toBeLessThan(normal.title);
+  });
+});
+
+describe("cross-family judge selection (#61 — anti self-bias)", () => {
+  it("judges with the OPPOSITE family from the generator", () => {
+    // Generator on OpenAI (showcase) → judge on Google; and vice versa.
+    expect(judgeProviderFor({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "x" })).toBe("google");
+    expect(judgeProviderFor({ LLM_PROVIDER: "google", GEMINI_API_KEY: "x" })).toBe("openai");
+  });
+
+  it("is available only when the OPPOSITE provider has a key", () => {
+    // Generator=OpenAI; cross-family judge=Google → needs a Google/Gemini key.
+    expect(
+      crossFamilyJudgeAvailable({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "x" }),
+    ).toBe(false); // no google key → not available
+    expect(
+      crossFamilyJudgeAvailable({
+        LLM_PROVIDER: "openai",
+        OPENAI_API_KEY: "x",
+        GEMINI_API_KEY: "g",
+      }),
+    ).toBe(true);
+    // Generator=Gemini; cross-family judge=OpenAI → needs an OpenAI key.
+    expect(
+      crossFamilyJudgeAvailable({ LLM_PROVIDER: "google", GEMINI_API_KEY: "g" }),
+    ).toBe(false);
+    expect(
+      crossFamilyJudgeAvailable({
+        LLM_PROVIDER: "google",
+        GEMINI_API_KEY: "g",
+        OPENAI_API_KEY: "x",
+      }),
+    ).toBe(true);
   });
 });
 

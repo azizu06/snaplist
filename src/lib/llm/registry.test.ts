@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LLM_ROLES,
+  oppositeProvider,
   resolveApiKey,
   resolveLanguageModel,
   resolveModelId,
@@ -15,6 +16,18 @@ import {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("oppositeProvider", () => {
+  it("flips the provider family (the cross-family judge anchor, #61)", () => {
+    expect(oppositeProvider("openai")).toBe("google");
+    expect(oppositeProvider("google")).toBe("openai");
+  });
+
+  it("is an involution (flipping twice is identity)", () => {
+    expect(oppositeProvider(oppositeProvider("openai"))).toBe("openai");
+    expect(oppositeProvider(oppositeProvider("google"))).toBe("google");
+  });
 });
 
 describe("resolveProvider", () => {
