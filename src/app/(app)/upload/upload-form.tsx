@@ -8,28 +8,29 @@ import { Banner } from "@/components/ui/banner";
 import { Spinner } from "@/components/ui/spinner";
 
 /**
- * Sell sheet — app-surfaces v3. The default state is composed as "the start
- * of the pipeline", not a form (owner: "the default area still not improved
- * too much"):
+ * Sell sheet — app-surfaces v4. The default state is composed as "the start
+ * of the pipeline", not a form:
  * - a journey rail under the title (add photos → AI identifies & prices →
  *   review & post) so the three-step promise is visible before any photo;
- * - the dropzone is the hero: a large cover slot (drag-drop or browse) over
- *   three labeled angle slots (back/detail/label), with a soft breathing
- *   violet glow ring + wash on drag-over;
- * - the Mercari field rows live under an "Autofill by SnapList" card header,
- *   each with a leading glyph + the sparkle "AI suggests" pill.
+ * - the photo input is a single square CAROUSEL — one viewer, prev/next arrows
+ *   + dots, an "Add photo" button (owner: the old cover-plus-tiles grid was
+ *   hard to read and cropped portrait shots). Each frame is object-contain over
+ *   a blurred fill, so a photo shows exactly as framed. Drag-drop still works,
+ *   signalled by a soft breathing violet glow ring + wash;
+ * - the field rows live under an "Autofill by SnapList" card header, each with
+ *   a leading glyph + the sparkle "AI suggests" pill.
  *
- * Mechanism is UNCHANGED from round 1 (audit U-1/U-2/U-3): four slot inputs
- * all named `photo` (the server action reads formData.getAll("photo")), slot
- * 1 required, object-URL previews, and the PROCESSING view that paces the
- * live pipeline stages while the single server action runs.
+ * Mechanism: a single hidden <input type="file" name="photo" multiple> is kept
+ * in sync (via the DataTransfer API) with the `files` array the carousel
+ * manages, so the server action still reads formData.getAll("photo") unchanged.
+ * Capped at MAX_PHOTOS — every photo is fed into ONE vision call, so each one
+ * adds cost/latency (PRD). The PROCESSING view paces the live pipeline stages
+ * while the single server action runs.
  */
 
 const ACCEPT = "image/png,image/jpeg,image/webp";
-const SLOT_COUNT = 4;
-
-/** Angle hints for the three secondary slots (cover is slot 0). */
-const ANGLE_HINTS = ["Back", "Detail", "Label"] as const;
+/** All photos go into ONE vision call; the cap bounds cost/latency (PRD). */
+const MAX_PHOTOS = 4;
 
 const STEPS = [
   {
@@ -278,23 +279,180 @@ function JourneyRail() {
   );
 }
 
+/** Flick power (|offset| × velocity) past which a drag commits to a swipe. */
+const SWIPE_CONFIDENCE = 8000;
+/** Distance (px) a slow, deliberate drag must cross to commit to a swipe. */
+const SWIPE_DISTANCE = 80;
+
+/**
+ * Directional slide: the entering frame comes in from the side you're heading
+ * toward, the leaving frame exits the opposite way. `custom` carries the
+ * direction (+1 next / -1 prev) into the variants.
+ */
+const slideVariants = {
+  enter: (dir: number) => ({ x: dir >= 0 ? "100%" : "-100%" }),
+  center: { x: 0 },
+  exit: (dir: number) => ({ x: dir >= 0 ? "-100%" : "100%" }),
+};
+
+/**
+ * The photo carousel: one big square viewer (object-contain over a blurred
+ * fill so the shot shows as framed) that fills the card width, with a smooth
+ * spring slide between frames, prev/next arrows + dots, a per-photo remove, and
+ * a "Cover" badge on the first (what the pipeline treats as the cover). No
+ * fixed slots, no angle labels.
+ */
+function PhotoCarousel({
+  previews,
+  current,
+  onSetCurrent,
+  onRemove,
+}: {
+  previews: string[];
+  current: number;
+  onSetCurrent: (i: number) => void;
+  onRemove: (i: number) => void;
+}) {
+  const count = previews.length;
+  const safe = Math.min(Math.max(0, current), count - 1);
+  // Direction of the last navigation, fed to the slide variants. Set just
+  // before we move so the entering/leaving frames travel the right way.
+  const [direction, setDirection] = useState(0);
+
+  const paginate = (target: number, dir: number) => {
+    setDirection(dir);
+    onSetCurrent(target);
+  };
+
+  return (
+    <div className="w-full">
+      <div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-border bg-surface-2 sm:aspect-[4/3]">
+        <AnimatePresence initial={false} custom={direction}>
+          <motion.div
+            key={safe}
+            custom={direction}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", stiffness: 320, damping: 34 }}
+            drag={count > 1 ? "x" : false}
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.5}
+            onDragEnd={(_event, info) => {
+              // Commit on a fast flick (offset × velocity) OR a deliberate drag
+              // past SWIPE_DISTANCE; otherwise it springs back to center.
+              const power = Math.abs(info.offset.x) * info.velocity.x;
+              if (info.offset.x < -SWIPE_DISTANCE || power < -SWIPE_CONFIDENCE) {
+                paginate((safe + 1) % count, 1);
+              } else if (info.offset.x > SWIPE_DISTANCE || power > SWIPE_CONFIDENCE) {
+                paginate((safe - 1 + count) % count, -1);
+              }
+            }}
+            className={`absolute inset-0 select-none ${
+              count > 1 ? "cursor-grab active:cursor-grabbing" : ""
+            }`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+            <img
+              src={previews[safe]}
+              alt=""
+              aria-hidden
+              draggable={false}
+              className="absolute inset-0 size-full scale-110 object-cover blur-xl"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+            <img
+              src={previews[safe]}
+              alt={`Photo ${safe + 1} of ${count}`}
+              draggable={false}
+              className="relative size-full object-contain"
+            />
+          </motion.div>
+        </AnimatePresence>
+
+        <span className="absolute left-3 top-3 z-10 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+          {safe === 0 ? "Cover" : `Photo ${safe + 1}`}
+        </span>
+
+        <button
+          type="button"
+          onClick={() => onRemove(safe)}
+          aria-label="Remove this photo"
+          className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
+        >
+          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+
+        {count > 1 ? (
+          <>
+            <button
+              type="button"
+              onClick={() => paginate((safe - 1 + count) % count, -1)}
+              aria-label="Previous photo"
+              className="absolute left-3 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
+            >
+              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => paginate((safe + 1) % count, 1)}
+              aria-label="Next photo"
+              className="absolute right-3 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
+            >
+              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      {count > 1 ? (
+        <div className="mt-3 flex items-center justify-center gap-2">
+          {previews.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => paginate(i, i >= safe ? 1 : -1)}
+              aria-label={`Go to photo ${i + 1}`}
+              aria-current={i === safe}
+              className={`h-2 rounded-full transition-all ${
+                i === safe
+                  ? "w-6 bg-accent-solid"
+                  : "w-2 bg-border-strong hover:bg-muted"
+              }`}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function FormBody({
   previews,
-  onPick,
-  onClear,
-  inputRefs,
+  current,
+  onSetCurrent,
+  onAdd,
+  onRemove,
 }: {
-  previews: (string | null)[];
-  onPick: (slot: number, file: File | null) => void;
-  onClear: (slot: number) => void;
-  inputRefs: React.MutableRefObject<(HTMLInputElement | null)[]>;
+  previews: string[];
+  current: number;
+  onSetCurrent: (i: number) => void;
+  onAdd: (files: FileList | File[]) => void;
+  onRemove: (i: number) => void;
 }) {
   const { pending } = useFormStatus();
-  const photoCount = previews.filter(Boolean).length;
+  const count = previews.length;
+  const atMax = count >= MAX_PHOTOS;
 
-  // Drag-and-drop onto the photo card: dropped images fill the empty slots
-  // in order (the same inputs the click flow uses, so the server action sees
-  // identical FormData). dragDepth tracks nested dragenter/leave pairs.
+  // Drag-and-drop onto the photo card appends to the carousel (capacity is
+  // enforced in onAdd). dragDepth tracks nested dragenter/leave pairs.
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
 
@@ -302,35 +460,16 @@ function FormBody({
     e.preventDefault();
     dragDepth.current = 0;
     setDragActive(false);
-    const dropped = Array.from(e.dataTransfer.files).filter((f) =>
-      ACCEPT.split(",").includes(f.type),
-    );
-    if (dropped.length === 0) return;
-    const emptySlots = previews
-      .map((p, slot) => (p ? null : slot))
-      .filter((s): s is number => s !== null);
-    dropped.slice(0, emptySlots.length).forEach((file, i) => {
-      const slot = emptySlots[i];
-      const input = inputRefs.current[slot];
-      if (input) {
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        input.files = dt.files;
-      }
-      onPick(slot, file);
-    });
+    onAdd(e.dataTransfer.files);
   };
 
-  if (pending) return <ProcessingView coverUrl={previews[0]} />;
-
-  const firstEmpty = previews.findIndex((p) => !p);
+  if (pending) return <ProcessingView coverUrl={previews[0] ?? null} />;
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ---- the dropzone hero: large cover slot + three labeled angle
-           slots. While dragging files anywhere over the card, a soft
-           breathing violet glow ring + wash (pointer-events-none overlays —
-           the inputs never remount) signal the drop target. ---- */}
+      {/* ---- the photo carousel. While dragging files anywhere over the card,
+           a soft breathing violet glow ring + wash (pointer-events-none
+           overlays) signal the drop target. ---- */}
       <section
         onDragEnter={(e) => {
           if (!e.dataTransfer.types.includes("Files")) return;
@@ -352,8 +491,7 @@ function FormBody({
       >
         {dragActive ? (
           <>
-            {/* Calm drop affordance (owner: the old animated lightning edge
-                read as chaotic). A soft violet wash + one gently breathing
+            {/* Calm drop affordance: a soft violet wash + one gently breathing
                 glow ring — reads as a glowing border, not a storm. */}
             <div
               aria-hidden
@@ -384,152 +522,82 @@ function FormBody({
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h2 className="text-[14px] font-semibold text-fg-strong">Photos</h2>
           <span className="text-[13.5px] text-muted" data-nums>
-            {photoCount}/{SLOT_COUNT}
+            {count}/{MAX_PHOTOS}
           </span>
         </div>
 
-        {/* ---- slots: one map, two shapes — slot 0 renders as the
-             full-width cover hero, slots 1–3 as labeled angle tiles. ---- */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
-          {Array.from({ length: SLOT_COUNT }, (_, slot) => {
-            const preview = previews[slot];
-            const isCover = slot === 0;
-            const enabled = preview != null || slot === firstEmpty || isCover;
-            return (
-              <div
-                key={slot}
-                className={
-                  isCover
-                    ? `relative col-span-3 h-44 overflow-hidden rounded-2xl sm:h-52 ${
-                        preview
-                          ? "border border-border"
-                          : "border-2 border-dashed border-accent/45 bg-accent-soft/35"
-                      }`
-                    : `relative aspect-[4/3] overflow-hidden rounded-xl ${
-                        preview
-                          ? "border border-border"
-                          : "border-2 border-dashed border-border-strong bg-surface-2"
-                      }`
-                }
-              >
-                <input
-                  ref={(el) => {
-                    inputRefs.current[slot] = el;
-                  }}
-                  id={`photo-slot-${slot}`}
-                  type="file"
-                  name="photo"
-                  accept={ACCEPT}
-                  required={isCover}
-                  disabled={!enabled}
-                  onChange={(e) => onPick(slot, e.target.files?.[0] ?? null)}
-                  className="sr-only"
-                />
-                {preview ? (
-                  <>
-                    {isCover ? (
-                      <>
-                        {/* Blurred fill behind an object-contain image: the
-                            cover shows the seller's photo in full — exactly as
-                            framed, never cropped — at any aspect ratio. The
-                            angle tiles below stay object-cover (thumbnails). */}
-                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-                        <img
-                          src={preview}
-                          alt=""
-                          aria-hidden
-                          className="absolute inset-0 size-full scale-110 object-cover blur-xl"
-                        />
-                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-                        <img
-                          src={preview}
-                          alt="Cover photo"
-                          className="relative size-full object-contain"
-                        />
-                      </>
-                    ) : (
-                      <>
-                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-                        <img
-                          src={preview}
-                          alt={`Photo ${slot + 1}`}
-                          className="size-full object-cover"
-                        />
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onClear(slot)}
-                      aria-label={
-                        isCover ? "Remove cover photo" : `Remove photo ${slot + 1}`
-                      }
-                      className={`absolute flex items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a] ${
-                        isCover ? "right-2 top-2 size-7" : "right-1 top-1 size-6"
-                      }`}
-                    >
-                      <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M18 6 6 18M6 6l12 12" />
-                      </svg>
-                    </button>
-                    {/* Pinned ink scrim badges — right in both themes on a photo. */}
-                    {isCover ? (
-                      <span className="absolute left-2 top-2 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[10.5px] font-semibold text-white">
-                        Cover
-                      </span>
-                    ) : (
-                      <span className="absolute left-1 top-1 flex size-5 items-center justify-center rounded-full bg-[#131e3a]/70 text-[10px] font-semibold text-white">
-                        {slot + 1}
-                      </span>
-                    )}
-                  </>
-                ) : isCover ? (
-                  <label
-                    htmlFor={`photo-slot-${slot}`}
-                    className="flex size-full cursor-pointer flex-col items-center justify-center gap-2.5 px-6 text-center"
-                  >
-                    <span
-                      aria-hidden
-                      className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-fg shadow-md"
-                    >
-                      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                        <circle cx="12" cy="13" r="3" />
-                      </svg>
-                    </span>
-                    <span>
-                      <span className="block text-[16px] font-semibold text-fg-strong">
-                        Add your first photo
-                      </span>
-                      <span className="mt-1 block text-[13.5px] leading-relaxed text-muted">
-                        Drag &amp; drop or click to browse. This becomes the cover
-                      </span>
-                    </span>
-                    <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10.5px] font-medium text-faint">
-                      PNG · JPG · WEBP
-                    </span>
-                  </label>
-                ) : (
-                  <label
-                    htmlFor={`photo-slot-${slot}`}
-                    className={`flex size-full cursor-pointer flex-col items-center justify-center gap-1 text-faint ${
-                      enabled ? "" : "pointer-events-none opacity-40"
-                    }`}
-                  >
-                    <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                    <span className="text-[10.5px] font-medium">
-                      {ANGLE_HINTS[slot - 1]}
-                    </span>
-                  </label>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <p className="mt-3 text-[13px] text-faint">
-          Good light and a clear shot of any label or barcode improve accuracy.
-        </p>
+        {/* Shared, hidden picker (no `name` → never submitted). Both the empty
+            hero and the "Add photo" button trigger it via htmlFor; on change it
+            appends and resets so the same file can be re-picked. */}
+        <input
+          id="photo-picker"
+          type="file"
+          accept={ACCEPT}
+          multiple
+          className="sr-only"
+          onChange={(e) => {
+            if (e.target.files) onAdd(e.target.files);
+            e.target.value = "";
+          }}
+        />
+
+        {count === 0 ? (
+          <label
+            htmlFor="photo-picker"
+            className="relative flex aspect-square w-full cursor-pointer flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-accent/45 bg-accent-soft/35 px-6 text-center sm:aspect-[4/3]"
+          >
+            <span
+              aria-hidden
+              className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-fg shadow-md"
+            >
+              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                <circle cx="12" cy="13" r="3" />
+              </svg>
+            </span>
+            <span>
+              <span className="block text-[16px] font-semibold text-fg-strong">
+                Add your first photo
+              </span>
+              <span className="mt-1 block text-[13.5px] leading-relaxed text-muted">
+                Drag &amp; drop or click to browse. This becomes the cover
+              </span>
+            </span>
+            <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10.5px] font-medium text-faint">
+              PNG · JPG · WEBP
+            </span>
+            <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-muted">
+              Good light and a clear shot of any label or barcode help the most.
+            </span>
+          </label>
+        ) : (
+          <>
+            <PhotoCarousel
+              previews={previews}
+              current={current}
+              onSetCurrent={onSetCurrent}
+              onRemove={onRemove}
+            />
+            <div className="mt-3 w-full">
+              {!atMax ? (
+                <label
+                  htmlFor="photo-picker"
+                  className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-4 py-2 text-[14px] font-semibold text-fg transition-colors hover:bg-surface-2"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  Add photo
+                </label>
+              ) : (
+                <p className="text-center text-[13px] text-faint">
+                  Up to {MAX_PHOTOS} photos — more angles, better identification.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
       </section>
 
       {/* ---- Autofill card: callout header + the field rows it fills ---- */}
@@ -579,15 +647,12 @@ function FormBody({
         >
           <button
             type="submit"
-            disabled={photoCount === 0}
+            disabled={count === 0}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
           >
             Identify, price &amp; draft
           </button>
         </ClickSpark>
-        <p className="mt-2 text-center text-[12.5px] text-faint">
-          ≈ 30 seconds · nothing posts without your review
-        </p>
       </div>
     </div>
   );
@@ -598,46 +663,79 @@ export function UploadForm({
 }: {
   action: (formData: FormData) => Promise<void>;
 }) {
-  const [previews, setPreviews] = useState<(string | null)[]>(
-    Array(SLOT_COUNT).fill(null),
-  );
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  // Mirror of `previews` for the unmount cleanup: a state closure in the
-  // unmount effect would capture the INITIAL (empty) array and revoke nothing.
-  const previewsRef = useRef(previews);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [current, setCurrent] = useState(0);
+  // The single hidden file input the form actually submits; its FileList is
+  // kept in sync with `files` so the server action reads getAll("photo").
+  const submitRef = useRef<HTMLInputElement | null>(null);
+  // Mirror of `previews` for the unmount cleanup (a state closure there would
+  // capture the INITIAL empty array and revoke nothing).
+  const previewsRef = useRef<string[]>([]);
   useEffect(() => {
     previewsRef.current = previews;
   }, [previews]);
 
-  // Revoke object URLs we replace/remove; revoke whatever is left on unmount.
-  const setPreview = (slot: number, url: string | null) => {
-    setPreviews((prev) => {
-      const old = prev[slot];
-      if (old) URL.revokeObjectURL(old);
-      const next = [...prev];
-      next[slot] = url;
-      return next;
+  const addFiles = (incoming: FileList | File[]) => {
+    const accepted = Array.from(incoming).filter((f) =>
+      ACCEPT.split(",").includes(f.type),
+    );
+    const room = MAX_PHOTOS - files.length;
+    if (room <= 0 || accepted.length === 0) return;
+    const added = accepted.slice(0, room);
+    const urls = added.map((f) => URL.createObjectURL(f));
+    setFiles((prev) => [...prev, ...added].slice(0, MAX_PHOTOS));
+    setPreviews((prev) => [...prev, ...urls].slice(0, MAX_PHOTOS));
+  };
+
+  const removeAt = (index: number) => {
+    const url = previews[index];
+    if (url) URL.revokeObjectURL(url);
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setPreviews((prev) => prev.filter((_, i) => i !== index));
+    // Clamp the viewer to a valid neighbour here (in the handler, not an
+    // effect) so we never setState during the render-commit phase.
+    setCurrent((c) => {
+      const newLen = files.length - 1;
+      return newLen <= 0 ? 0 : Math.min(c, newLen - 1);
     });
   };
+
+  // Mirror `files` into the hidden submit input's FileList (DataTransfer is the
+  // only way to set input.files programmatically). Runs client-side only.
+  useEffect(() => {
+    const input = submitRef.current;
+    if (!input) return;
+    const dt = new DataTransfer();
+    files.forEach((f) => dt.items.add(f));
+    input.files = dt.files;
+  }, [files]);
+
+  // Revoke whatever object URLs are left on unmount.
   useEffect(() => {
     return () => {
-      previewsRef.current.forEach((p) => p && URL.revokeObjectURL(p));
+      previewsRef.current.forEach((u) => URL.revokeObjectURL(u));
     };
   }, []);
 
   return (
     <form action={action}>
+      <input
+        ref={submitRef}
+        type="file"
+        name="photo"
+        accept={ACCEPT}
+        multiple
+        tabIndex={-1}
+        aria-hidden
+        className="sr-only"
+      />
       <FormBody
         previews={previews}
-        inputRefs={inputRefs}
-        onPick={(slot, file) =>
-          setPreview(slot, file ? URL.createObjectURL(file) : null)
-        }
-        onClear={(slot) => {
-          const input = inputRefs.current[slot];
-          if (input) input.value = "";
-          setPreview(slot, null);
-        }}
+        current={current}
+        onSetCurrent={setCurrent}
+        onAdd={addFiles}
+        onRemove={removeAt}
       />
     </form>
   );
