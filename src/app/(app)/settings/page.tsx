@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { getEbayConnectionStatus } from "@/lib/marketplace/ebay";
+import { resolveTier, tierLimits } from "@/lib/abuse/config";
 import { setAutopilotSetting } from "@/app/(app)/upload/actions";
 import { disconnectEbay } from "./actions";
 import { SettingsView, type SettingsData } from "./settings-view";
@@ -31,6 +32,11 @@ export default async function SettingsPage({
     currentUser(),
   ]);
 
+  // #64: resolve the caller's billing tier from the live `resolveTier` seam so
+  // the settings UI shows the real plan + the daily allowance actually enforced.
+  // Everyone is `free` until the Stripe backend flips paid subscribers.
+  const tier = resolveTier(userId);
+
   const data: SettingsData = {
     user: {
       name:
@@ -47,6 +53,11 @@ export default async function SettingsPage({
       ebayUsername: ebayConnection.connected
         ? (ebayConnection.ebayUsername ?? null)
         : null,
+    },
+    billing: {
+      tier,
+      itemsPerDay: tierLimits(tier).itemsPerDay,
+      proItemsPerDay: tierLimits("paid").itemsPerDay,
     },
     error: error ?? null,
     ebayBanner:
