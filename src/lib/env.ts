@@ -41,6 +41,17 @@ const envSchema = z.object({
   QUOTA_PAID_ITEMS_PER_DAY: z.string().min(1).optional(),
   OPENAI_DAILY_CALL_BUDGET: z.string().min(1).optional(),
 
+  // Billing — freemium subscriptions via direct Stripe (issue #64). ALL OPTIONAL
+  // and TEST-MODE: with these unset the billing endpoints return 503 ("not
+  // configured") and `getEntitlement` reports everyone `free`, so the app (and the
+  // offline test suite, which uses the mock adapter) runs without them. Set the
+  // Stripe TEST keys to enable; going live is a key swap. The Pro price id is the
+  // single paid plan (`tierLimits` models exactly free vs paid). Redirect URLs are
+  // derived from the request origin, so no app-URL var is needed.
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  STRIPE_PRICE_PRO: z.string().min(1).optional(),
+
   // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
   // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
   // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier

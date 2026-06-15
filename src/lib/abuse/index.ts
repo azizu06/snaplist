@@ -93,16 +93,17 @@ export interface QuotaResult {
 }
 
 /**
- * Spend guardrail — the per-user/day ITEM cap (the quota billing #64 will gate).
- * Atomically increments today's count and reports whether this item is within the
- * tier's daily limit. Each item is a full vision+pricing+listing run, so this is
- * the real cost lever.
+ * Spend guardrail — the per-user/day ITEM cap, gated by the caller's tier. Each
+ * item is a full vision+pricing+listing run, so this is the real cost lever.
+ * `tier` is optional: pass the resolved billing entitlement (`getEntitlement`,
+ * #64) so paid users get the higher cap; it defaults to the pure `resolveTier`
+ * (free) for callers that don't resolve entitlement.
  */
 export async function checkDailyItemQuota(
   userId: string,
   env: Record<string, string | undefined> = process.env,
+  tier: Tier = resolveTier(userId),
 ): Promise<QuotaResult> {
-  const tier = resolveTier(userId);
   const limit = tierLimits(tier, env).itemsPerDay;
   let used: number;
   try {
