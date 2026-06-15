@@ -168,6 +168,36 @@ describe("walking skeleton: upload → stub pipeline → persisted, RLS-scoped r
     expect(log.sources.length).toBeGreaterThan(0);
   });
 
+  it("deletes the anchor item when the pipeline fails (nothing strands as 'Processing')", async () => {
+    if (!reachable) return;
+
+    const photoPath = await uploadPhoto(userA);
+
+    // The real failure mode that was stranding items: the model call throws
+    // mid-run (e.g. depleted quota) after the anchor item row already exists.
+    const failing: Pipeline = {
+      run: async () => {
+        throw new Error("simulated vision failure (quota)");
+      },
+    };
+
+    await expect(
+      runPipelineAndPersist(
+        userA.client,
+        { userId: userA.id, photos: [photoPath] },
+        failing,
+      ),
+    ).rejects.toThrow(/simulated vision failure/);
+
+    // No item row survives for this run — so it can never render as "Processing".
+    const { data: orphans, error } = await userA.client
+      .from("items")
+      .select("id")
+      .contains("photos", [photoPath]);
+    expect(error).toBeNull();
+    expect(orphans).toEqual([]);
+  });
+
   it("RLS holds: user B cannot read user A's persisted item or listing", async () => {
     if (!reachable) return;
 
