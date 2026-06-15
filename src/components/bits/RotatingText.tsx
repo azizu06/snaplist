@@ -1,6 +1,6 @@
 'use client';
 
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   motion,
   AnimatePresence,
@@ -80,6 +80,15 @@ const RotatingText = forwardRef<RotatingTextRef, RotatingTextProps>(
     ref
   ) => {
     const [currentTextIndex, setCurrentTextIndex] = useState<number>(0);
+
+    // First paint shows the first word fully formed — no blank pill. The
+    // per-character enter animation is suppressed on the very first render only
+    // (AnimatePresence initial=false can't reach these nested char spans); it
+    // flips back on after mount so every later rotation still animates.
+    const isInitialRender = useRef(true);
+    useEffect(() => {
+      isInitialRender.current = false;
+    }, []);
 
     const elements = useMemo(() => {
       const currentText: string = texts[currentTextIndex];
@@ -219,7 +228,7 @@ const RotatingText = forwardRef<RotatingTextRef, RotatingTextProps>(
                   {wordObj.characters.map((char, charIndex) => (
                     <motion.span
                       key={charIndex}
-                      initial={initial}
+                      initial={isInitialRender.current ? false : initial}
                       animate={animate}
                       exit={exit}
                       transition={{

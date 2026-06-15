@@ -66,6 +66,22 @@ const SplitText: React.FC<SplitTextProps> = ({
       if (!ref.current || !text || !fontsLoaded) return;
       // Prevent re-animation if already completed
       if (animationCompletedRef.current) return;
+
+      // Mobile-first perf: skip the per-character GSAP entrance on small
+      // screens and when reduced motion is requested. The hero headline is the
+      // page's LCP element; without this it stays hidden (from: opacity 0,
+      // clipped by overflow-hidden) until fonts + GSAP run — the load "jitter".
+      // Returning early leaves the text rendered at full opacity, so it paints
+      // immediately. Desktop keeps the full character animation.
+      if (
+        typeof window !== 'undefined' &&
+        (window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+          window.matchMedia('(max-width: 767px)').matches)
+      ) {
+        animationCompletedRef.current = true;
+        onCompleteRef.current?.();
+        return;
+      }
       const el = ref.current as HTMLElement & {
         _rbsplitInstance?: GSAPSplitText;
       };

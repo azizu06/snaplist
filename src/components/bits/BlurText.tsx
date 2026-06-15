@@ -1,7 +1,32 @@
 'use client';
 
 import { motion, Transition, Easing } from 'motion/react';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useSyncExternalStore } from 'react';
+
+// Mobile-first perf gate: animate only when motion is allowed AND there's room.
+// Phones / reduced-motion get the static, instant-paint copy instead of the
+// per-word blur-in (the hero "jitter"). useSyncExternalStore — not setState in
+// an effect (the repo lint forbids that) — keeps SSR and the first client
+// render identical, then the real preference takes over right after mount.
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+const SMALL_SCREEN_QUERY = '(max-width: 767px)';
+const subscribeHeroMotion = (onChange: () => void) => {
+  const reduced = window.matchMedia(REDUCED_MOTION_QUERY);
+  const small = window.matchMedia(SMALL_SCREEN_QUERY);
+  reduced.addEventListener('change', onChange);
+  small.addEventListener('change', onChange);
+  return () => {
+    reduced.removeEventListener('change', onChange);
+    small.removeEventListener('change', onChange);
+  };
+};
+const getHeroMotion = () =>
+  !(
+    window.matchMedia(REDUCED_MOTION_QUERY).matches ||
+    window.matchMedia(SMALL_SCREEN_QUERY).matches
+  );
+// Server / hydration snapshot: assume motion on, matching the pre-change markup.
+const getHeroMotionServer = () => true;
 
 type BlurTextProps = {
   text?: string;
@@ -48,6 +73,12 @@ const BlurText: React.FC<BlurTextProps> = ({
   const elements = animateBy === 'words' ? text.split(' ') : text.split('');
   const [inView, setInView] = useState(false);
   const ref = useRef<HTMLParagraphElement>(null);
+
+  const motionOn = useSyncExternalStore(
+    subscribeHeroMotion,
+    getHeroMotion,
+    getHeroMotionServer,
+  );
 
   useEffect(() => {
     if (!ref.current) return;
@@ -104,9 +135,15 @@ const BlurText: React.FC<BlurTextProps> = ({
         return (
           <motion.span
             key={index}
-            initial={fromSnapshot}
-            animate={inView ? animateKeyframes : fromSnapshot}
-            transition={spanTransition}
+            initial={motionOn ? fromSnapshot : false}
+            animate={
+              motionOn
+                ? inView
+                  ? animateKeyframes
+                  : fromSnapshot
+                : { filter: 'blur(0px)', opacity: 1, y: 0 }
+            }
+            transition={motionOn ? spanTransition : { duration: 0 }}
             onAnimationComplete={index === elements.length - 1 ? onAnimationComplete : undefined}
             style={{
               display: 'inline-block',

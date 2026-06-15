@@ -490,6 +490,10 @@ export default function Landing() {
                 staggerFrom="last"
                 staggerDuration={0.02}
                 rotationInterval={2200}
+                // sync (not the default "wait"): the outgoing word rolls up as
+                // the next rolls in, so the pill is never momentarily empty
+                // between swaps.
+                animatePresenceMode="sync"
                 initial={{ y: "100%", opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: "-120%", opacity: 0 }}

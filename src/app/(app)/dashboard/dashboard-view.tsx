@@ -225,7 +225,7 @@ export function DashboardView({
   const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-10 pt-24 sm:px-6">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-10 pt-8 sm:px-6 sm:pt-24">
       {/* ---- page header (Stripe: 24px bold title; primary lives in topbar) ---- */}
       <header className="flex items-center justify-between gap-3">
         <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">

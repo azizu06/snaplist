@@ -33,6 +33,9 @@ const STEPS = [
     eyebrow: "Step 1",
     tint: undefined,
     src: "/demo/steps/snap.mp4",
+    // Portrait mobile render exists for this step (public/demo/steps/snap-mobile.mp4
+    // + -dark). Under 768px /tour swaps to it so the in-clip UI is legible.
+    mobile: true,
     glyph: "snap",
     title: "Snap",
     body: "One photo, or up to four if condition matters. Visible barcodes and ISBNs are read automatically, so books and boxed items start with an exact identity.",
@@ -44,6 +47,7 @@ const STEPS = [
     eyebrow: "Step 2",
     tint: undefined,
     src: "/demo/steps/identify.mp4",
+    mobile: true,
     glyph: "identify",
     title: "Identify",
     body: "SnapList reads your photo and pulls out the brand, model, category, condition, and the details that matter. If it isn't sure what it's looking at, it says so instead of quietly guessing.",
@@ -55,6 +59,7 @@ const STEPS = [
     eyebrow: "Step 3",
     tint: undefined,
     src: "/demo/steps/price.mp4",
+    mobile: true,
     glyph: "price",
     title: "Price",
     body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources behind it. Real sale prices, not wishful asking prices.",
@@ -66,6 +71,7 @@ const STEPS = [
     eyebrow: "Step 4",
     tint: undefined,
     src: "/demo/steps/write.mp4",
+    mobile: true,
     glyph: "write",
     title: "Write",
     body: "Your listing gets written once for each marketplace. eBay gets full item details and a title built for search. Facebook stays casual and local. Mercari leans on hashtags and shipping details.",
@@ -77,6 +83,7 @@ const STEPS = [
     eyebrow: "Step 5",
     tint: undefined,
     src: "/demo/steps/publish.mp4",
+    mobile: true,
     glyph: "publish",
     title: "Publish",
     body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
@@ -88,6 +95,7 @@ const STEPS = [
     eyebrow: "Step 6",
     tint: undefined,
     src: "/demo/buyer-qa.mp4",
+    mobile: true,
     glyph: "chat",
     title: "Answer",
     body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details, like edition, condition, and what's included. You approve, edit, or rewrite, and nothing sends without you.",
@@ -122,7 +130,15 @@ export default function HowItWorks() {
           in-video UI is readable without squinting. */}
       <section className="mx-auto w-full max-w-[1720px] px-5 pb-24 pt-6 sm:px-8 sm:pb-28 sm:pt-10">
         <div className="space-y-24 sm:space-y-32">
-          {STEPS.map(({ n, eyebrow, src, glyph, title, body, poster, label }, i) => (
+          {STEPS.map((step, i) => {
+            const { n, eyebrow, src, glyph, title, body, poster, label } = step;
+            // Only steps with a portrait render set `mobile`; under 768px the
+            // clip swaps to "<name>-mobile.mp4" (see DemoClip/SeamlessThemeVideo).
+            const mobileSrc =
+              "mobile" in step && step.mobile
+                ? src.replace(/\.mp4$/, "-mobile.mp4")
+                : undefined;
+            return (
             <Reveal key={n} delay={0.05}>
               <div
                 id={`step-${glyph === "chat" ? "qa" : glyph}`}
@@ -138,27 +154,37 @@ export default function HowItWorks() {
                       and step 6 was a different rose color — owner). The
                       numeral still rides the clip badge via DemoClip n={n}. */}
                   <Eyebrow>{eyebrow}</Eyebrow>
-                  <h2 className="mt-4 font-display text-[clamp(28px,3.4vw,40px)] font-bold tracking-tight text-flash">
+                  <h2 className="mt-3 font-display text-[clamp(23px,3.4vw,40px)] font-bold tracking-tight text-flash sm:mt-4">
                     {title}
                   </h2>
-                  <p className="mt-4 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
+                  <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-flash-dim sm:mt-4 sm:text-[16px]">
                     {body}
                   </p>
                 </div>
-                <div className={i % 2 === 0 ? "" : "lg:order-1"}>
+                {/* Mobile: the clip goes full-bleed edge-to-edge (escaping the
+                    section's px-5) so a wide 16:9 desktop render is as large as
+                    the screen allows and clearly leads the step, instead of a
+                    small box dwarfed by the heading. Desktop keeps the framed,
+                    rounded panel. (True in-frame legibility needs mobile-framed
+                    renders — tracked separately.) */}
+                <div
+                  className={`-mx-5 sm:mx-0 ${i % 2 === 0 ? "" : "lg:order-1"}`}
+                >
                   <DemoClip
                     src={src}
+                    mobileSrc={mobileSrc}
                     label={label}
                     n={n}
                     title={title}
                     caption={poster}
                     glyph={HIW_GLYPHS[glyph]}
-                    className="rounded-3xl"
+                    className="!rounded-none border-x-0 sm:!rounded-3xl sm:border-x"
                   />
                 </div>
               </div>
             </Reveal>
-          ))}
+            );
+          })}
         </div>
       </section>
 
