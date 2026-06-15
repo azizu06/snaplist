@@ -25,7 +25,7 @@ export default async function LoginPage({
   if (userId) redirect(safeNext(next));
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pt-2 pb-[10vh]">
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pt-2 pb-[20vh]">
       {/* react-bits FadeContent: one soft blur-up entrance for the whole card */}
       <FadeContent
         blur

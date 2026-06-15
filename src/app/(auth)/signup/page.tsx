@@ -26,7 +26,7 @@ export default async function SignupPage({
   if (userId) redirect(safeNext(next));
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pt-2 pb-[10vh]">
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center px-6 pt-2 pb-[20vh]">
       <FadeContent
         blur
         duration={600}
