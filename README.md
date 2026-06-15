@@ -7,6 +7,112 @@ score and cited price sources. Production-real AI-engineering showcase.
 > is the domain glossary · [`AGENTS.md`](./AGENTS.md) is the agent/engineering guide ·
 > [`PROJECT_BRIEF.md`](./PROJECT_BRIEF.md) is origin context (superseded by the PRD).
 
+## What it is
+Selling a used item is ~20–30 minutes of repetitive work every time: photograph it, research what
+it's actually worth *used* (not retail), write a platform-appropriate listing, post it, then answer
+the same buyer questions over and over. Real *sold* prices are the hard part, and retail prices
+mislead for used goods.
+
+SnapList collapses that into a photo plus a couple of approvals. The seller snaps 1–4 photos; the
+system identifies the item (brand, model, category, condition, specs, any barcode/ISBN), researches
+a defensible used-price range with cited sources, writes per-platform listing copy, and shows it for
+review. High-confidence items can post automatically (a confidence-gated autopilot); low-confidence
+ones queue for review. Listings publish to eBay behind an adapter, with copy-paste export packs for
+Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
+SnapList is the seller's **control surface** — payment, checkout, and shipping stay on eBay; buyers
+never see it.
+
+This repo is built as a **production-real AI-engineering showcase**: the AI pipeline *is* the product,
+and the goal is the full stack working end-to-end in a deployed app. The
+[skills-on-display map](#skills-on-display) shows where each technique lives.
+
+## Architecture
+One spine, seen three ways: **which pricing tier fired → the confidence composite → eval
+calibration.** A photo becomes Zod-validated attributes; the pricing router walks its tiers in
+priority order and returns the first that handles the item; a signal-based confidence score (never an
+LLM self-report) gates the autopilot; and every run is logged for the eval harness.
+
+```mermaid
+flowchart TD
+    subgraph seller["Seller surface · Next.js App Router · Clerk auth"]
+        UP["Snap 1–4 photos"]
+        REVIEW["Review, edit, approve"]
+        INBOX["Buyer Q&A inbox (Realtime)"]
+    end
+
+    UP --> STORE["Supabase Storage<br/>user-scoped paths · RLS"]
+    STORE --> VISION
+
+    subgraph pipeline["AI pipeline · src/lib"]
+        VISION["Vision extraction<br/>1 multimodal generateObject call<br/>Zod attributes · flags ambiguity"]
+        ROUTER["PricingProvider router<br/>tries tiers in order, first wins"]
+        CONF["Confidence composite<br/>tier fired + comp agreement + ID completeness"]
+        GATE{"Autopilot gate"}
+        LISTING["Listing generation<br/>per-platform copy · RAG few-shot"]
+    end
+
+    VISION --> ROUTER
+
+    subgraph tiers["Pricing tiers · PRD priority order"]
+        T1["1 · ISBN lookup<br/>Open Library + Google Books"]
+        T2["2 · eBay PUBLIC sold comps<br/>completed-sale scrape"]
+        T3["3 · UPC-aided web search<br/>Tavily / Exa agent"]
+        T4["4 · Branded web search<br/>Tavily / Exa agent"]
+        T5["5 · Depreciation<br/>retail x condition factor"]
+        T6["6 · LLM-only floor<br/>never declines"]
+        T1 -->|declines| T2 -->|declines| T3 -->|declines| T4 -->|declines| T5 -->|declines| T6
+    end
+
+    ROUTER --> T1
+    ROUTER -->|"first priced result: suggested, range, confidence, sources"| CONF
+    CONF --> GATE
+    GATE -->|high confidence| LISTING
+    GATE -->|low confidence| REVIEW
+    REVIEW --> LISTING
+
+    LISTING --> EBAY["eBay adapter<br/>Sell API · sandbox → prod flip"]
+    LISTING --> EXPORT["Export packs<br/>Facebook Marketplace · Mercari"]
+    EBAY --> LIVE["Live eBay listing"]
+
+    INBOX --> QA["Buyer-Q&A agent<br/>grounded draft reply"]
+    QA --> QAPPROVE["Seller approves or edits reply"]
+    QAPPROVE --> DELIVER["Deliver to buyer (simulated in v1)"]
+
+    subgraph crosscut["Cross-cutting"]
+        REG["LLM provider registry<br/>Gemini dev / OpenAI showcase"]
+        RAG["pgvector reference corpus<br/>grounds copy · corroborates price"]
+        LOGS["prediction_logs<br/>attrs · price · tier · confidence per run"]
+        EVAL["Eval harness<br/>ID accuracy · price band · calibration"]
+        OBS["Observability<br/>structured JSON · /api/health"]
+    end
+
+    VISION -.->|resolveLanguageModel| REG
+    LISTING -.-> REG
+    QA -.-> REG
+    ROUTER -.->|corroboration| RAG
+    LISTING -.->|few-shot| RAG
+    CONF -.->|logs prediction| LOGS
+    LISTING -.->|run events| OBS
+    LOGS --> EVAL
+```
+
+**Reading the diagram.** Photos land in user-scoped Supabase Storage (RLS). A single multimodal
+`generateObject` call extracts attributes and *flags* anything ambiguous instead of guessing. The
+`PricingProvider` router tries six tiers in priority order and returns the first that handles the
+item, always shaped as `{ suggested, range, confidence, sources[] }`. The confidence composite —
+tier fired + comp agreement + identification completeness — drives the autopilot gate: high
+confidence is eligible to auto-post, everything else queues for review. Approved listings publish to
+eBay through the adapter (sandbox today; a credential flip to production) and render copy-paste export
+packs for Facebook Marketplace and Mercari. Buyer questions arrive in a Realtime inbox where a
+grounded agent drafts a reply for the seller to approve. Cutting across all of it: a role-keyed LLM
+provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference corpus that grounds
+copy and corroborates price, per-run prediction logs feeding the eval harness, structured-JSON
+observability, and Clerk auth with Postgres RLS enforcing per-user isolation everywhere.
+
+> This diagram tracks the current build and will keep maturing with the project — the messaging
+> delivery path is simulated in v1, and the production eBay poller/queue lands with the go-live work
+> ([#17](https://github.com/azizu06/snaplist/issues/17), [#65](https://github.com/azizu06/snaplist/issues/65)).
+
 ## Stack
 Next.js (App Router) + TypeScript · Vercel AI SDK + OpenAI · Tavily/Exa web search · Supabase
 (Postgres + pgvector + Auth + Realtime + Storage) · Zod · Tailwind + shadcn/ui · Vercel · eBay
@@ -45,7 +151,7 @@ idea seen three ways. The map from skill to code:
 | Multimodal vision extraction | `src/lib/vision` — one `generateObject` call over the photos → Zod-validated attributes + flagged identification |
 | Agents + tool calling | `src/lib/pricing/providers` (web-search pricing agent over Tavily/Exa) · `src/lib/inbox` (grounded buyer-Q&A reply agent) |
 | RAG + pgvector | `src/lib/rag` — seeded reference corpus, HNSW + cosine via the `match_reference_corpus` RPC; one retrieval feeds pricing corroboration **and** few-shot listing copy |
-| Pricing as a routing pipeline | `src/lib/pricing/router.ts` — ISBN lookup → UPC-aided web → branded web → depreciation → LLM fallback, every result `{ suggested, range, confidence, sources[] }` |
+| Pricing as a routing pipeline | `src/lib/pricing/router.ts` — ISBN lookup → eBay sold comps → UPC-aided web → branded web → depreciation → LLM fallback, every result `{ suggested, range, confidence, sources[] }` |
 | Signal-based confidence (never LLM self-report) | `src/lib/confidence` — pure composite of tier fired + comp agreement + ID completeness; gates the autopilot |
 | Structured outputs | Zod everywhere a model speaks: `src/lib/pipeline/types.ts`, `src/lib/listing/schema.ts` — no ad-hoc JSON parsing |
 | Prompt/context engineering | `src/lib/listing` + `src/lib/export` — per-platform copy generation, used-vs-new disambiguation |
@@ -67,6 +173,21 @@ pnpm eval --db                  # score real logged runs from Supabase (service-
 pnpm eval --real-judge          # LLM judge instead of the heuristic (OPENAI_API_KEY)
 pnpm eval --predictions f.json  # score an arbitrary predictions file
 ```
+
+## Eval results
+Headline numbers from the gold set, populated once the eval-metrics work
+([#61](https://github.com/azizu06/snaplist/issues/61)) lands. Until then, run `pnpm eval` for the
+live offline report.
+
+| Metric | Value |
+|---|---|
+| Identification accuracy (field-level) | _TODO (#61)_ |
+| Pricing within band (% of items) | _TODO (#61)_ |
+| Median price error | _TODO (#61)_ |
+| Confidence calibration (ECE) | _TODO (#61)_ |
+
+> These measure pipeline consistency against authored gold labels, **not** field accuracy against
+> real sold prices — see [Honest accuracy ceiling](#honest-accuracy-ceiling).
 
 ## CI
 `.github/workflows/ci.yml` runs on every push/PR to `main`, with **no secrets**:
