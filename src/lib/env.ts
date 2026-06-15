@@ -50,6 +50,16 @@ const envSchema = z.object({
   EBAY_SOLD_ENABLED: z.string().min(1).optional(),
   EBAY_SOLD_BASE_URL: z.string().min(1).optional(),
   EBAY_SOLD_USER_AGENT: z.string().min(1).optional(),
+  // Pricing freshness (#59). All OPTIONAL with sane defaults (parsed in
+  // src/lib/pricing/providers/ebay-sold.ts + freshness.ts). The TTL cache of
+  // sold-comp scrapes reuses a pull for a few days (cuts scrape footprint; the
+  // live page stays the source of truth); the staleness cutoff drops sales older
+  // than N days; the half-life sets how fast a sale's influence on the suggested
+  // price decays. With Upstash unset the cache degrades to a per-instance
+  // in-memory fallback (offline-safe).
+  EBAY_SOLD_CACHE_TTL_HOURS: z.string().min(1).optional(),
+  EBAY_SOLD_STALE_DAYS: z.string().min(1).optional(),
+  EBAY_SOLD_HALFLIFE_DAYS: z.string().min(1).optional(),
 
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),

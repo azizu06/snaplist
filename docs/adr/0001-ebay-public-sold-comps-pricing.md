@@ -56,11 +56,20 @@ sold-comp research is now a first-class tier.
    pricing — and explicitly does **not** serve stored prices as current truth.
 
 6. **Confidence stays signal-based.** `ebay-sold` is sold-grounded by construction (every source
-   is a `sold-comp`), so it maps to the `web_tight` confidence tier when its comps cluster tightly
-   and `web_wide` when scattered — a scattered sold set is real evidence of *a* market but not of a
-   defensible tight price, so it cannot ride the sold label past the autopilot gate. Final
-   calibration of the sold tier against the **gold set** is #60/#61 and may earn it a dedicated
-   bucket above `web_tight`.
+   is a `sold-comp`), so when its comps cluster tightly it maps to the first-class **`sold`**
+   confidence tier — ranked ABOVE the asking-based web tiers and below only an exact ISBN lookup
+   (#60, "sold beats asking") — and to `web_wide` when scattered, since a scattered sold set is real
+   evidence of *a* market but not of a defensible tight price and must not ride the sold label past
+   the autopilot gate. Remaining numeric calibration of the sold tier rides with the **gold set** (#61).
+
+7. **Freshness is live-fetch-first, with a TTL cache + age-decay (#59).** The live sold page is the
+   source of truth; a **TTL request cache** keyed by resolved product identity (the search URL)
+   reuses a scrape for a few days to cut footprint (Upstash when configured, else per-instance
+   in-memory — never the authority). Each comp's **sale date** is parsed from its card caption;
+   at synthesis the suggested price is a **recency-weighted median** (newer sales weigh more, by a
+   half-life) and comps older than a **staleness cutoff** are dropped — re-applied on every read, so
+   a comp that ages out while cached is still dropped. Freshness is opt-in at the provider and wired
+   on by `createDefaultPricer` (the composition root), keeping the scraper's unit tests deterministic.
 
 ## Alternatives considered
 
