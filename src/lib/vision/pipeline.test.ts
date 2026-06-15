@@ -16,7 +16,7 @@ import type {
   ExtractItemAttributesInput,
   ExtractItemAttributesResult,
 } from "./extract";
-import type { SignedUrlClient } from "./photos";
+import type { DownloadClient } from "./photos";
 import { attributesToSignal } from "../pipeline/stub";
 
 /**
@@ -36,14 +36,21 @@ function fakeExtract(result: ExtractItemAttributesResult) {
   );
 }
 
-function fakeSignerClient(): SignedUrlClient {
+function fakeDownloadClient(): DownloadClient {
   return {
     storage: {
       from: () => ({
-        createSignedUrl: async (path: string) => ({
-          data: { signedUrl: `https://signed/${path}` },
-          error: null,
-        }),
+        download: async (path: string) => {
+          void path;
+          // A tiny non-empty blob with a real media type — the pipeline reads the bytes
+          // and passes them inline; the injected fake `extract` ignores the content.
+          return {
+            data: new Blob([new Uint8Array([0xff, 0xd8, 0xff])], {
+              type: "image/jpeg",
+            }),
+            error: null,
+          };
+        },
       }),
     },
   };
@@ -87,7 +94,7 @@ const STUB_LISTING_MODEL = "test-listing-model";
 /** Build a pipeline with all real deps replaced by offline fakes; override per test. */
 function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
   return createVisionPipeline({
-    supabase: fakeSignerClient(),
+    supabase: fakeDownloadClient(),
     extract: fakeExtract(STRONG_EXTRACTION),
     priceItem: async () => STUB_PRICE,
     generateListing: async () => ({ copy: STUB_LISTING, model: STUB_LISTING_MODEL }),
@@ -96,7 +103,7 @@ function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
 }
 
 describe("vision/pipeline — createVisionPipeline.run", () => {
-  it("signs photos, extracts, prices, lists, and returns a schema-valid PipelineResult", async () => {
+  it("downloads photos, extracts, prices, lists, and returns a schema-valid PipelineResult", async () => {
     const result = await makePipeline().run({ photos: ["u/a.jpg", "u/b.jpg"] });
 
     expect(pipelineResultSchema.safeParse(result).success).toBe(true);
@@ -105,14 +112,16 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(result.model).toBe("test-vision-model");
   });
 
-  it("passes the SIGNED image URLs (all of them) to extraction", async () => {
+  it("passes the downloaded image BYTES (all of them) to extraction", async () => {
     const extract = fakeExtract(STRONG_EXTRACTION);
     await makePipeline({ extract }).run({ photos: ["u/a.jpg", "u/b.jpg"] });
 
     expect(extract).toHaveBeenCalledOnce();
+    // Both photos resolve to inline bytes (not URLs) so Gemini/OpenAI receive image
+    // data directly — never a private/loopback Storage URL the SDK would reject.
     expect(extract.mock.calls[0][0].images).toEqual([
-      "https://signed/u/a.jpg",
-      "https://signed/u/b.jpg",
+      { data: new Uint8Array([0xff, 0xd8, 0xff]), mediaType: "image/jpeg" },
+      { data: new Uint8Array([0xff, 0xd8, 0xff]), mediaType: "image/jpeg" },
     ]);
   });
 

@@ -39,7 +39,7 @@ import {
   type VisionGenerate,
   type VisionImageInput,
 } from "./extract";
-import { resolvePhotoImages, type SignedUrlClient } from "./photos";
+import { resolvePhotoImageData, type DownloadClient } from "./photos";
 
 /**
  * The real vision pipeline (issue #6, integrated with #8 pricing + #9 listing).
@@ -47,7 +47,7 @@ import { resolvePhotoImages, type SignedUrlClient } from "./photos";
  * `runPipelineAndPersist` as the injected 3rd arg with zero changes to the persistence
  * layer or callers.
  *
- *   photos[] → (signed URLs) → SINGLE multimodal extraction → attributes + flagged
+ *   photos[] → (inline bytes) → SINGLE multimodal extraction → attributes + flagged
  *   identification → REAL pricing (PriceRouter: all five PRD tiers) → REAL
  *   grounded eBay listing → REAL, #31-calibrated confidence composite → result.
  *
@@ -56,8 +56,8 @@ import { resolvePhotoImages, type SignedUrlClient } from "./photos";
  */
 
 export interface CreateVisionPipelineOptions {
-  /** User-scoped server client used to sign the private photo URLs. */
-  supabase: SupabaseClient | SignedUrlClient;
+  /** User-scoped server client used to download the private photo bytes (RLS-scoped). */
+  supabase: SupabaseClient | DownloadClient;
   /** Injected extraction (defaults to the real `extractItemAttributes`). */
   extract?: typeof extractItemAttributes;
   /** Injected model call forwarded to the default extraction (tests pass a fake). */
@@ -299,9 +299,15 @@ export function createVisionPipeline(
         throw new Error("Vision pipeline requires at least one photo path");
       }
 
-      // 1. Resolve the private Storage paths to signed URLs the model can fetch.
-      const urls = await resolvePhotoImages(supabase, input.photos);
-      const images: VisionImageInput[] = urls;
+      // 1. Download the private Storage objects as inline BYTES for the model. We
+      //    inline rather than hand the model a signed URL: the dev provider (Gemini)
+      //    can't fetch remote URLs — the AI SDK downloads them and blocks private/
+      //    loopback hosts like local Storage at 127.0.0.1 — and inlining also drops a
+      //    prod dependency on the provider fetching a short-TTL URL. RLS still scopes it.
+      const images: VisionImageInput[] = await resolvePhotoImageData(
+        supabase,
+        input.photos,
+      );
 
       // 2. SINGLE multimodal extraction → validated attributes + flagged identification.
       const extraction = await extract({

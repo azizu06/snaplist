@@ -19,9 +19,12 @@ export {
 } from "./extract";
 export {
   resolvePhotoImages,
+  resolvePhotoImageData,
   PHOTOS_BUCKET,
   DEFAULT_SIGNED_URL_TTL_SECONDS,
   type SignedUrlClient,
+  type DownloadClient,
+  type PhotoImageData,
 } from "./photos";
 export {
   createVisionPipeline,
