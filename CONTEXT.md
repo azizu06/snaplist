@@ -62,8 +62,13 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
 - **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
   for every pipeline execution. The **eval harness** depends on it.
 - **Eval harness** — the offline quality measurement over a fixed **gold set**: ID accuracy,
-  pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge).
+  pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge). The
+  judge is **cross-family** (`--real-judge` runs the OPPOSITE provider from the generator, #61) to
+  strip same-family self-bias; it falls back to the offline heuristic — and says so — when the
+  opposite provider's key is absent.
 - **Gold set** — the fixed, labeled set of items used by the eval harness; doubles as the demo set.
+  Truth is **independent of the pipeline**; price bands are (re)built from live eBay sold comps by
+  `pnpm eval:build-gold` (#61), emitted for a human spot-check rather than auto-overwriting.
 - **Hero domain** — the item categories SnapList excels at (books/media, electronics, board games,
   branded gear). Generic items still flow through but honestly show low confidence.
 

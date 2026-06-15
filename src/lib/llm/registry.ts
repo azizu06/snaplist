@@ -30,6 +30,15 @@ type EnvLike = Record<string, string | undefined>;
 export const LLM_PROVIDERS = ["openai", "google"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
+/**
+ * The other provider family. Used by the eval's CROSS-FAMILY judge (#61): scoring
+ * a generated listing with a model from the OPPOSITE family from the one that
+ * generated it removes same-family self-bias from the listing-quality metric.
+ */
+export function oppositeProvider(provider: LlmProvider): LlmProvider {
+  return provider === "openai" ? "google" : "openai";
+}
+
 /** The generation roles the registry routes. Embeddings are intentionally absent. */
 export const LLM_ROLES = [
   "vision",
