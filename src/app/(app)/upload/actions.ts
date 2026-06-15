@@ -126,9 +126,13 @@ export async function uploadAndProcess(formData: FormData) {
     // Pipeline errors (vision/model/DB) stay server-side; the client gets a
     // generic message (CWE-209, #57).
     reportServerError("upload.process", err);
-    // Give back the daily item slot — no item persisted (#58 self-review). The
+    // Give back the daily item slot — the partial item row is deleted inside
+    // runPipelineAndPersist on failure, so nothing strands as "Processing". The
     // global OpenAI budget counter is NOT refunded: the run may have cost calls.
     await refundDailyItem(userId);
+    // Remove the photos we uploaded for this failed run so no orphaned storage
+    // objects linger (best-effort; the user-scoped client only touches its own).
+    await supabase.storage.from("photos").remove(paths);
     redirect(
       `/upload?error=${encodeURIComponent("We couldn't process that photo. Please try again.")}`,
     );

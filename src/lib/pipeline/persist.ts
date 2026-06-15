@@ -67,86 +67,106 @@ export async function runPipelineAndPersist(
   }
   const itemId = item.id as string;
 
-  // 2. Run the pipeline (stubbed AI). photos → attributes + price + confidence + listing.
-  //    `timed` (issue #18) emits ONE structured line with duration + outcome — the
-  //    pipeline is the slow, model-bound step worth watching — and rethrows on
-  //    failure, so the error contract here is unchanged.
-  const result = await timed(
-    "pipeline.run",
-    { runId, itemId, photoCount: input.photos.length },
-    () =>
-      pipeline.run({
-        photos: input.photos,
-        autopilotEnabled: input.autopilotEnabled,
-      }),
-  );
-
-  // 3. Backfill the extracted attributes + condition + identification onto the item.
-  //    Persisting `identification` lets the review page render the MODEL's actual
-  //    decision (incl. its ambiguity flag/reason/candidates) instead of re-deriving
-  //    it from attributes alone (issue #27). Null when the pipeline produced none
-  //    (the stub pipeline) — the review page falls back to re-derivation then.
-  const { error: updErr } = await supabase
-    .from("items")
-    .update({
-      attributes: result.attributes,
-      condition: result.attributes.condition ?? null,
-      identification: result.identification ?? null,
-    })
-    .eq("id", itemId);
-  if (updErr) {
-    throw new Error(`Failed to update item attributes: ${updErr.message}`);
-  }
-
-  // 4. Log the prediction for the eval harness (PRD non-negotiable: log every
-  //    run) BEFORE any listing becomes queued: these two writes are not
-  //    transactional, and the failure modes are asymmetric. A log row without
-  //    a listing is inert; a QUEUED listing without its mandatory evaluation
-  //    record is a publishable run the upload request reported as failed —
-  //    a queue consumer could post it, and a retried upload could duplicate it.
-  await logPrediction(supabase, input.userId, itemId, result, {
-    autopilotEnabled: input.autopilotEnabled,
-    runId,
-  });
-
-  // 5. Persist the generated listing. The initial status is the confidence-gated
-  //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
-  //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
-  //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
-  const status = initialListingStatus(result.confidence);
-  const { data: listing, error: listingErr } = await supabase
-    .from("listings")
-    .insert({
-      user_id: input.userId,
-      item_id: itemId,
-      platform: result.listing.platform,
-      title: result.listing.title,
-      description: result.listing.description,
-      copy: result.listing.fields,
-      status,
-      run_id: runId,
-    })
-    .select("id")
-    .single();
-  if (listingErr || !listing) {
-    throw new Error(
-      `Failed to create listing: ${listingErr?.message ?? "no row returned"}`,
+  // Steps 2–5 build on the anchor item row. If ANY of them fails (model error,
+  // depleted quota, DB), the item would otherwise strand with empty attributes and
+  // no listing and render FOREVER as "Processing" (status is derived from the absence
+  // of a listing). So on failure we delete the anchor item — child rows (none yet at
+  // a failure here, but `prediction_logs`/`listings`/`embeddings`/`messages` cascade)
+  // go with it — and re-throw for the caller's error path. A failed run leaves nothing.
+  try {
+    // 2. Run the pipeline (stubbed AI). photos → attributes + price + confidence + listing.
+    //    `timed` (issue #18) emits ONE structured line with duration + outcome — the
+    //    pipeline is the slow, model-bound step worth watching — and rethrows on
+    //    failure, so the error contract here is unchanged.
+    const result = await timed(
+      "pipeline.run",
+      { runId, itemId, photoCount: input.photos.length },
+      () =>
+        pipeline.run({
+          photos: input.photos,
+          autopilotEnabled: input.autopilotEnabled,
+        }),
     );
+
+    // 3. Backfill the extracted attributes + condition + identification onto the item.
+    //    Persisting `identification` lets the review page render the MODEL's actual
+    //    decision (incl. its ambiguity flag/reason/candidates) instead of re-deriving
+    //    it from attributes alone (issue #27). Null when the pipeline produced none
+    //    (the stub pipeline) — the review page falls back to re-derivation then.
+    const { error: updErr } = await supabase
+      .from("items")
+      .update({
+        attributes: result.attributes,
+        condition: result.attributes.condition ?? null,
+        identification: result.identification ?? null,
+      })
+      .eq("id", itemId);
+    if (updErr) {
+      throw new Error(`Failed to update item attributes: ${updErr.message}`);
+    }
+
+    // 4. Log the prediction for the eval harness (PRD non-negotiable: log every
+    //    run) BEFORE any listing becomes queued: these two writes are not
+    //    transactional, and the failure modes are asymmetric. A log row without
+    //    a listing is inert; a QUEUED listing without its mandatory evaluation
+    //    record is a publishable run the upload request reported as failed —
+    //    a queue consumer could post it, and a retried upload could duplicate it.
+    await logPrediction(supabase, input.userId, itemId, result, {
+      autopilotEnabled: input.autopilotEnabled,
+      runId,
+    });
+
+    // 5. Persist the generated listing. The initial status is the confidence-gated
+    //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
+    //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
+    //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
+    const status = initialListingStatus(result.confidence);
+    const { data: listing, error: listingErr } = await supabase
+      .from("listings")
+      .insert({
+        user_id: input.userId,
+        item_id: itemId,
+        platform: result.listing.platform,
+        title: result.listing.title,
+        description: result.listing.description,
+        copy: result.listing.fields,
+        status,
+        run_id: runId,
+      })
+      .select("id")
+      .single();
+    if (listingErr || !listing) {
+      throw new Error(
+        `Failed to create listing: ${listingErr?.message ?? "no row returned"}`,
+      );
+    }
+    const listingId = listing.id as string;
+
+    // One summary line per successful run: the ids + the confidence-spine signals
+    // (tier fired → score/band → gated status). Identifiers and signals only —
+    // never listing copy or photo contents.
+    logEvent("pipeline.persisted", {
+      runId,
+      itemId,
+      listingId,
+      tier: result.price.tier,
+      confidence: result.confidence.score,
+      band: result.confidence.band,
+      status,
+    });
+
+    return { itemId, listingId, result };
+  } catch (err) {
+    // Best-effort cleanup of the stranded anchor item so a failed run leaves nothing
+    // visible. Swallow a cleanup failure so the ORIGINAL pipeline error is what the
+    // caller sees and reports; note it for observability.
+    const { error: cleanupErr } = await supabase
+      .from("items")
+      .delete()
+      .eq("id", itemId);
+    if (cleanupErr) {
+      logEvent("pipeline.cleanup_failed", { runId, itemId, error: cleanupErr.message });
+    }
+    throw err;
   }
-  const listingId = listing.id as string;
-
-  // One summary line per successful run: the ids + the confidence-spine signals
-  // (tier fired → score/band → gated status). Identifiers and signals only —
-  // never listing copy or photo contents.
-  logEvent("pipeline.persisted", {
-    runId,
-    itemId,
-    listingId,
-    tier: result.price.tier,
-    confidence: result.confidence.score,
-    band: result.confidence.band,
-    status,
-  });
-
-  return { itemId, listingId, result };
 }
