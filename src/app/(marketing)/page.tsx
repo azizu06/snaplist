@@ -597,7 +597,7 @@ export default function Landing() {
             same crop — uniform across all three), the listing visibly growing
             across the row. A chevron in each gap signals the next step. Equal
             height via h-full; the row stacks on mobile (chevrons hidden). */}
-        <Reveal stagger className="mt-14 grid gap-12 md:grid-cols-3">
+        <Reveal stagger className="mt-14 grid grid-cols-1 gap-12 md:grid-cols-3">
           {STEPS.map(({ n, kicker, title, body }, i) => (
             <div key={n} className="relative">
               <SpotlightCard

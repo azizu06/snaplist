@@ -131,27 +131,39 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
         </div>
       </nav>
 
-      {open ? (
-        <div className="border-t border-line px-5 pb-5 pt-2 md:hidden">
-          {LINKS.map(({ href, label }) => (
+      {/* Mobile menu — always mounted so it can animate. The grid-rows 0fr→1fr
+          trick gives a smooth height "pop" (+ fade); reduced-motion jumps.
+          Collapsed links are non-focusable and inert. */}
+      <div
+        aria-hidden={!open}
+        className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out md:hidden motion-reduce:transition-none ${
+          open ? "grid-rows-[1fr] opacity-100" : "pointer-events-none grid-rows-[0fr] opacity-0"
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="border-t border-line px-5 pb-5 pt-2">
+            {LINKS.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                tabIndex={open ? undefined : -1}
+                onClick={() => setOpen(false)}
+                className="block rounded-lg px-2 py-2.5 text-[16px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash"
+              >
+                {label}
+              </Link>
+            ))}
             <Link
-              key={href}
-              href={href}
+              href={signedIn ? "/dashboard" : "/signup"}
+              tabIndex={open ? undefined : -1}
               onClick={() => setOpen(false)}
-              className="block rounded-lg px-2 py-2.5 text-[16px] font-medium text-flash-dim"
+              className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
             >
-              {label}
+              {signedIn ? "Open app →" : "Start selling →"}
             </Link>
-          ))}
-          <Link
-            href={signedIn ? "/dashboard" : "/signup"}
-            onClick={() => setOpen(false)}
-            className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
-          >
-            {signedIn ? "Open app →" : "Start selling →"}
-          </Link>
+          </div>
         </div>
-      ) : null}
+      </div>
     </header>
   );
 }
