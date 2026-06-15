@@ -16,11 +16,11 @@ import { DIM, FAINT, GREEN, GREEN_SOFT, INK, LINE, SLAB, SURFACE, type ClickSpec
 
 /**
  * Step 2 · Identify — the photo-reading moment in full: sweep + detection
- * boxes over the camera's actual printed text (“Canon”, “AE-1”), the
+ * boxes over the laptop's printed badges (“Predator”, “Helios 300”), the
  * extracted details with per-field certainty, the how-sure composite, and a
  * plain-language item summary (ui-r6: the dark JSON “structured output”
  * panel is gone — sellers, not engineers). No cursor, no clicks.
- * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (demo/acer-hero.jpg) —
  * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-identify public/demo/steps/identify.mp4 --crf 26 --muted
@@ -62,7 +62,7 @@ const FEED: FeedEvent[] = [
     at: 108,
     done: 150,
     text: "Reading the printed text on the body…",
-    sub: "Found “Canon” and “AE-1”",
+    sub: "Found “Predator” and “Core i7”",
     subAt: 154,
   },
   { at: 162, done: 248, text: "Pulling out the details" },
@@ -70,22 +70,22 @@ const FEED: FeedEvent[] = [
 ];
 
 const FIELDS = [
-  { label: "BRAND", value: "Canon", conf: 0.99 },
-  { label: "MODEL", value: "AE-1", conf: 0.97 },
-  { label: "CATEGORY", value: "Cameras & Photo", conf: 0.96 },
-  { label: "CONDITION", value: "Good · light brassing", conf: 0.86 },
-  { label: "LENS", value: "FD 50mm f/1.8", conf: 0.91 },
-  { label: "FORMAT", value: "35mm film SLR", conf: 0.94 },
+  { label: "BRAND", value: "Acer", conf: 0.99 },
+  { label: "MODEL", value: "Predator Helios 300", conf: 0.95 },
+  { label: "CATEGORY", value: "Computers & Accessories", conf: 0.96 },
+  { label: "CONDITION", value: "Good · light wear", conf: 0.86 },
+  { label: "CPU", value: "Intel Core i7", conf: 0.92 },
+  { label: "GRAPHICS", value: "GeForce RTX · 144Hz", conf: 0.9 },
 ];
 
 const SIGNALS = [
   "Brand and model read straight from the photo",
-  "Printed text came through cleanly",
+  "Printed badges came through cleanly",
   "Category is clear-cut",
 ];
 
 const SUMMARY_TEXT =
-  "Canon AE-1 35mm film SLR with a 50mm f/1.8 lens. Good condition with light brassing. Ready to price under Cameras & Photo.";
+  "Acer Predator Helios 300 gaming laptop — Intel Core i7, GeForce RTX, 144Hz display. Good condition, RGB keyboard works. Ready to price under Computers & Accessories.";
 
 /* ---------- pieces ---------- */
 
@@ -306,27 +306,25 @@ function IdentifyAct() {
       <Shell badge="STEP 2 · IDENTIFY">
         <PhotoFrame
           rect={PHOTO}
-          src={staticFile("demo/filmcamera.jpg")}
+          src={staticFile("demo/acer-hero.jpg")}
           fileName="IMG_4032.jpg"
           photoIn={photoIn}
           scanStart={SCAN_START}
           scanEnd={SCAN_END}
           objectPosition="50% 50%"
         >
-          {/* boxes sit over the AE-1's printed marks: the "Canon" badge on the
-              prism and the "AE-1" nameplate on the top deck. Coords are local
-              to the 460×345 photo frame (image is 1600×1200 = 4:3, same aspect
-              → object-fit:cover does not crop, so 1px = 1px·460/1600 of source).
-              Measured on a clean pre-box still (5px grid): "Canon" letters span
-              local x233–300 / y122–150, "AE-1" spans x129–189 / y151–171. Boxes
-              pad those by ~4–5px on every side so each mark is fully bracketed
-              (the prior boxes sat ~7px low and clipped the letter tops). */}
-          <OcrBox at={110} box={{ x: 228, y: 118, w: 76, h: 35 }} label="brand · “Canon”" labelSide="above" />
+          {/* boxes sit over the Acer Predator's printed marks: the "PREDATOR"
+              wordmark on the screen bezel and the "Predator Helios 300" spec
+              sticker on the lower-right deck. Coords are local to the 460×345
+              photo frame (acer-hero.jpg is 1600×1200 = 4:3, same aspect →
+              object-fit:cover does not crop, so 1px = 1px·460/1600 of source).
+              Tuned against an actual render still. */}
+          <OcrBox at={110} box={{ x: 148, y: 84, w: 166, h: 28 }} label="brand · “Predator”" labelSide="above" />
           <OcrBox
             at={135}
-            box={{ x: 124, y: 147, w: 70, h: 28 }}
-            label="model · “AE-1”"
-            labelSide="below"
+            box={{ x: 250, y: 295, w: 130, h: 26 }}
+            label="model · “Helios 300”"
+            labelSide="above"
           />
         </PhotoFrame>
         <StatusLine
@@ -335,7 +333,7 @@ function IdentifyAct() {
           startAt={SCAN_START}
           doneAt={250}
           busyText="Reading your photo…"
-          doneText="Found it · Canon AE-1"
+          doneText="Found it · Acer Predator"
         />
         <Feed rect={FEED_RECT} events={FEED} />
 

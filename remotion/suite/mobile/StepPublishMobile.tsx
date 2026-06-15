@@ -16,8 +16,8 @@ import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
  * Step 5 · Publish (portrait mobile) — the review screen: listing summary,
  * pre-flight checklist ticks, the autopilot gate confirms it cleared the bar
  * (91% sure), then a tap on "Publish to eBay" → posting → a live confirmation
- * card with the eBay item id. Same content as the desktop StepPublish (Canon
- * AE-1, $165, item #110558203341). See [[snaplist-mobile-polish-pr70]].
+ * card with the eBay item id. Same content as the desktop StepPublish (Acer
+ * Predator, $550, item #110558203341). See [[snaplist-mobile-polish-pr70]].
  *
  * Render:
  *   npx remotion render remotion/index.ts step-publish-mobile public/demo/steps/publish-mobile.mp4 --crf 26 --muted
@@ -31,7 +31,7 @@ const INNER = M_LOGICAL_W - PAD * 2;
 
 const CHECKS = [
   { text: "Title fits eBay's 80-character limit", at: 44 },
-  { text: "Price set · $165 (range $140–$195)", at: 60 },
+  { text: "Price set · $550 (range $480–$620)", at: 60 },
   { text: "Photos and condition attached", at: 76 },
 ];
 const GATE_AT = 100;
@@ -86,11 +86,11 @@ function PublishMobileAct() {
 
         {/* listing summary card */}
         <div style={{ position: "absolute", left: PAD, top: 100, width: INNER, height: 132, borderRadius: 20, border: `1.5px solid ${LINE}`, background: SURFACE, boxSizing: "border-box", padding: "18px 20px" }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: INK, lineHeight: 1.3 }}>Canon AE-1 35mm film camera with 50mm lens</div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: INK, lineHeight: 1.3 }}>Acer Predator Helios 300 gaming laptop</div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
-            <span style={{ fontSize: 28, fontWeight: 800, color: INK, lineHeight: 1 }}>$165</span>
-            <span style={{ fontSize: 13.5, fontWeight: 700, color: INK, background: SLAB, border: `1px solid ${LINE}`, borderRadius: 8, padding: "5px 10px" }}>Brand · Canon</span>
-            <span style={{ fontSize: 13.5, fontWeight: 700, color: INK, background: SLAB, border: `1px solid ${LINE}`, borderRadius: 8, padding: "5px 10px" }}>Model · AE-1</span>
+            <span style={{ fontSize: 28, fontWeight: 800, color: INK, lineHeight: 1 }}>$550</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: INK, background: SLAB, border: `1px solid ${LINE}`, borderRadius: 8, padding: "5px 10px" }}>Brand · Acer</span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: INK, background: SLAB, border: `1px solid ${LINE}`, borderRadius: 8, padding: "5px 10px" }}>Model · Predator Helios 300</span>
           </div>
         </div>
 

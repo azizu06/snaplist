@@ -17,7 +17,7 @@ import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
  * taps through eBay / Facebook / Mercari tabs and each pane shows that
  * marketplace's native copy (search-friendly eBay title + item specifics,
  * casual local Facebook text, short Mercari title + hashtags). Same copy as the
- * desktop StepWrite (Canon AE-1). See [[snaplist-mobile-polish-pr70]].
+ * desktop StepWrite (Acer Predator). See [[snaplist-mobile-polish-pr70]].
  *
  * Render:
  *   npx remotion render remotion/index.ts step-write-mobile public/demo/steps/write-mobile.mp4 --crf 26 --muted
@@ -37,16 +37,16 @@ const MC_AT = 280;
 const TAP_FB = 152;
 const TAP_MC = 272;
 
-const EBAY_TITLE = "Canon AE-1 35mm Film SLR Camera w/ FD 50mm f/1.8 Lens";
-const EBAY_SPECS = ["Brand: Canon", "Model: AE-1", "Lens: FD 50mm f/1.8"];
+const EBAY_TITLE = "Acer Predator Helios 300 Gaming Laptop i7 RTX 144Hz 16GB 512GB SSD";
+const EBAY_SPECS = ["Brand: Acer", "Model: Predator Helios 300", "CPU: Intel Core i7"];
 const EBAY_DESC =
-  "Canon AE-1 35mm film SLR with the FD 50mm f/1.8 lens, front cap, and original strap. Cosmetically good — light brassing from honest use, no dents or cracks visible in the photos.";
+  "Acer Predator Helios 300 gaming laptop — Intel Core i7, GeForce RTX, 144Hz display, 16GB RAM, 512GB SSD. RGB backlit keyboard. Cosmetically good with light wear; powers on and runs in the photos.";
 const FB_DESC =
-  "Canon AE-1 film camera with the 50mm f/1.8 lens — strap and cap included. Body's in good shape, light brassing from age. Pickup this week, $165 OBO.";
-const MC_TITLE = "Canon AE-1 35mm Film Camera";
+  "Acer Predator Helios 300 gaming laptop — Core i7, RTX graphics, 144Hz screen, 16GB RAM, 512GB SSD. RGB keyboard, light wear, runs well. Pickup this week, $550 OBO.";
+const MC_TITLE = "Acer Predator Helios 300 Gaming Laptop";
 const MC_DESC =
-  "Vintage Canon AE-1 SLR with the FD 50mm f/1.8 lens — strap and cap included. Light brassing from honest use, glass is clean.";
-const MC_TAGS = ["#CanonAE1", "#35mm", "#filmcamera", "#vintagecamera"];
+  "Acer Predator Helios 300 gaming laptop — Core i7, GeForce RTX, 144Hz, 16GB/512GB. RGB keyboard, light wear, runs clean.";
+const MC_TAGS = ["#AcerPredator", "#gaminglaptop", "#RTX", "#144Hz"];
 
 const CARD: Rect = { x: PAD, y: 172, w: INNER, h: 408 };
 
@@ -141,7 +141,7 @@ function FacebookPane() {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 18 }}>
         <Chip>Orlando, FL</Chip>
         <Chip>Local pickup</Chip>
-        <Chip accent>$165 OBO</Chip>
+        <Chip accent>$550 OBO</Chip>
       </div>
     </>
   );

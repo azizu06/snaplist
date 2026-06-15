@@ -15,11 +15,11 @@ import { FAINT, GREEN, INK, LINE, SURFACE, VIOLET } from "../theme";
 import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
 
 /**
- * Step 2 · Identify (portrait mobile) — a scan beam sweeps the Canon AE-1 photo,
+ * Step 2 · Identify (portrait mobile) — a scan beam sweeps the Acer Predator photo,
  * then the identified label + a "how sure" composite reveal, and the extracted
  * attributes fill a 2-up grid. Same item + same values as the desktop
- * StepIdentify (brand Canon, model AE-1, Cameras & Photo, good · light brassing,
- * FD 50mm f/1.8, 35mm film SLR, 94% composite). See [[snaplist-mobile-polish-pr70]].
+ * StepIdentify (brand Acer, model Predator Helios 300, Computers & Accessories, good · light wear,
+ * Core i7, GeForce RTX, 94% composite). See [[snaplist-mobile-polish-pr70]].
  *
  * Render:
  *   npx remotion render remotion/index.ts step-identify-mobile public/demo/steps/identify-mobile.mp4 --crf 26 --muted
@@ -30,7 +30,7 @@ export const STEP_IDENTIFY_MOBILE_LEN = 360;
 const SEAM = 16;
 const PAD = 28;
 
-const IMG = "demo/filmcamera.jpg";
+const IMG = "demo/acer-hero.jpg";
 const PHOTO = { x: PAD, y: 104, w: M_LOGICAL_W - PAD * 2, h: 206 };
 
 const SCAN_FROM = 18;
@@ -38,12 +38,12 @@ const SCAN_TO = 92;
 const FOUND_AT = 104;
 
 const ATTRS: Array<{ label: string; value: string; at: number }> = [
-  { label: "BRAND", value: "Canon", at: 128 },
-  { label: "MODEL", value: "AE-1", at: 144 },
-  { label: "FORMAT", value: "35mm film SLR", at: 160 },
-  { label: "CATEGORY", value: "Cameras & Photo", at: 176 },
-  { label: "CONDITION", value: "Good · light brassing", at: 192 },
-  { label: "LENS", value: "FD 50mm f/1.8", at: 208 },
+  { label: "BRAND", value: "Acer", at: 128 },
+  { label: "MODEL", value: "Predator Helios 300", at: 144 },
+  { label: "CPU", value: "Intel Core i7", at: 160 },
+  { label: "CATEGORY", value: "Computers & Accessories", at: 176 },
+  { label: "CONDITION", value: "Good · light wear", at: 192 },
+  { label: "GPU", value: "GeForce RTX", at: 208 },
 ];
 const CELL_W = 234;
 const CELL_H = 70;
@@ -192,7 +192,7 @@ function IdentifyMobileAct() {
               }}
             >
               <CheckIcon size={15} color="#34d399" />
-              <span style={{ fontSize: 15, fontWeight: 800, color: "white" }}>Found it · Canon AE-1</span>
+              <span style={{ fontSize: 15, fontWeight: 800, color: "white" }}>Found it · Acer Predator</span>
             </div>
           ) : null}
         </div>
@@ -211,7 +211,7 @@ function IdentifyMobileAct() {
               opacity: foundIn,
             }}
           >
-            <span style={{ fontSize: 21, fontWeight: 800, color: INK }}>Canon AE-1</span>
+            <span style={{ fontSize: 21, fontWeight: 800, color: INK }}>Acer Predator</span>
             <span
               style={{
                 fontSize: 15,

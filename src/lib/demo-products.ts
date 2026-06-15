@@ -507,6 +507,414 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     details: ["Brother Lock 1034D 3/4-thread serger", "Includes original instruction manual", "Color-coded threading guides intact"],
     alt: "A used Brother 1034D serger sewing machine on a wooden table by a window with its manual open in front of it",
   },
+  // ===== AUTHENTIC FB-Marketplace assets (2026-06 overhaul): real used
+  // items from the owner's two Marketplace accounts, uniform 1080² masters,
+  // price overlays curated out. Grounded titles/specs from the listing data. =====
+  {
+    slug: "a-macbookair",
+    image: "/demo/authentic/a-macbookair.jpg",
+    title: "Apple MacBook Air (M1), 13-inch",
+    shortName: "Apple MacBook Air (M1)",
+    price: 600,
+    condition: "Good",
+    category: "Computers & Accessories",
+    pricingStory: "comps",
+    details: ["Apple MacBook Air, M1 chip", "13-inch Retina, silver", "Powers on, light desk wear"],
+    alt: "Open silver Apple MacBook Air on a desk showing the macOS desktop",
+  },
+  {
+    slug: "a-cyberpc",
+    image: "/demo/authentic/a-cyberpc.jpg",
+    title: "CyberPowerPC gaming desktop, tempered-glass case",
+    shortName: "CyberPowerPC gaming",
+    price: 520,
+    condition: "Good",
+    category: "Computers & Accessories",
+    pricingStory: "comps",
+    details: ["CyberPowerPC tower build", "Tempered-glass side panel", "RGB-ready gaming desktop"],
+    alt: "Black CyberPowerPC gaming desktop with a tempered-glass side panel",
+  },
+  {
+    slug: "a-monitors",
+    image: "/demo/authentic/a-monitors.jpg",
+    title: "Pair of Dell monitors with stands",
+    shortName: "Pair of Dell monitors",
+    price: 120,
+    condition: "Good",
+    category: "Computers & Accessories",
+    pricingStory: "depreciation",
+    details: ["Two matching Dell monitors", "Stands included", "Clean screens, tested"],
+    alt: "Two matching Dell monitors side by side on a desk",
+  },
+  {
+    slug: "a-powerblock",
+    image: "/demo/authentic/a-powerblock.jpg",
+    title: "PowerBlock adjustable dumbbells with stand",
+    shortName: "PowerBlock adjustable",
+    price: 250,
+    condition: "Good",
+    category: "Sporting Goods",
+    pricingStory: "comps",
+    details: ["PowerBlock adjustable dumbbell set", "Selector pins + stand", "Replaces a full dumbbell rack"],
+    alt: "A pair of PowerBlock adjustable dumbbells resting on their stand",
+  },
+  {
+    slug: "a-breadmaker",
+    image: "/demo/authentic/a-breadmaker.jpg",
+    title: "Automatic bread maker, white",
+    shortName: "Automatic bread maker",
+    price: 30,
+    condition: "Good",
+    category: "Home & Kitchen",
+    pricingStory: "comps",
+    details: ["Countertop bread machine", "Digital control panel", "Pan and paddle included"],
+    alt: "A white automatic bread maker on a counter",
+  },
+  {
+    slug: "a-fishtank",
+    image: "/demo/authentic/a-fishtank.jpg",
+    title: "30-gallon glass aquarium with accessories",
+    shortName: "30-gallon glass aquarium",
+    price: 80,
+    condition: "Good",
+    category: "Pet Supplies",
+    pricingStory: "comps",
+    details: ["About 30-gallon glass tank", "Currently planted", "Comes with accessories"],
+    alt: "A 30-gallon planted glass aquarium",
+  },
+  {
+    slug: "a-roadbike",
+    image: "/demo/authentic/a-roadbike.jpg",
+    title: "Vintage road bike, single-speed",
+    shortName: "Vintage road bike",
+    price: 80,
+    condition: "Good",
+    category: "Bicycles",
+    pricingStory: "comps",
+    details: ["Vintage steel road bicycle", "Drop handlebars", "Rides well, honest patina"],
+    alt: "A vintage road bicycle leaning against a patterned wall",
+  },
+  {
+    slug: "a-martini",
+    image: "/demo/authentic/a-martini.jpg",
+    title: "Set of martini glasses, boxed",
+    shortName: "Set of martini glasses",
+    price: 15,
+    condition: "Like new",
+    category: "Home & Kitchen",
+    pricingStory: "depreciation",
+    details: ["Set of stemmed martini glasses", "Original box", "No chips or cracks"],
+    alt: "A boxed set of stemmed martini glasses",
+  },
+  {
+    slug: "a-scooter",
+    image: "/demo/authentic/a-scooter.jpg",
+    title: "Folding kick scooter",
+    shortName: "Folding kick scooter",
+    price: 35,
+    condition: "Good",
+    category: "Sporting Goods",
+    pricingStory: "depreciation",
+    details: ["Folding aluminum kick scooter", "Rear fender brake", "Rolls smooth, light wear"],
+    alt: "A folding kick scooter standing on a driveway",
+  },
+  {
+    slug: "a-yellowbike",
+    image: "/demo/authentic/a-yellowbike.jpg",
+    title: "Mongoose 20-inch kids' bike, yellow",
+    shortName: "Mongoose 20-inch kids'",
+    price: 80,
+    condition: "Good",
+    category: "Bicycles",
+    pricingStory: "comps",
+    details: ["20-inch kids' mountain bike", "Yellow frame, knobby tires", "Rides well, normal wear"],
+    alt: "A yellow 20-inch kids' mountain bike outdoors",
+  },
+  {
+    slug: "a-xboxpads",
+    image: "/demo/authentic/a-xboxpads.jpg",
+    title: "Xbox One wireless controllers, set of 2",
+    shortName: "Xbox One wireless",
+    price: 45,
+    condition: "Good",
+    category: "Video Games & Consoles",
+    pricingStory: "comps",
+    details: ["Two Xbox One wireless controllers", "One black, one white", "Tested, both work"],
+    alt: "Two Xbox One wireless controllers, one black and one white",
+  },
+  {
+    slug: "a-speakers",
+    image: "/demo/authentic/a-speakers.jpg",
+    title: "Desktop computer speakers, black pair",
+    shortName: "Desktop computer speakers",
+    price: 20,
+    condition: "Good",
+    category: "Computers & Accessories",
+    pricingStory: "depreciation",
+    details: ["Pair of powered desktop speakers", "Compact black cabinets", "Cabling included"],
+    alt: "A pair of black desktop computer speakers on a wood floor",
+  },
+  {
+    slug: "a-ceilinglight",
+    image: "/demo/authentic/a-ceilinglight.jpg",
+    title: "Brushed-brass semi-flush ceiling light",
+    shortName: "Brushed-brass semi-flush",
+    price: 30,
+    condition: "Good",
+    category: "Home & Garden",
+    pricingStory: "depreciation",
+    details: ["Brass-finish semi-flush fixture", "Frosted glass bowl shade", "Three-arm mount"],
+    alt: "A brushed-brass ceiling light fixture with a frosted glass shade",
+  },
+  {
+    slug: "a-cooler",
+    image: "/demo/authentic/a-cooler.jpg",
+    title: "Hard-side cooler, blue and white",
+    shortName: "Hard-side cooler",
+    price: 20,
+    condition: "Good",
+    category: "Sporting Goods",
+    pricingStory: "depreciation",
+    details: ["Blue and white hard cooler", "Hinged lid", "Holds ice well"],
+    alt: "A blue and white hard-side cooler",
+  },
+  {
+    slug: "a-microwave",
+    image: "/demo/authentic/a-microwave.jpg",
+    title: "Countertop microwave, white",
+    shortName: "Countertop microwave",
+    price: 40,
+    condition: "Good",
+    category: "Home & Kitchen",
+    pricingStory: "depreciation",
+    details: ["White countertop microwave", "Digital keypad", "Tested, heats evenly"],
+    alt: "A white countertop microwave",
+  },
+  {
+    slug: "a-fridge",
+    image: "/demo/authentic/a-fridge.jpg",
+    title: "Stainless top-freezer refrigerator",
+    shortName: "Stainless top-freezer",
+    price: 300,
+    condition: "Good",
+    category: "Appliances",
+    pricingStory: "comps",
+    details: ["Stainless top-freezer fridge", "Adjustable interior shelves", "Runs cold, clean"],
+    alt: "A stainless steel top-freezer refrigerator",
+  },
+  {
+    slug: "a-wardrobe",
+    image: "/demo/authentic/a-wardrobe.jpg",
+    title: "White wardrobe storage cabinet",
+    shortName: "White wardrobe storage",
+    price: 90,
+    condition: "Good",
+    category: "Furniture",
+    pricingStory: "depreciation",
+    details: ["Tall white wardrobe cabinet", "Hanging space and shelf", "Solid, minor wear"],
+    alt: "A tall white wardrobe storage cabinet",
+  },
+  {
+    slug: "a-dresser",
+    image: "/demo/authentic/a-dresser.jpg",
+    title: "Dresser with mirror, dark wood",
+    shortName: "Dresser with mirror",
+    price: 180,
+    condition: "Like new",
+    category: "Furniture",
+    pricingStory: "comps",
+    details: ["Six-drawer dresser", "Matching mirror", "Like-new dark wood finish"],
+    alt: "A dark wood dresser with an attached mirror",
+  },
+  {
+    slug: "a-nightstand",
+    image: "/demo/authentic/a-nightstand.jpg",
+    title: "Nightstand, dark wood",
+    shortName: "Nightstand",
+    price: 60,
+    condition: "Like new",
+    category: "Furniture",
+    pricingStory: "comps",
+    details: ["Single-drawer nightstand", "Dark wood, matches a bedroom set", "Like new"],
+    alt: "A dark wood nightstand",
+  },
+  {
+    slug: "a-patioset",
+    image: "/demo/authentic/a-patioset.jpg",
+    title: "Glass-top patio table with wicker chairs",
+    shortName: "Glass-top patio table",
+    price: 120,
+    condition: "Fair",
+    category: "Patio & Garden",
+    pricingStory: "depreciation",
+    details: ["Glass-top outdoor table", "Woven wicker chairs", "Weathered but sturdy"],
+    alt: "A glass-top patio table with woven wicker chairs",
+  },
+  {
+    slug: "a-stool",
+    image: "/demo/authentic/a-stool.jpg",
+    title: "Counter stool, black metal",
+    shortName: "Counter stool",
+    price: 20,
+    condition: "Good",
+    category: "Furniture",
+    pricingStory: "depreciation",
+    details: ["Black metal counter stool", "Footrest ring", "Sturdy, light use"],
+    alt: "A black metal counter stool on a patterned rug",
+  },
+  {
+    slug: "a-campchairs",
+    image: "/demo/authentic/a-campchairs.jpg",
+    title: "Folding camping chairs, red pair",
+    shortName: "Folding camping chairs",
+    price: 15,
+    condition: "Good",
+    category: "Sporting Goods",
+    pricingStory: "depreciation",
+    details: ["Two folding camp chairs", "Red fabric", "Sturdy frames"],
+    alt: "Two red folding camping chairs",
+  },
+  {
+    slug: "a-rug",
+    image: "/demo/authentic/a-rug.jpg",
+    title: "Patterned area rug, cream and black",
+    shortName: "Patterned area rug",
+    price: 35,
+    condition: "Good",
+    category: "Home & Garden",
+    pricingStory: "depreciation",
+    details: ["Large patterned area rug", "Cream field with border", "Clean, gently used"],
+    alt: "A large cream and black patterned area rug",
+  },
+  {
+    slug: "a-mattress",
+    image: "/demo/authentic/a-mattress.jpg",
+    title: "Quilted pillow-top mattress",
+    shortName: "Quilted pillow-top",
+    price: 120,
+    condition: "Good",
+    category: "Furniture",
+    pricingStory: "comps",
+    details: ["Quilted pillow-top mattress", "Clean, no stains", "Firm support"],
+    alt: "A quilted pillow-top mattress",
+  },
+  {
+    slug: "a-plant",
+    image: "/demo/authentic/a-plant.jpg",
+    title: "Trailing pothos houseplant",
+    shortName: "Trailing pothos houseplant",
+    price: 15,
+    condition: "Like new",
+    category: "Home & Garden",
+    pricingStory: "depreciation",
+    details: ["Healthy trailing pothos", "Long vines", "Easy-care houseplant"],
+    alt: "A trailing pothos houseplant by a window",
+  },
+  {
+    slug: "a-bedframe",
+    image: "/demo/authentic/a-bedframe.jpg",
+    title: "King bed frame with headboard, dark wood",
+    shortName: "King bed frame with",
+    price: 200,
+    condition: "Like new",
+    category: "Furniture",
+    pricingStory: "comps",
+    details: ["King bed frame and headboard", "Dark wood, matches set", "Like-new condition"],
+    alt: "A dark wood king bed frame with a paneled headboard",
+  },
+  {
+    slug: "a-hulahoop",
+    image: "/demo/authentic/a-hulahoop.jpg",
+    title: "Weighted fitness hula hoop, ~4 lb",
+    shortName: "Weighted fitness hula hoop",
+    price: 10,
+    condition: "Good",
+    category: "Sporting Goods",
+    pricingStory: "comps",
+    details: ["Weighted exercise hoop", "About 4 lb", "Padded segmented design"],
+    alt: "A colorful weighted fitness hula hoop",
+  },
+  {
+    slug: "a-crib",
+    image: "/demo/authentic/a-crib.jpg",
+    title: "Convertible baby crib, dark wood",
+    shortName: "Convertible baby crib",
+    price: 50,
+    condition: "Like new",
+    category: "Baby & Kids",
+    pricingStory: "comps",
+    details: ["Convertible wooden crib", "Adjustable mattress height", "Like new"],
+    alt: "A dark wood convertible baby crib",
+  },
+  {
+    slug: "a-stroller",
+    image: "/demo/authentic/a-stroller.jpg",
+    title: "Full-size baby stroller, black",
+    shortName: "Full-size baby stroller",
+    price: 20,
+    condition: "Good",
+    category: "Baby & Kids",
+    pricingStory: "depreciation",
+    details: ["Full-size black stroller", "Folds flat", "Works, light wear"],
+    alt: "A folded black full-size baby stroller",
+  },
+  {
+    slug: "a-litterbox",
+    image: "/demo/authentic/a-litterbox.jpg",
+    title: "Covered cat litter box, gray",
+    shortName: "Covered cat litter box",
+    price: 20,
+    condition: "Good",
+    category: "Pet Supplies",
+    pricingStory: "depreciation",
+    details: ["Gray plastic litter box", "High sides", "Clean"],
+    alt: "A gray plastic covered cat litter box",
+  },
+  {
+    slug: "a-bowls",
+    image: "/demo/authentic/a-bowls.jpg",
+    title: "Decorative ceramic bowls, set of 3",
+    shortName: "Decorative ceramic bowls",
+    price: 20,
+    condition: "Good",
+    category: "Home & Garden",
+    pricingStory: "depreciation",
+    details: ["Three painted decorative bowls", "Hand-finished look", "Display pieces"],
+    alt: "Three painted decorative ceramic bowls",
+  },
+  {
+    slug: "a-chest",
+    image: "/demo/authentic/a-chest.jpg",
+    title: "Tall 5-drawer chest of drawers, dark wood",
+    shortName: "Tall 5-drawer chest of",
+    price: 150,
+    condition: "Like new",
+    category: "Furniture",
+    pricingStory: "comps",
+    details: ["Five-drawer tall chest", "Dark wood, matches set", "Like new"],
+    alt: "A tall dark wood five-drawer chest of drawers",
+  },
+  // The new how-it-works PIPELINE HERO (replaces the Canon AE-1). A real Acer
+  // Predator Helios 300 with readable on-body markings (Predator Helios 300 /
+  // Core i7 / GeForce RTX / 144Hz) that drive the identify OCR, and strong sold
+  // comps for the price step. Four verified-distinct angles staged for the snap
+  // step (a1 open straight-on, a2 open night, a3 closed lid, a4 boot screen).
+  {
+    slug: "acer-predator",
+    image: "/demo/authentic/acer-predator-a1-open.jpg",
+    title: "Acer Predator Helios 300 gaming laptop, Core i7 / RTX",
+    shortName: "Acer Predator Helios",
+    price: 550,
+    condition: "Good",
+    category: "Computers & Accessories",
+    pricingStory: "comps",
+    details: [
+      "Predator Helios 300, Intel Core i7",
+      "GeForce RTX graphics, 144Hz display",
+      "RGB keyboard, powers on, light wear",
+    ],
+    alt: "An open Acer Predator Helios 300 gaming laptop with an RGB-backlit keyboard, model badges visible below the screen",
+  },
 ];
 
 export const DEMO_PRODUCTS_BY_SLUG: Record<string, DemoProduct> =
@@ -518,75 +926,66 @@ export const DEMO_PRODUCTS_BY_SLUG: Record<string, DemoProduct> =
  */
 export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   // --- Remotion demo-video suite (remotion/suite; see remotion/INTEGRATION.md) ---
-  // r7: the how-it-works pipeline now follows ONE item start-to-finish so the
-  // narrative holds — the Canon AE-1 (filmcamera) is snapped, identified,
-  // priced, written, published, then asked about. Every step clip uses it.
+  // The how-it-works pipeline follows ONE item start-to-finish so the narrative
+  // holds — the real Acer Predator Helios 300 (demo/acer-hero.jpg) is snapped,
+  // identified, priced, written, published, then asked about. Every step clip
+  // uses it; the snap step shows three framings of it standing in for angles.
   "hero-video": ["polaroid", "gameboy", "gshock"], // public/hero-demo.mp4 — vision-showcase acts 1–3
-  "step-snap": ["filmcamera"], // public/demo/steps/snap.mp4
-  "step-identify": ["filmcamera"], // public/demo/steps/identify.mp4
-  "step-price": ["filmcamera"], // public/demo/steps/price.mp4
-  "step-write": ["filmcamera"], // public/demo/steps/write.mp4
-  "step-publish": ["filmcamera"], // public/demo/steps/publish.mp4
-  "buyer-qa": ["filmcamera"], // public/demo/buyer-qa.mp4 (tour step 6)
+  "step-snap": ["acer-predator"], // public/demo/steps/snap.mp4
+  "step-identify": ["acer-predator"], // public/demo/steps/identify.mp4
+  "step-price": ["acer-predator"], // public/demo/steps/price.mp4
+  "step-write": ["acer-predator"], // public/demo/steps/write.mp4
+  "step-publish": ["acer-predator"], // public/demo/steps/publish.mp4
+  "buyer-qa": ["acer-predator"], // public/demo/buyer-qa.mp4 (tour step 6)
   // r7: the logged-in inbox teaser must show a DIFFERENT item than the tour so
   // a user who already watched the tour gets a fresh scenario, not déjà vu.
   // Brass chess set — hero-domain collectible, disjoint from the AE-1 and from
   // every home surface. Rendered to its own clip (public/demo/inbox-qa.mp4).
   "inbox-qa": ["chess"], // public/demo/inbox-qa.mp4 (logged-in dashboard inbox)
-  // --- Static page surfaces (post v3 passes; reflects actual usage) ---
-  // r6: a richer 17-card loop, deliberately DISJOINT from the video clips and
-  // the scan montage so no image repeats across surfaces. A used tilt (worn
-  // boots, dusty drill, vintage typewriter/boombox, frayed chair) because
-  // selling secondhand IS the product. book/headphones/chess moved out (they
-  // live in the scan montage / buyer-Q&A clip) to keep the loop unique.
+  // --- Static page surfaces ---
+  // 2026-06 authentic overhaul: every static surface below now uses the owner's
+  // real FB-Marketplace items (a-* slugs), kept DISJOINT across surfaces so no
+  // photo repeats. The Remotion video surfaces above still follow the AE-1 / chess
+  // until their clips are re-rendered around the Acer Predator hero.
   "landing-carousel": [
-    "macbook",
-    "lamp",
-    "boots",
-    "typewriter",
-    "jacket",
-    "bicycle",
-    "skillet",
-    "drill",
-    "plant",
-    "crt-tv",
-    "racket",
-    "chair",
-    "skateboard",
-    "boombox",
-    "watch",
-    "vase",
-    "backpack",
+    "a-scooter",
+    "a-yellowbike",
+    "a-xboxpads",
+    "a-speakers",
+    "a-ceilinglight",
+    "a-cooler",
+    "a-microwave",
+    "a-fridge",
+    "a-wardrobe",
+    "a-dresser",
+    "a-nightstand",
+    "a-patioset",
+    "a-stool",
+    "a-campchairs",
+    "a-rug",
+    "a-mattress",
+    "a-plant",
   ],
-  "landing-storefronts": ["console"], // r6.1: was "keyboard"
-  // r6.1: the home "From shelf to sold in three moves" prelude — one item shown
+  "landing-storefronts": ["a-bedframe"],
+  // The home "From shelf to sold in three moves" prelude — one item shown
   // captured → priced → listed.
-  "landing-three-moves": ["rollerskates"],
-  // Hero ScanShowcase on the landing page — a deliberate 8-product montage
-  // (scanning-beam cycle), exempt from the one-surface rule by design. The
-  // eight are picked DISJOINT from the landing carousel and the how-it-works
-  // step clips, so no photo repeats across surfaces.
+  "landing-three-moves": ["a-hulahoop"],
+  // Hero ScanShowcase on the landing page — an 8-product scanning montage,
+  // disjoint from the carousel and the step clips.
   "landing-hero-scan": [
-    "book",
-    "vinyl",
-    "gameboy",
-    "headphones",
-    "polaroid",
-    "espresso",
-    "gshock",
-    "turntable",
+    "a-macbookair",
+    "a-cyberpc",
+    "a-monitors",
+    "a-powerblock",
+    "a-breadmaker",
+    "a-fishtank",
+    "a-roadbike",
+    "a-martini",
   ],
-  // /features was deleted in r5 (redirects to /how-it-works); the waterfall
-  // explorer now lives only on /how-it-works, last section before the CTA.
-  "hiw-waterfall": ["dutchoven"], // r6.1: was "guitar"
-  "how-it-works": ["gameboy"], // + embeds the step-* clips above
-  // r5.1: the upload page's "one photo in, a finished listing out" example
-  // strip was removed (how-it-works already tells that story) — gameboy and
-  // vinyl remain in use via the step clips and the hiw scan montage.
-  // r5: espresso freed up when the About FAQ anchor card was removed; the
-  // folder now pops items that no landing surface features.
-  // r6.1: was gshock/espresso/turntable, which also headline the home scan.
-  // Now three items exclusive to the dashboard (ordered shortest→longest name
-  // for the folder's narrow→wide papers).
-  "dashboard-folder": ["kettlebell", "binoculars", "sewingmachine"],
+  // The pricing waterfall on /how-it-works (last section before the CTA).
+  "hiw-waterfall": ["a-crib"],
+  "how-it-works": ["a-stroller"], // + embeds the step-* clips above
+  // Three items exclusive to the logged-in dashboard folder (ordered
+  // shortest→longest name for the folder's narrow→wide papers).
+  "dashboard-folder": ["a-litterbox", "a-bowls", "a-chest"],
 };

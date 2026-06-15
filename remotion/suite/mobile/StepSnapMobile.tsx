@@ -35,7 +35,7 @@ import {
  * drag-drop, so the in-clip UI is large and readable. /tour swaps to the
  * `-mobile` clip under 768px (see SeamlessThemeVideo / DemoClip).
  *
- * Step 1 · Snap — tap the camera to add photos of the Canon AE-1 one by one
+ * Step 1 · Snap — tap the shutter to add photos of the Acer Predator one by one
  * (capture flash → photo lands in the cover + rail), ending on
  * "3 photos · ready to identify". Same item + same demo asset as the desktop
  * step so the pipeline still tells one coherent story.
@@ -93,13 +93,13 @@ const slotRect = (i: number): Rect => ({
 });
 const BTN: Rect = { x: PAD, y: 560, w: M_LOGICAL_W - PAD * 2, h: 70 };
 
-const IMG = "demo/filmcamera.jpg";
-/** three crops of the verified Canon AE-1 photo standing in for angles */
-const ANGLES = ["50% 50%", "55% 60%", "32% 45%"];
+const IMG = "demo/acer-hero.jpg";
+/** three framings of the verified Acer Predator photo standing in for angles */
+const ANGLES = ["50% 42%", "50% 76%", "50% 22%"];
 const THUMB = [
-  { origin: "50% 50%", zoom: 1.5 },
-  { origin: "56% 58%", zoom: 2.0 },
-  { origin: "33% 46%", zoom: 2.1 },
+  { origin: "50% 42%", zoom: 1.25 },
+  { origin: "50% 78%", zoom: 1.7 },
+  { origin: "50% 24%", zoom: 1.6 },
 ];
 
 /* ---------- choreography ---------- */

@@ -35,7 +35,7 @@ import {
  * the seller reviews, makes one edit, and approves before anything sends.
  * Three cursor-accurate clicks: open the conversation, focus the draft,
  * approve & send. Joined the how-it-works pipeline as step 6 (ui-r6).
- * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * Product: Acer Predator Helios 300 with 50mm lens (demo/acer-hero.jpg) —
  * the same item the whole how-it-works pipeline follows, now fielding a buyer
  * question. (The logged-in dashboard inbox uses a DIFFERENT item; see
  * InboxQA / public/demo/inbox-qa.mp4.)
@@ -78,15 +78,16 @@ const CLICK_APPROVE = 484;
 const SENT_AT = 496;
 const SENT_NOTE_AT = 520;
 
-const BUYER_MSG = "Hi! Does the shutter fire at all speeds, and is the 50mm lens included?";
+const BUYER_MSG = "Hi! Does it come with the charger, and how's the battery life?";
 // Honest grounding: the draft asserts only what the photos/listing support —
-// the lens is visibly mounted (included), and the cosmetic condition is visible.
-// Shutter timing is a hands-on check no photo can verify, so the draft stops and
-// hands that part to the seller; EDIT_TEXT is the seller filling in their own
-// tested answer before approving. (No claim the system can't back up.)
+// the laptop is visibly powered on with the RGB keyboard lit, the model/specs
+// are read from the body, and the cosmetic condition is visible. Charger
+// inclusion and real battery life are hands-on facts no photo can verify, so the
+// draft stops and hands that part to the seller; EDIT_TEXT is the seller filling
+// in their own answer before approving. (No claim the system can't back up.)
 const DRAFT_TEXT =
-  "Yes — the FD 50mm f/1.8 lens shown in the photos is included, along with the front cap and original strap. Cosmetically it's in good shape, with light brassing on the edges from honest use. On whether the shutter fires at every speed:";
-const EDIT_TEXT = " I ran a roll through it last week and all speeds fired cleanly.";
+  "The photos show it powering on with the RGB keyboard lit, and cosmetically it's in good shape with light wear. It's the Core i7 / GeForce RTX / 144Hz Helios 300. On the charger and how long the battery lasts:";
+const EDIT_TEXT = " Yes, the original charger is included, and it holds about 4–5 hours on lighter use.";
 
 const ROW_C = center(ROW1);
 const BOX_C = center(TEXTBOX);
@@ -212,7 +213,7 @@ function InboxList() {
               <span style={{ fontSize: 11, fontWeight: 600, color: FAINT }}>now</span>
             </div>
             <div style={{ fontSize: 12, fontWeight: 600, color: VIOLET, marginTop: 2 }}>
-              Canon AE-1 · $165
+              Acer Predator · $550
             </div>
             <div
               style={{
@@ -331,7 +332,7 @@ function ThreadHeader() {
         }}
       >
         <Img
-          src={staticFile("demo/filmcamera.jpg")}
+          src={staticFile("demo/acer-hero.jpg")}
           style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>
@@ -346,10 +347,10 @@ function ThreadHeader() {
             textOverflow: "ellipsis",
           }}
         >
-          Canon AE-1 35mm film camera with 50mm lens
+          Acer Predator Helios 300 gaming laptop
         </div>
         <div style={{ fontSize: 12.5, color: FAINT, marginTop: 3 }}>
-          $165 · Good condition · live on eBay
+          $550 · Good condition · live on eBay
         </div>
       </div>
       <span
