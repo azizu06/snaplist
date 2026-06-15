@@ -96,7 +96,7 @@ function AnswerMobileAct() {
         {frame >= BUYER_AT ? (
           <div style={{ position: "absolute", left: PAD, top: 110, maxWidth: 400, background: SLAB, border: `1px solid ${LINE}`, borderRadius: "16px 16px 16px 4px", padding: "13px 16px", opacity: buyerIn, transform: `translateY(${(1 - buyerIn) * 8}px)` }}>
             <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6, color: FAINT, marginBottom: 4 }}>BUYER</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: INK, lineHeight: 1.45 }}>{BUYER_MSG}</div>
+            <div style={{ fontSize: 16.5, fontWeight: 600, color: INK, lineHeight: 1.5 }}>{BUYER_MSG}</div>
           </div>
         ) : null}
 
@@ -109,7 +109,7 @@ function AnswerMobileAct() {
             {drafting ? (
               <div style={{ fontSize: 15.5, fontWeight: 600, color: FAINT }}>Drafting a reply…</div>
             ) : (
-              <div style={{ fontSize: 15, lineHeight: 1.5, color: INK, opacity: draftIn }}>
+              <div style={{ fontSize: 16, lineHeight: 1.6, color: INK, opacity: draftIn }}>
                 {DRAFT_TEXT}
                 {frame >= EDIT_AT ? (
                   <span style={{ color: VIOLET, fontWeight: 700, background: "var(--sl-violet-soft, rgba(99,91,255,0.18))", borderRadius: 4, opacity: editIn }}>
