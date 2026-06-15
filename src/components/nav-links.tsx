@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import Dock from "@/components/bits/Dock";
 
 /**
- * Navigation (issue #40 round 2). Desktop: Shopify-style sidebar items — 13px,
- * icon + label, active item is a white pill with a hairline shadow. Mobile:
- * react-bits Dock (app pass) — same 4 routes and active logic as the old tab
- * grid, rendered as a floating dock with a violet active pill; items magnify
- * for pointer devices only. Client-only for pathname-driven active state.
+ * Navigation (issue #40; mobile dock revisited). Desktop: Shopify-style sidebar
+ * items — 13px, icon + label, active item is a white pill with a hairline
+ * shadow. Mobile: a flush, edge-to-edge bottom tab bar (the iOS/Material
+ * primary-nav convention) — same 4 routes and active logic, a solid surface with
+ * a hairline top border and safe-area padding, the active tab tinted with the
+ * accent. This replaced the earlier floating react-bits Dock pill, which read as
+ * a marketing flourish inside the app shell and let content scroll through the
+ * gaps around it. Client-only for pathname-driven active state.
  */
 
 const ICONS: Record<string, React.ReactNode> = {
@@ -111,17 +113,30 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Primary"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-2.5 sm:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
     >
-      <Dock
-        className="pointer-events-auto mx-auto w-fit [&_svg]:size-5"
-        items={LINKS.map(({ href, label, icon, match }) => ({
-          href,
-          label: label === "New listing" ? "Sell" : label,
-          icon: ICONS[icon],
-          active: match(pathname),
-        }))}
-      />
+      <ul className="flex items-stretch">
+        {LINKS.map(({ href, label, icon, match }) => {
+          const active = match(pathname);
+          const tabLabel = label === "New listing" ? "Sell" : label;
+          return (
+            <li key={href} className="flex-1">
+              <Link
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors [&_svg]:size-5 ${
+                  active
+                    ? "text-accent-soft-fg"
+                    : "text-faint hover:text-fg-strong"
+                }`}
+              >
+                {ICONS[icon]}
+                {tabLabel}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }
