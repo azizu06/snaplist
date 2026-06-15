@@ -54,7 +54,7 @@ export default function AuthLayout({
    since provider-level appearance.layout.socialButtonsPlacement is ignored in
    this Clerk version. Semantic .cl-* classes only (no volatile .cl-internal-*). */
 .cl-main .cl-form{order:1!important;}
-.cl-main .cl-socialButtonsRoot{order:2!important;margin-top:1.5rem!important;}`,
+.cl-main .cl-socialButtonsRoot{order:2!important;margin-top:1rem!important;}`,
         }}
       />
     </div>

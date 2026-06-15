@@ -59,6 +59,14 @@ export default function RootLayout({
           colorRing: "var(--clerk-primary)",
           borderRadius: "0.5rem",
           fontFamily: "var(--font-geist-sans), ui-sans-serif, sans-serif",
+          // Two levers tune the whole card at once instead of styling every
+          // element (owner: type read small, gaps too loose). fontSize scales
+          // all form type up from Clerk's 0.8125rem default; spacing pulls
+          // every internal gap/padding in from the 1rem default so the stack
+          // reads tighter. Input/button heights are fixed below, so fields keep
+          // their 46px tap target while the rhythm between them tightens.
+          fontSize: "0.9375rem",
+          spacing: "0.8rem",
         },
         elements: {
           // rounded-2xl card on the landing's floating-panel shadow — the
