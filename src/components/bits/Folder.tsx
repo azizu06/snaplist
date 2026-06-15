@@ -3,13 +3,35 @@
 // react-bits Folder (TS-TW registry), light-adapted for SnapList: violet
 // default to match the app accent, papers slightly toned for the white
 // canvas. Click toggles open; hover lifts the papers.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface FolderProps {
   color?: string;
   size?: number;
   items?: React.ReactNode[];
   className?: string;
+}
+
+// SnapList: the open papers fan out by a translate proportional to `size`, so a
+// desktop `size` (e.g. 2.2) throws them off both edges on a phone. Below this
+// width we cap the scale AND tighten the open-spread so the popped previews stay
+// on-screen and clear the page title. rAF-deferred read matches the repo's
+// MagicBento `useMobileDetection` (avoids react-hooks/set-state-in-effect).
+const FOLDER_MOBILE_BREAKPOINT = 640;
+const FOLDER_MOBILE_MAX_SIZE = 1.5;
+
+function useFolderMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= FOLDER_MOBILE_BREAKPOINT);
+    const raf = requestAnimationFrame(check);
+    window.addEventListener('resize', check);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', check);
+    };
+  }, []);
+  return isMobile;
 }
 
 const darkenColor = (hex: string, percent: number): string => {
@@ -36,6 +58,9 @@ const Folder: React.FC<FolderProps> = ({ color = '#6d4aff', size = 1, items = []
   while (papers.length < maxItems) {
     papers.push(null);
   }
+
+  const isMobile = useFolderMobile();
+  const effSize = isMobile ? Math.min(size, FOLDER_MOBILE_MAX_SIZE) : size;
 
   const [open, setOpen] = useState(false);
   const [paperOffsets, setPaperOffsets] = useState<{ x: number; y: number }[]>(
@@ -84,12 +109,20 @@ const Folder: React.FC<FolderProps> = ({ color = '#6d4aff', size = 1, items = []
     '--paper-3': paper3
   } as React.CSSProperties;
 
-  const scaleStyle = { transform: `scale(${size})` };
+  const scaleStyle = { transform: `scale(${effSize})` };
 
   // SnapList: spread widened vs the registry default — the papers carry real
   // mini listing previews (photo + title + price), so they fan out far enough
-  // to stay readable instead of stacking over each other.
+  // to stay readable instead of stacking over each other. On mobile the spread
+  // is pulled in (and the scale capped above) so the popped papers stay inside
+  // the viewport and don't collide with the title.
   const getOpenTransform = (index: number) => {
+    if (isMobile) {
+      if (index === 0) return 'translate(-96%, -58%) rotate(-10deg)';
+      if (index === 1) return 'translate(0%, -58%) rotate(10deg)';
+      if (index === 2) return 'translate(-50%, -100%) rotate(2deg)';
+      return '';
+    }
     if (index === 0) return 'translate(-148%, -72%) rotate(-13deg)';
     if (index === 1) return 'translate(48%, -72%) rotate(13deg)';
     if (index === 2) return 'translate(-50%, -122%) rotate(2deg)';
