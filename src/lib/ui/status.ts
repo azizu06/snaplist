@@ -40,6 +40,8 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
       return { label: "Needs attention", tone: "danger" };
     case "new":
       return { label: "Processing", tone: "neutral" };
+    case "archived":
+      return { label: "Archived", tone: "neutral" };
     default:
       return { label: status, tone: "neutral" };
   }

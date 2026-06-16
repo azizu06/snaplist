@@ -69,6 +69,15 @@ const FIXTURE_ROWS: DashboardRow[] = [
     price: null,
     thumbUrl: null,
   },
+  {
+    itemId: "fx-6",
+    listingId: "l-6",
+    title: "KitchenAid Artisan Stand Mixer, Empire Red",
+    status: "archived",
+    createdAt: "2026-06-08T09:00:00Z",
+    price: 220,
+    thumbUrl: null,
+  },
 ];
 
 const FIXTURE_REVIEW: ReviewData = {
@@ -180,6 +189,9 @@ export default async function PreviewPage({
   async function noopAction(_formData: FormData) {
     "use server";
   }
+  async function noopIds(_ids: string[]) {
+    "use server";
+  }
 
   switch (screen) {
     case "dashboard":
@@ -188,6 +200,9 @@ export default async function PreviewPage({
           rows={FIXTURE_ROWS}
           counts={{ draft: 1, attention: 1, live: 1 }}
           filter="all"
+          archiveAction={noopIds}
+          unarchiveAction={noopIds}
+          deleteAction={noopIds}
         />
       );
     case "dashboard-empty":

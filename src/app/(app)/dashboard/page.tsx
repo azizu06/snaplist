@@ -8,6 +8,12 @@ import { DashboardView, type DashboardRow } from "./dashboard-view";
 // imported across the client boundary arrives as a reference proxy, not the
 // array (the post-#52 production outage).
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
+import {
+  archiveListings,
+  unarchiveListings,
+  deleteItems,
+  bulkUpdateListings,
+} from "./actions";
 
 /**
  * /dashboard — the seller dashboard (issue #49: the marketing landing now
@@ -138,5 +144,15 @@ export default async function Dashboard({
     ? (rawFilter as DashboardFilterKey)
     : "all";
 
-  return <DashboardView rows={rows} counts={counts} filter={filter} />;
+  return (
+    <DashboardView
+      rows={rows}
+      counts={counts}
+      filter={filter}
+      archiveAction={archiveListings}
+      unarchiveAction={unarchiveListings}
+      deleteAction={deleteItems}
+      bulkUpdateAction={bulkUpdateListings}
+    />
+  );
 }

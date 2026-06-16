@@ -7,7 +7,7 @@
  * the client view import it from here instead.
  */
 export const DASHBOARD_FILTERS: ReadonlyArray<{
-  key: "all" | "review" | "live";
+  key: "all" | "review" | "live" | "archived";
   label: string;
   statuses: readonly string[] | null;
 }> = [
@@ -18,6 +18,9 @@ export const DASHBOARD_FILTERS: ReadonlyArray<{
   // collapses the old five-tab strip (Draft/Queued/Live/Attention) to three.
   { key: "review", label: "Needs review", statuses: ["draft", "draft_failed", "failed"] },
   { key: "live", label: "Live", statuses: ["published"] },
+  // Archived = hidden from the working set (Shopify pattern). Shown in "All"
+  // with an Archived chip; this tab filters to just them.
+  { key: "archived", label: "Archived", statuses: ["archived"] },
 ];
 
 export type DashboardFilterKey = (typeof DASHBOARD_FILTERS)[number]["key"];
