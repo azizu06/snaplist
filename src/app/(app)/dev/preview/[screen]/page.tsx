@@ -15,6 +15,7 @@ import {
 } from "@/app/(app)/settings/settings-view";
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-view";
+import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -23,49 +24,61 @@ import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-
  * Hard-gated out of production builds.
  */
 
+// Image + title come from the SAME demo product so a card never carries another
+// item's label; the last row is intentionally photo-less to exercise the
+// "processing / no photo yet" placeholder.
 const FIXTURE_ROWS: DashboardRow[] = [
   {
     itemId: "fx-1",
     listingId: "l-1",
-    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones",
+    title: "Canon EOS 80D DSLR Camera (body + 18-55mm)",
     status: "draft",
-    createdAt: "2026-06-11T15:00:00Z",
-    price: 178,
-    thumbUrl: null,
+    createdAt: "2026-06-15T15:00:00Z",
+    price: 429,
+    thumbUrl: DEMO_PRODUCTS_BY_SLUG.camera.image,
   },
   {
     itemId: "fx-2",
     listingId: "l-2",
-    title: "LEGO Star Wars Millennium Falcon 75257, complete in box",
+    title: "Nintendo Game Boy Color, Teal — tested & working",
     status: "queued",
-    createdAt: "2026-06-11T13:30:00Z",
-    price: 112,
-    thumbUrl: null,
+    createdAt: "2026-06-15T11:30:00Z",
+    price: 110,
+    thumbUrl: DEMO_PRODUCTS_BY_SLUG.gameboy.image,
   },
   {
     itemId: "fx-3",
     listingId: "l-3",
-    title: "Patagonia Better Sweater Fleece Jacket, Men's M",
+    title: "Taylor 110e Acoustic-Electric Guitar",
     status: "published",
-    createdAt: "2026-06-10T19:12:00Z",
-    price: 64,
-    thumbUrl: null,
+    createdAt: "2026-06-14T19:12:00Z",
+    price: 895,
+    thumbUrl: DEMO_PRODUCTS_BY_SLUG.guitar.image,
   },
   {
     itemId: "fx-4",
     listingId: "l-4",
-    title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red",
-    status: "failed",
-    createdAt: "2026-06-10T16:40:00Z",
-    price: 210,
-    thumbUrl: null,
+    title: "Polaroid 636 CloseUp Instant Camera",
+    status: "published",
+    createdAt: "2026-06-14T16:40:00Z",
+    price: 65,
+    thumbUrl: DEMO_PRODUCTS_BY_SLUG.polaroid.image,
   },
   {
     itemId: "fx-5",
+    listingId: "l-5",
+    title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red",
+    status: "failed",
+    createdAt: "2026-06-13T09:05:00Z",
+    price: 185,
+    thumbUrl: DEMO_PRODUCTS_BY_SLUG.mixer.image,
+  },
+  {
+    itemId: "fx-6",
     listingId: null,
     title: "The Pragmatic Programmer (20th Anniversary, hardcover)",
     status: "new",
-    createdAt: "2026-06-09T11:05:00Z",
+    createdAt: "2026-06-12T11:05:00Z",
     price: null,
     thumbUrl: null,
   },
