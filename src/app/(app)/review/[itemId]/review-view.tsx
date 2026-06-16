@@ -207,95 +207,102 @@ function SharpenCard({
   );
 
   return (
-    <form
-      action={action}
-      className="rounded-2xl border border-accent/30 bg-accent/[0.04] p-4 shadow-xs sm:p-5"
+    <SpotlightCard
+      chromeClassName={APP_CARD_CHROME}
+      spotlightColor="rgba(109, 74, 255, 0.07)"
+      className="p-4 sm:p-5"
     >
-      <input type="hidden" name="itemId" value={itemId} />
-      {chips.map((c, i) => (
-        <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
-      ))}
+      <form action={action}>
+        <input type="hidden" name="itemId" value={itemId} />
+        {chips.map((c, i) => (
+          <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
+        ))}
 
-      <Eyebrow>Sharpen the estimate</Eyebrow>
-      <p className="mt-2 text-[14px] text-muted">
-        Confidence is {bandWord ? bandWord.toLowerCase() : "limited"} because the photo
-        can’t show everything that sets the price. Add a detail we couldn’t see — exact
-        model, GPU, storage, or year — and we’ll re-research the comps.
-      </p>
+        <Eyebrow>Sharpen the estimate</Eyebrow>
+        <p className="mt-3 max-w-prose text-[14.5px] leading-relaxed text-muted">
+          Confidence is {bandWord ? bandWord.toLowerCase() : "limited"} because the photo
+          can’t show everything that sets the price. Add a detail we couldn’t see — the
+          exact model, GPU, storage, or year — and we’ll re-research the comps.
+        </p>
 
-      {chips.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-1.5">
-          {chips.map((c, i) => (
-            <li
-              key={`chip-${i}`}
-              className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-surface px-2.5 py-1 text-[13px] font-medium text-fg"
+        <div className="mt-4">
+          <label htmlFor="sharpen-detail" className="mb-1.5 block text-[14px] font-medium text-fg">
+            Add a detail
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              id="sharpen-detail"
+              type="text"
+              name="detail"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addChip(input);
+                }
+              }}
+              placeholder="e.g. RTX 3060, 512GB SSD, 2021"
+              className={`${INPUT_CLASSES} sm:flex-1`}
+            />
+            <button
+              type="button"
+              onClick={() => addChip(input)}
+              disabled={input.trim().length === 0}
+              className="shrink-0 rounded-lg border border-border-strong bg-surface px-4 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {c}
-              <button
-                type="button"
-                onClick={() => removeChip(i)}
-                aria-label={`Remove ${c}`}
-                className="-mr-0.5 text-[15px] leading-none text-faint transition-colors hover:text-fg"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+              Add detail
+            </button>
+          </div>
 
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-        <input
-          type="text"
-          name="detail"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addChip(input);
-            }
-          }}
-          placeholder="e.g. RTX 3060, 512GB SSD, 2021"
-          aria-label="Add a price-determining detail"
-          className={INPUT_CLASSES}
-        />
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => addChip(input)}
-            disabled={input.trim().length === 0}
-            className="rounded-lg border border-border-strong bg-surface px-3.5 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2 disabled:opacity-40 sm:py-1.5"
-          >
-            Add
-          </button>
-          <PendingButton pendingLabel="Re-pricing…" size="sm" className="flex-1 sm:flex-none">
+          {chips.length > 0 ? (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {chips.map((c, i) => (
+                <li
+                  key={`chip-${i}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/[0.06] py-1 pl-3 pr-1.5 text-[13px] font-medium text-fg"
+                >
+                  {c}
+                  <button
+                    type="button"
+                    onClick={() => removeChip(i)}
+                    aria-label={`Remove ${c}`}
+                    className="grid size-4 place-items-center rounded-full text-[15px] leading-none text-faint transition-colors hover:bg-accent/15 hover:text-fg"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {suggestions.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[13px] text-faint">Suggestions:</span>
+              {suggestions.map((s, i) => (
+                <button
+                  key={`sugg-${i}`}
+                  type="button"
+                  onClick={() => addChip(s)}
+                  className="rounded-full border border-border bg-surface px-3 py-1 text-[13px] text-muted transition-colors hover:border-accent/50 hover:text-fg"
+                >
+                  + {s}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[13px] leading-relaxed text-faint">
+            Re-researches live comps — one search. Your own price edits are kept.
+          </p>
+          <PendingButton pendingLabel="Re-pricing…" className="w-full sm:w-auto sm:shrink-0">
             Re-price
           </PendingButton>
         </div>
-      </div>
-
-      {suggestions.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[12.5px] text-faint">Maybe:</span>
-          {suggestions.map((s, i) => (
-            <button
-              key={`sugg-${i}`}
-              type="button"
-              onClick={() => addChip(s)}
-              className="rounded-full border border-border bg-surface px-2.5 py-1 text-[13px] text-muted transition-colors hover:border-accent/40 hover:text-fg"
-            >
-              + {s}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <p className="mt-3 text-[12.5px] text-faint">
-        Re-researches live comps (one search). Updates the suggestion — your own price
-        edits are kept.
-      </p>
-    </form>
+      </form>
+    </SpotlightCard>
   );
 }
 
