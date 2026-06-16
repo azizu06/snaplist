@@ -103,6 +103,15 @@ const FIXTURE_REVIEW: ReviewData = {
   range: { low: 155, high: 205 },
   confidence: 0.82,
   tier: "web_tight",
+  strategies: [
+    { key: "quick", label: "Quick sell", price: 167, blurb: "Priced to move — toward the lower end of real listed prices." },
+    { key: "balanced", label: "Balanced", price: 178, blurb: "The typical listed price — a safe bet." },
+    { key: "maximize", label: "Maximize", price: 194, blurb: "Top of what comparable items list for — expect a longer wait." },
+  ],
+  clarifyOptions: [
+    { label: "Charger included", spec: "with charger" },
+    { label: "Battery health tested good", spec: "battery health good" },
+  ],
   banner: {
     variant: "warning",
     title: "Waiting for your review",

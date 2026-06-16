@@ -62,8 +62,16 @@ function clampTo(value: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, value));
 }
 
+/**
+ * The minimal price shape the strategies need. A full `PriceResult` satisfies it,
+ * and so does the review page's assembled `{ suggested, range, tier }` — so the
+ * caller never has to fabricate a whole PriceResult (sources, refinements) just to
+ * split the band.
+ */
+export type StrategyInput = Pick<PriceResult, "suggested" | "range" | "tier">;
+
 /** Does this result carry a real distribution we can honestly split three ways? */
-export function hasStrategySpread(price: PriceResult): boolean {
+export function hasStrategySpread(price: Pick<StrategyInput, "tier" | "range">): boolean {
   return DISTRIBUTION_TIERS.has(price.tier) && price.range.max > price.range.min;
 }
 
@@ -78,7 +86,7 @@ function basisFor(tier: PricingTier): "sold" | "listed" {
  * a real distribution backs them, otherwise a SINGLE "Suggested" point.
  */
 export function deriveStrategies(
-  price: PriceResult,
+  price: StrategyInput,
   options: StrategyOptions = {},
 ): PricingStrategy[] {
   const balancedPrice = Math.round(price.suggested);

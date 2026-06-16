@@ -14,6 +14,14 @@ import {
   lifecycleLabel,
   tierLabel,
 } from "@/lib/ui/status";
+import { PricingStrategies } from "./pricing-strategies";
+import type { PricingStrategy } from "@/lib/pricing/strategies";
+
+/** A dynamic clarify option the seller can confirm (label shown; doubles as the spec). */
+export interface ClarifyOption {
+  label: string;
+  spec: string;
+}
 
 /**
  * Review — Shopify product-edit composition (redesign/review, neutral + green).
@@ -62,6 +70,10 @@ export interface ReviewData {
   range: { low?: number; high?: number } | null;
   confidence: number | null;
   tier: string | null;
+  /** Seller pricing strategies (quick/balanced/maximize, or a single point). */
+  strategies: PricingStrategy[];
+  /** Dynamic per-product confirm options for the Sharpen card. */
+  clarifyOptions: ClarifyOption[];
   banner: { variant: BannerVariant; title: string; detail: string } | null;
   actionError: string | null;
 }
@@ -186,11 +198,13 @@ function SharpenCard({
   itemId,
   bandWord,
   candidates,
+  options,
   action,
 }: {
   itemId: string;
   bandWord: string | null;
   candidates: string[];
+  options: ClarifyOption[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [chips, setChips] = useState<string[]>([]);
@@ -230,6 +244,29 @@ function SharpenCard({
           can’t show everything that sets the price. Add a detail we couldn’t see — the
           exact model, GPU, storage, or year — and we’ll re-research the comps.
         </p>
+
+        {options.length > 0 ? (
+          <div className="mt-4">
+            <p className="text-[13px] font-medium text-fg-strong">Confirm what applies</p>
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {options
+                .filter(
+                  (o) => !chips.some((c) => c.toLowerCase() === o.label.toLowerCase()),
+                )
+                .map((o, i) => (
+                  <li key={`opt-${i}`}>
+                    <button
+                      type="button"
+                      onClick={() => addChip(o.label)}
+                      className="rounded-full border border-border bg-surface px-3 py-1 text-[13px] text-muted transition-colors hover:border-accent/60 hover:text-accent"
+                    >
+                      + {o.label}
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="mt-4">
           <label htmlFor="sharpen-detail" className="mb-1.5 block text-[13px] font-medium text-fg-strong">
@@ -576,6 +613,7 @@ export function ReviewView({
               itemId={data.itemId}
               bandWord={confidenceWord}
               candidates={data.identification?.candidates ?? []}
+              options={data.clarifyOptions}
               action={sharpenAction}
             />
           ) : null}
@@ -672,6 +710,16 @@ export function ReviewView({
                 </p>
               ) : null}
             </div>
+
+            {data.strategies.length > 1 ? (
+              <div className="mt-4">
+                <PricingStrategies
+                  strategies={data.strategies}
+                  selected={fields.price}
+                  onPick={(p) => setField("price", String(p))}
+                />
+              </div>
+            ) : null}
           </SpotlightCard>
 
           {/* Item details — every attribute in one place (Shopify "Organization"). */}
