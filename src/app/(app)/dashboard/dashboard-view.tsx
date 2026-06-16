@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import CountUp from "@/components/bits/CountUp";
-import Folder from "@/components/bits/Folder";
 import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
 import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
@@ -70,130 +69,67 @@ function Thumb({ url }: { url: string | null }) {
 }
 
 /**
- * Stat-tab filter card with the react-bits SpotlightCard treatment adapted
- * onto a real <Link> (the vendored SpotlightCard is a div — wrapping the Link
- * would bury navigation semantics). A violet radial spotlight tracks the
- * cursor; the active card keeps its violet border + ring untouched.
+ * Empty dashboard (home pass r2) — a calm, minimal first-run hero in the review
+ * page's card language (rounded-2xl, plain border): a static trio of EXAMPLE
+ * listing previews ("this is what your listings become"), a headline, and the
+ * New listing CTA. Replaces the animated folder, which read as a flat purple box
+ * until interacted with. Image + name + price always come from the SAME
+ * DemoProduct, so a preview can never carry another item's label.
  */
-function SpotlightStatLink({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLAnchorElement>(null);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [lit, setLit] = useState(false);
-
-  return (
-    <Link
-      ref={ref}
-      href={href}
-      aria-current={active ? "page" : undefined}
-      onMouseMove={(e) => {
-        const rect = ref.current?.getBoundingClientRect();
-        if (rect) setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-      }}
-      onMouseEnter={() => setLit(true)}
-      onMouseLeave={() => setLit(false)}
-      className={`relative min-w-[124px] shrink-0 overflow-hidden rounded-xl border bg-surface px-3.5 py-2.5 transition-all motion-safe:active:scale-[0.98] sm:min-w-0 ${
-        active
-          ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
-          : "border-border hover:-translate-y-px hover:border-border-strong hover:shadow-xs"
-      }`}
-    >
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 transition-opacity duration-300 ease-in-out"
-        style={{
-          opacity: lit ? 1 : 0,
-          background: `radial-gradient(circle at ${pos.x}px ${pos.y}px, rgba(109, 74, 255, 0.10), transparent 80%)`,
-        }}
-      />
-      {children}
-    </Link>
-  );
-}
-
-/**
- * Empty dashboard — react-bits Folder (violet) holding miniature LISTING
- * PREVIEWS pulled straight from the demo catalog (image + name + price always
- * come from the SAME DemoProduct, so a photo can never carry another item's
- * label — round-5 owner trust fix). The opened folder reads as "this is what
- * your listings will become". Click/hover plays with the papers.
- *
- * Items picked exclusive to the dashboard (r6.1): kettlebell, binoculars,
- * sewing machine — none appear on any marketing surface (the old gshock/
- * espresso/turntable also headlined the home scan).
- */
-const FOLDER_ITEMS: DemoProduct[] = [
-  // Order matters: paper 0 is the narrowest, paper 2 the widest — the longest
-  // short-name (Sewing machine) rides the wide paper so nothing truncates.
+const EXAMPLE_PRODUCTS: DemoProduct[] = [
   DEMO_PRODUCTS_BY_SLUG.kettlebell,
   DEMO_PRODUCTS_BY_SLUG.binoculars,
   DEMO_PRODUCTS_BY_SLUG.sewingmachine,
 ];
 
-function MiniListingCard({ product }: { product: DemoProduct }) {
+function EmptyPreviewCard({ product }: { product: DemoProduct }) {
   return (
-    /* The folder papers stay literal white paper in both themes, so their ink
-       is pinned (fg-strong / accent-soft-fg flip light in dark mode and would
-       wash out on the white card). Sizes look tiny here but render ~2.2× via
-       the Folder scale transform. */
-    <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm dark:border-white/20">
-      {/* eslint-disable-next-line @next/next/no-img-element -- tiny static demo thumbnail inside the folder animation */}
+    <div className="w-24 shrink-0 overflow-hidden rounded-xl border border-border bg-surface shadow-xs sm:w-32">
+      {/* eslint-disable-next-line @next/next/no-img-element -- static demo thumbnail */}
       <img
         src={product.image}
         alt=""
         aria-hidden
-        className="h-[58%] w-full object-cover"
+        className="h-20 w-full object-cover sm:h-24"
       />
-      <span className="flex min-h-0 flex-1 flex-col justify-center gap-[2px] px-[5px]">
-        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#131e3a]">
+      <div className="px-2.5 py-2 text-left">
+        <p className="truncate text-[12px] font-semibold text-fg-strong">
           {product.shortName}
-        </span>
-        <span className="block text-[7.5px] font-bold leading-none text-[#5a36f0]" data-nums>
+        </p>
+        <p className="text-[12px] font-bold text-accent-soft-fg" data-nums>
           ${product.price}
-        </span>
-      </span>
-    </span>
+        </p>
+      </div>
+    </div>
   );
 }
 
 function DashboardEmpty() {
   return (
-    <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-      {/* r6 (owner): the folder block is vertically CENTERED in the container
-          (justify-center + min-h), not pushed down with a void above it.
-          mb-14 sets the gap to the title. The whole section is nudged down
-          from the nav at the <main> level (pt-16). */}
-      <div className="mb-14">
-        <Folder
-          color="#6d4aff"
-          size={2.2}
-          items={FOLDER_ITEMS.map((product) => (
-            <MiniListingCard key={product.slug} product={product} />
-          ))}
-        />
+    <div className="flex min-h-[440px] flex-col items-center justify-center gap-7 rounded-2xl border border-border bg-surface px-6 py-16 text-center">
+      <div className="flex items-end justify-center gap-2.5 sm:gap-3" aria-hidden>
+        {EXAMPLE_PRODUCTS.map((product) => (
+          <EmptyPreviewCard key={product.slug} product={product} />
+        ))}
       </div>
-      <p className="text-base font-semibold text-fg-strong">
-        List your first item
-      </p>
-      <p className="max-w-sm text-[15px] text-muted">
-        Take a photo of something you want to sell and we&apos;ll identify it,
-        research the price, and write the listing for you.
-      </p>
-      <div className="mt-1">
-        <Link
-          href="/upload"
-          className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
-        >
-          New listing
-        </Link>
+      <div className="flex flex-col items-center gap-2">
+        <h2 className="font-display text-[20px] font-bold tracking-tight text-fg-strong">
+          List your first item
+        </h2>
+        <p className="max-w-sm text-[15px] leading-relaxed text-muted">
+          Take a photo of something you want to sell and we’ll identify it,
+          research the price, and write the listing for you.
+        </p>
       </div>
+      <Link
+        href="/upload"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
+      >
+        <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        New listing
+      </Link>
     </div>
   );
 }
@@ -272,31 +208,39 @@ export function DashboardView({
         <DashboardEmpty />
       ) : (
         <>
-          {/* ---- stat-tab cards (Stripe Transactions pattern: the filters ARE
-               the metric cards; selected = violet border) ---- */}
+          {/* ---- filter tab strip (minimal: a quiet underline tab row, label +
+               inline count, accent underline on the active one — no 5 boxes) ---- */}
           <nav
             aria-label="Filter by status"
-            className="-mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0 sm:pb-0"
+            className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4 [scrollbar-width:none] sm:mx-0 sm:px-0"
           >
             {DASHBOARD_FILTERS.map((f) => {
               const active = f.key === filter;
               return (
-                <SpotlightStatLink
+                <Link
                   key={f.key}
                   href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
-                  active={active}
+                  aria-current={active ? "page" : undefined}
+                  className={`relative flex shrink-0 items-baseline gap-2 whitespace-nowrap px-3 py-2.5 text-[14px] transition-colors ${
+                    active ? "text-fg-strong" : "text-muted hover:text-fg"
+                  }`}
                 >
+                  <span className="font-medium">{f.label}</span>
                   <span
-                    className={`block text-[13.5px] font-medium ${
-                      active ? "text-accent-soft-fg" : "text-muted"
+                    className={`text-[13px] font-semibold ${
+                      active ? "text-accent-soft-fg" : "text-faint"
                     }`}
+                    data-nums
                   >
-                    {f.label}
-                  </span>
-                  <span className="mt-0.5 block text-[18px] font-bold text-fg-strong" data-nums>
                     <CountUp to={filterCount(f)} duration={0.7} />
                   </span>
-                </SpotlightStatLink>
+                  {active ? (
+                    <span
+                      aria-hidden
+                      className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-accent"
+                    />
+                  ) : null}
+                </Link>
               );
             })}
           </nav>
