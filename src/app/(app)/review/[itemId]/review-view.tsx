@@ -572,15 +572,6 @@ export function ReviewView({
             )}
           </SpotlightCard>
 
-          {/* clarify-variant: sharpen a non-high estimate with a missing detail */}
-          {canSharpen ? (
-            <SharpenCard
-              itemId={data.itemId}
-              bandWord={confidenceWord}
-              candidates={data.identification?.candidates ?? []}
-              action={sharpenAction}
-            />
-          ) : null}
         </div>
 
         {/* ============ RIGHT sidebar: the DECISION leads, meta follows ============
@@ -763,6 +754,21 @@ export function ReviewView({
           </div>
         ) : null}
       </form>
+
+      {/* Sharpen / re-price — its OWN form (posts to sharpenAction), rendered as
+          a SIBLING of the save form (never nested — nested <form>s are invalid
+          HTML and would route the sharpen submit through Save). Sits below the
+          editor, aligned under the main column on desktop, full-width on mobile. */}
+      {canSharpen ? (
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-5">
+          <SharpenCard
+            itemId={data.itemId}
+            bandWord={confidenceWord}
+            candidates={data.identification?.candidates ?? []}
+            action={sharpenAction}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }
