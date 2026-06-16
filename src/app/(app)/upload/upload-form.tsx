@@ -257,42 +257,51 @@ function AutoFieldRow({ label, icon }: { label: string; icon: React.ReactNode })
   );
 }
 
-/** Journey rail — the three-step promise, visible before any photo exists. */
+/** Journey rail — the three-step promise, visible before any photo exists.
+ *  A quiet bordered band gives it presence; the current step's number sits in a
+ *  filled green chip (ringed), upcoming steps are hollow. Numbers are centered
+ *  with `grid place-items-center` + `leading-none` (flex-centering left them
+ *  optically low). */
 function JourneyRail() {
   const steps = [
-    { short: "Photos", long: "Add photos", state: "active" as const },
-    { short: "AI drafts", long: "AI identifies & prices", state: "next" as const },
-    { short: "You review", long: "You review & post", state: "next" as const },
-  ];
+    { short: "Photos", long: "Add photos" },
+    { short: "AI drafts", long: "AI identifies & prices" },
+    { short: "You review", long: "You review & post" },
+  ] as const;
+  const activeIndex = 0;
   return (
-    <ol aria-label="How listing works" className="mt-4 flex items-center gap-2">
-      {steps.map((step, i) => (
-        <li key={step.long} className="flex min-w-0 items-center gap-2">
-          {i > 0 ? (
-            <span aria-hidden className="h-px w-4 shrink-0 bg-border-strong sm:w-7" />
-          ) : null}
-          <span
-            aria-hidden
-            className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-              step.state === "active"
-                ? "bg-accent-solid text-accent-fg"
-                : "border border-border-strong bg-surface text-muted"
-            }`}
-          >
-            {i + 1}
-          </span>
-          <span
-            className={`truncate text-[13.5px] ${
-              step.state === "active"
-                ? "font-semibold text-fg-strong"
-                : "font-medium text-muted"
-            }`}
-          >
-            <span className="sm:hidden">{step.short}</span>
-            <span className="hidden sm:inline">{step.long}</span>
-          </span>
-        </li>
-      ))}
+    <ol
+      aria-label="How listing works"
+      className="mt-4 flex items-center gap-2 rounded-xl border border-border bg-surface-2/60 px-3 py-2.5 sm:gap-3 sm:px-4"
+    >
+      {steps.map((step, i) => {
+        const active = i === activeIndex;
+        return (
+          <li key={step.long} className="flex min-w-0 items-center gap-2 sm:gap-3">
+            {i > 0 ? (
+              <span aria-hidden className="h-[2px] w-3 shrink-0 rounded-full bg-border-strong sm:w-7" />
+            ) : null}
+            <span
+              aria-hidden
+              className={`grid size-6 shrink-0 place-items-center rounded-full text-[12px] font-bold leading-none tabular-nums ${
+                active
+                  ? "bg-accent-solid text-accent-fg shadow-sm ring-2 ring-accent/25"
+                  : "border-[1.5px] border-border-strong bg-surface text-faint"
+              }`}
+            >
+              {i + 1}
+            </span>
+            <span
+              className={`truncate text-[13px] sm:text-[13.5px] ${
+                active ? "font-semibold text-fg-strong" : "font-medium text-muted"
+              }`}
+            >
+              <span className="sm:hidden">{step.short}</span>
+              <span className="hidden sm:inline">{step.long}</span>
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

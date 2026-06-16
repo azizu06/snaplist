@@ -472,7 +472,7 @@ export function ReviewView({
            editable field below associates with the Save form by id —
            form="rv-save" — and the form element itself trails the layout,
            carrying the action + the contextual Save bar. ---- */}
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
         {/* ============ LEFT main column: media + listing copy ============ */}
         <div className="flex min-w-0 flex-col gap-5">
           {/* Media — the product photos (Shopify "Media" block). */}
@@ -496,7 +496,6 @@ export function ReviewView({
                 onSetCurrent={setPhotoIdx}
                 aspectClassName="aspect-[4/3]"
                 adaptiveFrame
-                frameMaxHeight={480}
                 enableZoom
               />
             ) : (
@@ -628,13 +627,13 @@ export function ReviewView({
                 <div className="grid flex-1 grid-cols-2 gap-2">
                   <div>
                     <p className="text-[12px] text-muted">Suggested</p>
-                    <p className="mt-0.5 text-[16px] font-bold text-accent-soft-fg" data-nums>
+                    <p className="mt-0.5 whitespace-nowrap text-[16px] font-bold text-accent-soft-fg" data-nums>
                       {data.suggested != null ? `$${data.suggested}` : "–"}
                     </p>
                   </div>
                   <div>
                     <p className="text-[12px] text-muted">Typical range</p>
-                    <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
+                    <p className="mt-0.5 whitespace-nowrap text-[16px] font-bold text-fg-strong" data-nums>
                       {data.range?.low != null && data.range?.high != null
                         ? `$${data.range.low}–$${data.range.high}`
                         : "–"}
