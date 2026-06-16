@@ -9,16 +9,23 @@ import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { Spinner } from "@/components/ui/spinner";
 
 /**
- * Sell sheet — app-surfaces v4. The default state is composed as "the start
- * of the pipeline", not a form:
- * - a journey rail under the title (add photos → AI identifies & prices →
- *   review & post) so the three-step promise is visible before any photo;
- * - the photo input is a single square CAROUSEL (the shared PhotoCarousel —
- *   one viewer, prev/next arrows + dots, swipe; here with per-photo remove +
- *   a "Cover" badge). Drag-drop still works, signalled by a soft breathing
- *   violet glow ring + wash;
- * - the field rows live under an "Autofill by SnapList" card header, each with
- *   a leading glyph + the sparkle "AI suggests" pill.
+ * Upload sell sheet — redesigned on Shopify's create/media pattern (Shopify web
+ * Jan 2024 #325/#328, "Create collection"): a calm create screen built from
+ * sectioned cards, where the photo input is the "Media" card and the start
+ * button reads like Shopify's near-black "Save" in the action bar. The loud
+ * breathing-violet drag glow of the prior pass is gone — per Shopify's quiet
+ * dashed "Add image / or drag and drop to upload" drop zone, the affordance is
+ * a neutral dashed tile that shows a single thin accent ring only while a file
+ * is over it (UI principles: restraint, kill glows; near-black primary, green
+ * accent reserved for emphasis).
+ *
+ * Sections (mobile-first, one column; cards reuse the app idiom
+ * `rounded-2xl border border-border bg-surface shadow-xs`):
+ * - a 3-step journey rail under the title (photos → AI drafts → you review);
+ * - the Photos card (the shared PhotoCarousel — one object-contain viewer that
+ *   keeps photos as-shot, prev/next + dots + swipe, per-photo remove + a
+ *   "Cover" badge), drag-and-drop onto the whole card;
+ * - the "Autofill by SnapList" card listing the fields the pipeline fills.
  *
  * Mechanism: a single hidden <input type="file" name="photo" multiple> is kept
  * in sync (via the DataTransfer API) with the `files` array the carousel
@@ -31,6 +38,17 @@ import { Spinner } from "@/components/ui/spinner";
 const ACCEPT = "image/png,image/jpeg,image/webp";
 /** All photos go into ONE vision call; the cap bounds cost/latency (PRD). */
 const MAX_PHOTOS = 4;
+
+/** Read the live brand-accent token for the canvas-drawn ClickSpark burst.
+ *  SSR-safe: returns `currentColor` on the server / before mount. */
+function readAccentColor(): string {
+  if (typeof document === "undefined") return "currentColor";
+  return (
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--color-accent")
+      .trim() || "currentColor"
+  );
+}
 
 const STEPS = [
   {
@@ -301,6 +319,20 @@ function FormBody({
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
 
+  // ClickSpark paints on a <canvas>, so its color must be a real CSS color, not
+  // a utility class. Resolve it from the live --color-accent token (never a
+  // hardcoded hex) — lazily on first client render, then re-read on theme flip
+  // so the burst follows the palette. SSR falls back to currentColor.
+  const [sparkColor, setSparkColor] = useState(readAccentColor);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setSparkColor(readAccentColor()));
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => obs.disconnect();
+  }, []);
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     dragDepth.current = 0;
@@ -312,9 +344,9 @@ function FormBody({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ---- the photo carousel. While dragging files anywhere over the card,
-           a soft breathing violet glow ring + wash (pointer-events-none
-           overlays) signal the drop target. ---- */}
+      {/* ---- Photos card (Shopify "Media" section). Drag-and-drop onto the
+           whole card; while a file is over it, one quiet accent ring + soft
+           wash appear (no glow, no motion) — the restrained drop affordance. ---- */}
       <section
         onDragEnter={(e) => {
           if (!e.dataTransfer.types.includes("Files")) return;
@@ -332,48 +364,37 @@ function FormBody({
           if (dragDepth.current === 0) setDragActive(false);
         }}
         onDrop={handleDrop}
-        className="relative rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5"
+        className={`relative rounded-2xl border bg-surface p-4 shadow-xs transition-colors sm:p-5 ${
+          dragActive ? "border-accent" : "border-border"
+        }`}
       >
         {dragActive ? (
           <>
-            {/* Calm drop affordance: a soft violet wash + one gently breathing
-                glow ring — reads as a glowing border, not a storm. */}
+            {/* Calm drop affordance: a single thin accent ring + a faint wash,
+                static — reads as "this is the drop target", not a storm. */}
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-0 z-10 rounded-xl bg-accent/10"
-            />
-            <motion.div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-2 ring-accent/70"
-              animate={{
-                opacity: [0.6, 1, 0.6],
-                boxShadow: [
-                  "0 0 10px 1px rgba(0, 128, 96,0.25)",
-                  "0 0 20px 4px rgba(0, 128, 96,0.45)",
-                  "0 0 10px 1px rgba(0, 128, 96,0.25)",
-                ],
-              }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              className="pointer-events-none absolute inset-0 z-10 rounded-2xl bg-accent-soft/40 ring-2 ring-accent ring-inset"
             />
             <span
               aria-hidden
-              className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-solid px-4 py-1.5 text-[14px] font-semibold text-accent-fg shadow-md"
+              className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-fg-strong px-3.5 py-1.5 text-[14px] font-semibold text-surface shadow-sm"
             >
-              Drop photos to add them
+              Drop to add photos
             </span>
           </>
         ) : null}
 
         <div className="mb-3 flex items-baseline justify-between gap-2">
           <h2 className="text-[14px] font-semibold text-fg-strong">Photos</h2>
-          <span className="text-[13.5px] text-muted" data-nums>
-            {count}/{MAX_PHOTOS}
+          <span className="text-[13px] text-muted" data-nums>
+            {count} of {MAX_PHOTOS}
           </span>
         </div>
 
         {/* Shared, hidden picker (no `name` → never submitted). Both the empty
-            hero and the "Add photo" button trigger it via htmlFor; on change it
-            appends and resets so the same file can be re-picked. */}
+            drop zone and the "Add photo" button trigger it via htmlFor; on
+            change it appends and resets so the same file can be re-picked. */}
         <input
           id="photo-picker"
           type="file"
@@ -387,32 +408,35 @@ function FormBody({
         />
 
         {count === 0 ? (
+          /* Empty drop zone — Shopify's quiet media card: neutral dashed tile,
+             a muted icon, an explicit "Add photos" action that reads as a real
+             button, and a "or drag and drop" subline. The accent only joins in
+             on the drag-over ring above; at rest this is all neutral. */
           <label
             htmlFor="photo-picker"
-            className="relative flex aspect-square w-full cursor-pointer flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-accent/45 bg-accent-soft/35 px-6 text-center sm:aspect-[4/3]"
+            className="group relative flex aspect-square w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface-2/50 px-6 text-center transition-colors hover:border-accent hover:bg-accent-soft/25 sm:aspect-[4/3]"
           >
             <span
               aria-hidden
-              className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-fg shadow-md"
+              className="flex size-11 items-center justify-center rounded-xl bg-surface text-muted shadow-xs ring-1 ring-border transition-colors group-hover:text-accent"
             >
               <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
                 <circle cx="12" cy="13" r="3" />
               </svg>
             </span>
-            <span>
-              <span className="block text-[16px] font-semibold text-fg-strong">
-                Add your first photo
+            <span className="flex flex-col items-center gap-1">
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3.5 py-1.5 text-[14px] font-semibold text-fg shadow-xs transition-colors group-hover:bg-surface-2">
+                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Add photos
               </span>
-              <span className="mt-1 block text-[13.5px] leading-relaxed text-muted">
-                Drag &amp; drop or click to browse. This becomes the cover
-              </span>
+              <span className="text-[13px] text-muted">or drag and drop here</span>
             </span>
-            <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[11px] font-medium text-faint">
-              PNG · JPG · WEBP
-            </span>
-            <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-muted">
-              Good light and a clear shot of any label or barcode help the most.
+            <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-faint">
+              PNG, JPG, or WEBP. The first photo becomes the cover — good light
+              and a clear shot of any label or barcode help most.
             </span>
           </label>
         ) : (
@@ -424,11 +448,11 @@ function FormBody({
               onRemove={onRemove}
               showCover
             />
-            <div className="mt-3 w-full">
+            <div className="mt-4 w-full">
               {!atMax ? (
                 <label
                   htmlFor="photo-picker"
-                  className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-4 py-2 text-[14px] font-semibold text-fg transition-colors hover:bg-surface-2"
+                  className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-surface px-4 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
                 >
                   <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <path d="M12 5v14M5 12h14" />
@@ -437,7 +461,7 @@ function FormBody({
                 </label>
               ) : (
                 <p className="text-center text-[13px] text-faint">
-                  Up to {MAX_PHOTOS} photos — more angles, better identification.
+                  All {MAX_PHOTOS} photos added — more angles mean a better read.
                 </p>
               )}
             </div>
@@ -446,12 +470,14 @@ function FormBody({
 
       </section>
 
-      {/* ---- Autofill card: callout header + the field rows it fills ---- */}
-      <section className="rounded-xl border border-border bg-surface shadow-xs">
-        <header className="flex items-center gap-3 rounded-t-xl border-b border-accent/20 bg-accent-soft/50 px-4 py-3 sm:px-5">
+      {/* ---- Autofill card. Shopify section cards carry a plain title, not a
+           saturated band — so the header is neutral chrome; the accent lives
+           only on the small sparkle glyph and the "On" status pill. ---- */}
+      <section className="rounded-2xl border border-border bg-surface shadow-xs">
+        <header className="flex items-center gap-3 border-b border-border px-4 py-3.5 sm:px-5">
           <span
             aria-hidden
-            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-solid text-accent-fg"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-soft-fg"
           >
             <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" />
@@ -467,7 +493,8 @@ function FormBody({
               listing from your photos.
             </p>
           </div>
-          <span className="shrink-0 rounded-full bg-accent-solid px-2.5 py-0.5 text-[11px] font-semibold text-accent-fg">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-0.5 text-[11px] font-semibold text-success-soft-fg">
+            <span aria-hidden className="size-1.5 rounded-full bg-success-solid" />
             On
           </span>
         </header>
@@ -480,13 +507,16 @@ function FormBody({
         </div>
       </section>
 
-      {/* ---- sticky bottom CTA bar ---- */}
-      <div className="sticky bottom-20 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-xl sm:border sm:shadow-md">
-        {/* react-bits ClickSpark: violet burst on the one action that starts
-            the whole pipeline. */}
+      {/* ---- sticky action bar — Shopify's bottom "Save" bar, near-black
+           primary. The helper line carries the count state so the disabled
+           button is never a dead end. ---- */}
+      <div className="sticky bottom-20 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-2xl sm:border sm:shadow-md">
+        {/* react-bits ClickSpark: a brand-accent burst on the one action that
+            starts the whole pipeline. Spark color is read from the live
+            --color-accent token (not hardcoded) so it tracks the palette. */}
         <ClickSpark
           className="block w-full"
-          sparkColor="#008060"
+          sparkColor={sparkColor}
           sparkSize={8}
           sparkRadius={20}
           sparkCount={10}
@@ -494,11 +524,16 @@ function FormBody({
           <button
             type="submit"
             disabled={count === 0}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-50"
           >
             Identify, price &amp; draft
           </button>
         </ClickSpark>
+        <p className="mt-2 text-center text-[12.5px] text-muted">
+          {count === 0
+            ? "Add at least one photo to start."
+            : "You review and approve every draft before anything posts."}
+        </p>
       </div>
     </div>
   );

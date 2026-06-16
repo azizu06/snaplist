@@ -12,14 +12,14 @@ import type { ProfileUser } from "@/components/profile-menu";
 import { BillingCta } from "./billing-cta";
 
 /**
- * Settings — presentational surface (UI pass: the page was "Account + Sign
- * out", i.e. super plain). Now a proper stack of section cards in the
- * dashboard's house style: Profile (the signed-in human, same Clerk fields the
- * topbar avatar gets) → Autopilot → eBay connection → and the sign-out as a
- * clearly separated, destructive-ish card at the very bottom.
+ * Settings — presentational surface, modelled on Shopify's grouped settings
+ * pattern (Shopify web Jan 2024 #730/#720/#740): a vertical stack of section
+ * cards under labelled groups (Account · Selling · Preferences), each card a
+ * bold title + a muted descriptor line + its control + a quiet footnote, with
+ * sign-out held out as a separate destructive card at the bottom.
  *
  * Pure presentation over serializable props + server actions, so the page and
- * the dev preview harness render the identical screen.
+ * the dev preview harness render the identical screen. Tokens only — no raw hex.
  */
 
 export interface SettingsData {
@@ -47,7 +47,7 @@ export interface SettingsData {
   ebayBanner: "connected" | "disconnected" | null;
 }
 
-/** Violet-soft leading square for section-card headers (Stripe treatment). */
+/** Green-soft leading square for section-card headers (Shopify section icon). */
 function SectionIcon({
   children,
   tone = "accent",
@@ -58,7 +58,7 @@ function SectionIcon({
   return (
     <span
       aria-hidden
-      className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${
+      className={`flex size-7 shrink-0 items-center justify-center rounded-md ${
         tone === "danger"
           ? "bg-danger-soft text-danger-soft-fg"
           : "bg-accent-soft text-accent-soft-fg"
@@ -69,6 +69,29 @@ function SectionIcon({
   );
 }
 
+/**
+ * Shopify's group caption — a small, quiet label that splits the long settings
+ * stack into scannable groups (Account · Selling · Preferences) the way
+ * Shopify's left settings nav is grouped.
+ */
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="px-1 pt-3 text-[12px] font-semibold uppercase tracking-[0.06em] text-faint">
+      {children}
+    </h2>
+  );
+}
+
+/** Muted descriptor line beneath a card title (Shopify settings-card pattern). */
+function SectionDescription({ children }: { children: React.ReactNode }) {
+  return <p className="text-[14px] leading-relaxed text-muted">{children}</p>;
+}
+
+/** Quiet closing footnote on a card — Shopify's small explanatory line. */
+function CardNote({ children }: { children: React.ReactNode }) {
+  return <p className="text-[13px] leading-relaxed text-faint">{children}</p>;
+}
+
 const ICON_SVG_PROPS = {
   viewBox: "0 0 24 24",
   fill: "none",
@@ -76,7 +99,7 @@ const ICON_SVG_PROPS = {
   strokeWidth: 2,
   strokeLinecap: "round",
   strokeLinejoin: "round",
-  className: "size-4",
+  className: "size-3.5",
 } as const;
 
 function SparklesIcon() {
@@ -137,16 +160,16 @@ function SignOutIcon() {
   );
 }
 
-/** Big avatar — Clerk image when present, the topbar's initial gradient otherwise. */
+/** Account-card avatar — Clerk image when present, a calm token-green initial otherwise. */
 function ProfileAvatar({ user }: { user: ProfileUser }) {
   const initial = (user.name || user.email || "?").charAt(0).toUpperCase();
   return (
-    <span className="relative flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full text-lg font-bold text-white shadow-xs ring-2 ring-border">
+    <span className="relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full ring-1 ring-border">
       {user.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element -- external Clerk avatar
         <img src={user.imageUrl} alt="" className="size-full object-cover" />
       ) : (
-        <span className="flex size-full items-center justify-center bg-gradient-to-br from-[#1fb88c] to-[#1fb88c]">
+        <span className="flex size-full items-center justify-center bg-accent text-[18px] font-semibold text-accent-fg">
           {initial}
         </span>
       )}
@@ -167,13 +190,13 @@ export function SettingsView({
   const isPaid = billing.tier === "paid";
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
-      <header>
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-2 px-4 py-6 sm:px-6">
+      <header className="mb-1">
         <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
           Settings
         </h1>
         <p className="mt-0.5 text-[14px] text-muted">
-          Your account, autopilot, and marketplace connections.
+          Your account, selling connections, and app preferences.
         </p>
       </header>
 
@@ -194,265 +217,275 @@ export function SettingsView({
         </Banner>
       ) : null}
 
-      {/* ---- Profile: the signed-in human, front and center ---- */}
+      {/* ============================= Account ============================= */}
+      <GroupLabel>Account</GroupLabel>
+
+      {/* Profile — the signed-in human, led with Shopify's account-card treatment. */}
       <GlareHover>
-      <Card>
-        <CardHeader
-          title={
-            <span className="flex items-center gap-2.5">
-              <SectionIcon>
-                <UserIcon />
-              </SectionIcon>
-              Profile
-            </span>
-          }
-          aside={<StatusBadge label="Signed in" tone="success" />}
-        />
-        <CardBody className="flex flex-col gap-4">
-          <div className="flex items-center gap-4">
-            <ProfileAvatar user={user} />
-            <div className="min-w-0">
-              <p className="truncate text-[16px] font-semibold text-fg-strong">
-                {user.name}
-              </p>
-              <p className="truncate text-[14px] text-muted">
-                {user.email || "No email on file"}
-              </p>
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <SectionIcon>
+                  <UserIcon />
+                </SectionIcon>
+                Profile
+              </span>
+            }
+            aside={<StatusBadge label="Signed in" tone="success" />}
+          />
+          <CardBody className="flex flex-col gap-3">
+            <div className="flex items-center gap-3.5">
+              <ProfileAvatar user={user} />
+              <div className="min-w-0">
+                <p className="truncate text-[15px] font-semibold text-fg-strong">
+                  {user.name}
+                </p>
+                <p className="truncate text-[13.5px] text-muted">
+                  {user.email || "No email on file"}
+                </p>
+              </div>
             </div>
-          </div>
-          <p className="text-[13.5px] text-faint">
-            Your name and photo come from your sign-in provider. Update them
-            there and they follow you here.
-          </p>
-        </CardBody>
-      </Card>
+            <CardNote>
+              Your name and photo come from your sign-in provider. Update them
+              there and they follow you here.
+            </CardNote>
+          </CardBody>
+        </Card>
       </GlareHover>
 
-      {/* ---- Plan & billing: real entitlement, daily allowance, upgrade path.
-              The tier is the live `getEntitlement` mirror (#64); the CTAs POST the
-              billing routes via <BillingCta> — Upgrade → /api/billing/checkout,
-              Manage billing → /api/billing/portal — the single billing interface. ---- */}
+      {/* Plan & billing — real entitlement, daily allowance, upgrade path (#64).
+          CTAs POST the billing routes via <BillingCta>: Upgrade → checkout,
+          Manage billing → portal — the single billing interface. */}
       <GlareHover>
-      <Card>
-        <CardHeader
-          title={
-            <span className="flex items-center gap-2.5">
-              <SectionIcon>
-                <CreditCardIcon />
-              </SectionIcon>
-              Plan &amp; billing
-            </span>
-          }
-          aside={
-            <StatusBadge
-              label={isPaid ? "Seller Pro" : "Free"}
-              tone={isPaid ? "success" : "neutral"}
-            />
-          }
-        />
-        <CardBody className="flex flex-col gap-4">
-          {isPaid ? (
-            <>
-              <p className="text-[15px] leading-relaxed text-muted">
-                You&apos;re on{" "}
-                <strong className="font-medium text-fg">Seller Pro</strong>. Identify,
-                price, and list up to{" "}
-                <strong className="font-medium text-fg">
-                  {billing.itemsPerDay} items a day
-                </strong>
-                , with priority research and bulk uploads.
-              </p>
-              <BillingCta
-                endpoint="/api/billing/portal"
-                label="Manage billing"
-                variant="secondary"
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <SectionIcon>
+                  <CreditCardIcon />
+                </SectionIcon>
+                Plan &amp; billing
+              </span>
+            }
+            aside={
+              <StatusBadge
+                label={isPaid ? "Seller Pro" : "Free"}
+                tone={isPaid ? "success" : "neutral"}
               />
-            </>
-          ) : (
-            <>
-              <p className="text-[15px] leading-relaxed text-muted">
-                You&apos;re on the{" "}
-                <strong className="font-medium text-fg">Free</strong> plan — every core
-                feature, up to{" "}
-                <strong className="font-medium text-fg">
-                  {billing.itemsPerDay} items a day
-                </strong>
-                .
-              </p>
-              <p className="text-[13.5px] text-faint">
-                Seller Pro lifts that to {billing.proItemsPerDay} a day with priority
-                research and bulk uploads.
-                {billing.billingEnabled
-                  ? " Beta users keep early-bird pricing."
-                  : " It arrives after beta, and beta users keep early-bird pricing."}
-              </p>
-              {billing.billingEnabled ? (
+            }
+          />
+          <CardBody className="flex flex-col gap-3.5">
+            {isPaid ? (
+              <>
+                <SectionDescription>
+                  You&apos;re on{" "}
+                  <strong className="font-medium text-fg-strong">Seller Pro</strong>.
+                  Identify, price, and list up to{" "}
+                  <strong className="font-medium text-fg-strong">
+                    {billing.itemsPerDay} items a day
+                  </strong>
+                  , with priority research and bulk uploads.
+                </SectionDescription>
                 <BillingCta
-                  endpoint="/api/billing/checkout"
-                  label="Upgrade to Seller Pro"
-                  variant="primary"
+                  endpoint="/api/billing/portal"
+                  label="Manage billing"
+                  variant="secondary"
                 />
-              ) : (
+              </>
+            ) : (
+              <>
+                <SectionDescription>
+                  You&apos;re on the{" "}
+                  <strong className="font-medium text-fg-strong">Free</strong> plan —
+                  every core feature, up to{" "}
+                  <strong className="font-medium text-fg-strong">
+                    {billing.itemsPerDay} items a day
+                  </strong>
+                  .
+                </SectionDescription>
+                <CardNote>
+                  Seller Pro lifts that to {billing.proItemsPerDay} a day with priority
+                  research and bulk uploads.
+                  {billing.billingEnabled
+                    ? " Beta users keep early-bird pricing."
+                    : " It arrives after beta, and beta users keep early-bird pricing."}
+                </CardNote>
+                {billing.billingEnabled ? (
+                  <BillingCta
+                    endpoint="/api/billing/checkout"
+                    label="Upgrade to Seller Pro"
+                    variant="primary"
+                  />
+                ) : (
+                  <a
+                    href="/pricing"
+                    className={`${buttonClasses("primary", "md")} self-start`}
+                  >
+                    See plans
+                  </a>
+                )}
+              </>
+            )}
+          </CardBody>
+        </Card>
+      </GlareHover>
+
+      {/* ============================= Selling ============================= */}
+      <GroupLabel>Selling</GroupLabel>
+
+      {/* Autopilot — the confidence-gated auto-post toggle. */}
+      <GlareHover>
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <SectionIcon>
+                  <SparklesIcon />
+                </SectionIcon>
+                Autopilot
+              </span>
+            }
+            aside={
+              <>
+                <StatusBadge
+                  label={autopilotEnabled ? "On" : "Off"}
+                  tone={autopilotEnabled ? "success" : "neutral"}
+                />
+                <form action={autopilotAction} className="flex items-center">
+                  <Switch
+                    checked={autopilotEnabled}
+                    name="enabled"
+                    aria-label={
+                      autopilotEnabled ? "Turn autopilot off" : "Turn autopilot on"
+                    }
+                  />
+                </form>
+              </>
+            }
+          />
+          <CardBody className="flex flex-col gap-3.5">
+            <SectionDescription>
+              When autopilot is on, items we identify and price with{" "}
+              <strong className="font-medium text-fg-strong">high confidence</strong>{" "}
+              are queued to publish{" "}
+              <strong className="font-medium text-fg-strong">
+                without your per-item approval
+              </strong>
+              . Anything below that bar always waits for your review. Turn it off and
+              every listing waits for you, no exceptions.
+            </SectionDescription>
+            <CardNote>
+              Changing this affects new uploads; it never rewrites why a past listing
+              was queued or held.
+            </CardNote>
+          </CardBody>
+        </Card>
+      </GlareHover>
+
+      {/* eBay account — connected (disconnect) vs disconnected (connect) states. */}
+      <GlareHover>
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <SectionIcon>
+                  <LinkIcon />
+                </SectionIcon>
+                eBay account
+              </span>
+            }
+            aside={
+              <StatusBadge
+                label={ebay.connected ? "Connected" : "Not connected"}
+                tone={ebay.connected ? "success" : "neutral"}
+              />
+            }
+          />
+          <CardBody className="flex flex-col gap-3.5">
+            {ebay.connected ? (
+              <>
+                <SectionDescription>
+                  Connected as{" "}
+                  {/* react-bits ShinyText: a slow green shimmer on the live
+                      connection — the one celebratory note on this page. */}
+                  <ShinyText
+                    text={ebay.ebayUsername ?? "your eBay account"}
+                    color="var(--color-fg-strong)"
+                    shineColor="var(--color-accent)"
+                    speed={3.5}
+                    className="font-semibold"
+                  />
+                  . Listings publish under this account. Your tokens are stored
+                  encrypted and you can disconnect at any time.
+                </SectionDescription>
+                <form action={disconnectEbayAction}>
+                  <PendingButton pendingLabel="Disconnecting…" variant="secondary">
+                    Disconnect eBay
+                  </PendingButton>
+                </form>
+              </>
+            ) : (
+              <>
+                <SectionDescription>
+                  Connect your eBay account to publish listings under your own
+                  identity. You approve access on eBay’s consent screen, and SnapList
+                  never sees your eBay password.
+                </SectionDescription>
                 <a
-                  href="/pricing"
+                  href="/api/ebay/connect"
                   className={`${buttonClasses("primary", "md")} self-start`}
                 >
-                  See plans
+                  Connect eBay
                 </a>
-              )}
-            </>
-          )}
-        </CardBody>
-      </Card>
+              </>
+            )}
+          </CardBody>
+        </Card>
       </GlareHover>
 
-      {/* ---- Appearance: light / dark / system, persisted per device ---- */}
+      {/* =========================== Preferences =========================== */}
+      <GroupLabel>Preferences</GroupLabel>
+
+      {/* Appearance — light / dark / system, persisted per device. */}
       <GlareHover>
-      <Card>
-        <CardHeader
-          title={
-            <span className="flex items-center gap-2.5">
-              <SectionIcon>
-                <ContrastIcon />
-              </SectionIcon>
-              Appearance
-            </span>
-          }
-          aside={
-            <div className="hidden sm:block">
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <SectionIcon>
+                  <ContrastIcon />
+                </SectionIcon>
+                Appearance
+              </span>
+            }
+            aside={
+              <div className="hidden sm:block">
+                <ThemeSegmented />
+              </div>
+            }
+          />
+          <CardBody className="flex flex-col gap-3.5">
+            <SectionDescription>
+              Choose how SnapList looks on this device.{" "}
+              <strong className="font-medium text-fg-strong">System</strong> follows
+              your OS setting automatically.
+            </SectionDescription>
+            {/* Mobile: a 3-option segmented control can't fit beside the title
+                without clipping "System", so it sits here full-width instead. */}
+            <div className="sm:hidden">
               <ThemeSegmented />
             </div>
-          }
-        />
-        <CardBody className="flex flex-col gap-4">
-          <p className="text-[15px] leading-relaxed text-muted">
-            Choose how SnapList looks on this device.{" "}
-            <strong className="font-medium text-fg">System</strong> follows
-            your OS setting automatically.
-          </p>
-          {/* Mobile: a 3-option segmented control can't fit beside the title
-              without clipping "System", so it sits here full-width instead. */}
-          <div className="sm:hidden">
-            <ThemeSegmented />
-          </div>
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
       </GlareHover>
 
-      {/* react-bits GlareHover (app pass): a quiet violet glare sweep across
-          each settings card on hover — chrome polish only, content untouched. */}
-      <GlareHover>
-      <Card>
-        <CardHeader
-          title={
-            <span className="flex items-center gap-2.5">
-              <SectionIcon>
-                <SparklesIcon />
-              </SectionIcon>
-              Autopilot
-            </span>
-          }
-          aside={
-            <>
-              <StatusBadge
-                label={autopilotEnabled ? "On" : "Off"}
-                tone={autopilotEnabled ? "success" : "neutral"}
-              />
-              <form action={autopilotAction} className="flex items-center">
-                <Switch
-                  checked={autopilotEnabled}
-                  name="enabled"
-                  aria-label={
-                    autopilotEnabled ? "Turn autopilot off" : "Turn autopilot on"
-                  }
-                />
-              </form>
-            </>
-          }
-        />
-        <CardBody className="flex flex-col gap-4">
-          <p className="text-[15px] leading-relaxed text-muted">
-            When autopilot is on, items we identify and price with{" "}
-            <strong className="font-medium text-fg">high confidence</strong> are
-            queued to publish <strong className="font-medium text-fg">without
-            your per-item approval</strong>. Anything below that bar always waits
-            for your review. Turn it off and every listing waits for you, no
-            exceptions.
-          </p>
-          <p className="text-[13.5px] text-faint">
-            Changing this affects new uploads; it never rewrites why a past
-            listing was queued or held.
-          </p>
-        </CardBody>
-      </Card>
-      </GlareHover>
-
-      <GlareHover>
-      <Card>
-        <CardHeader
-          title={
-            <span className="flex items-center gap-2.5">
-              <SectionIcon>
-                <LinkIcon />
-              </SectionIcon>
-              eBay account
-            </span>
-          }
-          aside={
-            <StatusBadge
-              label={ebay.connected ? "Connected" : "Not connected"}
-              tone={ebay.connected ? "success" : "neutral"}
-            />
-          }
-        />
-        <CardBody className="flex flex-col gap-4">
-          {ebay.connected ? (
-            <>
-              <p className="text-[15px] leading-relaxed text-muted">
-                Connected as{" "}
-                {/* react-bits ShinyText: a slow violet shimmer on the live
-                    connection — the one celebratory note on this page. */}
-                <ShinyText
-                  text={ebay.ebayUsername ?? "your eBay account"}
-                  color="var(--color-fg)"
-                  shineColor="var(--color-iris)"
-                  speed={3.5}
-                  className="font-semibold"
-                />
-                . Listings publish under this account. Your tokens are stored
-                encrypted and you can disconnect at any time.
-              </p>
-              <form action={disconnectEbayAction}>
-                <PendingButton pendingLabel="Disconnecting…" variant="secondary">
-                  Disconnect eBay
-                </PendingButton>
-              </form>
-            </>
-          ) : (
-            <>
-              <p className="text-[15px] leading-relaxed text-muted">
-                Connect your eBay account to publish listings under your own
-                identity. You approve access on eBay’s consent screen, and SnapList
-                never sees your eBay password.
-              </p>
-              <a
-                href="/api/ebay/connect"
-                className={`${buttonClasses("primary", "md")} self-start`}
-              >
-                Connect eBay
-              </a>
-            </>
-          )}
-        </CardBody>
-      </Card>
-      </GlareHover>
-
-      {/* ---- Sign out: separated, destructive-ish, last ---- */}
-      <div className="mt-2 border-t border-border pt-4">
+      {/* Sign out — held out as a separate, destructive-toned card, last. */}
+      <div className="mt-3 border-t border-border pt-5">
         <Card className="border-danger-border/60">
           <CardHeader
             title={
-              <span className="flex items-center gap-2.5">
+              <span className="flex items-center gap-2">
                 <SectionIcon tone="danger">
                   <SignOutIcon />
                 </SectionIcon>
@@ -461,12 +494,12 @@ export function SettingsView({
             }
           />
           <CardBody className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[15px] leading-relaxed text-muted">
-              Ends your session on this device. Your items, drafts, and
-              connections stay exactly as you left them.
-            </p>
+            <SectionDescription>
+              Ends your session on this device. Your items, drafts, and connections
+              stay exactly as you left them.
+            </SectionDescription>
             {/* Clerk sign-out (issue #41) — the /auth/signout route is gone. */}
-            <AppSignOutButton className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-danger-border bg-surface px-4 py-2 text-[15px] font-semibold text-danger-soft-fg shadow-xs transition-colors hover:bg-danger-soft" />
+            <AppSignOutButton className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-danger-border bg-surface px-4 py-2 text-[14px] font-semibold text-danger-soft-fg shadow-xs transition-colors hover:bg-danger-soft" />
           </CardBody>
         </Card>
       </div>
