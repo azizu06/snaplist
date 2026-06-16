@@ -46,9 +46,10 @@ export default async function InboxPage() {
   });
 
   return (
-    // max-w-5xl (was 2xl): the 672px column made the demo video — and the
-    // whole messaging area — read cramped and illegible (owner, twice).
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6">
+    // max-w-6xl: the two-pane messaging shell (340px list + thread) needs the
+    // width — the older narrow column made the conversation area read cramped
+    // and illegible (owner, twice).
+    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6">
       <header>
         <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
           Buyer inbox

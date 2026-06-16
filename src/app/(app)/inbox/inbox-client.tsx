@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { InboxEmptyState } from "./inbox-empty";
 import { SimulatorCard } from "./simulator-card";
-import { ConversationList } from "./conversation-list";
+import {
+  ConversationList,
+  ConversationThread,
+  ThreadPlaceholder,
+  deriveConversationState,
+} from "./conversation-list";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -67,6 +72,9 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   // Seller edits keyed by message id; absent → show the agent's draft as-is.
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
+  // Which conversation (inbound message id) is open in the right pane / mobile
+  // thread view. null → list view on mobile, calm placeholder on desktop.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // "simulate" | "send:<id>" | "retry:<id>"
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
@@ -230,63 +238,200 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
     }
   }
 
-  const inbound = messages.filter((m) => m.direction === "inbound");
-  const repliesByQuestion = new Map<string, MessageRow>();
-  for (const m of messages) {
-    if (m.direction === "outbound" && m.reply_to) {
-      repliesByQuestion.set(m.reply_to, m);
+  const inbound = useMemo(
+    () => messages.filter((m) => m.direction === "inbound"),
+    [messages],
+  );
+  const repliesByQuestion = useMemo(() => {
+    const map = new Map<string, MessageRow>();
+    for (const m of messages) {
+      if (m.direction === "outbound" && m.reply_to) map.set(m.reply_to, m);
     }
+    return map;
+  }, [messages]);
+
+  // item_id → display label, so a conversation row can name the listing.
+  const itemLabels = useMemo(
+    () => new Map(items.map((i) => [i.id, i.label] as const)),
+    [items],
+  );
+
+  // Resolve the open conversation; if it scrolled out of the snapshot (e.g.
+  // reconciled away) the placeholder shows again rather than a dangling pane.
+  const selectedMessage = selectedId
+    ? inbound.find((m) => m.id === selectedId) ?? null
+    : null;
+  const buyerLabelFor = (m: MessageRow) =>
+    (m.item_id ? itemLabels.get(m.item_id) : undefined) ?? "Buyer question";
+
+  const unreadCount = inbound.reduce((n, m) => {
+    const replied = m.status === "sent" && repliesByQuestion.has(m.id);
+    return replied ? n : n + 1;
+  }, 0);
+
+  // Zero conversations → keep the rich empty state (with the simulator above it).
+  if (inbound.length === 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        <SimulatorCard
+          items={items}
+          selectedItem={selectedItem}
+          onSelectItem={setSelectedItem}
+          onSimulate={simulate}
+          live={live}
+          simulating={busy === "simulate"}
+        />
+        {error ? <ErrorBanner message={error} /> : null}
+        <InboxEmptyState />
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <SimulatorCard
-        items={items}
-        selectedItem={selectedItem}
-        onSelectItem={setSelectedItem}
-        onSimulate={simulate}
-        live={live}
-        simulating={busy === "simulate"}
-      />
+    <div className="flex flex-col gap-4">
+      {error ? <ErrorBanner message={error} /> : null}
 
-      {error ? (
-        <p
-          role="alert"
-          className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[15px] text-danger-soft-fg"
+      {/* Two-pane messaging shell. One bordered card; the list and thread each
+          scroll independently. On mobile only ONE pane shows: list by default,
+          thread once a conversation is selected (back button returns). */}
+      <div className="flex min-h-[60vh] overflow-hidden rounded-xl border border-border bg-surface shadow-xs lg:h-[calc(100vh-13rem)] lg:min-h-[34rem]">
+        {/* ── left: conversation list ── */}
+        <nav
+          aria-label="Buyer conversations"
+          className={`min-h-0 w-full flex-col border-border lg:flex lg:w-[340px] lg:shrink-0 lg:border-r ${
+            selectedMessage ? "hidden lg:flex" : "flex"
+          }`}
         >
-          {error}
-        </p>
-      ) : null}
-
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-[15px] font-semibold text-fg-strong">Conversations</h2>
-          {inbound.length > 0 ? (
-            <span
-              data-nums
-              className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
-            >
-              {inbound.length}
+          <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+            <span className="flex items-baseline gap-2">
+              <h2 className="text-[14px] font-semibold text-fg-strong">
+                Conversations
+              </h2>
+              {unreadCount > 0 ? (
+                <span
+                  data-nums
+                  className="rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent-soft-fg"
+                >
+                  {unreadCount} new
+                </span>
+              ) : null}
             </span>
-          ) : null}
-        </div>
-        {inbound.length === 0 ? (
-          <InboxEmptyState />
-        ) : (
-          <ConversationList
-            inbound={inbound}
-            repliesByQuestion={repliesByQuestion}
-            edits={edits}
-            busy={busy}
-            onEdit={(id, value) =>
-              setEdits((prev) => ({ ...prev, [id]: value }))
-            }
-            onApproveAndSend={approveAndSend}
-            onRetryDelivery={retryDelivery}
-            onRetryDraft={retryDraft}
+            <SimulatorMenu
+              items={items}
+              selectedItem={selectedItem}
+              onSelectItem={setSelectedItem}
+              onSimulate={simulate}
+              live={live}
+              simulating={busy === "simulate"}
+            />
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ConversationList
+              inbound={inbound}
+              repliesByQuestion={repliesByQuestion}
+              busy={busy}
+              itemLabels={itemLabels}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          </div>
+        </nav>
+
+        {/* ── right: selected thread / placeholder ── */}
+        <section
+          aria-label="Conversation"
+          className={`min-h-0 flex-1 flex-col ${selectedMessage ? "flex" : "hidden lg:flex"}`}
+        >
+          {selectedMessage ? (
+            <ConversationThread
+              state={deriveConversationState(
+                selectedMessage,
+                repliesByQuestion,
+                busy,
+              )}
+              buyerName={buyerLabelFor(selectedMessage)}
+              edits={edits}
+              busy={busy}
+              onEdit={(id, value) =>
+                setEdits((prev) => ({ ...prev, [id]: value }))
+              }
+              onApproveAndSend={approveAndSend}
+              onRetryDelivery={retryDelivery}
+              onRetryDraft={retryDraft}
+              onBack={() => setSelectedId(null)}
+            />
+          ) : (
+            <ThreadPlaceholder />
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** Inline error banner (audit). */
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <p
+      role="alert"
+      className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[15px] text-danger-soft-fg"
+    >
+      {message}
+    </p>
+  );
+}
+
+/**
+ * Simulator folded into the list-pane header as a compact disclosure: a quiet
+ * "Simulate" button reveals the existing SimulatorCard bench inline (kept
+ * reachable per the inbox spec without stealing the column the conversations
+ * need). State + behavior are unchanged — it just renders in a popover.
+ */
+function SimulatorMenu(props: {
+  items: ItemOption[];
+  selectedItem: string;
+  onSelectItem: (id: string) => void;
+  onSimulate: () => void;
+  live: boolean;
+  simulating: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[13px] font-medium text-fg transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M10 2v6.3L4.6 17.4A2 2 0 0 0 6.3 20.5h11.4a2 2 0 0 0 1.7-3.1L14 8.3V2" />
+          <path d="M8.5 2h7" />
+        </svg>
+        Simulate
+      </button>
+      {open ? (
+        <>
+          {/* click-away */}
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-10 cursor-default"
           />
-        )}
-      </section>
+          <div className="absolute right-0 z-20 mt-2 w-[min(20rem,calc(100vw-2rem))]">
+            <SimulatorCard
+              items={props.items}
+              selectedItem={props.selectedItem}
+              onSelectItem={props.onSelectItem}
+              onSimulate={props.onSimulate}
+              live={props.live}
+              simulating={props.simulating}
+            />
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
