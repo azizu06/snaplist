@@ -292,7 +292,27 @@ export default async function PreviewPage({
             suggested: 45,
             displayPrice: 45,
             range: { low: 30, high: 70 },
+            // llm-only / low confidence → a single honest point, no fabricated split.
+            strategies: [
+              {
+                key: "balanced",
+                label: "Suggested",
+                price: 45,
+                blurb:
+                  "Our best estimate — not enough comparable sales for quick / maximize options.",
+              },
+            ],
           }}
+          saveAction={noopAction}
+          sharpenAction={noopAction}
+        />
+      );
+    case "review-sharpen":
+      // Mid-confidence, comp-backed item: shows BOTH new features at once — the
+      // quick/balanced/maximize selector AND the dynamic "Confirm what applies" chips.
+      return (
+        <ReviewView
+          data={{ ...FIXTURE_REVIEW, confidence: 0.68, tier: "web_wide" }}
           saveAction={noopAction}
           sharpenAction={noopAction}
         />
