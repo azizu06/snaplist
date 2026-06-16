@@ -28,7 +28,11 @@ const FIXTURE_ITEMS: ItemOption[] = [
   { id: "fx-3", label: "Patagonia Better Sweater M" },
 ];
 
-const NOW = Date.now();
+// Fixed base (not Date.now()) so the <time dateTime> ISO strings are identical
+// on the server render and the client hydration — Date.now() is evaluated once
+// per environment and the ~ms drift caused a hydration mismatch in this preview.
+// The real inbox uses stable DB timestamps, so it never had this issue.
+const NOW = Date.parse("2026-06-16T15:10:00.000Z");
 const minsAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
 
 /** A buyer question row, leaving threading/replies to the maps below. */
