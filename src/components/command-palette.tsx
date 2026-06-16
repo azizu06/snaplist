@@ -156,11 +156,12 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
 
   return (
     <>
-      {/* desktop trigger — the Stripe-style centered pill, now functional */}
+      {/* desktop trigger — centered, lifted off the bar with a border + shadow
+          (so it doesn't read as "embedded in the background") */}
       <button
         type="button"
         onClick={openPalette}
-        className="hidden max-w-md flex-1 items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-left text-[14px] text-faint transition-colors hover:bg-surface-3 hover:text-muted sm:flex"
+        className="hidden w-full max-w-md items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-[14px] text-muted shadow-xs transition-all hover:border-border-strong hover:shadow-sm sm:flex"
       >
         <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="11" cy="11" r="8" />

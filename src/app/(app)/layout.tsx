@@ -1,5 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { getUserId } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
+import { listRecentNotifications, type NotificationView } from "@/lib/notifications";
 import { AppShell } from "@/components/app-shell";
 import type { ProfileUser } from "@/components/profile-menu";
 import type { PaletteHit } from "@/components/command-palette";
@@ -25,6 +27,11 @@ const PREVIEW_SEARCH_FIXTURES: PaletteHit[] = [
   { itemId: "fx-4", title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red", status: "failed", createdAt: "2026-06-10T16:40:00Z" },
   { itemId: "fx-5", title: "The Pragmatic Programmer (20th Anniversary, hardcover)", status: "new", createdAt: "2026-06-09T11:05:00Z" },
 ];
+const PREVIEW_NOTIFICATIONS: NotificationView[] = [
+  { id: "n-1", kind: "buyer_message", title: "New question on Sony WH-1000XM4", body: "“Do these come with the original case and cable?” — a reply is drafted for you.", href: "/inbox", read: false, createdAt: "2026-06-16T14:10:00Z" },
+  { id: "n-2", kind: "listing_published", title: "Patagonia Better Sweater is live on eBay", body: "Listed at $64. You can view or edit it anytime.", href: "/dashboard", read: false, createdAt: "2026-06-16T11:32:00Z" },
+  { id: "n-3", kind: "listing_failed", title: "Couldn’t publish the Canon EOS 80D", body: "eBay rejected the listing — add a price and try again.", href: "/dashboard", read: true, createdAt: "2026-06-15T18:05:00Z" },
+];
 
 export default async function AppLayout({
   children,
@@ -40,6 +47,7 @@ export default async function AppLayout({
     process.env.PREVIEW_SIGNED_IN === "1";
 
   let user: ProfileUser | null = null;
+  let notifications: NotificationView[] = [];
   if (userId) {
     const clerkUser = await currentUser();
     user = {
@@ -51,14 +59,20 @@ export default async function AppLayout({
       email: clerkUser?.primaryEmailAddress?.emailAddress ?? "",
       imageUrl: clerkUser?.imageUrl ?? null,
     };
+    // RLS scopes the read to this user; the bell rides Realtime from here.
+    const supabase = await createClient();
+    notifications = await listRecentNotifications(supabase);
   } else if (previewSignedIn) {
     user = PREVIEW_USER;
+    notifications = PREVIEW_NOTIFICATIONS;
   }
 
   return (
     <AppShell
       signedIn={userId != null || previewSignedIn}
       user={user}
+      userId={userId}
+      notifications={notifications}
       searchFixtures={
         previewSignedIn && !userId ? PREVIEW_SEARCH_FIXTURES : undefined
       }

@@ -14,6 +14,7 @@ import {
 } from "@/lib/inbox";
 import { logServerError } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
+import { createNotification } from "@/lib/notifications";
 
 /**
  * POST /api/inbox/simulate — simulate an incoming buyer question for one of the
@@ -165,6 +166,19 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+
+  // Activity feed: a new buyer question → notify (rides Realtime to the bell).
+  await createNotification(supabase, {
+    userId,
+    kind: "buyer_message",
+    title: listing?.title
+      ? `New question on “${listing.title}”`
+      : "New buyer question",
+    body: question,
+    href: "/inbox",
+    itemId,
+    listingId: listing?.id ?? null,
+  });
 
   try {
     // The agent never throws (deterministic grounded fallback), so the message

@@ -71,6 +71,24 @@ export function ThemeIconToggle({ className = "" }: { className?: string }) {
   );
 }
 
+/** Icon button tuned for the app's neutral top bar (next to the bell). */
+export function ThemeTopbarToggle({ className = "" }: { className?: string }) {
+  const mounted = useMounted();
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = mounted && resolvedTheme === "dark";
+
+  return (
+    <button
+      type="button"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className={`flex size-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong motion-safe:active:scale-[0.96] ${className}`}
+    >
+      {isDark ? <MoonIcon /> : <SunIcon />}
+    </button>
+  );
+}
+
 /** Dropdown row — same chrome as ProfileMenu's MenuItem links. */
 export function ThemeMenuToggle() {
   const mounted = useMounted();

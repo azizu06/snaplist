@@ -4,12 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /**
- * Navigation (issue #40; Shopify nav-mirror pass). Desktop sidebar follows
- * Shopify's grouped admin nav: a PRIMARY group (Home · New listing · Inbox), a
- * "Sales channels" group (eBay — the real post target), and Settings pinned to
- * the bottom (rendered by AppSidebar via `SidebarFooter`). Items are 14px,
- * icon + label; the active item is a soft-green pill. Collapsed → a 64px icon
- * rail (labels + group headers fade out). Mobile keeps the flush bottom tab bar
+ * Navigation (issue #40; Shopify nav-mirror pass). Desktop sidebar: the PRIMARY
+ * group (Home · New listing · Inbox) with Settings pinned to the bottom
+ * (rendered by AppSidebar via `SidebarFooter`). (The "Sales channels" group was
+ * dropped — eBay connection lives in Settings, so a second entry was redundant.)
+ * Items are 14px, icon + label; the active item is a soft-green pill. Collapsed
+ * → a 64px icon rail (labels fade out). Mobile keeps the flush bottom tab bar
  * (Home · Sell · Inbox · Settings). Client-only for pathname-driven active state.
  */
 
@@ -29,12 +29,6 @@ const ICONS: Record<string, React.ReactNode> = {
     <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
       <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-    </svg>
-  ),
-  tag: (
-    <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3.5 3.5h7l9.5 9.5a2 2 0 0 1 0 2.83l-4.17 4.17a2 2 0 0 1-2.83 0L3.5 10.5z" />
-      <circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none" />
     </svg>
   ),
   settings: (
@@ -73,18 +67,6 @@ const PRIMARY_LINKS: readonly NavLink[] = [
     label: "Inbox",
     icon: "inbox",
     match: (p) => p.startsWith("/inbox"),
-  },
-];
-
-/** Sales channels — where listings actually post (Shopify "Sales channels"). */
-const CHANNEL_LINKS: readonly NavLink[] = [
-  {
-    href: "/settings",
-    label: "eBay",
-    icon: "tag",
-    // No active state of its own — it points into Settings where the
-    // connection is managed.
-    match: () => false,
   },
 ];
 
@@ -131,36 +113,13 @@ function SidebarItem({
   );
 }
 
-/** Small Shopify-style group header — fades out when the rail is collapsed. */
-function GroupLabel({ children, collapsed }: { children: React.ReactNode; collapsed: boolean }) {
-  return (
-    <p
-      className={`px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint transition-opacity duration-200 ${
-        collapsed ? "h-0 overflow-hidden opacity-0" : "opacity-100"
-      }`}
-    >
-      {children}
-    </p>
-  );
-}
-
 export function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   return (
-    <div className="flex flex-col gap-5">
-      <nav aria-label="Primary" className="flex flex-col gap-0.5">
-        {PRIMARY_LINKS.map((link) => (
-          <SidebarItem key={link.href} link={link} collapsed={collapsed} />
-        ))}
-      </nav>
-      <div>
-        <GroupLabel collapsed={collapsed}>Sales channels</GroupLabel>
-        <nav aria-label="Sales channels" className="flex flex-col gap-0.5">
-          {CHANNEL_LINKS.map((link) => (
-            <SidebarItem key={`ch-${link.label}`} link={link} collapsed={collapsed} />
-          ))}
-        </nav>
-      </div>
-    </div>
+    <nav aria-label="Primary" className="flex flex-col gap-0.5">
+      {PRIMARY_LINKS.map((link) => (
+        <SidebarItem key={link.href} link={link} collapsed={collapsed} />
+      ))}
+    </nav>
   );
 }
 
