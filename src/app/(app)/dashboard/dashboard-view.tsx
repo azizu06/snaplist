@@ -10,6 +10,7 @@ import { lifecycleShortLabel } from "@/lib/ui/status";
 import { matchesQuery } from "@/lib/ui/search";
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 import type { BulkListingUpdate } from "./actions";
+import { BulkEditGrid } from "./bulk-edit-grid";
 
 /**
  * Dashboard — Shopify **Products index** (grounded in asset-intake #320 + the
@@ -516,6 +517,7 @@ export function DashboardView({
   archiveAction,
   unarchiveAction,
   deleteAction,
+  bulkUpdateAction,
 }: {
   rows: DashboardRow[];
   counts: DashboardCounts;
@@ -523,13 +525,14 @@ export function DashboardView({
   archiveAction?: IdsAction;
   unarchiveAction?: IdsAction;
   deleteAction?: IdsAction;
-  /** Reserved for the Phase-4 quick-edit grid. */
+  /** Batched quick-edit (price + status) — opens the full-screen grid. */
   bulkUpdateAction?: (updates: BulkListingUpdate[]) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "smart", dir: "asc" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<"archive" | "delete" | null>(null);
+  const [quickEdit, setQuickEdit] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -608,6 +611,13 @@ export function DashboardView({
       setToast(`${deleteTargets.length} item${deleteTargets.length === 1 ? "" : "s"} deleted`);
       clearSelection();
       setConfirm(null);
+    });
+  const runBulkUpdate = (updates: BulkListingUpdate[]) =>
+    startTransition(async () => {
+      await bulkUpdateAction?.(updates);
+      setToast(`${updates.length} listing${updates.length === 1 ? "" : "s"} updated`);
+      setQuickEdit(false);
+      clearSelection();
     });
 
   return (
@@ -753,6 +763,15 @@ export function DashboardView({
               {selected.size} selected
             </span>
             <span aria-hidden className="mx-1 h-5 w-px bg-primary-fg/20" />
+            {bulkUpdateAction ? (
+              <button
+                type="button"
+                onClick={() => setQuickEdit(true)}
+                className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-primary-fg/90 transition-colors hover:bg-primary-fg/10"
+              >
+                Quick edit
+              </button>
+            ) : null}
             {archiveTargets.length > 0 ? (
               <button
                 type="button"
@@ -821,6 +840,15 @@ export function DashboardView({
             {toast}
           </div>
         </div>
+      ) : null}
+
+      {quickEdit ? (
+        <BulkEditGrid
+          rows={selectedRows}
+          pending={isPending}
+          onClose={() => setQuickEdit(false)}
+          onSave={runBulkUpdate}
+        />
       ) : null}
     </main>
   );

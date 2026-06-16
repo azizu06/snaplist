@@ -3,6 +3,7 @@ import {
   DashboardView,
   type DashboardRow,
 } from "@/app/(app)/dashboard/dashboard-view";
+import type { BulkListingUpdate } from "@/app/(app)/dashboard/actions";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
 import { UploadView } from "@/app/(app)/upload/upload-form";
 import {
@@ -192,6 +193,9 @@ export default async function PreviewPage({
   async function noopIds(_ids: string[]) {
     "use server";
   }
+  async function noopBulk(_updates: BulkListingUpdate[]) {
+    "use server";
+  }
 
   switch (screen) {
     case "dashboard":
@@ -203,6 +207,7 @@ export default async function PreviewPage({
           archiveAction={noopIds}
           unarchiveAction={noopIds}
           deleteAction={noopIds}
+          bulkUpdateAction={noopBulk}
         />
       );
     case "dashboard-empty":
