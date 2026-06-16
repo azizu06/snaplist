@@ -113,6 +113,31 @@ describe("query formulation", () => {
     expect(queries[0]).toContain("WH-1000XM4");
   });
 
+  it("narrows the FIRST branded query with key specs so comps cluster on one config", () => {
+    const queries = buildSearchQueries(
+      { ...BRANDED_SIGNAL, specs: ["i7", "RTX 3060", "144Hz", "DDR4"] },
+      "branded-web",
+    );
+    // Spec-narrowed query leads so the agent gathers same-configuration comps first;
+    // brand+model still anchor it. Capped at 3 specs — the 4th (DDR4) is dropped.
+    expect(queries[0]).toContain("Sony WH-1000XM4");
+    expect(queries[0]).toContain("i7");
+    expect(queries[0]).toContain("RTX 3060");
+    expect(queries[0]).toContain("144Hz");
+    expect(queries[0]).not.toContain("DDR4");
+    // The broad query still follows as a coverage fallback.
+    expect(queries.some((q) => q === "Sony WH-1000XM4 used sold price")).toBe(true);
+  });
+
+  it("leaves queries unchanged when no specs are present (additive behavior)", () => {
+    const withEmptySpecs = buildSearchQueries(
+      { ...BRANDED_SIGNAL, specs: [] },
+      "branded-web",
+    );
+    const without = buildSearchQueries(BRANDED_SIGNAL, "branded-web");
+    expect(withEmptySpecs).toEqual(without);
+  });
+
   it("uses the UPC as a QUERY AID (in the query text) for the upc-aided tier", () => {
     const queries = buildSearchQueries(UPC_SIGNAL, "upc-aided-web");
     expect(queries[0]).toContain(UPC_SIGNAL.upc!);
