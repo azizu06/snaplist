@@ -169,12 +169,144 @@ function RangeBar({
   );
 }
 
+/**
+ * "Sharpen the estimate" (clarify-variant) — shown only when confidence isn't high.
+ * The seller adds a discriminating detail the photo couldn't show (exact GPU,
+ * storage, year…); each becomes a `spec` the re-price action narrows the comp search
+ * with. Its OWN form (posts to `sharpenAction`) — kept OUT of the save form so the
+ * two never nest. Generic for any item: nothing here is product-specific.
+ */
+function SharpenCard({
+  itemId,
+  bandWord,
+  candidates,
+  action,
+}: {
+  itemId: string;
+  bandWord: string | null;
+  candidates: string[];
+  action: (formData: FormData) => Promise<void>;
+}) {
+  const [chips, setChips] = useState<string[]>([]);
+  const [input, setInput] = useState("");
+
+  const addChip = (raw: string) => {
+    const value = raw.trim();
+    if (!value) return;
+    setChips((prev) =>
+      prev.some((c) => c.toLowerCase() === value.toLowerCase()) ? prev : [...prev, value],
+    );
+    setInput("");
+  };
+  const removeChip = (idx: number) =>
+    setChips((prev) => prev.filter((_, i) => i !== idx));
+
+  // Quick-add the model's own alternative guesses, minus ones already added.
+  const suggestions = candidates.filter(
+    (c) => !chips.some((chip) => chip.toLowerCase() === c.toLowerCase()),
+  );
+
+  return (
+    <form
+      action={action}
+      className="rounded-2xl border border-accent/30 bg-accent/[0.04] p-4 shadow-xs sm:p-5"
+    >
+      <input type="hidden" name="itemId" value={itemId} />
+      {chips.map((c, i) => (
+        <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
+      ))}
+
+      <Eyebrow>Sharpen the estimate</Eyebrow>
+      <p className="mt-2 text-[14px] text-muted">
+        Confidence is {bandWord ? bandWord.toLowerCase() : "limited"} because the photo
+        can’t show everything that sets the price. Add a detail we couldn’t see — exact
+        model, GPU, storage, or year — and we’ll re-research the comps.
+      </p>
+
+      {chips.length > 0 ? (
+        <ul className="mt-3 flex flex-wrap gap-1.5">
+          {chips.map((c, i) => (
+            <li
+              key={`chip-${i}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-surface px-2.5 py-1 text-[13px] font-medium text-fg"
+            >
+              {c}
+              <button
+                type="button"
+                onClick={() => removeChip(i)}
+                aria-label={`Remove ${c}`}
+                className="-mr-0.5 text-[15px] leading-none text-faint transition-colors hover:text-fg"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          name="detail"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addChip(input);
+            }
+          }}
+          placeholder="e.g. RTX 3060, 512GB SSD, 2021"
+          aria-label="Add a price-determining detail"
+          className={INPUT_CLASSES}
+        />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => addChip(input)}
+            disabled={input.trim().length === 0}
+            className="rounded-lg border border-border-strong bg-surface px-3.5 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2 disabled:opacity-40 sm:py-1.5"
+          >
+            Add
+          </button>
+          <PendingButton pendingLabel="Re-pricing…" size="sm" className="flex-1 sm:flex-none">
+            Re-price
+          </PendingButton>
+        </div>
+      </div>
+
+      {suggestions.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[12.5px] text-faint">Maybe:</span>
+          {suggestions.map((s, i) => (
+            <button
+              key={`sugg-${i}`}
+              type="button"
+              onClick={() => addChip(s)}
+              className="rounded-full border border-border bg-surface px-2.5 py-1 text-[13px] text-muted transition-colors hover:border-accent/40 hover:text-fg"
+            >
+              + {s}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <p className="mt-3 text-[12.5px] text-faint">
+        Re-researches live comps (one search). Updates the suggestion — your own price
+        edits are kept.
+      </p>
+    </form>
+  );
+}
+
 export function ReviewView({
   data,
   saveAction,
+  sharpenAction,
 }: {
   data: ReviewData;
   saveAction: (formData: FormData) => Promise<void>;
+  sharpenAction: (formData: FormData) => Promise<void>;
 }) {
   const attr = (key: string) =>
     data.attrs.find((a) => a.key === key)?.value ?? "";
@@ -244,6 +376,12 @@ export function ReviewView({
     "Review listing";
   const uncertain =
     data.identification != null && !data.identification.confident;
+
+  // Offer the clarify-variant re-price whenever confidence isn't already high (the
+  // HIGH band starts at 0.75) and there's a priced suggestion to sharpen. Pure UI
+  // gate; the action re-validates and re-prices server-side.
+  const canSharpen =
+    data.suggested != null && data.confidence != null && data.confidence < 0.75;
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
@@ -406,6 +544,16 @@ export function ReviewView({
           </div>
         </div>
       </section>
+
+      {/* ---- clarify-variant: sharpen a non-high estimate with a missing detail ---- */}
+      {canSharpen ? (
+        <SharpenCard
+          itemId={data.itemId}
+          bandWord={confidenceWord}
+          candidates={data.identification?.candidates ?? []}
+          action={sharpenAction}
+        />
+      ) : null}
 
       {/* ---- ONE form spans the stacked cards: every AI field saves together ---- */}
       <form action={saveAction} className="contents">

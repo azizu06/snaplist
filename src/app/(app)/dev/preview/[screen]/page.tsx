@@ -195,7 +195,13 @@ export default async function PreviewPage({
         <DashboardView rows={[]} counts={{ draft: 0, attention: 0, live: 0 }} filter="all" />
       );
     case "review":
-      return <ReviewView data={FIXTURE_REVIEW} saveAction={noopAction} />;
+      return (
+        <ReviewView
+          data={FIXTURE_REVIEW}
+          saveAction={noopAction}
+          sharpenAction={noopAction}
+        />
+      );
     case "export":
       return <ExportView data={FIXTURE_EXPORT} />;
     case "settings":
@@ -279,6 +285,7 @@ export default async function PreviewPage({
             range: { low: 30, high: 70 },
           }}
           saveAction={noopAction}
+          sharpenAction={noopAction}
         />
       );
     default:

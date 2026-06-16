@@ -5,7 +5,7 @@ import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification } from "@/lib/vision";
-import { saveReview } from "./actions";
+import { saveReview, sharpenEstimate } from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
 
 /**
@@ -180,5 +180,7 @@ export default async function ReviewPage({
     actionError: actionError ?? null,
   };
 
-  return <ReviewView data={data} saveAction={saveReview} />;
+  return (
+    <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+  );
 }

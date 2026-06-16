@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   computeConfidence,
+  type ConfidenceResult,
   type ConfidenceSignals,
 } from "../confidence/confidence";
 import {
@@ -278,6 +279,23 @@ function confidenceSignalsFor(
 }
 
 /**
+ * The calibrated price → confidence mapping, exported so a RE-PRICE (clarify-variant,
+ * `pipeline/reprice.ts`) recomputes confidence through the EXACT same #31/#32/#60
+ * bridge the full pipeline uses — never a divergent second copy that could drift the
+ * autopilot gate out of calibration. Pure over its inputs; `autopilotEnabled`
+ * defaults to true (matching `createVisionPipeline`'s run default).
+ */
+export function priceToConfidence(
+  attributes: ExtractedAttributes,
+  price: PriceResult,
+  options: { autopilotEnabled?: boolean } = {},
+): ConfidenceResult {
+  return computeConfidence(confidenceSignalsFor(attributes, price), {
+    autopilotEnabled: options.autopilotEnabled ?? true,
+  });
+}
+
+/**
  * Construct a `Pipeline` whose `run` performs real vision extraction, real pricing
  * (PriceRouter: all five PRD tiers via `createDefaultPricer`), and real grounded
  * eBay listing generation. `supabase` signs the private photo URLs; all
@@ -328,11 +346,11 @@ export function createVisionPipeline(
 
       // 4. REAL confidence composite over deterministic signals (tier #31-calibrated;
       //    the model's self-reported ambiguity stays out of the score — it only flags
-      //    the user-facing identification).
-      const confidence = computeConfidence(
-        confidenceSignalsFor(attributes, price),
-        { autopilotEnabled: input.autopilotEnabled ?? true },
-      );
+      //    the user-facing identification). The same `priceToConfidence` bridge a
+      //    re-price (clarify-variant) reuses, so the two can never miscalibrate.
+      const confidence = priceToConfidence(attributes, price, {
+        autopilotEnabled: input.autopilotEnabled,
+      });
 
       return {
         attributes,
