@@ -189,7 +189,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
           the containing block for this fixed overlay and clip it to the bar. */}
       {open ? createPortal(
         <div
-          className="fixed inset-0 z-50 bg-[rgba(19,30,58,0.32)] p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 bg-[rgba(26, 26, 26,0.32)] p-4 backdrop-blur-[2px]"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}

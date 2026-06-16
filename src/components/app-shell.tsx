@@ -7,11 +7,11 @@ import { CommandPalette, type PaletteHit } from "./command-palette";
 import { LogoMark } from "./logo";
 
 /**
- * AppShell — Stripe-Dashboard layout language on the Prism-light identity
+ * AppShell — Shopify-admin layout language on the neutral+green identity
  * (issue #49 round 4; dashboard v2 makes the chrome interactive): a
  * collapsible white left sidebar, a white top bar whose search pill opens the
- * real ⌘K palette, a violet primary action, and the account dropdown on the
- * avatar. Content sits on a cool-gray canvas; mobile keeps the bottom tabs.
+ * real ⌘K palette, a near-black primary action, and the account dropdown on the
+ * avatar. Content sits on a neutral-gray canvas; mobile keeps the bottom tabs.
  *
  * Signed-out: logo-only top bar, no nav. `searchFixtures` is dev-preview
  * only — it lets the palette search fixture rows without a session.

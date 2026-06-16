@@ -3,10 +3,11 @@
 /**
  * True WebGL Aurora (react-bits, ogl) behind the sign-in card — app-surfaces
  * v3 replaces the SoftAurora band with the real aurora curtain, theme-tuned:
- * - useTheme().resolvedTheme drives the color stops (light: prism violet on
- *   the white canvas; dark: the +luminosity violet so it carries on navy).
+ * - useTheme().resolvedTheme drives the color stops (light: brand green on
+ *   the white canvas; dark: the +luminosity green so it carries on the dark
+ *   canvas).
  * - next/dynamic ssr:false → zero bytes in the server HTML.
- * - prefers-reduced-motion → render nothing; the static CSS prism gradient
+ * - prefers-reduced-motion → render nothing; the static CSS aurora gradient
  *   in the (auth) layout is the designed fallback and stands alone.
  * - mobile (<sm) → same CSS fallback; no WebGL canvas tax on phones.
  */
@@ -36,10 +37,11 @@ function useMediaQuery(query: string, serverFallback: boolean): boolean {
   );
 }
 
-/* Theme-tuned stops. Light digs the violet DEEPER than the prism wash so the
- * curtain reads as light through it (additive violet on white disappears);
- * dark lifts the violet (+luminosity, same hue family as --color-iris dark)
- * and lets the cyan edge ring so the ridge stays crisp on navy. */
+/* Theme-tuned stops, all in the brand-green family. Light digs the green
+ * DEEPER (#006e52) so the curtain reads as light through it (a pale-green wash
+ * on white would disappear); dark lifts the green (+luminosity, same hue family
+ * as --color-iris dark) and lets a teal edge ring so the ridge stays crisp on
+ * the dark canvas. */
 const LIGHT_STOPS = ["#006e52", "#1fb88c", "#3ec9a3"];
 const DARK_STOPS = ["#006e52", "#00a37a", "#2bb3a3"];
 

@@ -543,7 +543,7 @@ const MagicBento: React.FC<BentoProps> = ({
           }
 
           .card--border-glow:hover {
-            box-shadow: 0 6px 24px -8px rgba(19, 30, 58, 0.18), 0 0 28px rgba(${glowColor}, 0.16);
+            box-shadow: 0 6px 24px -8px rgba(26, 26, 26, 0.18), 0 0 28px rgba(${glowColor}, 0.16);
           }
 
           .particle::before {

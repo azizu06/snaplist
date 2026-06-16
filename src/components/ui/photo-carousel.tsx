@@ -31,7 +31,7 @@ const slideVariants = {
 };
 
 const OVERLAY_BTN =
-  "flex items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]";
+  "flex items-center justify-center rounded-full bg-[#1a1a1a]/70 text-white transition-colors hover:bg-[#1a1a1a]";
 
 export interface PhotoCarouselProps {
   previews: string[];
@@ -203,12 +203,12 @@ export function PhotoCarousel({
 
         {/* badge: upload shows Cover/Photo N; review shows a frame counter */}
         {showCover ? (
-          <span className="absolute left-3 top-3 z-10 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+          <span className="absolute left-3 top-3 z-10 rounded-full bg-[#1a1a1a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white">
             {safe === 0 ? "Cover" : `Photo ${safe + 1}`}
           </span>
         ) : count > 1 ? (
           <span
-            className="absolute left-3 top-3 z-10 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white"
+            className="absolute left-3 top-3 z-10 rounded-full bg-[#1a1a1a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white"
             data-nums
           >
             {safe + 1} / {count}
@@ -299,7 +299,7 @@ export function PhotoCarousel({
             {renderArrows("size-11")}
             {count > 1 ? (
               <span
-                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-[#131e3a]/70 px-3 py-0.5 text-[12px] font-semibold text-white"
+                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-[#1a1a1a]/70 px-3 py-0.5 text-[12px] font-semibold text-white"
                 data-nums
               >
                 {safe + 1} / {count}
