@@ -268,7 +268,15 @@ export const visionResponseSchema = z.object({
     .nullable()
     .describe("Decoded ISBN read from the image (books/media), else null."),
   upc: z.string().nullable().describe("Decoded UPC read from the image, else null."),
-  specs: z.array(z.string()).nullable().describe("Key specs visible on the item."),
+  specs: z
+    .array(z.string())
+    .nullable()
+    .describe(
+      "Price-determining specs visible on the item, each in the MOST specific form " +
+        "(e.g. \"RTX 3060\" not \"RTX\"; \"256GB SSD\" not \"SSD\"; \"i7-11800H\" not " +
+        "\"Core i7\"; \"15.6 inch\"). Prefer exact model/version numbers, generation/year, " +
+        "capacity/size, and specific component models. OMIT a spec rather than give a vague one.",
+    ),
   title: z.string().nullable().describe("A short human title for the item."),
   ambiguous: z
     .boolean()
@@ -295,14 +303,19 @@ function nullsToUndefined(obj: Record<string, unknown>): VisionGenerateResult {
   return out as VisionGenerateResult;
 }
 
-/** System guidance: extract faithfully, READ barcodes visually, and flag uncertainty. */
+/** System guidance: extract faithfully + SPECIFICALLY, READ every label, and flag uncertainty. */
 const EXTRACTION_SYSTEM_PROMPT =
   "You identify a used item for resale from one or more photos. Extract only what you can " +
-  "actually see: brand, model, category, condition, and any decoded barcode (ISBN for books/media, " +
-  "UPC otherwise) read directly from the image. Provide key specs and a short title. " +
-  "Do NOT guess a brand or model you cannot confirm from the photos — if the item is ambiguous, " +
+  "actually see — never invent. Read EVERY visible label, sticker, box, screen, spec sheet, and " +
+  "engraving. Capture brand, model, category, condition, and any decoded barcode (ISBN for " +
+  "books/media, UPC otherwise) read directly from the image. For `specs`, prefer PRICE-DETERMINING, " +
+  "DISCRIMINATING details that distinguish this EXACT configuration from similar ones — exact " +
+  "model/version numbers, generation/year, capacity or size (storage, RAM, screen size), and " +
+  "specific component models — always in the most specific form visible (e.g. \"RTX 3060\" not " +
+  "\"RTX\"; \"256GB SSD\" not \"SSD\"). Omit a spec rather than give a vague one. Provide a short title. " +
+  "Do NOT guess a brand, model, or spec you cannot confirm from the photos — if the item is ambiguous, " +
   "generic, or the photo is unclear, set ambiguous=true, give a short uncertaintyReason, and list " +
-  "any plausible candidates instead of committing to one identity.";
+  "plausible candidates instead of committing to one identity.";
 
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject` with
