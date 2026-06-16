@@ -178,7 +178,7 @@ function RowCheckbox({
 /** Shared desktop column template (header + rows align): select · Product ·
  *  Status · Price · Listed. */
 const ROW_GRID =
-  "sm:grid sm:grid-cols-[auto_1fr_148px_104px_92px] sm:items-center sm:gap-4";
+  "sm:grid sm:grid-cols-[auto_1fr_156px_112px_104px] sm:items-center sm:gap-5";
 
 /**
  * One listing row. The whole row links to review (the inner <a> is
@@ -198,7 +198,7 @@ function ListingRow({
   const chip = lifecycleShortLabel(row.status);
   return (
     <div
-      className={`group/row grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-surface-2 sm:px-3 ${ROW_GRID} ${
+      className={`group/row grid grid-cols-[auto_1fr_auto] items-center gap-3.5 rounded-lg px-3 py-3.5 transition-colors hover:bg-surface-2 sm:px-3.5 ${ROW_GRID} ${
         selected ? "bg-accent-soft/50" : ""
       }`}
     >
@@ -206,8 +206,8 @@ function ListingRow({
 
       <Link href={`/review/${row.itemId}`} className="contents">
         {/* Product cell: cover thumbnail + title (+ mobile-only meta line). */}
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="relative size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2">
+        <span className="flex min-w-0 items-center gap-3.5">
+          <span className="relative size-14 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2">
             {row.thumbUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
               <img
@@ -221,12 +221,12 @@ function ListingRow({
             )}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-[14px] font-semibold leading-snug text-fg-strong group-hover/row:underline">
+            <span className="block truncate text-[14.5px] font-semibold leading-snug text-fg-strong group-hover/row:underline">
               {row.title}
             </span>
-            <span className="mt-1 flex items-center gap-2 sm:hidden">
+            <span className="mt-1.5 flex items-center gap-2 sm:hidden">
               {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
-              <span className="text-[12px] text-faint" data-nums>
+              <span className="text-[12.5px] text-muted" data-nums>
                 {listedLabel(row.createdAt)}
               </span>
             </span>
@@ -238,7 +238,7 @@ function ListingRow({
           {row.price != null ? (
             PRICE_FMT.format(row.price)
           ) : (
-            <span className="text-[12px] font-normal text-faint">No price</span>
+            <span className="text-[12.5px] font-normal text-muted">No price</span>
           )}
         </span>
 
@@ -246,14 +246,14 @@ function ListingRow({
         <span className="hidden sm:flex">
           {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
         </span>
-        <span className="hidden text-right text-[14px] font-bold text-fg-strong sm:block" data-nums>
+        <span className="hidden text-right text-[14.5px] font-bold text-fg-strong sm:block" data-nums>
           {row.price != null ? (
             PRICE_FMT.format(row.price)
           ) : (
-            <span className="text-[13px] font-normal text-faint">—</span>
+            <span className="text-[13px] font-normal text-muted">—</span>
           )}
         </span>
-        <span className="hidden text-right text-[13px] text-muted sm:block" data-nums>
+        <span className="hidden text-right text-[13.5px] text-fg sm:block" data-nums>
           {listedLabel(row.createdAt)}
         </span>
       </Link>
@@ -285,9 +285,9 @@ function SortHeader({
           ? `Sorted by ${label}, ${sort.dir === "asc" ? "ascending" : "descending"}. Activate to reverse.`
           : `Sort by ${label}`
       }
-      className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+      className={`flex items-center gap-1 text-[11.5px] font-semibold uppercase tracking-[0.08em] transition-colors ${
         align === "right" ? "justify-end" : ""
-      } ${active ? "text-fg-strong" : "text-faint hover:text-fg"}`}
+      } ${active ? "text-fg-strong" : "text-muted hover:text-fg-strong"}`}
     >
       {label}
       <svg
@@ -326,9 +326,11 @@ function SortMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[13px] font-medium text-muted shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong"
+        className={`flex items-center gap-1.5 rounded-lg border bg-surface px-3 py-2 text-[13.5px] font-semibold shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong ${
+          open ? "border-border-strong text-fg-strong" : "border-border text-fg"
+        }`}
       >
-        <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M3 6h13M3 12h9M3 18h5M17 9l4 4 4-4" transform="translate(-4 0)" />
         </svg>
         <span className="hidden sm:inline">{sort.key === "smart" ? "Sort" : activeLabel}</span>
@@ -343,9 +345,9 @@ function SortMenu({
           />
           <div
             role="menu"
-            className="absolute right-0 z-50 mt-1 w-56 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+            className="absolute right-0 z-50 mt-2 w-56 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
           >
-            <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">
+            <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
               Sort by
             </p>
             {SORT_OPTIONS.map((o) => (
@@ -663,9 +665,12 @@ export function DashboardView({
       {rows.length === 0 ? (
         <DashboardEmpty />
       ) : (
-        <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
-          {/* ---- toolbar: tab strip + sort + inline search ---- */}
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-2 sm:px-3">
+        <section className="rounded-xl border border-border bg-surface shadow-xs">
+          {/* ---- toolbar: tab strip + sort + inline search ----
+               No `overflow-hidden` on this wrapper: it would clip the Sort
+               popover (absolutely positioned, escapes the section). Rows carry
+               their own radius, so the rounded section still reads clean. */}
+          <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-t-xl border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
             <nav aria-label="Filter by status" className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none]">
               {DASHBOARD_FILTERS.map((f) => {
                 const active = f.key === filter;
@@ -674,24 +679,24 @@ export function DashboardView({
                     key={f.key}
                     href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
                     aria-current={active ? "page" : undefined}
-                    className={`relative flex shrink-0 items-baseline gap-1.5 whitespace-nowrap px-3 py-2.5 text-[13.5px] transition-colors ${
-                      active ? "text-fg-strong" : "text-muted hover:text-fg"
+                    className={`relative flex shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-md px-3.5 py-3 text-[14px] transition-colors ${
+                      active ? "text-fg-strong" : "text-muted hover:text-fg-strong"
                     }`}
                   >
-                    <span className="font-medium">{f.label}</span>
-                    <span className={`text-[12.5px] ${active ? "text-accent-soft-fg" : "text-faint"}`} data-nums>
+                    <span className="font-semibold">{f.label}</span>
+                    <span className={`text-[13px] ${active ? "text-accent-soft-fg" : "text-muted"}`} data-nums>
                       <CountUp to={filterCount(f)} duration={0.7} />
                     </span>
                     {active ? (
-                      <span aria-hidden className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent" />
+                      <span aria-hidden className="absolute inset-x-3.5 bottom-0 h-[2px] rounded-full bg-accent" />
                     ) : null}
                   </Link>
                 );
               })}
             </nav>
-            <div className="mb-2 flex w-full items-center gap-2 sm:mb-1.5 sm:w-auto">
-              <label className="flex flex-1 items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[14px] focus-within:ring-2 focus-within:ring-accent/40 sm:w-56 sm:flex-none">
-                <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div className="flex w-full items-center gap-2.5 sm:w-auto">
+              <label className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[14px] transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/40 sm:w-64 sm:flex-none">
+                <svg viewBox="0 0 24 24" className="size-4 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="8" />
                   <path d="m21 21-4.3-4.3" />
                 </svg>
@@ -700,14 +705,14 @@ export function DashboardView({
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={`Filter ${activeFilter.key === "all" ? "listings" : `“${activeFilter.label}”`}…`}
                   aria-label="Filter listings by title"
-                  className="w-full bg-transparent text-fg-strong outline-none placeholder:text-faint"
+                  className="w-full bg-transparent text-fg-strong outline-none placeholder:text-muted"
                 />
                 {searching ? (
                   <button
                     type="button"
                     onClick={() => setQuery("")}
                     aria-label="Clear filter"
-                    className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-faint transition-colors hover:text-fg"
+                    className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-fg-strong"
                   >
                     <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                       <path d="M18 6 6 18M6 6l12 12" />
@@ -734,8 +739,9 @@ export function DashboardView({
             )
           ) : (
             <>
-              {/* sortable column headers (desktop) + select-all */}
-              <div className={`group/head hidden border-b border-border px-3 py-2 ${ROW_GRID}`}>
+              {/* sortable column headers (desktop) + select-all. px matches a
+                  row's effective inset (ul px-1 + row px-3.5) so columns align. */}
+              <div className={`group/head hidden border-b border-border px-[18px] py-3 ${ROW_GRID}`}>
                 <RowCheckbox checked={allSelected} onToggle={toggleAll} label="Select all listings" />
                 <SortHeader label="Product" k="title" sort={sort} onSort={onSortToggle} />
                 <SortHeader label="Status" k="status" sort={sort} onSort={onSortToggle} />
