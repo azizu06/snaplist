@@ -71,7 +71,7 @@ function CompRow({ c, i }: { c: (typeof COMPS)[number]; i: number }) {
           fontSize: 12.5,
           fontWeight: 800,
           color: VIOLET,
-          background: "var(--sl-violet-soft, rgba(99,91,255,0.1))",
+          background: "var(--sl-violet-soft, rgba(0,128,96,0.1))",
           borderRadius: 8,
           padding: "4px 9px",
         }}
@@ -114,7 +114,7 @@ function PriceMobileAct() {
         {/* header */}
         <div style={{ position: "absolute", left: PAD, top: 30, right: PAD, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.4, color: INK }}>Price</span>
-          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: VIOLET, background: "var(--sl-violet-soft, rgba(99,91,255,0.1))", borderRadius: 99, padding: "6px 12px" }}>
+          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: VIOLET, background: "var(--sl-violet-soft, rgba(0,128,96,0.1))", borderRadius: 99, padding: "6px 12px" }}>
             STEP 3 · PRICE
           </span>
         </div>
@@ -140,9 +140,9 @@ function PriceMobileAct() {
             <span style={{ fontSize: 16, fontWeight: 600, color: FAINT }}>from recent sold listings</span>
           </div>
           {/* mini range axis */}
-          <div style={{ marginTop: 26, position: "relative", height: 8, borderRadius: 99, background: "var(--sl-slab, #f4f6fb)", border: `1px solid ${LINE}` }}>
-            <div style={{ position: "absolute", left: "8%", right: "8%", top: 0, bottom: 0, borderRadius: 99, background: "linear-gradient(90deg,#7a73ff,#635bff,#a960ee)", opacity: 0.55, transform: `scaleX(${barT})`, transformOrigin: "center" }} />
-            <div style={{ position: "absolute", left: `${markerPct}%`, top: "50%", width: 18, height: 18, borderRadius: 99, background: VIOLET, border: `3px solid ${SURFACE}`, boxShadow: "0 0 0 3px rgba(99,91,255,0.25)", transform: "translate(-50%,-50%)", opacity: barT }} />
+          <div style={{ marginTop: 26, position: "relative", height: 8, borderRadius: 99, background: "var(--sl-slab, #f6f6f7)", border: `1px solid ${LINE}` }}>
+            <div style={{ position: "absolute", left: "8%", right: "8%", top: 0, bottom: 0, borderRadius: 99, background: "linear-gradient(90deg,#1fb88c,#008060,#00604a)", opacity: 0.55, transform: `scaleX(${barT})`, transformOrigin: "center" }} />
+            <div style={{ position: "absolute", left: `${markerPct}%`, top: "50%", width: 18, height: 18, borderRadius: 99, background: VIOLET, border: `3px solid ${SURFACE}`, boxShadow: "0 0 0 3px rgba(0,128,96,0.25)", transform: "translate(-50%,-50%)", opacity: barT }} />
           </div>
           <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700, color: FAINT }}>
             <span>${RANGE_LOW}</span>
@@ -184,7 +184,7 @@ function PriceMobileAct() {
             fontSize: 20,
             fontWeight: 800,
             transform: `scale(${1 - press * 0.03})`,
-            boxShadow: "0 12px 26px -10px rgba(99,91,255,0.6)",
+            boxShadow: "0 12px 26px -10px rgba(0,128,96,0.6)",
           }}
         >
           {applied ? "Price applied · $550" : "Apply $550"}

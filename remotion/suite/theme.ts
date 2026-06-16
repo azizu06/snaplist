@@ -22,41 +22,41 @@
  * They are real CSS vars and Remotion renders to a DOM, so they cascade to
  * every descendant — including the shared chrome from remotion/hero.
  */
-export const INK = "var(--sl-ink, #131e3a)";
-export const DIM = "var(--sl-dim, #3d4a68)";
-export const FAINT = "var(--sl-faint, #5f6b88)";
-export const LINE = "var(--sl-line, #dfe4ee)";
-export const SLAB = "var(--sl-slab, #f4f6fb)";
+export const INK = "var(--sl-ink, #1a1a1a)";
+export const DIM = "var(--sl-dim, #404040)";
+export const FAINT = "var(--sl-faint, #6d7175)";
+export const LINE = "var(--sl-line, #e1e3e5)";
+export const SLAB = "var(--sl-slab, #f6f6f7)";
 /** card / window / panel surface — replaces the hardcoded "white" fills. */
 export const SURFACE = "var(--sl-surface, #ffffff)";
-export const VIOLET = "var(--sl-violet, #635bff)";
+export const VIOLET = "var(--sl-violet, #008060)";
 export const GREEN = "var(--sl-green, #16a34a)";
 export const AMBER = "var(--sl-amber, #b45309)";
 
-export const VIOLET_SOFT = "var(--sl-violet-soft, rgba(99,91,255,0.1))";
-export const VIOLET_BORDER = "var(--sl-violet-border, rgba(99,91,255,0.3))";
+export const VIOLET_SOFT = "var(--sl-violet-soft, rgba(0,128,96,0.1))";
+export const VIOLET_BORDER = "var(--sl-violet-border, rgba(0,128,96,0.3))";
 export const GREEN_SOFT = "var(--sl-green-soft, rgba(22,163,74,0.1))";
 
 export type VideoTheme = "light" | "dark";
 
 /**
  * Dark palette, injected as CSS variables on the Scene root. Tuned to the
- * app's navy dark theme: a deep canvas, a lifted panel surface for cards, and
- * brand violet/emerald/amber nudged brighter so they read on dark. Product
+ * app's neutral dark theme: a deep canvas, a lifted panel surface for cards, and
+ * brand green/emerald/amber nudged brighter so they read on dark. Product
  * photos are untouched (a used camera looks the same in either theme).
  */
 const DARK_PALETTE: Record<string, string> = {
-  "--sl-ink": "#eef1fb",
-  "--sl-dim": "#aab4d4",
-  "--sl-faint": "#828edb",
+  "--sl-ink": "#f5f5f5",
+  "--sl-dim": "#c9ccd0",
+  "--sl-faint": "#9ea2a6",
   "--sl-line": "rgba(255,255,255,0.11)",
-  "--sl-slab": "#0b0f24",
-  "--sl-surface": "#161b38",
-  "--sl-violet": "#7c6bff",
+  "--sl-slab": "#141414",
+  "--sl-surface": "#1f1f1f",
+  "--sl-violet": "#00a37a",
   "--sl-green": "#34d399",
   "--sl-amber": "#fbbf24",
-  "--sl-violet-soft": "rgba(124,107,255,0.18)",
-  "--sl-violet-border": "rgba(124,107,255,0.42)",
+  "--sl-violet-soft": "rgba(0,163,122,0.18)",
+  "--sl-violet-border": "rgba(0,163,122,0.42)",
   "--sl-green-soft": "rgba(52,211,153,0.16)",
 };
 

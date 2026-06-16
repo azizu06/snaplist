@@ -456,7 +456,7 @@ function SnapAct() {
               height: DROP.h,
               borderRadius: 14,
               border: `2.5px dashed ${VIOLET}`,
-              background: "rgba(99,91,255,0.08)",
+              background: "rgba(0,128,96,0.08)",
               boxSizing: "border-box",
               display: "flex",
               alignItems: "flex-end",
@@ -533,7 +533,7 @@ function SnapAct() {
               fontWeight: 700,
               opacity: hintIn,
               transform: `translateY(${(1 - hintIn) * 10}px)`,
-              boxShadow: "0 8px 20px -8px rgba(99,91,255,0.55)",
+              boxShadow: "0 8px 20px -8px rgba(0,128,96,0.55)",
             }}
           >
             Identify item →

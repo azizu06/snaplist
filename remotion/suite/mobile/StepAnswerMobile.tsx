@@ -102,7 +102,7 @@ function AnswerMobileAct() {
 
         {/* drafted reply card */}
         {frame >= DRAFT_AT - 30 ? (
-          <div style={{ position: "absolute", left: PAD, top: 228, width: INNER, borderRadius: "16px 16px 4px 16px", border: `1px solid var(--sl-violet-border, rgba(99,91,255,0.3))`, background: VIOLET_SOFT, boxSizing: "border-box", padding: "14px 16px" }}>
+          <div style={{ position: "absolute", left: PAD, top: 228, width: INNER, borderRadius: "16px 16px 4px 16px", border: `1px solid var(--sl-violet-border, rgba(0,128,96,0.3))`, background: VIOLET_SOFT, boxSizing: "border-box", padding: "14px 16px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
               <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6, color: VIOLET }}>✦ DRAFTED FROM YOUR LISTING</span>
             </div>
@@ -112,7 +112,7 @@ function AnswerMobileAct() {
               <div style={{ fontSize: 16, lineHeight: 1.6, color: INK, opacity: draftIn }}>
                 {DRAFT_TEXT}
                 {frame >= EDIT_AT ? (
-                  <span style={{ color: VIOLET, fontWeight: 700, background: "var(--sl-violet-soft, rgba(99,91,255,0.18))", borderRadius: 4, opacity: editIn }}>
+                  <span style={{ color: VIOLET, fontWeight: 700, background: "var(--sl-violet-soft, rgba(0,128,96,0.18))", borderRadius: 4, opacity: editIn }}>
                     {EDIT_TEXT}
                   </span>
                 ) : null}
@@ -120,7 +120,7 @@ function AnswerMobileAct() {
             )}
             {frame >= EDIT_AT ? (
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12.5, fontWeight: 800, color: VIOLET, opacity: editIn }}>
-                <CheckIcon size={13} color="var(--sl-violet, #635bff)" /> your answer added
+                <CheckIcon size={13} color="var(--sl-violet, #008060)" /> your answer added
               </div>
             ) : null}
           </div>
@@ -138,7 +138,7 @@ function AnswerMobileAct() {
             <span style={{ fontSize: 19, fontWeight: 800, color: GREEN }}>Sent · approved reply</span>
           </div>
         ) : (
-          <div style={{ position: "absolute", left: SEND.x, top: SEND.y, width: SEND.w, height: SEND.h, borderRadius: 18, background: VIOLET, color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 20, fontWeight: 800, transform: `scale(${1 - press * 0.03})`, boxShadow: "0 12px 26px -10px rgba(99,91,255,0.6)" }}>
+          <div style={{ position: "absolute", left: SEND.x, top: SEND.y, width: SEND.w, height: SEND.h, borderRadius: 18, background: VIOLET, color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 20, fontWeight: 800, transform: `scale(${1 - press * 0.03})`, boxShadow: "0 12px 26px -10px rgba(0,128,96,0.6)" }}>
             Approve &amp; send <span aria-hidden>→</span>
           </div>
         )}

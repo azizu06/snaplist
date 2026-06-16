@@ -17,10 +17,10 @@ import {
  * Render: `npx remotion render remotion/index.ts stage-identify public/stage-identify.mp4`
  */
 
-const FAINT = "#5f6b88";
-const LINE = "#dfe4ee";
-const SLAB = "#f4f6fb";
-const VIOLET = "#6d4aff";
+const FAINT = "#6d7175";
+const LINE = "#e1e3e5";
+const SLAB = "#f6f6f7";
+const VIOLET = "#008060";
 const GREEN = "#16a34a";
 
 const font =
@@ -136,7 +136,7 @@ export const StageIdentify: React.FC = () => {
                     height: 70,
                     transform: "translateY(-50%)",
                     background:
-                      "linear-gradient(180deg, transparent, rgba(109,74,255,0.22), rgba(255,255,255,0.34), rgba(109,74,255,0.22), transparent)",
+                      "linear-gradient(180deg, transparent, rgba(0,128,96,0.22), rgba(255,255,255,0.34), rgba(0,128,96,0.22), transparent)",
                   }}
                 />
               ) : null}
@@ -203,7 +203,7 @@ export const StageIdentify: React.FC = () => {
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 9,
-                    background: "rgba(109,74,255,0.1)",
+                    background: "rgba(0,128,96,0.1)",
                     borderRadius: 99,
                     padding: "8px 15px",
                   }}
@@ -213,7 +213,7 @@ export const StageIdentify: React.FC = () => {
                       width: 13,
                       height: 13,
                       borderRadius: 99,
-                      border: "2px solid rgba(109,74,255,0.25)",
+                      border: "2px solid rgba(0,128,96,0.25)",
                       borderTopColor: VIOLET,
                       transform: `rotate(${frame * 14}deg)`,
                     }}
@@ -228,7 +228,7 @@ export const StageIdentify: React.FC = () => {
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 8,
-                    background: "rgba(109,74,255,0.1)",
+                    background: "rgba(0,128,96,0.1)",
                     borderRadius: 99,
                     padding: "8px 15px",
                   }}
@@ -257,8 +257,8 @@ export const StageIdentify: React.FC = () => {
                   style={{
                     opacity: chipSprings[i],
                     transform: `translateY(${(1 - chipSprings[i]) * 12}px) scale(${0.8 + chipSprings[i] * 0.2})`,
-                    border: "1px solid rgba(109,74,255,0.3)",
-                    background: "rgba(109,74,255,0.08)",
+                    border: "1px solid rgba(0,128,96,0.3)",
+                    background: "rgba(0,128,96,0.08)",
                     color: VIOLET,
                     borderRadius: 99,
                     padding: "9px 16px",

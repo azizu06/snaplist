@@ -381,8 +381,8 @@ function RangeModule() {
               top: 22,
               height: 18,
               borderRadius: 9,
-              background: "rgba(99,91,255,0.18)",
-              border: `1px solid rgba(99,91,255,0.35)`,
+              background: "rgba(0,128,96,0.18)",
+              border: `1px solid rgba(0,128,96,0.35)`,
               boxSizing: "border-box",
             }}
           />
@@ -590,7 +590,7 @@ function SignalsPanel() {
           style={{
             height: "100%",
             width: `${pct}%`,
-            background: "linear-gradient(90deg, #5147f5, #635bff)",
+            background: "linear-gradient(90deg, #006e52, #008060)",
           }}
         />
       </div>

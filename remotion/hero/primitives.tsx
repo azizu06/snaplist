@@ -47,7 +47,7 @@ export function Cursor({ x, y, press }: { x: number; y: number; press: number })
             width: 38,
             height: 38,
             borderRadius: 99,
-            border: `2.5px solid rgba(109,74,255,${0.6 * (1 - press)})`,
+            border: `2.5px solid rgba(0,128,96,${0.6 * (1 - press)})`,
             transform: `scale(${0.4 + press * 1.25})`,
           }}
         />
@@ -195,9 +195,9 @@ export function LogoMark({ size = 26 }: { size?: number }) {
           y2="46"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0" stopColor="#7a73ff" />
-          <stop offset="0.55" stopColor="#635bff" />
-          <stop offset="1" stopColor="#a960ee" />
+          <stop offset="0" stopColor="#1fb88c" />
+          <stop offset="0.55" stopColor="#008060" />
+          <stop offset="1" stopColor="#00604a" />
         </linearGradient>
       </defs>
       <rect x="2" y="2" width="44" height="44" rx="13" fill="url(#iris-grad)" />
@@ -258,7 +258,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     padding: "7px 13px",
                     borderRadius: 99,
                     color: i === 1 ? VIOLET : FAINT,
-                    background: i === 1 ? "rgba(109,74,255,0.1)" : "transparent",
+                    background: i === 1 ? "rgba(0,128,96,0.1)" : "transparent",
                   }}
                 >
                   {t}
@@ -271,7 +271,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               width: 30,
               height: 30,
               borderRadius: 99,
-              background: "linear-gradient(135deg, #7a73ff, #a960ee)",
+              background: "linear-gradient(135deg, #1fb88c, #00604a)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -298,7 +298,7 @@ export function Spinner({ size = 12, deg }: { size?: number; deg: number }) {
         width: size,
         height: size,
         borderRadius: 99,
-        border: "2px solid rgba(109,74,255,0.25)",
+        border: "2px solid rgba(0,128,96,0.25)",
         borderTopColor: VIOLET,
         transform: `rotate(${deg}deg)`,
         flexShrink: 0,
@@ -375,7 +375,7 @@ export function PhotoPanel({
               width: 46,
               height: 46,
               borderRadius: 99,
-              background: "rgba(109,74,255,0.1)",
+              background: "rgba(0,128,96,0.1)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -425,7 +425,7 @@ export function PhotoPanel({
                 height: 64,
                 transform: "translateY(-50%)",
                 background:
-                  "linear-gradient(180deg, transparent, rgba(109,74,255,0.22), rgba(255,255,255,0.32), rgba(109,74,255,0.22), transparent)",
+                  "linear-gradient(180deg, transparent, rgba(0,128,96,0.22), rgba(255,255,255,0.32), rgba(0,128,96,0.22), transparent)",
               }}
             />
           ) : null}
@@ -500,7 +500,7 @@ export function StatusPill({
           display: "inline-flex",
           alignItems: "center",
           gap: 8,
-          background: analyzing ? "rgba(109,74,255,0.1)" : "rgba(22,163,74,0.1)",
+          background: analyzing ? "rgba(0,128,96,0.1)" : "rgba(22,163,74,0.1)",
           borderRadius: 99,
           padding: "7px 14px",
         }}
@@ -596,8 +596,8 @@ export function FeedPanel({ events, agent }: { events: FeedEvent[]; agent: strin
                     fontSize: 10.5,
                     fontWeight: 700,
                     color: VIOLET,
-                    background: "rgba(109,74,255,0.08)",
-                    border: "1px solid rgba(109,74,255,0.22)",
+                    background: "rgba(0,128,96,0.08)",
+                    border: "1px solid rgba(0,128,96,0.22)",
                     borderRadius: 6,
                     padding: "1.5px 6px",
                     flexShrink: 0,
@@ -748,8 +748,8 @@ export function ChipsRow({ chips, startAt }: { chips: string[]; startAt: number 
             style={{
               opacity: s,
               transform: `translateY(${(1 - s) * 10}px) scale(${0.8 + s * 0.2})`,
-              border: "1px solid rgba(109,74,255,0.3)",
-              background: "rgba(109,74,255,0.08)",
+              border: "1px solid rgba(0,128,96,0.3)",
+              background: "rgba(0,128,96,0.08)",
               color: VIOLET,
               borderRadius: 99,
               padding: "6px 12px",
@@ -789,8 +789,8 @@ export function DescriptionField({
           width: DESC_FIELD.w,
           height: DESC_FIELD.h,
           borderRadius: 10,
-          border: `1px solid ${typing ? "rgba(109,74,255,0.45)" : LINE}`,
-          boxShadow: typing ? "0 0 0 3px rgba(109,74,255,0.1)" : undefined,
+          border: `1px solid ${typing ? "rgba(0,128,96,0.45)" : LINE}`,
+          boxShadow: typing ? "0 0 0 3px rgba(0,128,96,0.1)" : undefined,
           background: SLAB,
           padding: "12px 14px",
           fontSize: 13,
@@ -906,8 +906,8 @@ export function PriceModule({
           width: PRICE_INPUT.w,
           height: PRICE_INPUT.h,
           borderRadius: 10,
-          border: `1px solid ${focused ? "rgba(109,74,255,0.55)" : LINE}`,
-          boxShadow: focused ? "0 0 0 3px rgba(109,74,255,0.12)" : undefined,
+          border: `1px solid ${focused ? "rgba(0,128,96,0.55)" : LINE}`,
+          boxShadow: focused ? "0 0 0 3px rgba(0,128,96,0.12)" : undefined,
           background: SURFACE,
           display: "flex",
           alignItems: "center",
@@ -921,7 +921,7 @@ export function PriceModule({
             fontWeight: 800,
             color: INK,
             fontVariantNumeric: "tabular-nums",
-            background: selected ? "rgba(109,74,255,0.22)" : "transparent",
+            background: selected ? "rgba(0,128,96,0.22)" : "transparent",
             borderRadius: 3,
           }}
         >
@@ -975,7 +975,7 @@ export function PriceModule({
             style={{
               height: "100%",
               width: `${confFill * 100}%`,
-              background: "linear-gradient(90deg, #5a36f0, #6d4aff)",
+              background: "linear-gradient(90deg, #006e52, #008060)",
             }}
           />
         </div>
@@ -985,7 +985,7 @@ export function PriceModule({
               fontSize: 10.5,
               fontWeight: 700,
               color: VIOLET,
-              background: "rgba(109,74,255,0.1)",
+              background: "rgba(0,128,96,0.1)",
               borderRadius: 99,
               padding: "3px 10px",
             }}
@@ -1017,7 +1017,7 @@ export function PriceModule({
             style={{
               height: "100%",
               width: `${confFill * 88}%`,
-              background: "linear-gradient(90deg, rgba(109,74,255,0.35), #6d4aff)",
+              background: "linear-gradient(90deg, rgba(0,128,96,0.35), #008060)",
             }}
           />
         </div>
@@ -1090,8 +1090,8 @@ export function PublishArea({
             display: "flex",
             alignItems: "center",
             gap: 6,
-            background: "rgba(109,74,255,0.1)",
-            border: "1px solid rgba(109,74,255,0.3)",
+            background: "rgba(0,128,96,0.1)",
+            border: "1px solid rgba(0,128,96,0.3)",
             borderRadius: 99,
             padding: "4px 11px",
             opacity: spring({
@@ -1136,7 +1136,7 @@ export function PublishArea({
               fontSize: 14.5,
               fontWeight: 700,
               transform: `scale(${1 - pressed * 0.04})`,
-              boxShadow: `0 ${8 - pressed * 6}px ${20 - pressed * 12}px -8px rgba(109,74,255,0.55)`,
+              boxShadow: `0 ${8 - pressed * 6}px ${20 - pressed * 12}px -8px rgba(0,128,96,0.55)`,
               boxSizing: "border-box",
             }}
           >
