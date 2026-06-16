@@ -74,6 +74,14 @@ export interface ItemSignal {
   retailPrice?: number;
   /** Free-form resolved product name (e.g. UPC-resolved title) to seed search queries. */
   resolvedName?: string;
+  /**
+   * Key specs the vision step surfaced (e.g. ["i7", "RTX 3060"]). Used ONLY to
+   * NARROW the web-search query so comps cluster on the SAME configuration — an
+   * identification/query aid, never a price source. Without them a multi-config
+   * model (a laptop sold as i5/i7, 1660Ti/RTX) returns scattered comps and the
+   * comp-agreement signal collapses toward zero.
+   */
+  specs?: string[];
 }
 
 /** A comparable price point / citation behind a price recommendation. */

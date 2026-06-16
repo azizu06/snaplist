@@ -308,6 +308,15 @@ export function buildSearchQueries(
   const fullyBranded = signal.brand && signal.model ? branded : "";
   const name = fullyBranded || resolved || branded;
   const category = signal.category?.trim();
+  // Top specs narrow the query so comps cluster on the SAME configuration (a
+  // "Helios 300" ships as i5/i7, 1660Ti/RTX — without specs the comps span configs
+  // and comp-agreement collapses). Cap at 3: more over-narrows and the search returns
+  // nothing; the broad queries below stay as a fallback so coverage is never lost.
+  const specsHint = (signal.specs ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" ");
 
   const queries: string[] = [];
   if (tier === "upc-aided-web" && signal.upc) {
@@ -319,6 +328,11 @@ export function buildSearchQueries(
     );
   }
   if (name) {
+    // Narrowed-by-specs query FIRST (same brand+model AND key specs → comps on the
+    // same configuration), then the broader queries as a coverage fallback.
+    if (specsHint) {
+      queries.push(`${name} ${specsHint} used sold price`);
+    }
     queries.push(`${name} used sold price`);
     queries.push(
       [name, category, "resale listing price"].filter(Boolean).join(" "),

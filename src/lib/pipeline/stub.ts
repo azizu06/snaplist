@@ -55,6 +55,9 @@ export function attributesToSignal(attrs: ExtractedAttributes): ItemSignal {
     category: attrs.category,
     condition: attrs.condition,
     conditionKnown: attrs.condition != null,
+    // Key specs narrow the web-search query so comps cluster on the same
+    // configuration (see ItemSignal.specs) — a query aid, never a price source.
+    specs: attrs.specs,
     // attrs.title is the model-GENERATED display title — the vision prompt
     // produces one even for generic/ambiguous items ("Nike running shoes"),
     // so it is NOT identification and must not enable the branded web tier.
