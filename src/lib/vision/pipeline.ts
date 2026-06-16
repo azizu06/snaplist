@@ -135,9 +135,19 @@ function withSoldFreshness(
 export function createDefaultPricer(
   options: CreateDefaultPricerOptions = {},
 ): (signal: ItemSignal) => Promise<PriceResult> {
+  // One eBay-sold provider instance, reused two ways: as the standalone sold tier
+  // AND as the ISBN tier's sold-comp lookup (#2) — so a book is priced from REAL
+  // used sales (earning the top `isbn` tier) and the shared TTL cache means it's
+  // fetched at most once (the router returns the ISBN result before reaching the
+  // standalone tier). Searching by the exact ISBN pins the precise edition, so the
+  // comps cluster tightly — exactly what the agreement signal rewards.
+  const soldProvider = createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold));
   const router = new PriceRouter([
-    createIsbnPricingProvider(options.isbn),
-    createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold)),
+    createIsbnPricingProvider({
+      ...options.isbn,
+      soldLookup: options.isbn?.soldLookup ?? ((signal) => soldProvider.price(signal)),
+    }),
+    soldProvider,
     createUpcWebPricingProvider(options.webSearch),
     createBrandedWebPricingProvider(options.webSearch),
     createDepreciationPricingProvider(options.depreciation),
@@ -167,6 +177,50 @@ function createDefaultListingGenerator(): (args: {
 /** Does this price cite a real SOLD comp (vs only catalog/asking lookups)? */
 function hasSoldComp(price: PriceResult): boolean {
   return price.sources.some((s) => s.kind === "sold-comp");
+}
+
+/**
+ * Count of DISTINCT source hosts — a proxy for INDEPENDENT corroboration. Five
+ * listings on one site are not five independent signals; five sites agreeing is a
+ * real market consensus. `www.` is folded; an unparseable url falls back to its raw
+ * string so it still counts as its own bucket (never silently merged).
+ */
+function independentSourceCount(price: PriceResult): number {
+  const hosts = new Set<string>();
+  for (const s of price.sources) {
+    try {
+      hosts.add(new URL(s.url).hostname.replace(/^www\./, ""));
+    } catch {
+      hosts.add(s.url);
+    }
+  }
+  return hosts.size;
+}
+
+/**
+ * Minimum INDEPENDENT asking sources for the `web_tight` trust bump. A couple of
+ * agreeing asking prices is weak; a broad consensus across distinct sites is real
+ * evidence — still below completed sales, but enough to be auto-postable.
+ */
+const WEB_TIGHT_MIN_SOURCES = 4;
+
+/**
+ * A no-sold-comp ASKING cluster strong enough to earn the `web_tight` tier (0.80) —
+ * the web-search coverage lever for products with many agreeing LISTINGS but few
+ * completed sales. Requires BOTH: DEMONSTRATED tightness (a REPORTED
+ * `compAgreement >= TIGHT_AGREEMENT_MIN`, never the unreported-null default) AND
+ * broad INDEPENDENT corroboration (>= WEB_TIGHT_MIN_SOURCES distinct sites). It is
+ * deliberately bounded: it ranks below `sold`, and the score math still queues a
+ * borderline-tight cluster — asking consensus earns *more* trust than before, not a
+ * blank check (asking ≠ sold).
+ */
+function stronglyCorroboratedAsking(price: PriceResult): boolean {
+  return (
+    !hasSoldComp(price) &&
+    price.compAgreement != null &&
+    price.compAgreement >= TIGHT_AGREEMENT_MIN &&
+    independentSourceCount(price) >= WEB_TIGHT_MIN_SOURCES
+  );
 }
 
 /**
@@ -206,7 +260,8 @@ function pricingTierToConfidenceTier(
       // stays `web_wide` (real evidence of *a* market, not a defensible tight price).
       return tightAgreement(price) ? "sold" : "web_wide";
     case "upc-aided-web":
-      return "web_wide";
+      // A broadly-corroborated tight asking cluster earns web_tight; otherwise wide.
+      return stronglyCorroboratedAsking(price) ? "web_tight" : "web_wide";
     case "branded-web":
       // #10 round-4 calibration: the `sold` tier needs BOTH sold grounding AND the
       // provider's judged tight agreement. A scattered sold set ($60/$185/$420)
@@ -214,9 +269,10 @@ function pricingTierToConfidenceTier(
       // it stays web_wide and cannot ride the sold-comp label past the
       // autopilot gate. Providers that don't report agreement (e.g. injected
       // test pricers) keep the sold-comp-only behavior.
-      return hasSoldComp(price) && tightAgreement(price)
-        ? "sold"
-        : "web_wide";
+      if (hasSoldComp(price) && tightAgreement(price)) return "sold";
+      // Coverage lever: a tight cluster across many INDEPENDENT asking sources earns
+      // `web_tight` (0.80) — real consensus, still ranked below completed sales.
+      return stronglyCorroboratedAsking(price) ? "web_tight" : "web_wide";
     case "depreciation":
       return "depreciation";
     case "llm-only":
@@ -248,9 +304,11 @@ const ASKING_AGREEMENT_CAP = 0.4;
  */
 function compAgreementFor(price: PriceResult): number {
   if (price.compAgreement != null) {
-    return hasSoldComp(price)
-      ? price.compAgreement
-      : Math.min(price.compAgreement, ASKING_AGREEMENT_CAP);
+    // Sold grounding OR a broadly-corroborated tight asking cluster (web_tight) has
+    // EARNED its agreement — use it uncapped. A thin/under-corroborated asking set
+    // stays capped (sellers agreeing on asking ≠ buyers agreeing on paying).
+    if (hasSoldComp(price) || stronglyCorroboratedAsking(price)) return price.compAgreement;
+    return Math.min(price.compAgreement, ASKING_AGREEMENT_CAP);
   }
   if (hasSoldComp(price)) return 0.7;
   return price.sources.length > 0 ? 0.4 : 0.3;

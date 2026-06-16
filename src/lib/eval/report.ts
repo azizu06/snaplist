@@ -3,10 +3,12 @@ import {
   idAccuracy,
   matchPredictions,
   pricingAccuracy,
+  recommendAutopilotThreshold,
   type CalibrationReport,
   type EvalPair,
   type IdAccuracyReport,
   type PricingReport,
+  type ThresholdRecommendation,
 } from "./metrics";
 import {
   JUDGE_DIMENSIONS,
@@ -47,6 +49,11 @@ export interface EvalReport {
   id: IdAccuracyReport;
   pricing: PricingReport;
   calibration: CalibrationReport;
+  /**
+   * Evidence-driven autopilot gate recommendation (#4) — vs the hand-set 0.75.
+   * Absent when no predictions matched the gold set (nothing to recommend from).
+   */
+  autopilot?: ThresholdRecommendation;
   listing: ListingQualityReport;
 }
 
@@ -125,6 +132,8 @@ export async function runEval(input: RunEvalInput): Promise<EvalReport> {
     id: idAccuracy(pairs),
     pricing: pricingAccuracy(pairs),
     calibration: calibration(pairs),
+    // No matched pairs → no evidence to recommend a gate from; omit honestly.
+    ...(pairs.length > 0 ? { autopilot: recommendAutopilotThreshold(pairs) } : {}),
     listing: await listingQuality(
       pairs,
       input.judge,
@@ -203,6 +212,28 @@ export function formatReport(report: EvalReport): string {
     );
   }
   lines.push(`  ECE: ${num(report.calibration.ece, 3)}`);
+
+  lines.push("");
+  lines.push("Autopilot gate (evidence-driven recommendation)");
+  lines.push("-----------------------------------------------");
+  if (report.autopilot) {
+    const a = report.autopilot;
+    lines.push(
+      `  recommend threshold ${a.threshold.toFixed(2)}` +
+        ` (target precision ${pct(a.targetPrecision)}${a.targetMet ? "" : " — NOT met"})`,
+    );
+    lines.push(
+      `  at that gate: precision ${pct(a.precision)} | recall ${pct(a.recall)}` +
+        ` | F1 ${num(a.f1)} | auto-posts ${a.eligibleCount}/${report.evaluated}`,
+    );
+    if (!a.targetMet) {
+      lines.push(
+        "  ⚠ even the strictest gate misses the precision target — keep autopilot off / fix upstream.",
+      );
+    }
+  } else {
+    lines.push("  n/a (no matched predictions)");
+  }
 
   lines.push("");
   lines.push(`Listing quality (judge: ${report.listing.judge})`);

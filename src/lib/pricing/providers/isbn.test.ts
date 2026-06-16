@@ -5,7 +5,7 @@ import {
   type FetchJson,
 } from "./isbn";
 import { PriceRouter } from "../router";
-import { priceResultSchema, type ItemSignal } from "../types";
+import { priceResultSchema, type ItemSignal, type PriceResult } from "../types";
 
 /**
  * The ISBN provider is tier 1 (`isbn-lookup`) — true structured lookup via
@@ -262,5 +262,122 @@ describe("ISBN provider wired into the PriceRouter (tier 1)", () => {
     const router = new PriceRouter([isbnProvider, fallback]);
     const result = await router.price({ brand: "Sony", model: "WH-1000XM4" });
     expect(result.tier).toBe("llm-only");
+  });
+});
+
+describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
+  /** A fake eBay-sold PriceResult, as the injected `soldLookup` would return. */
+  const soldResult = (overrides: Partial<PriceResult> = {}): PriceResult => ({
+    suggested: 6.5,
+    range: { min: 5, max: 8 },
+    confidence: 0.8,
+    sources: [
+      {
+        url: "https://www.ebay.com/itm/sold-1",
+        title: "Fantastic Mr Fox (used, paperback)",
+        kind: "sold-comp",
+      },
+    ],
+    tier: "ebay-sold",
+    compAgreement: 0.9,
+    ...overrides,
+  });
+
+  it("upgrades to a sold-grounded price (real used sales) while staying the isbn-lookup tier", async () => {
+    const soldLookup = vi.fn(async () => soldResult());
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson(),
+      soldLookup,
+    });
+    const result = await provider.price({ isbn: ISBN });
+
+    expect(result).not.toBeNull();
+    expect(() => priceResultSchema.parse(result)).not.toThrow();
+    // The tier stays isbn-lookup (structured identity) ...
+    expect(result!.tier).toBe("isbn-lookup");
+    // ... but the price now comes from the SOLD comps, not retail × 0.5 (catalog
+    // would be ~3.995; the sold median is 6.5).
+    expect(result!.suggested).toBeCloseTo(6.5, 2);
+    expect(result!.range).toEqual({ min: 5, max: 8 });
+    // It carries the sold-comp tightness for the composite ...
+    expect(result!.compAgreement).toBe(0.9);
+    // ... and cites BOTH the structured identity (isbn-lookup) AND the sold comps —
+    // the sold-comp kind is exactly what the pipeline bridge needs to restore the
+    // top `isbn` (0.95) confidence tier (vision/pipeline.ts: hasSoldComp).
+    expect(result!.sources.some((s) => s.kind === "isbn-lookup")).toBe(true);
+    expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(true);
+  });
+
+  it("calls soldLookup with the signal, but only after a catalog identity resolves", async () => {
+    const soldLookup = vi.fn(async () => soldResult());
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson(),
+      soldLookup,
+    });
+    const signal: ItemSignal = { isbn: ISBN };
+    await provider.price(signal);
+    expect(soldLookup).toHaveBeenCalledTimes(1);
+    expect(soldLookup).toHaveBeenCalledWith(signal);
+  });
+
+  it("falls back to the catalog used-price estimate when NO sold comps are found", async () => {
+    const soldLookup = vi.fn(async () => null);
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson(),
+      soldLookup,
+    });
+    const result = await provider.price({ isbn: ISBN });
+
+    expect(result!.tier).toBe("isbn-lookup");
+    // Catalog heuristic: ~retail (7.99) × USED_PRICE_FRACTION.
+    expect(result!.suggested).toBeCloseTo(7.99 * USED_PRICE_FRACTION, 2);
+    // No sold comp → stays a retail-derived estimate (bridge keeps it sub-gate).
+    expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(false);
+  });
+
+  it("does NOT fetch sold comps when there is no catalog identity (declines; router falls to the eBay-sold tier)", async () => {
+    const soldLookup = vi.fn(async () => soldResult());
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson({
+        openLibrary: null,
+        googleBooks: { totalItems: 0, items: [] },
+      }),
+      soldLookup,
+    });
+    const result = await provider.price({ isbn: ISBN });
+    expect(result).toBeNull();
+    // No identity → don't spend a sold-comp fetch here; the standalone ebay-sold
+    // tier handles the ISBN signal next and prices it as `ebay-sold`.
+    expect(soldLookup).not.toHaveBeenCalled();
+  });
+
+  it("prices from sold comps even when the catalog exposed no retail anchor (identity + sold = top tier)", async () => {
+    // A book with metadata but no list/retail price would normally DECLINE; with
+    // sold comps it now prices from real sales and earns the isbn tier.
+    const soldLookup = vi.fn(async () => soldResult());
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson({
+        googleBooks: {
+          totalItems: 1,
+          items: [
+            {
+              id: "GB_NO_PRICE",
+              volumeInfo: {
+                title: "Fantastic Mr Fox",
+                infoLink: "https://books.google.com/books?id=GB_NO_PRICE",
+                industryIdentifiers: [{ type: "ISBN_13", identifier: ISBN }],
+              },
+              saleInfo: { saleability: "NOT_FOR_SALE" },
+            },
+          ],
+        },
+      }),
+      soldLookup,
+    });
+    const result = await provider.price({ isbn: ISBN });
+    expect(result).not.toBeNull();
+    expect(result!.tier).toBe("isbn-lookup");
+    expect(result!.suggested).toBeCloseTo(6.5, 2);
+    expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(true);
   });
 });
