@@ -26,8 +26,8 @@ import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
 /**
  * Step 6 · Answer / Buyer Q&A (portrait mobile) — the trust story. A buyer
  * question lands, SnapList drafts a reply from the item's real details and
- * STOPS before the shutter-timing claim (a hands-on check no photo verifies);
- * the seller fills that part in, then approves & sends. Same copy + honest
+ * STOPS before the charger/battery-life claim (a hands-on check no photo
+ * verifies); the seller fills that part in, then approves & sends. Same copy + honest
  * grounding as the desktop BuyerQA (Acer Predator). See
  * [[snaplist-honest-grounded-copy]] and [[snaplist-mobile-polish-pr70]].
  *

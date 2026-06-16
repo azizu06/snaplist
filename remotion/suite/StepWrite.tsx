@@ -32,7 +32,7 @@ import {
  * the marketplace tabs: eBay (search-friendly title + item details +
  * description), Facebook Marketplace (casual, local) and Mercari (short
  * title, hashtags, shipping). Both tab switches are cursor-accurate clicks.
- * Product: Acer Predator Helios 300 gaming laptop (demo/acer-hero.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 3 · acer-predator-a3-closed.jpg) —
  * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-write public/demo/steps/write.mp4 --crf 26 --muted
@@ -74,8 +74,8 @@ const MC_SHIP_AT = 514;
 const READY_AT = 530;
 
 // Copy is grounded in what the photos/attributes actually show: model + included
-// items are visible, condition is cosmetic. No "fully working / shutter fires at
-// every speed / meter responds" — those are hands-on facts a photo can't verify,
+// items are visible, condition is cosmetic. No "fully working / battery lasts X
+// hours / charger included" — those are hands-on facts a photo can't verify,
 // so the copy leaves them to the seller (see the success line) rather than the
 // system guaranteeing them.
 const EBAY_TITLE = "Acer Predator Helios 300 Gaming Laptop i7 RTX 144Hz 16GB 512GB SSD";
@@ -163,10 +163,11 @@ function ItemCard() {
           borderRadius: 10,
           overflow: "hidden",
           border: `1px solid ${LINE}`,
+          background: "#cfcdc4",
         }}
       >
         <Img
-          src={staticFile("demo/acer-hero.jpg")}
+          src={staticFile("demo/authentic/acer-predator-a3-closed.jpg")}
           style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>

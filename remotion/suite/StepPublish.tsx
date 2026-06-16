@@ -32,7 +32,7 @@ import {
  * autopilot gate confirms this one cleared the bar (91% sure, priced from real
  * sales), then a cursor-accurate Publish click → posting state → live
  * confirmation card with the listing id.
- * Product: Acer Predator Helios 300 with 50mm lens (demo/acer-hero.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 1 · acer-predator-a1-open.jpg) —
  * the same item the whole how-it-works pipeline follows. Its price came from
  * real recent sales, so the confidence is high and consistent with step 3.
  *
@@ -87,7 +87,7 @@ export const PUBLISH_CLICKS: ClickSpec[] = [
 ];
 
 const CHECKS = [
-  "3 photos · cover photo set",
+  "4 photos · cover photo set",
   "Title fits eBay's 80-character limit",
   "Item details complete",
   "Price set · $550 (range $480–$620)",
@@ -111,12 +111,13 @@ function PhotoCard() {
           borderRadius: 14,
           overflow: "hidden",
           border: `1px solid ${LINE}`,
+          background: "#cfcdc4",
           opacity: enter,
         }}
       >
         <Img
-          src={staticFile("demo/acer-hero.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a1-open.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 44%" }}
         />
         <div
           style={{
@@ -131,7 +132,7 @@ function PhotoCard() {
             fontWeight: 600,
           }}
         >
-          cover photo · 1 of 3
+          cover photo · 1 of 4
         </div>
       </div>
       <div style={{ position: "absolute", left: PHOTO.x, top: 428, display: "flex", gap: 8 }}>
@@ -377,8 +378,8 @@ function ConfirmCard() {
         }}
       >
         <Img
-          src={staticFile("demo/acer-hero.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a1-open.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 44%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>

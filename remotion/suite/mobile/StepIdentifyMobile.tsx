@@ -146,10 +146,10 @@ function IdentifyMobileAct() {
             borderRadius: 20,
             overflow: "hidden",
             border: `1.5px solid ${LINE}`,
-            background: "#000",
+            background: "#cfcdc4",
           }}
         >
-          <Img src={staticFile(IMG)} style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 48%" }} />
+          <Img src={staticFile(IMG)} style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "50% 50%" }} />
           {scanning ? (
             <>
               <div

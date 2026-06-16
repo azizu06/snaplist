@@ -35,7 +35,7 @@ import {
  * the suggested price on a real axis, the why-trust-it panel fills in, then
  * the seller applies the suggestion (cursor-accurate click). Plain seller
  * language only (ui-r6) — "recent sales", never "comps".
- * Product: Acer Predator Helios 300 gaming laptop (demo/acer-hero.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 2 · acer-predator-a2-night.jpg) —
  * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-price public/demo/steps/price.mp4 --crf 26 --muted
@@ -176,8 +176,8 @@ function ItemCard() {
         }}
       >
         <Img
-          src={staticFile("demo/acer-hero.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a2-night.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 45%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>

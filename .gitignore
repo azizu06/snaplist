@@ -53,3 +53,4 @@ asset-intake/
 
 # local render/review scratch
 .review-shots/
+.verify-shots/

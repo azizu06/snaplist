@@ -35,7 +35,7 @@ import {
  * the seller reviews, makes one edit, and approves before anything sends.
  * Three cursor-accurate clicks: open the conversation, focus the draft,
  * approve & send. Joined the how-it-works pipeline as step 6 (ui-r6).
- * Product: Acer Predator Helios 300 with 50mm lens (demo/acer-hero.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 2 · acer-predator-a2-night.jpg) —
  * the same item the whole how-it-works pipeline follows, now fielding a buyer
  * question. (The logged-in dashboard inbox uses a DIFFERENT item; see
  * InboxQA / public/demo/inbox-qa.mp4.)
@@ -225,7 +225,7 @@ function InboxList() {
                 textOverflow: "ellipsis",
               }}
             >
-              Does the shutter fire at all speeds, and…
+              Does it come with the charger, and how&apos;s the…
             </div>
           </div>
           {answered ? (
@@ -332,8 +332,8 @@ function ThreadHeader() {
         }}
       >
         <Img
-          src={staticFile("demo/acer-hero.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a2-night.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 45%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>

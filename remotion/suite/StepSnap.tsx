@@ -21,10 +21,12 @@ import { FAINT, GREEN, INK, LINE, SURFACE, VIOLET, center, type ClickSpec, type 
  *   2. a real OS drag-drop: the cursor picks up a Finder-style file card on
  *      the desk and drops it on the dropzone (press + release both asserted),
  *   3. a click on the “+ Add” tile for a third angle.
- * Ends on “3 photos · ready to identify”. Product: Acer Predator Helios 300
- * (demo/acer-hero.jpg) — three crops play as angles. This is the SAME item
- * carried through every how-it-works step (snap → identify → price → write →
- * publish → answer) so the pipeline tells one coherent story.
+ * Ends on “4 photos · ready to identify”. Product: Acer Predator Helios 300 —
+ * the rail shows the FOUR REAL angle photos we actually have of it (open
+ * straight-on, open 3/4 with the screen on, closed lid, boot screen), not crops
+ * of one image. This is the SAME item carried through every how-it-works step
+ * (snap → identify → price → write → publish → answer) so the pipeline tells one
+ * coherent story; the later steps each reuse a DIFFERENT one of these angles.
  *
  * Render: npx remotion render remotion/index.ts step-snap public/demo/steps/snap.mp4 --crf 26 --muted
  */
@@ -44,16 +46,19 @@ const slotRect = (i: number): Rect => ({ x: 64 + i * 176, y: SLOT_Y, w: SLOT_W, 
 const PHONE: Rect = { x: 940, y: 56, w: 230, h: 470 };
 const FILE: Rect = { x: 952, y: 566, w: 206, h: 64 };
 
-const IMG = "demo/acer-hero.jpg";
-/** three framings of the verified Acer Predator photo standing in for angles:
- *  whole laptop, keyboard + spec stickers, screen with the "PREDATOR" bezel */
-const ANGLES = ["50% 42%", "50% 76%", "50% 22%"];
-/** rail-thumbnail zoom framing so the laptop fills each tile */
-const THUMB_VIEW = [
-  { origin: "50% 42%", zoom: 1.25 },
-  { origin: "50% 78%", zoom: 1.7 },
-  { origin: "50% 24%", zoom: 1.6 },
+/** The FOUR REAL verified angles of the Acer Predator (1080² each). The capture
+ *  rail shows all four; later steps each reuse a distinct one. */
+const ANGLE_IMGS = [
+  "demo/authentic/acer-predator-a1-open.jpg", // 1 · open, straight-on (the cover)
+  "demo/authentic/acer-predator-a2-night.jpg", // 2 · open 3/4, lock screen on
+  "demo/authentic/acer-predator-a3-closed.jpg", // 3 · closed lid, Predator logo
+  "demo/authentic/acer-predator-a4-boot.jpg", // 4 · boot screen
 ];
+const COVER_IMG = ANGLE_IMGS[0];
+/** Banner-crop framing for the wide cover preview — keeps the keyboard + the
+ *  "PREDATOR" bezel in view. Rail tiles are near-square so they need no special
+ *  framing (each holds a whole, distinct photo). */
+const COVER_POS = "50% 44%";
 
 /* ---------- choreography ---------- */
 
@@ -155,12 +160,12 @@ function PhoneFrame() {
         }}
       >
         <Img
-          src={staticFile(IMG)}
+          src={staticFile(COVER_IMG)}
           style={{
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            objectPosition: "50% 30%",
+            objectPosition: "50% 38%",
             opacity: 0.94,
           }}
         />
@@ -244,8 +249,8 @@ function FlyingCapture() {
       }}
     >
       <Img
-        src={staticFile(IMG)}
-        style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: ANGLES[0] }}
+        src={staticFile(COVER_IMG)}
+        style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: COVER_POS }}
       />
     </div>
   );
@@ -278,14 +283,12 @@ function RailSlot({ index, at }: { index: number; at: number }) {
       }}
     >
       <Img
-        src={staticFile(IMG)}
+        src={staticFile(ANGLE_IMGS[index])}
         style={{
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          objectPosition: ANGLES[index],
-          transform: `scale(${THUMB_VIEW[index].zoom})`,
-          transformOrigin: THUMB_VIEW[index].origin,
+          objectPosition: "50% 45%",
         }}
       />
       <div
@@ -311,8 +314,10 @@ function RailSlot({ index, at }: { index: number; at: number }) {
   );
 }
 
-/** the “+ Add” tile, sitting after the last landed photo */
+/** the “+ Add” tile, sitting after the last landed photo. Hidden once all four
+ *  slots are filled (the rail is full). */
 function AddTile({ count }: { count: number }) {
+  if (count >= 4) return null;
   const r = slotRect(Math.min(count, 3));
   return (
     <div
@@ -376,8 +381,8 @@ function FileCard({ x, y, ghost }: { x: number; y: number; ghost?: boolean }) {
         }}
       >
         <Img
-          src={staticFile(IMG)}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: ANGLES[1] }}
+          src={staticFile(ANGLE_IMGS[1])}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 45%" }}
         />
       </div>
       <div style={{ minWidth: 0 }}>
@@ -411,7 +416,9 @@ function SnapAct() {
     durationInFrames: 26,
   });
 
-  const photoCount = frame >= SLOT3_AT ? 3 : frame >= SLOT2_AT ? 2 : frame >= SLOT1_AT ? 1 : 0;
+  // the “+ Add” / browse brings in the last two angles together, so the count
+  // steps 0 → 1 (phone) → 2 (drag) → 4 (browse imports angles 3 + 4).
+  const photoCount = frame >= SLOT3_AT ? 4 : frame >= SLOT2_AT ? 2 : frame >= SLOT1_AT ? 1 : 0;
   const hoverDrop = dragging && frame >= ARRIVE_DROP - 10;
 
   const fadeOut = interpolate(frame, [STEP_SNAP_LEN - SEAM, STEP_SNAP_LEN - 1], [1, 0], {
@@ -431,10 +438,10 @@ function SnapAct() {
       <Shell win={WIN_SNAP} badge="STEP 1 · SNAP">
         <PhotoFrame
           rect={DROP}
-          src={staticFile(IMG)}
+          src={staticFile(COVER_IMG)}
           fileName="IMG_5712.jpg"
           photoIn={mainIn}
-          objectPosition={ANGLES[0]}
+          objectPosition={COVER_POS}
           emptyLabel="Add photos"
           emptySub="drag & drop, browse, or capture on your phone"
         />
@@ -473,10 +480,11 @@ function SnapAct() {
           </div>
         ) : null}
 
-        {/* thumbnail rail */}
+        {/* thumbnail rail — all four real angles */}
         <RailSlot index={0} at={SLOT1_AT} />
         <RailSlot index={1} at={SLOT2_AT} />
         <RailSlot index={2} at={SLOT3_AT} />
+        <RailSlot index={3} at={SLOT3_AT} />
         <AddTile count={photoCount} />
 
         {/* counter / ready line */}
@@ -494,7 +502,7 @@ function SnapAct() {
             <>
               <CheckIcon />
               <span style={{ fontSize: 14, fontWeight: 700, color: GREEN }}>
-                3 photos · ready to identify
+                4 photos · ready to identify
               </span>
             </>
           ) : photoCount > 0 ? (
@@ -533,7 +541,8 @@ function SnapAct() {
         ) : null}
 
         <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT1_AT + 6} hold={48} icon="phone" text="Imported from iPhone" />
-        <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT2_AT + 8} hold={44} text="Photo added · 2 angles" />
+        <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT2_AT + 8} hold={40} text="Photo added · 2 angles" />
+        <Toast x={DROP.x + 18} y={DROP.y + 14} at={SLOT3_AT + 6} hold={44} text="2 photos added · 4 angles total" />
       </Shell>
 
       {/* desk: phone + file card */}

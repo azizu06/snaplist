@@ -35,10 +35,10 @@ import {
  * drag-drop, so the in-clip UI is large and readable. /tour swaps to the
  * `-mobile` clip under 768px (see SeamlessThemeVideo / DemoClip).
  *
- * Step 1 · Snap — tap the shutter to add photos of the Acer Predator one by one
- * (capture flash → photo lands in the cover + rail), ending on
- * "3 photos · ready to identify". Same item + same demo asset as the desktop
- * step so the pipeline still tells one coherent story.
+ * Step 1 · Snap — tap to add photos of the Acer Predator (capture flash → photo
+ * lands in the cover + rail), ending on "4 photos · ready to identify". The rail
+ * holds the FOUR REAL angle photos (open straight-on, open 3/4, closed lid, boot
+ * screen) — not crops of one image — matching the desktop step.
  *
  * Render:
  *   npx remotion render remotion/index.ts step-snap-mobile public/demo/steps/snap-mobile.mp4 --crf 26 --muted
@@ -93,14 +93,16 @@ const slotRect = (i: number): Rect => ({
 });
 const BTN: Rect = { x: PAD, y: 560, w: M_LOGICAL_W - PAD * 2, h: 70 };
 
-const IMG = "demo/acer-hero.jpg";
-/** three framings of the verified Acer Predator photo standing in for angles */
-const ANGLES = ["50% 42%", "50% 76%", "50% 22%"];
-const THUMB = [
-  { origin: "50% 42%", zoom: 1.25 },
-  { origin: "50% 78%", zoom: 1.7 },
-  { origin: "50% 24%", zoom: 1.6 },
+/** The FOUR REAL verified angles of the Acer Predator (1080² each). The rail
+ *  shows all four; the cover preview uses the first (straight-on). */
+const ANGLE_IMGS = [
+  "demo/authentic/acer-predator-a1-open.jpg", // 1 · open, straight-on (cover)
+  "demo/authentic/acer-predator-a2-night.jpg", // 2 · open 3/4, lock screen on
+  "demo/authentic/acer-predator-a3-closed.jpg", // 3 · closed lid, Predator logo
+  "demo/authentic/acer-predator-a4-boot.jpg", // 4 · boot screen
 ];
+const COVER_IMG = ANGLE_IMGS[0];
+const COVER_POS = "50% 44%";
 
 /* ---------- choreography ---------- */
 const TAP_COVER = 40;
@@ -166,14 +168,12 @@ function Thumb({ index, at }: { index: number; at: number }) {
       }}
     >
       <Img
-        src={staticFile(IMG)}
+        src={staticFile(ANGLE_IMGS[index])}
         style={{
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          objectPosition: ANGLES[index],
-          transform: `scale(${THUMB[index].zoom})`,
-          transformOrigin: THUMB[index].origin,
+          objectPosition: "50% 45%",
         }}
       />
       <div
@@ -239,7 +239,8 @@ function SnapMobileAct() {
     pressAt(frame, TAP_BTN),
   );
 
-  const count = frame >= PHOTO3_AT ? 3 : frame >= PHOTO2_AT ? 2 : frame >= PHOTO1_AT ? 1 : 0;
+  // the last tap (browse) brings in two angles together: 0 → 1 → 2 → 4.
+  const count = frame >= PHOTO3_AT ? 4 : frame >= PHOTO2_AT ? 2 : frame >= PHOTO1_AT ? 1 : 0;
 
   // capture flash on each photo add
   const flashAt = (at: number) =>
@@ -326,12 +327,12 @@ function SnapMobileAct() {
         >
           {count > 0 ? (
             <Img
-              src={staticFile(IMG)}
+              src={staticFile(COVER_IMG)}
               style={{
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
-                objectPosition: ANGLES[0],
+                objectPosition: COVER_POS,
                 opacity: coverIn,
               }}
             />
@@ -364,10 +365,11 @@ function SnapMobileAct() {
           ) : null}
         </div>
 
-        {/* thumbnail rail */}
+        {/* thumbnail rail — all four real angles */}
         <Thumb index={0} at={PHOTO1_AT} />
         <Thumb index={1} at={PHOTO2_AT} />
         <Thumb index={2} at={PHOTO3_AT} />
+        <Thumb index={3} at={PHOTO3_AT} />
         <AddTile count={count} />
 
         {/* counter / ready line */}
@@ -378,7 +380,7 @@ function SnapMobileAct() {
             <>
               <CheckIcon size={17} />
               <span style={{ fontSize: 17, fontWeight: 700, color: GREEN }}>
-                3 photos · ready to identify
+                4 photos · ready to identify
               </span>
             </>
           ) : (

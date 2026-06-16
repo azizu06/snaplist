@@ -20,7 +20,10 @@ import {
 } from "@/components/marketing/marketplace-loop";
 import { Reveal } from "@/components/marketing/reveal";
 import { ScanShowcase } from "@/components/marketing/scan-showcase";
-import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
+import {
+  DEMO_PRODUCTS_BY_SLUG,
+  DEMO_SURFACE_ASSIGNMENTS,
+} from "@/lib/demo-products";
 
 /**
  * Landing (v3 pass): the live scanning showcase IS the hero — a scan beam
@@ -45,12 +48,6 @@ const ROTATING_CATEGORIES = [
   "headphones",
   "game consoles",
   "watches",
-] as const;
-
-const TRUST_POINTS = [
-  "Free while in beta",
-  "No credit card required",
-  "Your eBay account, your sales",
 ] as const;
 
 const STEPS = [
@@ -85,7 +82,8 @@ const STEPS = [
  * is the short teaser; /tour expands each stage into its full video step.
  * ------------------------------------------------------------------------- */
 
-const STEP_PRODUCT = DEMO_PRODUCTS_BY_SLUG.rollerskates;
+const STEP_PRODUCT =
+  DEMO_PRODUCTS_BY_SLUG[DEMO_SURFACE_ASSIGNMENTS["landing-three-moves"][0]];
 
 /** The media frame every step shares: a tall photo region + a fixed-height
  *  detail panel. Both dimensions are identical across all three cards, so the
@@ -101,19 +99,22 @@ function StepFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The item photo region — same item, same fixed height, SAME crop in every
- *  frame (owner: keep it uniform/symmetric, give the photo room to breathe).
- *  Overlays (the viewfinder) come in via children. */
+/** The item photo region — same item, same fixed height in every frame
+ *  (owner: keep it uniform/symmetric, give the photo room to breathe). Uses
+ *  object-contain on the panel ground so the WHOLE item shows, never a zoomed
+ *  crop (owner: "the image should convey the whole item" — same rule as the
+ *  carousel). Height is fixed (not aspect-square) so the floating step chevron
+ *  can stay pixel-anchored to the photo's vertical center. Overlays (the
+ *  viewfinder) come in via children. */
 function StepPhoto({ children }: { children?: React.ReactNode }) {
   return (
-    <div className="relative h-56 w-full shrink-0 overflow-hidden">
+    <div className="relative h-72 w-full shrink-0 overflow-hidden bg-night-2">
       <Image
         src={STEP_PRODUCT.image}
         alt=""
         fill
         sizes="(max-width: 768px) 100vw, 440px"
-        className="object-cover"
-        style={{ objectPosition: "50% 44%" }}
+        className="object-contain"
       />
       {children}
     </div>
@@ -187,11 +188,11 @@ function PriceFrame() {
         <div>
           <div className="relative h-1.5 rounded-full bg-line">
             <span className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-60" />
-            <span className="absolute left-[52%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(109,74,255,0.22)]" />
+            <span className="absolute left-[42%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(109,74,255,0.22)]" />
           </div>
           <div className="nums mt-1.5 flex justify-between text-[11px] font-medium text-flash-faint">
-            <span>$35</span>
-            <span>$60</span>
+            <span>$170</span>
+            <span>$240</span>
           </div>
         </div>
       </StepPanel>
@@ -356,8 +357,8 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
 
 /* ---------------------------------------------------------------------------
  * "One photo, three storefronts" — the single instance of the motif on the
- * whole site. One verified catalog product (the Nintendo Switch — reserved
- * for this section, exclusive to it) rendered three platform-fluent
+ * whole site. One verified catalog product (the Xbox 360 Kinect bundle —
+ * reserved for this section, exclusive to it) rendered three platform-fluent
  * ways. Round 5 (owner): the photo goes full-width at its natural wide
  * aspect so the WHOLE item is visible (the old 400px column cropped it
  * to a sliver), and the three cards share one identical structural skeleton
@@ -369,7 +370,8 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
  * photo carries no glyphs.
  * ------------------------------------------------------------------------- */
 
-const STOREFRONT_PRODUCT = DEMO_PRODUCTS_BY_SLUG.console;
+const STOREFRONT_PRODUCT =
+  DEMO_PRODUCTS_BY_SLUG[DEMO_SURFACE_ASSIGNMENTS["landing-storefronts"][0]];
 
 const STOREFRONT_CARD =
   "group/sf flex flex-col rounded-2xl border border-line bg-panel p-6 shadow-card transition-all duration-200 hover:-translate-y-1 hover:border-iris/40 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0";
@@ -536,27 +538,6 @@ export default function Landing() {
                 See how it works
               </Link>
             </div>
-            {/* Trust strip — glass surface so it stays legible over the
-                gradient slab in both themes (it used to dissolve into it). */}
-            <p className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 rounded-full border border-white/55 bg-white/70 px-5 py-2 text-[14px] font-semibold text-flash shadow-xs backdrop-blur dark:border-white/10 dark:bg-white/10">
-              {TRUST_POINTS.map((point) => (
-                <span key={point} className="flex items-center gap-1.5">
-                  <svg
-                    viewBox="0 0 24 24"
-                    aria-hidden
-                    className="size-3 text-iris"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                  {point}
-                </span>
-              ))}
-            </p>
           </div>
 
           {/* The headline, performed live: authentic seller photos cycle under
@@ -624,13 +605,13 @@ export default function Landing() {
               </SpotlightCard>
               {/* chevron floating in the gap — a glowing "next step" marker.
                   Centered in the gap-12 column (24px) and on the photo region
-                  (card p-4 16px + photo h-56 224px / 2 = 128px). The glow pulse
+                  (card p-4 16px + photo h-72 288px / 2 = 160px). The glow pulse
                   is staggered per chevron so it reads left→right. Desktop only. */}
               {i < STEPS.length - 1 && (
                 <span
                   aria-hidden
                   style={{ animationDelay: `${i * 0.9}s` }}
-                  className="step-chevron absolute right-[-24px] top-[128px] z-[2] hidden size-9 -translate-y-1/2 translate-x-1/2 place-items-center rounded-full border border-line bg-panel text-iris md:grid"
+                  className="step-chevron absolute right-[-24px] top-[160px] z-[2] hidden size-9 -translate-y-1/2 translate-x-1/2 place-items-center rounded-full border border-line bg-panel text-iris md:grid"
                 >
                   <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m9 18 6-6-6-6" />
@@ -706,16 +687,20 @@ export default function Landing() {
             </p>
           </Reveal>
           <Reveal delay={0.1} className="relative mt-12">
-            {/* the one photo — full panel width at a wide aspect so the whole
-                item is visible edge to edge; hover zooms the IMAGE inside
-                its clipped frame (never the caption) + an iris glow ring */}
-            <figure className="group overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
-              <div className="relative aspect-[16/10] overflow-hidden sm:aspect-[2.4/1]">
+            {/* the one photo — a centered frame whose aspect EXACTLY matches
+                the cropped master (1080×863), so the real photo fills it edge
+                to edge: no zoom-crop (owner: the old 2.4:1 panorama sliced it
+                down to the middle) and no fill bands (owner: the master had
+                brown padding baked in — now cropped to the bare photo). Capped
+                width keeps it tidy on desktop, full-width on mobile. Hover still
+                zooms the IMAGE inside its clipped frame (never the caption). */}
+            <figure className="group mx-auto max-w-[560px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
+              <div className="relative aspect-[1080/863] overflow-hidden">
                 <Image
                   src={STOREFRONT_PRODUCT.image}
                   alt={STOREFRONT_PRODUCT.alt}
                   fill
-                  sizes="(max-width: 1152px) 100vw, 1024px"
+                  sizes="(max-width: 560px) 100vw, 560px"
                   className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
                 />
                 <span className="absolute left-3.5 top-3.5 rounded-md bg-flash/80 px-2.5 py-1 text-[11.5px] font-semibold text-white backdrop-blur dark:bg-night/80 dark:text-flash">
@@ -740,11 +725,11 @@ export default function Landing() {
               <StorefrontListing
                 platform="eBay"
                 delivery="Publishes directly"
-                title="Nintendo Switch Console, Neon Blue & Red Joy-Cons, Dock Included"
+                title="Xbox 360 Console with Kinect Sensor, 2 Controllers & Game"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $175.00
+                      $95.00
                     </span>
                     <span className="rounded-md border border-line bg-night-2 px-2.5 py-1 text-[13.5px] font-medium text-flash-dim">
                       Pre-owned · Good
@@ -764,11 +749,11 @@ export default function Landing() {
               <StorefrontListing
                 platform="Facebook"
                 delivery="Copy-paste pack"
-                title="Nintendo Switch, neon Joy-Cons, comes with dock"
+                title="Xbox 360 with Kinect, 2 controllers, comes with a game"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $175
+                      $95
                     </span>
                     <span className="text-[14px] font-medium text-flash-dim">
                       Good condition
@@ -792,21 +777,21 @@ export default function Landing() {
               <StorefrontListing
                 platform="Mercari"
                 delivery="Copy-paste pack"
-                title="Nintendo Switch + dock, neon Joy-Cons"
+                title="Xbox 360 Kinect bundle, 2 controllers + game"
                 price={
                   <>
                     <span className="nums text-[15px] font-medium text-flash-faint line-through">
-                      $200
+                      $110
                     </span>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $175
+                      $95
                     </span>
                   </>
                 }
-                detail="Smart pricing keeps it competitive, never below your $150 floor"
+                detail="Smart pricing keeps it competitive, never below your $80 floor"
                 footer={
                   <p className="text-[14px] font-medium text-iris">
-                    #nintendoswitch&ensp;#switch&ensp;#gaming
+                    #xbox360&ensp;#kinect&ensp;#gaming
                   </p>
                 }
               />

@@ -312,19 +312,22 @@ function IdentifyAct() {
           scanStart={SCAN_START}
           scanEnd={SCAN_END}
           objectPosition="50% 50%"
+          objectFit="contain"
         >
           {/* boxes sit over the Acer Predator's printed marks: the "PREDATOR"
-              wordmark on the screen bezel and the "Predator Helios 300" spec
+              wordmark on the screen bezel and the "PREDATOR HELIOS 300" spec
               sticker on the lower-right deck. Coords are local to the 460×345
-              photo frame (acer-hero.jpg is 1600×1200 = 4:3, same aspect →
-              object-fit:cover does not crop, so 1px = 1px·460/1600 of source).
-              Tuned against an actual render still. */}
-          <OcrBox at={110} box={{ x: 148, y: 84, w: 166, h: 28 }} label="brand · “Predator”" labelSide="above" />
+              photo frame. acer-hero.jpg is 1600×1200 = 4:3, same aspect as the
+              frame → object-fit:contain fills it exactly with no letterbox, so
+              1px frame = 1600/460 ≈ 3.48px source. The whole laptop now shows
+              (it's centered on its own room background). Tuned against an actual
+              render still — re-measure here if the hero crop changes. */}
+          <OcrBox at={110} box={{ x: 194, y: 158, w: 62, h: 18 }} label="brand · “Predator”" labelSide="above" />
           <OcrBox
             at={135}
-            box={{ x: 250, y: 295, w: 130, h: 26 }}
+            box={{ x: 272, y: 247, w: 84, h: 17 }}
             label="model · “Helios 300”"
-            labelSide="above"
+            labelSide="below"
           />
         </PhotoFrame>
         <StatusLine
