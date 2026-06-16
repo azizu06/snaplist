@@ -5,19 +5,18 @@ import { motion, useReducedMotion } from "motion/react";
 import GlareHover from "@/components/bits/GlareHover";
 import { StatusBadge } from "@/components/ui/badge";
 import { Banner } from "@/components/ui/banner";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PendingButton } from "@/components/ui/button";
 import { buttonClasses } from "@/components/ui/button-styles";
 import { lifecycleLabel } from "@/lib/ui/status";
 
 /**
- * Publish — Shopify-style detail surface (issue #40 round 2): back-chevron
- * header with the listing title and an inline status chip, an animated
- * Draft → Queued → Live stepper, then white cards on the gray canvas —
- * Listing preview (field-styled blocks like the review page), and the
- * Publish / What's-next card. Pure presentation (client component only for
- * the motion polish) — the page (and the dev preview harness) feed the data,
- * and the publish server action passes through untouched.
+ * Publish — Shopify-style detail surface (issue #40; ui-lifecycle-revamp). The
+ * back-chevron header + animated Draft → Queued → Live stepper are unchanged;
+ * the listing preview now LEADS WITH THE ITEM PHOTO (a framed buyer's-eye view
+ * with a "Buyer preview" / "Live on eBay" overlay) so the card looks like what
+ * a buyer sees, not a wall of text. The live state celebrates: a green-rimmed
+ * preview + pulsing Live badge. Pure presentation (client only for the motion);
+ * the page feeds the data and the publish server action passes through.
  */
 
 export interface PublishData {
@@ -31,7 +30,19 @@ export interface PublishData {
   published: boolean;
   failed: boolean;
   ebayListingId: string | null;
+  /** Signed thumbnail URL for the buyer-preview card, or null. */
+  photoUrl: string | null;
   actionError: string | null;
+}
+
+/** Dash-accented small-caps eyebrow — shared lifecycle-screen section label. */
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-faint">
+      <span aria-hidden className="h-[2px] w-6 rounded-full bg-accent" />
+      {children}
+    </span>
+  );
 }
 
 /* ---- status stepper: Draft → Queued → Live -------------------------------- */
@@ -165,7 +176,7 @@ export function PublishView({
         <Link
           href={`/review/${data.itemId}`}
           aria-label="Back to review"
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:text-fg"
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:text-fg sm:size-9"
         >
           <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m15 18-6-6 6-6" />
@@ -209,31 +220,57 @@ export function PublishView({
         </Banner>
       ) : null}
 
-      {/* react-bits GlareHover (app pass): violet glare sweep on hover over
-          the preview of what buyers will see. */}
-      <GlareHover>
-        <Card>
-          <CardHeader
-            title="Listing preview"
-            aside={
-              <span className="text-[13.5px] uppercase tracking-wide text-faint">
+      {/* ---- buyer-preview card: leads with the item photo (GlareHover sweep) ---- */}
+      <GlareHover borderRadius="1rem">
+        <figure
+          className={`group overflow-hidden rounded-2xl border bg-surface shadow-xs ${
+            data.published ? "border-success-border" : "border-border"
+          }`}
+        >
+          {data.photoUrl ? (
+            <div className="relative aspect-[16/9] overflow-hidden bg-surface-2">
+              {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL */}
+              <img
+                src={data.photoUrl}
+                alt={data.title}
+                className="size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+              />
+              {data.published ? (
+                <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-success-solid px-2.5 py-1 text-[12px] font-semibold text-white shadow-sm">
+                  <span aria-hidden className="relative flex size-1.5">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-white/80 motion-safe:animate-ping" />
+                    <span className="relative inline-flex size-1.5 rounded-full bg-white" />
+                  </span>
+                  Live on eBay
+                </span>
+              ) : (
+                <span className="absolute left-3 top-3 rounded-full bg-[#131e3a]/80 px-2.5 py-1 text-[11.5px] font-semibold text-white backdrop-blur">
+                  Buyer preview
+                </span>
+              )}
+            </div>
+          ) : null}
+          <figcaption className="p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-2">
+              <Eyebrow>Listing preview</Eyebrow>
+              <span className="text-[12px] uppercase tracking-wide text-faint">
                 {data.platform}
               </span>
-            }
-          />
-          <CardBody>
-            <p className="text-[15px] font-semibold text-fg-strong">{data.title}</p>
-            <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-muted">
+            </div>
+            <p className="mt-3 text-[16px] font-semibold leading-snug text-fg-strong break-words">
+              {data.title}
+            </p>
+            <p className="mt-2 whitespace-pre-wrap break-words text-[14.5px] leading-relaxed text-muted">
               {data.description}
             </p>
-          </CardBody>
-        </Card>
+          </figcaption>
+        </figure>
       </GlareHover>
 
       {data.published ? (
-        <Card>
-          <CardHeader title="What’s next" />
-          <CardBody className="flex flex-col gap-2.5">
+        <section className="rounded-2xl border border-border bg-surface p-4 shadow-xs sm:p-5">
+          <Eyebrow>What’s next</Eyebrow>
+          <div className="mt-3 flex flex-col gap-2.5">
             <Link
               href={`/export/${data.itemId}`}
               className={buttonClasses("secondary")}
@@ -243,12 +280,12 @@ export function PublishView({
             <Link href="/dashboard" className={buttonClasses("ghost")}>
               Back to dashboard
             </Link>
-          </CardBody>
-        </Card>
+          </div>
+        </section>
       ) : (
-        <Card>
-          <CardHeader title="Publish" />
-          <CardBody className="flex flex-col gap-3">
+        <section className="rounded-2xl border border-border bg-surface p-4 shadow-xs sm:p-5">
+          <Eyebrow>Publish</Eyebrow>
+          <div className="mt-3 flex flex-col gap-3">
             {data.failed ? (
               <Banner variant="error" title="The last attempt failed">
                 eBay rejected or errored on this listing. The draft is untouched, so
@@ -269,8 +306,8 @@ export function PublishView({
                 {data.failed ? "Retry publish" : "Publish to eBay"}
               </PendingButton>
             </form>
-          </CardBody>
-        </Card>
+          </div>
+        </section>
       )}
     </main>
   );

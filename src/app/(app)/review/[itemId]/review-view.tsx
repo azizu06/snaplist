@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import FadeContent from "@/components/bits/FadeContent";
+import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import SpotlightCard from "@/components/bits/SpotlightCard";
 import { StatusBadge } from "@/components/ui/badge";
 import { ConfidenceGauge } from "@/components/ui/confidence-gauge";
@@ -16,16 +16,24 @@ import {
 } from "@/lib/ui/status";
 
 /**
- * Review — Shopify product-detail layout (issue #40 round 2), made EDITABLE in
- * the UI pass: every AI-filled field (title, description, category, condition,
- * price) renders as a real input pre-filled with the suggestion and wearing a
- * small "AI" sparkle badge that disappears the moment the seller edits — the
- * pipeline proposes, the seller disposes. One form spans both columns; a
- * Shopify-style contextual save bar (navy, sticky) appears when anything is
- * dirty and submits through the page's server action.
+ * Review — "the item is the hero" rework (ui-lifecycle-revamp, round 2). Owner
+ * feedback drove a real restructure for cohesion + balance + mobile:
+ *  - ONE accent (brand violet). The green "Identified" chip is gone; status is
+ *    said once (the banner), confidence once (the gauge), and the five purple
+ *    "AI-suggested" pills are demoted to a single faint sparkle on each field.
+ *  - The top bar is decluttered: title gets its own line on mobile, actions
+ *    drop to a second row; no redundant header status chip.
+ *  - The photo uses the SAME swipeable PhotoCarousel as the upload sheet, now
+ *    tap-to-zoom in the hero.
+ *  - Facts live in ONE place: identity name in the hero, every attribute
+ *    (brand/model/category/condition/upc/isbn) only in Item details — no
+ *    duplicate spec pills. Price + the pricing intelligence live together in
+ *    the hero command column.
+ *  - Layout is a full-width hero then full-width stacked cards (Your listing →
+ *    Item details), so there's no short/tall column mismatch; everything
+ *    collapses cleanly to one column on mobile.
  *
- * Client component, but still pure presentation over serializable props — the
- * page (and the dev preview harness) feed the data + the action.
+ * Client component, pure presentation over serializable props + the action.
  */
 
 export interface ReviewData {
@@ -57,40 +65,48 @@ export interface ReviewData {
 }
 
 /** App-card chrome for the react-bits SpotlightCard (vs its marketing default). */
-const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
+const APP_CARD_CHROME = "rounded-2xl border border-border bg-surface shadow-xs";
 
 const INPUT_CLASSES =
   "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20";
+
+const READONLY_FIELD =
+  "rounded-lg border border-border bg-surface-2/50 px-2.5 py-1.5 text-[14px] text-fg break-words";
+
+/** Human labels for read-only attribute keys that aren't plain words — acronyms
+ *  must render UPPERCASE (not "Upc"/"Isbn"). Other keys fall back to capitalize. */
+const ATTR_LABELS: Record<string, string> = { upc: "UPC", isbn: "ISBN" };
 
 type FieldKey = "title" | "description" | "category" | "condition" | "price";
 
 function SparkleIcon({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className}
-      fill="currentColor"
-      aria-hidden
-    >
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
       <path d="M12 2.5c.3 0 .57.2.66.49l1.4 4.6a3 3 0 0 0 1.99 1.99l4.6 1.4a.69.69 0 0 1 0 1.32l-4.6 1.4a3 3 0 0 0-1.99 1.99l-1.4 4.6a.69.69 0 0 1-1.32 0l-1.4-4.6a3 3 0 0 0-1.99-1.99l-4.6-1.4a.69.69 0 0 1 0-1.32l4.6-1.4a3 3 0 0 0 1.99-1.99l1.4-4.6c.09-.29.36-.49.66-.49Z" />
     </svg>
   );
 }
 
 /**
- * The editability affordance: a tiny violet sparkle pill on fields still
- * showing the pipeline's suggestion. It vanishes on first edit — the field
- * was never locked, the badge only marks provenance.
+ * Provenance affordance, demoted from a filled pill to a single faint violet
+ * sparkle (owner: too many competing colors). Marks a field still showing the
+ * pipeline's suggestion; vanishes on first edit. The field was never locked.
  */
-function AiBadge({ visible }: { visible: boolean }) {
+function AiSparkle({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
-    <span
-      title="Suggested by SnapList; edit freely"
-      className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-semibold leading-4 text-accent-soft-fg"
-    >
-      <SparkleIcon className="size-2.5" />
-      AI-suggested
+    <span title="Suggested by SnapList; edit freely" className="text-accent/70">
+      <SparkleIcon className="size-3" />
+    </span>
+  );
+}
+
+/** Dash-accented small-caps section eyebrow — the shared lifecycle label. */
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-faint">
+      <span aria-hidden className="h-[2px] w-6 rounded-full bg-accent" />
+      {children}
     </span>
   );
 }
@@ -109,16 +125,47 @@ function FieldLabel({
   return (
     <span className="mb-1 flex items-center justify-between gap-2">
       <span className="flex items-center gap-1.5">
-        <label
-          htmlFor={htmlFor}
-          className="text-[14px] font-medium text-fg"
-        >
+        <label htmlFor={htmlFor} className="text-[14px] font-medium text-fg">
           {label}
         </label>
-        <AiBadge visible={ai} />
+        <AiSparkle visible={ai} />
       </span>
       {aside}
     </span>
+  );
+}
+
+/** Visual price range — the landing page's PriceFrame treatment: a gradient
+ *  track with the suggested price as a marker, low/high endpoints labeled. */
+function RangeBar({
+  low,
+  high,
+  suggested,
+}: {
+  low: number | null | undefined;
+  high: number | null | undefined;
+  suggested: number | null;
+}) {
+  if (low == null || high == null || high <= low) return null;
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+  const at = suggested != null ? clamp01((suggested - low) / (high - low)) : null;
+  return (
+    <div>
+      <div className="relative h-1.5 rounded-full bg-surface-3">
+        <span className="absolute inset-y-0 left-[6%] right-[6%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-70" />
+        {at != null ? (
+          <span
+            aria-hidden
+            className="absolute top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-surface bg-accent shadow-[0_0_0_3px_rgba(109,74,255,0.22)]"
+            style={{ left: `${6 + at * 88}%` }}
+          />
+        ) : null}
+      </div>
+      <div className="mt-1.5 flex justify-between text-[12px] font-medium text-faint" data-nums>
+        <span>${low}</span>
+        <span>${high}</span>
+      </div>
+    </div>
   );
 }
 
@@ -146,6 +193,7 @@ export function ReviewView({
 
   const [fields, setFields] = useState(initial);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
+  const [photoIdx, setPhotoIdx] = useState(0);
 
   const setField = (key: FieldKey, value: string) => {
     setFields((prev) => ({ ...prev, [key]: value }));
@@ -161,8 +209,6 @@ export function ReviewView({
   );
 
   // "Still the AI's value" per field: untouched AND the suggestion existed.
-  // The price badge additionally requires that no seller override is already
-  // persisted — an overridden price is the seller's number, not the AI's.
   const ai = (key: FieldKey) =>
     !touched[key] &&
     initial[key] !== "" &&
@@ -171,45 +217,66 @@ export function ReviewView({
   const statusChip = lifecycleLabel(data.listing?.status ?? null);
   const confidenceChip = confidenceLabel(data.confidence);
   const tier = tierLabel(data.tier);
+  // Confidence is shown ONCE (the gauge carries the number); strip any "(NN%)"
+  // from the label so we never print "Low confidence 35%" beside a 35% gauge.
+  const confidenceWord = confidenceChip
+    ? confidenceChip.label.replace(/\s*\(\d+%\)\s*/, "").trim()
+    : null;
 
   const readOnlyAttrs = data.attrs.filter(
-    (a) => a.key !== "category" && a.key !== "condition",
+    (a) =>
+      a.key !== "category" &&
+      a.key !== "condition" &&
+      // UPC/ISBN are specialized barcodes — only surface them when actually
+      // detected, so items without one (e.g. a laptop) don't show confusing
+      // empty "Not detected" identifier rows. Brand/model always show.
+      !(["upc", "isbn"].includes(a.key) && !a.value),
   );
 
+  const heroLabel = data.identification?.label || fields.title || "Untitled item";
+  // Header carries a SHORT, stable identity (brand + model) — NOT the long,
+  // keyword-stuffed eBay title, which got ellipsized and looked unclean. The
+  // full descriptive name still lives in the hero h2; the SEO title stays in
+  // the editable Title field below.
+  const shortName =
+    [attr("brand"), attr("model")].filter(Boolean).join(" ").trim() ||
+    data.identification?.label ||
+    "Review listing";
+  const uncertain =
+    data.identification != null && !data.identification.confident;
+
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
-      {/* ---- header: back + title + chip, actions right (Shopify) ---- */}
-      <header className="flex flex-wrap items-center gap-3">
-        <Link
-          href="/dashboard"
-          aria-label="Back to listings"
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:text-fg"
-        >
-          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
-        </Link>
-        <h1 className="min-w-0 flex-1 truncate font-display text-[22px] font-bold tracking-tight text-fg-strong">
-          {(fields.title || data.identification?.label) ?? "Review listing"}
-        </h1>
-        {statusChip ? (
-          <StatusBadge label={statusChip.label} tone={statusChip.tone} dot={false} />
-        ) : null}
-        <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+    <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+      {/* ---- header: title on its own line; actions drop below (mobile-first) ---- */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link
+            href="/dashboard"
+            aria-label="Back to listings"
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:text-fg sm:size-9"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </Link>
+          <h1 className="min-w-0 flex-1 truncate font-display text-[20px] font-bold tracking-tight text-fg-strong sm:text-[22px]">
+            {shortName}
+          </h1>
+        </div>
+        <div className="flex items-center gap-2 sm:ml-auto sm:shrink-0">
           <Link
             href={`/export/${data.itemId}`}
-            className="inline-flex items-center rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
+            className="inline-flex flex-1 items-center justify-center rounded-lg border border-border-strong bg-surface px-3 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2 sm:flex-none sm:py-1.5"
           >
             Export pack
           </Link>
           {data.listing ? (
             <Link
               href={`/listings/${data.listing.id}`}
-              className="inline-flex items-center rounded-lg bg-primary px-3.5 py-1.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
+              className="group inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover sm:flex-none sm:py-1.5"
             >
-              {data.listing.status === "published"
-                ? "View on eBay"
-                : "Publish to eBay"}
+              {data.listing.status === "published" ? "View on eBay" : "Publish to eBay"}
+              <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
             </Link>
           ) : null}
         </div>
@@ -225,294 +292,236 @@ export function ReviewView({
           {data.banner.detail}
         </Banner>
       ) : null}
-      {data.identification && !data.identification.confident ? (
+      {uncertain ? (
         <Banner variant="warning" title="Is this identification right?">
-          {data.identification.reason ??
+          {data.identification?.reason ??
             "We couldn't identify this with certainty."}{" "}
-          Check the details and price before publishing. The research is only
-          as good as the identification.
+          Check the details and price before publishing. The research is only as
+          good as the identification.
         </Banner>
       ) : null}
 
-      {/* ---- ONE form spans both columns: every AI field saves together ---- */}
+      {/* ---- HERO: carousel + identity/price command column ---- */}
+      <section className="grid gap-5 rounded-2xl border border-border bg-surface p-4 shadow-xs sm:grid-cols-[minmax(0,360px)_minmax(0,1fr)] sm:p-5">
+        {data.photoUrls.length > 0 ? (
+          <PhotoCarousel
+            previews={data.photoUrls}
+            current={photoIdx}
+            onSetCurrent={setPhotoIdx}
+            aspectClassName="aspect-[4/5]"
+            adaptiveFrame
+            className="sm:self-center"
+            enableZoom
+          />
+        ) : (
+          <div className="flex aspect-[4/5] w-full items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-2 text-faint">
+            <svg viewBox="0 0 24 24" className="size-9" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="9" cy="9" r="2" />
+              <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
+            </svg>
+          </div>
+        )}
+
+        {/* identity + price command column — centered as one cluster so the
+            slack against a taller portrait image reads as symmetric breathing
+            room top/bottom, not a hole in the middle (owner feedback). */}
+        <div className="flex min-w-0 flex-col justify-center gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <Eyebrow>What we found</Eyebrow>
+            {/* status said ONCE: a chip only when there's no banner explaining it */}
+            {!data.banner && statusChip ? (
+              <StatusBadge label={statusChip.label} tone={statusChip.tone} dot={false} />
+            ) : null}
+          </div>
+
+          <h2 className="font-display text-[22px] font-bold leading-[1.14] tracking-tight text-fg-strong break-words sm:text-[26px]">
+            {heroLabel}
+          </h2>
+
+          {uncertain && data.identification!.candidates.length > 0 ? (
+            <p className="text-[13.5px] text-muted">
+              <span className="text-faint">Possible matches: </span>
+              {data.identification!.candidates.join(", ")}
+            </p>
+          ) : null}
+
+          {/* price command center — the ONE home for price + confidence */}
+          <div className="flex flex-col gap-3 border-t border-border pt-4">
+            <div>
+              <FieldLabel label="Your price" htmlFor="review-price" ai={ai("price")} />
+              <div className="flex max-w-[210px] items-center rounded-lg border border-border-strong bg-surface transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
+                <span className="pl-3 text-[19px] text-muted">$</span>
+                <input
+                  id="review-price"
+                  name="price"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={fields.price}
+                  onChange={(e) => setField("price", e.target.value)}
+                  placeholder={data.suggested != null ? String(data.suggested) : "0.00"}
+                  aria-label="Price (USD)"
+                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[22px] font-bold text-fg outline-none"
+                  data-nums
+                />
+              </div>
+              {data.override != null && data.suggested != null ? (
+                <p className="mt-1.5 text-[13px] text-faint" data-nums>
+                  AI suggested ${data.suggested}. Clear the field and save to use it again.
+                </p>
+              ) : null}
+            </div>
+
+            {/* intelligence: gauge (the one number) + suggested/range + bar */}
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface-2/50 p-3.5">
+              <div className="flex items-center gap-3">
+                <ConfidenceGauge value={data.confidence} size={92} />
+                <div className="grid flex-1 grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-[12px] text-muted">Suggested</p>
+                    <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
+                      {data.suggested != null ? `$${data.suggested}` : "–"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[12px] text-muted">Typical range</p>
+                    <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
+                      {data.range?.low != null && data.range?.high != null
+                        ? `$${data.range.low}–$${data.range.high}`
+                        : "–"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <RangeBar low={data.range?.low} high={data.range?.high} suggested={data.suggested} />
+              {confidenceWord ? (
+                <p className="text-[13px] text-muted">
+                  <span className="font-semibold text-fg">{confidenceWord}</span>
+                  {confidenceChip?.detail ? ` — ${confidenceChip.detail}` : ""}
+                  {tier ? ` · ${tier}` : ""}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ---- ONE form spans the stacked cards: every AI field saves together ---- */}
       <form action={saveAction} className="contents">
         <input type="hidden" name="itemId" value={data.itemId} />
         {data.listing ? (
           <input type="hidden" name="listingId" value={data.listing.id} />
         ) : null}
 
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_310px]">
-          {/* ===== main column ===== */}
-          <div className="flex min-w-0 flex-col gap-4">
-            {/* Listing card: title + description as REAL fields */}
-            <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
-              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">
-                Listing
-              </h2>
-              {data.listing ? (
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <FieldLabel
-                      label="Title"
-                      htmlFor="review-title"
-                      ai={ai("title")}
-                      aside={
-                        <span
-                          className={`text-[12px] ${
-                            fields.title.length > EBAY_TITLE_MAX
-                              ? "font-semibold text-danger-soft-fg"
-                              : "text-faint"
-                          }`}
-                          data-nums
-                        >
-                          {fields.title.length}/{EBAY_TITLE_MAX}
-                        </span>
-                      }
-                    />
-                    <input
-                      id="review-title"
-                      name="title"
-                      type="text"
-                      value={fields.title}
-                      maxLength={EBAY_TITLE_MAX}
-                      onChange={(e) => setField("title", e.target.value)}
-                      className={INPUT_CLASSES}
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel
-                      label="Description"
-                      htmlFor="review-description"
-                      ai={ai("description")}
-                    />
-                    <textarea
-                      id="review-description"
-                      name="description"
-                      value={fields.description}
-                      rows={7}
-                      onChange={(e) => setField("description", e.target.value)}
-                      className={`${INPUT_CLASSES} min-h-32 resize-y leading-relaxed`}
-                    />
-                  </div>
-                  <p className="text-[13.5px] text-faint">
-                    Drafted by SnapList from your verified item details
-                    {data.listing.platform ? ` · ${data.listing.platform} format` : ""}
-                    . Edit anything; your words always win.
-                  </p>
-                </div>
-              ) : (
-                <p className="text-[15px] text-muted">No listing generated yet.</p>
-              )}
-            </section>
-
-            {/* Media card */}
-            <section className="rounded-xl border border-border bg-surface p-4 shadow-xs sm:p-5">
-              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">Media</h2>
-              {data.photoUrls.length > 0 ? (
-                /* react-bits FadeContent: one soft blur-up entrance for the
-                   photo grid (reduced-motion safe inside the component). */
-                <FadeContent blur duration={500} className="flex flex-wrap gap-2">
-                  {data.photoUrls.map((url, i) => (
-                    // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URLs
-                    <img
-                      key={url}
-                      src={url}
-                      alt={`Item photo ${i + 1}`}
-                      className={
-                        i === 0
-                          ? "size-36 rounded-lg border border-border object-cover"
-                          : "size-[4.25rem] rounded-lg border border-border object-cover"
-                      }
-                    />
-                  ))}
-                </FadeContent>
-              ) : (
-                <p className="text-[15px] text-muted">No photos.</p>
-              )}
-            </section>
-
-            {/* Pricing card — react-bits SpotlightCard wearing app chrome: a
-                soft violet spotlight follows the cursor over the money card. */}
-            <SpotlightCard
-              chromeClassName={APP_CARD_CHROME}
-              spotlightColor="rgba(109, 74, 255, 0.09)"
-              className="p-4 sm:p-5"
-            >
-              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">Pricing</h2>
-              <div className="flex flex-col gap-4">
-                <div className="max-w-56">
-                  <FieldLabel
-                    label="Price"
-                    htmlFor="review-price"
-                    ai={ai("price")}
-                  />
-                  <div className="flex items-center rounded-lg border border-border-strong bg-surface transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/20">
-                    <span className="pl-3 text-[15px] text-muted">$</span>
-                    <input
-                      id="review-price"
-                      name="price"
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      value={fields.price}
-                      onChange={(e) => setField("price", e.target.value)}
-                      placeholder={
-                        data.suggested != null ? String(data.suggested) : "0.00"
-                      }
-                      aria-label="Price (USD)"
-                      className="w-full rounded-lg bg-transparent px-2 py-2 text-[15px] text-fg outline-none"
+        {/* Your listing — title + description */}
+        <SpotlightCard
+          chromeClassName={APP_CARD_CHROME}
+          spotlightColor="rgba(109, 74, 255, 0.07)"
+          className="p-4 sm:p-5"
+        >
+          <Eyebrow>Your listing</Eyebrow>
+          {data.listing ? (
+            <div className="mt-3 flex flex-col gap-4">
+              <div>
+                <FieldLabel
+                  label="Title"
+                  htmlFor="review-title"
+                  ai={ai("title")}
+                  aside={
+                    <span
+                      className={`text-[12px] ${
+                        fields.title.length > EBAY_TITLE_MAX
+                          ? "font-semibold text-danger-soft-fg"
+                          : "text-faint"
+                      }`}
                       data-nums
-                    />
-                  </div>
-                  {data.override != null && data.suggested != null ? (
-                    <p className="mt-1.5 text-[13.5px] text-faint" data-nums>
-                      AI suggested ${data.suggested}. Clear the field and save
-                      to use it again.
-                    </p>
-                  ) : null}
-                </div>
-
-                {/* Pricing intelligence — animated gauge + Suggested/Range
-                    (the marketing site's promise, kept in the product) */}
-                <div className="flex items-center gap-4 rounded-lg border border-border bg-surface-2/60 px-4 py-3">
-                  <ConfidenceGauge value={data.confidence} size={120} />
-                  <div className="grid flex-1 grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-[13.5px] text-muted">Suggested</p>
-                      <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
-                        {data.suggested != null ? `$${data.suggested}` : "–"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[13.5px] text-muted">Typical range</p>
-                      <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
-                        {data.range?.low != null && data.range?.high != null
-                          ? `$${data.range.low}–$${data.range.high}`
-                          : "–"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {confidenceChip ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge
-                      label={confidenceChip.label}
-                      tone={confidenceChip.tone}
-                      dot={false}
-                    />
-                    <span className="text-[13.5px] text-muted">
-                      {confidenceChip.detail}
-                      {tier ? ` · based on: ${tier}` : ""}
+                    >
+                      {fields.title.length}/{EBAY_TITLE_MAX}
                     </span>
-                  </div>
-                ) : null}
+                  }
+                />
+                <input
+                  id="review-title"
+                  name="title"
+                  type="text"
+                  value={fields.title}
+                  maxLength={EBAY_TITLE_MAX}
+                  onChange={(e) => setField("title", e.target.value)}
+                  className={INPUT_CLASSES}
+                />
               </div>
-            </SpotlightCard>
-          </div>
+              <div>
+                <FieldLabel label="Description" htmlFor="review-description" ai={ai("description")} />
+                <textarea
+                  id="review-description"
+                  name="description"
+                  value={fields.description}
+                  rows={7}
+                  onChange={(e) => setField("description", e.target.value)}
+                  className={`${INPUT_CLASSES} min-h-32 resize-y leading-relaxed`}
+                />
+              </div>
+              <p className="text-[13.5px] text-faint">
+                Drafted by SnapList from your verified item details
+                {data.listing.platform ? ` · ${data.listing.platform} format` : ""}. Fields
+                marked with a <SparkleIcon className="inline size-3 text-accent/70" /> are
+                AI-suggested — edit anything; your words always win.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-[15px] text-muted">No listing generated yet.</p>
+          )}
+        </SpotlightCard>
 
-          {/* ===== sidebar (SpotlightCard hover treatment on all three) ===== */}
-          <div className="flex flex-col gap-4">
-            {/* Status card */}
-            <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
-              <h2 className="mb-2 text-[14px] font-semibold text-fg-strong">Status</h2>
-              {statusChip ? (
-                <StatusBadge label={statusChip.label} tone={statusChip.tone} dot={false} />
-              ) : (
-                <p className="text-[15px] text-muted">No sale listing yet.</p>
-              )}
-              {data.banner ? (
-                <p className="mt-2 text-[13.5px] leading-relaxed text-muted">
-                  {data.banner.detail}
+        {/* Item details — the ONE place for every attribute (2-col grid) */}
+        <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4 sm:p-5">
+          <Eyebrow>Item details</Eyebrow>
+          <div className="mt-3 grid gap-x-4 gap-y-3.5 sm:grid-cols-2">
+            <div>
+              <FieldLabel label="Category" htmlFor="review-category" ai={ai("category")} />
+              <input
+                id="review-category"
+                name="category"
+                type="text"
+                value={fields.category}
+                placeholder="e.g. Consumer electronics"
+                onChange={(e) => setField("category", e.target.value)}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="Condition" htmlFor="review-condition" ai={ai("condition")} />
+              <input
+                id="review-condition"
+                name="condition"
+                type="text"
+                value={fields.condition}
+                placeholder="e.g. Good, light wear"
+                onChange={(e) => setField("condition", e.target.value)}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            {readOnlyAttrs.map(({ key, value }) => (
+              <div key={key}>
+                <p
+                  className={`mb-1 text-[14px] font-medium text-fg ${
+                    ATTR_LABELS[key] ? "" : "capitalize"
+                  }`}
+                >
+                  {ATTR_LABELS[key] ?? key}
                 </p>
-              ) : null}
-            </SpotlightCard>
-
-            {/* Identification card (the "Insights" slot) */}
-            {data.identification ? (
-              <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h2 className="text-[14px] font-semibold text-fg-strong">
-                    Identification
-                  </h2>
-                  {data.identification.confident ? (
-                    <StatusBadge label="Identified" tone="success" dot={false} />
-                  ) : (
-                    <StatusBadge label="Needs confirmation" tone="warning" dot={false} />
-                  )}
-                </div>
-                <p className="text-[15px] font-medium text-fg">{data.identification.label}</p>
-                {data.identification.candidates.length > 0 ? (
-                  <p className="mt-1.5 text-[13.5px] text-muted">
-                    Possible matches: {data.identification.candidates.join(", ")}
-                  </p>
-                ) : (
-                  <p className="mt-1.5 text-[13.5px] text-faint">
-                    {(data.identification.evidence * 100).toFixed(0)}% of strong
-                    identifiers resolved
-                  </p>
-                )}
-              </SpotlightCard>
-            ) : null}
-
-            {/* Item details card — category + condition are REAL fields too */}
-            <SpotlightCard chromeClassName={APP_CARD_CHROME} className="p-4">
-              <h2 className="mb-3 text-[14px] font-semibold text-fg-strong">
-                Item details
-              </h2>
-              <div className="flex flex-col gap-3.5">
-                <div>
-                  <FieldLabel
-                    label="Category"
-                    htmlFor="review-category"
-                    ai={ai("category")}
-                  />
-                  <input
-                    id="review-category"
-                    name="category"
-                    type="text"
-                    value={fields.category}
-                    placeholder="e.g. Consumer electronics"
-                    onChange={(e) => setField("category", e.target.value)}
-                    className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[14px]`}
-                  />
-                </div>
-                <div>
-                  <FieldLabel
-                    label="Condition"
-                    htmlFor="review-condition"
-                    ai={ai("condition")}
-                  />
-                  <input
-                    id="review-condition"
-                    name="condition"
-                    type="text"
-                    value={fields.condition}
-                    placeholder="e.g. Good, light wear"
-                    onChange={(e) => setField("condition", e.target.value)}
-                    className={`${INPUT_CLASSES} px-2.5 py-1.5 text-[14px]`}
-                  />
-                </div>
-                <dl className="flex flex-col gap-2.5 border-t border-border pt-3">
-                  {readOnlyAttrs.map(({ key, value }) => (
-                    <div key={key}>
-                      <dt className="text-[13.5px] capitalize text-muted">{key}</dt>
-                      <dd className="mt-0.5 rounded-lg border border-border bg-surface-2/50 px-2.5 py-1.5 text-[14px] text-fg">
-                        {value ?? <span className="text-faint">Not detected</span>}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+                <p className={READONLY_FIELD}>
+                  {value ?? <span className="text-faint">Not detected</span>}
+                </p>
               </div>
-            </SpotlightCard>
+            ))}
           </div>
-        </div>
+        </SpotlightCard>
 
         {/* ---- contextual save bar (Shopify): appears only when dirty ---- */}
         {dirty ? (
           <div className="pointer-events-none sticky bottom-24 z-30 sm:bottom-5">
-            {/* Pinned ink navy (bg-fg-strong flips near-white in dark, which
-                would break the white inner text); dark gets a raised navy. */}
             <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#131e3a] px-3 py-2 text-white shadow-lg dark:border-white/15 dark:bg-[#20294e]">
               <span className="flex items-center gap-2 pl-1 text-[14px] font-medium text-white/85">
                 <span aria-hidden className="size-1.5 rounded-full bg-warning" />

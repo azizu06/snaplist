@@ -53,12 +53,12 @@ function Thumb({ url }: { url: string | null }) {
       src={url}
       alt=""
       aria-hidden
-      className="size-10 shrink-0 rounded-lg border border-border object-cover"
+      className="size-11 shrink-0 rounded-lg border border-border object-cover"
     />
   ) : (
     <span
       aria-hidden
-      className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-faint"
+      className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-faint"
     >
       <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.6">
         <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -198,6 +198,16 @@ function DashboardEmpty() {
   );
 }
 
+/** Dash-accented small-caps eyebrow — shared lifecycle-screen section label. */
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-faint">
+      <span aria-hidden className="h-[2px] w-6 rounded-full bg-accent" />
+      {children}
+    </span>
+  );
+}
+
 // `counts` stays in the props API for the page/preview callers, but the
 // stat-tab cards compute per-filter counts from `rows` directly.
 export function DashboardView({
@@ -224,17 +234,38 @@ export function DashboardView({
   // Cap the stagger so long tables don't crawl in.
   const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
 
+  // Portfolio signal for the header summary — what the whole shop is worth.
+  const totalValue = rows.reduce((sum, r) => sum + (r.price ?? 0), 0);
+
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-10 pt-8 sm:px-6 sm:pt-24">
-      {/* ---- page header (Stripe: 24px bold title; primary lives in topbar) ---- */}
-      <header className="flex items-center justify-between gap-3">
-        <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
-          Listings
-        </h1>
-        <span className="text-[14px] text-muted" data-nums>
-          <CountUp to={rows.length} duration={0.7} /> item
-          {rows.length === 1 ? "" : "s"}
-        </span>
+      {/* ---- page header: eyebrow + title, with a portfolio-value summary ---- */}
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <Eyebrow>Your shop</Eyebrow>
+          <h1 className="mt-1.5 font-display text-[24px] font-bold tracking-tight text-fg-strong">
+            Listings
+          </h1>
+        </div>
+        {rows.length > 0 ? (
+          <div className="flex items-center gap-4 rounded-xl border border-border bg-surface px-4 py-2 shadow-xs">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.12em] text-faint">Items</p>
+              <p className="font-display text-[18px] font-bold text-fg-strong" data-nums>
+                <CountUp to={rows.length} duration={0.7} />
+              </p>
+            </div>
+            <span aria-hidden className="h-7 w-px bg-border" />
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.12em] text-faint">
+                Total value
+              </p>
+              <p className="font-display text-[18px] font-bold text-fg-strong" data-nums>
+                {PRICE_FMT.format(totalValue)}
+              </p>
+            </div>
+          </div>
+        ) : null}
       </header>
 
       {rows.length === 0 ? (
@@ -291,7 +322,7 @@ export function DashboardView({
                     type="button"
                     onClick={() => setQuery("")}
                     aria-label="Clear filter"
-                    className="shrink-0 rounded text-faint transition-colors hover:text-fg"
+                    className="-mr-1.5 flex size-9 shrink-0 items-center justify-center rounded text-faint transition-colors hover:text-fg"
                   >
                     <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                       <path d="M18 6 6 18M6 6l12 12" />
@@ -362,8 +393,8 @@ export function DashboardView({
                               <StatusBadge label={chip.label} tone={chip.tone} dot={false} />
                             ) : null}
                           </td>
-                          <td className="px-2 py-2 text-right text-[14px] text-fg" data-nums>
-                            {row.price != null ? PRICE_FMT.format(row.price) : "–"}
+                          <td className="px-2 py-2 text-right text-[14px] font-semibold text-fg-strong" data-nums>
+                            {row.price != null ? PRICE_FMT.format(row.price) : <span className="font-normal text-faint">–</span>}
                           </td>
                           {/* suppressHydrationWarning: relative dates are
                               computed in the server's TZ during SSR and the
