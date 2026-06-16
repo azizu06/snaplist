@@ -26,14 +26,13 @@ import {
  * Landing (v3 pass): the live scanning showcase IS the hero — a scan beam
  * sweeps authentic seller photos and flips an output panel to each item's
  * real title, price, and condition, full-width under the headline. Atmosphere
- * comes from the Prism shader behind the headline (the brand made literal) and
- * an iridescent violet field behind the final CTA; persistent product proof
+ * comes from the green .prism-gradient slab behind the headline and an
+ * iridescent green/teal field behind the final CTA; persistent product proof
  * comes from the finished-listings marquee and the MagicBento features grid.
  *
- * Affordance system (purple-pill fatigue fix): ONE glass pill in the hero
- * (status badge), dash-accented small-caps eyebrows on sections, numbered
+ * Affordance system: dash-accented small-caps eyebrows on sections, numbered
  * steps, duotone status-tinted icon chips on bento cards, and status-tinted
- * confidence chips on listing cards. The identical violet pill never repeats.
+ * confidence chips on listing cards — no repeated pill chip.
  */
 
 const ROTATING_CATEGORIES = [
@@ -520,9 +519,12 @@ export default function Landing() {
                   </Link>
                 </ClickSpark>
               </Magnet>
+              {/* Secondary = clean outline/ghost (owner): border + transparent
+                  fill, with only a subtle ink-tint wash on hover — not a second
+                  solid button competing with the primary. Keeps its ▶ play icon. */}
               <Link
                 href="/tour"
-                className="group inline-flex items-center gap-2 rounded-full border border-flash/20 bg-white/80 px-6 py-3 text-[16px] font-semibold text-flash shadow-xs backdrop-blur transition-all duration-200 hover:border-flash/35 hover:bg-white hover:shadow-sm dark:border-iris/25 dark:bg-panel-2 dark:shadow-sm dark:hover:border-iris/45 dark:hover:bg-panel-2"
+                className="group inline-flex items-center gap-2 rounded-full border border-flash/25 bg-transparent px-6 py-3 text-[16px] font-semibold text-flash transition-all duration-200 hover:border-flash/45 hover:bg-flash/[0.06] active:bg-flash/10 dark:border-iris/30 dark:hover:border-iris/55 dark:hover:bg-iris/10"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -660,7 +662,7 @@ export default function Landing() {
       {/* ====== 4 · one photo, three storefronts — the motif's ONE home ====== */}
       <section className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8">
         <div className="relative overflow-hidden rounded-3xl border border-line bg-night-2 px-6 py-14 sm:px-10 sm:py-16">
-          {/* faint violet pool so the framed panel reads intentional */}
+          {/* faint green pool so the framed panel reads intentional */}
           <div
             aria-hidden
             className="pointer-events-none absolute -right-24 -top-24 size-80 rounded-full bg-iris/10 blur-3xl"

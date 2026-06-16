@@ -6,12 +6,13 @@ import { Logo } from "@/components/logo";
 import { ThemeIconToggle } from "@/components/theme-toggle";
 
 const LINKS = [
-  // Explicit Home tab (owner): the logo links home, but not everyone knows
-  // that — a labelled tab makes it discoverable.
+  // Exactly three sections (owner): Home, Guide, Pricing. The logo links home,
+  // but a labelled tab makes it discoverable. "Guide" points at /tour (the
+  // route stays /tour; only the label changed). About was removed — its FAQ
+  // content moved onto the Guide page.
   { href: "/", label: "Home" },
-  { href: "/tour", label: "Tour" },
+  { href: "/tour", label: "Guide" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/about", label: "About" },
 ] as const;
 
 /**
@@ -90,10 +91,9 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           {signedIn ? (
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="inline-flex items-center rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Open app
-              <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
             </Link>
           ) : (
             <>
@@ -159,7 +159,7 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
               onClick={() => setOpen(false)}
               className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
             >
-              {signedIn ? "Open app →" : "Start selling →"}
+              {signedIn ? "Open app" : "Start selling →"}
             </Link>
           </div>
         </div>

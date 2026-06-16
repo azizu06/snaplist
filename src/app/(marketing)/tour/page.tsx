@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Reveal } from "@/components/marketing/reveal";
 import { DemoClip } from "@/components/marketing/demo-clip";
-import { WaterfallExplorer } from "@/components/marketing/waterfall-explorer";
+import { FaqAccordion } from "@/components/marketing/faq-accordion";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
 import { Eyebrow, LensRings } from "@/components/marketing/visuals";
 
@@ -21,10 +21,10 @@ export const metadata: Metadata = {
  * ("After it's live") in the identical alternating text/video format. Section
  * order: hero (headline only) → step-intro header → SIX step clips
  * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4, 1920×1080 loops via DemoClip,
- * alternating sides) → pricing waterfall LAST → CTA. The WaterfallExplorer
- * mirrors the real PricingProvider router tiers — keep in sync. The step
- * clips embed their own assigned items (see DEMO_SURFACE_ASSIGNMENTS). The
- * live scanning showcase now headlines the landing hero instead.
+ * alternating sides) → seller FAQ LAST → CTA. The FAQ (#faq anchor) was
+ * relocated here when the About page was retired. The step clips embed their
+ * own assigned items (see DEMO_SURFACE_ASSIGNMENTS). The live scanning
+ * showcase now headlines the landing hero instead.
  */
 
 const STEPS = [
@@ -101,6 +101,39 @@ const STEPS = [
     body: "Buyer questions, pre-answered. Incoming messages land in a live inbox with a reply already drafted from the item's real details, like edition, condition, and what's included. You approve, edit, or rewrite, and nothing sends without you.",
     poster: "Drafted from the item's real details, sent by you.",
     label: "Demo clip: a buyer question arrives and a reply drafted from the item's details awaits approval",
+  },
+] as const;
+
+/**
+ * Seller FAQ — relocated from the retired About page. Replaces the old
+ * "Where the price comes from" waterfall section: the six step clips above
+ * already walk the pipeline, so this page closes on the questions sellers
+ * actually ask (marketplaces, accuracy, privacy, autopilot, cost, eBay).
+ */
+const FAQ = [
+  {
+    q: "Which marketplaces does SnapList support?",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape anything.",
+  },
+  {
+    q: "How accurate is the pricing?",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest, an exact lookup with no guessing. Branded items are priced from what similar ones recently sold for, which is solid. Everyday items get a rougher estimate marked down from the new price, and we label it as less certain. Every price is yours to edit.",
+  },
+  {
+    q: "Is my data private?",
+    a: "Yes. Your photos are private, and only you can reach them. Your account's data is walled off from everyone else's, and your eBay connection is stored encrypted. If you ask eBay to remove your account, that request is honored end to end.",
+  },
+  {
+    q: "Does autopilot post things without asking me?",
+    a: "Only if you turn it on, and only for items it's genuinely sure about. That confidence comes from how the price was found, how closely recent sales agree, and how well it pinned down the item, never the AI grading its own work. Everything else waits for your review, and you can keep autopilot off entirely.",
+  },
+  {
+    q: "What does it cost?",
+    a: "The Free plan covers every core feature for up to 15 items a day. Seller Pro is $10 a month and lifts that to 200 items a day with priority research and bulk uploads. eBay's own selling fees still apply when something sells.",
+  },
+  {
+    q: "Do I need my own eBay account?",
+    a: "Yes, and that's a feature. Listings publish under your own identity and reputation. You connect your account once, and SnapList never sees your eBay password.",
   },
 ] as const;
 
@@ -188,23 +221,22 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* interactive pricing waterfall — last stop before the CTA */}
-      <section className="border-t border-line bg-night-2">
-        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-28">
-          <Reveal>
-            <Eyebrow tint="cyan">Where the price comes from</Eyebrow>
-            <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
-              The best price source that exists for{" "}
-              <em className="text-iris">your</em> item, honestly labeled
+      {/* seller FAQ — relocated from the retired About page; last stop before
+          the CTA. One clean centered question list on the animated accordion. */}
+      <section id="faq" className="scroll-mt-24 border-t border-line bg-night-2">
+        <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8 sm:py-28">
+          <Reveal className="flex flex-col items-center text-center">
+            <Eyebrow tint="cyan">FAQ</Eyebrow>
+            <h2 className="mt-4 font-display text-[clamp(28px,3.6vw,42px)] font-bold tracking-tight text-flash">
+              The questions everyone asks
             </h2>
-            <p className="mt-4 max-w-[58ch] text-[16px] leading-relaxed text-flash-dim">
-              Not every item can be priced the same way. SnapList works down
-              this list, uses the best source it can find for your item, and
-              tells you which one it landed on. Pick one to see how it works.
+            <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-flash-dim">
+              Marketplaces, accuracy, privacy, and what autopilot will never
+              do without you, answered straight.
             </p>
           </Reveal>
-          <Reveal className="mt-12">
-            <WaterfallExplorer />
+          <Reveal delay={0.1} className="mt-12">
+            <FaqAccordion items={FAQ} />
           </Reveal>
         </div>
       </section>

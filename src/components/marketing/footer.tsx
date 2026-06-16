@@ -6,15 +6,10 @@ const COLUMNS = [
   {
     heading: "Product",
     links: [
-      { href: "/tour", label: "Tour" },
+      { href: "/tour", label: "Guide" },
       { href: "/pricing", label: "Pricing" },
-    ],
-  },
-  {
-    heading: "Company",
-    links: [
-      { href: "/about", label: "About" },
-      { href: "/about#faq", label: "FAQ" },
+      // About was scrapped; its FAQ moved onto the Guide page (#faq anchor).
+      { href: "/tour#faq", label: "FAQ" },
     ],
   },
   {
@@ -44,7 +39,7 @@ export function MarketingFooter() {
               is, price it from real sales, and write the listing.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-10 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-10 sm:gap-14">
             {COLUMNS.map(({ heading, links }) => (
               <div key={heading}>
                 <p className="text-[13.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">

@@ -153,10 +153,18 @@ export function HeroPrism() {
   );
 }
 
-/** Green-white pastel — reads glassy on the white canvas. */
-const IRIDESCENCE_LIGHT: [number, number, number] = [0.9, 0.98, 0.95];
-/** Capped deep green — a glow, not a glare, on the dark canvas. */
-const IRIDESCENCE_DARK: [number, number, number] = [0.04, 0.45, 0.34];
+/**
+ * The Iridescence shader (src/components/bits) builds a full holographic
+ * spectrum and multiplies it by this uColor. A near-white color lets the whole
+ * rainbow (incl. violet) through; biasing the vector hard into green/teal masks
+ * the spectrum into the brand band so no purple/lavender can surface. Red is
+ * held well below green so the field can only ever read deep-ink → green
+ * (#008060) → teal/mint — never magenta.
+ */
+/** Mint-green field on the white canvas — green-dominant, red suppressed. */
+const IRIDESCENCE_LIGHT: [number, number, number] = [0.55, 0.85, 0.74];
+/** Deep brand green on the dark canvas — a glow, not a glare. */
+const IRIDESCENCE_DARK: [number, number, number] = [0.03, 0.42, 0.31];
 
 /**
  * Green iridescent field behind the final CTA band. Mounts on scroll-near

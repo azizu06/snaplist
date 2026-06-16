@@ -193,10 +193,6 @@ export function ScanShowcase() {
         <span aria-hidden className="absolute bottom-3 left-3 size-5 rounded-bl-lg border-b-2 border-l-2 border-white/80 mix-blend-difference" />
         <span aria-hidden className="absolute bottom-3 right-3 size-5 rounded-br-lg border-b-2 border-r-2 border-white/80 mix-blend-difference" />
 
-        <span className="absolute left-4 top-4 rounded-md bg-night/80 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-flash backdrop-blur dark:bg-night/80">
-          One photo in
-        </span>
-
         {/* scanning beam — re-keyed per photo so the sweep restarts in sync
             with each crossfade; the output flips exactly when it lands. */}
         {!reduced && (

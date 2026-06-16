@@ -18,7 +18,6 @@ const isPublic = createRouteMatcher([
   "/tour",
   "/features",
   "/pricing",
-  "/about",
   "/login(.*)",
   "/signup(.*)",
   "/api/health",
