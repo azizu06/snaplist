@@ -32,7 +32,7 @@ import {
  * autopilot gate confirms this one cleared the bar (91% sure, priced from real
  * sales), then a cursor-accurate Publish click → posting state → live
  * confirmation card with the listing id.
- * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 1 · acer-predator-a1-open.jpg) —
  * the same item the whole how-it-works pipeline follows. Its price came from
  * real recent sales, so the confidence is high and consistent with step 3.
  *
@@ -87,10 +87,10 @@ export const PUBLISH_CLICKS: ClickSpec[] = [
 ];
 
 const CHECKS = [
-  "3 photos · cover photo set",
+  "4 photos · cover photo set",
   "Title fits eBay's 80-character limit",
   "Item details complete",
-  "Price set · $165 (range $140–$195)",
+  "Price set · $550 (range $480–$620)",
 ];
 
 /* ---------- pieces ---------- */
@@ -111,12 +111,13 @@ function PhotoCard() {
           borderRadius: 14,
           overflow: "hidden",
           border: `1px solid ${LINE}`,
+          background: "#cfcdc4",
           opacity: enter,
         }}
       >
         <Img
-          src={staticFile("demo/filmcamera.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a1-open.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 44%" }}
         />
         <div
           style={{
@@ -131,12 +132,12 @@ function PhotoCard() {
             fontWeight: 600,
           }}
         >
-          cover photo · 1 of 3
+          cover photo · 1 of 4
         </div>
       </div>
       <div style={{ position: "absolute", left: PHOTO.x, top: 428, display: "flex", gap: 8 }}>
         <Chip text="Good condition" at={14} index={0} tone="plain" />
-        <Chip text="Cameras & Photo" at={14} index={1} tone="plain" />
+        <Chip text="Computers & Accessories" at={14} index={1} tone="plain" />
         <Chip text="Priced from real sales" at={14} index={2} />
       </div>
     </>
@@ -237,7 +238,7 @@ function PriceModule() {
           PRICE
         </span>
         <span style={{ fontSize: 13, color: FAINT }}>
-          set from 7 recent sales · range $140–$195
+          set from 7 recent sales · range $480–$620
         </span>
       </div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 18 }}>
@@ -249,7 +250,7 @@ function PriceModule() {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          $165
+          $550
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -377,8 +378,8 @@ function ConfirmCard() {
         }}
       >
         <Img
-          src={staticFile("demo/filmcamera.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a1-open.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 44%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -392,7 +393,7 @@ function ConfirmCard() {
             textOverflow: "ellipsis",
           }}
         >
-          Canon AE-1 35mm film camera with 50mm lens
+          Acer Predator Helios 300 gaming laptop
         </div>
         <div
           style={{
@@ -410,7 +411,7 @@ function ConfirmCard() {
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         <div style={{ fontSize: 17, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>
-          $165
+          $550
         </div>
         <div
           style={{
@@ -487,12 +488,12 @@ function PublishAct() {
             opacity: titleIn,
           }}
         >
-          Canon AE-1 35mm film camera with 50mm lens
+          Acer Predator Helios 300 gaming laptop
         </div>
         <div style={{ position: "absolute", left: RX, top: 208, display: "flex", gap: 8 }}>
-          <Chip text="Brand · Canon" at={24} index={0} />
-          <Chip text="Model · AE-1" at={24} index={1} />
-          <Chip text="Lens · FD 50mm f/1.8" at={24} index={2} />
+          <Chip text="Brand · Acer" at={24} index={0} />
+          <Chip text="Model · Predator Helios 300" at={24} index={1} />
+          <Chip text="Graphics · GeForce RTX" at={24} index={2} />
         </div>
 
         <PriceModule />

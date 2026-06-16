@@ -161,12 +161,12 @@ export default function HowItWorks() {
                     {body}
                   </p>
                 </div>
-                {/* Mobile: the clip goes full-bleed edge-to-edge (escaping the
-                    section's px-5) so a wide 16:9 desktop render is as large as
-                    the screen allows and clearly leads the step, instead of a
-                    small box dwarfed by the heading. Desktop keeps the framed,
-                    rounded panel. (True in-frame legibility needs mobile-framed
-                    renders — tracked separately.) */}
+                {/* Mobile: the clip frame goes full-bleed edge-to-edge
+                    (escaping the section's px-5). Under 768px it swaps to the
+                    portrait 4:5 `-mobile` render — a phone-native SnapList
+                    screen with large, legible in-frame UI — so the step reads
+                    clearly instead of squinting at a shrunk desktop window.
+                    Desktop keeps the framed 16:9 rounded panel. */}
                 <div
                   className={`-mx-5 sm:mx-0 ${i % 2 === 0 ? "" : "lg:order-1"}`}
                 >

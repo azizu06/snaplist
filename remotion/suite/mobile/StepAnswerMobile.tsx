@@ -26,9 +26,9 @@ import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
 /**
  * Step 6 · Answer / Buyer Q&A (portrait mobile) — the trust story. A buyer
  * question lands, SnapList drafts a reply from the item's real details and
- * STOPS before the shutter-timing claim (a hands-on check no photo verifies);
- * the seller fills that part in, then approves & sends. Same copy + honest
- * grounding as the desktop BuyerQA (Canon AE-1). See
+ * STOPS before the charger/battery-life claim (a hands-on check no photo
+ * verifies); the seller fills that part in, then approves & sends. Same copy + honest
+ * grounding as the desktop BuyerQA (Acer Predator). See
  * [[snaplist-honest-grounded-copy]] and [[snaplist-mobile-polish-pr70]].
  *
  * Render:
@@ -41,10 +41,10 @@ const SEAM = 16;
 const PAD = 28;
 const INNER = M_LOGICAL_W - PAD * 2;
 
-const BUYER_MSG = "Hi! Does the shutter fire at all speeds, and is the 50mm lens included?";
+const BUYER_MSG = "Hi! Does it come with the charger, and how's the battery life?";
 const DRAFT_TEXT =
-  "Yes — the FD 50mm f/1.8 lens shown in the photos is included, with the front cap and original strap. Cosmetically it's in good shape, light brassing from honest use. On whether the shutter fires at every speed:";
-const EDIT_TEXT = " I ran a roll through it last week and all speeds fired cleanly.";
+  "The photos show it powering on with the RGB keyboard lit, and cosmetically it's in good shape with light wear. It's the Core i7 / RTX / 144Hz Helios 300. On the charger and how long the battery lasts:";
+const EDIT_TEXT = " Yes, the original charger is included, and it holds about 4–5 hours on lighter use.";
 
 const BUYER_AT = 20;
 const DRAFT_AT = 80;
@@ -89,14 +89,14 @@ function AnswerMobileAct() {
 
         {/* item context */}
         <div style={{ position: "absolute", left: PAD, top: 78, fontSize: 13.5, fontWeight: 700, color: FAINT }}>
-          Buyer question · Canon AE-1 · $165
+          Buyer question · Acer Predator · $550
         </div>
 
         {/* buyer bubble */}
         {frame >= BUYER_AT ? (
           <div style={{ position: "absolute", left: PAD, top: 110, maxWidth: 400, background: SLAB, border: `1px solid ${LINE}`, borderRadius: "16px 16px 16px 4px", padding: "13px 16px", opacity: buyerIn, transform: `translateY(${(1 - buyerIn) * 8}px)` }}>
             <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.6, color: FAINT, marginBottom: 4 }}>BUYER</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: INK, lineHeight: 1.45 }}>{BUYER_MSG}</div>
+            <div style={{ fontSize: 16.5, fontWeight: 600, color: INK, lineHeight: 1.5 }}>{BUYER_MSG}</div>
           </div>
         ) : null}
 
@@ -109,7 +109,7 @@ function AnswerMobileAct() {
             {drafting ? (
               <div style={{ fontSize: 15.5, fontWeight: 600, color: FAINT }}>Drafting a reply…</div>
             ) : (
-              <div style={{ fontSize: 15, lineHeight: 1.5, color: INK, opacity: draftIn }}>
+              <div style={{ fontSize: 16, lineHeight: 1.6, color: INK, opacity: draftIn }}>
                 {DRAFT_TEXT}
                 {frame >= EDIT_AT ? (
                   <span style={{ color: VIOLET, fontWeight: 700, background: "var(--sl-violet-soft, rgba(99,91,255,0.18))", borderRadius: 4, opacity: editIn }}>

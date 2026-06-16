@@ -33,9 +33,9 @@ import {
  * Inbox Q&A — the buyer-Q&A flow rendered for the LOGGED-IN dashboard inbox
  * teaser. It is the same product moment as the tour's step 6 (BuyerQA), but on
  * a DELIBERATELY DIFFERENT item so a user who already watched the marketing
- * tour (which follows the Canon AE-1 end-to-end) sees a fresh scenario here,
+ * tour (which follows the Acer Predator end-to-end) sees a fresh scenario here,
  * not déjà vu. This clip's item is the brass figural chess set
- * (demo/chess.jpg) — hero-domain collectible, disjoint from the AE-1 and from
+ * (demo/chess.jpg) — hero-domain collectible, disjoint from the Acer Predator and from
  * every home/marketing surface (see DEMO_SURFACE_ASSIGNMENTS → "inbox-qa").
  *
  * Layout + choreography are intentionally identical to BuyerQA so the cursor

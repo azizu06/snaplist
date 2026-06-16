@@ -8,7 +8,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { Cursor, arriveAndDwell, path, pressAt } from "../../hero/primitives";
+import { CheckIcon, Cursor, arriveAndDwell, path, pressAt } from "../../hero/primitives";
 import { FAINT, INK, LINE, SLAB, SURFACE, VIOLET, type Rect } from "../theme";
 import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
 
@@ -17,7 +17,7 @@ import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
  * taps through eBay / Facebook / Mercari tabs and each pane shows that
  * marketplace's native copy (search-friendly eBay title + item specifics,
  * casual local Facebook text, short Mercari title + hashtags). Same copy as the
- * desktop StepWrite (Canon AE-1). See [[snaplist-mobile-polish-pr70]].
+ * desktop StepWrite (Acer Predator). See [[snaplist-mobile-polish-pr70]].
  *
  * Render:
  *   npx remotion render remotion/index.ts step-write-mobile public/demo/steps/write-mobile.mp4 --crf 26 --muted
@@ -37,36 +37,84 @@ const MC_AT = 280;
 const TAP_FB = 152;
 const TAP_MC = 272;
 
-const EBAY_TITLE = "Canon AE-1 35mm Film SLR Camera w/ FD 50mm f/1.8 Lens";
-const EBAY_SPECS = ["Brand: Canon", "Model: AE-1", "Lens: FD 50mm f/1.8"];
+const EBAY_TITLE = "Acer Predator Helios 300 Gaming Laptop i7 RTX 144Hz 16GB 512GB SSD";
+const EBAY_SPECS = ["Brand: Acer", "Model: Predator Helios 300", "CPU: Intel Core i7"];
 const EBAY_DESC =
-  "Canon AE-1 35mm film SLR with the FD 50mm f/1.8 lens, front cap, and original strap. Cosmetically good — light brassing from honest use, no dents or cracks visible in the photos.";
+  "Acer Predator Helios 300 gaming laptop — Intel Core i7, GeForce RTX, 144Hz display, 16GB RAM, 512GB SSD. RGB backlit keyboard. Cosmetically good with light wear; powers on and runs in the photos.";
 const FB_DESC =
-  "Canon AE-1 film camera with the 50mm f/1.8 lens — strap and cap included. Body's in good shape, light brassing from age. Pickup this week, $165 OBO.";
-const MC_TITLE = "Canon AE-1 35mm Film Camera";
-const MC_TAGS = ["#CanonAE1", "#35mm", "#filmcamera", "#vintagecamera"];
+  "Acer Predator Helios 300 gaming laptop — Core i7, RTX graphics, 144Hz screen, 16GB RAM, 512GB SSD. RGB keyboard, light wear, runs well. Pickup this week, $550 OBO.";
+const MC_TITLE = "Acer Predator Helios 300 Gaming Laptop";
+const MC_DESC =
+  "Acer Predator Helios 300 gaming laptop — Core i7, GeForce RTX, 144Hz, 16GB/512GB. RGB keyboard, light wear, runs clean.";
+const MC_TAGS = ["#AcerPredator", "#gaminglaptop", "#RTX", "#144Hz"];
 
-const CARD: Rect = { x: PAD, y: 172, w: INNER, h: 430 };
+const CARD: Rect = { x: PAD, y: 172, w: INNER, h: 408 };
 
 function Label({ children }: { children: React.ReactNode }) {
   return <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: FAINT }}>{children}</div>;
 }
 
-function Chip({ children, accent }: { children: React.ReactNode; accent?: boolean }) {
+function Chip({
+  children,
+  accent,
+  size = 13.5,
+}: {
+  children: React.ReactNode;
+  accent?: boolean;
+  size?: number;
+}) {
   return (
     <span
       style={{
-        fontSize: 13.5,
+        fontSize: size,
         fontWeight: 700,
         color: accent ? VIOLET : INK,
         background: accent ? "var(--sl-violet-soft, rgba(99,91,255,0.1))" : SLAB,
-        border: `1px solid ${LINE}`,
-        borderRadius: 9,
-        padding: "6px 11px",
+        border: `1px solid ${accent ? "var(--sl-violet-border, rgba(99,91,255,0.3))" : LINE}`,
+        borderRadius: 10,
+        padding: "7px 13px",
       }}
     >
       {children}
     </span>
+  );
+}
+
+/** Consistent footer pinned to the bottom of every tab's card so no
+ *  marketplace pane reads as a half-empty box — the leftover space becomes a
+ *  deliberate "ready to copy" footer instead of a void. */
+function CopyBar({ market }: { market: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        borderTop: `1px solid ${LINE}`,
+        paddingTop: 16,
+        marginTop: 16,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <CheckIcon size={15} color="var(--sl-green, #16a34a)" />
+        <span style={{ fontSize: 14, fontWeight: 700, color: FAINT }}>
+          Copy-paste ready · {market}
+        </span>
+      </div>
+      <span
+        style={{
+          fontSize: 13.5,
+          fontWeight: 800,
+          color: VIOLET,
+          background: "var(--sl-violet-soft, rgba(99,91,255,0.1))",
+          border: `1px solid var(--sl-violet-border, rgba(99,91,255,0.3))`,
+          borderRadius: 99,
+          padding: "6px 15px",
+        }}
+      >
+        Copy
+      </span>
+    </div>
   );
 }
 
@@ -90,8 +138,10 @@ function FacebookPane() {
     <>
       <Label>CASUAL · LOCAL PICKUP</Label>
       <div style={{ fontSize: 18, fontWeight: 700, color: INK, lineHeight: 1.5, marginTop: 12 }}>{FB_DESC}</div>
-      <div style={{ marginTop: 18 }}>
-        <Chip accent>Copy-paste pack · Orlando, FL</Chip>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 18 }}>
+        <Chip>Orlando, FL</Chip>
+        <Chip>Local pickup</Chip>
+        <Chip accent>$550 OBO</Chip>
       </div>
     </>
   );
@@ -102,15 +152,13 @@ function MercariPane() {
     <>
       <Label>SHORT TITLE · HASHTAGS</Label>
       <div style={{ fontSize: 20, fontWeight: 800, color: INK, lineHeight: 1.35, marginTop: 10 }}>{MC_TITLE}</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 18 }}>
+      <div style={{ fontSize: 15.5, lineHeight: 1.55, color: FAINT, marginTop: 12 }}>{MC_DESC}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 9, marginTop: 16 }}>
         {MC_TAGS.map((t) => (
-          <Chip key={t} accent>
+          <Chip key={t} accent size={15}>
             {t}
           </Chip>
         ))}
-      </div>
-      <div style={{ marginTop: 18 }}>
-        <Chip>Copy-paste pack · ships small</Chip>
       </div>
     </>
   );
@@ -198,12 +246,17 @@ function WriteMobileAct() {
             border: `1.5px solid ${LINE}`,
             background: SURFACE,
             boxSizing: "border-box",
-            padding: "24px 24px",
+            padding: "24px 24px 20px",
+            display: "flex",
+            flexDirection: "column",
             opacity: paneIn,
             transform: `translateY(${(1 - paneIn) * 10}px)`,
           }}
         >
-          {active === 0 ? <EbayPane /> : active === 1 ? <FacebookPane /> : <MercariPane />}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {active === 0 ? <EbayPane /> : active === 1 ? <FacebookPane /> : <MercariPane />}
+          </div>
+          <CopyBar market={TABS[active]} />
         </div>
       </div>
 

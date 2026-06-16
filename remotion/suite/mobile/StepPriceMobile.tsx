@@ -15,8 +15,8 @@ import { M_LOGICAL_W, MobileScene } from "./StepSnapMobile";
 /**
  * Step 3 · Price (portrait mobile) — the suggested price + range reveal on a
  * mini axis, recent SOLD comps land with their sources, a "prices agree" trust
- * line confirms the spread is tight, and the seller taps "Apply $165". Same
- * values as the desktop StepPrice ($165 suggested, $140–$195, the same comps).
+ * line confirms the spread is tight, and the seller taps "Apply $550". Same
+ * values as the desktop StepPrice ($550 suggested, $480–$620, the same comps).
  * See [[snaplist-mobile-polish-pr70]].
  *
  * Render:
@@ -28,15 +28,15 @@ export const STEP_PRICE_MOBILE_LEN = 360;
 const SEAM = 16;
 const PAD = 28;
 
-const RANGE_LOW = 140;
-const RANGE_HIGH = 195;
-const SUGGESTED = 165;
+const RANGE_LOW = 480;
+const RANGE_HIGH = 620;
+const SUGGESTED = 550;
 
 const COMPS: Array<{ source: string; note: string; price: number; at: number }> = [
-  { source: "eBay", note: "sold 5 days ago", price: 172, at: 96 },
-  { source: "eBay", note: "sold 12 days ago", price: 158, at: 112 },
-  { source: "Mercari", note: "sold 2 weeks ago", price: 150, at: 128 },
-  { source: "eBay", note: "sold 3 weeks ago", price: 185, at: 144 },
+  { source: "eBay", note: "sold 5 days ago", price: 565, at: 96 },
+  { source: "eBay", note: "sold 12 days ago", price: 530, at: 112 },
+  { source: "Mercari", note: "sold 2 weeks ago", price: 510, at: 128 },
+  { source: "eBay", note: "sold 3 weeks ago", price: 595, at: 144 },
 ];
 
 const TRUST_AT = 196;
@@ -187,7 +187,7 @@ function PriceMobileAct() {
             boxShadow: "0 12px 26px -10px rgba(99,91,255,0.6)",
           }}
         >
-          {applied ? "Price applied · $165" : "Apply $165"}
+          {applied ? "Price applied · $550" : "Apply $550"}
           <span aria-hidden>{applied ? "✓" : "→"}</span>
         </div>
       </div>

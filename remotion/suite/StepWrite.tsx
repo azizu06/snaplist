@@ -32,7 +32,7 @@ import {
  * the marketplace tabs: eBay (search-friendly title + item details +
  * description), Facebook Marketplace (casual, local) and Mercari (short
  * title, hashtags, shipping). Both tab switches are cursor-accurate clicks.
- * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 3 · acer-predator-a3-closed.jpg) —
  * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-write public/demo/steps/write.mp4 --crf 26 --muted
@@ -74,25 +74,25 @@ const MC_SHIP_AT = 514;
 const READY_AT = 530;
 
 // Copy is grounded in what the photos/attributes actually show: model + included
-// items are visible, condition is cosmetic. No "fully working / shutter fires at
-// every speed / meter responds" — those are hands-on facts a photo can't verify,
+// items are visible, condition is cosmetic. No "fully working / battery lasts X
+// hours / charger included" — those are hands-on facts a photo can't verify,
 // so the copy leaves them to the seller (see the success line) rather than the
 // system guaranteeing them.
-const EBAY_TITLE = "Canon AE-1 35mm Film SLR Camera w/ FD 50mm f/1.8 Lens";
+const EBAY_TITLE = "Acer Predator Helios 300 Gaming Laptop i7 RTX 144Hz 16GB 512GB SSD";
 const EBAY_SPECS: Array<[string, string]> = [
-  ["Brand", "Canon"],
-  ["Model", "AE-1"],
-  ["Format", "35mm film SLR"],
-  ["Condition", "Good · light brassing"],
+  ["Brand", "Acer"],
+  ["Model", "Predator Helios 300"],
+  ["Processor", "Intel Core i7"],
+  ["Condition", "Good · light wear"],
 ];
 const EBAY_DESC =
-  "Canon AE-1 35mm film SLR, shown with the Canon FD 50mm f/1.8 lens, front cap, and original strap. Cosmetically good — light brassing on the edges from honest use, no dents or cracks visible in the photos.";
+  "Acer Predator Helios 300 gaming laptop with an Intel Core i7, GeForce RTX graphics, and a 144Hz display — 16GB RAM, 512GB SSD. RGB backlit keyboard. Cosmetically good with light wear; powers on and runs in the photos.";
 
 const FB_TEXT =
-  "Canon AE-1 film camera with the 50mm f/1.8 lens — strap and cap included. Body's in good shape, light brassing from age. Pickup this week, $165 OBO.";
+  "Acer Predator Helios 300 gaming laptop — Core i7, RTX graphics, 144Hz screen, 16GB RAM, 512GB SSD. RGB keyboard, light wear, runs well. Pickup this week, $550 OBO.";
 
-const MC_TITLE = "Canon AE-1 35mm Film Camera";
-const MC_TAGS = ["#CanonAE1", "#35mm", "#filmcamera", "#vintagecamera"];
+const MC_TITLE = "Acer Predator Helios 300 Gaming Laptop i7 RTX";
+const MC_TAGS = ["#AcerPredator", "#gaminglaptop", "#RTX", "#144Hz"];
 
 const FEED: FeedEvent[] = [
   { at: 24, done: 88, text: "Reading 12 similar listings that sold well" },
@@ -163,15 +163,16 @@ function ItemCard() {
           borderRadius: 10,
           overflow: "hidden",
           border: `1px solid ${LINE}`,
+          background: "#cfcdc4",
         }}
       >
         <Img
-          src={staticFile("demo/filmcamera.jpg")}
+          src={staticFile("demo/authentic/acer-predator-a3-closed.jpg")}
           style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
         />
       </div>
       <div style={{ marginTop: 12, fontSize: 15.5, fontWeight: 700, color: INK }}>
-        Canon AE-1 35mm film camera
+        Acer Predator Helios 300
       </div>
       <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
         <span
@@ -186,7 +187,7 @@ function ItemCard() {
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          $165
+          $550
         </span>
         <span
           style={{
@@ -212,7 +213,7 @@ function ItemCard() {
             padding: "4px 11px",
           }}
         >
-          Cameras & Photo
+          Computers & Accessories
         </span>
       </div>
     </div>
@@ -422,8 +423,8 @@ function FacebookPane() {
       </div>
       <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
         <Chip text="Local pickup" at={FB_META_AT} index={0} tone="plain" />
-        <Chip text="Price: $165 · open to offers" at={FB_META_AT} index={1} tone="plain" />
-        <Chip text="Category: Cameras" at={FB_META_AT} index={2} tone="plain" />
+        <Chip text="Price: $550 · open to offers" at={FB_META_AT} index={1} tone="plain" />
+        <Chip text="Category: Computers" at={FB_META_AT} index={2} tone="plain" />
       </div>
       {frame >= FB_META_AT + 22 ? (
         <div
@@ -493,7 +494,7 @@ function MercariPane() {
             padding: "11px 14px",
           }}
         >
-          <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>$165</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: INK }}>$550</span>
           <span style={{ fontSize: 13, color: FAINT }}>
             + shipping · ships boxed in 1–2 days · about 3 pounds
           </span>

@@ -5,10 +5,11 @@
  * a wordmark marquee into a stream of *finished listings*: what SnapList
  * actually produces. Each card pairs a verified catalog photo with its real
  * title and price (src/lib/demo-products — never relabel), plus the
- * marketplace it ships to and the confidence chip the pipeline would show.
- * Confidence tints come from the status palette (emerald = autopilot-high,
- * blue = solid recent-sales data, amber = queued for review) so the chips MEAN the same
- * thing here as in the app.
+ * marketplace it ships to and one uniform price-confidence chip. Owner round 7:
+ * the old per-card pricing-method chips (varied wording, three colors) read as
+ * confusing, so every card now shows the same chip in one color. Owner round 8:
+ * a bare "{n}% match" gave no context for what was matched — the chip now reads
+ * "{n}% price confidence" so it's self-explanatory while staying brief.
  *
  * Text stays crisp because LogoLoop snaps its track transform to whole CSS
  * pixels (the LogoLoop fix); nothing inside a card transforms on hover, and
@@ -33,12 +34,11 @@ type Marketplace = "eBay" | "Facebook" | "Mercari";
 type LoopListing = {
   slug: string;
   marketplace: Marketplace;
-  /** Confidence chip in plain seller language (owner round 4: "92 comps"
-   *  meant nothing to anyone) — still truthful to the product's
-   *  pricingStory: barcode → ISBN match, comps → recent sales,
-   *  depreciation → held for review. */
+  /** A single, uniform price-confidence chip (owner: the old per-card
+   *  pricing-method wording in mixed colors read as confusing, and a bare
+   *  "{n}% match" gave no context). Every card now shows the same
+   *  "{n}% price confidence" chip in one shared color. */
   confidence: string;
-  tone: "high" | "solid" | "review";
 };
 
 const MARKETPLACES: Marketplace[] = ["eBay", "Facebook", "Mercari"];
@@ -51,41 +51,22 @@ function stableHash(slug: string): number {
   return h;
 }
 
-/** Derive a card's marketplace + confidence chip from the product itself, so
- *  the chip stays truthful to how the price was found (pricingStory) without
- *  any hand-maintained per-card table. */
+/** Derive a card's marketplace + a single uniform price-confidence chip. The
+ *  percentage still varies product to product (stable per slug, no Math.random)
+ *  but the wording and color are identical on every card. The label spells out
+ *  "price confidence" so the number isn't a contextless "% match". */
 function deriveListing(slug: string, index: number): LoopListing {
-  const { pricingStory } = DEMO_PRODUCTS_BY_SLUG[slug];
   const h = stableHash(slug);
   const marketplace = MARKETPLACES[index % MARKETPLACES.length];
-  if (pricingStory === "barcode") {
-    return { slug, marketplace, confidence: `ISBN match · ${96 + (h % 3)}% sure`, tone: "high" };
-  }
-  if (pricingStory === "depreciation") {
-    return {
-      slug,
-      marketplace,
-      confidence: `Estimated from condition · ${70 + (h % 9)}% sure`,
-      tone: "review",
-    };
-  }
-  const conf = 82 + (h % 12); // comps
-  return {
-    slug,
-    marketplace,
-    confidence: `Priced from recent sales · ${conf}% sure`,
-    tone: conf >= 89 ? "high" : "solid",
-  };
+  const conf = 86 + (h % 12); // 86–97% — a calm, consistent band
+  return { slug, marketplace, confidence: `${conf}% price confidence` };
 }
 
 const LISTINGS: LoopListing[] =
   DEMO_SURFACE_ASSIGNMENTS["landing-carousel"].map(deriveListing);
 
-const TONE_CLASSES: Record<LoopListing["tone"], string> = {
-  high: "bg-success-soft text-success-soft-fg",
-  solid: "bg-info-soft text-info-soft-fg",
-  review: "bg-warning-soft text-warning-soft-fg",
-};
+/** One shared chip style for every card (uniform color + format). */
+const CHIP_CLASS = "bg-info-soft text-info-soft-fg";
 
 /** Brand-colored lowercase wordmark — shared by the loop cards and the
  *  storefront trio so both surfaces speak one marketplace language. */
@@ -129,7 +110,9 @@ function ListingCard({ listing }: { listing: LoopListing }) {
   const product = DEMO_PRODUCTS_BY_SLUG[listing.slug];
   return (
     <article className="w-[324px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
-      <div className="relative h-[176px] border-b border-line">
+      {/* Square frame matches the 1:1 authentic masters, so each item shows
+          in full with no over-crop (owner: the old 1.84:1 box cut items off). */}
+      <div className="relative aspect-square border-b border-line">
         <Image
           src={product.image}
           alt={product.alt}
@@ -155,7 +138,7 @@ function ListingCard({ listing }: { listing: LoopListing }) {
           <MarketplaceBadge marketplace={listing.marketplace} className="text-[16px]" />
         </div>
         <span
-          className={`mt-3.5 inline-block max-w-full rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold leading-snug ${TONE_CLASSES[listing.tone]}`}
+          className={`mt-3.5 inline-block max-w-full rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold leading-snug ${CHIP_CLASS}`}
         >
           {listing.confidence}
         </span>

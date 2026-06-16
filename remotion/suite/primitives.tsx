@@ -342,6 +342,7 @@ export function PhotoFrame({
   scanStart,
   scanEnd,
   objectPosition = "50% 50%",
+  objectFit = "cover",
   emptyLabel = "Add photos",
   emptySub = "drag & drop or click to browse",
   children,
@@ -353,6 +354,8 @@ export function PhotoFrame({
   scanStart?: number;
   scanEnd?: number;
   objectPosition?: string;
+  /** how the photo fills the frame — `contain` shows the whole item (no crop). */
+  objectFit?: "cover" | "contain";
   emptyLabel?: string;
   emptySub?: string;
   children?: React.ReactNode;
@@ -414,7 +417,7 @@ export function PhotoFrame({
             style={{
               width: "100%",
               height: "100%",
-              objectFit: "cover",
+              objectFit,
               objectPosition,
               transform: `scale(${1.06 - photoIn * 0.06})`,
               opacity: photoIn,

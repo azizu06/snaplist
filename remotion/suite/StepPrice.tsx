@@ -35,7 +35,7 @@ import {
  * the suggested price on a real axis, the why-trust-it panel fills in, then
  * the seller applies the suggestion (cursor-accurate click). Plain seller
  * language only (ui-r6) — "recent sales", never "comps".
- * Product: Canon AE-1 35mm film SLR with 50mm lens (demo/filmcamera.jpg) —
+ * Product: Acer Predator Helios 300 gaming laptop (angle 2 · acer-predator-a2-night.jpg) —
  * the same item the whole how-it-works pipeline follows.
  *
  * Render: npx remotion render remotion/index.ts step-price public/demo/steps/price.mp4 --crf 26 --muted
@@ -60,12 +60,12 @@ const APPLY: Rect = { x: RX, y: 596, w: RW, h: 46 };
 /* ---------- choreography ---------- */
 
 const COMPS: Array<{ at: number; source: string; note: string; price: number; asking?: boolean }> = [
-  { at: 104, source: "eBay", note: "sold 5 days ago", price: 172 },
-  { at: 118, source: "eBay", note: "sold 12 days ago", price: 158 },
-  { at: 132, source: "Mercari", note: "sold 2 weeks ago", price: 150 },
-  { at: 146, source: "eBay", note: "sold 3 weeks ago", price: 185 },
-  { at: 188, source: "eBay", note: "sold 1 month ago", price: 162 },
-  { at: 202, source: "Etsy", note: "asking price · counts less", price: 210, asking: true },
+  { at: 104, source: "eBay", note: "sold 5 days ago", price: 565 },
+  { at: 118, source: "eBay", note: "sold 12 days ago", price: 530 },
+  { at: 132, source: "Mercari", note: "sold 2 weeks ago", price: 510 },
+  { at: 146, source: "eBay", note: "sold 3 weeks ago", price: 595 },
+  { at: 188, source: "eBay", note: "sold 1 month ago", price: 540 },
+  { at: 202, source: "Best Buy", note: "asking price · counts less", price: 680, asking: true },
 ];
 
 const RANGE_AT = 248;
@@ -85,19 +85,19 @@ const FEED: FeedEvent[] = [
   {
     at: 36,
     done: 96,
-    text: "Searching “canon ae-1 50mm used sold”",
+    text: "Searching “acer predator helios 300 used sold”",
     sub: "4 recent sales found",
     subAt: 100,
   },
   {
     at: 116,
     done: 180,
-    text: "Searching “canon ae-1 film camera sold”",
+    text: "Searching “predator helios i7 rtx laptop sold”",
     sub: "3 more found · 7 total",
     subAt: 184,
   },
   { at: 212, done: 242, text: "Comparing prices · setting odd ones aside" },
-  { at: 250, text: "Range $140–$195 · suggesting $165" },
+  { at: 250, text: "Range $480–$620 · suggesting $550" },
 ];
 
 const SIGNAL_ROWS = [
@@ -106,12 +106,12 @@ const SIGNAL_ROWS = [
   { label: "Is the item a sure match?", value: "brand + model found" },
 ];
 
-/* range axis: $110 → $230 across the inner width */
-const AXIS_MIN = 110;
-const AXIS_MAX = 230;
-const RANGE_LOW = 140;
-const RANGE_HIGH = 195;
-const SUGGESTED = 165;
+/* range axis: $420 → $720 across the inner width */
+const AXIS_MIN = 420;
+const AXIS_MAX = 720;
+const RANGE_LOW = 480;
+const RANGE_HIGH = 620;
+const SUGGESTED = 550;
 
 const APPLY_C = center(APPLY);
 
@@ -126,7 +126,7 @@ export const priceCursorAt = (frame: number) => path(frame, PRICE_WAYPOINTS);
 
 export const PRICE_CLICKS: ClickSpec[] = [
   {
-    label: "price: click “Apply suggested price · $165”",
+    label: "price: click “Apply suggested price · $550”",
     frame: CLICK_APPLY,
     target: APPLY,
     arrive: ARRIVE_APPLY,
@@ -176,8 +176,8 @@ function ItemCard() {
         }}
       >
         <Img
-          src={staticFile("demo/filmcamera.jpg")}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 50%" }}
+          src={staticFile("demo/authentic/acer-predator-a2-night.jpg")}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 45%" }}
         />
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -191,7 +191,7 @@ function ItemCard() {
             textOverflow: "ellipsis",
           }}
         >
-          Canon AE-1 35mm film camera with 50mm lens
+          Acer Predator Helios 300 gaming laptop · i7 / RTX
         </div>
         <div style={{ fontSize: 12.5, color: FAINT, marginTop: 4 }}>
           Good condition · 94% sure of the match
@@ -212,7 +212,7 @@ function ItemCard() {
             transform: `scale(${0.8 + chipIn * 0.2})`,
           }}
         >
-          $165
+          $550
         </span>
       ) : null}
     </div>
@@ -266,7 +266,7 @@ function CompRow({ comp, index }: { comp: (typeof COMPS)[number]; index: number 
         {comp.source}
       </span>
       <span style={{ fontSize: 13.5, color: DIM, flex: 1 }}>
-        Canon AE-1 · with 50mm lens · {comp.note}
+        Acer Predator Helios 300 · {comp.note}
       </span>
       <span
         style={{
@@ -445,7 +445,7 @@ function RangeModule() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              $165 suggested
+              $550 suggested
             </div>
           </div>
         ) : null}
@@ -463,7 +463,7 @@ function RangeModule() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              $140
+              $480
             </span>
             <span
               style={{
@@ -476,7 +476,7 @@ function RangeModule() {
                 fontVariantNumeric: "tabular-nums",
               }}
             >
-              $195
+              $620
             </span>
           </>
         ) : null}
@@ -632,7 +632,7 @@ function PriceAct() {
             justifyContent: "space-between",
           }}
         >
-          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What similar cameras sold for</span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: INK }}>What similar laptops sold for</span>
           <span style={{ fontSize: 13, fontWeight: 600, color: FAINT }}>
             {frame >= 184 ? "7 found · 6 sold, 1 asking" : frame >= 100 ? "4 found" : "searching…"}
           </span>
@@ -643,11 +643,11 @@ function PriceAct() {
         <RangeModule />
         <PrimaryButton
           rect={APPLY}
-          label="Apply suggested price · $165"
+          label="Apply suggested price · $550"
           appearAt={MARKER_AT + 10}
           pressFrame={CLICK_APPLY}
           doneFrom={APPLIED_AT}
-          doneLabel="Price set · $165 · added to the listing"
+          doneLabel="Price set · $550 · added to the listing"
         />
       </Shell>
       <Cursor x={cursor.x} y={cursor.y} press={press} />

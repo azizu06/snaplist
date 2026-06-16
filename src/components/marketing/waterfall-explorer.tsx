@@ -5,7 +5,8 @@
  * Selecting a tier shows that tier's worked example — animated fills,
  * counting numbers, and source rows that appear in sequence. Stays honest by
  * design: the recent-sales tier uses a real catalog product whose plausible
- * pricing path IS recent sales (Le Creuset Dutch oven); the other tiers show their
+ * pricing path IS recent sales (the authentic dark-wood convertible crib, via
+ * the "hiw-waterfall" surface assignment); the other tiers show their
  * mechanism with concrete worked numbers rather than pinning a product onto
  * a tier that wouldn't fire for it.
  *
@@ -19,7 +20,10 @@ import Image from "next/image";
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import CountUp from "@/components/bits/CountUp";
-import { DEMO_PRODUCTS_BY_SLUG } from "@/lib/demo-products";
+import {
+  DEMO_PRODUCTS_BY_SLUG,
+  DEMO_SURFACE_ASSIGNMENTS,
+} from "@/lib/demo-products";
 
 type TierId = "isbn" | "comps" | "depreciation" | "llm";
 
@@ -127,7 +131,8 @@ function IsbnExample() {
 }
 
 function CompsExample() {
-  const p = DEMO_PRODUCTS_BY_SLUG.dutchoven;
+  const p =
+    DEMO_PRODUCTS_BY_SLUG[DEMO_SURFACE_ASSIGNMENTS["hiw-waterfall"][0]];
   return (
     <div>
       <div className="flex items-center gap-4">
@@ -147,19 +152,19 @@ function CompsExample() {
         </p>
       </div>
       <div className="mt-4 space-y-2.5">
-        <SourceRow i={0} value="$195 · 3 days ago">
+        <SourceRow i={0} value="$55 · 3 days ago">
           Sold on eBay
         </SourceRow>
-        <SourceRow i={1} value="$180 · last week">
-          Sold on Facebook, same teal 4.5qt
+        <SourceRow i={1} value="$48 · last week">
+          Sold on Facebook, same dark-wood convertible
         </SourceRow>
-        <SourceRow i={2} value="$172 · last week">
+        <SourceRow i={2} value="$45 · last week">
           Sold on Mercari
         </SourceRow>
       </div>
       <p className="mt-3.5 text-[15px] leading-relaxed text-flash-faint">
-        Similar Le Creuset Dutch ovens sold for{" "}
-        <span className="nums font-semibold text-flash-dim">$165–$210</span>{" "}
+        Similar dark-wood convertible cribs sold for{" "}
+        <span className="nums font-semibold text-flash-dim">$40–$65</span>{" "}
         recently. Real sale prices count more than asking prices: what
         something sold for beats what someone hoped to get.
       </p>
