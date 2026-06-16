@@ -39,6 +39,22 @@ export default async function ListingPage({
     listing.ebay_status === "published" && listing.ebay_listing_id,
   );
 
+  // A short-lived signed thumbnail so the preview looks like the buyer's view,
+  // not a wall of text. Same read pattern as the review/export pages.
+  let photoUrl: string | null = null;
+  const { data: item } = await supabase
+    .from("items")
+    .select("photos")
+    .eq("id", listing.item_id)
+    .maybeSingle();
+  const photoPaths = (item?.photos as string[] | null) ?? [];
+  if (photoPaths.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("photos")
+      .createSignedUrl(photoPaths[0], 60 * 10);
+    photoUrl = signed?.signedUrl ?? null;
+  }
+
   const data: PublishData = {
     listingId: listing.id as string,
     itemId: listing.item_id as string,
@@ -49,6 +65,7 @@ export default async function ListingPage({
     published,
     failed: listing.ebay_status === "failed",
     ebayListingId: (listing.ebay_listing_id as string | null) ?? null,
+    photoUrl,
     actionError: error ?? null,
   };
 

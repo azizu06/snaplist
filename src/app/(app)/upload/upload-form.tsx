@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import ClickSpark from "@/components/bits/ClickSpark";
 import { Banner } from "@/components/ui/banner";
+import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { Spinner } from "@/components/ui/spinner";
 
 /**
@@ -12,11 +13,10 @@ import { Spinner } from "@/components/ui/spinner";
  * of the pipeline", not a form:
  * - a journey rail under the title (add photos → AI identifies & prices →
  *   review & post) so the three-step promise is visible before any photo;
- * - the photo input is a single square CAROUSEL — one viewer, prev/next arrows
- *   + dots, an "Add photo" button (owner: the old cover-plus-tiles grid was
- *   hard to read and cropped portrait shots). Each frame is object-contain over
- *   a blurred fill, so a photo shows exactly as framed. Drag-drop still works,
- *   signalled by a soft breathing violet glow ring + wash;
+ * - the photo input is a single square CAROUSEL (the shared PhotoCarousel —
+ *   one viewer, prev/next arrows + dots, swipe; here with per-photo remove +
+ *   a "Cover" badge). Drag-drop still works, signalled by a soft breathing
+ *   violet glow ring + wash;
  * - the field rows live under an "Autofill by SnapList" card header, each with
  *   a leading glyph + the sparkle "AI suggests" pill.
  *
@@ -255,7 +255,7 @@ function JourneyRail() {
           ) : null}
           <span
             aria-hidden
-            className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold ${
+            className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
               step.state === "active"
                 ? "bg-accent-solid text-accent-fg"
                 : "border border-border-strong bg-surface text-muted"
@@ -276,161 +276,6 @@ function JourneyRail() {
         </li>
       ))}
     </ol>
-  );
-}
-
-/** Flick power (|offset| × velocity) past which a drag commits to a swipe. */
-const SWIPE_CONFIDENCE = 8000;
-/** Distance (px) a slow, deliberate drag must cross to commit to a swipe. */
-const SWIPE_DISTANCE = 80;
-
-/**
- * Directional slide: the entering frame comes in from the side you're heading
- * toward, the leaving frame exits the opposite way. `custom` carries the
- * direction (+1 next / -1 prev) into the variants.
- */
-const slideVariants = {
-  enter: (dir: number) => ({ x: dir >= 0 ? "100%" : "-100%" }),
-  center: { x: 0 },
-  exit: (dir: number) => ({ x: dir >= 0 ? "-100%" : "100%" }),
-};
-
-/**
- * The photo carousel: one big square viewer (object-contain over a blurred
- * fill so the shot shows as framed) that fills the card width, with a smooth
- * spring slide between frames, prev/next arrows + dots, a per-photo remove, and
- * a "Cover" badge on the first (what the pipeline treats as the cover). No
- * fixed slots, no angle labels.
- */
-function PhotoCarousel({
-  previews,
-  current,
-  onSetCurrent,
-  onRemove,
-}: {
-  previews: string[];
-  current: number;
-  onSetCurrent: (i: number) => void;
-  onRemove: (i: number) => void;
-}) {
-  const count = previews.length;
-  const safe = Math.min(Math.max(0, current), count - 1);
-  // Direction of the last navigation, fed to the slide variants. Set just
-  // before we move so the entering/leaving frames travel the right way.
-  const [direction, setDirection] = useState(0);
-
-  const paginate = (target: number, dir: number) => {
-    setDirection(dir);
-    onSetCurrent(target);
-  };
-
-  return (
-    <div className="w-full">
-      <div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-border bg-surface-2 sm:aspect-[4/3]">
-        <AnimatePresence initial={false} custom={direction}>
-          <motion.div
-            key={safe}
-            custom={direction}
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ type: "spring", stiffness: 320, damping: 34 }}
-            drag={count > 1 ? "x" : false}
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.5}
-            onDragEnd={(_event, info) => {
-              // Commit on a fast flick (offset × velocity) OR a deliberate drag
-              // past SWIPE_DISTANCE; otherwise it springs back to center.
-              const power = Math.abs(info.offset.x) * info.velocity.x;
-              if (info.offset.x < -SWIPE_DISTANCE || power < -SWIPE_CONFIDENCE) {
-                paginate((safe + 1) % count, 1);
-              } else if (info.offset.x > SWIPE_DISTANCE || power > SWIPE_CONFIDENCE) {
-                paginate((safe - 1 + count) % count, -1);
-              }
-            }}
-            className={`absolute inset-0 select-none ${
-              count > 1 ? "cursor-grab active:cursor-grabbing" : ""
-            }`}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-            <img
-              src={previews[safe]}
-              alt=""
-              aria-hidden
-              draggable={false}
-              className="absolute inset-0 size-full scale-110 object-cover blur-xl"
-            />
-            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
-            <img
-              src={previews[safe]}
-              alt={`Photo ${safe + 1} of ${count}`}
-              draggable={false}
-              className="relative size-full object-contain"
-            />
-          </motion.div>
-        </AnimatePresence>
-
-        <span className="absolute left-3 top-3 z-10 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white">
-          {safe === 0 ? "Cover" : `Photo ${safe + 1}`}
-        </span>
-
-        <button
-          type="button"
-          onClick={() => onRemove(safe)}
-          aria-label="Remove this photo"
-          className="absolute right-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
-        >
-          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
-
-        {count > 1 ? (
-          <>
-            <button
-              type="button"
-              onClick={() => paginate((safe - 1 + count) % count, -1)}
-              aria-label="Previous photo"
-              className="absolute left-3 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
-            >
-              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m15 18-6-6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => paginate((safe + 1) % count, 1)}
-              aria-label="Next photo"
-              className="absolute right-3 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]"
-            >
-              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </button>
-          </>
-        ) : null}
-      </div>
-
-      {count > 1 ? (
-        <div className="mt-3 flex items-center justify-center gap-2">
-          {previews.map((_, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => paginate(i, i >= safe ? 1 : -1)}
-              aria-label={`Go to photo ${i + 1}`}
-              aria-current={i === safe}
-              className={`h-2 rounded-full transition-all ${
-                i === safe
-                  ? "w-6 bg-accent-solid"
-                  : "w-2 bg-border-strong hover:bg-muted"
-              }`}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -563,7 +408,7 @@ function FormBody({
                 Drag &amp; drop or click to browse. This becomes the cover
               </span>
             </span>
-            <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[10.5px] font-medium text-faint">
+            <span className="rounded-full border border-border bg-surface px-2.5 py-0.5 text-[11px] font-medium text-faint">
               PNG · JPG · WEBP
             </span>
             <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-muted">
@@ -577,6 +422,7 @@ function FormBody({
               current={current}
               onSetCurrent={onSetCurrent}
               onRemove={onRemove}
+              showCover
             />
             <div className="mt-3 w-full">
               {!atMax ? (

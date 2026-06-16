@@ -14,6 +14,7 @@ import {
   type SettingsData,
 } from "@/app/(app)/settings/settings-view";
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
+import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-view";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -72,7 +73,7 @@ const FIXTURE_ROWS: DashboardRow[] = [
 
 const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
-  photoUrls: [],
+  photoUrls: ["/demo/jacket.jpg", "/demo/headphones.jpg"],
   identification: {
     label: "Sony WH-1000XM4 Wireless Headphones",
     confident: true,
@@ -135,7 +136,37 @@ const FIXTURE_PUBLISH: PublishData = {
   published: false,
   failed: false,
   ebayListingId: null,
+  photoUrl: "/demo/headphones.jpg",
   actionError: null,
+};
+
+const FIXTURE_EXPORT: ExportData = {
+  itemId: "fx-1",
+  itemName: "Sony WH-1000XM4",
+  itemThumb: "/demo/headphones.jpg",
+  condition: "Good",
+  price: 178,
+  packs: {
+    facebook: {
+      title: "Sony WH-1000XM4 Wireless Headphones",
+      description:
+        "For sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.",
+      hashtags: [],
+      copyBlock:
+        "Sony WH-1000XM4 Wireless Headphones\n\nFor sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.\n\nCondition: Good\nAsking $178\nLocal pickup, message me if interested!",
+    },
+    mercari: {
+      title: "Sony WH-1000XM4 Noise Cancelling Headphones",
+      description:
+        "For sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.",
+      hashtags: ["#sony", "#wh1000xm4", "#headphones"],
+      copyBlock:
+        "Sony WH-1000XM4 Noise Cancelling Headphones\n\nFor sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.\n\n#sony #wh1000xm4 #headphones",
+    },
+    cached: true,
+    model: "gemini-2.5-flash",
+  },
+  error: null,
 };
 
 export default async function PreviewPage({
@@ -165,6 +196,8 @@ export default async function PreviewPage({
       );
     case "review":
       return <ReviewView data={FIXTURE_REVIEW} saveAction={noopAction} />;
+    case "export":
+      return <ExportView data={FIXTURE_EXPORT} />;
     case "settings":
       return (
         <SettingsView
