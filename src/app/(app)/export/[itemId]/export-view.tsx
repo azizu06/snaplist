@@ -1,17 +1,33 @@
 import Link from "next/link";
+import SpotlightCard from "@/components/bits/SpotlightCard";
 import { Banner } from "@/components/ui/banner";
 import type { ExportPacksView, ExportPackView } from "@/lib/export";
 import { CopyButton } from "./copy-button";
 
 /**
- * Export — "the item is the hero" pass (ui-lifecycle-revamp). Extracted from
- * the server page into a presentational view (matching review/publish/dashboard)
- * so it renders in the dev preview harness too. The screen now leads with a
- * compact item strip (you can see WHAT you're cross-posting), and each platform
- * gets real identity — a brand-coloured mark + a tinted header — instead of two
- * identical violet pills. The paste preview is split into title + body straight
- * from `copyBlock`, so what you see is byte-for-byte what lands on the clipboard,
- * and the how-to steps become a tinted numbered checklist beside it.
+ * Export — Shopify section-card composition (redesign/export, neutral + green).
+ *
+ * There's no exact Shopify analog for "copy-paste blocks", so the screen borrows
+ * two patterns from the reference set and fuses them:
+ *   - the product/collection EDIT cards (`Shopify web Jan 2024/325` + `331`):
+ *     each pack is a quiet white section card — hairline border, one soft
+ *     shadow, a titled header row with the section identity on the LEFT and the
+ *     primary action top-RIGHT (where Shopify parks Edit/Save). Here that action
+ *     is Copy, so the satisfying affordance sits exactly where the eye expects
+ *     the verb.
+ *   - the receipt/summary block (`Shopify web Jan 2024/600`): the paste preview
+ *     is a calm inset "what lands on the clipboard" panel — a boxed title (the
+ *     receipt's emphasized TOTAL) over the body, byte-for-byte from `copyBlock`,
+ *     newlines preserved. Mercari's hashtags surface as discreet chips.
+ *
+ * Palette is the locked neutral + green (ui-design-principles + minimalist-ui):
+ * NO raw platform brand hex (the old #1877f2 / #e0312f marks violated the
+ * token-only rule and pulled two loud colours onto a calm screen). Platform
+ * identity now reads through the NAME + a neutral monogram mark; the green
+ * accent is reserved for the Copy affordance and the numbered steps, so it never
+ * competes with the emerald "Live" status. 4-pt spacing, one radius scale, no
+ * gradients/glows. Keeps the react-bits SpotlightCard (green spotlight) on every
+ * card, matching the review/publish siblings, and the CopyButton micro-interaction.
  *
  * The internal model/provenance footer is intentionally NOT rendered — it stays
  * persisted server-side for the eval harness, but it's developer jargon, not
@@ -33,12 +49,8 @@ export interface ExportData {
 interface PlatformConfig {
   name: string;
   note: string;
-  /** Brand mark glyph (single letter). */
+  /** Neutral monogram mark glyph (single letter). */
   glyph: string;
-  /** Brand hex — the mark background + step-number ink. */
-  accent: string;
-  /** Soft brand wash for the header band + step-number background. */
-  soft: string;
   steps: string[];
 }
 
@@ -46,13 +58,11 @@ const FACEBOOK: PlatformConfig = {
   name: "Facebook Marketplace",
   note: "Casual and short, framed for local pickup.",
   glyph: "f",
-  accent: "#1877f2",
-  soft: "rgba(24, 119, 242, 0.10)",
   steps: [
     "Copy the pack below.",
     "In the Facebook app: Marketplace → Sell → Item.",
     "Add your photos from your camera roll (photos can't ride the clipboard).",
-    "Paste (first line is the title, the rest is the description) and set the price.",
+    "Paste — the first line is the title, the rest is the description — then set the price.",
   ],
 };
 
@@ -60,14 +70,19 @@ const MERCARI: PlatformConfig = {
   name: "Mercari",
   note: "Short title, shipping-oriented description, hashtags.",
   glyph: "m",
-  accent: "#e0312f",
-  soft: "rgba(224, 49, 47, 0.10)",
   steps: [
     "Copy the pack below.",
     "In the Mercari app: Sell → take or add your photos.",
     "Paste the title and description, then set the price and shipping.",
   ],
 };
+
+/** App-card chrome for the react-bits SpotlightCard (vs its marketing default):
+ *  a quiet Shopify panel — hairline border, white surface, one soft shadow. */
+const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
+
+/** Green spotlight to match the accent (the react-bits flair, kept subtle). */
+const SPOTLIGHT = "rgba(0, 128, 96, 0.06)";
 
 /** Dash-accented small-caps eyebrow — the marketing surfaces' non-pill label. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
@@ -79,12 +94,12 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Neutral monogram mark — platform identity without a loud brand colour. */
 function PlatformMark({ config }: { config: PlatformConfig }) {
   return (
     <span
       aria-hidden
-      className="grid size-9 shrink-0 place-items-center rounded-xl font-display text-[17px] font-bold lowercase text-white"
-      style={{ backgroundColor: config.accent }}
+      className="grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-surface-2 font-display text-[17px] font-bold lowercase text-fg-strong"
     >
       {config.glyph}
     </span>
@@ -102,36 +117,58 @@ function PackCard({
   // first line = title, the rest = body (kept verbatim, newlines preserved).
   const [titleLine, ...rest] = pack.copyBlock.split("\n");
   const body = rest.join("\n").replace(/^\n+/, "").trimEnd();
+  const labelId = `pack-${config.glyph}`;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-xs">
-      {/* platform identity header — brand-washed band, brand mark, copy CTA */}
+    <SpotlightCard
+      className="flex flex-col"
+      chromeClassName={`overflow-hidden ${APP_CARD_CHROME}`}
+      spotlightColor={SPOTLIGHT}
+    >
+      {/* platform identity header — neutral mark + name on the left, the Copy
+          action top-right (Shopify Edit/Save placement, 325/331). On mobile the
+          inline Copy hides in favour of the full-width foot button. */}
       <header
+        aria-labelledby={labelId}
         className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5"
-        style={{ backgroundColor: config.soft }}
       >
         <div className="flex min-w-0 items-center gap-2.5">
           <PlatformMark config={config} />
           <div className="min-w-0">
-            <p className="truncate text-[14.5px] font-semibold leading-tight text-fg-strong">
+            <p id={labelId} className="truncate text-[14.5px] font-semibold leading-tight text-fg-strong">
               {config.name}
             </p>
             <p className="truncate text-[12px] text-muted">{config.note}</p>
           </div>
         </div>
-        <CopyButton text={pack.copyBlock} label={`Copy the ${config.name} pack`} />
+        <div className="hidden sm:block">
+          <CopyButton text={pack.copyBlock} label={`Copy the ${config.name} pack`} />
+        </div>
       </header>
 
-      {/* body: paste preview (faithful to clipboard) + tinted step checklist */}
+      {/* body: receipt-style paste preview (faithful to clipboard) + steps */}
       <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,210px)] sm:p-5">
-        <div className="rounded-xl border border-border bg-surface-2/50 p-4">
-          <p className="text-[15.5px] font-semibold leading-snug text-fg-strong break-words">
+        <div className="rounded-xl border border-border bg-surface-2/60">
+          {/* boxed title — the receipt's emphasized TOTAL band (600) */}
+          <p className="border-b border-border px-4 py-3 text-[15.5px] font-semibold leading-snug text-fg-strong break-words">
             {titleLine}
           </p>
           {body ? (
-            <p className="mt-2.5 whitespace-pre-wrap break-words text-[14.5px] leading-relaxed text-fg">
+            <p className="whitespace-pre-wrap break-words px-4 py-3 text-[14.5px] leading-relaxed text-fg">
               {body}
             </p>
+          ) : null}
+          {pack.hashtags.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 border-t border-border px-4 py-3">
+              {pack.hashtags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-md bg-brand-soft px-2 py-0.5 text-[12px] font-medium text-accent-soft-fg"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
 
@@ -140,8 +177,7 @@ function PackCard({
             <li key={step} className="flex items-start gap-2.5">
               <span
                 aria-hidden
-                className="mt-px grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold"
-                style={{ backgroundColor: config.soft, color: config.accent }}
+                className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-accent-soft text-[11px] font-bold text-accent-soft-fg"
                 data-nums
               >
                 {i + 1}
@@ -151,7 +187,16 @@ function PackCard({
           ))}
         </ol>
       </div>
-    </section>
+
+      {/* full-width Copy for thumb reach — the satisfying affordance on mobile */}
+      <div className="border-t border-border p-4 sm:hidden">
+        <CopyButton
+          text={pack.copyBlock}
+          label={`Copy the ${config.name} pack`}
+          fullWidth
+        />
+      </div>
+    </SpotlightCard>
   );
 }
 
@@ -187,7 +232,7 @@ export function ExportView({ data }: { data: ExportData }) {
       ) : data.packs ? (
         <>
           {/* item strip — what you're cross-posting, at a glance */}
-          <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface p-3 shadow-xs">
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3 shadow-xs">
             {data.itemThumb ? (
               // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
               <img
