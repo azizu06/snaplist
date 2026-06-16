@@ -22,11 +22,13 @@ import {
  * (`asset-intake/Shopify web Jan 2024/325` + `328`/`331`): a dark-inked top bar
  * with a back arrow, a short identity title, and the primary action top-right;
  * then a two-column body — a wide LEFT main column of content cards (media,
- * then the editable listing copy) and a narrower RIGHT sidebar of metadata
- * cards (identification/status, price + confidence, item attributes). Each card
- * is a quiet white panel: hairline border, one soft shadow, a small section
- * heading. Everything collapses to one column on mobile (main first, sidebar
- * below), matching Shopify's responsive admin.
+ * then the editable listing copy) and a narrower RIGHT sidebar that leads with
+ * the seller's key DECISION. To give the rail a clear focal point (rather than
+ * three equal panels), Price + confidence is the HERO card — elevated chrome, an
+ * accent eyebrow, the suggested price colored green — and identification folds
+ * into a single quiet Item card (identity + attributes) below it. Everything
+ * collapses to one column on mobile (main first, sidebar below), matching
+ * Shopify's responsive admin.
  *
  * Palette is the locked neutral + green: near-black ink primary actions
  * (`bg-primary`), green `#008060` reserved for the accent — links, focus rings,
@@ -581,46 +583,28 @@ export function ReviewView({
           ) : null}
         </div>
 
-        {/* ============ RIGHT sidebar: identification · price · attributes ============ */}
+        {/* ============ RIGHT sidebar: the DECISION leads, meta follows ============
+             Hierarchy (ui-design-principles): one focal card, not three equal
+             ones. Price + confidence is the seller's key judgment, so it is the
+             hero — elevated chrome, an accent eyebrow, the suggested price
+             colored. Identification folds into the quiet Item card below, so the
+             rail reads hero → meta instead of three identical panels. */}
         <aside className="flex flex-col gap-5">
-          {/* Identification — "what we found" + candidates (Shopify metadata card). */}
+          {/* Price & confidence — HERO. Stronger border + soft elevation set it
+              apart from the calm meta card; the green dash eyebrow leads the eye. */}
           <SpotlightCard
-            chromeClassName={APP_CARD_CHROME}
+            chromeClassName="rounded-xl border border-border-strong bg-surface shadow-sm"
             spotlightColor={SPOTLIGHT}
             className="p-4 sm:p-5"
           >
-            <CardTitle>Identification</CardTitle>
-            <p className="mt-2.5 text-[16px] font-bold leading-snug tracking-tight text-fg-strong break-words">
-              {heroLabel}
-            </p>
-            {uncertain && data.identification!.candidates.length > 0 ? (
-              <div className="mt-2.5">
-                <p className="text-[12px] font-medium text-faint">Possible matches</p>
-                <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                  {data.identification!.candidates.map((c) => (
-                    <li
-                      key={c}
-                      className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[12.5px] text-muted"
-                    >
-                      {c}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </SpotlightCard>
-
-          {/* Price — the ONE home for price + confidence + range. */}
-          <SpotlightCard
-            chromeClassName={APP_CARD_CHROME}
-            spotlightColor={SPOTLIGHT}
-            className="p-4 sm:p-5"
-          >
-            <CardTitle>Price</CardTitle>
+            <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
+              <span aria-hidden className="h-[2px] w-5 rounded-full bg-accent" />
+              Price &amp; confidence
+            </span>
             <div className="mt-3">
               <FieldLabel label="Your price" htmlFor="review-price" ai={ai("price")} />
               <div className="flex items-center rounded-lg border border-border-strong bg-surface transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25">
-                <span className="pl-3 text-[19px] text-muted">$</span>
+                <span className="pl-3 text-[22px] text-muted">$</span>
                 <input
                   id="review-price"
                   name="price"
@@ -631,7 +615,7 @@ export function ReviewView({
                   onChange={(e) => setField("price", e.target.value)}
                   placeholder={data.suggested != null ? String(data.suggested) : "0.00"}
                   aria-label="Price (USD)"
-                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[22px] font-bold text-fg-strong outline-none"
+                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[26px] font-bold tracking-tight text-fg-strong outline-none"
                   data-nums
                 />
               </div>
@@ -642,20 +626,22 @@ export function ReviewView({
               ) : null}
             </div>
 
-            {/* intelligence: gauge (the one number) + suggested/range + bar */}
+            {/* intelligence: gauge (the one number) + suggested/range + bar.
+                Suggested is colored green (the AI/brand recommendation) so the
+                eye lands on it; the range stays a strong neutral. */}
             <div className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-surface-2 p-3.5">
               <div className="flex items-center gap-3">
                 <ConfidenceGauge value={data.confidence} size={84} />
                 <div className="grid flex-1 grid-cols-2 gap-2">
                   <div>
                     <p className="text-[12px] text-muted">Suggested</p>
-                    <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
+                    <p className="mt-0.5 text-[16px] font-bold text-accent-soft-fg" data-nums>
                       {data.suggested != null ? `$${data.suggested}` : "–"}
                     </p>
                   </div>
                   <div>
                     <p className="text-[12px] text-muted">Typical range</p>
-                    <p className="mt-0.5 text-[15px] font-bold text-fg-strong" data-nums>
+                    <p className="mt-0.5 text-[16px] font-bold text-fg-strong" data-nums>
                       {data.range?.low != null && data.range?.high != null
                         ? `$${data.range.low}–$${data.range.high}`
                         : "–"}
@@ -674,14 +660,35 @@ export function ReviewView({
             </div>
           </SpotlightCard>
 
-          {/* Item details — every attribute in one place (Shopify "Organization"). */}
+          {/* Item — identification + attributes in ONE quiet meta card (Shopify
+              "Organization"). The identified name leads; editable category/
+              condition and the detected attributes sit below a divider. */}
           <SpotlightCard
             chromeClassName={APP_CARD_CHROME}
             spotlightColor={SPOTLIGHT}
             className="p-4 sm:p-5"
           >
             <CardTitle>Item details</CardTitle>
-            <div className="mt-3 flex flex-col gap-3.5">
+            <p className="mt-2.5 text-[15px] font-bold leading-snug tracking-tight text-fg-strong break-words">
+              {heroLabel}
+            </p>
+            {uncertain && data.identification!.candidates.length > 0 ? (
+              <div className="mt-2.5">
+                <p className="text-[12px] font-medium text-faint">Possible matches</p>
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                  {data.identification!.candidates.map((c) => (
+                    <li
+                      key={c}
+                      className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[12.5px] text-muted"
+                    >
+                      {c}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex flex-col gap-3.5 border-t border-border pt-4">
               <div>
                 <FieldLabel label="Category" htmlFor="review-category" ai={ai("category")} />
                 <input
