@@ -50,6 +50,10 @@ export interface PhotoCarouselProps {
    *  so the first photo fills edge-to-edge — no side/letterbox bands — and the
    *  frame stays locked so swiping never reflows the layout. */
   adaptiveFrame?: boolean;
+  /** Optional cap on the inline frame height (e.g. "max-h-[440px]"). Lets a
+   *  dense edit layout keep the photo from dominating the column: the height is
+   *  clamped while the image stays object-contain (so it never crops). */
+  maxFrameClassName?: string;
   className?: string;
 }
 
@@ -62,6 +66,7 @@ export function PhotoCarousel({
   enableZoom = false,
   aspectClassName = "aspect-square sm:aspect-[4/3]",
   adaptiveFrame = false,
+  maxFrameClassName = "",
   className = "",
 }: PhotoCarouselProps) {
   const count = previews.length;
@@ -196,7 +201,7 @@ export function PhotoCarousel({
   return (
     <div className={`w-full ${className}`}>
       <div
-        className={`relative ${aspectClassName} w-full overflow-hidden rounded-2xl border border-border bg-surface-2`}
+        className={`relative ${aspectClassName} ${maxFrameClassName} w-full overflow-hidden rounded-2xl border border-border bg-surface-2`}
         style={frameAspect ? { aspectRatio: String(frameAspect) } : undefined}
       >
         {slide(enableZoom ? () => setZoomed(true) : undefined)}

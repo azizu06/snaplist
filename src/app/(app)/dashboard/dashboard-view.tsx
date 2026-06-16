@@ -11,20 +11,27 @@ import { matchesQuery } from "@/lib/ui/search";
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 
 /**
- * Dashboard — photo-forward listing grid (neutral + green exemplar; grounded in
- * the Shopify Products index, `asset-intake/Shopify web Jan 2024/320`). The
- * seller's shop reads as a wall of their own items: each listing is an
- * image-first card (cover photo · title · price · calm status pill) linking to
- * the review page. Shopify's quiet underline tab strip filters by status (with
- * live CountUp counts), and an inset search field filters the active tab inline.
- * The empty state keeps the react-bits Folder; CountUp drives the tab counts.
+ * Dashboard — Shopify **Products index** layout (neutral + green; grounded in
+ * `asset-intake/Shopify web Jan 2024/320`). The seller's shop is a dense,
+ * scannable LIST (not a photo wall): each listing is a compact row — small cover
+ * thumbnail · title · calm status pill · price · listed date — linking to the
+ * review page. Above it, Shopify's quiet underline tab strip filters by status
+ * (with live CountUp counts) and an inset field filters the active tab inline.
+ *
+ * Sorting (the seller can re-order): the column headers are sort controls
+ * (Product / Status / Price / Listed), click to sort, click again to flip — a
+ * caret marks the active column. The default "smart" order is action-first
+ * (errors → drafts → automatic states → live), so the work that needs the seller
+ * is on top until they choose otherwise. Dates render in a STABLE UTC format
+ * ("Jun 12") — never `Date.now()`/locale — so the server and client markup match
+ * (no hydration drift).
  *
  * Density / spacing / hierarchy follow the Shopify reference + the design-
- * principles skill: 4-pt rhythm, one corner-radius scale, restrained effects
- * (hairline borders + soft shadow, no glows), near-black primary, green as the
- * single accent. Mobile-first: 2-col grid → 3-col (sm) → 4-col (lg).
+ * principles skill: 4-pt rhythm, one corner-radius scale, hairline row dividers,
+ * near-black primary, green as the single accent. Mobile collapses each row to a
+ * two-line card (thumb · title+meta · price); sm+ shows the aligned table.
  *
- * Client component, still pure presentation over serializable props: the page
+ * Client component, pure presentation over serializable props: the page
  * assembles rows; the preview harness feeds fixtures.
  */
 
@@ -51,13 +58,13 @@ const PRICE_FMT = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-/** The states the SELLER must act on — used for the header summary + the grid's
- *  action-first ordering. Mirrors the "Needs review" filter in `filters.ts`. */
+/** The states the SELLER must act on — used for the header summary + the
+ *  default action-first ordering. Mirrors the "Needs review" filter. */
 const REVIEW_STATUSES = new Set(["draft", "draft_failed", "failed"]);
 
-/** Reading order for the grid: errors first, then drafts, then the automatic
- *  states (Processing → Scheduled), then the settled Live items. Unknown keys
- *  sort after drafts but before the automatic states (see `rank()`). */
+/** Default ("smart") reading order: errors first, then drafts, then the
+ *  automatic states (Processing → Scheduled), then settled Live items. Unknown
+ *  keys sort after drafts but before the automatic states (see `rank()`). */
 const STATUS_RANK: Record<string, number> = {
   failed: 0,
   draft_failed: 0,
@@ -68,82 +75,197 @@ const STATUS_RANK: Record<string, number> = {
 };
 const rank = (status: string) => STATUS_RANK[status] ?? 1.5;
 
+const SHORT_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+/** Stable "MMM D" from an ISO date, computed in UTC so SSR and client agree
+ *  (avoids a Next hydration mismatch — no Date.now()/toLocaleDateString). */
+function listedLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${SHORT_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+// ---- sorting ----------------------------------------------------------------
+
+type SortKey = "smart" | "title" | "status" | "price" | "date";
+interface SortState {
+  key: SortKey;
+  dir: "asc" | "desc";
+}
+/** The default direction a column opens in when first clicked. */
+const DEFAULT_DIR: Record<Exclude<SortKey, "smart">, "asc" | "desc"> = {
+  title: "asc",
+  status: "asc", // asc = action-first (low rank first)
+  price: "desc", // most valuable first
+  date: "desc", // newest first
+};
+
+function compareRows(a: DashboardRow, b: DashboardRow, sort: SortState): number {
+  const dir = sort.dir === "asc" ? 1 : -1;
+  switch (sort.key) {
+    case "title":
+      return a.title.localeCompare(b.title) * dir;
+    case "status":
+      return (rank(a.status) - rank(b.status)) * dir;
+    case "price":
+      // Items without a price sink to the bottom regardless of direction.
+      return ((a.price ?? -Infinity) - (b.price ?? -Infinity)) * dir;
+    case "date":
+      return (Date.parse(a.createdAt) - Date.parse(b.createdAt)) * dir;
+    default:
+      // "smart": action-first, then newest within each rank.
+      return (
+        rank(a.status) - rank(b.status) ||
+        Date.parse(b.createdAt) - Date.parse(a.createdAt)
+      );
+  }
+}
+
 function PhotoPlaceholder() {
   return (
     <span
       aria-hidden
-      className="flex size-full flex-col items-center justify-center gap-1.5 text-faint"
+      className="flex size-full items-center justify-center text-faint"
     >
-      <svg viewBox="0 0 24 24" className="size-7" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.5">
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <circle cx="9" cy="9" r="2" />
         <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
       </svg>
-      <span className="text-[11px] font-medium tracking-wide">Processing</span>
     </span>
   );
 }
 
+/** Shared desktop column template — used by the header row AND every data row
+ *  so the columns line up exactly. Product is flexible; the rest are fixed. */
+const ROW_GRID = "sm:grid sm:grid-cols-[1fr_148px_104px_92px] sm:items-center sm:gap-4";
+
 /**
- * One listing card — image-first, links to the review/inspect page. Falls back
- * to a labeled placeholder when an item has no photo yet (still processing).
- * Hierarchy (design skill): the photo leads, then the title, then price + a
- * single calm status pill on one baseline. Hover lifts with a soft shadow and a
- * restrained image zoom — no glow.
+ * One listing row — a Shopify products-index row that links to the review page.
+ * Mobile: a compact card (thumb · title over status+date · price on the right).
+ * sm+: the aligned table columns (Product · Status · Price · Listed).
  */
-function ListingCard({ row }: { row: DashboardRow }) {
+function ListingRow({ row }: { row: DashboardRow }) {
   const chip = lifecycleShortLabel(row.status);
   return (
     <Link
       href={`/review/${row.itemId}`}
-      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-xs transition-[box-shadow,border-color,transform] duration-200 hover:-translate-y-px hover:border-border-strong hover:shadow-md motion-safe:active:scale-[0.99]"
+      className={`group flex items-center gap-3 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-surface-2 ${ROW_GRID} sm:px-3`}
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-surface-2">
-        {row.thumbUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
-          <img
-            src={row.thumbUrl}
-            alt=""
-            aria-hidden
-            className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
-          />
-        ) : (
-          <PhotoPlaceholder />
-        )}
-      </div>
-      <div className="flex flex-1 flex-col gap-2 p-3">
-        <p className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-fg-strong group-hover:underline">
-          {row.title}
-        </p>
-        <div className="mt-auto flex items-center justify-between gap-2 pt-0.5">
-          <p className="text-[15px] font-bold text-fg-strong" data-nums>
-            {row.price != null ? (
-              PRICE_FMT.format(row.price)
-            ) : (
-              <span className="text-[13px] font-normal text-faint">No price yet</span>
-            )}
+      {/* Product cell: cover thumbnail + title (+ mobile-only meta line). */}
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:flex-none">
+        <span className="relative size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2">
+          {row.thumbUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
+            <img
+              src={row.thumbUrl}
+              alt=""
+              aria-hidden
+              className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.05]"
+            />
+          ) : (
+            <PhotoPlaceholder />
+          )}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-semibold leading-snug text-fg-strong group-hover:underline">
+            {row.title}
           </p>
-          {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
+          {/* Mobile-only meta: status + listed date under the title. */}
+          <div className="mt-1 flex items-center gap-2 sm:hidden">
+            {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
+            <span className="text-[12px] text-faint" data-nums>
+              {listedLabel(row.createdAt)}
+            </span>
+          </div>
         </div>
       </div>
+
+      {/* Mobile-only price on the right of the row. */}
+      <p className="shrink-0 text-[15px] font-bold text-fg-strong sm:hidden" data-nums>
+        {row.price != null ? (
+          PRICE_FMT.format(row.price)
+        ) : (
+          <span className="text-[12px] font-normal text-faint">No price</span>
+        )}
+      </p>
+
+      {/* Desktop columns. */}
+      <span className="hidden sm:flex">
+        {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
+      </span>
+      <p className="hidden text-right text-[14px] font-bold text-fg-strong sm:block" data-nums>
+        {row.price != null ? (
+          PRICE_FMT.format(row.price)
+        ) : (
+          <span className="text-[13px] font-normal text-faint">—</span>
+        )}
+      </p>
+      <span className="hidden text-right text-[13px] text-muted sm:block" data-nums>
+        {listedLabel(row.createdAt)}
+      </span>
     </Link>
   );
 }
 
+/** Sortable column header (desktop only). Shows a caret on the active column
+ *  pointing the sort direction; clicking flips direction, clicking a new column
+ *  opens it in its natural default direction. */
+function SortHeader({
+  label,
+  k,
+  sort,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  k: Exclude<SortKey, "smart">;
+  sort: SortState;
+  onSort: (k: Exclude<SortKey, "smart">) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort.key === k;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(k)}
+      aria-label={
+        active
+          ? `Sorted by ${label}, ${sort.dir === "asc" ? "ascending" : "descending"}. Activate to reverse.`
+          : `Sort by ${label}`
+      }
+      className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+        align === "right" ? "justify-end" : ""
+      } ${active ? "text-fg-strong" : "text-faint hover:text-fg"}`}
+    >
+      {label}
+      <svg
+        viewBox="0 0 24 24"
+        className={`size-3 transition-[transform,opacity] ${
+          active ? "opacity-100" : "opacity-0 group-hover/head:opacity-40"
+        } ${active && sort.dir === "asc" ? "rotate-180" : ""}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </button>
+  );
+}
+
 /**
- * Empty dashboard — react-bits Folder (now green to match the accent ramp)
- * holding miniature LISTING PREVIEWS pulled straight from the demo catalog
- * (image + name + price always come from the SAME DemoProduct, so a photo can
- * never carry another item's label — round-5 owner trust fix). The opened folder
- * reads as "this is what your listings will become". Click/hover plays with the
- * papers.
- *
- * Items picked exclusive to the dashboard: kettlebell, binoculars, sewing
- * machine — none appear on any marketing surface.
+ * Empty dashboard — react-bits Folder (green to match the accent) holding
+ * miniature LISTING PREVIEWS pulled from the demo catalog (image + name + price
+ * always from the SAME DemoProduct, so a photo can never carry another item's
+ * label). The opened folder reads as "this is what your listings will become".
  */
 const FOLDER_ITEMS: DemoProduct[] = [
-  // Order matters: paper 0 is the narrowest, paper 2 the widest — the longest
-  // short-name (Sewing machine) rides the wide paper so nothing truncates.
   DEMO_PRODUCTS_BY_SLUG.kettlebell,
   DEMO_PRODUCTS_BY_SLUG.binoculars,
   DEMO_PRODUCTS_BY_SLUG.sewingmachine,
@@ -151,10 +273,6 @@ const FOLDER_ITEMS: DemoProduct[] = [
 
 function MiniListingCard({ product }: { product: DemoProduct }) {
   return (
-    /* The folder papers stay literal white paper in both themes, so their ink
-       is pinned (fg-strong / accent-soft-fg flip light in dark mode and would
-       wash out on the white card). Sizes look tiny here but render ~2.2× via
-       the Folder scale transform. */
     <span className="flex size-full flex-col overflow-hidden rounded-[10px] border border-border/60 bg-white text-left shadow-sm dark:border-white/20">
       {/* eslint-disable-next-line @next/next/no-img-element -- tiny static demo thumbnail inside the folder animation */}
       <img
@@ -178,9 +296,6 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
 function DashboardEmpty() {
   return (
     <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-      {/* The folder block is vertically CENTERED in the container (justify-center
-          + min-h), not pushed down with a void above it. mb-14 sets the gap to
-          the title. */}
       <div className="mb-14">
         <Folder
           color="#008060"
@@ -228,6 +343,14 @@ export function DashboardView({
   filter: DashboardFilterKey;
 }) {
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ key: "smart", dir: "asc" });
+
+  const onSort = (k: Exclude<SortKey, "smart">) =>
+    setSort((prev) =>
+      prev.key === k
+        ? { key: k, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key: k, dir: DEFAULT_DIR[k] },
+    );
 
   const activeFilter =
     DASHBOARD_FILTERS.find((f) => f.key === filter) ?? DASHBOARD_FILTERS[0];
@@ -236,19 +359,15 @@ export function DashboardView({
     : rows;
   const visible = statusFiltered
     .filter((r) => matchesQuery(r.title, query))
-    // Hierarchy (design skill: "the main section reflects what matters most"):
-    // surface what the seller must act on first — errors, then drafts — then the
-    // automatic states, then the settled Live ones. A stable sort keeps each
-    // rank in newest-first order (rows arrive sorted by the page).
     .slice()
-    .sort((a, b) => rank(a.status) - rank(b.status));
+    .sort((a, b) => compareRows(a, b, sort));
   const searching = query.trim() !== "";
 
   const filterCount = (f: (typeof DASHBOARD_FILTERS)[number]) =>
     f.statuses ? rows.filter((r) => f.statuses!.includes(r.status)).length : rows.length;
 
   // Cap the stagger so a long shop doesn't crawl in.
-  const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
+  const enterDelay = (i: number) => `${Math.min(i, 12) * 24}ms`;
 
   // Header summary leads with what needs the seller, not just the headcount.
   const totalValue = rows.reduce((sum, r) => sum + (r.price ?? 0), 0);
@@ -300,10 +419,10 @@ export function DashboardView({
       {rows.length === 0 ? (
         <DashboardEmpty />
       ) : (
-        <>
+        <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
           {/* ---- toolbar: quiet underline tab strip (Shopify Products) + inline
                live search over the active tab ---- */}
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-2 sm:px-3">
             <nav
               aria-label="Filter by status"
               className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none]"
@@ -382,19 +501,29 @@ export function DashboardView({
               </p>
             )
           ) : (
-            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
-              {visible.map((row, i) => (
-                <li
-                  key={`${row.itemId}-${row.listingId ?? "item"}`}
-                  className="row-enter"
-                  style={{ animationDelay: enterDelay(i) }}
-                >
-                  <ListingCard row={row} />
-                </li>
-              ))}
-            </ul>
+            <>
+              {/* ---- sortable column headers (desktop) — Shopify's table head ---- */}
+              <div className={`group/head hidden border-b border-border px-3 py-2 ${ROW_GRID}`}>
+                <SortHeader label="Product" k="title" sort={sort} onSort={onSort} />
+                <SortHeader label="Status" k="status" sort={sort} onSort={onSort} />
+                <SortHeader label="Price" k="price" sort={sort} onSort={onSort} align="right" />
+                <SortHeader label="Listed" k="date" sort={sort} onSort={onSort} align="right" />
+              </div>
+
+              <ul className="divide-y divide-border px-1 py-1">
+                {visible.map((row, i) => (
+                  <li
+                    key={`${row.itemId}-${row.listingId ?? "item"}`}
+                    className="row-enter"
+                    style={{ animationDelay: enterDelay(i) }}
+                  >
+                    <ListingRow row={row} />
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
-        </>
+        </section>
       )}
     </main>
   );

@@ -499,6 +499,7 @@ export function ReviewView({
                 onSetCurrent={setPhotoIdx}
                 aspectClassName="aspect-[4/3]"
                 adaptiveFrame
+                maxFrameClassName="max-h-[420px]"
                 enableZoom
               />
             ) : (
@@ -579,8 +580,15 @@ export function ReviewView({
              ones. Price + confidence is the seller's key judgment, so it is the
              hero — elevated chrome, an accent eyebrow, the suggested price
              colored. Identification folds into the quiet Item card below, so the
-             rail reads hero → meta instead of three identical panels. */}
-        <aside className="flex flex-col gap-5">
+             rail reads hero → meta instead of three identical panels.
+
+             The rail is STICKY on desktop (Shopify product-edit): it's the
+             shorter column, so pinning it just below the app header keeps the
+             price decision + item facts in view while the taller media + copy
+             column scrolls — which is what kills the old "empty space beside a
+             short rail" feeling. `self-start` stops the grid from stretching it
+             (sticky needs the element shorter than its scroll container). */}
+        <aside className="flex flex-col gap-5 lg:sticky lg:top-[72px] lg:self-start">
           {/* Price & confidence — HERO. Stronger border + soft elevation set it
               apart from the calm meta card; the green dash eyebrow leads the eye. */}
           <SpotlightCard
@@ -757,17 +765,16 @@ export function ReviewView({
 
       {/* Sharpen / re-price — its OWN form (posts to sharpenAction), rendered as
           a SIBLING of the save form (never nested — nested <form>s are invalid
-          HTML and would route the sharpen submit through Save). Sits below the
-          editor, aligned under the main column on desktop, full-width on mobile. */}
+          HTML and would route the sharpen submit through Save). Runs FULL-WIDTH
+          below the two-column editor: a distinct "improve this estimate" band,
+          so it never leaves a dead gap beside a short column. */}
       {canSharpen ? (
-        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-5">
-          <SharpenCard
-            itemId={data.itemId}
-            bandWord={confidenceWord}
-            candidates={data.identification?.candidates ?? []}
-            action={sharpenAction}
-          />
-        </div>
+        <SharpenCard
+          itemId={data.itemId}
+          bandWord={confidenceWord}
+          candidates={data.identification?.candidates ?? []}
+          action={sharpenAction}
+        />
       ) : null}
     </main>
   );
