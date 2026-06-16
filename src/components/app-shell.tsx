@@ -53,11 +53,11 @@ export function AppShell({
                 {/* gap-4: breathing room between the primary action and the
                     avatar (round 5 — they sat nearly touching). */}
                 <div className="ml-auto flex items-center gap-4">
-                  {/* react-bits ClickSpark: a small violet burst on the primary
+                  {/* react-bits ClickSpark: a small green burst on the primary
                       action — subtle, product-dashboard scale. */}
                   <ClickSpark
                     className="inline-block"
-                    sparkColor="#6d4aff"
+                    sparkColor="#008060"
                     sparkSize={7}
                     sparkRadius={16}
                     sparkCount={8}

@@ -51,8 +51,8 @@ export function ConfidenceGauge({
             y2="76"
             gradientUnits="userSpaceOnUse"
           >
-            <stop offset="0" stopColor="#5a36f0" />
-            <stop offset="1" stopColor="#a960ee" />
+            <stop offset="0" stopColor="#1fb88c" />
+            <stop offset="1" stopColor="#008060" />
           </linearGradient>
         </defs>
         <text
