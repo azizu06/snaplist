@@ -1,26 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import CountUp from "@/components/bits/CountUp";
 import Folder from "@/components/bits/Folder";
 import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
-import { lifecycleLabel, lifecycleShortLabel } from "@/lib/ui/status";
+import { lifecycleShortLabel } from "@/lib/ui/status";
 import { matchesQuery } from "@/lib/ui/search";
-import { relativeDay } from "@/lib/ui/dates";
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 
 /**
- * Dashboard — Shopify products index, replicated (issue #40 round 2; Mobbin
- * Shopify admin reference), upgraded interactive in dashboard v2: page header
- * with the count, the stat-tab filter cards, then ONE card holding a toolbar
- * (live inline search using the same tested matcher as ⌘K) and a real data
- * table (thumbnail · title · status pill · price · created · hover chevron).
- * Rows stagger-fade in. Mobile collapses the table to Depop-style rows.
+ * Dashboard — photo-forward listing grid (neutral + green exemplar; grounded in
+ * the Shopify Products index, `asset-intake/Shopify web Jan 2024/320`). The
+ * seller's shop reads as a wall of their own items: each listing is an
+ * image-first card (cover photo · title · price · calm status pill) linking to
+ * the review page. Shopify's quiet underline tab strip filters by status (with
+ * live CountUp counts), and an inset search field filters the active tab inline.
+ * The empty state keeps the react-bits Folder; CountUp drives the tab counts.
  *
- * Client component, but still pure presentation over serializable props: the
- * page assembles rows; the preview harness feeds fixtures.
+ * Density / spacing / hierarchy follow the Shopify reference + the design-
+ * principles skill: 4-pt rhythm, one corner-radius scale, restrained effects
+ * (hairline borders + soft shadow, no glows), near-black primary, green as the
+ * single accent. Mobile-first: 2-col grid → 3-col (sm) → 4-col (lg).
+ *
+ * Client component, still pure presentation over serializable props: the page
+ * assembles rows; the preview harness feeds fixtures.
  */
 
 export interface DashboardRow {
@@ -46,88 +51,78 @@ const PRICE_FMT = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-function Thumb({ url }: { url: string | null }) {
-  return url ? (
-    // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
-    <img
-      src={url}
-      alt=""
-      aria-hidden
-      className="size-11 shrink-0 rounded-lg border border-border object-cover"
-    />
-  ) : (
+function PhotoPlaceholder() {
+  return (
     <span
       aria-hidden
-      className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-faint"
+      className="flex size-full flex-col items-center justify-center gap-1.5 text-faint"
     >
-      <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <svg viewBox="0 0 24 24" className="size-7" fill="none" stroke="currentColor" strokeWidth="1.4">
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <circle cx="9" cy="9" r="2" />
         <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
       </svg>
+      <span className="text-[11px] font-medium tracking-wide">Processing</span>
     </span>
   );
 }
 
 /**
- * Stat-tab filter card with the react-bits SpotlightCard treatment adapted
- * onto a real <Link> (the vendored SpotlightCard is a div — wrapping the Link
- * would bury navigation semantics). A violet radial spotlight tracks the
- * cursor; the active card keeps its violet border + ring untouched.
+ * One listing card — image-first, links to the review/inspect page. Falls back
+ * to a labeled placeholder when an item has no photo yet (still processing).
+ * Hierarchy (design skill): the photo leads, then the title, then price + a
+ * single calm status pill on one baseline. Hover lifts with a soft shadow and a
+ * restrained image zoom — no glow.
  */
-function SpotlightStatLink({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  const ref = useRef<HTMLAnchorElement>(null);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [lit, setLit] = useState(false);
-
+function ListingCard({ row }: { row: DashboardRow }) {
+  const chip = lifecycleShortLabel(row.status);
   return (
     <Link
-      ref={ref}
-      href={href}
-      aria-current={active ? "page" : undefined}
-      onMouseMove={(e) => {
-        const rect = ref.current?.getBoundingClientRect();
-        if (rect) setPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-      }}
-      onMouseEnter={() => setLit(true)}
-      onMouseLeave={() => setLit(false)}
-      className={`relative min-w-[124px] shrink-0 overflow-hidden rounded-xl border bg-surface px-3.5 py-2.5 transition-all motion-safe:active:scale-[0.98] sm:min-w-0 ${
-        active
-          ? "border-accent shadow-[0_0_0_1px_var(--color-accent)]"
-          : "border-border hover:-translate-y-px hover:border-border-strong hover:shadow-xs"
-      }`}
+      href={`/review/${row.itemId}`}
+      className="group flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-xs transition-[box-shadow,border-color,transform] duration-200 hover:-translate-y-px hover:border-border-strong hover:shadow-md motion-safe:active:scale-[0.99]"
     >
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 transition-opacity duration-300 ease-in-out"
-        style={{
-          opacity: lit ? 1 : 0,
-          background: `radial-gradient(circle at ${pos.x}px ${pos.y}px, rgba(0, 128, 96, 0.10), transparent 80%)`,
-        }}
-      />
-      {children}
+      <div className="relative aspect-[4/3] w-full overflow-hidden bg-surface-2">
+        {row.thumbUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
+          <img
+            src={row.thumbUrl}
+            alt=""
+            aria-hidden
+            className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
+          />
+        ) : (
+          <PhotoPlaceholder />
+        )}
+      </div>
+      <div className="flex flex-1 flex-col gap-2 p-3">
+        <p className="line-clamp-2 text-[13.5px] font-semibold leading-snug text-fg-strong group-hover:underline">
+          {row.title}
+        </p>
+        <div className="mt-auto flex items-center justify-between gap-2 pt-0.5">
+          <p className="text-[15px] font-bold text-fg-strong" data-nums>
+            {row.price != null ? (
+              PRICE_FMT.format(row.price)
+            ) : (
+              <span className="text-[13px] font-normal text-faint">No price yet</span>
+            )}
+          </p>
+          {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
+        </div>
+      </div>
     </Link>
   );
 }
 
 /**
- * Empty dashboard — react-bits Folder (violet) holding miniature LISTING
- * PREVIEWS pulled straight from the demo catalog (image + name + price always
- * come from the SAME DemoProduct, so a photo can never carry another item's
- * label — round-5 owner trust fix). The opened folder reads as "this is what
- * your listings will become". Click/hover plays with the papers.
+ * Empty dashboard — react-bits Folder (now green to match the accent ramp)
+ * holding miniature LISTING PREVIEWS pulled straight from the demo catalog
+ * (image + name + price always come from the SAME DemoProduct, so a photo can
+ * never carry another item's label — round-5 owner trust fix). The opened folder
+ * reads as "this is what your listings will become". Click/hover plays with the
+ * papers.
  *
- * Items picked exclusive to the dashboard (r6.1): kettlebell, binoculars,
- * sewing machine — none appear on any marketing surface (the old gshock/
- * espresso/turntable also headlined the home scan).
+ * Items picked exclusive to the dashboard: kettlebell, binoculars, sewing
+ * machine — none appear on any marketing surface.
  */
 const FOLDER_ITEMS: DemoProduct[] = [
   // Order matters: paper 0 is the narrowest, paper 2 the widest — the longest
@@ -165,11 +160,10 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
 
 function DashboardEmpty() {
   return (
-    <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-      {/* r6 (owner): the folder block is vertically CENTERED in the container
-          (justify-center + min-h), not pushed down with a void above it.
-          mb-14 sets the gap to the title. The whole section is nudged down
-          from the nav at the <main> level (pt-16). */}
+    <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+      {/* The folder block is vertically CENTERED in the container (justify-center
+          + min-h), not pushed down with a void above it. mb-14 sets the gap to
+          the title. */}
       <div className="mb-14">
         <Folder
           color="#008060"
@@ -179,9 +173,7 @@ function DashboardEmpty() {
           ))}
         />
       </div>
-      <p className="text-base font-semibold text-fg-strong">
-        List your first item
-      </p>
+      <p className="text-base font-semibold text-fg-strong">List your first item</p>
       <p className="max-w-sm text-[15px] text-muted">
         Take a photo of something you want to sell and we&apos;ll identify it,
         research the price, and write the listing for you.
@@ -208,8 +200,8 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-// `counts` stays in the props API for the page/preview callers, but the
-// stat-tab cards compute per-filter counts from `rows` directly.
+// `counts` stays in the props API for the page/preview callers, but the tab
+// counts are computed from `rows` directly.
 export function DashboardView({
   rows,
   filter,
@@ -231,40 +223,39 @@ export function DashboardView({
   const filterCount = (f: (typeof DASHBOARD_FILTERS)[number]) =>
     f.statuses ? rows.filter((r) => f.statuses!.includes(r.status)).length : rows.length;
 
-  // Cap the stagger so long tables don't crawl in.
+  // Cap the stagger so a long shop doesn't crawl in.
   const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
 
   // Portfolio signal for the header summary — what the whole shop is worth.
   const totalValue = rows.reduce((sum, r) => sum + (r.price ?? 0), 0);
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-10 pt-8 sm:px-6 sm:pt-24">
-      {/* ---- page header: eyebrow + title, with a portfolio-value summary ---- */}
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
+      {/* ---- page header: eyebrow + title + portfolio summary, with the primary
+           "New listing" action top-right (Shopify "Add product" pattern) ---- */}
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div>
           <Eyebrow>Your shop</Eyebrow>
           <h1 className="mt-1.5 font-display text-[24px] font-bold tracking-tight text-fg-strong">
             Listings
           </h1>
+          {rows.length > 0 ? (
+            <p className="mt-1 text-[13px] text-muted" data-nums>
+              <CountUp to={rows.length} duration={0.7} /> item{rows.length === 1 ? "" : "s"} ·{" "}
+              {PRICE_FMT.format(totalValue)} total
+            </p>
+          ) : null}
         </div>
         {rows.length > 0 ? (
-          <div className="flex items-center gap-4 rounded-xl border border-border bg-surface px-4 py-2 shadow-xs">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.12em] text-faint">Items</p>
-              <p className="font-display text-[18px] font-bold text-fg-strong" data-nums>
-                <CountUp to={rows.length} duration={0.7} />
-              </p>
-            </div>
-            <span aria-hidden className="h-7 w-px bg-border" />
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.12em] text-faint">
-                Total value
-              </p>
-              <p className="font-display text-[18px] font-bold text-fg-strong" data-nums>
-                {PRICE_FMT.format(totalValue)}
-              </p>
-            </div>
-          </div>
+          <Link
+            href="/upload"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover motion-safe:active:scale-[0.98]"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            New listing
+          </Link>
         ) : null}
       </header>
 
@@ -272,200 +263,99 @@ export function DashboardView({
         <DashboardEmpty />
       ) : (
         <>
-          {/* ---- stat-tab cards (Stripe Transactions pattern: the filters ARE
-               the metric cards; selected = violet border) ---- */}
-          <nav
-            aria-label="Filter by status"
-            className="-mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0 sm:pb-0"
-          >
-            {DASHBOARD_FILTERS.map((f) => {
-              const active = f.key === filter;
-              return (
-                <SpotlightStatLink
-                  key={f.key}
-                  href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
-                  active={active}
-                >
-                  <span
-                    className={`block text-[13.5px] font-medium ${
-                      active ? "text-accent-soft-fg" : "text-muted"
+          {/* ---- toolbar: quiet underline tab strip (Shopify Products) + inline
+               live search over the active tab ---- */}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border">
+            <nav
+              aria-label="Filter by status"
+              className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none]"
+            >
+              {DASHBOARD_FILTERS.map((f) => {
+                const active = f.key === filter;
+                return (
+                  <Link
+                    key={f.key}
+                    href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
+                    aria-current={active ? "page" : undefined}
+                    className={`relative flex shrink-0 items-baseline gap-1.5 whitespace-nowrap px-3 py-2.5 text-[13.5px] transition-colors ${
+                      active ? "text-fg-strong" : "text-muted hover:text-fg"
                     }`}
                   >
-                    {f.label}
-                  </span>
-                  <span className="mt-0.5 block text-[18px] font-bold text-fg-strong" data-nums>
-                    <CountUp to={filterCount(f)} duration={0.7} />
-                  </span>
-                </SpotlightStatLink>
-              );
-            })}
-          </nav>
-
-          {/* ---- table card ---- */}
-          <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-xs">
-            {/* toolbar: inline search over the active tab */}
-            <div className="flex items-center gap-3 border-b border-border px-3 py-2.5">
-              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[14px] focus-within:ring-2 focus-within:ring-accent/40 sm:max-w-xs">
-                <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.3-4.3" />
-                </svg>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`Filter ${activeFilter.key === "all" ? "listings" : `“${activeFilter.label}”`}…`}
-                  aria-label="Filter listings by title"
-                  className="w-full bg-transparent text-fg-strong outline-none placeholder:text-faint"
-                />
-                {searching ? (
-                  <button
-                    type="button"
-                    onClick={() => setQuery("")}
-                    aria-label="Clear filter"
-                    className="-mr-1.5 flex size-9 shrink-0 items-center justify-center rounded text-faint transition-colors hover:text-fg"
-                  >
-                    <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                      <path d="M18 6 6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                ) : null}
-              </label>
+                    <span className="font-medium">{f.label}</span>
+                    <span
+                      className={`text-[12.5px] ${active ? "text-accent-soft-fg" : "text-faint"}`}
+                      data-nums
+                    >
+                      <CountUp to={filterCount(f)} duration={0.7} />
+                    </span>
+                    {active ? (
+                      <span
+                        aria-hidden
+                        className="absolute inset-x-3 -bottom-px h-[2px] rounded-full bg-accent"
+                      />
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </nav>
+            <label className="mb-2 flex w-full items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[14px] focus-within:ring-2 focus-within:ring-accent/40 sm:mb-1.5 sm:w-56">
+              <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Filter ${activeFilter.key === "all" ? "listings" : `“${activeFilter.label}”`}…`}
+                aria-label="Filter listings by title"
+                className="w-full bg-transparent text-fg-strong outline-none placeholder:text-faint"
+              />
               {searching ? (
-                <span className="shrink-0 text-[13.5px] text-muted" data-nums>
-                  {visible.length} match{visible.length === 1 ? "" : "es"}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear filter"
+                  className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-faint transition-colors hover:text-fg"
+                >
+                  <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
               ) : null}
-            </div>
+            </label>
+          </div>
 
-            {visible.length === 0 ? (
-              searching ? (
-                <p className="px-4 py-10 text-center text-[15px] text-muted">
-                  No titles match “{query.trim()}”.{" "}
-                  <button
-                    type="button"
-                    onClick={() => setQuery("")}
-                    className="font-semibold text-accent-soft-fg hover:underline"
-                  >
-                    Clear
-                  </button>
-                </p>
-              ) : (
-                <p className="px-4 py-10 text-center text-[15px] text-muted">
-                  Nothing under “{activeFilter.label}” yet. Items move here as their
-                  status changes.
-                </p>
-              )
+          {visible.length === 0 ? (
+            searching ? (
+              <p className="px-4 py-12 text-center text-[15px] text-muted">
+                No titles match “{query.trim()}”.{" "}
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="font-semibold text-accent-soft-fg hover:underline"
+                >
+                  Clear
+                </button>
+              </p>
             ) : (
-              <>
-                {/* desktop: Shopify data table */}
-                <table className="hidden w-full sm:table">
-                  <thead>
-                    <tr className="border-b border-border text-left text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">
-                      <th className="py-2.5 pl-4 pr-2 font-semibold">Product</th>
-                      <th className="px-2 py-2.5 font-semibold">Status</th>
-                      <th className="px-2 py-2.5 text-right font-semibold">Price</th>
-                      <th className="py-2.5 pl-2 font-semibold text-right">Created</th>
-                      <th className="w-10" aria-hidden />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {visible.map((row, i) => {
-                      const chip = lifecycleLabel(row.status);
-                      return (
-                        <tr
-                          key={`${row.itemId}-${row.listingId ?? "item"}`}
-                          className="group row-enter transition-colors hover:bg-surface-2/50"
-                          style={{ animationDelay: enterDelay(i) }}
-                        >
-                          <td className="py-2 pl-4 pr-2">
-                            <Link
-                              href={`/review/${row.itemId}`}
-                              className="flex items-center gap-3"
-                            >
-                              <Thumb url={row.thumbUrl} />
-                              <span className="truncate text-[14px] font-semibold text-fg-strong group-hover:underline">
-                                {row.title}
-                              </span>
-                            </Link>
-                          </td>
-                          <td className="px-2 py-2">
-                            {chip ? (
-                              <StatusBadge label={chip.label} tone={chip.tone} dot={false} />
-                            ) : null}
-                          </td>
-                          <td className="px-2 py-2 text-right text-[14px] font-semibold text-fg-strong" data-nums>
-                            {row.price != null ? PRICE_FMT.format(row.price) : <span className="font-normal text-faint">–</span>}
-                          </td>
-                          {/* suppressHydrationWarning: relative dates are
-                              computed in the server's TZ during SSR and the
-                              user's TZ after hydration — they may differ
-                              around midnight, by design. */}
-                          <td
-                            className="py-2 pl-2 text-right text-[14px] text-muted"
-                            data-nums
-                            suppressHydrationWarning
-                          >
-                            {row.createdAt ? relativeDay(row.createdAt) : "–"}
-                          </td>
-                          <td className="py-2 pl-1 pr-3">
-                            <svg
-                              viewBox="0 0 24 24"
-                              aria-hidden
-                              className="size-4 text-faint opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-x-0.5 group-hover:opacity-100"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="m9 18 6-6-6-6" />
-                            </svg>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                {/* mobile: Depop-style rows */}
-                <ul className="divide-y divide-border sm:hidden">
-                  {visible.map((row, i) => {
-                    const chip = lifecycleShortLabel(row.status);
-                    return (
-                      <li
-                        key={`m-${row.itemId}-${row.listingId ?? "item"}`}
-                        className="row-enter"
-                        style={{ animationDelay: enterDelay(i) }}
-                      >
-                        <Link
-                          href={`/review/${row.itemId}`}
-                          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/50 active:bg-surface-2"
-                        >
-                          <Thumb url={row.thumbUrl} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[15px] font-semibold text-fg-strong">
-                              {row.title}
-                            </span>
-                            <span
-                              className="mt-0.5 block text-[13.5px] text-muted"
-                              data-nums
-                              suppressHydrationWarning
-                            >
-                              {row.price != null ? PRICE_FMT.format(row.price) : "No price yet"}
-                              {row.createdAt ? ` · ${relativeDay(row.createdAt)}` : ""}
-                            </span>
-                          </span>
-                          {chip ? (
-                            <StatusBadge label={chip.label} tone={chip.tone} dot={false} />
-                          ) : null}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-          </section>
+              <p className="px-4 py-12 text-center text-[15px] text-muted">
+                Nothing under “{activeFilter.label}” yet. Items move here as their
+                status changes.
+              </p>
+            )
+          ) : (
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+              {visible.map((row, i) => (
+                <li
+                  key={`${row.itemId}-${row.listingId ?? "item"}`}
+                  className="row-enter"
+                  style={{ animationDelay: enterDelay(i) }}
+                >
+                  <ListingCard row={row} />
+                </li>
+              ))}
+            </ul>
+          )}
         </>
       )}
     </main>

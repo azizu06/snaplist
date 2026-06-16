@@ -7,9 +7,13 @@
  * display time. No page may render a raw status/tier key directly — that is how
  * "tier: web_tight" leaked to end users.
  *
- * Tones map to the semantic status colors in globals.css `@theme`:
- * success (emerald) · success-solid (filled emerald, reserved for Live) ·
- * warning (amber) · danger (red) · neutral (gray).
+ * Tones map to the semantic status colors in globals.css `@theme`. The chip
+ * chrome is deliberately RESTRAINED (see `StatusBadge`): every pill shares one
+ * calm neutral chrome and color rides only on a small dot, so a column of
+ * statuses reads quietly. Color is reserved for the two states that matter —
+ * Live (success-solid, emerald) and Needs attention (danger, red); the in-flight
+ * states (Draft, Queued, Processing) are `neutral` and differentiated by their
+ * label, not by competing fills.
  */
 
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "../confidence/confidence";
@@ -26,9 +30,9 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
   if (status == null) return null;
   switch (status) {
     case "draft":
-      return { label: "Draft: needs review", tone: "warning" };
+      return { label: "Draft: needs review", tone: "neutral" };
     case "queued":
-      return { label: "Queued: autopilot will post", tone: "success" };
+      return { label: "Queued: autopilot will post", tone: "neutral" };
     case "published":
       return { label: "Live", tone: "success-solid" };
     case "failed":
