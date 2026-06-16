@@ -153,13 +153,13 @@ export function HeroPrism() {
   );
 }
 
-/** Violet-white pastel — reads glassy on the white canvas. */
-const IRIDESCENCE_LIGHT: [number, number, number] = [0.93, 0.91, 1];
-/** Capped deep violet — a glow, not a glare, on the navy canvas. */
-const IRIDESCENCE_DARK: [number, number, number] = [0.38, 0.31, 0.86];
+/** Green-white pastel — reads glassy on the white canvas. */
+const IRIDESCENCE_LIGHT: [number, number, number] = [0.9, 0.98, 0.95];
+/** Capped deep green — a glow, not a glare, on the dark canvas. */
+const IRIDESCENCE_DARK: [number, number, number] = [0.04, 0.45, 0.34];
 
 /**
- * Violet iridescent field behind the final CTA band. Mounts on scroll-near
+ * Green iridescent field behind the final CTA band. Mounts on scroll-near
  * only. The shader canvas is opaque, so two veil layers blend it back into
  * the page: edge gradients fade into the canvas color and a center wash
  * keeps the headline contrast-safe in both themes.

@@ -82,7 +82,7 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
           // eslint-disable-next-line @next/next/no-img-element -- external Clerk avatar
           <img src={user.imageUrl} alt="" className="size-full object-cover" />
         ) : (
-          <span className="flex size-full items-center justify-center bg-gradient-to-br from-[#7a73ff] to-[#a960ee]">
+          <span className="flex size-full items-center justify-center bg-gradient-to-br from-[#1fb88c] to-[#1fb88c]">
             {initial}
           </span>
         )}

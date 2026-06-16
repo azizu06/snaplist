@@ -11,9 +11,9 @@
 
    - Body font is wired to --font-sans (Geist via next/font in layout.tsx).
      Do NOT re-add a hardcoded Arial/Inter body rule — that was the X-1 bug.
-   - One accent (true blue, hue 255) deliberately distinct from the three
-     lifecycle hues (amber 75 / emerald 158 / red 27): status color always
-     MEANS status, the accent never collides with "Live".
+   - One green brand accent (#008060), kept distinct in USE from the emerald
+     lifecycle hue (amber 75 / emerald 158 / red 27): primary actions are
+     near-black ink, so the green accent never collides with "Live".
    - Plain `@theme` (not `@theme inline`) so tokens emit as :root custom
      properties — the dark-mode media query below re-points them and every
      utility flips for free.
@@ -82,6 +82,17 @@
   --color-accent-soft:    #e3f1ed;
   --color-accent-soft-fg: #0c5a43;
 
+  /* Brand green RAMP — the accent has real range (owner: "I only see one
+     green"). soft → tint → muted → base → deep → ink. Use across badges, hover
+     fills, chart series, borders, and money/positive emphasis on every screen
+     so green reads as a family, not a single flat note. */
+  --color-brand-soft:  #eef7f3;
+  --color-brand-tint:  #d7ece4;
+  --color-brand-muted: #7fc4ad;
+  --color-brand:       #008060;
+  --color-brand-deep:  #006e52;
+  --color-brand-ink:   #00422f;
+
   /* Lifecycle: draft → amber */
   --color-warning:         oklch(72%   0.15 75);
   --color-warning-solid:   oklch(70%   0.15 70);
@@ -129,12 +140,11 @@
 }
 
 /* ============================================================================
-   Prism-dark theme. Same identity, lights off: every token above re-points
-   under `.dark` so token-driven components flip automatically. The canvas
-   family is derived from the ink (#131e3a → a #0b1020-family navy-black),
-   violet stays the brand voice (nudged brighter for contrast on dark),
-   shadows go black-heavy with a faint violet rim on cards.
-   Unlayered on purpose: wins over the @layer theme defaults. */
+   Neutral-dark theme. Same identity, lights off: every token above re-points
+   under `.dark` so token-driven components flip automatically. The canvas is a
+   true neutral dark (#141414 family), green stays the brand voice (nudged
+   brighter for contrast on dark), shadows go black-heavy with a faint light rim
+   on cards. Unlayered on purpose: wins over the @layer theme defaults. */
 .dark {
   /* Surface family — neutral dark (true grays, not navy) */
   --color-night:       #141414;  /* page canvas               */
@@ -177,6 +187,14 @@
   --color-accent-fg:      #08130f;
   --color-accent-soft:    #10302a;
   --color-accent-soft-fg: #6fe3c0;
+
+  /* Brand green ramp (dark): fills go deep, text/accents go bright. */
+  --color-brand-soft:  #10302a;
+  --color-brand-tint:  #16463a;
+  --color-brand-muted: #2f9b76;
+  --color-brand:       #00a37a;
+  --color-brand-deep:  #1fb88c;
+  --color-brand-ink:   #6fe3c0;
 
   /* Lifecycle: draft → amber */
   --color-warning:         oklch(78% 0.14 80);
@@ -272,15 +290,15 @@
     height: 80%;
     pointer-events: none;
     background:
-      radial-gradient(40% 48% at 24% 12%, rgba(99, 91, 255, 0.1), transparent 70%),
-      radial-gradient(44% 52% at 78% 6%, rgba(0, 212, 255, 0.09), transparent 70%);
+      radial-gradient(40% 48% at 24% 12%, rgba(0, 128, 96, 0.1), transparent 70%),
+      radial-gradient(44% 52% at 78% 6%, rgba(20, 165, 150, 0.09), transparent 70%);
     filter: blur(30px);
   }
   /* Same pools after dark — a touch more luminous so they read on navy. */
   .dark .aurora::before {
     background:
-      radial-gradient(40% 48% at 24% 12%, rgba(126, 95, 255, 0.2), transparent 70%),
-      radial-gradient(44% 52% at 78% 6%, rgba(0, 212, 255, 0.12), transparent 70%);
+      radial-gradient(40% 48% at 24% 12%, rgba(0, 163, 122, 0.2), transparent 70%),
+      radial-gradient(44% 52% at 78% 6%, rgba(20, 165, 150, 0.12), transparent 70%);
   }
   /* The prism — SnapList's own animated gradient slab: light split through
      an aperture. Rebuilt as three layers so the color visibly FLOWS instead
@@ -309,7 +327,7 @@
     background:
       radial-gradient(52% 68% at 20% 52%, rgba(255, 255, 255, 0.62) 0%, transparent 68%),
       radial-gradient(60% 70% at 50% -10%, rgba(255, 255, 255, 0.75) 0%, transparent 60%),
-      linear-gradient(80deg, #8d77ff 0%, #5fd0f5 48%, #bd95ff 100%);
+      linear-gradient(80deg, #1fb88c 0%, #2bb3a3 48%, #6fe3c0 100%);
     opacity: 0.94;
   }
   .prism-gradient::before,
@@ -340,9 +358,9 @@
      survives the theme flip and light text stays readable on top. */
   .dark .prism-gradient {
     background:
-      radial-gradient(52% 68% at 20% 52%, rgba(126, 95, 255, 0.16) 0%, transparent 68%),
+      radial-gradient(52% 68% at 20% 52%, rgba(0, 163, 122, 0.16) 0%, transparent 68%),
       radial-gradient(60% 70% at 50% -10%, rgba(157, 123, 255, 0.18) 0%, transparent 60%),
-      linear-gradient(80deg, #221a55 0%, #0f3148 48%, #2c1d56 100%);
+      linear-gradient(80deg, #0a2a20 0%, #0c3329 48%, #0a2a20 100%);
     opacity: 0.96;
   }
   .dark .prism-gradient::before {
@@ -391,7 +409,7 @@
     background: var(--color-panel);
     border-color: rgba(50, 64, 110, 0.7);
     box-shadow:
-      0 0 0 1px rgba(126, 95, 255, 0.07),
+      0 0 0 1px rgba(0, 163, 122, 0.07),
       0 13px 27px -5px rgba(0, 0, 0, 0.5),
       0 8px 16px -8px rgba(0, 0, 0, 0.55);
   }
@@ -786,13 +804,13 @@
 }
 .footer-logo-glow:hover span {
   text-shadow:
-    0 0 14px rgba(109, 74, 255, 0.45),
-    0 0 32px rgba(109, 74, 255, 0.25);
+    0 0 14px rgba(0, 128, 96, 0.45),
+    0 0 32px rgba(0, 128, 96, 0.25);
 }
 .dark .footer-logo-glow:hover span {
   text-shadow:
-    0 0 14px rgba(126, 95, 255, 0.6),
-    0 0 36px rgba(126, 95, 255, 0.35);
+    0 0 14px rgba(0, 163, 122, 0.6),
+    0 0 36px rgba(0, 163, 122, 0.35);
 }
 
 /* ── Hero scan showcase ──────────────────────────────────────────────────────
@@ -810,14 +828,14 @@
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(126, 95, 255, 0.95) 22%,
+    rgba(0, 163, 122, 0.95) 22%,
     #cfd8ff 50%,
-    rgba(126, 95, 255, 0.95) 78%,
+    rgba(0, 163, 122, 0.95) 78%,
     transparent
   );
   box-shadow:
-    0 0 14px 2px rgba(126, 95, 255, 0.6),
-    0 0 38px 6px rgba(126, 95, 255, 0.28);
+    0 0 14px 2px rgba(0, 163, 122, 0.6),
+    0 0 38px 6px rgba(0, 163, 122, 0.28);
   animation: scan-showcase-sweep 2.1s cubic-bezier(0.45, 0.05, 0.45, 0.95) forwards;
 }
 /* soft gradient trail above the line — the "already scanned" wake */
@@ -827,7 +845,7 @@
   right: 0;
   bottom: 100%;
   height: 72px;
-  background: linear-gradient(to top, rgba(126, 95, 255, 0.22), transparent);
+  background: linear-gradient(to top, rgba(0, 163, 122, 0.22), transparent);
   pointer-events: none;
 }
 @keyframes scan-showcase-sweep {
@@ -890,9 +908,9 @@
    light up under the cursor; leaving fades it out in place. Reduced motion:
    the JS never arms, .is-lit is never added, the word stays at rest. */
 .wordmark-flashlight {
-  --wm-light-a: #8e6bff;
-  --wm-light-b: #5435d6;
-  --wm-bloom: rgba(109, 74, 255, 0.45);
+  --wm-light-a: #1fb88c;
+  --wm-light-b: #006e52;
+  --wm-bloom: rgba(0, 128, 96, 0.45);
   color: transparent;
   background-image: linear-gradient(to bottom, var(--wm-light-a), var(--wm-light-b));
   -webkit-background-clip: text;
@@ -926,8 +944,8 @@
 }
 .dark .wordmark-flashlight {
   --wm-light-a: #f3eeff;
-  --wm-light-b: #a98aff;
-  --wm-bloom: rgba(140, 110, 255, 0.55);
+  --wm-light-b: #6fe3c0;
+  --wm-bloom: rgba(0, 163, 122, 0.55);
 }
 
 /* --- end ui-r5-landing --- */
@@ -948,9 +966,9 @@
   background: linear-gradient(
     100deg,
     transparent 20%,
-    rgba(109, 74, 255, 0.1) 45%,
+    rgba(0, 128, 96, 0.1) 45%,
     rgba(255, 255, 255, 0.55) 50%,
-    rgba(109, 74, 255, 0.1) 55%,
+    rgba(0, 128, 96, 0.1) 55%,
     transparent 80%
   );
   transform: translateX(-100%);
@@ -960,9 +978,9 @@
   background: linear-gradient(
     100deg,
     transparent 20%,
-    rgba(126, 95, 255, 0.12) 45%,
+    rgba(0, 163, 122, 0.12) 45%,
     rgba(207, 216, 255, 0.22) 50%,
-    rgba(126, 95, 255, 0.12) 55%,
+    rgba(0, 163, 122, 0.12) 55%,
     transparent 80%
   );
 }
@@ -986,11 +1004,11 @@
   0%,
   100% {
     opacity: 0.25;
-    box-shadow: 0 0 0 0 rgba(126, 95, 255, 0);
+    box-shadow: 0 0 0 0 rgba(0, 163, 122, 0);
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 8px 1px rgba(126, 95, 255, 0.45);
+    box-shadow: 0 0 8px 1px rgba(0, 163, 122, 0.45);
   }
 }
 
@@ -1116,8 +1134,8 @@
     border-color: var(--color-line);
   }
   50% {
-    box-shadow: 0 0 18px 3px rgba(109, 74, 255, 0.5);
-    border-color: rgba(109, 74, 255, 0.6);
+    box-shadow: 0 0 18px 3px rgba(0, 128, 96, 0.5);
+    border-color: rgba(0, 128, 96, 0.6);
   }
 }
 @media (prefers-reduced-motion: reduce) {

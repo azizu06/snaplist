@@ -19,7 +19,7 @@ export function HeroDemoVideo() {
     <SeamlessThemeVideo
       src="/hero-demo.mp4"
       label="Demo: a photo becomes a priced, published eBay listing"
-      className="aspect-video rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(19,30,58,0.35),0_4px_16px_-6px_rgba(19,30,58,0.12)] dark:border-2 dark:border-white/20 dark:shadow-[0_0_0_1px_rgba(126,95,255,0.25),0_0_60px_-10px_rgba(126,95,255,0.35),0_24px_64px_-24px_rgba(0,0,0,0.7)]"
+      className="aspect-video rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(26,26,26,0.30),0_4px_16px_-6px_rgba(26,26,26,0.12)] dark:border-2 dark:border-white/20 dark:shadow-[0_0_0_1px_rgba(0,163,122,0.25),0_0_60px_-10px_rgba(0,163,122,0.35),0_24px_64px_-24px_rgba(0,0,0,0.7)]"
     >
       <div
         aria-hidden

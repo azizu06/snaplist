@@ -110,7 +110,7 @@ function SpotlightStatLink({
         className="pointer-events-none absolute inset-0 transition-opacity duration-300 ease-in-out"
         style={{
           opacity: lit ? 1 : 0,
-          background: `radial-gradient(circle at ${pos.x}px ${pos.y}px, rgba(109, 74, 255, 0.10), transparent 80%)`,
+          background: `radial-gradient(circle at ${pos.x}px ${pos.y}px, rgba(0, 128, 96, 0.10), transparent 80%)`,
         }}
       />
       {children}
@@ -155,7 +155,7 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
         <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#131e3a]">
           {product.shortName}
         </span>
-        <span className="block text-[7.5px] font-bold leading-none text-[#5a36f0]" data-nums>
+        <span className="block text-[7.5px] font-bold leading-none text-[#006e52]" data-nums>
           ${product.price}
         </span>
       </span>
@@ -172,7 +172,7 @@ function DashboardEmpty() {
           from the nav at the <main> level (pt-16). */}
       <div className="mb-14">
         <Folder
-          color="#6d4aff"
+          color="#008060"
           size={2.2}
           items={FOLDER_ITEMS.map((product) => (
             <MiniListingCard key={product.slug} product={product} />

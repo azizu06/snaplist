@@ -10,10 +10,7 @@ import ScrollFloat from "@/components/bits/ScrollFloat";
 import ShinyText from "@/components/bits/ShinyText";
 import SplitText from "@/components/bits/SplitText";
 import SpotlightCard from "@/components/bits/SpotlightCard";
-import {
-  CtaIridescence,
-  HeroPrism,
-} from "@/components/marketing/live-backgrounds";
+import { CtaIridescence } from "@/components/marketing/live-backgrounds";
 import {
   MarketplaceBadge,
   MarketplaceLoop,
@@ -187,8 +184,8 @@ function PriceFrame() {
         </div>
         <div>
           <div className="relative h-1.5 rounded-full bg-line">
-            <span className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-60" />
-            <span className="absolute left-[42%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(109,74,255,0.22)]" />
+            <span className="absolute inset-y-0 left-[8%] right-[8%] rounded-full bg-gradient-to-r from-[#1fb88c] via-[#008060] to-[#1fb88c] opacity-60" />
+            <span className="absolute left-[42%] top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-panel bg-iris shadow-[0_0_0_3px_rgba(0, 128, 96,0.22)]" />
           </div>
           <div className="nums mt-1.5 flex justify-between text-[11px] font-medium text-flash-faint">
             <span>$170</span>
@@ -432,11 +429,14 @@ function StorefrontListing({
 export default function Landing() {
   return (
     <>
-      {/* ====== 1 · hero — Prism shader + gradient slab, scan-showcase centerpiece ====== */}
+      {/* ====== 1 · hero — green gradient slab, scan-showcase centerpiece ====== */}
+      {/* The WebGL rainbow <HeroPrism> was retired here: it is a spectrum shader
+          (inherently contains violet) and can't be recolored via props. The green
+          .prism-gradient CSS slab carries the hero until the hero redesign pass
+          rebuilds this section. */}
       <section className="relative overflow-hidden pb-20 pt-32 sm:pb-24 sm:pt-40">
         <div aria-hidden className="prism-gradient" />
         <div aria-hidden className="prism-grain" />
-        <HeroPrism />
         {/* Slab-matched veil so the now-full-presence prism behind the hero
             never washes out the centred headline + paragraph: opaque on the
             text column, transparent at the edges/top where the prism glows
@@ -486,7 +486,7 @@ export default function Landing() {
               <span>Built for</span>
               <RotatingText
                 texts={[...ROTATING_CATEGORIES]}
-                // Dark mode: the resting iris (#7e5fff) is too dim on the navy
+                // Dark mode: the resting iris (#00a37a) is too dim on the navy
                 // hero slab — lift the rotating word to the bright accent tint.
                 mainClassName="overflow-hidden rounded-full bg-white/70 px-3 py-0.5 text-iris backdrop-blur dark:bg-white/10 dark:text-[color:var(--color-accent-soft-fg)]"
                 staggerFrom="last"
@@ -506,7 +506,7 @@ export default function Landing() {
               <Magnet padding={80} magnetStrength={18}>
                 <ClickSpark
                   className="inline-block"
-                  sparkColor="#6d4aff"
+                  sparkColor="#008060"
                   sparkSize={9}
                   sparkRadius={22}
                   sparkCount={8}
@@ -517,9 +517,6 @@ export default function Landing() {
                     className="group inline-flex items-center gap-2 rounded-full bg-flash px-6 py-3 text-[16px] font-semibold text-white transition-transform duration-200 hover:scale-[1.03] active:scale-[0.98] dark:text-night"
                   >
                     Start selling free
-                    <span aria-hidden className="transition-transform group-hover:translate-x-1">
-                      →
-                    </span>
                   </Link>
                 </ClickSpark>
               </Magnet>
@@ -583,12 +580,12 @@ export default function Landing() {
             <div key={n} className="relative">
               <SpotlightCard
                 className="flex h-full flex-col p-4"
-                spotlightColor="rgba(109, 74, 255, 0.1)"
+                spotlightColor="rgba(0, 128, 96, 0.1)"
               >
                 {STEP_FRAMES[i]}
                 <div className="flex flex-1 flex-col px-2 pb-1 pt-6">
                   <div className="flex items-center gap-2.5">
-                    <span className="nums grid size-7 shrink-0 place-items-center rounded-full bg-[rgba(109,74,255,0.13)] font-display text-[13px] font-bold text-iris">
+                    <span className="nums grid size-7 shrink-0 place-items-center rounded-full bg-[rgba(0, 128, 96,0.13)] font-display text-[13px] font-bold text-iris">
                       {n}
                     </span>
                     <span className="text-[11.5px] font-semibold uppercase tracking-[0.16em] text-flash-faint">
@@ -649,7 +646,7 @@ export default function Landing() {
           <div className="mt-14">
             <MagicBento
               cards={[...BENTO_CARDS]}
-              glowColor="109, 74, 255"
+              glowColor="0, 128, 96"
               enableTilt
               enableMagnetism={false}
               clickEffect
@@ -694,7 +691,7 @@ export default function Landing() {
                 brown padding baked in — now cropped to the bare photo). Capped
                 width keeps it tidy on desktop, full-width on mobile. Hover still
                 zooms the IMAGE inside its clipped frame (never the caption). */}
-            <figure className="group mx-auto max-w-[560px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(109,74,255,0.22),0_8px_24px_-6px_rgba(109,74,255,0.30),0_20px_56px_-16px_rgba(109,74,255,0.28)]">
+            <figure className="group mx-auto max-w-[560px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card transition-[border-color,box-shadow] duration-300 hover:border-iris/50 hover:shadow-[0_0_0_1px_rgba(0, 128, 96,0.22),0_8px_24px_-6px_rgba(0, 128, 96,0.30),0_20px_56px_-16px_rgba(0, 128, 96,0.28)]">
               <div className="relative aspect-[1080/863] overflow-hidden">
                 <Image
                   src={STOREFRONT_PRODUCT.image}
@@ -808,7 +805,7 @@ export default function Landing() {
             <h2 className="font-display text-[clamp(32px,5vw,52px)] font-bold leading-tight tracking-tight text-flash">
               That box in your closet is{" "}
               <GradientText
-                colors={["#6d4aff", "#635bff", "#9f7aff", "#6d4aff"]}
+                colors={["#008060", "#008060", "#3ec9a3", "#008060"]}
                 animationSpeed={5}
               >
                 money
@@ -821,7 +818,7 @@ export default function Landing() {
             <Magnet padding={80} magnetStrength={18} wrapperClassName="mt-9">
               <ClickSpark
                 className="inline-block"
-                sparkColor="#6d4aff"
+                sparkColor="#008060"
                 sparkSize={9}
                 sparkRadius={22}
                 sparkCount={8}

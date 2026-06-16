@@ -152,11 +152,11 @@ function RangeBar({
   return (
     <div>
       <div className="relative h-1.5 rounded-full bg-surface-3">
-        <span className="absolute inset-y-0 left-[6%] right-[6%] rounded-full bg-gradient-to-r from-[#7a73ff] via-[#635bff] to-[#a960ee] opacity-70" />
+        <span className="absolute inset-y-0 left-[6%] right-[6%] rounded-full bg-gradient-to-r from-[#1fb88c] via-[#008060] to-[#1fb88c] opacity-70" />
         {at != null ? (
           <span
             aria-hidden
-            className="absolute top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-surface bg-accent shadow-[0_0_0_3px_rgba(109,74,255,0.22)]"
+            className="absolute top-1/2 size-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-surface bg-accent shadow-[0_0_0_3px_rgba(0, 128, 96,0.22)]"
             style={{ left: `${6 + at * 88}%` }}
           />
         ) : null}
@@ -209,7 +209,7 @@ function SharpenCard({
   return (
     <SpotlightCard
       chromeClassName={APP_CARD_CHROME}
-      spotlightColor="rgba(109, 74, 255, 0.07)"
+      spotlightColor="rgba(0, 128, 96, 0.07)"
       className="p-4 sm:p-5"
     >
       <form action={action}>
@@ -572,7 +572,7 @@ export function ReviewView({
         {/* Your listing — title + description */}
         <SpotlightCard
           chromeClassName={APP_CARD_CHROME}
-          spotlightColor="rgba(109, 74, 255, 0.07)"
+          spotlightColor="rgba(0, 128, 96, 0.07)"
           className="p-4 sm:p-5"
         >
           <Eyebrow>Your listing</Eyebrow>

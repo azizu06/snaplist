@@ -44,6 +44,17 @@ const FIXTURE_HTML = readFileSync(
   "utf8",
 );
 
+/**
+ * The MODERN `.su-card-container` / `li.s-card` SRP layout eBay also serves (the
+ * #59 follow-up to #56's classic `.srp-results > li.s-item` fixture). Captured
+ * live (premium proxy) on 2026-06-16: 12 used Sony WH-1000XM4 comps, 2 "Shop on
+ * eBay" placeholders (no Sold caption), and 2 wrong-model noise cards.
+ */
+const MODERN_FIXTURE_HTML = readFileSync(
+  fileURLToPath(new URL("./fixtures/ebay-sold.modern.sample.html", import.meta.url)),
+  "utf8",
+);
+
 /** The five RELEVANT sold prices for the Sony WH-1000XM4 in the fixture. */
 const FIXTURE_PRICES = [169.99, 175.0, 178.0, 185.5, 199.95];
 const sortedFixturePrices = [...FIXTURE_PRICES].sort((a, b) => a - b);
@@ -293,6 +304,63 @@ describe("parseSoldComps (saved fixture)", () => {
     </ul>`;
     const parsed = parseSoldComps(html);
     expect(parsed.map((c) => c.price)).toEqual([180]);
+  });
+});
+
+describe("parseSoldComps (modern li.s-card layout — #59 follow-up)", () => {
+  // eBay also serves a MODERN `.su-card-container` / `li.s-card` SRP layout,
+  // distinct from the classic `.srp-results > li.s-item`. The SAME parser must
+  // read both, or a premium-proxy fetch that succeeds still yields zero comps and
+  // the sold tier silently declines to web search (the real-world #59 symptom).
+  const comps = parseSoldComps(MODERN_FIXTURE_HTML);
+
+  it("parses sold comps from the modern card markup", () => {
+    // 12 used WH-1000XM4 comps + 2 wrong-model noise cards; the 2 "Shop on eBay"
+    // placeholders (no Sold caption) are skipped.
+    expect(comps.length).toBeGreaterThanOrEqual(12);
+    expect(comps.some((c) => /shop on ebay/i.test(c.title ?? ""))).toBe(false);
+    for (const c of comps) {
+      expect(c.url.startsWith("https://www.ebay.com/itm/")).toBe(true);
+      expect(c.price).toBeGreaterThan(0);
+      expect(c.title).toBeTruthy();
+    }
+  });
+
+  it("cleans the modern title (strips 'Opens in a new window' suffix + 'New Listing' badge)", () => {
+    expect(comps.some((c) => /opens in a new window/i.test(c.title ?? ""))).toBe(false);
+    expect(comps.some((c) => /^New Listing/i.test(c.title ?? ""))).toBe(false);
+    // A specific known comp from the captured page (sanity that real data parses).
+    expect(
+      comps.some((c) => c.price === 175 && /sony wh-1000xm4/i.test(c.title ?? "")),
+    ).toBe(true);
+  });
+
+  it("reads condition metadata and the Sold date from the modern card", () => {
+    expect(comps.some((c) => c.condition === "Pre-Owned")).toBe(true);
+    // "Sold Jun 16, 2026" → a parsed epoch-ms timestamp on at least one comp.
+    expect(comps.some((c) => typeof c.soldAt === "number")).toBe(true);
+  });
+
+  it("relevance filter drops the wrong-model noise (WF-1000XM5 / WF-1000XM6)", () => {
+    const relevant = filterRelevantComps(comps, BRANDED_SIGNAL);
+    expect(relevant.length).toBeGreaterThanOrEqual(12);
+    expect(relevant.some((c) => /WF-1000XM[56]/i.test(c.title ?? ""))).toBe(false);
+    expect(relevant.some((c) => c.price === 37.61 || c.price === 268.99)).toBe(false);
+  });
+
+  it("prices a used item from the modern sold page end-to-end through the provider", async () => {
+    const provider = createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(MODERN_FIXTURE_HTML),
+    });
+    const result = await provider.price(BRANDED_SIGNAL);
+    expect(result).not.toBeNull();
+    expect(() => priceResultSchema.parse(result)).not.toThrow();
+    expect(result!.tier).toBe("ebay-sold");
+    // Median of the ~12 used comps lands in a sane used band; the $37.61 accessory
+    // and $268.99 new earbuds were filtered out, so they don't drag the suggestion.
+    expect(result!.suggested).toBeGreaterThan(120);
+    expect(result!.suggested).toBeLessThan(200);
+    expect(result!.sources.every((s) => !/WF-1000XM/i.test(s.title ?? ""))).toBe(true);
   });
 });
 

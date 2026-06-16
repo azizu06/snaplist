@@ -348,9 +348,9 @@ function FormBody({
               animate={{
                 opacity: [0.6, 1, 0.6],
                 boxShadow: [
-                  "0 0 10px 1px rgba(109,74,255,0.25)",
-                  "0 0 20px 4px rgba(109,74,255,0.45)",
-                  "0 0 10px 1px rgba(109,74,255,0.25)",
+                  "0 0 10px 1px rgba(0, 128, 96,0.25)",
+                  "0 0 20px 4px rgba(0, 128, 96,0.45)",
+                  "0 0 10px 1px rgba(0, 128, 96,0.25)",
                 ],
               }}
               transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
@@ -486,7 +486,7 @@ function FormBody({
             the whole pipeline. */}
         <ClickSpark
           className="block w-full"
-          sparkColor="#6d4aff"
+          sparkColor="#008060"
           sparkSize={8}
           sparkRadius={20}
           sparkCount={10}

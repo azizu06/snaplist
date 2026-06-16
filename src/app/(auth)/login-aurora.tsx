@@ -40,8 +40,8 @@ function useMediaQuery(query: string, serverFallback: boolean): boolean {
  * curtain reads as light through it (additive violet on white disappears);
  * dark lifts the violet (+luminosity, same hue family as --color-iris dark)
  * and lets the cyan edge ring so the ridge stays crisp on navy. */
-const LIGHT_STOPS = ["#5a36f0", "#7b61ff", "#38bdf8"];
-const DARK_STOPS = ["#5227ff", "#7e5fff", "#22d3ee"];
+const LIGHT_STOPS = ["#006e52", "#1fb88c", "#3ec9a3"];
+const DARK_STOPS = ["#006e52", "#00a37a", "#2bb3a3"];
 
 export function LoginAurora() {
   // SSR snapshot `true` → nothing renders until the client confirms.

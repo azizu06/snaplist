@@ -86,7 +86,7 @@ export default function Pricing() {
         <Reveal stagger className="grid items-stretch gap-6 lg:grid-cols-2">
           {/* live tier — a calm ElectricBorder hugs the recommended plan */}
           <ElectricBorder
-            color="#6d4aff"
+            color="#008060"
             speed={0.5}
             chaos={0.045}
             displacement={12}

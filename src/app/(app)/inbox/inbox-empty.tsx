@@ -48,7 +48,7 @@ export function InboxEmptyState() {
         className="pointer-events-none absolute -top-20 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full"
         style={{
           background:
-            "radial-gradient(closest-side, rgba(109, 74, 255, 0.10), rgba(109, 74, 255, 0.04) 55%, transparent)",
+            "radial-gradient(closest-side, rgba(0, 128, 96, 0.10), rgba(0, 128, 96, 0.04) 55%, transparent)",
         }}
       />
 

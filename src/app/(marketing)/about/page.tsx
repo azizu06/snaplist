@@ -177,7 +177,7 @@ export default function About() {
             <SpotlightCard
               key={title}
               className="group p-8"
-              spotlightColor="rgba(109, 74, 255, 0.12)"
+              spotlightColor="rgba(0, 128, 96, 0.12)"
             >
               <div className="flex items-center justify-between">
                 <span className="flex size-11 items-center justify-center rounded-xl bg-iris/10 text-iris transition-colors duration-300 group-hover:bg-iris group-hover:text-iris-ink">

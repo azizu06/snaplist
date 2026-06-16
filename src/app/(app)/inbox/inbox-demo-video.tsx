@@ -38,7 +38,7 @@ function PosterScene() {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(70% 90% at 50% 0%, rgba(109, 74, 255, 0.12), transparent 70%)",
+            "radial-gradient(70% 90% at 50% 0%, rgba(0, 128, 96, 0.12), transparent 70%)",
         }}
       />
       <div className="relative max-w-[62%] rounded-2xl rounded-bl-md border border-border bg-surface px-3.5 py-2 shadow-xs sm:py-2.5">

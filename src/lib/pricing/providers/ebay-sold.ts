@@ -391,6 +391,48 @@ export function parseSoldDate(captionText: string | undefined): number | undefin
   return Number.isFinite(t) ? t : undefined;
 }
 
+/**
+ * Field selectors for ONE eBay SRP layout. eBay serves two interchangeably: the
+ * CLASSIC `.srp-results > li.s-item` and the MODERN `.su-card-container` /
+ * `li.s-card` (#59). The fields read are identical; only the class names differ,
+ * so the per-card extraction is shared and only the selector set varies.
+ */
+interface CardSelectors {
+  /** The card container (the `.each` root). */
+  card: string;
+  title: string;
+  price: string;
+  caption: string;
+  link: string;
+  /** Condition grade span(s); the first non-empty wins. */
+  condition: string;
+}
+
+/** Classic layout. `card` is SCOPED to `.srp-results` so sponsored/"matching
+ * fewer words" carousels that reuse `li.s-item` outside the results list are
+ * never harvested (#56 review). */
+const CLASSIC_SELECTORS: CardSelectors = {
+  card: ".srp-results li.s-item",
+  title: ".s-item__title",
+  price: ".s-item__price",
+  caption: ".s-item__caption",
+  link: "a.s-item__link",
+  condition: ".s-item__subtitle, .SECONDARY_INFO",
+};
+
+/** Modern layout. `li.s-card` is NOT scoped to a verified results container, so
+ * the mandatory "Sold" caption check below is what excludes sponsored/active
+ * cards (they carry no completed-sale caption) — the same defense the classic
+ * path applies as its second gate. */
+const MODERN_SELECTORS: CardSelectors = {
+  card: "li.s-card",
+  title: ".s-card__title",
+  price: ".s-card__price",
+  caption: ".s-card__caption",
+  link: "a.s-card__link",
+  condition: ".s-card__subtitle",
+};
+
 export function parseSoldComps(
   html: string,
   baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
@@ -400,62 +442,83 @@ export function parseSoldComps(
   const comps: EbaySoldComp[] = [];
   const seen = new Set<string>();
 
-  $(".srp-results li.s-item").each((_i, el) => {
-    if (comps.length >= max) return false; // hit the cap — stop iterating
+  /** Harvest every valid sold comp for one layout. Returns true if the parse cap
+   * was hit (so the caller can stop without scanning the other layout). */
+  const harvest = (sel: CardSelectors): boolean => {
+    let capped = false;
+    $(sel.card).each((_i, el) => {
+      if (comps.length >= max) {
+        capped = true;
+        return false; // hit the cap — stop iterating
+      }
 
-    const card = $(el);
-    const title = card
-      .find(".s-item__title")
-      .first()
-      .text()
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^New Listing/i, "")
-      .trim();
-    if (!title || /^shop on ebay$/i.test(title)) return; // placeholder / empty
+      const card = $(el);
+      const title = card
+        .find(sel.title)
+        .first()
+        .text()
+        .replace(/\s+/g, " ")
+        .trim()
+        // Classic prefixes a "New Listing" badge; the modern card appends an
+        // "Opens in a new window or tab" a11y suffix (glued straight onto the
+        // title text, no space). Strip both — neither belongs in the title, and a
+        // leftover "a NEW window" would wrongly trip the new-condition filter and
+        // drop every comp (#59). `.*$` so the "or tab" tail goes too.
+        .replace(/^New Listing/i, "")
+        .replace(/\s*Opens in a new window.*$/i, "")
+        .trim();
+      if (!title || /^shop on ebay$/i.test(title)) return; // placeholder / empty
 
-    // Require the "Sold" caption — an active/sponsored card reusing li.s-item
-    // (no completed-sale caption) must never be counted as a sold comp. The same
-    // caption carries the sale DATE used by the freshness layer (#59).
-    const captionText = card.find(".s-item__caption").text();
-    if (!/\bsold\b/i.test(captionText)) return;
+      // Require the "Sold" caption — an active/sponsored card (no completed-sale
+      // caption) must never be counted as a sold comp. The same caption carries
+      // the sale DATE used by the freshness layer (#59).
+      const captionText = card.find(sel.caption).text();
+      if (!/\bsold\b/i.test(captionText)) return;
 
-    // Skip Best-Offer-accepted cards: the public card can show the LIST price, not
-    // the accepted transaction amount (the true amount is gated in Product
-    // Research), so its price is unreliable as a sold comp (#56 review). Honest
-    // ceiling: open-web sold pages can't always reveal the real offer price.
-    if (/best\s*offer\s*accepted/i.test(card.text())) return;
+      // Skip Best-Offer-accepted cards: the public card can show the LIST price, not
+      // the accepted transaction amount (the true amount is gated in Product
+      // Research), so its price is unreliable as a sold comp (#56 review). Honest
+      // ceiling: open-web sold pages can't always reveal the real offer price.
+      if (/best\s*offer\s*accepted/i.test(card.text())) return;
 
-    const price = parsePrice(card.find(".s-item__price").first().text());
-    if (price == null) return;
+      const price = parsePrice(card.find(sel.price).first().text());
+      if (price == null) return;
 
-    const href = card.find("a.s-item__link").first().attr("href");
-    if (!href) return;
-    let url: string;
-    try {
-      url = new URL(href, baseUrl).toString();
-    } catch {
-      return;
-    }
-    if (seen.has(url)) return;
-    seen.add(url);
+      const href = card.find(sel.link).first().attr("href");
+      if (!href) return;
+      let url: string;
+      try {
+        url = new URL(href, baseUrl).toString();
+      } catch {
+        return;
+      }
+      if (seen.has(url)) return;
+      seen.add(url);
 
-    // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
-    // authoritative grade even when the title omits it (#56 review).
-    const condition =
-      card.find(".s-item__subtitle, .SECONDARY_INFO").first().text().replace(/\s+/g, " ").trim() ||
-      undefined;
+      // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
+      // authoritative grade even when the title omits it (#56 review).
+      const condition =
+        card.find(sel.condition).first().text().replace(/\s+/g, " ").trim() ||
+        undefined;
 
-    const soldAt = parseSoldDate(captionText);
+      const soldAt = parseSoldDate(captionText);
 
-    comps.push({
-      url,
-      title,
-      price,
-      ...(condition ? { condition } : {}),
-      ...(soldAt != null ? { soldAt } : {}),
+      comps.push({
+        url,
+        title,
+        price,
+        ...(condition ? { condition } : {}),
+        ...(soldAt != null ? { soldAt } : {}),
+      });
     });
-  });
+    return capped;
+  };
+
+  // A real SRP is ONE layout or the other; harvest the classic first, then the
+  // modern (the absent layout yields nothing), deduping by URL across both so the
+  // parser is layout-agnostic. If the classic harvest already hit the cap, skip
+  // the modern scan — we're full.
+  if (!harvest(CLASSIC_SELECTORS)) harvest(MODERN_SELECTORS);
 
   return comps;
 }
