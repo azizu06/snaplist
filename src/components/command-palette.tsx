@@ -177,7 +177,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
         type="button"
         onClick={openPalette}
         aria-label="Search listings"
-        className="ml-auto flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 sm:hidden"
+        className="flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 sm:hidden"
       >
         <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="11" cy="11" r="8" />
@@ -189,7 +189,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
           the containing block for this fixed overlay and clip it to the bar. */}
       {open ? createPortal(
         <div
-          className="fixed inset-0 z-50 bg-[rgba(26, 26, 26,0.32)] p-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 bg-[rgba(26,26,26,0.32)] p-4 backdrop-blur-[2px]"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
