@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { StatusBadge } from "@/components/ui/badge";
 import type { StatusTone } from "@/lib/ui/status";
@@ -81,6 +82,55 @@ function relativeTime(iso: string): string {
   });
 }
 
+const SHORT_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Hydration-stable absolute label derived ONLY from the ISO via UTC fields —
+ *  no Date.now(), no locale/timezone — so the server render and the first
+ *  client render always agree. */
+function stableLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${SHORT_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/** "Am I hydrated?" via useSyncExternalStore — returns false on the server +
+ *  first client paint, then true once hydrated. The React-recommended hydration
+ *  signal (same pattern as login-aurora's useMediaQuery); avoids setState-in-
+ *  effect. The subscribe is a stable no-op (the value never changes after mount). */
+const subscribeNoop = () => () => {};
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Hydration-safe timestamp (Codex P2). `relativeTime()` reads `Date.now()` and a
+ * locale-dependent `toLocaleDateString`, so rendering it during SSR + hydration
+ * can diverge near a minute/hour/day boundary or across timezones/locales and
+ * trip a Next hydration mismatch. So we render the deterministic absolute label
+ * on the server + first client paint, then upgrade to the live relative label
+ * once hydrated (client-only) — no server round-trip for `now` needed.
+ */
+function RelativeTime({ iso }: { iso: string }) {
+  const hydrated = useHydrated();
+  return (
+    <time
+      data-nums
+      dateTime={iso}
+      className="shrink-0 text-[12px] text-faint"
+      suppressHydrationWarning
+    >
+      {hydrated ? relativeTime(iso) : stableLabel(iso)}
+    </time>
+  );
+}
+
 export interface ConversationListProps {
   inbound: MessageRow[];
   repliesByQuestion: Map<string, MessageRow>;
@@ -156,13 +206,7 @@ export function ConversationList({
                     Buyer
                     <span className="ml-1.5 font-normal text-faint">via eBay</span>
                   </p>
-                  <time
-                    data-nums
-                    dateTime={message.created_at}
-                    className="shrink-0 text-[12px] text-faint"
-                  >
-                    {relativeTime(message.created_at)}
-                  </time>
+                  <RelativeTime iso={message.created_at} />
                 </div>
                 <p className="mt-1.5 text-[15px] leading-relaxed text-fg">
                   {message.body}
