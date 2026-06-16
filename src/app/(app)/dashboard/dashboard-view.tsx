@@ -51,6 +51,23 @@ const PRICE_FMT = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+/** The states the SELLER must act on — used for the header summary + the grid's
+ *  action-first ordering. Mirrors the "Needs review" filter in `filters.ts`. */
+const REVIEW_STATUSES = new Set(["draft", "draft_failed", "failed"]);
+
+/** Reading order for the grid: errors first, then drafts, then the automatic
+ *  states (Processing → Scheduled), then the settled Live items. Unknown keys
+ *  sort after drafts but before the automatic states (see `rank()`). */
+const STATUS_RANK: Record<string, number> = {
+  failed: 0,
+  draft_failed: 0,
+  draft: 1,
+  new: 2,
+  queued: 3,
+  published: 4,
+};
+const rank = (status: string) => STATUS_RANK[status] ?? 1.5;
+
 function PhotoPlaceholder() {
   return (
     <span
@@ -147,7 +164,7 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
         className="h-[58%] w-full object-cover"
       />
       <span className="flex min-h-0 flex-1 flex-col justify-center gap-[2px] px-[5px]">
-        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#131e3a]">
+        <span className="block truncate text-[6.5px] font-semibold leading-[1.2] text-[#1a1a1a]">
           {product.shortName}
         </span>
         <span className="block text-[7.5px] font-bold leading-none text-[#006e52]" data-nums>
@@ -217,7 +234,14 @@ export function DashboardView({
   const statusFiltered = activeFilter.statuses
     ? rows.filter((r) => activeFilter.statuses!.includes(r.status))
     : rows;
-  const visible = statusFiltered.filter((r) => matchesQuery(r.title, query));
+  const visible = statusFiltered
+    .filter((r) => matchesQuery(r.title, query))
+    // Hierarchy (design skill: "the main section reflects what matters most"):
+    // surface what the seller must act on first — errors, then drafts — then the
+    // automatic states, then the settled Live ones. A stable sort keeps each
+    // rank in newest-first order (rows arrive sorted by the page).
+    .slice()
+    .sort((a, b) => rank(a.status) - rank(b.status));
   const searching = query.trim() !== "";
 
   const filterCount = (f: (typeof DASHBOARD_FILTERS)[number]) =>
@@ -226,8 +250,10 @@ export function DashboardView({
   // Cap the stagger so a long shop doesn't crawl in.
   const enterDelay = (i: number) => `${Math.min(i, 10) * 30}ms`;
 
-  // Portfolio signal for the header summary — what the whole shop is worth.
+  // Header summary leads with what needs the seller, not just the headcount.
   const totalValue = rows.reduce((sum, r) => sum + (r.price ?? 0), 0);
+  const reviewCount = rows.filter((r) => REVIEW_STATUSES.has(r.status)).length;
+  const liveCount = rows.filter((r) => r.status === "published").length;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
@@ -240,9 +266,21 @@ export function DashboardView({
             Listings
           </h1>
           {rows.length > 0 ? (
-            <p className="mt-1 text-[13px] text-muted" data-nums>
-              <CountUp to={rows.length} duration={0.7} /> item{rows.length === 1 ? "" : "s"} ·{" "}
-              {PRICE_FMT.format(totalValue)} total
+            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted" data-nums>
+              {reviewCount > 0 ? (
+                <span className="font-semibold text-fg-strong">
+                  <CountUp to={reviewCount} duration={0.7} /> need
+                  {reviewCount === 1 ? "s" : ""} review
+                </span>
+              ) : (
+                <span className="font-medium text-fg">All caught up</span>
+              )}
+              <span aria-hidden className="text-faint">·</span>
+              <span>
+                <CountUp to={liveCount} duration={0.7} /> live
+              </span>
+              <span aria-hidden className="text-faint">·</span>
+              <span>{PRICE_FMT.format(totalValue)} total</span>
             </p>
           ) : null}
         </div>

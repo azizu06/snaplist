@@ -7,15 +7,17 @@
  * the client view import it from here instead.
  */
 export const DASHBOARD_FILTERS: ReadonlyArray<{
-  key: "all" | "draft" | "queued" | "live" | "attention";
+  key: "all" | "review" | "live";
   label: string;
   statuses: readonly string[] | null;
 }> = [
   { key: "all", label: "All", statuses: null },
-  { key: "draft", label: "Draft", statuses: ["draft"] },
-  { key: "queued", label: "Queued", statuses: ["queued"] },
+  // Everything the SELLER has to act on — a normal draft or one that errored —
+  // lives under one section. The automatic states (Scheduled, Processing) need
+  // no action, so they stay visible as a card chip but don't earn a tab. This
+  // collapses the old five-tab strip (Draft/Queued/Live/Attention) to three.
+  { key: "review", label: "Needs review", statuses: ["draft", "draft_failed", "failed"] },
   { key: "live", label: "Live", statuses: ["published"] },
-  { key: "attention", label: "Needs attention", statuses: ["failed", "draft_failed"] },
 ];
 
 export type DashboardFilterKey = (typeof DASHBOARD_FILTERS)[number]["key"];

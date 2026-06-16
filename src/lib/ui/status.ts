@@ -30,9 +30,9 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
   if (status == null) return null;
   switch (status) {
     case "draft":
-      return { label: "Draft: needs review", tone: "neutral" };
+      return { label: "Needs review", tone: "neutral" };
     case "queued":
-      return { label: "Queued: autopilot will post", tone: "neutral" };
+      return { label: "Scheduled", tone: "neutral" };
     case "published":
       return { label: "Live", tone: "success-solid" };
     case "failed":
@@ -57,9 +57,9 @@ export function lifecycleShortLabel(
   if (!full) return null;
   switch (status) {
     case "draft":
-      return { label: "Draft", tone: full.tone };
+      return { label: "Needs review", tone: full.tone };
     case "queued":
-      return { label: "Queued", tone: full.tone };
+      return { label: "Scheduled", tone: full.tone };
     case "failed":
     case "draft_failed":
       return { label: "Attention", tone: full.tone };

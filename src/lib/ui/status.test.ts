@@ -19,11 +19,11 @@ describe("lifecycleLabel", () => {
     // Restrained palette: in-flight states are `neutral` (color is reserved for
     // Live + Needs attention); the label still says what each one is.
     expect(lifecycleLabel("draft")).toEqual({
-      label: "Draft: needs review",
+      label: "Needs review",
       tone: "neutral",
     });
     expect(lifecycleLabel("queued")).toEqual({
-      label: "Queued: autopilot will post",
+      label: "Scheduled",
       tone: "neutral",
     });
     expect(lifecycleLabel("published")).toEqual({
@@ -53,8 +53,8 @@ describe("lifecycleLabel", () => {
 
 describe("lifecycleShortLabel", () => {
   it("compacts the chip for narrow surfaces, keeping the SAME tone", () => {
-    expect(lifecycleShortLabel("draft")).toEqual({ label: "Draft", tone: "neutral" });
-    expect(lifecycleShortLabel("queued")).toEqual({ label: "Queued", tone: "neutral" });
+    expect(lifecycleShortLabel("draft")).toEqual({ label: "Needs review", tone: "neutral" });
+    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "neutral" });
     expect(lifecycleShortLabel("published")).toEqual({ label: "Live", tone: "success-solid" });
     expect(lifecycleShortLabel("failed")).toEqual({ label: "Attention", tone: "danger" });
     expect(lifecycleShortLabel("draft_failed")).toEqual({ label: "Attention", tone: "danger" });
