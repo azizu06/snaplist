@@ -466,16 +466,13 @@ export function ReviewView({
         </Banner>
       ) : null}
 
-      {/* ---- ONE form spans both columns: every editable field saves together ---- */}
-      <form
-        action={saveAction}
-        className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]"
-      >
-        <input type="hidden" name="itemId" value={data.itemId} />
-        {data.listing ? (
-          <input type="hidden" name="listingId" value={data.listing.id} />
-        ) : null}
-
+      {/* ---- two-column editor. The LAYOUT wrapper is a plain <div> (NOT a form)
+           so the Sharpen card's own form can sit inside the right rail without
+           nesting in the Save form (nested <form>s are invalid HTML). Every
+           editable field below associates with the Save form by id —
+           form="rv-save" — and the form element itself trails the layout,
+           carrying the action + the contextual Save bar. ---- */}
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         {/* ============ LEFT main column: media + listing copy ============ */}
         <div className="flex min-w-0 flex-col gap-5">
           {/* Media — the product photos (Shopify "Media" block). */}
@@ -499,7 +496,7 @@ export function ReviewView({
                 onSetCurrent={setPhotoIdx}
                 aspectClassName="aspect-[4/3]"
                 adaptiveFrame
-                maxFrameClassName="max-h-[420px]"
+                frameMaxHeight={480}
                 enableZoom
               />
             ) : (
@@ -543,6 +540,7 @@ export function ReviewView({
                   <input
                     id="review-title"
                     name="title"
+                    form="rv-save"
                     type="text"
                     value={fields.title}
                     maxLength={EBAY_TITLE_MAX}
@@ -555,6 +553,7 @@ export function ReviewView({
                   <textarea
                     id="review-description"
                     name="description"
+                    form="rv-save"
                     value={fields.description}
                     rows={8}
                     onChange={(e) => setField("description", e.target.value)}
@@ -575,20 +574,14 @@ export function ReviewView({
 
         </div>
 
-        {/* ============ RIGHT sidebar: the DECISION leads, meta follows ============
-             Hierarchy (ui-design-principles): one focal card, not three equal
-             ones. Price + confidence is the seller's key judgment, so it is the
-             hero — elevated chrome, an accent eyebrow, the suggested price
-             colored. Identification folds into the quiet Item card below, so the
-             rail reads hero → meta instead of three identical panels.
-
-             The rail is STICKY on desktop (Shopify product-edit): it's the
-             shorter column, so pinning it just below the app header keeps the
-             price decision + item facts in view while the taller media + copy
-             column scrolls — which is what kills the old "empty space beside a
-             short rail" feeling. `self-start` stops the grid from stretching it
-             (sticky needs the element shorter than its scroll container). */}
-        <aside className="flex flex-col gap-5 lg:sticky lg:top-[72px] lg:self-start">
+        {/* ============ RIGHT rail: decision -> meta -> sharpen ============
+             Hierarchy (ui-design-principles): one focal card, not equal panels.
+             Price + confidence is the seller's key judgment, so it leads as the
+             hero (elevated chrome, accent eyebrow, colored suggested price);
+             identification folds into the quiet Item card; the Sharpen form sits
+             last. Carrying Sharpen in the rail makes it run as long as the taller
+             media + copy column, so the columns end together — no dead space. */}
+        <aside className="flex flex-col gap-5">
           {/* Price & confidence — HERO. Stronger border + soft elevation set it
               apart from the calm meta card; the green dash eyebrow leads the eye. */}
           <SpotlightCard
@@ -607,6 +600,7 @@ export function ReviewView({
                 <input
                   id="review-price"
                   name="price"
+                  form="rv-save"
                   type="number"
                   step="0.01"
                   min="0.01"
@@ -693,6 +687,7 @@ export function ReviewView({
                 <input
                   id="review-category"
                   name="category"
+                  form="rv-save"
                   type="text"
                   value={fields.category}
                   placeholder="e.g. Consumer electronics"
@@ -705,6 +700,7 @@ export function ReviewView({
                 <input
                   id="review-condition"
                   name="condition"
+                  form="rv-save"
                   type="text"
                   value={fields.condition}
                   placeholder="e.g. Good, light wear"
@@ -732,11 +728,35 @@ export function ReviewView({
               ) : null}
             </div>
           </SpotlightCard>
+
+          {/* Sharpen / re-price — its OWN form (sharpenAction), a plain child of
+              the rail. The layout wrapper is a <div>, so this form never nests
+              inside the Save form (nested <form>s are invalid HTML). Living in
+              the rail also balances it against the taller media + copy column,
+              closing the old dead space. Shown only when confidence isn't high. */}
+          {canSharpen ? (
+            <SharpenCard
+              itemId={data.itemId}
+              bandWord={confidenceWord}
+              candidates={data.identification?.candidates ?? []}
+              action={sharpenAction}
+            />
+          ) : null}
         </aside>
 
-        {/* ---- contextual save bar (Shopify): appears only when dirty ---- */}
+      </div>
+
+      {/* ---- Save form: owns saveAction + the contextual Save bar. The editable
+           fields above associate to it by id (form="rv-save"), so they still
+           submit together even though the layout is a plain <div>; the
+           PendingButton lives inside this form so useFormStatus reads it. ---- */}
+      <form id="rv-save" action={saveAction}>
+        <input type="hidden" name="itemId" value={data.itemId} />
+        {data.listing ? (
+          <input type="hidden" name="listingId" value={data.listing.id} />
+        ) : null}
         {dirty ? (
-          <div className="pointer-events-none sticky bottom-24 z-30 sm:bottom-5 lg:col-span-2">
+          <div className="pointer-events-none sticky bottom-24 z-30 sm:bottom-5">
             <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-border-strong bg-flash px-3 py-2 text-primary-fg shadow-lg">
               <span className="flex items-center gap-2 pl-1 text-[14px] font-medium text-primary-fg/90">
                 <span aria-hidden className="size-1.5 rounded-full bg-warning" />
@@ -762,20 +782,6 @@ export function ReviewView({
           </div>
         ) : null}
       </form>
-
-      {/* Sharpen / re-price — its OWN form (posts to sharpenAction), rendered as
-          a SIBLING of the save form (never nested — nested <form>s are invalid
-          HTML and would route the sharpen submit through Save). Runs FULL-WIDTH
-          below the two-column editor: a distinct "improve this estimate" band,
-          so it never leaves a dead gap beside a short column. */}
-      {canSharpen ? (
-        <SharpenCard
-          itemId={data.itemId}
-          bandWord={confidenceWord}
-          candidates={data.identification?.candidates ?? []}
-          action={sharpenAction}
-        />
-      ) : null}
     </main>
   );
 }

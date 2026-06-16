@@ -50,10 +50,13 @@ export interface PhotoCarouselProps {
    *  so the first photo fills edge-to-edge — no side/letterbox bands — and the
    *  frame stays locked so swiping never reflows the layout. */
   adaptiveFrame?: boolean;
-  /** Optional cap on the inline frame height (e.g. "max-h-[440px]"). Lets a
-   *  dense edit layout keep the photo from dominating the column: the height is
-   *  clamped while the image stays object-contain (so it never crops). */
-  maxFrameClassName?: string;
+  /** Optional cap on the inline frame HEIGHT (px) for dense edit layouts. The
+   *  frame still matches the photo's REAL aspect ratio exactly (adaptiveFrame),
+   *  so the image fills it edge-to-edge with NO letterbox/pillar bands — for any
+   *  photo, never hardcoded. The cap just bounds how tall a square/portrait shot
+   *  gets, by capping the frame's width to `height × aspect` and centering it in
+   *  the card. Requires adaptiveFrame. */
+  frameMaxHeight?: number;
   className?: string;
 }
 
@@ -66,7 +69,7 @@ export function PhotoCarousel({
   enableZoom = false,
   aspectClassName = "aspect-square sm:aspect-[4/3]",
   adaptiveFrame = false,
-  maxFrameClassName = "",
+  frameMaxHeight,
   className = "",
 }: PhotoCarouselProps) {
   const count = previews.length;
@@ -201,8 +204,20 @@ export function PhotoCarousel({
   return (
     <div className={`w-full ${className}`}>
       <div
-        className={`relative ${aspectClassName} ${maxFrameClassName} w-full overflow-hidden rounded-2xl border border-border bg-surface-2`}
-        style={frameAspect ? { aspectRatio: String(frameAspect) } : undefined}
+        className={`relative ${aspectClassName} mx-auto w-full overflow-hidden rounded-2xl border border-border bg-surface-2`}
+        style={
+          frameAspect
+            ? {
+                aspectRatio: String(frameAspect),
+                // Cap height without ever cropping: the frame already matches the
+                // photo's aspect, so capping width to height×aspect bounds the
+                // height and just centres a narrower frame (no letterbox bands).
+                ...(frameMaxHeight
+                  ? { maxWidth: `${Math.round(frameMaxHeight * frameAspect)}px` }
+                  : {}),
+              }
+            : undefined
+        }
       >
         {slide(enableZoom ? () => setZoomed(true) : undefined)}
 
