@@ -793,7 +793,10 @@
   background-clip: text;
 }
 .dark .wordmark-glow {
-  --wm-top: #36447a;
+  /* Resting fade in the brand-green family (was a navy/indigo that read as a
+     purple blob on the dark footer). A muted deep evergreen — present like the
+     old base but on-palette; the cursor flashlight lifts it to vivid green. */
+  --wm-top: #2c4a40;
   --wm-bottom: var(--color-night);
 }
 
@@ -829,7 +832,7 @@
     90deg,
     transparent,
     rgba(0, 163, 122, 0.95) 22%,
-    #cfd8ff 50%,
+    #d9f7ee 50%,
     rgba(0, 163, 122, 0.95) 78%,
     transparent
   );
@@ -943,7 +946,7 @@
   opacity: 1;
 }
 .dark .wordmark-flashlight {
-  --wm-light-a: #f3eeff;
+  --wm-light-a: #e8fbf3;
   --wm-light-b: #6fe3c0;
   --wm-bloom: rgba(0, 163, 122, 0.55);
 }
