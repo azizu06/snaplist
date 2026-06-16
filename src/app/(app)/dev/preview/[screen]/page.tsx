@@ -83,7 +83,7 @@ const FIXTURE_ROWS: DashboardRow[] = [
 
 const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
-  photoUrls: ["/demo/jacket.jpg", "/demo/headphones.jpg"],
+  photoUrls: ["/demo/headphones.jpg", "/demo/boombox.jpg"],
   identification: {
     label: "Sony WH-1000XM4 Wireless Headphones",
     confident: true,
@@ -95,7 +95,7 @@ const FIXTURE_REVIEW: ReviewData = {
     { key: "brand", value: "Sony" },
     { key: "model", value: "WH-1000XM4" },
     { key: "category", value: "Consumer electronics" },
-    { key: "condition", value: "Good, light wear on the headband" },
+    { key: "condition", value: "Good" },
     { key: "upc", value: "027242919623" },
     { key: "isbn", value: null },
   ],

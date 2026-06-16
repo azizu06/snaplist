@@ -81,6 +81,30 @@ const INPUT_CLASSES =
 const READONLY_FIELD =
   "rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[14px] text-fg break-words";
 
+const SELECT_CLASSES =
+  "w-full cursor-pointer appearance-none rounded-lg border border-border-strong bg-surface px-3 py-2 pr-9 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25";
+
+/** Used-goods condition grades — a fixed taxonomy, so Condition is a dropdown
+ *  (an AI-supplied descriptive value is preserved as an extra option). */
+const CONDITION_OPTIONS = ["New", "Like new", "Good", "Fair", "For parts"] as const;
+
+/** Category stays free-text (the taxonomy is open-ended) but offers a typeahead
+ *  of common categories so it isn't a blank box. */
+const CATEGORY_SUGGESTIONS = [
+  "Consumer electronics",
+  "Computers & laptops",
+  "Cameras & photo",
+  "Video games & consoles",
+  "Board games & puzzles",
+  "Books & media",
+  "Home & kitchen",
+  "Clothing & accessories",
+  "Sporting goods",
+  "Toys & collectibles",
+  "Musical instruments",
+  "Tools & home improvement",
+] as const;
+
 /** Human labels for read-only attribute keys that aren't plain words — acronyms
  *  must render UPPERCASE (not "Upc"/"Isbn"). Other keys fall back to capitalize. */
 const ATTR_LABELS: Record<string, string> = { upc: "UPC", isbn: "ISBN" };
@@ -472,7 +496,10 @@ export function ReviewView({
            editable field below associates with the Save form by id —
            form="rv-save" — and the form element itself trails the layout,
            carrying the action + the contextual Save bar. ---- */}
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+      {/* Shopify product-edit proportion: a WIDER media+copy main column and a
+          narrower detail rail (the rail's three cards run as long as the taller
+          media column, so the two end close together — "even"). */}
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:gap-6">
         {/* ============ LEFT main column: media + listing copy ============ */}
         <div className="flex min-w-0 flex-col gap-5">
           {/* Media — the product photos (Shopify "Media" block). */}
@@ -688,24 +715,58 @@ export function ReviewView({
                   name="category"
                   form="rv-save"
                   type="text"
+                  list="review-category-options"
                   value={fields.category}
                   placeholder="e.g. Consumer electronics"
                   onChange={(e) => setField("category", e.target.value)}
                   className={INPUT_CLASSES}
                 />
+                <datalist id="review-category-options">
+                  {CATEGORY_SUGGESTIONS.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
               </div>
               <div>
                 <FieldLabel label="Condition" htmlFor="review-condition" ai={ai("condition")} />
-                <input
-                  id="review-condition"
-                  name="condition"
-                  form="rv-save"
-                  type="text"
-                  value={fields.condition}
-                  placeholder="e.g. Good, light wear"
-                  onChange={(e) => setField("condition", e.target.value)}
-                  className={INPUT_CLASSES}
-                />
+                <div className="relative">
+                  <select
+                    id="review-condition"
+                    name="condition"
+                    form="rv-save"
+                    value={fields.condition}
+                    onChange={(e) => setField("condition", e.target.value)}
+                    className={SELECT_CLASSES}
+                  >
+                    {fields.condition === "" ? (
+                      <option value="" disabled>
+                        Select a condition…
+                      </option>
+                    ) : CONDITION_OPTIONS.some(
+                        (o) => o.toLowerCase() === fields.condition.toLowerCase(),
+                      ) ? null : (
+                      // Preserve an AI-supplied / custom value not in the grades.
+                      <option value={fields.condition}>{fields.condition}</option>
+                    )}
+                    {CONDITION_OPTIONS.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 24 24"
+                    className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </div>
               </div>
               {readOnlyAttrs.length > 0 ? (
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3.5">

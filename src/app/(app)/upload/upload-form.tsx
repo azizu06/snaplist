@@ -84,7 +84,7 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
     >
       {/* The seller's own photo under the scanner — the pipeline made visible. */}
       {coverUrl ? (
-        <div className="relative h-60 overflow-hidden border-b border-border bg-surface-2">
+        <div className="relative h-72 overflow-hidden border-b border-border bg-surface-2 sm:h-[26rem]">
           {/* Blurred fill + object-contain so the scanner shows the seller's
               photo in full (as framed), not a cropped strip. */}
           {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
@@ -116,11 +116,11 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-5 p-5">
-        <p className="text-[15px] font-semibold text-fg-strong">
+      <div className="flex flex-col gap-6 p-6 sm:p-8">
+        <p className="text-[16px] font-semibold text-fg-strong">
           Building your listing. This usually takes under half a minute.
         </p>
-        <ol className="flex flex-col gap-4">
+        <ol className="flex flex-col gap-5">
           {STEPS.map((step, i) => (
             <li key={step.label} className="flex items-start gap-3">
               <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
@@ -456,6 +456,8 @@ function FormBody({
               onSetCurrent={onSetCurrent}
               onRemove={onRemove}
               showCover
+              aspectClassName="aspect-[4/3]"
+              adaptiveFrame
             />
             <div className="mt-4 w-full">
               {!atMax ? (
