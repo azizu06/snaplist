@@ -22,8 +22,6 @@ import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 
 /** `status` is free-text in the schema; the app owns the vocabulary. */
 const ARCHIVED = "archived";
-/** Unarchiving returns a listing to the seller's review queue. */
-const UNARCHIVED = "draft";
 
 export async function archiveListings(listingIds: string[]): Promise<void> {
   if (listingIds.length === 0) return;
@@ -47,13 +45,42 @@ export async function unarchiveListings(listingIds: string[]): Promise<void> {
   const userId = await getUserId();
   if (!userId) return;
 
-  const { error } = await supabase
+  // Restore to the lifecycle state the AUTHORITATIVE eBay fields imply, not a
+  // blanket "draft": archiving overwrote listings.status, so a listing that is
+  // actually live on eBay (ebay_listing_id set + ebay_status "published") must
+  // come back as `published`. Restoring it to `draft` would show a live listing
+  // as a re-publishable draft — corrupting tracking and inviting a redundant
+  // publish (Codex). Anything not live returns to the review queue (`draft`); a
+  // pre-archive `queued`/needs-review state collapsing to draft is benign (it
+  // just asks for re-approval, no live-state loss).
+  const { data: rows, error: readErr } = await supabase
     .from("listings")
-    .update({ status: UNARCHIVED })
+    .select("id, ebay_listing_id, ebay_status")
     .in("id", listingIds);
-  if (error) {
-    reportServerError("dashboard.unarchive", error, { count: listingIds.length });
+  if (readErr) {
+    reportServerError("dashboard.unarchive.read", readErr, { count: listingIds.length });
+    return;
   }
+  const live: string[] = [];
+  const draft: string[] = [];
+  for (const r of rows ?? []) {
+    if (r.ebay_listing_id && r.ebay_status === "published") live.push(r.id as string);
+    else draft.push(r.id as string);
+  }
+
+  const restore = (ids: string[], status: string) =>
+    supabase
+      .from("listings")
+      .update({ status })
+      .in("id", ids)
+      .then(({ error }) => {
+        if (error) reportServerError("dashboard.unarchive", error, { count: ids.length });
+      });
+
+  await Promise.all([
+    ...(live.length > 0 ? [restore(live, "published")] : []),
+    ...(draft.length > 0 ? [restore(draft, "draft")] : []),
+  ]);
   revalidatePath("/dashboard");
 }
 
