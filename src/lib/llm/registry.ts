@@ -47,6 +47,7 @@ export const LLM_ROLES = [
   "pricingAgent",
   "judge",
   "reply",
+  "clarify",
 ] as const;
 export type LlmRole = (typeof LLM_ROLES)[number];
 
@@ -62,6 +63,7 @@ const ROLE_ENV_VAR: Record<LlmRole, string> = {
   pricingAgent: "PRICING_MODEL",
   judge: "EVAL_JUDGE_MODEL",
   reply: "REPLY_MODEL",
+  clarify: "CLARIFY_MODEL",
 };
 
 /**
@@ -78,6 +80,7 @@ const MODEL_DEFAULTS: Record<LlmProvider, Record<LlmRole, string>> = {
     pricingAgent: "gpt-5.5",
     judge: "gpt-5.5",
     reply: "gpt-5.5",
+    clarify: "gpt-5.5",
   },
   google: {
     vision: "gemini-2.5-flash",
@@ -86,6 +89,7 @@ const MODEL_DEFAULTS: Record<LlmProvider, Record<LlmRole, string>> = {
     pricingAgent: "gemini-2.5-flash",
     judge: "gemini-2.5-flash",
     reply: "gemini-2.5-flash",
+    clarify: "gemini-2.5-flash",
   },
 };
 

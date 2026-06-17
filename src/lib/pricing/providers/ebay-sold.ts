@@ -742,6 +742,69 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Below this many comps, MAD-based outlier detection is unreliable (the median +
+ * MAD are themselves too noisy), so we don't trim — on 2–3 comps a divergent
+ * price could be the real market, not noise, and dropping it would manufacture a
+ * false-tight cluster. Honest default: keep all and let the wide spread land the
+ * item sub-gate (web_wide), where a human reviews it.
+ */
+const MIN_COMPS_FOR_OUTLIER_TRIM = 4;
+
+/**
+ * Iglewicz–Hoaglin modified z-score cutoff. |0.6745·(x−median)/MAD| > 3.5 marks a
+ * point an outlier. MAD (median absolute deviation) has a ~50% breakdown point, so
+ * a lone spike cannot inflate the center the way it inflates a range or an IQR
+ * hinge (the masking that lets a tail outlier hide inside Tukey fences).
+ */
+const MAD_OUTLIER_Z = 3.5;
+const MAD_Z_CONST = 0.6745;
+
+/**
+ * The core must retain at least this FRACTION of the comps. Trimming a large
+ * minority is not "removing noise" — e.g. 2 of 5 sales at $510 are real market
+ * signal (a different variant/condition), not an error, and silently dropping
+ * them to report a tight $180 would be over-confident. So we cap the trim at ~1/3
+ * of the set; if more than that look extreme, the set is genuinely dispersed —
+ * keep all and let the honest wide spread land it sub-gate (web_wide) for review.
+ */
+const MIN_CORE_FRACTION = 2 / 3;
+
+/**
+ * The robust CORE of a sold-comp set: the inliers after MAD-based outlier removal
+ * (#1 confidence lever). Pure and total — the primary unit-test target.
+ *
+ * Why this matters: comp agreement is `1 − (max−min)/median`, a RANGE measure with
+ * a near-zero breakdown point — a single wrong-model / "for parts" / sealed-unit
+ * sale that slips `filterRelevantComps` collapses agreement and forces a genuinely
+ * tight used cluster down to the sub-gate `web_wide` tier. Trimming the isolated
+ * spike lets the defensible core earn the `sold` tier it deserves.
+ *
+ * Honest by construction: MAD only removes ISOLATED tail spikes. A uniformly
+ * scattered set has a large MAD (no point is many MADs from the median → nothing
+ * trimmed), and a bimodal set's median sits between the clusters so every point is
+ * a similar distance out (again nothing trimmed). So real dispersion is preserved —
+ * only noise is removed. Below `MIN_COMPS_FOR_OUTLIER_TRIM`, or when MAD is 0
+ * (>half identical), or when a trim would drop below `MIN_CORE_COMPS`, keep all.
+ */
+export function coreComps(
+  comps: readonly EbaySoldComp[],
+): EbaySoldComp[] {
+  if (comps.length < MIN_COMPS_FOR_OUTLIER_TRIM) return [...comps];
+  const sorted = comps.map((c) => c.price).sort((a, b) => a - b);
+  const med = median(sorted);
+  const mad = median(sorted.map((p) => Math.abs(p - med)).sort((a, b) => a - b));
+  // MAD 0 means more than half the comps share a price — already maximally tight.
+  // The modified z-score is then ±∞ for any other point, which would wrongly drop
+  // legitimately-near comps, so keep all.
+  if (mad === 0) return [...comps];
+  const kept = comps.filter(
+    (c) => Math.abs((MAD_Z_CONST * (c.price - med)) / mad) <= MAD_OUTLIER_Z,
+  );
+  if (kept.length < Math.ceil(comps.length * MIN_CORE_FRACTION)) return [...comps];
+  return kept;
+}
+
 /** Freshness inputs for synthesis (#59). Omit to disable age-decay (raw median). */
 export interface SoldSynthesisOptions {
   /** Reference "now" (epoch ms). When set, the suggested price is recency-weighted. */
@@ -770,12 +833,17 @@ export function synthesizeSoldResult(
   if (comps.length === 0) {
     throw new Error("synthesizeSoldResult requires at least one comp");
   }
-  const prices = comps.map((c) => c.price).sort((a, b) => a - b);
+  // Price/range/agreement/citations all describe the robust CORE (#1): a lone
+  // "for parts" / sealed-unit / wrong-model spike that slipped the relevance
+  // filter must not collapse agreement nor widen the band, and is not cited as
+  // evidence backing the suggested price.
+  const core = coreComps(comps);
+  const prices = core.map((c) => c.price).sort((a, b) => a - b);
   const suggested =
     opts.now != null
       ? weightedMedian(
-          comps.map((c) => c.price),
-          comps.map((c) =>
+          core.map((c) => c.price),
+          core.map((c) =>
             recencyWeight(c.soldAt, opts.now as number, opts.halfLifeDays),
           ),
         )
@@ -789,10 +857,10 @@ export function synthesizeSoldResult(
     EBAY_SOLD_MAX_CONFIDENCE,
     EBAY_SOLD_BASE_CONFIDENCE +
       (agreement >= TIGHT_AGREEMENT_MIN ? EBAY_SOLD_AGREEMENT_BONUS : 0) +
-      (comps.length >= EBAY_SOLD_COVERAGE_THRESHOLD ? EBAY_SOLD_COVERAGE_BONUS : 0),
+      (core.length >= EBAY_SOLD_COVERAGE_THRESHOLD ? EBAY_SOLD_COVERAGE_BONUS : 0),
   );
 
-  const sources: PriceSource[] = comps.map((c) => ({
+  const sources: PriceSource[] = core.map((c) => ({
     url: c.url,
     title: c.title,
     kind: "sold-comp",

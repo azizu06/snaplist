@@ -268,6 +268,113 @@ export function calibration(
 }
 
 // ---------------------------------------------------------------------------
+// Autopilot threshold recommendation (#4 — an evidence-driven gate)
+// ---------------------------------------------------------------------------
+
+/**
+ * The recommended autopilot gate plus its measured quality. The gate is
+ * `confidence >= threshold`; `observedCorrect` is ground truth (price-in-band AND
+ * brand/model recovered). Precision = of the auto-posted, fraction actually
+ * correct; recall = of the correct items, fraction the gate would auto-post.
+ */
+export interface ThresholdRecommendation {
+  threshold: number;
+  precision: number;
+  recall: number;
+  /** Harmonic mean of precision and recall (0 when either is 0). */
+  f1: number;
+  /** Items marked autopilot-eligible at `threshold`. */
+  eligibleCount: number;
+  targetPrecision: number;
+  /** Whether a gate meeting `targetPrecision` with >0 auto-posts was found. */
+  targetMet: boolean;
+}
+
+export interface RecommendThresholdOptions {
+  /**
+   * Minimum gate precision to accept (default 0.9). A false auto-post (a wrong
+   * listing goes live) is far costlier than a false queue (a correct item waits
+   * for review), so the gate is chosen to be RIGHT at least this often, then to
+   * auto-post as much as possible within that bound.
+   */
+  targetPrecision?: number;
+  /**
+   * Candidate thresholds to evaluate; defaults to the distinct observed
+   * confidences (the only values at which the gate's decision changes).
+   */
+  candidates?: readonly number[];
+}
+
+/**
+ * Recommend the autopilot threshold that best matches REALITY, replacing the
+ * hand-set `DEFAULT_AUTOPILOT_THRESHOLD` with an evidence-driven value (#4). Pure
+ * and deterministic — unit-testable with crafted pairs, reproducible in the harness.
+ *
+ * Rule: among candidate gates that hit `targetPrecision` AND auto-post something,
+ * pick the highest recall (ties → the LOWER threshold, to auto-post more). If none
+ * can (even the strictest gate is too loose for the target), fall back to the
+ * most-precise gate (ties → the HIGHER, safest threshold) and report
+ * `targetMet: false` — an honest "don't enable autopilot / fix upstream first".
+ */
+export function recommendAutopilotThreshold(
+  pairs: readonly EvalPair[],
+  options: RecommendThresholdOptions = {},
+): ThresholdRecommendation {
+  if (pairs.length === 0) {
+    throw new Error("recommendAutopilotThreshold requires at least one pair");
+  }
+  const targetPrecision = options.targetPrecision ?? 0.9;
+  if (!Number.isFinite(targetPrecision) || targetPrecision < 0 || targetPrecision > 1) {
+    throw new Error(`Invalid targetPrecision ${targetPrecision}: must be in [0, 1].`);
+  }
+
+  const correct = pairs.map(observedCorrect);
+  const totalCorrect = correct.filter(Boolean).length;
+  const candidates =
+    options.candidates ??
+    Array.from(new Set(pairs.map((p) => p.prediction.confidence))).sort((a, b) => a - b);
+
+  const evals = candidates.map((threshold) => {
+    let tp = 0;
+    let eligible = 0;
+    pairs.forEach((p, i) => {
+      if (p.prediction.confidence >= threshold) {
+        eligible += 1;
+        if (correct[i]) tp += 1;
+      }
+    });
+    // No eligible → vacuously precise (it makes no wrong posts) but zero recall, so
+    // it can only win when nothing else clears the target.
+    const precision = eligible > 0 ? tp / eligible : 1;
+    const recall = totalCorrect > 0 ? tp / totalCorrect : 0;
+    const f1 =
+      precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+    return { threshold, precision, recall, f1, eligibleCount: eligible };
+  });
+
+  const meeting = evals.filter(
+    (e) => e.eligibleCount > 0 && e.precision >= targetPrecision,
+  );
+  let best: (typeof evals)[number];
+  let targetMet: boolean;
+  if (meeting.length > 0) {
+    targetMet = true;
+    best = meeting.reduce((a, b) =>
+      b.recall > a.recall || (b.recall === a.recall && b.threshold < a.threshold) ? b : a,
+    );
+  } else {
+    targetMet = false;
+    best = evals.reduce((a, b) =>
+      b.precision > a.precision ||
+      (b.precision === a.precision && b.threshold > a.threshold)
+        ? b
+        : a,
+    );
+  }
+  return { ...best, targetPrecision, targetMet };
+}
+
+// ---------------------------------------------------------------------------
 // Pair matching
 // ---------------------------------------------------------------------------
 

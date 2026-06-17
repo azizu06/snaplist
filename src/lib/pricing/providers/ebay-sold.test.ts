@@ -5,6 +5,7 @@ import {
   EBAY_SOLD_MIN_COMPS,
   assertSafeEbayUrl,
   buildSoldSearchUrl,
+  coreComps,
   createDefaultFetchPage,
   createEbaySoldPricingProvider,
   ebaySoldConfigured,
@@ -676,6 +677,71 @@ describe("synthesizeSoldResult", () => {
     expect(scattered.compAgreement!).toBeLessThan(TIGHT_AGREEMENT_MIN);
     // A scattered sold set is honestly less confident than a tight one.
     expect(scattered.confidence).toBeLessThan(result.confidence);
+  });
+});
+
+describe("coreComps — robust outlier trimming (#1 confidence lever)", () => {
+  const mk = (prices: number[]): EbaySoldComp[] =>
+    prices.map((price, i) => ({ url: `https://www.ebay.com/itm/${i}`, price, title: `c${i}` }));
+  const prices = (cs: EbaySoldComp[]) => cs.map((c) => c.price).sort((a, b) => a - b);
+
+  it("drops a single extreme HIGH spike (sealed unit / bundle / wrong model that slipped the filter)", () => {
+    // [120,125,130,135,140] is a tight used cluster; 400 is anomalous.
+    expect(prices(coreComps(mk([120, 125, 130, 135, 140, 400])))).toEqual([120, 125, 130, 135, 140]);
+  });
+
+  it("drops a single extreme LOW spike (a 'for parts / not working' sale)", () => {
+    expect(prices(coreComps(mk([20, 120, 125, 130, 135, 140])))).toEqual([120, 125, 130, 135, 140]);
+  });
+
+  it("catches a spike that masks itself under IQR fences (MAD's 50% breakpoint)", () => {
+    // Under Tukey IQR the 400 inflates Q3 and hides inside the fence; MAD flags it.
+    expect(prices(coreComps(mk([120, 125, 130, 135, 400])))).toEqual([120, 125, 130, 135]);
+  });
+
+  it("does NOT trim a genuinely scattered (uniform) set — no isolated outlier to remove", () => {
+    expect(coreComps(mk([60, 120, 185, 300, 420]))).toHaveLength(5);
+  });
+
+  it("does NOT trim a bimodal set — both clusters are real, neither is noise", () => {
+    expect(coreComps(mk([100, 105, 110, 500, 510, 520]))).toHaveLength(6);
+  });
+
+  it("leaves thin sets (<4 comps) untrimmed — MAD is unreliable on tiny n", () => {
+    expect(coreComps(mk([120, 125, 400]))).toHaveLength(3);
+  });
+
+  it("keeps an all-identical set intact (MAD = 0 → never drops the minority)", () => {
+    expect(coreComps(mk([130, 130, 130, 135]))).toHaveLength(4);
+  });
+});
+
+describe("synthesizeSoldResult — robust core rescues a tight cluster from one spike (#1)", () => {
+  const mk = (prices: number[]): EbaySoldComp[] =>
+    prices.map((price, i) => ({ url: `https://www.ebay.com/itm/${i}`, price, title: `c${i}` }));
+
+  it("trims a high spike so the tight core earns sold-tier agreement, range, and citations", () => {
+    const withSpike = synthesizeSoldResult(mk([120, 125, 130, 135, 140, 400]));
+    // Before the fix the 400 collapses agreement → web_wide; now the core is tight.
+    expect(withSpike.compAgreement!).toBeGreaterThanOrEqual(TIGHT_AGREEMENT_MIN);
+    // Suggested + band describe the DEFENSIBLE core, not the spike.
+    expect(withSpike.suggested).toBeCloseTo(130, 2);
+    expect(withSpike.range.max).toBeCloseTo(140, 2);
+    // Only the core comps are cited as backing the price (the spike is not evidence).
+    expect(withSpike.sources).toHaveLength(5);
+    expect(withSpike.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+  });
+
+  it("trims a low 'for parts' spike the same way", () => {
+    const withLow = synthesizeSoldResult(mk([20, 120, 125, 130, 135, 140]));
+    expect(withLow.compAgreement!).toBeGreaterThanOrEqual(TIGHT_AGREEMENT_MIN);
+    expect(withLow.range.min).toBeCloseTo(120, 2);
+  });
+
+  it("still reports a scattered sold set as sub-tight (honesty preserved)", () => {
+    const scattered = synthesizeSoldResult(mk([60, 120, 185, 300, 420]));
+    expect(scattered.compAgreement!).toBeLessThan(TIGHT_AGREEMENT_MIN);
+    expect(scattered.sources).toHaveLength(5);
   });
 });
 

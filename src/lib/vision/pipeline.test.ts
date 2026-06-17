@@ -10,6 +10,7 @@ import { pipelineResultSchema, type ListingCopy } from "../pipeline/types";
 import {
   createDefaultPricer,
   createVisionPipeline,
+  priceToConfidence,
   type CreateVisionPipelineOptions,
 } from "./pipeline";
 import type {
@@ -633,5 +634,61 @@ describe("#11 — createDefaultPricer fallthrough (offline fakes)", () => {
       expect(result.confidence.band).not.toBe("high");
       expect(result.confidence.autopilotEligible).toBe(false);
     }
+  });
+});
+
+describe("web_tight tier — strongly-corroborated asking clusters (web-search coverage lever)", () => {
+  // A branded item identified at 3/4 (brand + model + category; no barcode).
+  const attrs = { brand: "Sony", model: "WH-1000XM4", category: "electronics" };
+  const askingFrom = (hosts: string[]) =>
+    hosts.map((h, i) => ({ url: `https://${h}/listing/${i}`, kind: "asking-comp" as const }));
+  const askingPrice = (compAgreement: number, hosts: string[]): PriceResult =>
+    priceResultSchema.parse({
+      suggested: 150,
+      range: { min: 90, max: 220 },
+      confidence: 0.6,
+      tier: "branded-web",
+      compAgreement,
+      sources: askingFrom(hosts),
+    });
+
+  it("a TIGHT cluster of 4+ INDEPENDENT asking sources can clear the autopilot gate", () => {
+    const c = priceToConfidence(
+      attrs,
+      askingPrice(0.9, ["ebay.com", "mercari.com", "swappa.com", "reverb.com"]),
+    );
+    expect(c.band).toBe("high");
+    expect(c.autopilotEligible).toBe(true);
+  });
+
+  it("fewer than 4 independent asking sources stays sub-gate (web_wide, capped)", () => {
+    const c = priceToConfidence(
+      attrs,
+      askingPrice(0.9, ["ebay.com", "mercari.com", "swappa.com"]),
+    );
+    expect(c.autopilotEligible).toBe(false);
+  });
+
+  it("5 sources from the SAME domain count as one — not independent corroboration", () => {
+    const c = priceToConfidence(
+      attrs,
+      askingPrice(0.95, ["ebay.com", "ebay.com", "ebay.com", "ebay.com", "ebay.com"]),
+    );
+    expect(c.autopilotEligible).toBe(false);
+  });
+
+  it("a loosely-agreeing 4-source cluster does NOT clear (the bump is bounded, not a blank check)", () => {
+    // Agreement exactly at the tightness floor: web_tight may fire, but a barely-
+    // tight cluster is still queued for review (the score math gates it).
+    const c = priceToConfidence(
+      attrs,
+      askingPrice(0.5, ["ebay.com", "mercari.com", "swappa.com", "reverb.com"]),
+    );
+    expect(c.autopilotEligible).toBe(false);
+  });
+
+  it("a single asking comp is still sub-gate (the #32 honesty guarantee holds)", () => {
+    const c = priceToConfidence(attrs, askingPrice(1, ["ebay.com"]));
+    expect(c.autopilotEligible).toBe(false);
   });
 });
