@@ -11,6 +11,13 @@ gsap.registerPlugin(ScrollTrigger, useGSAP);
  * Scroll-reveal wrapper (issue #49): children fade + rise as they enter the
  * viewport. `stagger` animates direct children individually (cards in a
  * grid). Honors prefers-reduced-motion via gsap.matchMedia.
+ *
+ * Default state is fully VISIBLE: the SSR / pre-hydration / no-JS / reduced-
+ * motion render never gets an opacity:0 offset. `immediateRender: false` keeps
+ * the `from` start-state off the element until the ScrollTrigger actually
+ * fires, so a headless/hidden-tab render (where IntersectionObserver may never
+ * fire) ships visible instead of blank. The entrance is a post-hydration
+ * enhancement only.
  */
 export function Reveal({
   children,
@@ -41,6 +48,9 @@ export function Reveal({
           ease: "power3.out",
           delay,
           stagger: stagger ? 0.1 : 0,
+          // Don't blank the content at hydration — only apply the opacity:0/y
+          // start-state when the trigger fires, so the resting render is visible.
+          immediateRender: false,
           scrollTrigger: {
             trigger: el,
             start: "top 82%",

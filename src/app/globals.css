@@ -5,6 +5,12 @@
    toggle is the single source of truth. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Live desktop sidebar width, published by AppSidebar on toggle. The topbar
+   reads it to keep the centered search symmetric over the MAIN content area
+   (not the viewport), so it glides as the sidebar collapses/expands. Default
+   = expanded so the first server paint matches the sidebar's default. */
+:root { --sidebar-w: 232px; }
+
 /* ============================================================================
    SnapList design tokens (issue #40, audit X-1 + X-5 + X-10).
    Single source of truth for color, type, radius, elevation on all surfaces.
@@ -47,7 +53,7 @@
   --color-line-2:      #c9ccd0;  /* stronger hairline          */
   --color-flash:       #1a1a1a;  /* near-black ink — headings  */
   --color-flash-dim:   #404040;  /* secondary text             */
-  --color-flash-faint: #6d7175;  /* tertiary text              */
+  --color-flash-faint: #5c6064;  /* tertiary text — more contrast */
   --color-iris:        #008060;  /* the accent — brand green   */
   --color-iris-deep:   #006e52;
   --color-iris-ink:    #ffffff;  /* text on green              */
@@ -60,8 +66,8 @@
   --color-surface-3:     #ebeced;
   --color-fg:            #404040;
   --color-fg-strong:     #1a1a1a;
-  --color-muted:         #6d7175;
-  --color-faint:         #8c9196;
+  --color-muted:         #5c6064;  /* secondary — darker for readability */
+  --color-faint:         #74787d;  /* tertiary — readable, not washed-out */
   --color-border:        #e1e3e5;
   --color-border-strong: #c9ccd0;
 
@@ -155,7 +161,7 @@
   --color-line-2:      #454545;  /* stronger hairline          */
   --color-flash:       #f5f5f5;  /* headings                   */
   --color-flash-dim:   #c9ccd0;  /* secondary text             */
-  --color-flash-faint: #8c9196;  /* tertiary text              */
+  --color-flash-faint: #9aa0a5;  /* tertiary text — lifted for contrast */
   --color-iris:        #00a37a;  /* brand green, +luminosity   */
   --color-iris-deep:   #1fb88c;  /* hover goes LIGHTER on dark */
   --color-iris-ink:    #08130f;
@@ -167,8 +173,8 @@
   --color-surface-3:     #303030;
   --color-fg:            #c9ccd0;
   --color-fg-strong:     #f5f5f5;
-  --color-muted:         #9ea2a6;
-  --color-faint:         #6d7175;
+  --color-muted:         #bcc0c5;  /* secondary — lifted for dark-mode contrast (stays below fg) */
+  --color-faint:         #9da2a8;  /* tertiary — lifted so labels/dates read clearly on dark panels */
   --color-border:        #303030;
   --color-border-strong: #454545;
 
@@ -268,6 +274,30 @@
   ::selection {
     background: var(--color-accent-soft);
     color: var(--color-accent-soft-fg);
+  }
+  /* Tailwind v4's Preflight drops the legacy `cursor: pointer` on buttons, so
+     nothing in the app felt clickable. Restore a pointer cursor on every
+     interactive affordance (buttons, links, role-based controls, selects,
+     and labels that proxy a control), and a not-allowed cursor when disabled.
+     Text inputs/areas keep their default I-beam (not matched here). */
+  button:not(:disabled),
+  a[href],
+  label[for],
+  summary,
+  select:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
   }
 }
 
@@ -785,19 +815,25 @@
    wordmark-glow.tsx); this rule is now only the dim base the light reveals
    against. Tokens re-point under .dark. */
 .wordmark-glow {
-  --wm-top: var(--color-line);
-  --wm-bottom: var(--color-night);
+  /* Legible quiet fade. Was line→night — i.e. it faded INTO the footer canvas
+     (`night` = #fff in light mode), leaving the wordmark a near-invisible ghost
+     at rest. These greys stay readable on white (~3.2:1 top, ~2.0:1 bottom)
+     while keeping the soft top-down fade; the flashlight still lifts it to
+     vivid green under the cursor. */
+  --wm-top: #8b9197;
+  --wm-bottom: #b4b8bc;
   color: transparent;
   background-image: linear-gradient(to bottom, var(--wm-top), var(--wm-bottom));
   -webkit-background-clip: text;
   background-clip: text;
 }
 .dark .wordmark-glow {
-  /* Resting fade in the brand-green family (was a navy/indigo that read as a
-     purple blob on the dark footer). A muted deep evergreen — present like the
-     old base but on-palette; the cursor flashlight lifts it to vivid green. */
-  --wm-top: #2c4a40;
-  --wm-bottom: var(--color-night);
+  /* Resting fade in the brand-green family. Both ends stay legible on the dark
+     canvas (~4.8:1 top, ~2.5:1 bottom); the old bottom was `night` (= the
+     #141414 bg), so the lower half of the letters vanished. The cursor
+     flashlight still lifts the whole word to vivid green on hover. */
+  --wm-top: #5d8c7a;
+  --wm-bottom: #3a5e51;
 }
 
 /* Subtler cousin for the small footer nav-row wordmark: a soft iris halo
@@ -1109,6 +1145,13 @@
    screens, which is the graceful mobile fallback. Reduced motion: snap. */
 .nav-dock {
   max-width: 72rem;
+  /* `contain: layout` walls this grid's layout off from the rest of the page so
+     the animated max-width can't thrash document reflow — the standard way to
+     keep this (deliberate) layout-property transition cheap WITHOUT changing the
+     visible "dock-out" flare. Safe here: the dock is an inner centering grid,
+     and its only abspos child (the active-link underline) resolves against each
+     <Link>, not this container. */
+  contain: layout;
   transition: max-width 350ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .nav-dock[data-docked="true"] {
@@ -1153,28 +1196,101 @@
    but earlier) loses on source order. The override lives in the auth layout
    body instead, where it sits later in document order and wins. */
 
-/* --- ui-r6-hero-prism: the brand prism, take 2 ---------------------------
-   Round 1 shrank the hero prism and lifted its core to y:300 to keep the
-   bright base off the paragraph; that left a faint cropped triangle pinned
-   to the top edge with no wow factor (owner). It is now back to a full,
-   centred, brighter presence. To keep the centred headline + paragraph
-   legible over it we veil just the text column with a radial scrim matched
-   to the slab colour: brighten-to-white in light (dark ink reads), darken-
-   to-night in dark (light ink reads). Transparent at the edges and top, so
-   the prism's chromatic glow still pours through around the copy. */
-.hero-text-scrim {
-  background: radial-gradient(
-    60% 50% at 50% 31%,
-    rgba(255, 255, 255, 0.82) 0%,
-    rgba(255, 255, 255, 0.46) 40%,
-    transparent 72%
-  );
+/* `.hero-text-scrim` was removed (owner): it was a desktop-only (`md:block`)
+   radial veil behind the hero headline, so the hero looked different on mobile
+   (no veil, uniform prism) vs desktop (a darkened "void" around the text). The
+   bare `.prism-gradient` now flows uniformly behind the headline at every
+   width — the large bold headline reads cleanly over it without a scrim. */
+
+/* ============================================================================
+   Inbox chat bubbles — Apple iMessage-style. Rounded bubbles with a small tail
+   that hooks into the bottom corner (the canonical two-pseudo-element trick: a
+   nub in the bubble color + a cutout in the thread background that carves the
+   outer curve, leaving only the hook). The ::after cutout color MUST match the
+   thread scroll area behind the bubbles — that surface is --color-surface, set
+   explicitly on the message list so the cutout always blends.
+   ============================================================================ */
+.msg-bubble {
+  position: relative;
+  width: fit-content;
+  padding: 8px 14px;
+  border-radius: 19px;
+  font-size: 15px;
+  line-height: 1.45;
 }
-.dark .hero-text-scrim {
-  background: radial-gradient(
-    62% 52% at 50% 31%,
-    rgba(15, 11, 38, 0.84) 0%,
-    rgba(15, 11, 38, 0.5) 42%,
-    transparent 74%
-  );
+/* inbound (buyer) — neutral gray bubble, tail at bottom-left */
+.msg-in {
+  background: var(--color-surface-2);
+  color: var(--color-fg);
+}
+.msg-in::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -7px;
+  width: 16px;
+  height: 19px;
+  background: var(--color-surface-2);
+  border-bottom-right-radius: 16px;
+}
+.msg-in::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -16px;
+  width: 16px;
+  height: 19px;
+  background: var(--color-surface);
+  border-bottom-right-radius: 14px;
+}
+/* outbound (your reply) — brand-green filled bubble, white text, tail at
+   bottom-right. Dark mode deepens the green so white text keeps contrast. */
+.msg-out {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+.dark .msg-out {
+  background: #0b7a61;
+}
+.msg-out::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: -7px;
+  width: 16px;
+  height: 19px;
+  background: var(--color-accent);
+  border-bottom-left-radius: 16px;
+}
+.dark .msg-out::before {
+  background: #0b7a61;
+}
+.msg-out::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  right: -16px;
+  width: 16px;
+  height: 19px;
+  background: var(--color-surface);
+  border-bottom-left-radius: 14px;
+}
+/* Bubbles ease up on first paint (staggered inline per message). */
+.msg-enter {
+  animation: msg-enter 0.32s cubic-bezier(0.21, 0.8, 0.32, 1) both;
+}
+@keyframes msg-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-enter {
+    animation: none;
+  }
 }

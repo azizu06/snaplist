@@ -3,7 +3,6 @@ import Link from "next/link";
 import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Reveal } from "@/components/marketing/reveal";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
-import { Eyebrow } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "Pricing",
@@ -50,7 +49,6 @@ const PRICING_FAQ = [
 
 /** Per-plan card summary. Limits use tabular-nums; CTAs bottom-align. */
 const FREE_HIGHLIGHTS = [
-  "Up to 15 items a day",
   "AI pricing with cited sources",
   "eBay publishing from your own account",
   "Facebook & Mercari export packs",
@@ -59,7 +57,6 @@ const FREE_HIGHLIGHTS = [
 ] as const;
 
 const PRO_HIGHLIGHTS = [
-  "Up to 200 items a day",
   "Everything in Free",
   "Bulk photo uploads",
   "Priority pricing-research queue",
@@ -125,7 +122,7 @@ const FEATURE_MATRIX: readonly FeatureGroup[] = [
 function CellMark({ value }: { value: Cell }) {
   if (typeof value === "string") {
     return (
-      <span className="nums text-[15px] font-semibold text-flash">{value}</span>
+      <span className="nums text-[16px] font-semibold text-flash">{value}</span>
     );
   }
   if (value) {
@@ -135,7 +132,7 @@ function CellMark({ value }: { value: Cell }) {
         <svg
           viewBox="0 0 24 24"
           aria-hidden
-          className="size-[18px] text-iris"
+          className="size-5 text-iris"
           fill="none"
           stroke="currentColor"
           strokeWidth="2.6"
@@ -191,10 +188,10 @@ export default function Pricing() {
       <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
         <div className="mx-auto w-full max-w-6xl text-center">
           <Reveal>
-            <p className="text-[14px] font-semibold uppercase tracking-[0.16em] text-iris">
-              Pricing
-            </p>
-            <h1 className="mx-auto mt-4 max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
+            {/* "PRICING" eyebrow removed — the nav's active-page indicator now
+                says where you are, and a small eyebrow stacked over the big
+                heading flipped the hierarchy. The heading leads on its own. */}
+            <h1 className="mx-auto max-w-2xl font-display text-[clamp(34px,5vw,56px)] font-bold leading-[1.05] tracking-tight text-flash">
               Two plans, <em className="text-iris">no surprises</em>
             </h1>
             <p className="mx-auto mt-5 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
@@ -208,7 +205,10 @@ export default function Pricing() {
 
       {/* the two plan cards — Free vs the recommended Seller Pro */}
       <section className="mx-auto w-full max-w-5xl px-5 pb-20 sm:px-8">
-        <Reveal stagger className="grid items-stretch gap-6 lg:grid-cols-2">
+        {/* Generous gap on BOTH axes so the Seller Pro ElectricBorder glow has
+            room to fall off before it reaches the Free card — the old lg:gap-6
+            let the green halo bleed across the divider into the Free plan. */}
+        <Reveal stagger className="grid items-stretch gap-10 lg:grid-cols-2 lg:gap-10">
           {/* Free — calm bordered card */}
           <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-line bg-panel p-8 shadow-card sm:p-9">
             <h2 className="font-display text-[24px] font-bold text-flash">Free</h2>
@@ -241,8 +241,8 @@ export default function Pricing() {
           <ElectricBorder
             color="#008060"
             speed={0.5}
-            chaos={0.045}
-            displacement={12}
+            chaos={0.035}
+            displacement={8}
             borderRadius={24}
             className="h-full"
           >
@@ -285,8 +285,7 @@ export default function Pricing() {
       <section className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-5xl px-5 py-24 sm:px-8 sm:py-28">
           <Reveal>
-            <Eyebrow tint="cyan">Compare plans</Eyebrow>
-            <h2 className="mt-4 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
+            <h2 className="font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
               What you get, line by line
             </h2>
             <p className="mt-4 max-w-[54ch] text-[16px] leading-relaxed text-flash-dim">
@@ -298,13 +297,13 @@ export default function Pricing() {
           <Reveal className="mt-12 overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
             {/* sticky-feeling header row: feature | Free | Pro */}
             <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-6 border-b border-line bg-night-2 px-5 py-4 sm:gap-x-10 sm:px-7">
-              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
+              <span className="text-[13.5px] font-semibold uppercase tracking-[0.12em] text-flash-faint">
                 Feature
               </span>
-              <span className="w-16 text-center text-[14px] font-semibold text-flash sm:w-20">
+              <span className="w-16 text-center text-[15px] font-semibold text-flash sm:w-20">
                 Free
               </span>
-              <span className="flex w-16 items-center justify-center gap-1.5 text-center text-[14px] font-semibold text-flash sm:w-20">
+              <span className="flex w-16 items-center justify-center gap-1.5 text-center text-[15px] font-semibold text-flash sm:w-20">
                 Pro
                 <span aria-hidden className="size-1.5 rounded-full bg-iris" />
               </span>
@@ -312,15 +311,15 @@ export default function Pricing() {
 
             {FEATURE_MATRIX.map((group) => (
               <div key={group.group}>
-                <p className="bg-panel px-5 pb-2 pt-5 text-[12.5px] font-semibold uppercase tracking-[0.14em] text-iris sm:px-7">
+                <p className="bg-panel px-5 pb-2.5 pt-6 text-[13px] font-semibold uppercase tracking-[0.14em] text-iris-deep sm:px-7">
                   {group.group}
                 </p>
                 {group.rows.map((row) => (
                   <div
                     key={row.label}
-                    className="grid grid-cols-[1fr_auto_auto] items-center gap-x-6 border-t border-line px-5 py-3.5 sm:gap-x-10 sm:px-7"
+                    className="grid grid-cols-[1fr_auto_auto] items-center gap-x-6 border-t border-line px-5 py-4 sm:gap-x-10 sm:px-7"
                   >
-                    <span className="text-[15px] leading-snug text-flash-dim">
+                    <span className="text-[16px] leading-normal text-flash-dim">
                       {row.label}
                     </span>
                     <span className="flex w-16 items-center justify-center sm:w-20">
@@ -360,8 +359,7 @@ export default function Pricing() {
       <section className="border-t border-line bg-night-2">
         <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8">
           <Reveal>
-            <Eyebrow tint="cyan">Billing FAQ</Eyebrow>
-            <h2 className="mt-4 font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
+            <h2 className="font-display text-[clamp(24px,3.4vw,36px)] font-bold tracking-tight text-flash">
               Money questions, straight answers
             </h2>
           </Reveal>

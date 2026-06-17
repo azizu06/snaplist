@@ -172,7 +172,7 @@ export function ScanShowcase() {
   return (
     <div className="glass-panel grid overflow-hidden rounded-2xl md:grid-cols-[1.12fr_1fr]">
       {/* ------------------------------------------------ the one photo in */}
-      <div className="relative aspect-[4/3] md:aspect-auto md:min-h-[460px]">
+      <div className="relative aspect-[4/3] md:aspect-auto md:min-h-[540px]">
         {PRODUCTS.map((p, i) => (
           <Image
             key={p.slug}
@@ -236,8 +236,10 @@ export function ScanShowcase() {
             </p>
 
             {/* What the model pulled out of the photo — fills the panel with
-                real extracted attributes instead of dead space (owner). */}
-            <ul className="mt-5 space-y-2">
+                real extracted attributes instead of dead space (owner). The
+                `mb` opens a gap to the divider on mobile, where `mt-auto` below
+                collapses to nothing (desktop keeps the auto gap). */}
+            <ul className="mt-5 mb-7 space-y-2 sm:mb-0">
               {listing.details.map((detail) => (
                 <li
                   key={detail}
