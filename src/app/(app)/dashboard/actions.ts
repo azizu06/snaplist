@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { reportServerError } from "@/lib/sentry";
-import { isBulkEditableStatus } from "@/lib/ui/status";
+import { bulkStatusDecision, isLiveListingRow } from "@/lib/ui/status";
 import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 
 /**
@@ -50,7 +50,7 @@ async function liveListingIdSet(
     return live;
   }
   for (const r of data ?? []) {
-    if (r.ebay_listing_id && r.ebay_status === "published") live.add(r.id as string);
+    if (isLiveListingRow(r)) live.add(r.id as string);
   }
   return live;
 }
@@ -111,7 +111,11 @@ export async function unarchiveListings(listingIds: string[]): Promise<void> {
   const live: string[] = [];
   const draft: string[] = [];
   for (const r of rows ?? []) {
-    if (r.ebay_listing_id && r.ebay_status === "published") live.push(r.id as string);
+    // Same `isLiveListingRow` predicate the archive + bulk-edit guards use, so the
+    // definition of "live" can't drift; unarchive keeps its own read policy above
+    // (a read error bails — restoring nothing — rather than fail-closed-as-live,
+    // which here would wrongly re-publish everything).
+    if (isLiveListingRow(r)) live.push(r.id as string);
     else draft.push(r.id as string);
   }
 
@@ -152,7 +156,13 @@ export async function deleteItems(itemIds: string[]): Promise<void> {
     .select("photos")
     .in("id", itemIds);
   if (readErr) {
+    // Couldn't read the photo paths → deleting the rows now would ORPHAN the
+    // private Storage objects (the FK cascade never touches the bucket, and the
+    // row we'd remove is the only reference). Fail closed: abort + report so the
+    // seller can retry, rather than silently leak their images while the UI says
+    // "permanently removed" (Codex P2). Delete is idempotent, so bailing is safe.
     reportServerError("dashboard.delete.read", readErr, { count: itemIds.length });
+    return;
   }
   const paths = (items ?? []).flatMap(
     (it) => ((it.photos as string[] | null) ?? []),
@@ -253,13 +263,20 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
       // scopes the row; this scopes the VALUE. Reported, not silently dropped, so a
       // bypass attempt is auditable.
       if (u.status !== undefined && u.listingId) {
-        if (!isBulkEditableStatus(u.status)) {
+        // The pure, unit-tested decision (status/identity/lifecycle/test target):
+        // reject an out-of-vocabulary status, skip a live eBay listing, else write.
+        const decision = bulkStatusDecision({
+          status: u.status,
+          hasListing: true,
+          isLive: liveListingIds.has(u.listingId),
+        });
+        if (decision === "reject-vocab") {
           reportServerError(
             "dashboard.bulkUpdate.status",
             new Error(`rejected non-bulk-editable status "${u.status}"`),
             { listingId: u.listingId },
           );
-        } else if (liveListingIds.has(u.listingId)) {
+        } else if (decision === "skip-live") {
           // The listing is live on eBay — its status is owned by the eBay state, so
           // a bulk metadata edit must not move it to draft/archived and mislabel a
           // live listing as a draft (Codex). Skip + report.
@@ -268,7 +285,7 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
             new Error(`refused to change status of a live eBay listing to "${u.status}"`),
             { listingId: u.listingId },
           );
-        } else {
+        } else if (decision === "write") {
           writes.push(
             supabase
               .from("listings")

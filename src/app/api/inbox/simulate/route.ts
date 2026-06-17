@@ -168,17 +168,24 @@ export async function POST(request: Request) {
   }
 
   // Activity feed: a new buyer question → notify (rides Realtime to the bell).
-  await createNotification(supabase, {
-    userId,
-    kind: "buyer_message",
-    title: listing?.title
-      ? `New question on “${listing.title}”`
-      : "New buyer question",
-    body: question,
-    href: "/inbox",
-    itemId,
-    listingId: listing?.id ?? null,
-  });
+  // Best-effort: the inbound message already persisted (the point of this flow), so
+  // a notification failure must not throw and abort the request before the draft
+  // step runs — the seller would lose the drafted reply over a missed bell.
+  try {
+    await createNotification(supabase, {
+      userId,
+      kind: "buyer_message",
+      title: listing?.title
+        ? `New question on “${listing.title}”`
+        : "New buyer question",
+      body: question,
+      href: "/inbox",
+      itemId,
+      listingId: listing?.id ?? null,
+    });
+  } catch (err) {
+    logServerError("inbox.simulate.notify", err); // keep internals out of the client (#57)
+  }
 
   try {
     // The agent never throws (deterministic grounded fallback), so the message

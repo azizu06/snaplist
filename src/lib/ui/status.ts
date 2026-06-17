@@ -100,6 +100,48 @@ export function isBulkEditableStatus(status: string): boolean {
   return (BULK_EDITABLE_STATUSES as readonly string[]).includes(status);
 }
 
+/**
+ * Is this listing row LIVE on eBay? A listing is live iff it has an eBay listing
+ * id AND its eBay-side status is `published`. A live listing's lifecycle is owned
+ * by the eBay state, so dashboard mutations must never write a non-live status
+ * (draft/archived) onto it and mislabel a genuinely live listing (Codex). This is
+ * the ONE definition of "live", shared by `archiveListings`, `unarchiveListings`,
+ * and `bulkUpdateListings` so the predicate can never drift between them — each
+ * caller keeps its own read + error policy, but they all decide "live" identically.
+ */
+export function isLiveListingRow(row: {
+  ebay_listing_id?: string | null;
+  ebay_status?: string | null;
+}): boolean {
+  return Boolean(row.ebay_listing_id) && row.ebay_status === "published";
+}
+
+/**
+ * What a bulk quick-edit status write reduces to, made pure so the lifecycle guard
+ * that took six review rounds to get right is unit-tested directly instead of
+ * buried in Supabase I/O glue:
+ *  - `skip`         — no status change requested, or the row has no listing yet.
+ *  - `reject-vocab` — a status outside the seller-organizational set (published /
+ *                     queued / …): only a crafted request past the disabled UI can
+ *                     reach this; never written (defense-in-depth, Codex P1).
+ *  - `skip-live`    — the listing is live on eBay; its status is owned by the eBay
+ *                     state, so a bulk edit must not move it to draft/archived.
+ *  - `write`        — a bulk-editable status on a non-live listing: the only case
+ *                     that actually persists.
+ */
+export type BulkStatusDecision = "skip" | "reject-vocab" | "skip-live" | "write";
+
+export function bulkStatusDecision(params: {
+  status: string | undefined;
+  hasListing: boolean;
+  isLive: boolean;
+}): BulkStatusDecision {
+  if (params.status === undefined || !params.hasListing) return "skip";
+  if (!isBulkEditableStatus(params.status)) return "reject-vocab";
+  if (params.isLive) return "skip-live";
+  return "write";
+}
+
 export type ConfidenceBand = "high" | "medium" | "low";
 
 const MEDIUM_MIN = 0.5;
