@@ -10,6 +10,7 @@ import type { PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
 import { saveReview, sharpenEstimate } from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
+import { ConsumeUploadDraft } from "./consume-upload-draft";
 
 /**
  * Review page — reads the persisted item + its listing + the prediction log back
@@ -209,6 +210,12 @@ export default async function ReviewPage({
   };
 
   return (
-    <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+    <>
+      {/* Landing here means the upload succeeded and produced this item, so the
+          pending-upload draft has done its job — clear it (else back-navigating
+          to /upload re-hydrates the old photos into a duplicate submit). */}
+      <ConsumeUploadDraft />
+      <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+    </>
   );
 }
