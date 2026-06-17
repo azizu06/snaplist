@@ -1,16 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { notFound } from "next/navigation";
+import { useListResize } from "@/app/(app)/inbox/use-list-resize";
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 import { SimulatorCard } from "@/app/(app)/inbox/simulator-card";
 import {
   ConversationList,
+  ConversationRail,
   ConversationThread,
   ThreadPlaceholder,
   deriveConversationState,
+  useIsDesktopPane,
 } from "@/app/(app)/inbox/conversation-list";
-import type { ItemOption } from "@/app/(app)/inbox/inbox-client";
+import { SimulatorMenu, type ItemOption } from "@/app/(app)/inbox/inbox-client";
 import type { MessageRow } from "@/lib/inbox";
 
 /**
@@ -83,6 +87,7 @@ function outbound(
   replyTo: string,
   body: string,
   sentMinsAgo: number,
+  replyKind: "reply" | "followup" = "reply",
 ): MessageRow {
   return {
     id,
@@ -95,6 +100,7 @@ function outbound(
     status: "sent",
     sent_at: minsAgo(sentMinsAgo),
     reply_to: replyTo,
+    reply_kind: replyKind,
     draft_model: null,
     created_at: minsAgo(sentMinsAgo),
     updated_at: minsAgo(sentMinsAgo),
@@ -160,11 +166,46 @@ const FIXTURE_REPLIES = new Map<string, MessageRow>([
   ],
 ]);
 
+// Follow-up messages the seller sent AFTER the first reply — the thread stays
+// open (a conversation, not a single Q&A pair), so the persistent composer shows.
+const FIXTURE_FOLLOWUPS = new Map<string, MessageRow[]>([
+  [
+    Q_SENT,
+    [
+      outbound(
+        "00000000-0000-0000-0000-0000000000f1",
+        ITEM_PATAGONIA,
+        Q_SENT,
+        "Actually — hold on, let me double-check the exact measurements for you.",
+        12,
+        "followup",
+      ),
+      outbound(
+        "00000000-0000-0000-0000-0000000000f2",
+        ITEM_PATAGONIA,
+        Q_SENT,
+        "Pit-to-pit is 21\" and length is 27\". Happy to grab any other measurement.",
+        10,
+        "followup",
+      ),
+    ],
+  ],
+]);
+
 export default function InboxDevPreviewPage() {
   const [selectedItem, setSelectedItem] = useState(FIXTURE_ITEMS[0].id);
   const [edits, setEdits] = useState<Record<string, string>>({});
+  const [followUpDrafts, setFollowUpDrafts] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(Q_DRAFTED);
   const [view, setView] = useState<"populated" | "empty">("populated");
+
+  // Resizable conversation list — same hook as the shipped inbox (drag narrow
+  // → snaps to the avatar-only rail).
+  const { width: listWidth, collapsed, dragging, handleProps } = useListResize();
+  // Same single-pane (mobile) vs two-pane (desktop) fork as the live inbox.
+  const isDesktop = useIsDesktopPane();
+  const reduceMotion = useReducedMotion();
+
   if (process.env.NODE_ENV === "production") notFound();
 
   const inboundRows = FIXTURE_INBOUND;
@@ -181,39 +222,50 @@ export default function InboxDevPreviewPage() {
     return replied ? n : n + 1;
   }, 0);
 
+  // One thread instance, reused by whichever layout is live (see inbox-client).
+  const conversationThread = selectedMessage ? (
+    <ConversationThread
+      state={deriveConversationState(selectedMessage, FIXTURE_REPLIES, null)}
+      buyerName={buyerLabelFor(selectedMessage)}
+      edits={edits}
+      busy={null}
+      followUps={FIXTURE_FOLLOWUPS.get(selectedMessage.id) ?? []}
+      followUpValue={followUpDrafts[selectedMessage.id] ?? ""}
+      onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
+      onApproveAndSend={() => {}}
+      onRetryDelivery={() => {}}
+      onRetryDraft={() => {}}
+      onFollowUpChange={(id, value) =>
+        setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))
+      }
+      onSendFollowUp={() => {}}
+      onBack={() => setSelectedId(null)}
+    />
+  ) : null;
+
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
-            Buyer inbox
-          </h1>
-          <p className="mt-1 max-w-2xl text-[15px] leading-relaxed text-muted">
-            Questions from buyers land here live. We draft a reply from the
-            listing, then you approve or edit before anything sends.
-          </p>
-        </div>
-        {/* dev-only view switch — not part of the shipped screen */}
-        <div className="flex shrink-0 overflow-hidden rounded-lg border border-border text-[13px] font-medium">
-          {(["populated", "empty"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              className={`px-3 py-1.5 capitalize transition-colors ${
-                view === v
-                  ? "bg-primary text-primary-fg"
-                  : "bg-surface text-muted hover:text-fg-strong"
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      </header>
+    <main className="relative flex h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full flex-col overflow-hidden lg:h-[calc(100dvh-72px)]">
+      {/* dev-only view switch — floated over the surface (the shipped /inbox has
+          no title strip; this preview matches it). Not part of the screen. */}
+      <div className="absolute right-4 top-3 z-20 hidden overflow-hidden rounded-lg border border-border text-[13px] font-medium shadow-sm sm:flex">
+        {(["populated", "empty"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setView(v)}
+            className={`px-3 py-1.5 capitalize transition-colors ${
+              view === v
+                ? "bg-primary text-primary-fg"
+                : "bg-surface text-muted hover:text-fg-strong"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
 
       {view === "empty" ? (
-        <div className="flex flex-col gap-6">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6">
           <SimulatorCard
             items={FIXTURE_ITEMS}
             selectedItem={selectedItem}
@@ -225,15 +277,28 @@ export default function InboxDevPreviewPage() {
           <InboxEmptyState />
         </div>
       ) : (
-        <div className="flex min-h-[60vh] overflow-hidden rounded-xl border border-border bg-surface shadow-xs lg:h-[calc(100vh-13rem)] lg:min-h-[34rem]">
-          {/* ── left: conversation list ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          style={{ "--inbox-list-w": `${listWidth}px` } as React.CSSProperties}
+          className={`relative flex min-h-[60vh] flex-1 overflow-hidden bg-surface lg:min-h-0 ${
+            dragging ? "select-none" : ""
+          }`}
+        >
+          {/* ── left: conversation list (resizable on desktop) ── */}
           <nav
             aria-label="Buyer conversations"
-            className={`min-h-0 w-full flex-col border-border lg:flex lg:w-[340px] lg:shrink-0 lg:border-r ${
-              selectedMessage ? "hidden lg:flex" : "flex"
+            className={`flex min-h-0 w-full flex-col border-border lg:w-[var(--inbox-list-w)] lg:shrink-0 ${
+              dragging ? "" : "lg:transition-[width] lg:duration-200 lg:ease-out"
             }`}
           >
-            <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+            {/* full header — mobile always; desktop when expanded */}
+            <header
+              className={`flex h-16 items-center justify-between gap-2 border-b border-border px-4 ${
+                collapsed ? "lg:hidden" : ""
+              }`}
+            >
               <span className="flex items-baseline gap-2">
                 <h2 className="text-[14px] font-semibold text-fg-strong">
                   Conversations
@@ -247,57 +312,107 @@ export default function InboxDevPreviewPage() {
                   </span>
                 ) : null}
               </span>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[13px] font-medium text-fg transition-colors hover:bg-surface-2"
-              >
-                <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M10 2v6.3L4.6 17.4A2 2 0 0 0 6.3 20.5h11.4a2 2 0 0 0 1.7-3.1L14 8.3V2" />
-                  <path d="M8.5 2h7" />
-                </svg>
-                Simulate
-              </button>
-            </header>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <ConversationList
-                inbound={inboundRows}
-                repliesByQuestion={FIXTURE_REPLIES}
-                busy={null}
-                itemLabels={itemLabels}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
+              <SimulatorMenu
+                items={FIXTURE_ITEMS}
+                selectedItem={selectedItem}
+                onSelectItem={setSelectedItem}
+                onSimulate={() => {}}
+                live
+                simulating={false}
               />
+            </header>
+            {/* collapsed header — desktop rail only: just the simulate trigger */}
+            <div
+              className={`hidden h-16 items-center justify-center border-b border-border ${
+                collapsed ? "lg:flex" : ""
+              }`}
+            >
+              <SimulatorMenu
+                compact
+                items={FIXTURE_ITEMS}
+                selectedItem={selectedItem}
+                onSelectItem={setSelectedItem}
+                onSimulate={() => {}}
+                live
+                simulating={false}
+              />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {/* full list — mobile always; desktop when expanded */}
+              <div className={collapsed ? "lg:hidden" : ""}>
+                <ConversationList
+                  inbound={inboundRows}
+                  repliesByQuestion={FIXTURE_REPLIES}
+                  busy={null}
+                  itemLabels={itemLabels}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                />
+              </div>
+              {/* collapsed avatar rail — desktop only */}
+              {collapsed ? (
+                <div className="hidden lg:block">
+                  <ConversationRail
+                    inbound={inboundRows}
+                    repliesByQuestion={FIXTURE_REPLIES}
+                    busy={null}
+                    itemLabels={itemLabels}
+                    selectedId={selectedId}
+                    onSelect={setSelectedId}
+                  />
+                </div>
+              ) : null}
             </div>
           </nav>
 
-          {/* ── right: selected thread / placeholder ── */}
+          {/* ── drag handle: resize the conversation list (desktop only) ── */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize conversation list"
+            {...handleProps}
+            className="group relative hidden w-1.5 shrink-0 cursor-col-resize touch-none lg:block"
+          >
+            <span
+              aria-hidden
+              className={`absolute inset-y-0 left-1/2 -translate-x-1/2 transition-all ${
+                dragging
+                  ? "w-[2px] bg-accent"
+                  : "w-px bg-border group-hover:w-[2px] group-hover:bg-accent/60"
+              }`}
+            />
+          </div>
+
+          {/* ── right: selected thread / placeholder (desktop static pane) ── */}
           <section
             aria-label="Conversation"
-            className={`min-h-0 flex-1 flex-col ${selectedMessage ? "flex" : "hidden lg:flex"}`}
+            className="hidden min-h-0 flex-1 flex-col lg:flex"
           >
-            {selectedMessage ? (
-              <ConversationThread
-                state={deriveConversationState(
-                  selectedMessage,
-                  FIXTURE_REPLIES,
-                  null,
-                )}
-                buyerName={buyerLabelFor(selectedMessage)}
-                edits={edits}
-                busy={null}
-                onEdit={(id, value) =>
-                  setEdits((prev) => ({ ...prev, [id]: value }))
-                }
-                onApproveAndSend={() => {}}
-                onRetryDelivery={() => {}}
-                onRetryDraft={() => {}}
-                onBack={() => setSelectedId(null)}
-              />
-            ) : (
-              <ThreadPlaceholder />
-            )}
+            {isDesktop ? conversationThread ?? <ThreadPlaceholder /> : null}
           </section>
-        </div>
+
+          {/* ── mobile slide-over (mirrors inbox-client): thread pushes in from
+              the right, slides back out on Back. Mounted only below `lg`. ── */}
+          <AnimatePresence initial={false}>
+            {!isDesktop && selectedMessage ? (
+              <motion.section
+                key="mobile-thread"
+                aria-label="Conversation"
+                className="absolute inset-0 z-20 flex min-h-0 flex-col bg-surface lg:hidden"
+                initial={reduceMotion ? { opacity: 0 } : { x: "100%" }}
+                animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
+                exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
+                transition={
+                  reduceMotion
+                    ? { duration: 0.15 }
+                    : { type: "tween", duration: 0.28, ease: [0.22, 1, 0.36, 1] }
+                }
+              >
+                {conversationThread}
+              </motion.section>
+            ) : null}
+          </AnimatePresence>
+        </motion.div>
       )}
     </main>
   );

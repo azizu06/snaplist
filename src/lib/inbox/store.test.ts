@@ -7,6 +7,7 @@ import {
   attachDraftReply,
   createBuyerMessage,
   retryReplyDelivery,
+  sendFollowUpMessage,
   stubDeliverReply,
 } from "./store";
 import type { MessageRow } from "./types";
@@ -567,6 +568,94 @@ describe("retryReplyDelivery", () => {
     expect(deliver).not.toHaveBeenCalled();
     expect(selects).toHaveLength(0);
     expect(inserts).toHaveLength(0);
+  });
+});
+
+describe("sendFollowUpMessage", () => {
+  // The conversation root (the inbound question) the seller already replied to.
+  const question = row({ status: "sent" });
+  const FOLLOWUP_ID = "66666666-6666-4666-8666-666666666666";
+
+  function followUpRow() {
+    return row({
+      id: FOLLOWUP_ID,
+      direction: "outbound",
+      body: "Hold on, let me check the serial number for you.",
+      status: "sent",
+      reply_to: MESSAGE_ID,
+      reply_kind: "followup",
+      sent_at: "2026-06-17T12:00:00.000Z",
+    });
+  }
+
+  it("inserts an outbound 'followup' row threaded to the question, then delivers once keyed by the new row id", async () => {
+    const { client, inserts, updates } = fakeSupabase({
+      inserts: [{ data: followUpRow(), error: null }],
+    });
+    const delivered: { messageId: string; reply: string; idempotencyKey: string }[] = [];
+
+    const result = await sendFollowUpMessage(client, {
+      userId: USER_ID,
+      message: question,
+      body: "  Hold on, let me check the serial number for you.  ", // trimmed
+      deliver: async (args) => {
+        delivered.push(args);
+        // No CAS claim for a follow-up — the row is inserted first so its id can
+        // serve as a stable idempotency key for a real adapter.
+        expect(inserts).toHaveLength(1);
+      },
+    });
+
+    // A follow-up is NOT a reply-to-question: no status CAS, no draft.
+    expect(updates).toHaveLength(0);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].table).toBe("messages");
+    expect(inserts[0].payload).toEqual({
+      user_id: USER_ID,
+      item_id: ITEM_ID,
+      listing_id: LISTING_ID,
+      direction: "outbound",
+      body: "Hold on, let me check the serial number for you.",
+      status: "sent",
+      reply_to: MESSAGE_ID,
+      reply_kind: "followup",
+      sent_at: inserts[0].payload.sent_at,
+    });
+    // Threaded to the conversation root so it lands in the same thread.
+    expect(inserts[0].payload.reply_to).toBe(MESSAGE_ID);
+    // Delivered exactly once; the key is the new row id (stable per follow-up).
+    expect(delivered).toEqual([
+      {
+        messageId: MESSAGE_ID,
+        reply: "Hold on, let me check the serial number for you.",
+        idempotencyKey: FOLLOWUP_ID,
+      },
+    ]);
+    expect(result.outbound.id).toBe(FOLLOWUP_ID);
+  });
+
+  it("rejects an empty body WITHOUT inserting or delivering", async () => {
+    const { client, inserts } = fakeSupabase({});
+    const deliver = vi.fn(async () => {});
+    await expect(
+      sendFollowUpMessage(client, { userId: USER_ID, message: question, body: "   ", deliver }),
+    ).rejects.toThrow(/non-empty/);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("throws (never swallows) on a failed insert", async () => {
+    const { client } = fakeSupabase({
+      inserts: [{ data: null, error: { message: "row-level security" } }],
+    });
+    await expect(
+      sendFollowUpMessage(client, {
+        userId: USER_ID,
+        message: question,
+        body: "Following up",
+        deliver: async () => {},
+      }),
+    ).rejects.toThrow(/Failed to persist follow-up/);
   });
 });
 

@@ -1,16 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { InboxEmptyState } from "./inbox-empty";
 import { SimulatorCard } from "./simulator-card";
 import {
   ConversationList,
+  ConversationRail,
   ConversationThread,
   ThreadPlaceholder,
   deriveConversationState,
+  useIsDesktopPane,
 } from "./conversation-list";
+import { useListResize } from "./use-list-resize";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -71,6 +76,8 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   );
   // Seller edits keyed by message id; absent → show the agent's draft as-is.
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // Follow-up composer text keyed by conversation root (post-reply free text).
+  const [followUpDrafts, setFollowUpDrafts] = useState<Record<string, string>>({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
   // thread view. null → list view on mobile, calm placeholder on desktop.
@@ -78,6 +85,17 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   const [busy, setBusy] = useState<string | null>(null); // "simulate" | "send:<id>" | "retry:<id>"
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(false);
+
+  // Resizable conversation list (desktop) — width persists; drag tracks 1:1.
+  // Dragging past the breakpoint snaps to an avatar-only rail (`collapsed`).
+  const { width: listWidth, collapsed, dragging, handleProps } = useListResize();
+
+  // Mobile is single-pane: opening a conversation slides the thread in over the
+  // list, going Back slides it out. Desktop keeps both panes side by side, so
+  // the thread renders in the static pane (no transform). One render fork, one
+  // mounted ConversationThread.
+  const isDesktop = useIsDesktopPane();
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     let cancelled = false;
@@ -238,14 +256,66 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
     }
   }
 
+  // Send a follow-up message in a conversation already replied to. The outbound
+  // row arrives over Realtime (same as a reply), so we only clear the composer.
+  async function sendFollowUp(message: MessageRow) {
+    const body = (followUpDrafts[message.id] ?? "").trim();
+    if (body === "") return;
+    setBusy(`followup:${message.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/inbox/${message.id}/follow-up`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: body }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(b?.error ?? `Send failed (${res.status})`);
+      }
+      setFollowUpDrafts((prev) => ({ ...prev, [message.id]: "" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const inbound = useMemo(
     () => messages.filter((m) => m.direction === "inbound"),
     [messages],
   );
+  // The CANONICAL reply per question (the one the CAS claim/undelivered logic
+  // tracks). Follow-ups also carry reply_to but are excluded here — otherwise a
+  // later follow-up would overwrite the canonical reply and break undelivered
+  // detection.
   const repliesByQuestion = useMemo(() => {
     const map = new Map<string, MessageRow>();
     for (const m of messages) {
-      if (m.direction === "outbound" && m.reply_to) map.set(m.reply_to, m);
+      if (
+        m.direction === "outbound" &&
+        m.reply_to &&
+        m.reply_kind !== "followup"
+      ) {
+        map.set(m.reply_to, m);
+      }
+    }
+    return map;
+  }, [messages]);
+
+  // Follow-up messages (post-reply) grouped by conversation root, oldest→newest
+  // so the thread appends them after the canonical reply in send order.
+  const followUpsByQuestion = useMemo(() => {
+    const map = new Map<string, MessageRow[]>();
+    for (const m of messages) {
+      if (m.direction === "outbound" && m.reply_to && m.reply_kind === "followup") {
+        const list = map.get(m.reply_to) ?? [];
+        list.push(m);
+        map.set(m.reply_to, list);
+      }
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.created_at.localeCompare(b.created_at));
     }
     return map;
   }, [messages]);
@@ -269,10 +339,11 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
     return replied ? n : n + 1;
   }, 0);
 
-  // Zero conversations → keep the rich empty state (with the simulator above it).
+  // Zero conversations → keep the rich empty state (with the simulator above
+  // it), padded into a centered column since the surface is now full-bleed.
   if (inbound.length === 0) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6">
         <SimulatorCard
           items={items}
           selectedItem={selectedItem}
@@ -287,22 +358,66 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
     );
   }
 
-  return (
-    <div className="flex flex-col gap-4">
-      {error ? <ErrorBanner message={error} /> : null}
+  // One thread instance, reused by whichever layout is live (desktop static
+  // pane OR mobile slide-over) — the `isDesktop` fork below guarantees only one
+  // is mounted at a time, so the composer's `reply-<id>` input id stays unique.
+  const conversationThread = selectedMessage ? (
+    <ConversationThread
+      state={deriveConversationState(selectedMessage, repliesByQuestion, busy)}
+      buyerName={buyerLabelFor(selectedMessage)}
+      edits={edits}
+      busy={busy}
+      followUps={followUpsByQuestion.get(selectedMessage.id) ?? []}
+      followUpValue={followUpDrafts[selectedMessage.id] ?? ""}
+      onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
+      onApproveAndSend={approveAndSend}
+      onRetryDelivery={retryDelivery}
+      onRetryDraft={retryDraft}
+      onFollowUpChange={(id, value) =>
+        setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))
+      }
+      onSendFollowUp={sendFollowUp}
+      onBack={() => setSelectedId(null)}
+    />
+  ) : null;
 
-      {/* Two-pane messaging shell. One bordered card; the list and thread each
-          scroll independently. On mobile only ONE pane shows: list by default,
-          thread once a conversation is selected (back button returns). */}
-      <div className="flex min-h-[60vh] overflow-hidden rounded-xl border border-border bg-surface shadow-xs lg:h-[calc(100vh-13rem)] lg:min-h-[34rem]">
-        {/* ── left: conversation list ── */}
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {error ? (
+        <div className="px-4 pt-4 sm:px-6">
+          <ErrorBanner message={error} />
+        </div>
+      ) : null}
+
+      {/* Two-pane messaging shell — fills the surface edge-to-edge (no card
+          border/radius): the list and thread each scroll independently. The
+          parent `main` owns the bounded desktop height, so the panes fill it
+          via flex-1 and scroll internally; mobile shows one pane at a time
+          (list by default, thread once selected; back button returns). The
+          whole surface eases in on mount (no abrupt pop), and the list width is
+          published as --inbox-list-w for the resizable divider below. */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+        style={{ "--inbox-list-w": `${listWidth}px` } as React.CSSProperties}
+        className={`relative flex min-h-[60vh] flex-1 overflow-hidden bg-surface lg:min-h-0 ${
+          dragging ? "select-none" : ""
+        }`}
+      >
+        {/* ── left: conversation list (resizable on desktop) ── */}
         <nav
           aria-label="Buyer conversations"
-          className={`min-h-0 w-full flex-col border-border lg:flex lg:w-[340px] lg:shrink-0 lg:border-r ${
-            selectedMessage ? "hidden lg:flex" : "flex"
+          className={`flex min-h-0 w-full flex-col border-border lg:w-[var(--inbox-list-w)] lg:shrink-0 ${
+            dragging ? "" : "lg:transition-[width] lg:duration-200 lg:ease-out"
           }`}
         >
-          <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+          {/* full header — mobile always; desktop when expanded */}
+          <header
+            className={`flex h-16 items-center justify-between gap-2 border-b border-border px-4 ${
+              collapsed ? "lg:hidden" : ""
+            }`}
+          >
             <span className="flex items-baseline gap-2">
               <h2 className="text-[14px] font-semibold text-fg-strong">
                 Conversations
@@ -325,46 +440,102 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               simulating={busy === "simulate"}
             />
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <ConversationList
-              inbound={inbound}
-              repliesByQuestion={repliesByQuestion}
-              busy={busy}
-              itemLabels={itemLabels}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+          {/* collapsed header — desktop rail only: just the simulate trigger */}
+          <div
+            className={`hidden h-16 items-center justify-center border-b border-border ${
+              collapsed ? "lg:flex" : ""
+            }`}
+          >
+            <SimulatorMenu
+              compact
+              items={items}
+              selectedItem={selectedItem}
+              onSelectItem={setSelectedItem}
+              onSimulate={simulate}
+              live={live}
+              simulating={busy === "simulate"}
             />
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* full list — mobile always; desktop when expanded */}
+            <div className={collapsed ? "lg:hidden" : ""}>
+              <ConversationList
+                inbound={inbound}
+                repliesByQuestion={repliesByQuestion}
+                busy={busy}
+                itemLabels={itemLabels}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
+            </div>
+            {/* collapsed avatar rail — desktop only */}
+            {collapsed ? (
+              <div className="hidden lg:block">
+                <ConversationRail
+                  inbound={inbound}
+                  repliesByQuestion={repliesByQuestion}
+                  busy={busy}
+                  itemLabels={itemLabels}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                />
+              </div>
+            ) : null}
           </div>
         </nav>
 
-        {/* ── right: selected thread / placeholder ── */}
+        {/* ── drag handle: resize the conversation list (desktop only). A thin
+            divider that thickens to the accent on hover/drag. Pointer capture
+            keeps the drag alive past the 4px hit area. ── */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize conversation list"
+          {...handleProps}
+          className="group relative hidden w-1.5 shrink-0 cursor-col-resize touch-none lg:block"
+        >
+          <span
+            aria-hidden
+            className={`absolute inset-y-0 left-1/2 -translate-x-1/2 transition-all ${
+              dragging
+                ? "w-[2px] bg-accent"
+                : "w-px bg-border group-hover:w-[2px] group-hover:bg-accent/60"
+            }`}
+          />
+        </div>
+
+        {/* ── right: selected thread / placeholder (desktop static pane) ── */}
         <section
           aria-label="Conversation"
-          className={`min-h-0 flex-1 flex-col ${selectedMessage ? "flex" : "hidden lg:flex"}`}
+          className="hidden min-h-0 flex-1 flex-col lg:flex"
         >
-          {selectedMessage ? (
-            <ConversationThread
-              state={deriveConversationState(
-                selectedMessage,
-                repliesByQuestion,
-                busy,
-              )}
-              buyerName={buyerLabelFor(selectedMessage)}
-              edits={edits}
-              busy={busy}
-              onEdit={(id, value) =>
-                setEdits((prev) => ({ ...prev, [id]: value }))
-              }
-              onApproveAndSend={approveAndSend}
-              onRetryDelivery={retryDelivery}
-              onRetryDraft={retryDraft}
-              onBack={() => setSelectedId(null)}
-            />
-          ) : (
-            <ThreadPlaceholder />
-          )}
+          {isDesktop ? conversationThread ?? <ThreadPlaceholder /> : null}
         </section>
-      </div>
+
+        {/* ── mobile slide-over: the thread pushes in from the right over the
+            list, and slides back out on Back — entering AND exiting animate.
+            Mounted only below `lg` (single-pane), so it never double-renders the
+            thread that the desktop pane already holds. ── */}
+        <AnimatePresence initial={false}>
+          {!isDesktop && selectedMessage ? (
+            <motion.section
+              key="mobile-thread"
+              aria-label="Conversation"
+              className="absolute inset-0 z-20 flex min-h-0 flex-col bg-surface lg:hidden"
+              initial={reduceMotion ? { opacity: 0 } : { x: "100%" }}
+              animate={reduceMotion ? { opacity: 1 } : { x: 0 }}
+              exit={reduceMotion ? { opacity: 0 } : { x: "100%" }}
+              transition={
+                reduceMotion
+                  ? { duration: 0.15 }
+                  : { type: "tween", duration: 0.28, ease: [0.22, 1, 0.36, 1] }
+              }
+            >
+              {conversationThread}
+            </motion.section>
+          ) : null}
+        </AnimatePresence>
+      </motion.div>
     </div>
   );
 }
@@ -382,56 +553,72 @@ function ErrorBanner({ message }: { message: string }) {
 }
 
 /**
- * Simulator folded into the list-pane header as a compact disclosure: a quiet
- * "Simulate" button reveals the existing SimulatorCard bench inline (kept
- * reachable per the inbox spec without stealing the column the conversations
- * need). State + behavior are unchanged — it just renders in a popover.
+ * Simulator trigger in the list-pane header. The bench (SimulatorCard) opens in
+ * a portaled, centered overlay — NOT an absolutely-positioned popover, which the
+ * two-pane shell's `overflow-hidden` clipped (and which overflowed the narrow,
+ * resizable list pane). Portaling to <body> escapes that clip and centers
+ * cleanly on every viewport, mobile included. `compact` renders an icon-only
+ * trigger for the collapsed avatar rail.
  */
-function SimulatorMenu(props: {
+export function SimulatorMenu(props: {
   items: ItemOption[];
   selectedItem: string;
   onSelectItem: (id: string) => void;
   onSimulate: () => void;
   live: boolean;
   simulating: boolean;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+
+  const FlaskIcon = (
+    <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M10 2v6.3L4.6 17.4A2 2 0 0 0 6.3 20.5h11.4a2 2 0 0 0 1.7-3.1L14 8.3V2" />
+      <path d="M8.5 2h7" />
+    </svg>
+  );
+
   return (
-    <div className="relative">
+    <>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(true)}
         aria-expanded={open}
-        className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[13px] font-medium text-fg transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        aria-label="Simulate a buyer question"
+        className={
+          props.compact
+            ? "flex size-9 items-center justify-center rounded-lg border border-border text-fg transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            : "flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[13px] font-medium text-fg transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        }
       >
-        <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M10 2v6.3L4.6 17.4A2 2 0 0 0 6.3 20.5h11.4a2 2 0 0 0 1.7-3.1L14 8.3V2" />
-          <path d="M8.5 2h7" />
-        </svg>
-        Simulate
+        {FlaskIcon}
+        {props.compact ? null : "Simulate"}
       </button>
-      {open ? (
-        <>
-          {/* click-away */}
-          <button
-            type="button"
-            aria-hidden
-            tabIndex={-1}
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-10 cursor-default"
-          />
-          <div className="absolute right-0 z-20 mt-2 w-[min(20rem,calc(100vw-2rem))]">
-            <SimulatorCard
-              items={props.items}
-              selectedItem={props.selectedItem}
-              onSelectItem={props.onSelectItem}
-              onSimulate={props.onSimulate}
-              live={props.live}
-              simulating={props.simulating}
-            />
-          </div>
-        </>
-      ) : null}
-    </div>
+      {open
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(26,26,26,0.32)] p-4 backdrop-blur-[2px]"
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) setOpen(false);
+              }}
+            >
+              <div className="palette-pop mt-[12vh] w-full max-w-sm">
+                <SimulatorCard
+                  items={props.items}
+                  selectedItem={props.selectedItem}
+                  onSelectItem={props.onSelectItem}
+                  onSimulate={() => {
+                    props.onSimulate();
+                    setOpen(false);
+                  }}
+                  live={props.live}
+                  simulating={props.simulating}
+                />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }

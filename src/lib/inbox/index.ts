@@ -39,6 +39,7 @@ export {
   createBuyerMessage,
   markDraftFailed,
   retryReplyDelivery,
+  sendFollowUpMessage,
   stubDeliverReply,
   type ApproveAndSendReplyInput,
   type ApproveAndSendReplyResult,
@@ -46,4 +47,5 @@ export {
   type CreateBuyerMessageInput,
   type DeliverReply,
   type RetryReplyDeliveryInput,
+  type SendFollowUpMessageInput,
 } from "./store";

@@ -1,8 +1,7 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
-import { motion, useReducedMotion } from "motion/react";
-import { StatusBadge } from "@/components/ui/badge";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { StatusTone } from "@/lib/ui/status";
 import type { MessageRow } from "@/lib/inbox";
 
@@ -46,25 +45,28 @@ function SparkleIcon({ className }: { className?: string }) {
   );
 }
 
-/** Buyer avatar — a calm initials square (Shopify timeline uses the same). */
-function BuyerAvatar({ className }: { className?: string }) {
+/**
+ * Buyer avatar — a calm monogram tile (Shopify-style). Shows the conversation's
+ * initial in the brand tint so each buyer reads as a distinct person instead of
+ * an identical generic glyph. We don't have a real buyer name or photo in v1
+ * (eBay's member-messaging API exposes only the buyer's username, no photo, and
+ * it isn't stored yet), so the initial is derived from the conversation label;
+ * `name` falls back to "B" for an unlabeled question. Sizable via `className`.
+ */
+function BuyerAvatar({
+  name,
+  className,
+}: {
+  name?: string;
+  className?: string;
+}) {
+  const initial = (name?.trim()?.charAt(0) || "B").toUpperCase();
   return (
     <span
       aria-hidden
-      className={`flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-muted ${className ?? ""}`}
+      className={`flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[15px] font-bold text-accent-soft-fg shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${className ?? ""}`}
     >
-      <svg
-        viewBox="0 0 24 24"
-        className="size-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M19 21a7 7 0 0 0-14 0" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
+      {initial}
     </span>
   );
 }
@@ -109,6 +111,38 @@ function useHydrated(): boolean {
     () => true,
     () => false,
   );
+}
+
+/** Live media-query hook (same useSyncExternalStore pattern as login-aurora's);
+ *  `serverFallback` is the SSR/first-paint snapshot. */
+function useMediaQuery(query: string, serverFallback: boolean): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const mql = window.matchMedia(query);
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    },
+    [query],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => window.matchMedia(query).matches,
+    () => serverFallback,
+  );
+}
+
+/**
+ * "Is the two-pane desktop layout active?" (Tailwind `lg`, 1024px). Drives the
+ * inbox's render fork: desktop keeps the thread in the static side-by-side pane;
+ * below `lg` the thread becomes a single-pane slide-over. The SSR/first-paint
+ * snapshot is `true` so the desktop two-pane paints without a flash; a phone
+ * corrects to the slide-over the instant it hydrates (and since the thread pane
+ * is `display:none` under `lg` via CSS, nothing is visibly wrong in between).
+ * Gating on this keeps EXACTLY ONE ConversationThread mounted — no duplicate
+ * `reply-<id>` input ids across the two layouts.
+ */
+export function useIsDesktopPane(): boolean {
+  return useMediaQuery("(min-width: 1024px)", true);
 }
 
 /**
@@ -249,17 +283,17 @@ export function ConversationList({
               type="button"
               onClick={() => onSelect(message.id)}
               aria-current={active ? "true" : undefined}
-              className={`group flex w-full items-start gap-3 border-l-2 px-4 py-3.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+              className={`group flex w-full items-start gap-3 border-l-2 px-4 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 active
                   ? "border-l-accent bg-brand-soft"
                   : "border-l-transparent hover:bg-surface-2/60"
               }`}
             >
-              <BuyerAvatar />
+              <BuyerAvatar name={buyerLabel(itemLabels, message)} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline justify-between gap-2">
                   <span
-                    className={`truncate text-[14px] ${
+                    className={`truncate text-[15px] ${
                       state.unread
                         ? "font-semibold text-fg-strong"
                         : "font-medium text-fg"
@@ -271,7 +305,7 @@ export function ConversationList({
                 </span>
                 <span className="mt-1 flex items-center gap-2">
                   <span
-                    className={`min-w-0 flex-1 truncate text-[13px] ${
+                    className={`min-w-0 flex-1 truncate text-[13.5px] ${
                       state.unread ? "text-fg" : "text-muted"
                     }`}
                   >
@@ -297,6 +331,315 @@ export function ConversationList({
   );
 }
 
+/**
+ * Collapsed conversation rail — the avatar-only mode the list snaps to when the
+ * resize handle is dragged narrow (Apple Messages' icon rail). Each buyer is a
+ * circular monogram with the active ring + unread dot preserved; the full label
+ * rides in a native tooltip so nothing is lost. Desktop-only by construction
+ * (the rail width only applies at lg).
+ */
+export function ConversationRail({
+  inbound,
+  repliesByQuestion,
+  busy,
+  itemLabels,
+  selectedId,
+  onSelect,
+}: ConversationListProps) {
+  return (
+    <ul className="flex flex-col items-center gap-1.5 py-2">
+      {inbound.map((message) => {
+        const state = deriveConversationState(message, repliesByQuestion, busy);
+        const active = message.id === selectedId;
+        const label = buyerLabel(itemLabels, message);
+        return (
+          <li key={message.id}>
+            {/* Circular avatar, rectangular hit/highlight area (owner): the
+                active/hover state is a rounded-rect fill behind the circle. */}
+            <button
+              type="button"
+              onClick={() => onSelect(message.id)}
+              aria-current={active ? "true" : undefined}
+              aria-label={label}
+              title={label}
+              className={`relative flex items-center justify-center rounded-xl p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+                active ? "bg-surface-3" : "hover:bg-surface-2"
+              }`}
+            >
+              <span className="relative">
+                <BuyerAvatar name={label} className="size-10 text-[16px]" />
+                {state.unread ? (
+                  <span
+                    aria-hidden
+                    className={`absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-surface ${
+                      state.undelivered || message.status === "draft_failed"
+                        ? "bg-danger"
+                        : "bg-accent-solid"
+                    }`}
+                  />
+                ) : null}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/* ───────────────────────── follow-up composer (post-reply) ─────────────────── */
+
+/** A locally-previewed image attachment (object URL — front-end only in v1). */
+interface PendingAttachment {
+  id: string;
+  url: string;
+  name: string;
+}
+
+/**
+ * Apple-Messages-style follow-up composer: a `+` attach button (a filled circle
+ * at rest) opens a small popover (Photo library / Take a photo); to its right a
+ * single rounded-full input pill takes the remaining width with the send control
+ * tucked INSIDE at its right edge — an up-arrow (↑) circle that animates in only
+ * once there's something to send. The `+`, the pill, and the send arrow all sit
+ * on one vertical center axis.
+ *
+ * v1 SCOPE (honest): the picker + thumbnail previews are fully functional
+ * front-end affordances, but **photos are preview-only** — actually delivering
+ * image attachments to the buyer is a backend slice (Storage upload + a
+ * message-attachments model + the eBay adapter), mirroring how text delivery is
+ * itself stubbed today. So Send delivers the typed text (real path); a faint
+ * note appears while photos are attached so the seller is never misled.
+ */
+function FollowUpComposer({
+  message,
+  value,
+  busy,
+  onChange,
+  onSend,
+}: {
+  message: MessageRow;
+  value: string;
+  busy: string | null;
+  onChange: (id: string, value: string) => void;
+  onSend: (message: MessageRow) => void;
+}) {
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const libraryRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const reduceMotion = useReducedMotion();
+  const text = value.trim();
+  const sending = busy === `followup:${message.id}`;
+  // Send becomes available once there's typed text OR a pending photo (a
+  // photo-only follow-up still sends the message + the honest preview note).
+  const canSend = text !== "" || attachments.length > 0;
+
+  // Revoke object URLs on unmount so previews don't leak memory.
+  useEffect(() => {
+    return () => {
+      attachments.forEach((a) => URL.revokeObjectURL(a.url));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function addFiles(files: FileList | null) {
+    if (!files) return;
+    const next = Array.from(files)
+      .filter((f) => f.type.startsWith("image/"))
+      .map((f) => ({
+        id: `${f.name}-${f.size}-${f.lastModified}`,
+        url: URL.createObjectURL(f),
+        name: f.name,
+      }));
+    setAttachments((prev) => [...prev, ...next]);
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target) URL.revokeObjectURL(target.url);
+      return prev.filter((a) => a.id !== id);
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {/* attached-photo previews — removable thumbnails */}
+      {attachments.length > 0 ? (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((a) => (
+              <div
+                key={a.id}
+                className="relative size-16 overflow-hidden rounded-xl border border-border bg-surface-2"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={a.url} alt={a.name} className="size-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(a.id)}
+                  aria-label={`Remove ${a.name}`}
+                  className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-night/70 text-[13px] font-bold leading-none text-white transition-opacity hover:opacity-90"
+                >
+                  <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[12px] leading-snug text-faint">
+            Photos preview here — sending them to the buyer arrives with the eBay
+            adapter. Your typed message sends now.
+          </p>
+        </>
+      ) : null}
+
+      {/* One center axis: + circle · input pill (send tucked inside) */}
+      <div className="flex items-center gap-2">
+        {/* ── + attach button + popover (Apple Messages style) — filled circle
+            at rest, not a hover-only background ── */}
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label="Add photos"
+            aria-expanded={menuOpen}
+            className="flex size-9 cursor-pointer items-center justify-center rounded-full border border-border bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          {menuOpen ? (
+            <>
+              {/* click-away backdrop */}
+              <div
+                className="fixed inset-0 z-30"
+                onClick={() => setMenuOpen(false)}
+                aria-hidden
+              />
+              <div
+                role="menu"
+                className="palette-pop absolute bottom-full left-0 z-40 mb-2 w-44 overflow-hidden rounded-xl border border-border bg-surface p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    libraryRef.current?.click();
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] text-fg transition-colors hover:bg-surface-2"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4 text-muted" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <circle cx="9" cy="9" r="2" />
+                    <path d="m21 15-3.5-3.5a2 2 0 0 0-2.8 0L6 20" />
+                  </svg>
+                  Photo library
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    cameraRef.current?.click();
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px] text-fg transition-colors hover:bg-surface-2"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4 text-muted" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+                    <circle cx="12" cy="13" r="3" />
+                  </svg>
+                  Take a photo
+                </button>
+              </div>
+            </>
+          ) : null}
+          {/* hidden file inputs — reset value each time so re-picking the same
+              file still fires onChange */}
+          <input
+            ref={libraryRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </div>
+
+        {/* ── input pill with the send control tucked inside its right edge.
+            `pr-12` keeps text from sliding under the ↑ circle. ── */}
+        <div className="relative min-w-0 flex-1">
+          <textarea
+            id={`followup-${message.id}`}
+            aria-label="Send a follow-up message"
+            value={value}
+            onChange={(e) => onChange(message.id, e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends; Shift+Enter is a newline (chat convention).
+              if (e.key === "Enter" && !e.shiftKey && canSend) {
+                e.preventDefault();
+                onSend(message);
+              }
+            }}
+            rows={1}
+            placeholder="Send a follow-up message…"
+            className="max-h-32 min-h-[2.25rem] w-full resize-none rounded-full border border-border-strong bg-surface py-2 pl-4 pr-12 text-[15px] leading-relaxed text-fg outline-none transition-colors placeholder:text-faint focus:border-accent focus:ring-1 focus:ring-accent/30"
+          />
+
+          {/* ↑ send — Apple style, fades+scales in only when there's something
+              to send; reduced-motion gets an instant show/hide (no animation). */}
+          <AnimatePresence initial={false}>
+            {canSend ? (
+              <motion.button
+                key="send"
+                type="button"
+                onClick={() => onSend(message)}
+                disabled={sending}
+                aria-label="Send follow-up"
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.6 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                transition={reduceMotion ? { duration: 0 } : { duration: 0.15, ease: "easeOut" }}
+                className="absolute bottom-1 right-1 flex size-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-fg shadow-xs transition-colors hover:bg-primary-hover active:scale-[0.94] disabled:pointer-events-none disabled:opacity-50"
+              >
+                {sending ? (
+                  <span
+                    aria-hidden
+                    className="size-3 animate-spin rounded-full border-2 border-primary-fg/40 border-t-primary-fg motion-reduce:animate-none"
+                  />
+                ) : (
+                  <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 19V5" />
+                    <path d="m5 12 7-7 7 7" />
+                  </svg>
+                )}
+              </motion.button>
+            ) : null}
+          </AnimatePresence>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ────────────────────────── right pane: the thread ────────────────────────── */
 
 export interface ConversationThreadProps {
@@ -305,10 +648,17 @@ export interface ConversationThreadProps {
   /** Seller edits keyed by message id; absent → show the agent's draft as-is. */
   edits: Record<string, string>;
   busy: string | null;
+  /** Follow-up outbound messages in this thread, oldest→newest (after the reply). */
+  followUps: MessageRow[];
+  /** The current follow-up composer text for this conversation. */
+  followUpValue: string;
   onEdit: (id: string, value: string) => void;
   onApproveAndSend: (message: MessageRow) => void;
   onRetryDelivery: (message: MessageRow) => void;
   onRetryDraft: (message: MessageRow) => void;
+  /** Composer input change + send for follow-up messages (post-reply). */
+  onFollowUpChange: (id: string, value: string) => void;
+  onSendFollowUp: (message: MessageRow) => void;
   /** Mobile only — return to the list pane. */
   onBack?: () => void;
 }
@@ -318,24 +668,32 @@ export function ConversationThread({
   buyerName,
   edits,
   busy,
+  followUps,
+  followUpValue,
   onEdit,
   onApproveAndSend,
   onRetryDelivery,
   onRetryDraft,
+  onFollowUpChange,
+  onSendFollowUp,
   onBack,
 }: ConversationThreadProps) {
-  const { message, sentReply, undelivered, statusTone, statusLabel } = state;
+  const { message, sentReply, sending, undelivered } = state;
   const draftValue = edits[message.id] ?? message.draft_reply ?? "";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* ── thread header: who + what + status ── */}
-      <header className="flex items-center gap-3 border-b border-border px-4 py-3 sm:px-5">
+      {/* ── thread header — iMessage style, IDENTICAL on desktop + mobile: the
+          buyer avatar centered on top, the listing title centered below, and a
+          faint status line under it. The back button (mobile only) floats at the
+          left edge so the identity stays dead-centered. Fixed h-16 to line up
+          with the conversation-list header in the pane beside it. ── */}
+      <header className="relative flex h-16 shrink-0 flex-col items-center justify-center gap-1.5 border-b border-border px-12">
         {onBack ? (
           <button
             type="button"
             onClick={onBack}
-            className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 lg:hidden"
+            className="absolute left-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 lg:hidden"
             aria-label="Back to conversations"
           >
             <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -343,60 +701,64 @@ export function ConversationThread({
             </svg>
           </button>
         ) : null}
-        <BuyerAvatar />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-semibold text-fg-strong">
-            {buyerName}
-          </p>
-          <p className="truncate text-[12.5px] text-faint">Buyer · via eBay</p>
-        </div>
-        <StatusBadge label={statusLabel} tone={statusTone} />
+        <BuyerAvatar name={buyerName} />
+        <p className="max-w-full truncate text-[14px] font-semibold leading-none text-fg-strong">
+          {buyerName}
+        </p>
       </header>
 
-      {/* ── message history (scrolls) ── */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
-        <div className="mx-auto flex max-w-2xl flex-col gap-3">
-          {/* inbound buyer bubble */}
-          <div className="flex flex-col items-start">
-            <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-4 py-2.5">
-              <p className="text-[15px] leading-relaxed text-fg">{message.body}</p>
+      {/* ── message history (scrolls). bg-surface so the iMessage bubble tails
+          (which cut out the thread background) blend seamlessly. Bubbles attach
+          to the section's own edges (no centered max-width column), so inbound
+          hugs the left and outbound the right — like iMessage. ── */}
+      <div className="min-h-0 flex-1 overflow-y-auto bg-surface px-4 py-5 sm:px-5">
+        <div className="flex flex-col gap-3">
+          {/* inbound buyer bubble — gray, tail bottom-left */}
+          <div className="flex flex-col items-start gap-1">
+            <div className="msg-bubble msg-in msg-enter max-w-[80%]">
+              <p className="whitespace-pre-wrap">{message.body}</p>
             </div>
-            <RelativeTime iso={message.created_at} className="mt-1 px-1" />
+            <RelativeTime iso={message.created_at} className="px-1" />
           </div>
 
-          {/* outbound — sent reply (your delivered message) */}
+          {/* outbound — your delivered reply: green bubble, tail bottom-right */}
           {message.status === "sent" && !undelivered ? (
-            <div className="flex flex-col items-end">
-              <div className="max-w-[85%] rounded-2xl rounded-br-md border border-brand-tint bg-brand-soft px-4 py-2.5">
-                <p className="flex items-center gap-1.5 text-[12px] font-semibold text-accent-soft-fg">
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="size-3 shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                  Your reply
-                  {sentReply?.sent_at ? (
-                    <span className="font-normal text-accent-soft-fg/70">
-                      · sent (stubbed delivery)
-                    </span>
-                  ) : null}
-                </p>
-                <p className="mt-1 whitespace-pre-wrap text-[15px] leading-relaxed text-fg">
+            <div className="flex flex-col items-end gap-1">
+              <div
+                className="msg-bubble msg-out msg-enter max-w-[80%]"
+                style={{ animationDelay: "80ms" }}
+              >
+                <p className="whitespace-pre-wrap">
                   {sentReply?.body ?? message.draft_reply}
                 </p>
               </div>
-              {sentReply?.sent_at ? (
-                <RelativeTime iso={sentReply.sent_at} className="mt-1 px-1" />
-              ) : null}
+              <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
+                <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Delivered
+                <span className="text-faint/80">· stubbed</span>
+              </span>
             </div>
           ) : null}
+
+          {/* outbound — your follow-up messages (post-reply), newest last. Same
+              green bubble as the reply; a conversation is a thread, not a single
+              Q&A pair, so the seller can keep messaging the buyer. */}
+          {followUps.map((m) => (
+            <div key={m.id} className="flex flex-col items-end gap-1">
+              <div className="msg-bubble msg-out msg-enter max-w-[80%]">
+                <p className="whitespace-pre-wrap">{m.body}</p>
+              </div>
+              <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
+                <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                Delivered
+                <span className="text-faint/80">· stubbed</span>
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -439,13 +801,26 @@ export function ConversationThread({
               </button>
             </div>
           </div>
-        ) : message.status === "sent" ? (
+        ) : sending ? (
           <p className="flex items-center justify-center gap-1.5 py-1 text-[13px] text-faint">
-            <svg viewBox="0 0 24 24" className="size-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-            Replied — nothing further to send
+            <span
+              aria-hidden
+              className="size-1.5 shrink-0 animate-pulse rounded-full bg-faint motion-reduce:animate-none"
+            />
+            Sending your reply…
           </p>
+        ) : message.status === "sent" ? (
+          // Replied — but the conversation stays open: the seller can send
+          // follow-up messages (free text + photo attachments). The composer
+          // mirrors Apple Messages — `+` attach at the left, compact send at the
+          // right. (Photo *delivery* is the next backend slice; see FollowUpComposer.)
+          <FollowUpComposer
+            message={message}
+            value={followUpValue}
+            busy={busy}
+            onChange={onFollowUpChange}
+            onSend={onSendFollowUp}
+          />
         ) : message.status === "drafted" ? (
           <div className="flex flex-col gap-2.5">
             <div className="rounded-lg border border-brand-tint bg-brand-soft px-3.5 py-3">
@@ -501,24 +876,27 @@ export function ConversationThread({
 
 /* ────────────────────── right pane: nothing selected ──────────────────────── */
 
-/** Calm desktop placeholder shown when there are conversations but none picked. */
+/** Calm middle state — shown when no conversation is picked. With the page
+ *  title strip gone, this is where the "what this is / how it works" copy
+ *  lives, so a first visit explains the inbox before anything is selected. */
 export function ThreadPlaceholder() {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 py-16 text-center">
       <span
         aria-hidden
-        className="flex size-12 items-center justify-center rounded-xl bg-brand-soft text-accent-soft-fg"
+        className="flex size-16 items-center justify-center rounded-2xl bg-brand-soft text-accent-soft-fg"
       >
-        <svg viewBox="0 0 24 24" className="size-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <svg viewBox="0 0 24 24" className="size-8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
       </span>
-      <h3 className="mt-4 text-[16px] font-semibold text-fg-strong">
-        Select a conversation
-      </h3>
-      <p className="mt-1.5 max-w-xs text-[14px] leading-relaxed text-muted">
-        Pick a buyer question on the left to read the thread and review the
-        drafted reply before it sends.
+      <h2 className="mt-5 font-display text-[21px] font-bold tracking-tight text-fg-strong">
+        Your buyer inbox
+      </h2>
+      <p className="mt-2.5 max-w-sm text-[15px] leading-relaxed text-muted">
+        Buyer questions land here live. We draft a reply from the listing, then
+        you approve or edit it before anything sends. Pick a conversation on the
+        left to get started.
       </p>
     </div>
   );

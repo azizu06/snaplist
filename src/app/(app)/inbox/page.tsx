@@ -46,20 +46,16 @@ export default async function InboxPage() {
   });
 
   return (
-    // max-w-6xl: the two-pane messaging shell (340px list + thread) needs the
-    // width — the older narrow column made the conversation area read cramped
-    // and illegible (owner, twice).
-    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6">
-      <header>
-        <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
-          Buyer inbox
-        </h1>
-        <p className="mt-1 max-w-2xl text-[15px] leading-relaxed text-muted">
-          Questions from buyers land here live. We draft a reply from the
-          listing, then you approve or edit before anything sends.
-        </p>
-      </header>
-
+    // The whole content area IS the message center (owner): no title strip, no
+    // page padding. The two-pane fills it top to bottom; the calm middle state
+    // (no conversation selected) carries the "what this is / how it works" copy.
+    // Explicit viewport height on every size (the AppShell's min-h-full doesn't
+    // resolve on mobile — body is min-h-screen, not a definite height — so a
+    // flex-1 child can't fill and the list left a dead gap below it). Mobile
+    // subtracts the 72px top bar AND the 80px floating-dock clearance (pb-20);
+    // desktop has no dock, so it only subtracts the top bar. Both clip and let
+    // the two panes scroll internally.
+    <main className="flex h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full flex-col overflow-hidden lg:h-[calc(100dvh-72px)]">
       <InboxClient
         userId={userId}
         initialMessages={initialMessages}
