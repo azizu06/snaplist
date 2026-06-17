@@ -439,12 +439,20 @@ function FollowUpComposer({
   // it on text; the preview note already tells the seller the typed message sends.
   const canSend = text !== "";
 
-  // Revoke object URLs on unmount so previews don't leak memory.
+  // Revoke object URLs on unmount so previews don't leak memory. A ref mirrors
+  // the latest attachments so the unmount cleanup sees the CURRENT set — a
+  // []-deps cleanup closes over the initial empty array and would revoke nothing,
+  // leaking the blob URLs for the session when a seller leaves the inbox/thread
+  // with photos still attached (Codex P3). Per-photo removal already revokes in
+  // removeAttachment; this covers the leave-without-removing path.
+  const attachmentsRef = useRef<PendingAttachment[]>([]);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
   useEffect(() => {
     return () => {
-      attachments.forEach((a) => URL.revokeObjectURL(a.url));
+      attachmentsRef.current.forEach((a) => URL.revokeObjectURL(a.url));
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function addFiles(files: FileList | null) {
