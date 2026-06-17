@@ -30,10 +30,10 @@ export default async function ReviewPage({
   searchParams,
 }: {
   params: Promise<{ itemId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; new?: string }>;
 }) {
   const { itemId } = await params;
-  const { error: actionError } = await searchParams;
+  const { error: actionError, new: fromUpload } = await searchParams;
 
   const supabase = await createClient();
   const userId = await getUserId();
@@ -211,10 +211,13 @@ export default async function ReviewPage({
 
   return (
     <>
-      {/* Landing here means the upload succeeded and produced this item, so the
-          pending-upload draft has done its job — clear it (else back-navigating
-          to /upload re-hydrates the old photos into a duplicate submit). */}
-      <ConsumeUploadDraft />
+      {/* Consume the pending-upload draft ONLY when we arrived from a fresh upload
+          (the action redirects to /review/:id?new=1). Gating on that signal is
+          essential: this page is also opened for EXISTING items, and clearing
+          unconditionally would wipe a half-built upload draft a seller left on
+          /upload (Codex). With the flag, a successful upload still can't leave
+          photos behind to be resubmitted as a duplicate. */}
+      {fromUpload ? <ConsumeUploadDraft /> : null}
       <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
     </>
   );
