@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 import { lifecycleLabel } from "@/lib/ui/status";
 import type { DashboardRow } from "./dashboard-view";
 import type { BulkListingUpdate } from "./actions";
@@ -55,17 +56,33 @@ export function BulkEditGrid({
   const setField = (itemId: string, field: keyof RowEdit, value: string) =>
     setEdits((prev) => ({ ...prev, [itemId]: { ...prev[itemId], [field]: value } }));
 
-  const parsedPrice = (s: string): number | null => {
-    const t = s.trim();
-    if (t === "") return null;
-    const n = Number(t);
-    return Number.isFinite(n) ? n : null;
+  // Classify an edited price exactly as the review form does (the shared,
+  // unit-tested parsePriceOverride): blank → clear the override (null); a valid
+  // positive amount → normalized cents; a stray "-"/"e"/"0x10", 0, or a negative
+  // → INVALID. The old local parser coerced anything non-finite to null, which
+  // silently CLEARED the seller's price on a typo and let 0/negative through as a
+  // saved override the publish flow can't use (Codex P2). Invalid now blocks Save
+  // and flags the field instead of coercing.
+  type PriceState =
+    | { kind: "clear" }
+    | { kind: "value"; value: number }
+    | { kind: "invalid" };
+  const priceState = (s: string): PriceState => {
+    if (s.trim() === "") return { kind: "clear" };
+    try {
+      const value = parsePriceOverride(s);
+      return value == null ? { kind: "clear" } : { kind: "value", value };
+    } catch {
+      return { kind: "invalid" };
+    }
   };
 
   const updates: BulkListingUpdate[] = rows.flatMap((r) => {
     const e = edits[r.itemId];
     if (!e) return [];
-    const newPrice = parsedPrice(e.price);
+    const ps = priceState(e.price);
+    if (ps.kind === "invalid") return []; // never persist an invalid price
+    const newPrice = ps.kind === "clear" ? null : ps.value;
     const priceChanged = newPrice !== r.price;
     // Status only edits when the item actually has a listing to carry it.
     const statusChanged = !!r.listingId && e.status !== r.status;
@@ -79,6 +96,12 @@ export function BulkEditGrid({
       },
     ];
   });
+  // Block Save while ANY edited price is invalid — a typo must be corrected, not
+  // silently dropped (the invalid row is excluded from `updates`, so without this
+  // guard Save would quietly skip it).
+  const hasInvalidPrice = rows.some(
+    (r) => edits[r.itemId] && priceState(edits[r.itemId].price).kind === "invalid",
+  );
   const dirty = updates.length > 0;
 
   const GRID = "grid grid-cols-[1fr_150px_120px] items-center gap-4";
@@ -111,7 +134,8 @@ export function BulkEditGrid({
           <button
             type="button"
             onClick={() => onSave(updates)}
-            disabled={!dirty || pending}
+            disabled={!dirty || pending || hasInvalidPrice}
+            title={hasInvalidPrice ? "Fix the highlighted price before saving" : undefined}
             className="rounded-lg bg-primary px-3.5 py-1.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:opacity-50"
           >
             {pending ? "Saving…" : "Save"}
@@ -132,6 +156,7 @@ export function BulkEditGrid({
             {rows.map((r) => {
               const e = edits[r.itemId];
               const noListing = !r.listingId;
+              const priceInvalid = !!e && priceState(e.price).kind === "invalid";
               return (
                 <li key={r.itemId} className={`${GRID} px-3 py-2.5`}>
                   {/* Product (read-only) */}
@@ -177,8 +202,15 @@ export function BulkEditGrid({
                     ))}
                   </select>
 
-                  {/* Price → item.price_override */}
-                  <div className="flex items-center rounded-lg border border-border-strong bg-surface pl-2.5 transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25">
+                  {/* Price → item.price_override. An invalid entry rings red and
+                      blocks Save (instead of silently clearing the override). */}
+                  <div
+                    className={`flex items-center rounded-lg border bg-surface pl-2.5 transition-colors ${
+                      priceInvalid
+                        ? "border-danger ring-2 ring-danger/25"
+                        : "border-border-strong focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25"
+                    }`}
+                  >
                     <span className="text-[14px] text-faint">$</span>
                     <input
                       type="number"
@@ -189,6 +221,7 @@ export function BulkEditGrid({
                       onChange={(ev) => setField(r.itemId, "price", ev.target.value)}
                       placeholder="—"
                       aria-label={`Price for ${r.title}`}
+                      aria-invalid={priceInvalid}
                       className="w-full bg-transparent px-1.5 py-1.5 text-right text-[14px] font-semibold text-fg-strong outline-none"
                       data-nums
                     />

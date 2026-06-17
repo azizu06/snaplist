@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { reportServerError } from "@/lib/sentry";
 import { isBulkEditableStatus } from "@/lib/ui/status";
+import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 
 /**
  * Dashboard mutations (Shopify products-section mirror): archive / unarchive,
@@ -67,9 +68,40 @@ export async function deleteItems(itemIds: string[]): Promise<void> {
   const userId = await getUserId();
   if (!userId) return;
 
+  // Read the RLS-scoped Storage paths BEFORE deleting the rows: the FK cascade
+  // takes listings/messages/logs but NOT the private photo objects in the
+  // `photos` bucket, and once the item row is gone we've lost the only reference
+  // to them. Without this, deleting an item orphans its private images in Storage
+  // even though the UI says it's permanently removed (Codex P2).
+  const { data: items, error: readErr } = await supabase
+    .from("items")
+    .select("photos")
+    .in("id", itemIds);
+  if (readErr) {
+    reportServerError("dashboard.delete.read", readErr, { count: itemIds.length });
+  }
+  const paths = (items ?? []).flatMap(
+    (it) => ((it.photos as string[] | null) ?? []),
+  );
+
   const { error } = await supabase.from("items").delete().in("id", itemIds);
   if (error) {
+    // Row delete failed → leave the photos alone (the item still exists).
     reportServerError("dashboard.delete", error, { count: itemIds.length });
+    revalidatePath("/dashboard");
+    return;
+  }
+
+  // Best-effort Storage cleanup AFTER the row delete: the DB is the source of
+  // truth for "deleted", and an orphaned object is recoverable by a sweep, whereas
+  // a deleted object whose row survived is not. `.remove` runs under the
+  // user-scoped client, so Storage RLS still confines it to the seller's own paths
+  // (mirrors the upload rollback remove()).
+  if (paths.length > 0) {
+    const { error: storageErr } = await supabase.storage.from("photos").remove(paths);
+    if (storageErr) {
+      reportServerError("dashboard.delete.photos", storageErr, { count: paths.length });
+    }
   }
   revalidatePath("/dashboard");
 }
@@ -100,15 +132,34 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
       // accepts PromiseLike, so type the bucket accordingly.
       const writes: PromiseLike<unknown>[] = [];
       if (u.price !== undefined) {
-        writes.push(
-          supabase
-            .from("items")
-            .update({ price_override: u.price })
-            .eq("id", u.itemId)
-            .then(({ error }) => {
-              if (error) reportServerError("dashboard.bulkUpdate.price", error, { itemId: u.itemId });
-            }),
-        );
+        // Re-validate at the write boundary with the SAME parser the review form
+        // uses: null clears the override, otherwise it must be a positive amount.
+        // The grid already blocks an invalid price, but a crafted request (or a
+        // future caller) must never persist 0/negative/NaN as a price_override the
+        // publish flow can't use (Codex P2). Reject → report, don't write junk.
+        let price: number | null = null;
+        let priceOk = true;
+        try {
+          price = parsePriceOverride(u.price);
+        } catch (err) {
+          priceOk = false;
+          reportServerError(
+            "dashboard.bulkUpdate.price",
+            err instanceof Error ? err : new Error(String(err)),
+            { itemId: u.itemId },
+          );
+        }
+        if (priceOk) {
+          writes.push(
+            supabase
+              .from("items")
+              .update({ price_override: price })
+              .eq("id", u.itemId)
+              .then(({ error }) => {
+                if (error) reportServerError("dashboard.bulkUpdate.price", error, { itemId: u.itemId });
+              }),
+          );
+        }
       }
       // Status write boundary (Codex P1): bulk-edit may ONLY set the
       // seller-organizational statuses (draft / archived). `published` is owned by
