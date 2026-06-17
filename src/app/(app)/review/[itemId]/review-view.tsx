@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
-import SpotlightCard from "@/components/bits/SpotlightCard";
 import { StatusBadge } from "@/components/ui/badge";
 import { ConfidenceGauge } from "@/components/ui/confidence-gauge";
 import { Banner, type BannerVariant } from "@/components/ui/banner";
@@ -14,6 +13,11 @@ import {
   lifecycleLabel,
   tierLabel,
 } from "@/lib/ui/status";
+import { PricingStrategies } from "./pricing-strategies";
+import type { PricingStrategy } from "@/lib/pricing/strategies";
+
+/** A dynamic clarify chip (#93): seller-facing label + the spec it adds. */
+type ClarifyOption = { label: string; spec: string };
 
 /**
  * Review — Shopify product-edit composition (redesign/review, neutral + green).
@@ -35,7 +39,8 @@ import {
  * the confidence gauge, the price range, money emphasis. Status colour stays on
  * the calm lifecycle pills so green never collides with the emerald "Live".
  * 4-pt spacing, one radius scale, no gradients/glows (ui-design-principles +
- * minimalist-ui skills). Keeps the react-bits SpotlightCard on every panel.
+ * minimalist-ui skills). Panels are plain (no cursor-spotlight) — the glow read
+ * as distracting on a dense edit surface.
  *
  * Client component, pure presentation over serializable props + the actions.
  */
@@ -64,25 +69,46 @@ export interface ReviewData {
   range: { low?: number; high?: number } | null;
   confidence: number | null;
   tier: string | null;
+  /** Quick/Balanced/Maximize points (#94), or a single "Suggested" point. */
+  strategies: PricingStrategy[];
+  /** Dynamic per-product clarify chips (#93); [] degrades to the detail field. */
+  clarifyOptions: ClarifyOption[];
   banner: { variant: BannerVariant; title: string; detail: string } | null;
   actionError: string | null;
 }
 
-/** App-card chrome for the react-bits SpotlightCard (vs its marketing default):
- *  a quiet Shopify panel — hairline border, white surface, one soft shadow. */
+/** Quiet Shopify panel chrome: hairline border, surface fill, one soft shadow. */
 const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
 
-/** Green spotlight to match the accent (the react-bits flair, kept subtle). */
-const SPOTLIGHT = "rgba(0, 128, 96, 0.06)";
+/**
+ * Plain content panel. Replaced the react-bits SpotlightCard — its cursor-tracking
+ * "flashlight" glow read as distracting on these dense edit cards (the seller is
+ * reading and typing, not browsing marketing). Same chrome, no hover effect.
+ */
+function Card({
+  chromeClassName = APP_CARD_CHROME,
+  className,
+  children,
+}: {
+  chromeClassName?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return <div className={`${chromeClassName} ${className ?? ""}`}>{children}</div>;
+}
 
+// Fields read as a recessed well: filled with the PAGE colour (`bg-bg`), one
+// shade darker than the `bg-surface` card, so the field/card boundary carries
+// the contrast. On dark this is the difference that stops inputs blending into
+// the panel (#141414 field vs #1f1f1f card); in light it's a soft #f6f6f7 well.
 const INPUT_CLASSES =
-  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25";
+  "w-full rounded-lg border border-border-strong bg-bg px-3 py-2 text-[15px] text-fg-strong shadow-xs outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25";
 
 const READONLY_FIELD =
-  "rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[14px] text-fg break-words";
+  "rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-[14px] text-fg-strong break-words";
 
 const SELECT_CLASSES =
-  "w-full cursor-pointer appearance-none rounded-lg border border-border-strong bg-surface px-3 py-2 pr-9 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25";
+  "w-full cursor-pointer appearance-none rounded-lg border border-border-strong bg-bg px-3 py-2 pr-9 text-[15px] text-fg-strong shadow-xs outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25";
 
 /** Used-goods condition grades — a fixed taxonomy, so Condition is a dropdown
  *  (an AI-supplied descriptive value is preserved as an extra option). */
@@ -193,7 +219,7 @@ function RangeBar({
           />
         ) : null}
       </div>
-      <div className="mt-1.5 flex justify-between text-[12px] font-medium text-faint" data-nums>
+      <div className="mt-1.5 flex justify-between text-[12px] font-medium text-muted" data-nums>
         <span>${low}</span>
         <span>${high}</span>
       </div>
@@ -202,25 +228,27 @@ function RangeBar({
 }
 
 /**
- * "Sharpen the estimate" (clarify-variant) — shown only when confidence isn't high.
- * The seller adds a discriminating detail the photo couldn't show (exact GPU,
- * storage, year…); each becomes a `spec` the re-price action narrows the comp search
- * with. Its OWN form (posts to `sharpenAction`) — kept OUT of the save form so the
- * two never nest. Generic for any item: nothing here is product-specific.
+ * "Sharpen the estimate" — shown only when confidence isn't high. The seller
+ * confirms details a photo can't reveal (#93: dynamic, per-product chips) and/or
+ * types their own (the free-text escape hatch); each becomes a `spec` the re-price
+ * action narrows the comp search with. Its OWN form (posts to `sharpenAction`), a
+ * SIBLING of the save form — never nested (the layout wrapper is a plain <div>).
  */
 function SharpenCard({
   itemId,
-  bandWord,
+  options,
   candidates,
   action,
 }: {
   itemId: string;
-  bandWord: string | null;
+  options: ClarifyOption[];
   candidates: string[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [chips, setChips] = useState<string[]>([]);
   const [input, setInput] = useState("");
+  // Clarify options the seller confirmed apply, keyed by spec.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const addChip = (raw: string) => {
     const value = raw.trim();
@@ -232,6 +260,13 @@ function SharpenCard({
   };
   const removeChip = (idx: number) =>
     setChips((prev) => prev.filter((_, i) => i !== idx));
+  const toggleOption = (spec: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(spec)) next.delete(spec);
+      else next.add(spec);
+      return next;
+    });
 
   // Quick-add the model's own alternative guesses, minus ones already added.
   const suggestions = candidates.filter(
@@ -239,27 +274,66 @@ function SharpenCard({
   );
 
   return (
-    <SpotlightCard
-      chromeClassName={APP_CARD_CHROME}
-      spotlightColor={SPOTLIGHT}
-      className="p-4 sm:p-5"
+    <Card
+      chromeClassName={APP_CARD_CHROME}      className="p-4 sm:p-5"
     >
       <form action={action}>
         <input type="hidden" name="itemId" value={itemId} />
         {chips.map((c, i) => (
           <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
         ))}
+        {[...picked].map((spec, i) => (
+          <input key={`opt-${i}`} type="hidden" name="spec" value={spec} />
+        ))}
 
         <CardTitle>Sharpen the estimate</CardTitle>
-        <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-muted">
-          Confidence is {bandWord ? bandWord.toLowerCase() : "limited"} because the photo
-          can’t show everything that sets the price. Add a detail we couldn’t see — the
-          exact model, GPU, storage, or year — and we’ll re-research the comps.
-        </p>
+
+        {options.length > 0 ? (
+          <div className="mt-4">
+            <p className="mb-2 text-[13px] font-medium text-fg-strong">
+              Confirm what applies
+            </p>
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {options.map((o) => {
+                const on = picked.has(o.spec);
+                return (
+                  <li key={o.spec}>
+                    <button
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleOption(o.spec)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-[13.5px] font-medium transition-colors ${
+                        on
+                          ? "border-accent bg-brand-soft text-accent-soft-fg"
+                          : "border-border-strong bg-bg text-fg hover:border-accent/60"
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`grid size-[18px] shrink-0 place-items-center rounded-full border transition-colors ${
+                          on
+                            ? "border-accent bg-accent text-accent-fg"
+                            : "border-border-strong"
+                        }`}
+                      >
+                        {on ? (
+                          <svg viewBox="0 0 24 24" className="size-2.5" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20 6 9 17l-5-5" />
+                          </svg>
+                        ) : null}
+                      </span>
+                      <span className="min-w-0">{o.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
 
         <div className="mt-4">
           <label htmlFor="sharpen-detail" className="mb-1.5 block text-[13px] font-medium text-fg-strong">
-            Add a detail
+            {options.length > 0 ? "Add another detail" : "Add a detail"}
           </label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
@@ -310,7 +384,7 @@ function SharpenCard({
 
           {suggestions.length > 0 ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[13px] text-faint">Suggestions:</span>
+              <span className="text-[13px] text-muted">Suggestions:</span>
               {suggestions.map((s, i) => (
                 <button
                   key={`sugg-${i}`}
@@ -325,16 +399,13 @@ function SharpenCard({
           ) : null}
         </div>
 
-        <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[13px] leading-relaxed text-faint">
-            Re-researches live comps — one search. Your own price edits are kept.
-          </p>
+        <div className="mt-5 flex flex-col border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end">
           <PendingButton pendingLabel="Re-pricing…" className="w-full sm:w-auto sm:shrink-0">
             Re-price
           </PendingButton>
         </div>
       </form>
-    </SpotlightCard>
+    </Card>
   );
 }
 
@@ -423,7 +494,7 @@ export function ReviewView({
     data.suggested != null && data.confidence != null && data.confidence < 0.75;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pt-6 pb-28 sm:px-6 sm:pb-24">
       {/* ---- top bar: back + identity left, page actions right (Shopify 325) ---- */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -462,10 +533,9 @@ export function ReviewView({
           {data.listing ? (
             <Link
               href={`/listings/${data.listing.id}`}
-              className="group inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover sm:flex-none sm:py-1.5"
+              className="inline-flex flex-1 items-center justify-center rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover sm:flex-none sm:py-1.5"
             >
               {data.listing.status === "published" ? "View on eBay" : "Publish to eBay"}
-              <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
             </Link>
           ) : null}
         </div>
@@ -503,10 +573,8 @@ export function ReviewView({
         {/* ============ LEFT main column: media + listing copy ============ */}
         <div className="flex min-w-0 flex-col gap-5">
           {/* Media — the product photos (Shopify "Media" block). */}
-          <SpotlightCard
-            chromeClassName={APP_CARD_CHROME}
-            spotlightColor={SPOTLIGHT}
-            className="p-4 sm:p-5"
+          <Card
+            chromeClassName={APP_CARD_CHROME}            className="p-4 sm:p-5"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
               <CardTitle>Photos</CardTitle>
@@ -534,13 +602,11 @@ export function ReviewView({
                 </svg>
               </div>
             )}
-          </SpotlightCard>
+          </Card>
 
           {/* Listing details — title + description (Shopify "Description" block). */}
-          <SpotlightCard
-            chromeClassName={APP_CARD_CHROME}
-            spotlightColor={SPOTLIGHT}
-            className="p-4 sm:p-5"
+          <Card
+            chromeClassName={APP_CARD_CHROME}            className="p-4 sm:p-5"
           >
             <CardTitle>Listing details</CardTitle>
             {data.listing ? (
@@ -586,34 +652,26 @@ export function ReviewView({
                     className={`${INPUT_CLASSES} min-h-40 resize-y leading-relaxed`}
                   />
                 </div>
-                <p className="text-[13px] text-faint">
-                  Drafted by SnapList from your verified item details
-                  {data.listing.platform ? ` · ${data.listing.platform} format` : ""}. Fields
-                  marked with a <SparkleIcon className="inline size-3 text-accent/80" /> are
-                  AI-suggested — edit anything; your words always win.
-                </p>
               </div>
             ) : (
               <p className="mt-3 text-[15px] text-muted">No listing generated yet.</p>
             )}
-          </SpotlightCard>
+          </Card>
 
         </div>
 
-        {/* ============ RIGHT rail: decision -> meta -> sharpen ============
+        {/* ============ RIGHT rail: decision -> meta ============
              Hierarchy (ui-design-principles): one focal card, not equal panels.
              Price + confidence is the seller's key judgment, so it leads as the
              hero (elevated chrome, accent eyebrow, colored suggested price);
-             identification folds into the quiet Item card; the Sharpen form sits
-             last. Carrying Sharpen in the rail makes it run as long as the taller
-             media + copy column, so the columns end together — no dead space. */}
-        <aside className="flex flex-col gap-5">
+             identification folds into the quiet Item card below it. Sharpen now
+             lives full-width under both columns, so this rail (hero + item)
+             ends close to the media + copy column on the left. */}
+        <aside className="flex flex-col gap-5 lg:sticky lg:top-[88px] lg:self-start">
           {/* Price & confidence — HERO. Stronger border + soft elevation set it
               apart from the calm meta card; the green dash eyebrow leads the eye. */}
-          <SpotlightCard
-            chromeClassName="rounded-xl border border-border-strong bg-surface shadow-sm"
-            spotlightColor={SPOTLIGHT}
-            className="p-4 sm:p-5"
+          <Card
+            chromeClassName="rounded-xl border border-border-strong bg-surface shadow-sm"            className="p-4 sm:p-5"
           >
             <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
               <span aria-hidden className="h-[2px] w-5 rounded-full bg-accent" />
@@ -639,7 +697,7 @@ export function ReviewView({
                 />
               </div>
               {data.override != null && data.suggested != null ? (
-                <p className="mt-1.5 text-[12.5px] text-faint" data-nums>
+                <p className="mt-1.5 text-[12.5px] text-muted" data-nums>
                   AI suggested ${data.suggested}. Clear the field and save to use it again.
                 </p>
               ) : null}
@@ -677,15 +735,22 @@ export function ReviewView({
                 </p>
               ) : null}
             </div>
-          </SpotlightCard>
+
+            {/* #94 — Quick/Balanced/Maximize selector. Renders only when a real
+                comp distribution backs it; picking one sets the price field and
+                rides the existing save flow. */}
+            <PricingStrategies
+              strategies={data.strategies}
+              selected={fields.price}
+              onPick={(p) => setField("price", String(p))}
+            />
+          </Card>
 
           {/* Item — identification + attributes in ONE quiet meta card (Shopify
               "Organization"). The identified name leads; editable category/
               condition and the detected attributes sit below a divider. */}
-          <SpotlightCard
-            chromeClassName={APP_CARD_CHROME}
-            spotlightColor={SPOTLIGHT}
-            className="p-4 sm:p-5"
+          <Card
+            chromeClassName={APP_CARD_CHROME}            className="p-4 sm:p-5"
           >
             <CardTitle>Item details</CardTitle>
             <p className="mt-2.5 text-[15px] font-bold leading-snug tracking-tight text-fg-strong break-words">
@@ -787,24 +852,27 @@ export function ReviewView({
                 </dl>
               ) : null}
             </div>
-          </SpotlightCard>
+          </Card>
 
-          {/* Sharpen / re-price — its OWN form (sharpenAction), a plain child of
-              the rail. The layout wrapper is a <div>, so this form never nests
-              inside the Save form (nested <form>s are invalid HTML). Living in
-              the rail also balances it against the taller media + copy column,
-              closing the old dead space. Shown only when confidence isn't high. */}
-          {canSharpen ? (
-            <SharpenCard
-              itemId={data.itemId}
-              bandWord={confidenceWord}
-              candidates={data.identification?.candidates ?? []}
-              action={sharpenAction}
-            />
-          ) : null}
         </aside>
 
       </div>
+
+      {/* Sharpen / re-price — FULL-WIDTH below the two columns. Its OWN form
+          (sharpenAction); the layout wrapper above is a plain <div>, so this
+          never nests inside the Save form (nested <form>s are invalid HTML).
+          Going full width lets the clarify chips run as an even two-column grid
+          instead of one tall stack, and keeps the left/right columns balanced
+          (the rail no longer outruns the media column). Shown only when
+          confidence isn't high. */}
+      {canSharpen ? (
+        <SharpenCard
+          itemId={data.itemId}
+          options={data.clarifyOptions}
+          candidates={data.identification?.candidates ?? []}
+          action={sharpenAction}
+        />
+      ) : null}
 
       {/* ---- Save form: owns saveAction + the contextual Save bar. The editable
            fields above associate to it by id (form="rv-save"), so they still
@@ -816,7 +884,7 @@ export function ReviewView({
           <input type="hidden" name="listingId" value={data.listing.id} />
         ) : null}
         {dirty ? (
-          <div className="pointer-events-none sticky bottom-24 z-30 sm:bottom-5">
+          <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 px-4 sm:bottom-5">
             <div className="pointer-events-auto mx-auto flex w-full max-w-md items-center justify-between gap-3 rounded-xl border border-border-strong bg-flash px-3 py-2 text-primary-fg shadow-lg">
               <span className="flex items-center gap-2 pl-1 text-[14px] font-medium text-primary-fg/90">
                 <span aria-hidden className="size-1.5 rounded-full bg-warning" />
