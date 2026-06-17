@@ -7,6 +7,7 @@ import ClickSpark from "@/components/bits/ClickSpark";
 import { Banner } from "@/components/ui/banner";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { Spinner } from "@/components/ui/spinner";
+import { ACCEPT, MAX_PHOTOS, useUploadDraft } from "./upload-draft-context";
 
 /**
  * Upload sell sheet — redesigned on Shopify's create/media pattern (Shopify web
@@ -34,10 +35,6 @@ import { Spinner } from "@/components/ui/spinner";
  * adds cost/latency (PRD). The PROCESSING view paces the live pipeline stages
  * while the single server action runs.
  */
-
-const ACCEPT = "image/png,image/jpeg,image/webp";
-/** All photos go into ONE vision call; the cap bounds cost/latency (PRD). */
-const MAX_PHOTOS = 4;
 
 /** Read the live brand-accent token for the canvas-drawn ClickSpark burst.
  *  SSR-safe: returns `currentColor` on the server / before mount. */
@@ -443,9 +440,10 @@ function FormBody({
               </span>
               <span className="text-[13px] text-muted">or drag and drop here</span>
             </span>
-            <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-faint">
-              PNG, JPG, or WEBP. The first photo becomes the cover — good light
-              and a clear shot of any label or barcode help most.
+            <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-muted">
+              PNG, JPG, or WEBP. The first one you add becomes the cover photo.
+              Good light helps, and a clear shot of any label or barcode helps
+              even more.
             </span>
           </label>
         ) : (
@@ -456,26 +454,50 @@ function FormBody({
               onSetCurrent={onSetCurrent}
               onRemove={onRemove}
               showCover
+              showDots={false}
               aspectClassName="aspect-[4/3]"
               adaptiveFrame
             />
-            <div className="mt-4 w-full">
+            {/* Shopify mobile add-product "Media" row: the photos as a thumbnail
+                strip (tap to page the viewer; the cover sits first) with a
+                trailing dashed "+" add tile. Replaces the carousel's dot pager
+                AND the old full-width button in one native-feeling control. */}
+            <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">
+              {previews.map((src, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onSetCurrent(i)}
+                  aria-label={`Show photo ${i + 1}${i === 0 ? " (cover)" : ""}`}
+                  aria-current={i === current}
+                  className={`relative size-16 shrink-0 overflow-hidden rounded-lg border transition-colors ${
+                    i === current
+                      ? "border-accent ring-2 ring-accent/30"
+                      : "border-border hover:border-border-strong"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
+                  <img src={src} alt="" className="size-full object-cover" />
+                </button>
+              ))}
               {!atMax ? (
                 <label
                   htmlFor="photo-picker"
-                  className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-surface px-4 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
+                  aria-label="Add photo"
+                  className="flex size-16 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-border-strong bg-surface-2/50 text-muted transition-colors hover:border-accent hover:bg-accent-soft/25 hover:text-accent"
                 >
-                  <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
-                  Add photo
+                  <span className="text-[11px] font-medium">Add</span>
                 </label>
-              ) : (
-                <p className="text-center text-[13px] text-faint">
-                  All {MAX_PHOTOS} photos added — more angles mean a better read.
-                </p>
-              )}
+              ) : null}
             </div>
+            {atMax ? (
+              <p className="mt-2 text-[12.5px] text-faint">
+                All {MAX_PHOTOS} photos added — more angles mean a better read.
+              </p>
+            ) : null}
           </>
         )}
 
@@ -497,17 +519,13 @@ function FormBody({
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-[14px] font-semibold text-fg-strong">
-              Autofill by SnapList
+              What SnapList fills in
             </p>
             <p className="mt-0.5 text-[13.5px] leading-relaxed text-muted">
-              We identify the item, research the used price, and write the
-              listing from your photos.
+              From your photos we identify the item, research the used price, and
+              draft these fields. You edit every one on the next screen.
             </p>
           </div>
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-success-soft px-2.5 py-0.5 text-[11px] font-semibold text-success-soft-fg">
-            <span aria-hidden className="size-1.5 rounded-full bg-success-solid" />
-            On
-          </span>
         </header>
         <div className="px-4 sm:px-5">
           <div className="divide-y divide-border py-1">
@@ -521,7 +539,7 @@ function FormBody({
       {/* ---- sticky action bar — Shopify's bottom "Save" bar, near-black
            primary. The helper line carries the count state so the disabled
            button is never a dead end. ---- */}
-      <div className="sticky bottom-20 z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-2xl sm:border sm:shadow-md">
+      <div className="sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-10 -mx-4 border-t border-border bg-bg/95 px-4 py-3 backdrop-blur sm:bottom-4 sm:mx-0 sm:rounded-2xl sm:border sm:shadow-md">
         {/* react-bits ClickSpark: a brand-accent burst on the one action that
             starts the whole pipeline. Spark color is read from the live
             --color-accent token (not hardcoded) so it tracks the palette. */}
@@ -535,9 +553,9 @@ function FormBody({
           <button
             type="submit"
             disabled={count === 0}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-50"
+            className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-[15px] font-semibold text-primary-fg shadow-xs transition-all duration-150 hover:bg-primary-hover hover:shadow-md motion-safe:hover:-translate-y-0.5 motion-safe:active:translate-y-0 motion-safe:active:scale-[0.99] disabled:pointer-events-none disabled:translate-y-0 disabled:opacity-50 disabled:shadow-xs"
           >
-            Identify, price &amp; draft
+            Build my listing
           </button>
         </ClickSpark>
         <p className="mt-2 text-center text-[12.5px] text-muted">
@@ -555,46 +573,27 @@ export function UploadForm({
 }: {
   action: (formData: FormData) => Promise<void>;
 }) {
-  const [files, setFiles] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
+  // Photos live in the (app)-layout draft context so they survive navigating
+  // away and back (they used to reset to zero). This component owns only the
+  // view index and the hidden input the form actually submits.
+  const { files, previews, addFiles, removeAt } = useUploadDraft();
   const [current, setCurrent] = useState(0);
-  // The single hidden file input the form actually submits; its FileList is
-  // kept in sync with `files` so the server action reads getAll("photo").
   const submitRef = useRef<HTMLInputElement | null>(null);
-  // Mirror of `previews` for the unmount cleanup (a state closure there would
-  // capture the INITIAL empty array and revoke nothing).
-  const previewsRef = useRef<string[]>([]);
-  useEffect(() => {
-    previewsRef.current = previews;
-  }, [previews]);
 
-  const addFiles = (incoming: FileList | File[]) => {
-    const accepted = Array.from(incoming).filter((f) =>
-      ACCEPT.split(",").includes(f.type),
-    );
-    const room = MAX_PHOTOS - files.length;
-    if (room <= 0 || accepted.length === 0) return;
-    const added = accepted.slice(0, room);
-    const urls = added.map((f) => URL.createObjectURL(f));
-    setFiles((prev) => [...prev, ...added].slice(0, MAX_PHOTOS));
-    setPreviews((prev) => [...prev, ...urls].slice(0, MAX_PHOTOS));
-  };
-
-  const removeAt = (index: number) => {
-    const url = previews[index];
-    if (url) URL.revokeObjectURL(url);
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    setPreviews((prev) => prev.filter((_, i) => i !== index));
+  const handleRemove = (index: number) => {
+    removeAt(index);
     // Clamp the viewer to a valid neighbour here (in the handler, not an
     // effect) so we never setState during the render-commit phase.
     setCurrent((c) => {
-      const newLen = files.length - 1;
+      const newLen = previews.length - 1;
       return newLen <= 0 ? 0 : Math.min(c, newLen - 1);
     });
   };
 
-  // Mirror `files` into the hidden submit input's FileList (DataTransfer is the
-  // only way to set input.files programmatically). Runs client-side only.
+  // Mirror the draft files into the hidden submit input's FileList (DataTransfer
+  // is the only way to set input.files programmatically) so the server action
+  // still reads getAll("photo"). Re-runs on change AND on mount, so photos
+  // restored from the context re-attach to the form after navigation.
   useEffect(() => {
     const input = submitRef.current;
     if (!input) return;
@@ -602,13 +601,6 @@ export function UploadForm({
     files.forEach((f) => dt.items.add(f));
     input.files = dt.files;
   }, [files]);
-
-  // Revoke whatever object URLs are left on unmount.
-  useEffect(() => {
-    return () => {
-      previewsRef.current.forEach((u) => URL.revokeObjectURL(u));
-    };
-  }, []);
 
   return (
     <form action={action}>
@@ -627,7 +619,7 @@ export function UploadForm({
         current={current}
         onSetCurrent={setCurrent}
         onAdd={addFiles}
-        onRemove={removeAt}
+        onRemove={handleRemove}
       />
     </form>
   );

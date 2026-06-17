@@ -7,19 +7,20 @@ import type { StatusTone } from "@/lib/ui/status";
  */
 
 /**
- * Restrained status chrome (home polish round 1). Every pill shares ONE calm
- * neutral chrome so a column of statuses reads quietly; COLOR is carried only by
- * the small dot, plus a faint text tint for the two states that matter — Live and
- * Needs attention. This replaces the old filled amber/green/red pills that made
- * the dashboard noisy. The in-flight states (Draft, Queued, Processing) map to
- * `neutral` upstream and are told apart by their label, not by a fill.
+ * Color-coded status chrome (Shopify Products parity). Each tone is a soft
+ * tonal badge — a tinted fill + same-hue text + a saturated dot — so a column
+ * of statuses is scannable at a glance and the meaningful states pop: Active
+ * green, Scheduled/Processing blue, Needs attention red, Draft/Archived a calm
+ * grey. Tints come from the semantic `*-soft` tokens, which carry their own
+ * light + dark values, so this reads correctly in both themes.
  */
 const NEUTRAL_PILL = "bg-surface-2 text-muted border border-border";
 const TONE_CLASSES: Record<StatusTone, string> = {
-  success: NEUTRAL_PILL,
-  "success-solid": "bg-surface-2 text-success-soft-fg border border-border",
-  warning: NEUTRAL_PILL,
-  danger: "bg-surface-2 text-danger-soft-fg border border-border",
+  success: "bg-success-soft text-success-soft-fg",
+  "success-solid": "bg-success-soft text-success-soft-fg",
+  warning: "bg-warning-soft text-warning-soft-fg",
+  danger: "bg-danger-soft text-danger-soft-fg",
+  info: "bg-info-soft text-info-soft-fg",
   neutral: NEUTRAL_PILL,
 };
 
@@ -28,6 +29,7 @@ const DOT_CLASSES: Record<StatusTone, string> = {
   "success-solid": "bg-success",
   warning: "bg-warning",
   danger: "bg-danger",
+  info: "bg-info-soft-fg",
   neutral: "bg-faint",
 };
 
@@ -35,19 +37,26 @@ export function StatusBadge({
   label,
   tone,
   dot = true,
+  pulse = false,
 }: {
   label: string;
   tone: StatusTone;
   dot?: boolean;
+  /** Pulses the dot for transient "working" states (e.g. Processing) so they
+   *  read as active and don't blur against same-hue static states. Motion-safe:
+   *  reduced-motion users get a steady dot. */
+  pulse?: boolean;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[13px] font-medium ${TONE_CLASSES[tone]}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-medium ${TONE_CLASSES[tone]}`}
     >
       {dot ? (
         <span
           aria-hidden
-          className={`size-1.5 shrink-0 rounded-full ${DOT_CLASSES[tone]}`}
+          className={`size-1.5 shrink-0 rounded-full ${DOT_CLASSES[tone]} ${
+            pulse ? "motion-safe:animate-pulse" : ""
+          }`}
         />
       ) : null}
       {label}

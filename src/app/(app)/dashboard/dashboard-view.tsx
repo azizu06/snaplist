@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
-import CountUp from "@/components/bits/CountUp";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import Folder from "@/components/bits/Folder";
 import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
@@ -37,6 +37,10 @@ export interface DashboardRow {
   createdAt: string;
   price: number | null;
   thumbUrl: string | null;
+  /** Item facets surfaced as their own columns + search filters (Shopify
+   *  Products parity). Null when the pipeline couldn't resolve them. */
+  category: string | null;
+  condition: string | null;
 }
 
 export interface DashboardCounts {
@@ -53,9 +57,6 @@ const PRICE_FMT = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 2,
 });
-
-/** States the SELLER must act on — header summary + action-first ordering. */
-const REVIEW_STATUSES = new Set(["draft", "draft_failed", "failed"]);
 
 /** Default ("smart") order: errors → drafts → automatic states → live →
  *  archived. Unknown keys sort with drafts. */
@@ -100,6 +101,11 @@ const SORT_OPTIONS: { key: Exclude<SortKey, "smart">; label: string }[] = [
   { key: "date", label: "Date listed" },
   { key: "status", label: "Status" },
 ];
+
+/** Status options for the search-mode filter chip (Shopify's "Status" filter):
+ *  every view tab except "All". The chip multi-selects these and unions their
+ *  statuses, so search can filter by status independently of the view tabs. */
+const STATUS_CHIP_OPTIONS = DASHBOARD_FILTERS.filter((f) => f.key !== "all");
 
 function compareRows(a: DashboardRow, b: DashboardRow, sort: SortState): number {
   const dir = sort.dir === "asc" ? 1 : -1;
@@ -153,6 +159,10 @@ function RowCheckbox({
   onToggle: () => void;
   label: string;
 }) {
+  // The visible box stays 18px, but the BUTTON is a 44×44 tap target on touch
+  // (WCAG 2.5.5) and shrinks to the box on pointer screens (sm+), where the row
+  // itself is the large target. The width difference is absorbed by the grid's
+  // `auto` checkbox column (same width in header + rows), so nothing misaligns.
   return (
     <button
       type="button"
@@ -164,27 +174,50 @@ function RowCheckbox({
         e.stopPropagation();
         onToggle();
       }}
-      className={`flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
-        checked
-          ? "border-accent-solid bg-accent-solid text-accent-fg"
-          : "border-border-strong bg-surface hover:border-fg-strong"
-      }`}
+      className="group/cb flex size-11 shrink-0 items-center justify-center sm:size-[18px]"
     >
-      {checked ? <CheckIcon className="size-3" /> : null}
+      <span
+        className={`flex size-[18px] items-center justify-center rounded-[5px] border transition-colors ${
+          checked
+            ? "border-accent-solid bg-accent-solid text-accent-fg"
+            : "border-border-strong bg-surface group-hover/cb:border-fg-strong"
+        }`}
+      >
+        {checked ? <CheckIcon className="size-3" /> : null}
+      </span>
     </button>
   );
 }
 
-/** Shared desktop column template (header + rows align): select · Product ·
- *  Status · Price · Listed. */
+/** Shared column template (header + rows align), Shopify Products parity:
+ *  select · Product · Status · Category · Condition · Price · Listed. Columns
+ *  disclose progressively so narrow screens never crowd — least-important
+ *  first to drop:
+ *    md  (≥768):  select · Product · Status · Price · Listed
+ *    lg  (≥1024): + Category
+ *    xl  (≥1280): + Condition
+ *  Below md the row is a stacked card (the base `grid-cols-[auto_1fr_auto]`).
+ *  Cell visibility classes (`hidden md/lg/xl:block`) MUST stay in sync with
+ *  these track counts or the grid columns misalign. Data columns are EQUAL
+ *  fixed widths (`repeat(n, 120px)`) and every value is CENTER-aligned, so each
+ *  value sits on its column's midpoint and the rhythm stays even regardless of
+ *  text length (a long "Gaming Laptop" no longer crowds the next column's
+ *  "Good"); the title column keeps the flexible `1fr` so names stay full. */
 const ROW_GRID =
-  "sm:grid sm:grid-cols-[auto_1fr_156px_112px_104px] sm:items-center sm:gap-5";
+  "md:grid md:items-center md:gap-5 md:grid-cols-[auto_minmax(0,1fr)_repeat(3,120px)] " +
+  "lg:grid-cols-[auto_minmax(0,1fr)_repeat(4,120px)] " +
+  "xl:grid-cols-[auto_minmax(0,1fr)_repeat(5,120px)]";
 
 /**
  * One listing row. The whole row links to review (the inner <a> is
  * `display:contents`, so its children are the grid cells and a click anywhere
- * navigates), while the leading checkbox sits outside the link. Mobile: a
- * two-line card (checkbox · thumb+title+meta · price); sm+: the table columns.
+ * navigates), while the leading checkbox sits outside the link.
+ *
+ * Cell order is fixed — Product · Status · Category · Condition · (mobile
+ * price) · Price · Listed — and each cell carries the responsive visibility
+ * that matches `ROW_GRID`'s track count at each breakpoint. Below md the row
+ * is a stacked card: thumb + title, a meta line (status · category · condition
+ * · date), and the price on the right.
  */
 function ListingRow({
   row,
@@ -198,43 +231,69 @@ function ListingRow({
   const chip = lifecycleShortLabel(row.status);
   return (
     <div
-      className={`group/row grid grid-cols-[auto_1fr_auto] items-center gap-3.5 rounded-lg px-3 py-3.5 transition-colors hover:bg-surface-2 sm:px-3.5 ${ROW_GRID} ${
+      className={`group/row relative grid grid-cols-[auto_1fr_auto] items-center gap-3.5 rounded-lg px-2.5 py-3 transition-colors duration-150 hover:bg-surface-2 active:bg-surface-3 md:px-4 md:py-2.5 lg:px-5 lg:py-2.5 ${ROW_GRID} before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent before:opacity-0 before:transition-opacity hover:before:opacity-100 ${
         selected ? "bg-accent-soft/50" : ""
       }`}
     >
       <RowCheckbox checked={selected} onToggle={onToggle} label={`Select ${row.title}`} />
 
       <Link href={`/review/${row.itemId}`} className="contents">
-        {/* Product cell: cover thumbnail + title (+ mobile-only meta line). */}
-        <span className="flex min-w-0 items-center gap-3.5">
-          <span className="relative size-14 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2">
+        {/* Product cell: cover thumbnail + title. Status/category/condition are
+            their own columns at md+; the mobile meta line below carries them. */}
+        <span className="flex min-w-0 items-center gap-3 lg:gap-4">
+          <span className="relative size-14 shrink-0 overflow-hidden rounded-xl border border-border bg-surface-2 md:size-11 md:rounded-lg">
             {row.thumbUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
               <img
                 src={row.thumbUrl}
                 alt=""
                 aria-hidden
-                className="size-full object-cover transition-transform duration-300 ease-out group-hover/row:scale-[1.05]"
+                className="size-full object-cover"
               />
             ) : (
               <PhotoPlaceholder />
             )}
           </span>
           <span className="min-w-0">
-            <span className="block truncate text-[14.5px] font-semibold leading-snug text-fg-strong group-hover/row:underline">
+            <span className="block min-w-0 truncate text-[15px] font-semibold leading-snug text-fg-strong lg:text-[15.5px]">
               {row.title}
             </span>
-            <span className="mt-1.5 flex items-center gap-2 sm:hidden">
-              {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
-              <span className="text-[12.5px] text-muted" data-nums>
-                {listedLabel(row.createdAt)}
-              </span>
+            {/* Mobile meta — ONE quiet secondary line under the title (Shopify
+                product-row hierarchy): the status chip is the single colored
+                signal, then category · condition in muted ink. The created date
+                was dropped here — it read as "thrown in" and added a third
+                competing element at the same weight; it still lives in the
+                desktop Listed column and on the item's review screen. */}
+            <span className="mt-1.5 flex min-w-0 items-center gap-2 md:hidden">
+              {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} /> : null}
+              {row.category ? (
+                <span className="min-w-0 truncate text-[13px] text-muted">
+                  {row.category}
+                </span>
+              ) : null}
             </span>
           </span>
         </span>
 
-        {/* Mobile-only price (right of the row). */}
-        <span className="shrink-0 text-[15px] font-bold text-fg-strong sm:hidden" data-nums>
+        {/* Status column (md+). Centered on the column midpoint. */}
+        <span className="hidden md:block md:text-center">
+          {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} /> : null}
+        </span>
+
+        {/* Category column (lg+). One consistent type ramp across every column
+            — same size/weight/ink as the product title (owner request),
+            center-aligned so the rhythm stays even. */}
+        <span className="hidden truncate text-[15px] font-semibold text-fg-strong lg:block lg:text-center">
+          {row.category ?? <span className="font-normal text-faint">—</span>}
+        </span>
+
+        {/* Condition column (xl+). */}
+        <span className="hidden truncate text-[15px] font-semibold text-fg-strong xl:block xl:text-center">
+          {row.condition ?? <span className="font-normal text-faint">—</span>}
+        </span>
+
+        {/* Mobile/tablet price (right of the card). */}
+        <span className="shrink-0 text-[15px] font-semibold text-fg-strong md:hidden" data-nums>
           {row.price != null ? (
             PRICE_FMT.format(row.price)
           ) : (
@@ -242,18 +301,16 @@ function ListingRow({
           )}
         </span>
 
-        {/* Desktop columns. */}
-        <span className="hidden sm:flex">
-          {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot /> : null}
-        </span>
-        <span className="hidden text-right text-[14.5px] font-bold text-fg-strong sm:block" data-nums>
+        {/* Desktop columns: price · listed (left-aligned like every other
+            column, so the row keeps one even spacing rhythm). */}
+        <span className="hidden text-[15px] font-semibold text-fg-strong md:block md:text-center" data-nums>
           {row.price != null ? (
             PRICE_FMT.format(row.price)
           ) : (
-            <span className="text-[13px] font-normal text-muted">—</span>
+            <span className="font-normal text-faint">—</span>
           )}
         </span>
-        <span className="hidden text-right text-[13.5px] text-fg sm:block" data-nums>
+        <span className="hidden text-[15px] font-semibold text-fg-strong md:block md:text-center" data-nums>
           {listedLabel(row.createdAt)}
         </span>
       </Link>
@@ -273,9 +330,29 @@ function SortHeader({
   k: Exclude<SortKey, "smart">;
   sort: SortState;
   onSort: (k: Exclude<SortKey, "smart">) => void;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
 }) {
   const active = sort.key === k;
+  // For right-aligned columns the caret sits BEFORE the label so the label's
+  // right edge lands on the column's right edge — i.e. flush under the value
+  // ($price / date) below it. (A trailing caret used to push the label left of
+  // the value, which read as a misaligned column.)
+  const caret = (
+    <svg
+      viewBox="0 0 24 24"
+      className={`size-3 shrink-0 transition-[transform,opacity] ${
+        active ? "opacity-100" : "opacity-0 group-hover/head:opacity-40"
+      } ${active && sort.dir === "asc" ? "rotate-180" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
   return (
     <button
       type="button"
@@ -285,25 +362,30 @@ function SortHeader({
           ? `Sorted by ${label}, ${sort.dir === "asc" ? "ascending" : "descending"}. Activate to reverse.`
           : `Sort by ${label}`
       }
-      className={`flex items-center gap-1 text-[11.5px] font-semibold uppercase tracking-[0.08em] transition-colors ${
-        align === "right" ? "justify-end" : ""
+      className={`flex items-center gap-1 text-[12px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+        align === "right" ? "justify-end" : align === "center" ? "justify-center" : ""
       } ${active ? "text-fg-strong" : "text-muted hover:text-fg-strong"}`}
     >
-      {label}
-      <svg
-        viewBox="0 0 24 24"
-        className={`size-3 transition-[transform,opacity] ${
-          active ? "opacity-100" : "opacity-0 group-hover/head:opacity-40"
-        } ${active && sort.dir === "asc" ? "rotate-180" : ""}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <path d="m6 9 6 6 6-6" />
-      </svg>
+      {align === "right" ? (
+        <>
+          {caret}
+          {label}
+        </>
+      ) : align === "center" ? (
+        // Mirror the caret's width on the leading edge so the LABEL (not the
+        // label+caret group) is what centers — keeps the header text dead over
+        // its centered column values.
+        <>
+          <span aria-hidden className="size-3 shrink-0" />
+          {label}
+          {caret}
+        </>
+      ) : (
+        <>
+          {label}
+          {caret}
+        </>
+      )}
     </button>
   );
 }
@@ -312,13 +394,15 @@ function SortHeader({
 function SortMenu({
   sort,
   setSort,
+  compact = false,
 }: {
   sort: SortState;
   setSort: (s: SortState) => void;
+  /** Icon-only trigger for the cramped mobile toolbar. Desktop shows a labeled
+   *  "Sort" so it reads as a control, not a mystery glyph (recognition). */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const activeLabel =
-    SORT_OPTIONS.find((o) => o.key === sort.key)?.label ?? "Sort";
   return (
     <div className="relative">
       <button
@@ -326,14 +410,18 @@ function SortMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded-lg border bg-surface px-3 py-2 text-[13.5px] font-semibold shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong ${
-          open ? "border-border-strong text-fg-strong" : "border-border text-fg"
-        }`}
+        aria-label="Sort listings"
+        className={`flex items-center rounded-lg border bg-surface shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong ${
+          compact ? "justify-center px-2.5 py-2.5" : "gap-1.5 px-3 py-2.5 text-[14px] font-medium"
+        } ${open ? "border-border-strong text-fg-strong" : "border-border text-fg"}`}
       >
-        <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M3 6h13M3 12h9M3 18h5M17 9l4 4 4-4" transform="translate(-4 0)" />
+        <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="m3 8 4-4 4 4" />
+          <path d="M7 4v16" />
+          <path d="m21 16-4 4-4-4" />
+          <path d="M17 20V4" />
         </svg>
-        <span className="hidden sm:inline">{sort.key === "smart" ? "Sort" : activeLabel}</span>
+        {compact ? null : <span>Sort</span>}
       </button>
       {open ? (
         <>
@@ -345,40 +433,228 @@ function SortMenu({
           />
           <div
             role="menu"
-            className="absolute right-0 z-50 mt-2 w-56 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+            className="menu-pop absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
           >
             <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
               Sort by
             </p>
-            {SORT_OPTIONS.map((o) => (
-              <button
-                key={o.key}
-                type="button"
-                role="menuitemradio"
-                aria-checked={sort.key === o.key}
-                onClick={() => setSort({ key: o.key, dir: DEFAULT_DIR[o.key] })}
-                className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors hover:bg-surface-2 ${
-                  sort.key === o.key ? "font-semibold text-accent-soft-fg" : "text-fg"
-                }`}
-              >
-                {o.label}
-                {sort.key === o.key ? <CheckIcon className="size-3.5 text-accent-soft-fg" /> : null}
-              </button>
-            ))}
+            {SORT_OPTIONS.map((o) => {
+              const sel = sort.key === o.key;
+              return (
+                <button
+                  key={o.key}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sel}
+                  onClick={() => setSort({ key: o.key, dir: DEFAULT_DIR[o.key] })}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13.5px] text-fg transition-colors hover:bg-surface-2"
+                >
+                  {/* radio dot (Shopify) — thick accent ring reads as filled */}
+                  <span
+                    aria-hidden
+                    className={`flex size-[18px] shrink-0 rounded-full transition-colors ${
+                      sel ? "border-[5px] border-accent" : "border-2 border-border-strong"
+                    }`}
+                  />
+                  {o.label}
+                </button>
+              );
+            })}
             <div className="my-1 border-t border-border" />
-            {(["asc", "desc"] as const).map((dir) => (
+            {(["asc", "desc"] as const).map((dir) => {
+              const sel = sort.dir === dir;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sel}
+                  onClick={() => setSort({ key: sort.key === "smart" ? "date" : sort.key, dir })}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors ${
+                    sel ? "bg-surface-2 font-semibold text-fg-strong" : "text-fg hover:bg-surface-2"
+                  }`}
+                >
+                  <svg viewBox="0 0 24 24" className="size-3.5 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    {dir === "asc" ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M5 12l7 7 7-7" />}
+                  </svg>
+                  {dir === "asc" ? "Lowest to highest" : "Highest to lowest"}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** A filter facet shown in the search bar. Status is always present; Category
+ *  and Condition are added via "+ Add filter" (Shopify Products parity). */
+type FacetKey = "status" | "category" | "condition";
+
+interface FacetOption {
+  value: string;
+  label: string;
+}
+
+/** Distinct, sorted non-null values from a column — feeds the Category /
+ *  Condition filter options off the rows actually present (no hardcoded
+ *  taxonomy), the way Shopify's vendor filter lists real vendors. */
+function distinctValues(values: (string | null)[]): FacetOption[] {
+  const seen = new Set<string>();
+  for (const v of values) if (v) seen.add(v);
+  return [...seen].sort((a, b) => a.localeCompare(b)).map((v) => ({ value: v, label: v }));
+}
+
+/**
+ * One Shopify-style filter dropdown: a pill that opens a multi-select checkbox
+ * popover. Inactive it shows just the label + caret; active it goes accent and
+ * shows the selection ("Status: Active" / "Category: 2 selected") with an × to
+ * clear. Secondary facets (Category/Condition) are `removable` — their × drops
+ * the whole filter back into "+ Add filter". The popover animates in (.menu-pop).
+ */
+function FilterDropdown({
+  label,
+  options,
+  selected,
+  onToggle,
+  onClear,
+  removable,
+  onRemove,
+}: {
+  label: string;
+  options: FacetOption[];
+  selected: Set<string>;
+  onToggle: (value: string) => void;
+  onClear: () => void;
+  removable?: boolean;
+  onRemove?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = selected.size;
+  const active = count > 0;
+  const summary =
+    count === 0
+      ? label
+      : count === 1
+        ? `${label}: ${options.find((o) => selected.has(o.value))?.label ?? ""}`
+        : `${label}: ${count} selected`;
+  return (
+    <div className="relative">
+      <span
+        className={`flex items-center rounded-lg border text-[13.5px] font-medium transition-colors ${
+          active
+            ? "border-accent bg-brand-soft text-accent-soft-fg"
+            : "border-border-strong text-fg hover:bg-surface-2"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="flex items-center gap-1.5 py-1.5 pl-3 pr-2"
+        >
+          <span className="truncate">{summary}</span>
+          <svg viewBox="0 0 24 24" className={`size-3.5 transition-transform ${open ? "rotate-180" : ""} ${active ? "text-accent-soft-fg" : "text-muted"}`} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+        {active || removable ? (
+          <button
+            type="button"
+            aria-label={removable ? `Remove ${label} filter` : `Clear ${label} filter`}
+            onClick={() => {
+              if (removable && onRemove) onRemove();
+              else onClear();
+            }}
+            className="mr-1 flex size-5 items-center justify-center rounded text-current/70 transition-colors hover:bg-accent-soft hover:text-accent-soft-fg"
+          >
+            <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        ) : null}
+      </span>
+      {open ? (
+        <>
+          <button aria-hidden tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default" />
+          <div role="menu" className="menu-pop absolute left-0 z-50 mt-2 max-h-72 w-52 origin-top-left overflow-y-auto rounded-xl border border-border bg-surface p-1.5 shadow-lg">
+            {options.length === 0 ? (
+              <p className="px-2.5 py-2 text-[13px] text-muted">No options.</p>
+            ) : (
+              options.map((o) => {
+                const on = selected.has(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={on}
+                    onClick={() => onToggle(o.value)}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13.5px] text-fg transition-colors hover:bg-surface-2"
+                  >
+                    <span
+                      className={`flex size-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors ${
+                        on ? "border-accent-solid bg-accent-solid text-accent-fg" : "border-border-strong"
+                      }`}
+                    >
+                      {on ? <CheckIcon className="size-3" /> : null}
+                    </span>
+                    <span className="truncate">{o.label}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** "+ Add filter" — Shopify's pattern for adding secondary filters. A dashed
+ *  pill opening a small menu of facets not yet shown; selecting one reveals its
+ *  FilterDropdown. Hidden when every facet is already shown. */
+function AddFilterMenu({
+  available,
+  onAdd,
+}: {
+  available: { key: FacetKey; label: string }[];
+  onAdd: (key: FacetKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (available.length === 0) return null;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-[13.5px] font-medium text-fg transition-colors hover:bg-surface-2"
+      >
+        <svg viewBox="0 0 24 24" className="size-3.5 text-muted" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add filter
+      </button>
+      {open ? (
+        <>
+          <button aria-hidden tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default" />
+          <div role="menu" className="menu-pop absolute left-0 z-50 mt-2 w-44 origin-top-left rounded-xl border border-border bg-surface p-1.5 shadow-lg">
+            {available.map((f) => (
               <button
-                key={dir}
+                key={f.key}
                 type="button"
-                role="menuitemradio"
-                aria-checked={sort.dir === dir}
-                onClick={() => setSort({ key: sort.key === "smart" ? "date" : sort.key, dir })}
-                className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors hover:bg-surface-2 ${
-                  sort.dir === dir ? "font-semibold text-accent-soft-fg" : "text-fg"
-                }`}
+                role="menuitem"
+                onClick={() => {
+                  onAdd(f.key);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[13.5px] text-fg transition-colors hover:bg-surface-2"
               >
-                {dir === "asc" ? "Lowest to highest" : "Highest to lowest"}
-                {sort.dir === dir ? <CheckIcon className="size-3.5 text-accent-soft-fg" /> : null}
+                {f.label}
               </button>
             ))}
           </div>
@@ -441,15 +717,6 @@ function DashboardEmpty() {
         </Link>
       </div>
     </div>
-  );
-}
-
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-faint">
-      <span aria-hidden className="h-[2px] w-6 rounded-full bg-accent" />
-      {children}
-    </span>
   );
 }
 
@@ -516,6 +783,7 @@ function ConfirmDialog({
 export function DashboardView({
   rows,
   filter,
+  initialQuery,
   archiveAction,
   unarchiveAction,
   deleteAction,
@@ -524,17 +792,36 @@ export function DashboardView({
   rows: DashboardRow[];
   counts: DashboardCounts;
   filter: DashboardFilterKey;
+  /** When the global search deep-links here (`/dashboard?q=…`), open search
+   *  mode pre-filled so the two surfaces chain like Shopify's global → scoped
+   *  search. */
+  initialQuery?: string;
   archiveAction?: IdsAction;
   unarchiveAction?: IdsAction;
   deleteAction?: IdsAction;
   /** Batched quick-edit (price + status) — opens the full-screen grid. */
   bulkUpdateAction?: (updates: BulkListingUpdate[]) => Promise<void>;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery ?? "");
+  // Search MODE (the expanded Shopify search bar) is distinct from a non-empty
+  // query: opening search hides the view tabs and reveals the filter dropdowns.
+  const [searchMode, setSearchMode] = useState(Boolean(initialQuery?.trim()));
+  // Per-facet selections. Status is always shown; category/condition appear via
+  // "+ Add filter" (tracked in `extraFacets`). Status values are filter KEYS
+  // (active/draft/archived) expanded to statuses; cat/cond hold literal values.
+  const [filters, setFilters] = useState<Record<FacetKey, Set<string>>>({
+    status: new Set(),
+    category: new Set(),
+    condition: new Set(),
+  });
+  const [extraFacets, setExtraFacets] = useState<FacetKey[]>([]);
   const [sort, setSort] = useState<SortState>({ key: "smart", dir: "asc" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<"archive" | "delete" | null>(null);
   const [quickEdit, setQuickEdit] = useState(false);
+  // Mobile-only: the Shopify-style toolbar's Filter button reveals the facet
+  // dropdowns inline (desktop hides them behind search mode instead).
+  const [mobileFilters, setMobileFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -553,23 +840,92 @@ export function DashboardView({
 
   const activeFilter =
     DASHBOARD_FILTERS.find((f) => f.key === filter) ?? DASHBOARD_FILTERS[0];
-  const statusFiltered = activeFilter.statuses
-    ? rows.filter((r) => activeFilter.statuses!.includes(r.status))
+
+  // Filter options derived from the rows present (no hardcoded taxonomy).
+  const statusOptions: FacetOption[] = STATUS_CHIP_OPTIONS.map((o) => ({
+    value: o.key,
+    label: o.label,
+  }));
+  const categoryOptions = useMemo(
+    () => distinctValues(rows.map((r) => r.category)),
+    [rows],
+  );
+  const conditionOptions = useMemo(
+    () => distinctValues(rows.map((r) => r.condition)),
+    [rows],
+  );
+
+  // While searching, the filter dropdowns drive status (Shopify hides the view
+  // tabs in search mode); otherwise the active view tab does.
+  const selectedStatuses =
+    filters.status.size > 0
+      ? STATUS_CHIP_OPTIONS.filter((o) => filters.status.has(o.key)).flatMap(
+          (o) => o.statuses ?? [],
+        )
+      : null;
+  const effectiveStatuses = searchMode ? selectedStatuses : activeFilter.statuses;
+
+  let pool = effectiveStatuses
+    ? rows.filter((r) => effectiveStatuses.includes(r.status))
     : rows;
-  const visible = statusFiltered
+  // Category/Condition facets apply whenever they're set. On desktop they're
+  // only settable inside search mode; the mobile toolbar exposes them inline via
+  // the Filter button, so gating on searchMode would make that button inert.
+  if (filters.category.size > 0)
+    pool = pool.filter((r) => r.category != null && filters.category.has(r.category));
+  if (filters.condition.size > 0)
+    pool = pool.filter((r) => r.condition != null && filters.condition.has(r.condition));
+  const visible = pool
     .filter((r) => matchesQuery(r.title, query))
     .slice()
     .sort((a, b) => compareRows(a, b, sort));
-  const searching = query.trim() !== "";
 
-  const filterCount = (f: (typeof DASHBOARD_FILTERS)[number]) =>
-    f.statuses ? rows.filter((r) => f.statuses!.includes(r.status)).length : rows.length;
+  const queryActive = query.trim() !== "";
+  const anyFacet =
+    filters.status.size + filters.category.size + filters.condition.size > 0;
+  const filtersActive = queryActive || anyFacet;
+
+  const resetFilters = () =>
+    setFilters({ status: new Set(), category: new Set(), condition: new Set() });
+  const exitSearch = () => {
+    setSearchMode(false);
+    setQuery("");
+    resetFilters();
+    setExtraFacets([]);
+  };
+  const clearAllFilters = () => {
+    setQuery("");
+    resetFilters();
+    setExtraFacets([]);
+  };
+  const toggleFacet = (key: FacetKey, value: string) =>
+    setFilters((prev) => {
+      const next = new Set(prev[key]);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return { ...prev, [key]: next };
+    });
+  const clearFacet = (key: FacetKey) =>
+    setFilters((prev) => ({ ...prev, [key]: new Set() }));
+  const addFacet = (key: FacetKey) =>
+    setExtraFacets((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  const removeFacet = (key: FacetKey) => {
+    setExtraFacets((prev) => prev.filter((k) => k !== key));
+    clearFacet(key);
+  };
+
+  // Secondary facets still available to add (not already shown, and with
+  // options to choose from).
+  const availableFacets = (
+    [
+      { key: "category" as const, label: "Category", has: categoryOptions.length > 0 },
+      { key: "condition" as const, label: "Condition", has: conditionOptions.length > 0 },
+    ]
+  )
+    .filter((f) => f.has && !extraFacets.includes(f.key))
+    .map(({ key, label }) => ({ key, label }));
 
   const enterDelay = (i: number) => `${Math.min(i, 12) * 24}ms`;
-
-  const totalValue = rows.reduce((sum, r) => sum + (r.price ?? 0), 0);
-  const reviewCount = rows.filter((r) => REVIEW_STATUSES.has(r.status)).length;
-  const liveCount = rows.filter((r) => r.status === "published").length;
 
   // ---- selection ----
   const toggleRow = (itemId: string) =>
@@ -623,31 +979,12 @@ export function DashboardView({
     });
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
+    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-5 px-4 pb-12 pt-8 sm:px-6 sm:pt-10">
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div>
-          <Eyebrow>Your shop</Eyebrow>
-          <h1 className="mt-1.5 font-display text-[24px] font-bold tracking-tight text-fg-strong">
+          <h1 className="font-display text-[24px] font-bold tracking-tight text-fg-strong">
             Listings
           </h1>
-          {rows.length > 0 ? (
-            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted" data-nums>
-              {reviewCount > 0 ? (
-                <span className="font-semibold text-fg-strong">
-                  <CountUp to={reviewCount} duration={0.7} /> need
-                  {reviewCount === 1 ? "s" : ""} review
-                </span>
-              ) : (
-                <span className="font-medium text-fg">All caught up</span>
-              )}
-              <span aria-hidden className="text-faint">·</span>
-              <span>
-                <CountUp to={liveCount} duration={0.7} /> live
-              </span>
-              <span aria-hidden className="text-faint">·</span>
-              <span>{PRICE_FMT.format(totalValue)} total</span>
-            </p>
-          ) : null}
         </div>
         {rows.length > 0 ? (
           <Link
@@ -670,8 +1007,20 @@ export function DashboardView({
                No `overflow-hidden` on this wrapper: it would clip the Sort
                popover (absolutely positioned, escapes the section). Rows carry
                their own radius, so the rounded section still reads clean. */}
-          <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-t-xl border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
-            <nav aria-label="Filter by status" className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none]">
+          {/* Toolbar — two modes, mirroring Shopify's Products search flow:
+              default shows the view-tab pills + a search-icon + sort; clicking
+              search swaps to a full-width search field with a Status filter chip
+              and Cancel (the tabs hide while searching). */}
+          {/* ---- mobile toolbar (Shopify Products / iOS): a DIFFERENT shape
+               from the desktop two-mode toolbar — status tabs on top, then a
+               persistent row of Sort · an always-expanded search · Filter, so a
+               phone gets the native always-on filter bar (the Filter button
+               reveals the facet dropdowns) instead of a search-button. ---- */}
+          <div className="flex flex-col gap-3 rounded-t-xl border-b border-border px-3 py-3 sm:hidden">
+            <nav
+              aria-label="Filter by status"
+              className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none]"
+            >
               {DASHBOARD_FILTERS.map((f) => {
                 const active = f.key === filter;
                 return (
@@ -679,85 +1028,324 @@ export function DashboardView({
                     key={f.key}
                     href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
                     aria-current={active ? "page" : undefined}
-                    className={`relative flex shrink-0 items-baseline gap-1.5 whitespace-nowrap rounded-md px-3.5 py-3 text-[14px] transition-colors ${
-                      active ? "text-fg-strong" : "text-muted hover:text-fg-strong"
+                    className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-[14px] font-semibold transition-colors ${
+                      active
+                        ? "bg-surface-3 text-fg-strong"
+                        : "text-muted hover:bg-surface-2 hover:text-fg-strong"
                     }`}
                   >
-                    <span className="font-semibold">{f.label}</span>
-                    <span className={`text-[13px] ${active ? "text-accent-soft-fg" : "text-muted"}`} data-nums>
-                      <CountUp to={filterCount(f)} duration={0.7} />
-                    </span>
-                    {active ? (
-                      <span aria-hidden className="absolute inset-x-3.5 bottom-0 h-[2px] rounded-full bg-accent" />
-                    ) : null}
+                    {f.label}
                   </Link>
                 );
               })}
             </nav>
-            <div className="flex w-full items-center gap-2.5 sm:w-auto">
-              <label className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[14px] transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/40 sm:w-64 sm:flex-none">
-                <svg viewBox="0 0 24 24" className="size-4 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <div className="flex items-center gap-2">
+              <SortMenu sort={sort} setSort={setSort} compact />
+              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-[15px] transition-colors focus-within:border-accent focus-within:bg-surface focus-within:ring-2 focus-within:ring-accent/25">
+                <svg viewBox="0 0 24 24" className="size-4 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <circle cx="11" cy="11" r="8" />
                   <path d="m21 21-4.3-4.3" />
                 </svg>
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder={`Filter ${activeFilter.key === "all" ? "listings" : `“${activeFilter.label}”`}…`}
+                  placeholder="Filter listings…"
                   aria-label="Filter listings by title"
-                  className="w-full bg-transparent text-fg-strong outline-none placeholder:text-muted"
+                  className="w-full min-w-0 bg-transparent text-fg-strong outline-none placeholder:text-muted"
                 />
-                {searching ? (
+                {queryActive ? (
                   <button
                     type="button"
                     onClick={() => setQuery("")}
-                    aria-label="Clear filter"
+                    aria-label="Clear search text"
                     className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-fg-strong"
                   >
-                    <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
                       <path d="M18 6 6 18M6 6l12 12" />
                     </svg>
                   </button>
                 ) : null}
               </label>
-              <SortMenu sort={sort} setSort={setSort} />
+              <button
+                type="button"
+                onClick={() => setMobileFilters((v) => !v)}
+                aria-label="Filter listings"
+                aria-expanded={mobileFilters}
+                className={`flex size-[42px] shrink-0 items-center justify-center rounded-lg border shadow-xs transition-colors ${
+                  mobileFilters || anyFacet
+                    ? "border-accent bg-accent-soft text-accent-soft-fg"
+                    : "border-border bg-surface text-fg hover:bg-surface-2"
+                }`}
+              >
+                <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M3 5h18M6 12h12M10 19h4" />
+                </svg>
+              </button>
             </div>
+            {mobileFilters ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {categoryOptions.length > 0 ? (
+                  <FilterDropdown
+                    label="Category"
+                    options={categoryOptions}
+                    selected={filters.category}
+                    onToggle={(v) => toggleFacet("category", v)}
+                    onClear={() => clearFacet("category")}
+                  />
+                ) : null}
+                {conditionOptions.length > 0 ? (
+                  <FilterDropdown
+                    label="Condition"
+                    options={conditionOptions}
+                    selected={filters.condition}
+                    onToggle={(v) => toggleFacet("condition", v)}
+                    onClear={() => clearFacet("condition")}
+                  />
+                ) : null}
+                {filtersActive ? (
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-accent-soft-fg transition-colors hover:bg-surface-2"
+                  >
+                    Clear all
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
-          {visible.length === 0 ? (
-            searching ? (
-              <p className="px-4 py-12 text-center text-[15px] text-muted">
-                No titles match “{query.trim()}”.{" "}
-                <button type="button" onClick={() => setQuery("")} className="font-semibold text-accent-soft-fg hover:underline">
-                  Clear
-                </button>
-              </p>
+          <div className="hidden rounded-t-xl border-b border-border px-3 py-2.5 sm:block sm:px-4 sm:py-3">
+            <AnimatePresence mode="wait" initial={false}>
+            {searchMode ? (
+              <motion.div
+                key="search"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.11 }}
+                className="flex flex-col gap-2.5"
+              >
+                {/* row 1: search field · Cancel · Save as · Sort (rightmost) —
+                    Shopify keeps search + sort on ONE line; filters drop to row
+                    2. The field unrolls from the right (where the search button
+                    was) for a smooth open. */}
+                <div className="flex items-center gap-2.5">
+                  <motion.label
+                    initial={{ scaleX: 0.55, opacity: 0 }}
+                    animate={{ scaleX: 1, opacity: 1 }}
+                    exit={{ scaleX: 0.55, opacity: 0 }}
+                    transition={{ duration: 0.17, ease: [0.21, 0.8, 0.32, 1] }}
+                    style={{ transformOrigin: "right" }}
+                    className="flex flex-1 items-center gap-2 rounded-lg border border-accent bg-surface-2 px-3.5 py-2.5 text-[15px] ring-2 ring-accent/30"
+                  >
+                    <svg viewBox="0 0 24 24" className="size-4 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="m21 21-4.3-4.3" />
+                    </svg>
+                    <input
+                      autoFocus
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") exitSearch();
+                      }}
+                      placeholder="Searching all listings…"
+                      aria-label="Search listings by title"
+                      className="w-full bg-transparent text-fg-strong outline-none placeholder:text-muted"
+                    />
+                    {queryActive ? (
+                      <button
+                        type="button"
+                        onClick={() => setQuery("")}
+                        aria-label="Clear search text"
+                        className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-fg-strong"
+                      >
+                        <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </motion.label>
+                  <button
+                    type="button"
+                    onClick={exitSearch}
+                    className="shrink-0 rounded-lg px-3 py-2.5 text-[14px] font-semibold text-fg transition-colors hover:bg-surface-2"
+                  >
+                    Cancel
+                  </button>
+                  {/* Save as (saved views) — present + positioned like Shopify;
+                      disabled until there's something to save, matching their
+                      default greyed state. Full recall is a follow-up. */}
+                  <button
+                    type="button"
+                    disabled={!filtersActive}
+                    title="Save these filters as a view"
+                    className={`shrink-0 rounded-lg px-3 py-2.5 text-[14px] font-semibold transition-colors ${
+                      filtersActive ? "text-fg hover:bg-surface-2" : "cursor-not-allowed text-faint"
+                    }`}
+                  >
+                    Save as
+                  </button>
+                  <SortMenu sort={sort} setSort={setSort} />
+                </div>
+                {/* row 2: filter dropdowns only (Status always; Category/
+                    Condition via Add filter) + Clear all — Shopify's Products
+                    filter bar sits BELOW the search/sort row. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <FilterDropdown
+                    label="Status"
+                    options={statusOptions}
+                    selected={filters.status}
+                    onToggle={(v) => toggleFacet("status", v)}
+                    onClear={() => clearFacet("status")}
+                  />
+                  {extraFacets.includes("category") ? (
+                    <FilterDropdown
+                      label="Category"
+                      options={categoryOptions}
+                      selected={filters.category}
+                      onToggle={(v) => toggleFacet("category", v)}
+                      onClear={() => clearFacet("category")}
+                      removable
+                      onRemove={() => removeFacet("category")}
+                    />
+                  ) : null}
+                  {extraFacets.includes("condition") ? (
+                    <FilterDropdown
+                      label="Condition"
+                      options={conditionOptions}
+                      selected={filters.condition}
+                      onToggle={(v) => toggleFacet("condition", v)}
+                      onClear={() => clearFacet("condition")}
+                      removable
+                      onRemove={() => removeFacet("condition")}
+                    />
+                  ) : null}
+                  <AddFilterMenu available={availableFacets} onAdd={addFacet} />
+                  {filtersActive ? (
+                    <button
+                      type="button"
+                      onClick={clearAllFilters}
+                      className="rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-accent-soft-fg transition-colors hover:bg-surface-2"
+                    >
+                      Clear all
+                    </button>
+                  ) : null}
+                </div>
+              </motion.div>
             ) : (
-              <p className="px-4 py-12 text-center text-[15px] text-muted">
-                Nothing under “{activeFilter.label}” yet. Items move here as their status changes.
-              </p>
-            )
-          ) : (
-            <>
-              {/* sortable column headers (desktop) + select-all. px matches a
-                  row's effective inset (ul px-1 + row px-3.5) so columns align. */}
-              <div className={`group/head hidden border-b border-border px-[18px] py-3 ${ROW_GRID}`}>
-                <RowCheckbox checked={allSelected} onToggle={toggleAll} label="Select all listings" />
-                <SortHeader label="Product" k="title" sort={sort} onSort={onSortToggle} />
-                <SortHeader label="Status" k="status" sort={sort} onSort={onSortToggle} />
-                <SortHeader label="Price" k="price" sort={sort} onSort={onSortToggle} align="right" />
-                <SortHeader label="Listed" k="date" sort={sort} onSort={onSortToggle} align="right" />
-              </div>
+              <motion.div
+                key="default"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.11 }}
+                className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3"
+              >
+                {/* Shopify Products tab strip: a segmented pill set — the active
+                    tab is a rounded gray fill (highlight, not underline) that
+                    slides between tabs (layoutId). Labels only, no counts. */}
+                <nav aria-label="Filter by status" className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
+                  {DASHBOARD_FILTERS.map((f) => {
+                    const active = f.key === filter;
+                    return (
+                      <Link
+                        key={f.key}
+                        href={f.key === "all" ? "/dashboard" : `/dashboard?filter=${f.key}`}
+                        aria-current={active ? "page" : undefined}
+                        className={`relative shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-[14px] font-semibold transition-colors ${
+                          active ? "text-fg-strong" : "text-muted hover:bg-surface-2 hover:text-fg-strong"
+                        }`}
+                      >
+                        {active ? (
+                          <motion.span
+                            layoutId="dashboard-tab-pill"
+                            aria-hidden
+                            className="absolute inset-0 rounded-lg bg-surface-3"
+                            transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                          />
+                        ) : null}
+                        <span className="relative">{f.label}</span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSearchMode(true)}
+                    aria-label="Search and filter listings"
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2.5 text-[14px] font-medium text-fg shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong"
+                  >
+                    {/* Labeled, not icon-only: earns recognition and reads as the
+                        list-scoped search+filter — distinct from the global ⌘K
+                        "Search listings" in the top bar (Shopify labels it too). */}
+                    <svg viewBox="0 0 24 24" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="m21 21-4.3-4.3" />
+                    </svg>
+                    Search &amp; filter
+                  </button>
+                  <SortMenu sort={sort} setSort={setSort} />
+                </div>
+              </motion.div>
+            )}
+            </AnimatePresence>
+          </div>
 
-              <ul className="divide-y divide-border px-1 py-1">
-                {visible.map((row, i) => (
-                  <li key={`${row.itemId}-${row.listingId ?? "item"}`} className="row-enter" style={{ animationDelay: enterDelay(i) }}>
-                    <ListingRow row={row} selected={selected.has(row.itemId)} onToggle={() => toggleRow(row.itemId)} />
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
+          {/* Keyed by the active tab so switching views cross-fades the content
+              in (smooth tab transitions, owner). The sliding underline above is
+              a shared-layout motion element; this fades the rows beneath it. */}
+          <motion.div
+            key={filter}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: [0.21, 0.8, 0.32, 1] }}
+          >
+            {visible.length === 0 ? (
+              filtersActive ? (
+                <p className="px-4 py-12 text-center text-[15px] text-muted">
+                  No listings match your search.{" "}
+                  <button type="button" onClick={clearAllFilters} className="font-semibold text-accent-soft-fg hover:underline">
+                    Clear all
+                  </button>
+                </p>
+              ) : (
+                <p className="px-4 py-12 text-center text-[15px] text-muted">
+                  Nothing under “{activeFilter.label}” yet. Items move here as their status changes.
+                </p>
+              )
+            ) : (
+              <>
+                {/* column headers (md+) + select-all. px matches a row's
+                    effective inset (ul px-1 + row md:px-4 / lg:px-5) so columns
+                    align. Product/Status/Price/Listed sort; Category/Condition
+                    are plain labels (disclosed at lg/xl with their columns). */}
+                <div className={`group/head hidden border-b border-border px-5 py-3 lg:px-6 ${ROW_GRID}`}>
+                  <RowCheckbox checked={allSelected} onToggle={toggleAll} label="Select all listings" />
+                  <SortHeader label="Product" k="title" sort={sort} onSort={onSortToggle} />
+                  <SortHeader label="Status" k="status" sort={sort} onSort={onSortToggle} align="center" />
+                  <span className="hidden text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-muted lg:block">
+                    Category
+                  </span>
+                  <span className="hidden text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-muted xl:block">
+                    Condition
+                  </span>
+                  <SortHeader label="Price" k="price" sort={sort} onSort={onSortToggle} align="center" />
+                  <SortHeader label="Listed" k="date" sort={sort} onSort={onSortToggle} align="center" />
+                </div>
+
+                <ul className="divide-y divide-border px-1 py-1">
+                  {visible.map((row, i) => (
+                    <li key={`${row.itemId}-${row.listingId ?? "item"}`} className="row-enter" style={{ animationDelay: enterDelay(i) }}>
+                      <ListingRow row={row} selected={selected.has(row.itemId)} onToggle={() => toggleRow(row.itemId)} />
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </motion.div>
         </section>
       )}
 

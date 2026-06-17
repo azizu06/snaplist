@@ -7,22 +7,31 @@
  * display time. No page may render a raw status/tier key directly — that is how
  * "tier: web_tight" leaked to end users.
  *
- * Tones map to the semantic status colors in globals.css `@theme`. The chip
- * chrome is deliberately RESTRAINED (see `StatusBadge`): every pill shares one
- * calm neutral chrome and color rides only on a small dot, so a column of
- * statuses reads quietly. Color is reserved for the two states that matter —
- * Live (success-solid, emerald) and Needs attention (danger, red); the in-flight
- * states (Draft, Queued, Processing) are `neutral` and differentiated by their
- * label, not by competing fills.
+ * Tones map to the semantic status colors in globals.css `@theme` and render as
+ * soft tonal badges (see `StatusBadge`), Shopify Products-style, so each state
+ * is distinguishable at a glance: Active is green (success), Draft is amber
+ * (warning, "unfinished"), Scheduled and Processing are blue (info, "in
+ * motion"), Needs attention is red (danger), and only Archived stays calm grey
+ * (neutral, "dormant"). Color carries meaning here — it is not decoration.
  */
 
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "../confidence/confidence";
 
-export type StatusTone = "success" | "success-solid" | "warning" | "danger" | "neutral";
+export type StatusTone =
+  | "success"
+  | "success-solid"
+  | "warning"
+  | "danger"
+  | "info"
+  | "neutral";
 
 export interface StatusLabel {
   label: string;
   tone: StatusTone;
+  /** Transient "working" states (Processing) set this so their badge dot pulses
+   *  (motion-safe). It differentiates them from the *static* blue of Scheduled,
+   *  which shares the same info hue under the locked one-blue palette. */
+  pulse?: boolean;
 }
 
 /** Listing lifecycle → end-user chip. Unknown keys render as themselves (honest), never invented. */
@@ -30,16 +39,18 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
   if (status == null) return null;
   switch (status) {
     case "draft":
-      return { label: "Needs review", tone: "neutral" };
+      return { label: "Draft", tone: "warning" };
     case "queued":
-      return { label: "Scheduled", tone: "neutral" };
+      return { label: "Scheduled", tone: "info" };
     case "published":
-      return { label: "Live", tone: "success-solid" };
+      return { label: "Active", tone: "success-solid" };
     case "failed":
     case "draft_failed":
       return { label: "Needs attention", tone: "danger" };
     case "new":
-      return { label: "Processing", tone: "neutral" };
+      // Shares info-blue with Scheduled; pulses so the transient "working"
+      // state reads as active and doesn't blur against Scheduled when scanned.
+      return { label: "Processing", tone: "info", pulse: true };
     case "archived":
       return { label: "Archived", tone: "neutral" };
     default:
@@ -59,7 +70,7 @@ export function lifecycleShortLabel(
   if (!full) return null;
   switch (status) {
     case "draft":
-      return { label: "Needs review", tone: full.tone };
+      return { label: "Draft", tone: full.tone };
     case "queued":
       return { label: "Scheduled", tone: full.tone };
     case "failed":

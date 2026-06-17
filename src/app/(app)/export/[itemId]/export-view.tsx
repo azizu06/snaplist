@@ -1,5 +1,4 @@
 import Link from "next/link";
-import SpotlightCard from "@/components/bits/SpotlightCard";
 import { Banner } from "@/components/ui/banner";
 import type { ExportPacksView, ExportPackView } from "@/lib/export";
 import { CopyButton } from "./copy-button";
@@ -26,8 +25,8 @@ import { CopyButton } from "./copy-button";
  * identity now reads through the NAME + a neutral monogram mark; the green
  * accent is reserved for the Copy affordance and the numbered steps, so it never
  * competes with the emerald "Live" status. 4-pt spacing, one radius scale, no
- * gradients/glows. Keeps the react-bits SpotlightCard (green spotlight) on every
- * card, matching the review/publish siblings, and the CopyButton micro-interaction.
+ * gradients/glows. Panels are plain (no cursor-spotlight), matching the review
+ * sibling, and the CopyButton micro-interaction stays.
  *
  * The internal model/provenance footer is intentionally NOT rendered — it stays
  * persisted server-side for the eval harness, but it's developer jargon, not
@@ -77,12 +76,24 @@ const MERCARI: PlatformConfig = {
   ],
 };
 
-/** App-card chrome for the react-bits SpotlightCard (vs its marketing default):
- *  a quiet Shopify panel — hairline border, white surface, one soft shadow. */
+/** Quiet Shopify panel chrome: hairline border, surface fill, one soft shadow. */
 const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
 
-/** Green spotlight to match the accent (the react-bits flair, kept subtle). */
-const SPOTLIGHT = "rgba(0, 128, 96, 0.06)";
+/**
+ * Plain content panel (replaced the react-bits SpotlightCard — the cursor glow
+ * read as distracting). Same chrome, no hover effect.
+ */
+function Card({
+  chromeClassName = APP_CARD_CHROME,
+  className,
+  children,
+}: {
+  chromeClassName?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return <div className={`${chromeClassName} ${className ?? ""}`}>{children}</div>;
+}
 
 /** Dash-accented small-caps eyebrow — the marketing surfaces' non-pill label. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
@@ -120,10 +131,9 @@ function PackCard({
   const labelId = `pack-${config.glyph}`;
 
   return (
-    <SpotlightCard
+    <Card
       className="flex flex-col"
       chromeClassName={`overflow-hidden ${APP_CARD_CHROME}`}
-      spotlightColor={SPOTLIGHT}
     >
       {/* platform identity header — neutral mark + name on the left, the Copy
           action top-right (Shopify Edit/Save placement, 325/331). On mobile the
@@ -196,7 +206,7 @@ function PackCard({
           fullWidth
         />
       </div>
-    </SpotlightCard>
+    </Card>
   );
 }
 

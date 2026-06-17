@@ -3,6 +3,7 @@ import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { listRecentNotifications, type NotificationView } from "@/lib/notifications";
 import { AppShell } from "@/components/app-shell";
+import { UploadDraftProvider } from "./upload/upload-draft-context";
 import type { ProfileUser } from "@/components/profile-menu";
 import type { PaletteHit } from "@/components/command-palette";
 
@@ -20,12 +21,15 @@ const PREVIEW_USER: ProfileUser = {
   email: "preview@snaplist.dev",
   imageUrl: null,
 };
+// Mirror the dashboard rows exactly: the SAME compact "brand + model" name and
+// first-photo thumbnail a list row shows — never the long eBay SEO title — so a
+// search result reads identically to the row it links to.
 const PREVIEW_SEARCH_FIXTURES: PaletteHit[] = [
-  { itemId: "fx-1", title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones", status: "draft", createdAt: "2026-06-11T15:00:00Z" },
-  { itemId: "fx-2", title: "LEGO Star Wars Millennium Falcon 75257, complete in box", status: "queued", createdAt: "2026-06-11T13:30:00Z" },
-  { itemId: "fx-3", title: "Patagonia Better Sweater Fleece Jacket, Men's M", status: "published", createdAt: "2026-06-10T19:12:00Z" },
-  { itemId: "fx-4", title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red", status: "failed", createdAt: "2026-06-10T16:40:00Z" },
-  { itemId: "fx-5", title: "The Pragmatic Programmer (20th Anniversary, hardcover)", status: "new", createdAt: "2026-06-09T11:05:00Z" },
+  { itemId: "fx-1", title: "Sony WH-1000XM4", status: "draft", thumbUrl: "/demo/headphones.jpg", createdAt: "2026-06-11T15:00:00Z" },
+  { itemId: "fx-2", title: "Nintendo Game Boy Color", status: "queued", thumbUrl: "/demo/gameboy.jpg", createdAt: "2026-06-11T13:30:00Z" },
+  { itemId: "fx-3", title: "Patagonia Better Sweater Fleece", status: "published", thumbUrl: "/demo/jacket.jpg", createdAt: "2026-06-10T19:12:00Z" },
+  { itemId: "fx-4", title: "Canon EOS 80D", status: "failed", thumbUrl: "/demo/camera.jpg", createdAt: "2026-06-10T16:40:00Z" },
+  { itemId: "fx-5", title: "The Pragmatic Programmer", status: "new", thumbUrl: null, createdAt: "2026-06-09T11:05:00Z" },
 ];
 const PREVIEW_NOTIFICATIONS: NotificationView[] = [
   { id: "n-1", kind: "buyer_message", title: "New question on Sony WH-1000XM4", body: "“Do these come with the original case and cable?” — a reply is drafted for you.", href: "/inbox", read: false, createdAt: "2026-06-16T14:10:00Z" },
@@ -77,7 +81,10 @@ export default async function AppLayout({
         previewSignedIn && !userId ? PREVIEW_SEARCH_FIXTURES : undefined
       }
     >
-      {children}
+      {/* Holds pending upload photos so a half-built listing survives in-app
+          navigation (Home/inbox and back). Lives in the layout, which persists
+          across (app) route changes. */}
+      <UploadDraftProvider>{children}</UploadDraftProvider>
     </AppShell>
   );
 }

@@ -43,6 +43,9 @@ export interface PhotoCarouselProps {
   showCover?: boolean;
   /** Review only: tapping the image opens a full-screen zoom lightbox. */
   enableZoom?: boolean;
+  /** Show the dot pager under the viewer. Default true; the upload sheet turns
+   *  it off because its Shopify-style thumbnail rail already pages the photos. */
+  showDots?: boolean;
   /** Tailwind aspect classes for the inline viewer (fallback before the cover
    *  photo is measured, or when adaptiveFrame is off). */
   aspectClassName?: string;
@@ -67,6 +70,7 @@ export function PhotoCarousel({
   onRemove,
   showCover = false,
   enableZoom = false,
+  showDots = true,
   aspectClassName = "aspect-square sm:aspect-[4/3]",
   adaptiveFrame = false,
   frameMaxHeight,
@@ -266,7 +270,7 @@ export function PhotoCarousel({
         {renderArrows("size-10")}
       </div>
 
-      {count > 1 ? (
+      {showDots && count > 1 ? (
         <div className="mt-3 flex items-center justify-center gap-2">
           {previews.map((_, i) => (
             <button

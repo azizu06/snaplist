@@ -1,4 +1,3 @@
-import GlareHover from "@/components/bits/GlareHover";
 import ShinyText from "@/components/bits/ShinyText";
 import { Banner } from "@/components/ui/banner";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -221,8 +220,7 @@ export function SettingsView({
       <GroupLabel>Account</GroupLabel>
 
       {/* Profile — the signed-in human, led with Shopify's account-card treatment. */}
-      <GlareHover>
-        <Card>
+      <Card>
           <CardHeader
             title={
               <span className="flex items-center gap-2">
@@ -251,14 +249,12 @@ export function SettingsView({
               there and they follow you here.
             </CardNote>
           </CardBody>
-        </Card>
-      </GlareHover>
+      </Card>
 
       {/* Plan & billing — real entitlement, daily allowance, upgrade path (#64).
           CTAs POST the billing routes via <BillingCta>: Upgrade → checkout,
           Manage billing → portal — the single billing interface. */}
-      <GlareHover>
-        <Card>
+      <Card>
           <CardHeader
             title={
               <span className="flex items-center gap-2">
@@ -328,15 +324,13 @@ export function SettingsView({
               </>
             )}
           </CardBody>
-        </Card>
-      </GlareHover>
+      </Card>
 
       {/* ============================= Selling ============================= */}
       <GroupLabel>Selling</GroupLabel>
 
       {/* Autopilot — the confidence-gated auto-post toggle. */}
-      <GlareHover>
-        <Card>
+      <Card>
           <CardHeader
             title={
               <span className="flex items-center gap-2">
@@ -380,12 +374,10 @@ export function SettingsView({
               was queued or held.
             </CardNote>
           </CardBody>
-        </Card>
-      </GlareHover>
+      </Card>
 
       {/* eBay account — connected (disconnect) vs disconnected (connect) states. */}
-      <GlareHover>
-        <Card>
+      <Card>
           <CardHeader
             title={
               <span className="flex items-center gap-2">
@@ -441,15 +433,13 @@ export function SettingsView({
               </>
             )}
           </CardBody>
-        </Card>
-      </GlareHover>
+      </Card>
 
       {/* =========================== Preferences =========================== */}
       <GroupLabel>Preferences</GroupLabel>
 
       {/* Appearance — light / dark / system, persisted per device. */}
-      <GlareHover>
-        <Card>
+      <Card>
           <CardHeader
             title={
               <span className="flex items-center gap-2">
@@ -477,8 +467,7 @@ export function SettingsView({
               <ThemeSegmented />
             </div>
           </CardBody>
-        </Card>
-      </GlareHover>
+      </Card>
 
       {/* Sign out — held out as a separate, destructive-toned card, last. */}
       <div className="mt-3 border-t border-border pt-5">

@@ -17,17 +17,18 @@ import {
 describe("lifecycleLabel", () => {
   it("translates every persisted listing status to a labeled tone", () => {
     // Restrained palette: in-flight states are `neutral` (color is reserved for
-    // Live + Needs attention); the label still says what each one is.
+    // Active + Needs attention); the label still says what each one is.
+    // Labels track Shopify's Products vocabulary: Draft / Active.
     expect(lifecycleLabel("draft")).toEqual({
-      label: "Needs review",
-      tone: "neutral",
+      label: "Draft",
+      tone: "warning",
     });
     expect(lifecycleLabel("queued")).toEqual({
       label: "Scheduled",
-      tone: "neutral",
+      tone: "info",
     });
     expect(lifecycleLabel("published")).toEqual({
-      label: "Live",
+      label: "Active",
       tone: "success-solid",
     });
     expect(lifecycleLabel("failed")).toEqual({
@@ -41,7 +42,9 @@ describe("lifecycleLabel", () => {
   });
 
   it("renders an unknown/legacy status honestly instead of guessing", () => {
-    expect(lifecycleLabel("new")).toEqual({ label: "Processing", tone: "neutral" });
+    // Processing pulses (transient "working" state) so it doesn't blur against
+    // the static-blue Scheduled under the locked one-blue palette.
+    expect(lifecycleLabel("new")).toEqual({ label: "Processing", tone: "info", pulse: true });
     expect(lifecycleLabel("something_else")).toEqual({
       label: "something_else",
       tone: "neutral",
@@ -53,12 +56,12 @@ describe("lifecycleLabel", () => {
 
 describe("lifecycleShortLabel", () => {
   it("compacts the chip for narrow surfaces, keeping the SAME tone", () => {
-    expect(lifecycleShortLabel("draft")).toEqual({ label: "Needs review", tone: "neutral" });
-    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "neutral" });
-    expect(lifecycleShortLabel("published")).toEqual({ label: "Live", tone: "success-solid" });
+    expect(lifecycleShortLabel("draft")).toEqual({ label: "Draft", tone: "warning" });
+    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "info" });
+    expect(lifecycleShortLabel("published")).toEqual({ label: "Active", tone: "success-solid" });
     expect(lifecycleShortLabel("failed")).toEqual({ label: "Attention", tone: "danger" });
     expect(lifecycleShortLabel("draft_failed")).toEqual({ label: "Attention", tone: "danger" });
-    expect(lifecycleShortLabel("new")).toEqual({ label: "Processing", tone: "neutral" });
+    expect(lifecycleShortLabel("new")).toEqual({ label: "Processing", tone: "info", pulse: true });
   });
 
   it("falls back to the long label's honest rendering for unknown/null", () => {
