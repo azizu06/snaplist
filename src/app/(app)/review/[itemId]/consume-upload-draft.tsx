@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useUploadDraft } from "../../upload/upload-draft-context";
 
 /**
@@ -24,8 +25,20 @@ import { useUploadDraft } from "../../upload/upload-draft-context";
  */
 export function ConsumeUploadDraft() {
   const { clear } = useUploadDraft();
+  const pathname = usePathname();
   useEffect(() => {
     clear();
-  }, [clear]);
+    // Consume the ?new=1 signal ONCE: strip it from the URL so a later Back /
+    // refresh / bookmark to this same review can't re-fire and clear a DIFFERENT
+    // in-progress upload draft (Codex). replaceState (not the Next router) keeps
+    // it cheap — no RSC refetch — since nothing on the page depends on the param;
+    // only `new` is removed, any co-param is preserved.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("new")) {
+      params.delete("new");
+      const qs = params.toString();
+      window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
+    }
+  }, [clear, pathname]);
   return null;
 }
