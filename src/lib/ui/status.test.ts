@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   confidenceBand,
   confidenceLabel,
+  isBulkEditableStatus,
   lifecycleLabel,
   lifecycleShortLabel,
   tierLabel,
@@ -70,6 +71,24 @@ describe("lifecycleShortLabel", () => {
       tone: "neutral",
     });
     expect(lifecycleShortLabel(null)).toBeNull();
+  });
+});
+
+describe("isBulkEditableStatus", () => {
+  it("allows only the seller-organizational statuses (draft, archived)", () => {
+    expect(isBulkEditableStatus("draft")).toBe(true);
+    expect(isBulkEditableStatus("archived")).toBe(true);
+  });
+
+  it("rejects the publish-flow statuses so bulk-edit can't bypass the eBay adapter (Codex P1)", () => {
+    // `published` (Live) is written only by the eBay publish path alongside the
+    // ebay_* fields; `queued` (Scheduled) only by the autopilot gate. Neither may
+    // be set by a bulk metadata edit — incl. a crafted request past the UI.
+    expect(isBulkEditableStatus("published")).toBe(false);
+    expect(isBulkEditableStatus("queued")).toBe(false);
+    expect(isBulkEditableStatus("new")).toBe(false);
+    expect(isBulkEditableStatus("failed")).toBe(false);
+    expect(isBulkEditableStatus("")).toBe(false);
   });
 });
 

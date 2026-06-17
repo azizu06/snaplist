@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { reportServerError } from "@/lib/sentry";
+import { isBulkEditableStatus } from "@/lib/ui/status";
 
 /**
  * Dashboard mutations (Shopify products-section mirror): archive / unarchive,
@@ -109,16 +110,33 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
             }),
         );
       }
+      // Status write boundary (Codex P1): bulk-edit may ONLY set the
+      // seller-organizational statuses (draft / archived). `published` is owned by
+      // the eBay publish path (it sets ebay_listing_id/ebay_status together) and
+      // `queued` by the autopilot gate; writing either here would mark an unposted
+      // item Live / queue it past the gate without ever touching the adapter. The
+      // grid already hides those options — this rejects an out-of-vocabulary status
+      // from a crafted request that bypassed the UI (defense-in-depth). RLS still
+      // scopes the row; this scopes the VALUE. Reported, not silently dropped, so a
+      // bypass attempt is auditable.
       if (u.status !== undefined && u.listingId) {
-        writes.push(
-          supabase
-            .from("listings")
-            .update({ status: u.status })
-            .eq("id", u.listingId)
-            .then(({ error }) => {
-              if (error) reportServerError("dashboard.bulkUpdate.status", error, { listingId: u.listingId });
-            }),
-        );
+        if (!isBulkEditableStatus(u.status)) {
+          reportServerError(
+            "dashboard.bulkUpdate.status",
+            new Error(`rejected non-bulk-editable status "${u.status}"`),
+            { listingId: u.listingId },
+          );
+        } else {
+          writes.push(
+            supabase
+              .from("listings")
+              .update({ status: u.status })
+              .eq("id", u.listingId)
+              .then(({ error }) => {
+                if (error) reportServerError("dashboard.bulkUpdate.status", error, { listingId: u.listingId });
+              }),
+          );
+        }
       }
       return writes;
     }),

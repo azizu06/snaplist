@@ -81,6 +81,25 @@ export function lifecycleShortLabel(
   }
 }
 
+/**
+ * The ONLY listing statuses a seller may set through the dashboard bulk quick-edit
+ * grid. Deliberately seller-organizational only:
+ *  - `published` (Active/Live) is written ONLY by the eBay publish path, alongside
+ *    `ebay_listing_id` + `ebay_status`. Letting a bulk metadata edit write it would
+ *    mark an UNPOSTED draft "Live" without ever touching the eBay adapter (Codex P1).
+ *  - `queued` (Scheduled) is assigned ONLY by the autopilot confidence gate; setting
+ *    it by hand would inject an item into the auto-post pipeline past that gate.
+ * Both are excluded; bulk-edit can only pull a listing back to review or archive it.
+ * Shared by the grid's options AND the `bulkUpdateListings` server guard so the UI
+ * and the write boundary can never drift.
+ */
+export const BULK_EDITABLE_STATUSES = ["draft", "archived"] as const;
+
+/** Is `status` one a seller may set via the bulk quick-edit grid? */
+export function isBulkEditableStatus(status: string): boolean {
+  return (BULK_EDITABLE_STATUSES as readonly string[]).includes(status);
+}
+
 export type ConfidenceBand = "high" | "medium" | "low";
 
 const MEDIUM_MIN = 0.5;

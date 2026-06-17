@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { lifecycleLabel } from "@/lib/ui/status";
 import type { DashboardRow } from "./dashboard-view";
 import type { BulkListingUpdate } from "./actions";
 
@@ -15,10 +16,14 @@ import type { BulkListingUpdate } from "./actions";
  * sends only the rows that actually changed; Discard closes without writing.
  */
 
+// Only seller-organizational statuses are bulk-settable — see BULK_EDITABLE_STATUSES
+// in @/lib/ui/status. "Live" (published) is owned by the eBay publish path and
+// "Scheduled" (queued) by the autopilot gate, so neither is offered here: a bulk
+// metadata edit must never mark an unposted item live or queue it past the gate
+// (Codex P1). A row already in one of those states still renders its real status
+// via the fallback <option> below; it just can't be SET from the grid.
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "draft", label: "Needs review" },
-  { value: "queued", label: "Scheduled" },
-  { value: "published", label: "Live" },
   { value: "archived", label: "Archived" },
 ];
 
@@ -156,9 +161,14 @@ export function BulkEditGrid({
                     aria-label={`Status for ${r.title}`}
                     className="w-full rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-[14px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-faint"
                   >
-                    {/* keep an unknown current status selectable, honestly labeled */}
+                    {/* A current status that isn't bulk-settable (Active, Scheduled,
+                        Processing, …) stays selectable so the row shows its REAL
+                        state and can be left unchanged — honestly labeled, never the
+                        raw key. The seller can only switch it to a bulk-editable option. */}
                     {!STATUS_OPTIONS.some((o) => o.value === r.status) ? (
-                      <option value={r.status}>{r.status}</option>
+                      <option value={r.status}>
+                        {lifecycleLabel(r.status)?.label ?? r.status}
+                      </option>
                     ) : null}
                     {STATUS_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
