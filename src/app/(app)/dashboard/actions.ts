@@ -23,18 +23,65 @@ import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 /** `status` is free-text in the schema; the app owns the vocabulary. */
 const ARCHIVED = "archived";
 
+type DbClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * The subset of `listingIds` that are LIVE on eBay (ebay_listing_id set +
+ * ebay_status "published"). A live listing's lifecycle is owned by the eBay state,
+ * so dashboard mutations must never write a non-live status onto it and mislabel a
+ * genuinely live listing (the dashboard derives its chip from listings.status).
+ * Shared by archive + bulk-edit so the guard can't drift between them. Fails CLOSED:
+ * if the read errors, every id is treated as live (→ the caller skips it) rather
+ * than risk a desync. RLS scopes the read to the caller's own rows.
+ */
+async function liveListingIdSet(
+  supabase: DbClient,
+  listingIds: string[],
+): Promise<Set<string>> {
+  const live = new Set<string>();
+  if (listingIds.length === 0) return live;
+  const { data, error } = await supabase
+    .from("listings")
+    .select("id, ebay_listing_id, ebay_status")
+    .in("id", listingIds);
+  if (error) {
+    reportServerError("dashboard.liveCheck", error, { count: listingIds.length });
+    for (const id of listingIds) live.add(id);
+    return live;
+  }
+  for (const r of data ?? []) {
+    if (r.ebay_listing_id && r.ebay_status === "published") live.add(r.id as string);
+  }
+  return live;
+}
+
 export async function archiveListings(listingIds: string[]): Promise<void> {
   if (listingIds.length === 0) return;
   const supabase = await createClient();
   const userId = await getUserId();
   if (!userId) return;
 
-  const { error } = await supabase
-    .from("listings")
-    .update({ status: ARCHIVED })
-    .in("id", listingIds);
-  if (error) {
-    reportServerError("dashboard.archive", error, { count: listingIds.length });
+  // Never archive a listing that's still LIVE on eBay: archiving hides it and marks
+  // it Archived while the eBay listing is up, so the dashboard would show a live
+  // listing as archived (Codex). Ending a real listing is the adapter's job, not an
+  // archive toggle — skip live rows (report the skip), archive the rest.
+  const live = await liveListingIdSet(supabase, listingIds);
+  const archivable = listingIds.filter((id) => !live.has(id));
+  if (live.size > 0) {
+    reportServerError(
+      "dashboard.archive",
+      new Error(`skipped ${live.size} live eBay listing(s)`),
+      { skipped: live.size },
+    );
+  }
+  if (archivable.length > 0) {
+    const { error } = await supabase
+      .from("listings")
+      .update({ status: ARCHIVED })
+      .in("id", archivable);
+    if (error) {
+      reportServerError("dashboard.archive", error, { count: archivable.length });
+    }
   }
   revalidatePath("/dashboard");
 }
@@ -153,40 +200,13 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
   const userId = await getUserId();
   if (!userId) return;
 
-  // A listing that is actually live on eBay (ebay_listing_id + ebay_status
-  // "published") has its lifecycle owned by the eBay state. The dashboard derives
-  // its chip from listings.status, so writing a non-live status (draft/archived)
-  // onto a live row would show a genuinely live listing as a draft (Codex). Read
-  // the eBay fields for every status-changing listing up front and refuse to
-  // desync them below. RLS scopes the read to the seller's own rows.
-  const statusListingIds = [
-    ...new Set(
-      updates
-        .filter((u) => u.status !== undefined && u.listingId)
-        .map((u) => u.listingId as string),
-    ),
-  ];
-  const liveListingIds = new Set<string>();
-  if (statusListingIds.length > 0) {
-    const { data: ebayRows, error: ebayErr } = await supabase
-      .from("listings")
-      .select("id, ebay_listing_id, ebay_status")
-      .in("id", statusListingIds);
-    if (ebayErr) {
-      // Fail closed: if we can't confirm a row isn't live, skip every status write
-      // rather than risk desyncing a live listing.
-      reportServerError("dashboard.bulkUpdate.ebayRead", ebayErr, {
-        count: statusListingIds.length,
-      });
-      for (const id of statusListingIds) liveListingIds.add(id);
-    } else {
-      for (const r of ebayRows ?? []) {
-        if (r.ebay_listing_id && r.ebay_status === "published") {
-          liveListingIds.add(r.id as string);
-        }
-      }
-    }
-  }
+  // A listing that is live on eBay has its lifecycle owned by the eBay state, so a
+  // bulk status write (draft/archived) must not desync it and mislabel a live
+  // listing as a draft (Codex). Resolve the live set up front via the shared guard.
+  const statusListingIds = updates
+    .filter((u) => u.status !== undefined && u.listingId)
+    .map((u) => u.listingId as string);
+  const liveListingIds = await liveListingIdSet(supabase, statusListingIds);
 
   await Promise.all(
     updates.flatMap((u) => {
