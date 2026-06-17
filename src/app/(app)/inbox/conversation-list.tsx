@@ -431,9 +431,13 @@ function FollowUpComposer({
   const reduceMotion = useReducedMotion();
   const text = value.trim();
   const sending = busy === `followup:${message.id}`;
-  // Send becomes available once there's typed text OR a pending photo (a
-  // photo-only follow-up still sends the message + the honest preview note).
-  const canSend = text !== "" || attachments.length > 0;
+  // Send requires TYPED TEXT. Photos are preview-only in this slice (real
+  // attachment delivery arrives with the eBay adapter), and the typed text is the
+  // only thing that actually sends — both the `sendFollowUp` handler and the
+  // follow-up API bail on an empty body. Enabling send on a photo alone would
+  // light up an actionable ↑ arrow that silently does nothing (Codex P2), so gate
+  // it on text; the preview note already tells the seller the typed message sends.
+  const canSend = text !== "";
 
   // Revoke object URLs on unmount so previews don't leak memory.
   useEffect(() => {
