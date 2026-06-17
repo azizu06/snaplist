@@ -153,6 +153,41 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
   const userId = await getUserId();
   if (!userId) return;
 
+  // A listing that is actually live on eBay (ebay_listing_id + ebay_status
+  // "published") has its lifecycle owned by the eBay state. The dashboard derives
+  // its chip from listings.status, so writing a non-live status (draft/archived)
+  // onto a live row would show a genuinely live listing as a draft (Codex). Read
+  // the eBay fields for every status-changing listing up front and refuse to
+  // desync them below. RLS scopes the read to the seller's own rows.
+  const statusListingIds = [
+    ...new Set(
+      updates
+        .filter((u) => u.status !== undefined && u.listingId)
+        .map((u) => u.listingId as string),
+    ),
+  ];
+  const liveListingIds = new Set<string>();
+  if (statusListingIds.length > 0) {
+    const { data: ebayRows, error: ebayErr } = await supabase
+      .from("listings")
+      .select("id, ebay_listing_id, ebay_status")
+      .in("id", statusListingIds);
+    if (ebayErr) {
+      // Fail closed: if we can't confirm a row isn't live, skip every status write
+      // rather than risk desyncing a live listing.
+      reportServerError("dashboard.bulkUpdate.ebayRead", ebayErr, {
+        count: statusListingIds.length,
+      });
+      for (const id of statusListingIds) liveListingIds.add(id);
+    } else {
+      for (const r of ebayRows ?? []) {
+        if (r.ebay_listing_id && r.ebay_status === "published") {
+          liveListingIds.add(r.id as string);
+        }
+      }
+    }
+  }
+
   await Promise.all(
     updates.flatMap((u) => {
       // Supabase's builder is a thenable (PromiseLike), not a Promise; Promise.all
@@ -202,6 +237,15 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
           reportServerError(
             "dashboard.bulkUpdate.status",
             new Error(`rejected non-bulk-editable status "${u.status}"`),
+            { listingId: u.listingId },
+          );
+        } else if (liveListingIds.has(u.listingId)) {
+          // The listing is live on eBay — its status is owned by the eBay state, so
+          // a bulk metadata edit must not move it to draft/archived and mislabel a
+          // live listing as a draft (Codex). Skip + report.
+          reportServerError(
+            "dashboard.bulkUpdate.status",
+            new Error(`refused to change status of a live eBay listing to "${u.status}"`),
             { listingId: u.listingId },
           );
         } else {

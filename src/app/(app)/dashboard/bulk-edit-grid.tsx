@@ -84,8 +84,12 @@ export function BulkEditGrid({
     if (ps.kind === "invalid") return []; // never persist an invalid price
     const newPrice = ps.kind === "clear" ? null : ps.value;
     const priceChanged = newPrice !== r.price;
-    // Status only edits when the item actually has a listing to carry it.
-    const statusChanged = !!r.listingId && e.status !== r.status;
+    // Status only edits when the item has a listing AND isn't live on eBay — a
+    // live (published) listing's status is owned by the eBay state, so bulk-edit
+    // must not move it to draft/archived and mislabel it (Codex). The select is
+    // disabled for those rows; this mirrors the rule in the change set.
+    const statusChanged =
+      !!r.listingId && r.status !== "published" && e.status !== r.status;
     if (!priceChanged && !statusChanged) return [];
     return [
       {
@@ -156,6 +160,10 @@ export function BulkEditGrid({
             {rows.map((r) => {
               const e = edits[r.itemId];
               const noListing = !r.listingId;
+              // A live (published) listing's status is owned by the eBay state —
+              // bulk-edit must not move it to draft/archived (Codex), so its select
+              // is read-only here.
+              const isLive = r.status === "published";
               const priceInvalid = !!e && priceState(e.price).kind === "invalid";
               return (
                 <li key={r.itemId} className={`${GRID} px-3 py-2.5`}>
@@ -181,7 +189,8 @@ export function BulkEditGrid({
                   {/* Status (editable when the item has a listing) */}
                   <select
                     value={e?.status ?? r.status}
-                    disabled={noListing}
+                    disabled={noListing || isLive}
+                    title={isLive ? "Live eBay listings are managed from the listing, not bulk-edit" : undefined}
                     onChange={(ev) => setField(r.itemId, "status", ev.target.value)}
                     aria-label={`Status for ${r.title}`}
                     className="w-full rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-[14px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-faint"
