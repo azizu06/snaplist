@@ -161,6 +161,30 @@ describe("buildSoldSearchUrl", () => {
     expect(u.searchParams.get("_nkw")).toBe("Sony WH-1000XM4");
   });
 
+  it("folds a bounded specs hint into a brand+model query so sold comps cluster on the SAME configuration", () => {
+    // Without this, a sharpened multi-config item (Codex P2) prices against EVERY
+    // configuration: the sold tier runs above web search and a brand+model-only sold
+    // query returns mixed configs. Mirror the web-search tier — cap at 3 specs (more
+    // over-narrows eBay's keyword match) so a 4th spec is dropped, blanks/whitespace
+    // ignored.
+    const url = buildSoldSearchUrl({
+      brand: "Dell",
+      model: "XPS 15",
+      specs: ["RTX 4070", " ", "32GB", "1TB SSD", "OLED"],
+    });
+    expect(new URL(url!).searchParams.get("_nkw")).toBe("Dell XPS 15 RTX 4070 32GB 1TB SSD");
+  });
+
+  it("does NOT append specs to a bare UPC/ISBN query (an exact code key, not a keyword search)", () => {
+    // A UPC/ISBN is an exact identifier; gluing generic vision specs onto it ("0272…
+    // wireless over-ear") is noise, not narrowing. Specs only narrow the brand+model form.
+    expect(
+      new URL(
+        buildSoldSearchUrl({ upc: "027242920569", specs: ["wireless", "over-ear"] })!,
+      ).searchParams.get("_nkw"),
+    ).toBe("027242920569");
+  });
+
   it("uses a UPC as the query when that is the only identity, and a resolved name otherwise", () => {
     expect(new URL(buildSoldSearchUrl({ upc: "027242920569" })!).searchParams.get("_nkw")).toBe(
       "027242920569",

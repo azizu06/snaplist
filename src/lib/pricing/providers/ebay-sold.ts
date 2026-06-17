@@ -270,7 +270,24 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
 function identityQuery(signal: ItemSignal): string | null {
   const brand = signal.brand?.trim();
   const model = signal.model?.trim();
-  if (brand && model) return `${brand} ${model}`;
+  if (brand && model) {
+    // Brand+model alone spans EVERY configuration a multi-config product ships in
+    // (a laptop sold as i5/i7, 1660Ti/RTX). The sold tier runs ABOVE web search, so
+    // a brand+model-only sold query would price mixed configs and the "Sharpen" flow
+    // — which feeds the seller's confirmed specs in as `signal.specs` — would be
+    // ignored at this tier (Codex P2). Fold a bounded specs hint into the query so
+    // sold comps cluster on the SAME configuration. Cap at 3, exactly as the
+    // web-search tier does (`buildSearchQueries`): more over-narrows eBay's keyword
+    // match. If the narrowed query then returns < MIN comps the provider declines to
+    // the web-search tier (which itself narrows-then-broadens), so coverage is never
+    // lost — only the wrong-config sold comps are.
+    const specsHint = (signal.specs ?? [])
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(" ");
+    return specsHint ? `${brand} ${model} ${specsHint}` : `${brand} ${model}`;
+  }
   const resolved = signal.resolvedName?.trim();
   if (resolved) return resolved;
   const upc = signal.upc?.trim();
