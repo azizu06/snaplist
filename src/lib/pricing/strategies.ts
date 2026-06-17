@@ -89,7 +89,17 @@ export function deriveStrategies(
   price: StrategyInput,
   options: StrategyOptions = {},
 ): PricingStrategy[] {
-  const balancedPrice = Math.round(price.suggested);
+  // Clamp the rounded suggestion into the real comp band so rounding can't lift the
+  // balanced/Suggested point OUTSIDE the range the UI promises (e.g. a $9.60 median
+  // in an $8.50–$9.80 band rounding to $10) — the same clamp quick/maximize use,
+  // applied in the single-point fallback too (Codex). A missing/degenerate band
+  // (hi ≤ 0) skips the clamp so we never force the price to 0.
+  const bandLo = Math.min(price.range.min, price.range.max);
+  const bandHi = Math.max(price.range.min, price.range.max);
+  const balancedPrice =
+    bandHi > 0
+      ? clampTo(Math.round(price.suggested), bandLo, bandHi)
+      : Math.round(price.suggested);
 
   if (!hasStrategySpread(price)) {
     return [

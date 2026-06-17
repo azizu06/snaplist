@@ -54,6 +54,20 @@ describe("deriveStrategies — comp-backed distribution", () => {
     const web = result({ tier: "branded-web" });
     expect(deriveStrategies(web)[2].blurb).toMatch(/list for/);
   });
+
+  it("clamps the rounded balanced price into the band when the median sits near the ceiling (Codex)", () => {
+    // suggested 9.60 in 8.50–9.80: Math.round(9.60) = 10 would escape the band.
+    // The balanced point must be clamped to the max like quick/maximize, so the UI
+    // never lets the seller save a "Suggested" price outside the real range.
+    const s = deriveStrategies(
+      result({ tier: "ebay-sold", suggested: 9.6, range: { min: 8.5, max: 9.8 } }),
+    );
+    for (const x of s) {
+      expect(x.price).toBeGreaterThanOrEqual(8.5);
+      expect(x.price).toBeLessThanOrEqual(9.8);
+    }
+    expect(s.find((x) => x.key === "balanced")!.price).toBe(9.8);
+  });
 });
 
 describe("deriveStrategies — honesty guard", () => {
