@@ -5,8 +5,12 @@ import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification } from "@/lib/vision";
+import { deriveStrategies } from "@/lib/pricing/strategies";
+import type { PricingTier } from "@/lib/pricing/types";
+import { generateClarifyingOptions } from "@/lib/clarify/generate";
 import { saveReview, sharpenEstimate } from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
+import { ConsumeUploadDraft } from "./consume-upload-draft";
 
 /**
  * Review page — reads the persisted item + its listing + the prediction log back
@@ -26,10 +30,10 @@ export default async function ReviewPage({
   searchParams,
 }: {
   params: Promise<{ itemId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; new?: string }>;
 }) {
   const { itemId } = await params;
-  const { error: actionError } = await searchParams;
+  const { error: actionError, new: fromUpload } = await searchParams;
 
   const supabase = await createClient();
   const userId = await getUserId();
@@ -96,6 +100,29 @@ export default async function ReviewPage({
   const override = item.price_override != null ? Number(item.price_override) : null;
   const displayPrice =
     suggested != null ? effectivePrice(suggested, override) : override;
+
+  // Seller pricing strategies (#94: quick/balanced/maximize) — positions in the
+  // real comp band. Pure + honesty-gated: a tight/low-confidence tier yields a
+  // single "Suggested" point, never a fabricated spread.
+  const strategies =
+    suggested != null
+      ? deriveStrategies({
+          suggested,
+          range: { min: range?.low ?? suggested, max: range?.high ?? suggested },
+          tier: (log?.tier_fired as PricingTier | null) ?? "llm-only",
+        })
+      : [];
+
+  // Dynamic per-product clarify options (#93) — generated only for a non-high
+  // estimate we can still sharpen, and only when parsed attributes exist.
+  // Best-effort: the generator returns [] on any failure, so the page never
+  // blocks on it (one model call per low-confidence review render).
+  const clarifyEligible =
+    suggested != null && confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
+  const clarifyOptions =
+    clarifyEligible && parsedAttrs.success
+      ? (await generateClarifyingOptions({ attributes: parsedAttrs.data })).options
+      : [];
 
   // Disposition transparency (issue #12): the explanation derives from the
   // RUN-TIME facts (persisted status + logged confidence + the switch value
@@ -176,11 +203,22 @@ export default async function ReviewPage({
     range,
     confidence,
     tier: (log?.tier_fired as string | null) ?? null,
+    strategies,
+    clarifyOptions,
     banner,
     actionError: actionError ?? null,
   };
 
   return (
-    <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+    <>
+      {/* Consume the pending-upload draft ONLY when we arrived from a fresh upload
+          (the action redirects to /review/:id?new=1). Gating on that signal is
+          essential: this page is also opened for EXISTING items, and clearing
+          unconditionally would wipe a half-built upload draft a seller left on
+          /upload (Codex). With the flag, a successful upload still can't leave
+          photos behind to be resubmitted as a duplicate. */}
+      {fromUpload ? <ConsumeUploadDraft /> : null}
+      <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+    </>
   );
 }

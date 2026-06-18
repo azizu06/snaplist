@@ -16,13 +16,13 @@ import {
  * Render: `npx remotion render remotion/index.ts stage-price public/stage-price.mp4`
  */
 
-const INK = "#131e3a";
-const DIM = "#3d4a68";
-const FAINT = "#5f6b88";
-const LINE = "#dfe4ee";
-const SLAB = "#f4f6fb";
-const VIOLET = "#6d4aff";
-const DEEP = "#5a36f0";
+const INK = "#1a1a1a";
+const DIM = "#404040";
+const FAINT = "#6d7175";
+const LINE = "#e1e3e5";
+const SLAB = "#f6f6f7";
+const VIOLET = "#008060";
+const DEEP = "#006e52";
 
 const font =
   'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -123,7 +123,7 @@ export const StagePrice: React.FC = () => {
             {searchingDone ? (
               <div
                 style={{
-                  background: "rgba(109,74,255,0.12)",
+                  background: "rgba(0,128,96,0.12)",
                   color: VIOLET,
                   borderRadius: 99,
                   padding: "5px 12px",
@@ -141,7 +141,7 @@ export const StagePrice: React.FC = () => {
                     width: 12,
                     height: 12,
                     borderRadius: 99,
-                    border: "2px solid rgba(109,74,255,0.25)",
+                    border: "2px solid rgba(0,128,96,0.25)",
                     borderTopColor: VIOLET,
                     transform: `rotate(${frame * 14}deg)`,
                   }}

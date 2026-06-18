@@ -64,7 +64,7 @@ export const EndCard: React.FC = () => {
     <AbsoluteFill
       style={{
         opacity: Math.min(fadeIn, fadeOut),
-        background: "#f4f6fb",
+        background: "#f6f6f7",
         alignItems: "center",
       }}
     >

@@ -22,7 +22,7 @@ const SpotlightCard: React.FC<SpotlightCardProps> = ({
   children,
   className = '',
   chromeClassName = 'rounded-2xl border border-line bg-panel shadow-card',
-  spotlightColor = 'rgba(109, 74, 255, 0.12)'
+  spotlightColor = 'rgba(0, 128, 96, 0.12)'
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
   const [isFocused, setIsFocused] = useState<boolean>(false);

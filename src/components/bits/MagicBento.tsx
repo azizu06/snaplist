@@ -52,7 +52,7 @@ export interface BentoProps {
 
 const DEFAULT_PARTICLE_COUNT = 10;
 const DEFAULT_SPOTLIGHT_RADIUS = 320;
-const DEFAULT_GLOW_COLOR = '109, 74, 255';
+const DEFAULT_GLOW_COLOR = '0, 128, 96';
 const MOBILE_BREAKPOINT = 768;
 
 const createParticleElement = (x: number, y: number, color: string = DEFAULT_GLOW_COLOR): HTMLDivElement => {
@@ -543,7 +543,7 @@ const MagicBento: React.FC<BentoProps> = ({
           }
 
           .card--border-glow:hover {
-            box-shadow: 0 6px 24px -8px rgba(19, 30, 58, 0.18), 0 0 28px rgba(${glowColor}, 0.16);
+            box-shadow: 0 6px 24px -8px rgba(26, 26, 26, 0.18), 0 0 28px rgba(${glowColor}, 0.16);
           }
 
           .particle::before {

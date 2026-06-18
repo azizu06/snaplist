@@ -6,21 +6,30 @@ import type { StatusTone } from "@/lib/ui/status";
  * never raw persisted keys.
  */
 
+/**
+ * Color-coded status chrome (Shopify Products parity). Each tone is a soft
+ * tonal badge — a tinted fill + same-hue text + a saturated dot — so a column
+ * of statuses is scannable at a glance and the meaningful states pop: Active
+ * green, Scheduled/Processing blue, Needs attention red, Draft/Archived a calm
+ * grey. Tints come from the semantic `*-soft` tokens, which carry their own
+ * light + dark values, so this reads correctly in both themes.
+ */
+const NEUTRAL_PILL = "bg-surface-2 text-muted border border-border";
 const TONE_CLASSES: Record<StatusTone, string> = {
-  success:
-    "bg-success-soft text-success-soft-fg border border-success-border",
-  "success-solid": "bg-success-solid text-white border border-success-solid",
-  warning:
-    "bg-warning-soft text-warning-soft-fg border border-warning-border",
-  danger: "bg-danger-soft text-danger-soft-fg border border-danger-border",
-  neutral: "bg-surface-2 text-muted border border-border",
+  success: "bg-success-soft text-success-soft-fg",
+  "success-solid": "bg-success-soft text-success-soft-fg",
+  warning: "bg-warning-soft text-warning-soft-fg",
+  danger: "bg-danger-soft text-danger-soft-fg",
+  info: "bg-info-soft text-info-soft-fg",
+  neutral: NEUTRAL_PILL,
 };
 
 const DOT_CLASSES: Record<StatusTone, string> = {
   success: "bg-success",
-  "success-solid": "bg-white",
+  "success-solid": "bg-success",
   warning: "bg-warning",
   danger: "bg-danger",
+  info: "bg-info-soft-fg",
   neutral: "bg-faint",
 };
 
@@ -28,19 +37,26 @@ export function StatusBadge({
   label,
   tone,
   dot = true,
+  pulse = false,
 }: {
   label: string;
   tone: StatusTone;
   dot?: boolean;
+  /** Pulses the dot for transient "working" states (e.g. Processing) so they
+   *  read as active and don't blur against same-hue static states. Motion-safe:
+   *  reduced-motion users get a steady dot. */
+  pulse?: boolean;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[13px] font-medium ${TONE_CLASSES[tone]}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-medium ${TONE_CLASSES[tone]}`}
     >
       {dot ? (
         <span
           aria-hidden
-          className={`size-1.5 shrink-0 rounded-full ${DOT_CLASSES[tone]}`}
+          className={`size-1.5 shrink-0 rounded-full ${DOT_CLASSES[tone]} ${
+            pulse ? "motion-safe:animate-pulse" : ""
+          }`}
         />
       ) : null}
       {label}

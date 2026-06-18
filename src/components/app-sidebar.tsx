@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { SidebarNav } from "./nav-links";
-import { LogoMark } from "./logo";
+import { SidebarNav, SidebarFooter } from "./nav-links";
 
 /**
  * AppSidebar — the desktop sidebar, now collapsible (dashboard v2). Expanded
@@ -53,6 +51,15 @@ export function AppSidebar() {
     });
   }, []);
 
+  // Publish the live width so the topbar can center its search over the content
+  // area (--sidebar-w). Mirrors the w-16 / w-[232px] classes below exactly.
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--sidebar-w",
+      collapsed ? "64px" : "232px",
+    );
+  }, [collapsed]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (
@@ -73,8 +80,8 @@ export function AppSidebar() {
   return (
     <aside
       data-collapsed={collapsed || undefined}
-      className={`relative sticky top-0 z-40 hidden h-screen shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none sm:flex ${
-        collapsed ? "w-16" : "w-[218px]"
+      className={`relative sticky top-[72px] z-30 hidden h-[calc(100dvh-72px)] shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none sm:flex ${
+        collapsed ? "w-16" : "w-[232px]"
       }`}
     >
       {/* Floating edge toggle — straddles the sidebar border, aligned with
@@ -101,26 +108,14 @@ export function AppSidebar() {
           <path d="m15 18-6-6 6-6" />
         </svg>
       </button>
-      <Link
-        href="/dashboard"
-        className={`flex items-center gap-2.5 pb-4 pt-5 text-[16px] font-bold tracking-tight text-fg-strong ${
-          collapsed ? "justify-center px-0" : "px-5"
-        }`}
-      >
-        <LogoMark className="size-7 shrink-0" />
-        <span
-          className={`overflow-hidden whitespace-nowrap transition-opacity duration-200 ${
-            collapsed ? "w-0 opacity-0" : "opacity-100"
-          }`}
-        >
-          SnapList
-        </span>
-      </Link>
-
-      <div className={`flex-1 overflow-y-auto ${collapsed ? "px-2.5" : "px-3"}`}>
+      <div className={`flex flex-1 flex-col overflow-y-auto pt-5 ${collapsed ? "px-2.5" : "px-3"}`}>
         <SidebarNav collapsed={collapsed} />
       </div>
 
+      {/* Settings pinned to the bottom (Shopify's footer slot). */}
+      <div className={`border-t border-border py-2.5 ${collapsed ? "px-2.5" : "px-3"}`}>
+        <SidebarFooter collapsed={collapsed} />
+      </div>
     </aside>
   );
 }

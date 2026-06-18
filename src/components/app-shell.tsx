@@ -1,87 +1,112 @@
 import Link from "next/link";
-import ClickSpark from "./bits/ClickSpark";
 import { MobileNav } from "./nav-links";
 import { AppSidebar } from "./app-sidebar";
 import { ProfileMenu, type ProfileUser } from "./profile-menu";
 import { CommandPalette, type PaletteHit } from "./command-palette";
+import { NotificationBell } from "./notification-bell";
+import { ThemeTopbarToggle } from "./theme-toggle";
+import type { NotificationView } from "@/lib/notifications";
 import { LogoMark } from "./logo";
 
 /**
- * AppShell — Stripe-Dashboard layout language on the Prism-light identity
- * (issue #49 round 4; dashboard v2 makes the chrome interactive): a
- * collapsible white left sidebar, a white top bar whose search pill opens the
- * real ⌘K palette, a violet primary action, and the account dropdown on the
- * avatar. Content sits on a cool-gray canvas; mobile keeps the bottom tabs.
+ * AppShell — Shopify-admin shell on the neutral+green identity (issue #49; nav
+ * mirror pass). Shopify's chrome: a FULL-WIDTH top bar spanning above
+ * everything, laid out as three zones — logo (left) · search (TRULY centered
+ * to the viewport via a 1fr middle column) · actions (right: notification bell,
+ * theme toggle, account) — then a row of the collapsible left sidebar + the
+ * content canvas beneath it. Mobile keeps the bottom tabs.
  *
- * Signed-out: logo-only top bar, no nav. `searchFixtures` is dev-preview
- * only — it lets the palette search fixture rows without a session.
+ * Signed-out: logo-only top bar, no nav. `searchFixtures`/`notifications` are
+ * dev-preview seeds so the chrome is screenshotable without a session.
  */
 export function AppShell({
   signedIn,
   user,
+  userId,
+  notifications = [],
   searchFixtures,
   children,
 }: {
   signedIn: boolean;
   user: ProfileUser | null;
+  userId: string | null;
+  notifications?: NotificationView[];
   searchFixtures?: PaletteHit[];
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-full">
-      {signedIn ? <AppSidebar /> : null}
+    <div className="flex min-h-full flex-col">
+      {/* ---- full-width top bar (Shopify): logo · centered search · actions ---- */}
+      {/* Solid (not bg-surface/95 + backdrop-blur): the backdrop-filter promoted
+          the whole bar to a composited layer and rendered the tiny ⌘K pill
+          blurry on retina displays. The bar was 95% opaque anyway, so going
+          solid is a no-op visually and keeps small text crisp. */}
+      <header className="sticky top-0 z-40 border-b border-border bg-surface">
+        {/* 1fr · auto · 1fr → the middle (search) cell sits dead-center between
+            two equal flanks, so it's centered to the FULL-WIDTH bar = the
+            viewport, and never shifts when the sidebar collapses. The center
+            track is a clamped width on sm+ so the field is generously sized;
+            on mobile it collapses to an auto-sized search icon. */}
+        <div className="relative">
+          {/* brand — pinned to the bar's true left (over the sidebar zone) so it
+              stays put while the search re-centers over the content area. */}
+          <Link
+            href={signedIn ? "/dashboard" : "/"}
+            aria-label="SnapList home"
+            className="absolute left-4 top-1/2 z-10 flex -translate-y-1/2 items-center gap-2.5 text-[18px] font-bold tracking-tight text-fg-strong sm:left-6"
+          >
+            <LogoMark className="size-8" />
+            {/* wordmark on every size — with the mobile global search dropped,
+                there's room for the full brand again. */}
+            <span>SnapList</span>
+          </Link>
 
-      {/* ---- main column: topbar + content ---- */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
-          <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
-            {/* brand on mobile / signed-out */}
-            <Link
-              href={signedIn ? "/dashboard" : "/"}
-              className={`flex items-center gap-2 text-[15px] font-bold tracking-tight text-fg-strong ${
-                signedIn ? "sm:hidden" : ""
-              }`}
-            >
-              <LogoMark className="size-6" />
-              SnapList
-            </Link>
-
-            {signedIn ? (
-              <>
-                <CommandPalette fixtures={searchFixtures} />
-
-                {/* gap-4: breathing room between the primary action and the
-                    avatar (round 5 — they sat nearly touching). */}
-                <div className="ml-auto flex items-center gap-4">
-                  {/* react-bits ClickSpark: a small violet burst on the primary
-                      action — subtle, product-dashboard scale. */}
-                  <ClickSpark
-                    className="inline-block"
-                    sparkColor="#6d4aff"
-                    sparkSize={7}
-                    sparkRadius={16}
-                    sparkCount={8}
-                    duration={400}
-                  >
-                    <Link
-                      href="/upload"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover motion-safe:active:scale-[0.98]"
-                    >
-                      <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M12 5v14M5 12h14" />
-                      </svg>
-                      New listing
-                    </Link>
-                  </ClickSpark>
-                  {user ? <ProfileMenu user={user} /> : null}
+          {/* Content-area row: left-padded by the LIVE sidebar width (sm+) so the
+              centered search is symmetric over the MAIN section and glides as the
+              sidebar collapses/expands (--sidebar-w, published by AppSidebar).
+              Transition matches the sidebar's width animation. */}
+          <div className="grid h-14 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-2 px-4 transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none sm:h-[72px] sm:grid-cols-[1fr_clamp(16rem,38vw,30rem)_1fr] sm:gap-4 sm:px-6 sm:pl-[var(--sidebar-w)]">
+            <div aria-hidden />
+            {/* center zone — content-centered search, sm+ ONLY. The mobile
+                global search is dropped (sellers explore via each screen's own
+                search/filter), so this cell stays empty on phones and the bar
+                reads as logo · actions with room to breathe. The cell itself
+                stays in flow so the grid columns hold; only the palette hides. */}
+            <div className="flex min-w-0 justify-center">
+              {signedIn ? (
+                <div className="hidden w-full justify-center sm:flex">
+                  <CommandPalette fixtures={searchFixtures} />
                 </div>
-              </>
-            ) : null}
-          </div>
-        </header>
+              ) : null}
+            </div>
 
-        {/* pb-20: clearance for the floating mobile Dock (react-bits app pass) */}
-        <div className="flex min-w-0 flex-1 flex-col pb-20 sm:pb-0">{children}</div>
+            {/* right zone — bell · theme · (divider) · account. Tight, equal gaps
+                between the ghost icon buttons, then a hairline before the avatar
+                so the cluster reads evenly spaced rather than crowding the photo. */}
+            {signedIn ? (
+              <div className="flex items-center justify-end gap-1.5 sm:gap-1">
+                <NotificationBell userId={userId} initial={notifications} />
+                <ThemeTopbarToggle />
+                {user ? (
+                  <span aria-hidden className="mx-1 h-5 w-px bg-border sm:mx-1.5" />
+                ) : null}
+                {user ? <ProfileMenu user={user} /> : null}
+              </div>
+            ) : (
+              <div />
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ---- body: sidebar + content canvas ---- */}
+      <div className="flex min-h-0 flex-1">
+        {signedIn ? <AppSidebar /> : null}
+        {/* Bottom clearance for the fixed mobile dock — EXACTLY the dock's height
+            (h-14 = 56px) + the safe-area inset, so the dock never overlaps
+            content and there's no dead band above it (the old pb-20 over-reserved
+            and left a gap on no-safe-area viewports). */}
+        <div className="flex min-w-0 flex-1 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-0">{children}</div>
       </div>
 
       {signedIn ? <MobileNav /> : null}

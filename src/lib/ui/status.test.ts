@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  bulkStatusDecision,
   confidenceBand,
   confidenceLabel,
+  isBulkEditableStatus,
+  isLiveListingRow,
   lifecycleLabel,
   lifecycleShortLabel,
   tierLabel,
@@ -16,16 +19,19 @@ import {
 
 describe("lifecycleLabel", () => {
   it("translates every persisted listing status to a labeled tone", () => {
+    // Restrained palette: in-flight states are `neutral` (color is reserved for
+    // Active + Needs attention); the label still says what each one is.
+    // Labels track Shopify's Products vocabulary: Draft / Active.
     expect(lifecycleLabel("draft")).toEqual({
-      label: "Draft: needs review",
+      label: "Draft",
       tone: "warning",
     });
     expect(lifecycleLabel("queued")).toEqual({
-      label: "Queued: autopilot will post",
-      tone: "success",
+      label: "Scheduled",
+      tone: "info",
     });
     expect(lifecycleLabel("published")).toEqual({
-      label: "Live",
+      label: "Active",
       tone: "success-solid",
     });
     expect(lifecycleLabel("failed")).toEqual({
@@ -39,7 +45,9 @@ describe("lifecycleLabel", () => {
   });
 
   it("renders an unknown/legacy status honestly instead of guessing", () => {
-    expect(lifecycleLabel("new")).toEqual({ label: "Processing", tone: "neutral" });
+    // Processing pulses (transient "working" state) so it doesn't blur against
+    // the static-blue Scheduled under the locked one-blue palette.
+    expect(lifecycleLabel("new")).toEqual({ label: "Processing", tone: "info", pulse: true });
     expect(lifecycleLabel("something_else")).toEqual({
       label: "something_else",
       tone: "neutral",
@@ -52,11 +60,11 @@ describe("lifecycleLabel", () => {
 describe("lifecycleShortLabel", () => {
   it("compacts the chip for narrow surfaces, keeping the SAME tone", () => {
     expect(lifecycleShortLabel("draft")).toEqual({ label: "Draft", tone: "warning" });
-    expect(lifecycleShortLabel("queued")).toEqual({ label: "Queued", tone: "success" });
-    expect(lifecycleShortLabel("published")).toEqual({ label: "Live", tone: "success-solid" });
+    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "info" });
+    expect(lifecycleShortLabel("published")).toEqual({ label: "Active", tone: "success-solid" });
     expect(lifecycleShortLabel("failed")).toEqual({ label: "Attention", tone: "danger" });
     expect(lifecycleShortLabel("draft_failed")).toEqual({ label: "Attention", tone: "danger" });
-    expect(lifecycleShortLabel("new")).toEqual({ label: "Processing", tone: "neutral" });
+    expect(lifecycleShortLabel("new")).toEqual({ label: "Processing", tone: "info", pulse: true });
   });
 
   it("falls back to the long label's honest rendering for unknown/null", () => {
@@ -65,6 +73,74 @@ describe("lifecycleShortLabel", () => {
       tone: "neutral",
     });
     expect(lifecycleShortLabel(null)).toBeNull();
+  });
+});
+
+describe("isBulkEditableStatus", () => {
+  it("allows only the seller-organizational statuses (draft, archived)", () => {
+    expect(isBulkEditableStatus("draft")).toBe(true);
+    expect(isBulkEditableStatus("archived")).toBe(true);
+  });
+
+  it("rejects the publish-flow statuses so bulk-edit can't bypass the eBay adapter (Codex P1)", () => {
+    // `published` (Live) is written only by the eBay publish path alongside the
+    // ebay_* fields; `queued` (Scheduled) only by the autopilot gate. Neither may
+    // be set by a bulk metadata edit — incl. a crafted request past the UI.
+    expect(isBulkEditableStatus("published")).toBe(false);
+    expect(isBulkEditableStatus("queued")).toBe(false);
+    expect(isBulkEditableStatus("new")).toBe(false);
+    expect(isBulkEditableStatus("failed")).toBe(false);
+    expect(isBulkEditableStatus("")).toBe(false);
+  });
+});
+
+describe("isLiveListingRow", () => {
+  it("is live only with BOTH an eBay listing id AND ebay_status published", () => {
+    expect(
+      isLiveListingRow({ ebay_listing_id: "v1|1234567890|0", ebay_status: "published" }),
+    ).toBe(true);
+  });
+
+  it("is NOT live when either authoritative eBay field is missing/not published", () => {
+    // A local "published" status with no eBay id (never posted) is NOT live — the
+    // whole point of the guard: status alone can't make a listing live.
+    expect(isLiveListingRow({ ebay_listing_id: null, ebay_status: "published" })).toBe(false);
+    expect(isLiveListingRow({ ebay_listing_id: "", ebay_status: "published" })).toBe(false);
+    // Has an eBay id but the eBay side ended/sold — no longer live.
+    expect(isLiveListingRow({ ebay_listing_id: "v1|1|0", ebay_status: "ended" })).toBe(false);
+    expect(isLiveListingRow({ ebay_listing_id: "v1|1|0", ebay_status: null })).toBe(false);
+    expect(isLiveListingRow({})).toBe(false);
+  });
+});
+
+describe("bulkStatusDecision", () => {
+  it("skips when no status change is requested or the row has no listing yet", () => {
+    expect(bulkStatusDecision({ status: undefined, hasListing: true, isLive: false })).toBe("skip");
+    expect(bulkStatusDecision({ status: "draft", hasListing: false, isLive: false })).toBe("skip");
+  });
+
+  it("rejects a status outside the seller-organizational vocabulary (Codex P1)", () => {
+    // published/queued are owned by the publish path / autopilot gate; a crafted
+    // request past the disabled UI must never write them via bulk-edit.
+    expect(bulkStatusDecision({ status: "published", hasListing: true, isLive: false })).toBe("reject-vocab");
+    expect(bulkStatusDecision({ status: "queued", hasListing: true, isLive: false })).toBe("reject-vocab");
+    expect(bulkStatusDecision({ status: "new", hasListing: true, isLive: false })).toBe("reject-vocab");
+  });
+
+  it("refuses to move a LIVE eBay listing, even to a bulk-editable status (Codex)", () => {
+    expect(bulkStatusDecision({ status: "draft", hasListing: true, isLive: true })).toBe("skip-live");
+    expect(bulkStatusDecision({ status: "archived", hasListing: true, isLive: true })).toBe("skip-live");
+  });
+
+  it("writes a bulk-editable status on a non-live listing — the only persisting case", () => {
+    expect(bulkStatusDecision({ status: "draft", hasListing: true, isLive: false })).toBe("write");
+    expect(bulkStatusDecision({ status: "archived", hasListing: true, isLive: false })).toBe("write");
+  });
+
+  it("checks vocabulary BEFORE liveness, so the reported reason is accurate", () => {
+    // A crafted live + out-of-vocab request stays a vocab reject (not skip-live),
+    // so the audit log names the real violation.
+    expect(bulkStatusDecision({ status: "published", hasListing: true, isLive: true })).toBe("reject-vocab");
   });
 });
 

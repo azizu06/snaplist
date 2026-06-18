@@ -40,8 +40,19 @@ void main() {
     d += sin(uv.y * i + a);
   }
   d += uTime * 0.5 * uSpeed;
-  vec3 col = vec3(cos(uv * vec2(d, a)) * 0.6 + 0.4, cos(a + d) * 0.5 + 0.5);
-  col = cos(col * cos(vec3(d, a, 2.5)) * 0.5 + 0.5) * uColor;
+  // Two chaotic scalars from the same field, mapped into a GREEN -> TEAL -> MINT
+  // band. Upstream built an independent-RGB rainbow (which resolved to
+  // purple/magenta — off-palette); driving a single intensity through a fixed
+  // green ramp keeps the iridescence on-brand and never lets purple appear.
+  // uColor stays an overall tint knob for the light/dark variants.
+  float t1 = cos(a + d) * 0.5 + 0.5;
+  float t2 = cos(uv.x * d + uv.y * a) * 0.5 + 0.5;
+  vec3 deep = vec3(0.00, 0.28, 0.21);
+  vec3 mid  = vec3(0.00, 0.55, 0.42);
+  vec3 mint = vec3(0.60, 0.88, 0.78);
+  vec3 col = mix(deep, mid, t1);
+  col = mix(col, mint, t2 * 0.55);
+  col *= uColor;
   gl_FragColor = vec4(col, 1.0);
 }
 `;

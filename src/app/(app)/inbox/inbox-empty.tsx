@@ -1,12 +1,12 @@
 import { InboxDemoVideo } from "./inbox-demo-video";
 
 /**
- * Inbox empty state (app-surfaces v3). A ghost-conversation composition — two
- * tilted blank message cards behind a low-opacity mock thread (buyer bubble +
- * sparkle-drafted reply) under a soft violet glow — reading as "this is what
- * it will look like", then one headline, one sentence, a hint about where
- * messages come from, and a lazy "watch how replies work" video teaser
- * (designed CSS poster until the mp4 can play, so it never reads broken).
+ * Inbox empty state. A ghost-conversation composition — two tilted blank
+ * message cards behind a low-opacity mock thread (buyer bubble + sparkle-drafted
+ * reply) under a soft brand-green glow — reading as "this is what it will look
+ * like", then one headline, one sentence, a hint about where messages come
+ * from, and a lazy "watch how replies work" video teaser (designed CSS poster
+ * until the mp4 can play, so it never reads broken).
  *
  * The composition itself stays CSS/SVG; only the video teaser is a client
  * component — the state renders identically from the live inbox and the dev
@@ -32,8 +32,8 @@ function GhostCard({ className }: { className: string }) {
         <span className="block h-1.5 w-24 rounded-full bg-border" />
         <span className="mt-1.5 block h-1.5 w-16 rounded-full bg-border/70" />
       </div>
-      <div className="ml-auto mt-2.5 max-w-[60%] rounded-xl rounded-br-sm bg-accent-soft/50 p-2.5">
-        <span className="block h-1.5 w-20 rounded-full bg-accent/20" />
+      <div className="ml-auto mt-2.5 max-w-[60%] rounded-xl rounded-br-sm bg-brand-soft p-2.5">
+        <span className="block h-1.5 w-20 rounded-full bg-brand-muted/40" />
       </div>
     </div>
   );
@@ -42,13 +42,13 @@ function GhostCard({ className }: { className: string }) {
 export function InboxEmptyState() {
   return (
     <div className="relative overflow-hidden rounded-xl border border-border bg-surface pt-10 text-center shadow-xs">
-      {/* soft violet bloom behind the composition */}
+      {/* soft brand-green bloom behind the composition (kept low — restraint) */}
       <div
         aria-hidden
         className="pointer-events-none absolute -top-20 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full"
         style={{
           background:
-            "radial-gradient(closest-side, rgba(109, 74, 255, 0.10), rgba(109, 74, 255, 0.04) 55%, transparent)",
+            "radial-gradient(closest-side, rgba(0, 128, 96, 0.08), rgba(0, 128, 96, 0.03) 55%, transparent)",
         }}
       />
 
@@ -73,10 +73,10 @@ export function InboxEmptyState() {
                 Hi! Does it come with the original box and cables?
               </p>
             </div>
-            <div className="ml-auto mt-2.5 max-w-[80%] rounded-2xl rounded-br-md border border-accent/20 bg-accent-soft/60 px-3.5 py-2.5">
+            <div className="ml-auto mt-2.5 max-w-[80%] rounded-2xl rounded-br-md border border-brand-tint bg-brand-soft px-3.5 py-2.5">
               <p className="flex items-center gap-1 text-[12.5px] font-semibold text-accent-soft-fg">
                 <SparkleIcon className="size-3" />
-                reply drafted, awaiting your approval
+                Drafted from your listing
               </p>
               <p className="mt-0.5 text-[15px] leading-snug text-fg-strong">
                 Yes, it ships in the original box with both cables included.

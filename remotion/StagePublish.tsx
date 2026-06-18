@@ -18,12 +18,12 @@ import {
  * Render: `npx remotion render remotion/index.ts stage-publish public/stage-publish.mp4`
  */
 
-const INK = "#131e3a";
-const DIM = "#3d4a68";
-const FAINT = "#5f6b88";
-const LINE = "#dfe4ee";
-const SLAB = "#f4f6fb";
-const VIOLET = "#6d4aff";
+const INK = "#1a1a1a";
+const DIM = "#404040";
+const FAINT = "#6d7175";
+const LINE = "#e1e3e5";
+const SLAB = "#f6f6f7";
+const VIOLET = "#008060";
 const GREEN = "#16a34a";
 
 const font =
@@ -62,7 +62,7 @@ function Cursor({ x, y, press }: { x: number; y: number; press: number }) {
             width: 40,
             height: 40,
             borderRadius: 99,
-            border: `2px solid rgba(109,74,255,${0.55 * (1 - press)})`,
+            border: `2px solid rgba(0,128,96,${0.55 * (1 - press)})`,
             transform: `scale(${0.5 + press * 1.1})`,
           }}
         />
@@ -223,7 +223,7 @@ export const StagePublish: React.FC = () => {
                 </span>
                 <span
                   style={{
-                    background: "rgba(109,74,255,0.12)",
+                    background: "rgba(0,128,96,0.12)",
                     color: VIOLET,
                     borderRadius: 99,
                     padding: "4px 11px",
@@ -251,7 +251,7 @@ export const StagePublish: React.FC = () => {
                   fontSize: 15.5,
                   fontWeight: 700,
                   transform: `scale(${1 - buttonPressed * 0.04})`,
-                  boxShadow: `0 ${8 - buttonPressed * 6}px ${20 - buttonPressed * 12}px -8px rgba(109,74,255,0.55)`,
+                  boxShadow: `0 ${8 - buttonPressed * 6}px ${20 - buttonPressed * 12}px -8px rgba(0,128,96,0.55)`,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",

@@ -33,12 +33,12 @@ function PosterScene() {
       aria-hidden
       className="absolute inset-0 flex flex-col justify-center gap-1.5 bg-surface-2 px-5 py-3 sm:gap-2.5 sm:px-10 sm:py-5"
     >
-      {/* soft violet pool, echoes the empty-state bloom */}
+      {/* soft brand-green pool, echoes the empty-state bloom */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(70% 90% at 50% 0%, rgba(109, 74, 255, 0.12), transparent 70%)",
+            "radial-gradient(70% 90% at 50% 0%, rgba(0, 128, 96, 0.10), transparent 70%)",
         }}
       />
       <div className="relative max-w-[62%] rounded-2xl rounded-bl-md border border-border bg-surface px-3.5 py-2 shadow-xs sm:py-2.5">
@@ -49,16 +49,16 @@ function PosterScene() {
           Is this still available? Any scratches?
         </p>
       </div>
-      <div className="relative ml-auto max-w-[68%] rounded-2xl rounded-br-md border border-accent/25 bg-accent-soft/70 px-3.5 py-2 shadow-xs sm:py-2.5">
+      <div className="relative ml-auto max-w-[68%] rounded-2xl rounded-br-md border border-brand-tint bg-brand-soft px-3.5 py-2 shadow-xs sm:py-2.5">
         <p className="flex items-center gap-1 text-[10px] font-semibold text-accent-soft-fg sm:text-[12px]">
           <SparkleIcon className="size-3" />
-          reply drafted in seconds
+          Drafted in seconds
         </p>
         <p className="mt-0.5 text-[13.5px] leading-snug text-fg sm:text-[15px]">
           Yes, it&apos;s available, light wear only, photos show every angle.
         </p>
       </div>
-      <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-[#131e3a]/70 px-3.5 py-1.5 text-[11px] font-semibold text-white sm:mt-1 sm:text-[13.5px]">
+      <p className="relative mx-auto inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[11px] font-semibold text-primary-fg sm:mt-1 sm:text-[13.5px]">
         <svg viewBox="0 0 24 24" className="size-3" fill="currentColor" aria-hidden>
           <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86a1 1 0 0 0-1.5.86Z" />
         </svg>

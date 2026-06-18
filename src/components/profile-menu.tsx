@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AppSignOutButton } from "./sign-out-button";
-import { ThemeMenuToggle } from "./theme-toggle";
 
 /**
  * ProfileMenu — the topbar avatar opens an account dropdown (dashboard v2).
@@ -82,7 +81,7 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
           // eslint-disable-next-line @next/next/no-img-element -- external Clerk avatar
           <img src={user.imageUrl} alt="" className="size-full object-cover" />
         ) : (
-          <span className="flex size-full items-center justify-center bg-gradient-to-br from-[#7a73ff] to-[#a960ee]">
+          <span className="flex size-full items-center justify-center bg-gradient-to-br from-[#1fb88c] to-[#1fb88c]">
             {initial}
           </span>
         )}
@@ -128,12 +127,11 @@ export function ProfileMenu({ user }: { user: ProfileUser }) {
                 </svg>
               }
             >
-              Tour
+              Guide
             </MenuItem>
-            {/* Quick light/dark flip — full Light/Dark/System lives in
-                Settings → Appearance. Doesn't close the menu: flipping is
-                something you want to see happen. */}
-            <ThemeMenuToggle />
+            {/* Theme toggle removed from here — it lives in the top bar next to
+                the bell now, so this menu doesn't duplicate the control. Full
+                Light/Dark/System still lives in Settings → Appearance. */}
           </div>
 
           <div className="border-t border-border pt-1">

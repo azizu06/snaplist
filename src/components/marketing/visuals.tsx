@@ -45,32 +45,6 @@ const TINT_VAR: Record<SpectrumTint, { ink: string; soft: string }> = {
   indigo: { ink: "var(--tint-indigo)", soft: "var(--tint-indigo-soft)" },
 };
 
-/**
- * Numbered section eyebrow with a short tinted rule — the affordance system
- * that replaces the repeated violet pill chip. Each capability area keys to
- * one band of the prism spectrum.
- */
-export function Eyebrow({
-  n,
-  tint = "violet",
-  children,
-}: {
-  n?: string;
-  tint?: SpectrumTint;
-  children: React.ReactNode;
-}) {
-  const t = TINT_VAR[tint];
-  return (
-    <p
-      className="eyebrow-rule inline-flex items-baseline gap-2 text-[13.5px] font-semibold uppercase tracking-[0.16em]"
-      style={{ color: t.ink, "--eyebrow-tint": t.ink } as React.CSSProperties}
-    >
-      {n ? <span className="nums opacity-60">{n}</span> : null}
-      {children}
-    </p>
-  );
-}
-
 /** Compact icon + phrase chip — replaces paragraph bullets on /features. */
 export function PointChip({
   tint = "violet",

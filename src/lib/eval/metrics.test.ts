@@ -9,6 +9,7 @@ import {
   observedCorrect,
   pricingAccuracy,
   priceWithinBand,
+  recommendAutopilotThreshold,
   type EvalPair,
 } from "./metrics";
 import type { EvalPrediction, GoldItem } from "./types";
@@ -279,5 +280,69 @@ describe("matchPredictions", () => {
       prediction({ goldId: "g1", price: 20 }),
     ]);
     expect(result.pairs[0].prediction.price).toBe(20);
+  });
+});
+
+describe("recommendAutopilotThreshold (#4 — evidence-driven gate)", () => {
+  // Default gold has no brand/model truth, so observedCorrect == priceWithinBand
+  // ([50,100]): price 75 is correct, price 150 is wrong. Confidence is set freely.
+  const correctAt = (c: number, id = `c${c}`) =>
+    pair(gold({ id }), prediction({ goldId: id, price: 75, confidence: c }));
+  const wrongAt = (c: number, id = `w${c}`) =>
+    pair(gold({ id }), prediction({ goldId: id, price: 150, confidence: c }));
+
+  it("finds the clean boundary when confidence separates correct from wrong runs", () => {
+    const rec = recommendAutopilotThreshold([
+      correctAt(0.9),
+      correctAt(0.85),
+      wrongAt(0.3),
+      wrongAt(0.2),
+    ]);
+    // Lowest gate with full precision: 0.85 admits both correct, no wrong.
+    expect(rec.threshold).toBeCloseTo(0.85, 5);
+    expect(rec.precision).toBe(1);
+    expect(rec.recall).toBe(1);
+    expect(rec.targetMet).toBe(true);
+    expect(rec.eligibleCount).toBe(2);
+  });
+
+  it("raises the gate to hold target precision when confidences overlap (trades recall)", () => {
+    // A wrong run at 0.7 sits between two correct runs (0.9, 0.6): any gate that
+    // admits 0.6 also admits the wrong 0.7, so target precision forces gate 0.9.
+    const rec = recommendAutopilotThreshold(
+      [correctAt(0.9), correctAt(0.6), wrongAt(0.7), wrongAt(0.4)],
+      { targetPrecision: 0.9 },
+    );
+    expect(rec.threshold).toBeCloseTo(0.9, 5);
+    expect(rec.precision).toBe(1);
+    expect(rec.recall).toBe(0.5);
+    expect(rec.targetMet).toBe(true);
+  });
+
+  it("a looser target precision lets the gate auto-post more (higher recall)", () => {
+    // At target 0.6 the gate 0.6 (precision 2/3 ≈ 0.667 ≥ 0.6) beats gate 0.9.
+    const rec = recommendAutopilotThreshold(
+      [correctAt(0.9), correctAt(0.6), wrongAt(0.7), wrongAt(0.4)],
+      { targetPrecision: 0.6 },
+    );
+    expect(rec.threshold).toBeCloseTo(0.6, 5);
+    expect(rec.recall).toBe(1);
+    expect(rec.targetMet).toBe(true);
+  });
+
+  it("reports targetMet=false when even the strictest gate is too loose", () => {
+    const rec = recommendAutopilotThreshold([wrongAt(0.9), wrongAt(0.8)], {
+      targetPrecision: 0.9,
+    });
+    expect(rec.targetMet).toBe(false);
+    expect(rec.precision).toBe(0); // no correct runs anywhere
+    expect(rec.threshold).toBeCloseTo(0.9, 5); // most conservative fallback
+  });
+
+  it("throws on an empty pair set and on an out-of-range target", () => {
+    expect(() => recommendAutopilotThreshold([])).toThrow(/at least one/);
+    expect(() =>
+      recommendAutopilotThreshold([correctAt(0.9)], { targetPrecision: 1.5 }),
+    ).toThrow(/targetPrecision/);
   });
 });

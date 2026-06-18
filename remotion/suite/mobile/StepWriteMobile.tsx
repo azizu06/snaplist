@@ -69,8 +69,8 @@ function Chip({
         fontSize: size,
         fontWeight: 700,
         color: accent ? VIOLET : INK,
-        background: accent ? "var(--sl-violet-soft, rgba(99,91,255,0.1))" : SLAB,
-        border: `1px solid ${accent ? "var(--sl-violet-border, rgba(99,91,255,0.3))" : LINE}`,
+        background: accent ? "var(--sl-violet-soft, rgba(0,128,96,0.1))" : SLAB,
+        border: `1px solid ${accent ? "var(--sl-violet-border, rgba(0,128,96,0.3))" : LINE}`,
         borderRadius: 10,
         padding: "7px 13px",
       }}
@@ -106,8 +106,8 @@ function CopyBar({ market }: { market: string }) {
           fontSize: 13.5,
           fontWeight: 800,
           color: VIOLET,
-          background: "var(--sl-violet-soft, rgba(99,91,255,0.1))",
-          border: `1px solid var(--sl-violet-border, rgba(99,91,255,0.3))`,
+          background: "var(--sl-violet-soft, rgba(0,128,96,0.1))",
+          border: `1px solid var(--sl-violet-border, rgba(0,128,96,0.3))`,
           borderRadius: 99,
           padding: "6px 15px",
         }}
@@ -192,7 +192,7 @@ function WriteMobileAct() {
         {/* header */}
         <div style={{ position: "absolute", left: PAD, top: 30, right: PAD, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.4, color: INK }}>Write</span>
-          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: VIOLET, background: "var(--sl-violet-soft, rgba(99,91,255,0.1))", borderRadius: 99, padding: "6px 12px" }}>
+          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: VIOLET, background: "var(--sl-violet-soft, rgba(0,128,96,0.1))", borderRadius: 99, padding: "6px 12px" }}>
             STEP 4 · WRITE
           </span>
         </div>
@@ -226,7 +226,7 @@ function WriteMobileAct() {
                 fontWeight: 800,
                 color: i === active ? "white" : FAINT,
                 background: i === active ? VIOLET : "transparent",
-                boxShadow: i === active ? "0 6px 16px -8px rgba(99,91,255,0.6)" : "none",
+                boxShadow: i === active ? "0 6px 16px -8px rgba(0,128,96,0.6)" : "none",
               }}
             >
               {t}

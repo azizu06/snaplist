@@ -16,6 +16,9 @@ export interface SearchHit {
   itemId: string;
   title: string;
   status: string;
+  /** Signed first-photo URL (≤10 min) so the palette row shows the same
+   *  thumbnail as the dashboard list. Null when the item has no photo. */
+  thumbUrl: string | null;
 }
 
 export async function GET(request: Request) {
@@ -80,8 +83,47 @@ export async function GET(request: Request) {
       })),
   ];
 
-  const results: SearchHit[] = searchRows(candidates, q, 8).map(
-    ({ itemId, title, status }) => ({ itemId, title, status }),
-  );
+  const ranked = searchRows(candidates, q, 8);
+
+  // For the winners only (≤8): pull the SAME compact label the dashboard row
+  // shows (itemLabel — brand + model, NOT the long eBay SEO title) plus a signed
+  // first-photo thumbnail, so a search result reads identically to its list row.
+  // Bounded to the 8 results, so this stays one items lookup + one batch sign.
+  const winnerIds = ranked.map((r) => r.itemId);
+  const labelByItem = new Map<string, string>();
+  const thumbByItem = new Map<string, string>();
+  if (winnerIds.length > 0) {
+    const { data: winnerItems } = await supabase
+      .from("items")
+      .select("id, attributes, photos")
+      .in("id", winnerIds);
+    const photoByItem = new Map<string, string>();
+    for (const it of winnerItems ?? []) {
+      const id = it.id as string;
+      labelByItem.set(id, itemLabel(it.attributes, id));
+      const first = (it.photos as string[] | null)?.[0];
+      if (first) photoByItem.set(id, first);
+    }
+    if (photoByItem.size > 0) {
+      const { data: signed } = await supabase.storage
+        .from("photos")
+        .createSignedUrls([...photoByItem.values()], 60 * 10);
+      const urlByPath = new Map<string, string>();
+      for (const entry of signed ?? []) {
+        if (entry.signedUrl && entry.path) urlByPath.set(entry.path, entry.signedUrl);
+      }
+      for (const [id, path] of photoByItem) {
+        const url = urlByPath.get(path);
+        if (url) thumbByItem.set(id, url);
+      }
+    }
+  }
+
+  const results: SearchHit[] = ranked.map(({ itemId, title, status }) => ({
+    itemId,
+    title: labelByItem.get(itemId) ?? title,
+    status,
+    thumbUrl: thumbByItem.get(itemId) ?? null,
+  }));
   return NextResponse.json({ results });
 }

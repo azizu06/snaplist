@@ -31,7 +31,7 @@ const slideVariants = {
 };
 
 const OVERLAY_BTN =
-  "flex items-center justify-center rounded-full bg-[#131e3a]/70 text-white transition-colors hover:bg-[#131e3a]";
+  "flex items-center justify-center rounded-full bg-[#1a1a1a]/70 text-white transition-colors hover:bg-[#1a1a1a]";
 
 export interface PhotoCarouselProps {
   previews: string[];
@@ -43,6 +43,9 @@ export interface PhotoCarouselProps {
   showCover?: boolean;
   /** Review only: tapping the image opens a full-screen zoom lightbox. */
   enableZoom?: boolean;
+  /** Show the dot pager under the viewer. Default true; the upload sheet turns
+   *  it off because its Shopify-style thumbnail rail already pages the photos. */
+  showDots?: boolean;
   /** Tailwind aspect classes for the inline viewer (fallback before the cover
    *  photo is measured, or when adaptiveFrame is off). */
   aspectClassName?: string;
@@ -50,6 +53,13 @@ export interface PhotoCarouselProps {
    *  so the first photo fills edge-to-edge — no side/letterbox bands — and the
    *  frame stays locked so swiping never reflows the layout. */
   adaptiveFrame?: boolean;
+  /** Optional cap on the inline frame HEIGHT (px) for dense edit layouts. The
+   *  frame still matches the photo's REAL aspect ratio exactly (adaptiveFrame),
+   *  so the image fills it edge-to-edge with NO letterbox/pillar bands — for any
+   *  photo, never hardcoded. The cap just bounds how tall a square/portrait shot
+   *  gets, by capping the frame's width to `height × aspect` and centering it in
+   *  the card. Requires adaptiveFrame. */
+  frameMaxHeight?: number;
   className?: string;
 }
 
@@ -60,8 +70,10 @@ export function PhotoCarousel({
   onRemove,
   showCover = false,
   enableZoom = false,
+  showDots = true,
   aspectClassName = "aspect-square sm:aspect-[4/3]",
   adaptiveFrame = false,
+  frameMaxHeight,
   className = "",
 }: PhotoCarouselProps) {
   const count = previews.length;
@@ -196,19 +208,31 @@ export function PhotoCarousel({
   return (
     <div className={`w-full ${className}`}>
       <div
-        className={`relative ${aspectClassName} w-full overflow-hidden rounded-2xl border border-border bg-surface-2`}
-        style={frameAspect ? { aspectRatio: String(frameAspect) } : undefined}
+        className={`relative ${aspectClassName} mx-auto w-full overflow-hidden rounded-2xl border border-border bg-surface-2`}
+        style={
+          frameAspect
+            ? {
+                aspectRatio: String(frameAspect),
+                // Cap height without ever cropping: the frame already matches the
+                // photo's aspect, so capping width to height×aspect bounds the
+                // height and just centres a narrower frame (no letterbox bands).
+                ...(frameMaxHeight
+                  ? { maxWidth: `${Math.round(frameMaxHeight * frameAspect)}px` }
+                  : {}),
+              }
+            : undefined
+        }
       >
         {slide(enableZoom ? () => setZoomed(true) : undefined)}
 
         {/* badge: upload shows Cover/Photo N; review shows a frame counter */}
         {showCover ? (
-          <span className="absolute left-3 top-3 z-10 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+          <span className="absolute left-3 top-3 z-10 rounded-full bg-[#1a1a1a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white">
             {safe === 0 ? "Cover" : `Photo ${safe + 1}`}
           </span>
         ) : count > 1 ? (
           <span
-            className="absolute left-3 top-3 z-10 rounded-full bg-[#131e3a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white"
+            className="absolute left-3 top-3 z-10 rounded-full bg-[#1a1a1a]/70 px-2.5 py-0.5 text-[11px] font-semibold text-white"
             data-nums
           >
             {safe + 1} / {count}
@@ -246,7 +270,7 @@ export function PhotoCarousel({
         {renderArrows("size-10")}
       </div>
 
-      {count > 1 ? (
+      {showDots && count > 1 ? (
         <div className="mt-3 flex items-center justify-center gap-2">
           {previews.map((_, i) => (
             <button
@@ -299,7 +323,7 @@ export function PhotoCarousel({
             {renderArrows("size-11")}
             {count > 1 ? (
               <span
-                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-[#131e3a]/70 px-3 py-0.5 text-[12px] font-semibold text-white"
+                className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-[#1a1a1a]/70 px-3 py-0.5 text-[12px] font-semibold text-white"
                 data-nums
               >
                 {safe + 1} / {count}

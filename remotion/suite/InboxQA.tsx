@@ -620,8 +620,8 @@ function Composer() {
           width: TEXTBOX.w,
           height: TEXTBOX.h,
           borderRadius: 10,
-          border: `1px solid ${focused ? "rgba(99,91,255,0.55)" : LINE}`,
-          boxShadow: focused ? "0 0 0 3px rgba(99,91,255,0.12)" : undefined,
+          border: `1px solid ${focused ? "rgba(0,128,96,0.55)" : LINE}`,
+          boxShadow: focused ? "0 0 0 3px rgba(0,128,96,0.12)" : undefined,
           background: sent ? SLAB : SURFACE,
           padding: "9px 12px",
           fontSize: 13.5,
@@ -663,7 +663,7 @@ function Composer() {
             width: APPROVE.w,
             height: APPROVE.h,
             borderRadius: 11,
-            background: draftN >= DRAFT_TEXT.length ? VIOLET : "rgba(99,91,255,0.4)",
+            background: draftN >= DRAFT_TEXT.length ? VIOLET : "rgba(0,128,96,0.4)",
             color: "white",
             display: "flex",
             alignItems: "center",
@@ -671,7 +671,7 @@ function Composer() {
             fontSize: 13.5,
             fontWeight: 700,
             transform: `scale(${1 - pressAt(frame, CLICK_APPROVE) * 0.05})`,
-            boxShadow: "0 8px 18px -8px rgba(99,91,255,0.55)",
+            boxShadow: "0 8px 18px -8px rgba(0,128,96,0.55)",
           }}
         >
           Approve & send

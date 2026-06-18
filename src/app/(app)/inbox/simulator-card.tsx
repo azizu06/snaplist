@@ -1,15 +1,36 @@
 "use client";
 
-import { StatusBadge } from "@/components/ui/badge";
 import type { ItemOption } from "./inbox-client";
 
 /**
  * Simulator card — presentational shell for the inbox's "simulate a buyer
- * question" bench (app-surfaces v3: settings-card chrome — leading icon
- * square, header row, body, sandbox footnote). Extracted from InboxClient so
- * the dev preview can render the exact same card with fixture props while
- * the live inbox wires it to Realtime state.
+ * question" bench (settings-card chrome — leading icon square, header row,
+ * body, sandbox footnote). Extracted from InboxClient so the dev preview can
+ * render the exact same card with fixture props while the live inbox wires it
+ * to Realtime state.
+ *
+ * The connection state reads as a quiet live indicator (Shopify "Online store"
+ * pattern, Mobbin "Shopify web Jan 2024" #600): a single pulsing dot + text,
+ * not a filled status pill that competes with the conversation chips below.
  */
+
+/** Live-connection indicator — pulse dot + label, calm by design. */
+function LiveDot({ live }: { live: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-muted">
+      <span aria-hidden className="relative flex size-2">
+        {live ? (
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60 motion-reduce:animate-none" />
+        ) : null}
+        <span
+          className={`relative inline-flex size-2 rounded-full ${live ? "bg-success" : "bg-faint"}`}
+        />
+      </span>
+      {live ? "Live" : "Connecting…"}
+    </span>
+  );
+}
+
 export function SimulatorCard({
   items,
   selectedItem,
@@ -31,7 +52,7 @@ export function SimulatorCard({
         <span className="flex items-center gap-2.5 text-[14px] font-semibold text-fg-strong">
           <span
             aria-hidden
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-soft-fg"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-accent-soft-fg"
           >
             {/* flask — the demo bench */}
             <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -42,10 +63,7 @@ export function SimulatorCard({
           </span>
           Simulate a buyer question
         </span>
-        <StatusBadge
-          label={live ? "Live" : "Connecting…"}
-          tone={live ? "success" : "neutral"}
-        />
+        <LiveDot live={live} />
       </header>
       <div className="flex flex-col gap-3 px-4 py-4 sm:px-5">
         {items.length === 0 ? (
@@ -62,7 +80,7 @@ export function SimulatorCard({
               id="simulate-item"
               value={selectedItem}
               onChange={(e) => onSelectItem(e.target.value)}
-              className="min-w-0 max-w-full flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg sm:max-w-[280px] sm:flex-none"
+              className="min-w-0 max-w-full flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent/30 sm:max-w-[280px] sm:flex-none"
             >
               {items.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -78,7 +96,7 @@ export function SimulatorCard({
               // is active, leaving the question invisible until refresh.
               disabled={simulating || !live}
               title={live ? undefined : "Waiting for the live connection…"}
-              className="rounded-lg bg-primary px-4 py-2 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-60"
+              className="rounded-lg bg-primary px-4 py-2 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
             >
               {simulating
                 ? "Asking…"

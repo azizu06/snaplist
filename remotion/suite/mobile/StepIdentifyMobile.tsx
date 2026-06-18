@@ -126,7 +126,7 @@ function IdentifyMobileAct() {
               fontWeight: 800,
               letterSpacing: 1,
               color: VIOLET,
-              background: "var(--sl-violet-soft, rgba(99,91,255,0.1))",
+              background: "var(--sl-violet-soft, rgba(0,128,96,0.1))",
               borderRadius: 99,
               padding: "6px 12px",
             }}
@@ -160,7 +160,7 @@ function IdentifyMobileAct() {
                   top: scanY - 2,
                   height: 4,
                   background: VIOLET,
-                  boxShadow: `0 0 24px 6px var(--sl-violet, #635bff)`,
+                  boxShadow: `0 0 24px 6px var(--sl-violet, #008060)`,
                 }}
               />
               <div
@@ -170,7 +170,7 @@ function IdentifyMobileAct() {
                   right: 0,
                   top: 0,
                   height: scanY,
-                  background: "var(--sl-violet-soft, rgba(99,91,255,0.14))",
+                  background: "var(--sl-violet-soft, rgba(0,128,96,0.14))",
                 }}
               />
             </>

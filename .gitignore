@@ -54,3 +54,12 @@ asset-intake/
 # local render/review scratch
 .review-shots/
 .verify-shots/
+
+# Impeccable design skill + hook (vendored per-developer; reinstall with
+# `npx impeccable skills install`). Kept local so it doesn't bloat the repo.
+.claude/skills/impeccable/
+.claude/settings.local.json
+.impeccable/
+# Impeccable project context (per-developer design register; not shipped)
+PRODUCT.md
+DESIGN.md

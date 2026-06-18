@@ -138,7 +138,10 @@ export async function uploadAndProcess(formData: FormData) {
     );
   }
 
-  redirect(`/review/${itemId}`);
+  // `?new=1` marks this as the fresh-upload landing so the review page knows to
+  // consume the pending-upload draft (clear its File[]). Without the flag, opening
+  // an EXISTING item's review would wrongly wipe a half-built upload draft.
+  redirect(`/review/${itemId}?new=1`);
 }
 
 /**

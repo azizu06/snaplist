@@ -3,11 +3,18 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { effectivePrice } from "@/lib/pipeline";
 import { itemLabel } from "@/lib/ui/item-label";
+import { sentenceCase } from "@/lib/ui/format";
 import { DashboardView, type DashboardRow } from "./dashboard-view";
 // NOT from dashboard-view: that file is "use client", and a runtime value
 // imported across the client boundary arrives as a reference proxy, not the
 // array (the post-#52 production outage).
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
+import {
+  archiveListings,
+  unarchiveListings,
+  deleteItems,
+  bulkUpdateListings,
+} from "./actions";
 
 /**
  * /dashboard — the seller dashboard (issue #49: the marketing landing now
@@ -17,12 +24,21 @@ import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
  * winning. The auth proxy gates the route; the redirect below is
  * defense-in-depth.
  */
+/** Read a trimmed string attribute off an item's JSON `attributes`. */
+function attrString(attrs: unknown, key: string): string | null {
+  if (attrs && typeof attrs === "object" && key in attrs) {
+    const v = (attrs as Record<string, unknown>)[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; q?: string }>;
 }) {
-  const { filter: rawFilter } = await searchParams;
+  const { filter: rawFilter, q: rawQuery } = await searchParams;
 
   const supabase = await createClient();
   const userId = await getUserId();
@@ -104,13 +120,19 @@ export default async function Dashboard({
       return {
         itemId: l.item_id as string,
         listingId: l.id as string,
-        title:
-          (l.title as string | null) ??
-          (item ? itemLabel(item.attributes, item.id as string) : "Untitled"),
+        // Dashboard rows show a SHORT name (brand + model, via itemLabel) — NOT
+        // the long, keyword-stuffed eBay SEO title. That title is correct for
+        // eBay (and still lives on the listing for publishing) but drags the row
+        // out. Fall back to the listing title only if attributes can't label it.
+        title: item
+          ? itemLabel(item.attributes, item.id as string)
+          : ((l.title as string | null) ?? "Untitled"),
         status: (l.status as string | null) ?? "new",
         createdAt: (l.created_at as string | null) ?? "",
         price: rowPrice(l.item_id as string),
         thumbUrl: rowThumb(l.item_id as string),
+        category: item ? sentenceCase(attrString(item.attributes, "category")) : null,
+        condition: item ? sentenceCase(attrString(item.attributes, "condition")) : null,
       };
     }),
     ...(items ?? [])
@@ -123,6 +145,8 @@ export default async function Dashboard({
         createdAt: (item.created_at as string | null) ?? "",
         price: rowPrice(item.id as string),
         thumbUrl: rowThumb(item.id as string),
+        category: sentenceCase(attrString(item.attributes, "category")),
+        condition: sentenceCase(attrString(item.attributes, "condition")),
       })),
   ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
@@ -138,5 +162,18 @@ export default async function Dashboard({
     ? (rawFilter as DashboardFilterKey)
     : "all";
 
-  return <DashboardView rows={rows} counts={counts} filter={filter} />;
+  const initialQuery = typeof rawQuery === "string" ? rawQuery : undefined;
+
+  return (
+    <DashboardView
+      rows={rows}
+      counts={counts}
+      filter={filter}
+      initialQuery={initialQuery}
+      archiveAction={archiveListings}
+      unarchiveAction={unarchiveListings}
+      deleteAction={deleteItems}
+      bulkUpdateAction={bulkUpdateListings}
+    />
+  );
 }

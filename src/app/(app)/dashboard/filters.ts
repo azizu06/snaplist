@@ -7,15 +7,20 @@
  * the client view import it from here instead.
  */
 export const DASHBOARD_FILTERS: ReadonlyArray<{
-  key: "all" | "draft" | "queued" | "live" | "attention";
+  key: "all" | "active" | "draft" | "archived";
   label: string;
   statuses: readonly string[] | null;
 }> = [
   { key: "all", label: "All", statuses: null },
-  { key: "draft", label: "Draft", statuses: ["draft"] },
-  { key: "queued", label: "Queued", statuses: ["queued"] },
-  { key: "live", label: "Live", statuses: ["published"] },
-  { key: "attention", label: "Needs attention", statuses: ["failed", "draft_failed"] },
+  // Shopify's Products tab set: All · Active · Draft · Archived. Active = live
+  // on eBay (published). Draft folds in everything pre-live and the states that
+  // need the seller (a normal draft, one that errored, plus the automatic
+  // Processing/Scheduled steps) — nothing live, nothing archived.
+  { key: "active", label: "Active", statuses: ["published"] },
+  { key: "draft", label: "Draft", statuses: ["draft", "draft_failed", "failed", "new", "queued"] },
+  // Archived = hidden from the working set (Shopify pattern). Shown in "All"
+  // with an Archived chip; this tab filters to just them.
+  { key: "archived", label: "Archived", statuses: ["archived"] },
 ];
 
 export type DashboardFilterKey = (typeof DASHBOARD_FILTERS)[number]["key"];

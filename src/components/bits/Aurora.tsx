@@ -129,7 +129,7 @@ interface AuroraProps {
 }
 
 export default function Aurora(props: AuroraProps) {
-  const { colorStops = ['#5227FF', '#7cff67', '#5227FF'], amplitude = 1.0, blend = 0.5 } = props;
+  const { colorStops = ['#006e52', '#1fb88c', '#006e52'], amplitude = 1.0, blend = 0.5 } = props;
   // Upstream mirrors props into the ref during render; the repo's
   // react-hooks/refs rule (rightly) forbids that, so the mirror moves into a
   // passive effect — the rAF loop reads it next frame, which is soon enough.

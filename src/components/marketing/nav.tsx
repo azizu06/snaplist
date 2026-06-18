@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { Logo } from "@/components/logo";
 import { ThemeIconToggle } from "@/components/theme-toggle";
 
 const LINKS = [
-  // Explicit Home tab (owner): the logo links home, but not everyone knows
-  // that — a labelled tab makes it discoverable.
+  // Exactly three sections (owner): Home, Guide, Pricing. The logo links home,
+  // but a labelled tab makes it discoverable. "Guide" points at /tour (the
+  // route stays /tour; only the label changed). About was removed — its FAQ
+  // content moved onto the Guide page.
   { href: "/", label: "Home" },
-  { href: "/tour", label: "Tour" },
+  { href: "/tour", label: "Guide" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/about", label: "About" },
 ] as const;
 
 /**
@@ -35,6 +38,11 @@ const LINKS = [
 export function MarketingNav({ signedIn }: { signedIn: boolean }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  // Home matches only "/"; section tabs match their route prefix (so /tour and
+  // any nested guide route both light up "Guide").
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -74,15 +82,33 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
         {/* r6: primary wayfinding links bumped to 15px (was 13.5) with more
             padding + gap so they carry real presence in the bar (owner). */}
         <div className="col-start-2 hidden items-center justify-self-center gap-1.5 md:flex">
-          {LINKS.map(({ href, label }) => (
-            <Link
-              key={href}
-              href={href}
-              className="rounded-full px-4 py-2 text-[16px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
-            >
-              {label}
-            </Link>
-          ))}
+          {LINKS.map(({ href, label }) => {
+            const active = isActive(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={`relative rounded-full px-4 py-2 text-[16px] font-medium transition-colors ${
+                  active
+                    ? "text-flash"
+                    : "text-flash-dim hover:bg-flash/10 hover:text-flash focus-visible:bg-flash/10 focus-visible:text-flash"
+                }`}
+              >
+                {label}
+                {/* sliding active underline — glides between tabs on client-side
+                    nav (shared-layout), matching the app's other highlights */}
+                {active ? (
+                  <motion.span
+                    layoutId="nav-underline"
+                    aria-hidden
+                    className="absolute bottom-1 left-1/2 h-[2px] w-6 -translate-x-1/2 rounded-full bg-iris"
+                    transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                  />
+                ) : null}
+              </Link>
+            );
+          })}
         </div>
 
         <div className="col-start-3 hidden items-center justify-self-end gap-2.5 md:flex">
@@ -90,10 +116,9 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           {signedIn ? (
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-1.5 rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
+              className="inline-flex items-center rounded-full bg-iris px-4.5 py-2 text-[15px] font-semibold text-iris-ink transition-transform hover:scale-[1.03] active:scale-[0.98]"
             >
               Open app
-              <span aria-hidden className="transition-transform group-hover:translate-x-0.5">→</span>
             </Link>
           ) : (
             <>
@@ -142,24 +167,32 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
       >
         <div className="min-h-0 overflow-hidden">
           <div className="border-t border-line px-5 pb-5 pt-2">
-            {LINKS.map(({ href, label }) => (
-              <Link
-                key={href}
-                href={href}
-                tabIndex={open ? undefined : -1}
-                onClick={() => setOpen(false)}
-                className="block rounded-lg px-2 py-2.5 text-[16px] font-medium text-flash-dim transition-colors hover:bg-flash/10 hover:text-flash"
-              >
-                {label}
-              </Link>
-            ))}
+            {LINKS.map(({ href, label }) => {
+              const active = isActive(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  tabIndex={open ? undefined : -1}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => setOpen(false)}
+                  className={`block rounded-lg px-2 py-2.5 text-[16px] font-medium transition-colors ${
+                    active
+                      ? "bg-flash/10 text-flash"
+                      : "text-flash-dim hover:bg-flash/10 hover:text-flash"
+                  }`}
+                >
+                  {label}
+                </Link>
+              );
+            })}
             <Link
               href={signedIn ? "/dashboard" : "/signup"}
               tabIndex={open ? undefined : -1}
               onClick={() => setOpen(false)}
               className="mt-3 inline-flex w-full items-center justify-center rounded-full bg-iris px-4 py-2.5 text-[15px] font-semibold text-iris-ink"
             >
-              {signedIn ? "Open app →" : "Start selling →"}
+              {signedIn ? "Open app" : "Start selling →"}
             </Link>
           </div>
         </div>

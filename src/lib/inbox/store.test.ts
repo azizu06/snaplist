@@ -7,6 +7,7 @@ import {
   attachDraftReply,
   createBuyerMessage,
   retryReplyDelivery,
+  sendFollowUpMessage,
   stubDeliverReply,
 } from "./store";
 import type { MessageRow } from "./types";
@@ -62,6 +63,8 @@ interface RecordedSelect {
   table: string;
   columns: string;
   eqs: [string, unknown][];
+  /** `.or(...)` filter strings, e.g. the retry claim's canonical-reply scope. */
+  ors: string[];
 }
 
 /**
@@ -69,7 +72,7 @@ interface RecordedSelect {
  *   from().insert().select().single()
  *   from().update().eq().select().single()
  *   from().update().eq().eq().select()   (awaited directly — the CAS claim)
- *   from().select().eq().eq().limit()    (awaited directly — the retry claim)
+ *   from().select().eq().eq().or().limit()  (awaited directly — the retry claim)
  * Planned update/insert results may be functions, letting a test compute the
  * result at claim time (e.g. exactly one concurrent CAS winner).
  */
@@ -97,13 +100,17 @@ function fakeSupabase(plan: {
           return { select: () => ({ single: async () => res }) };
         },
         select(columns: string) {
-          const entry: RecordedSelect = { table, columns, eqs: [] };
+          const entry: RecordedSelect = { table, columns, eqs: [], ors: [] };
           selects.push(entry);
           const res =
             plannedSelects.shift() ?? ({ data: [], error: null } as PlannedResult);
           const builder = {
             eq(column: string, value: unknown) {
               entry.eqs.push([column, value]);
+              return builder;
+            },
+            or(filter: string) {
+              entry.ors.push(filter);
               return builder;
             },
             limit: () => builder,
@@ -484,11 +491,14 @@ describe("retryReplyDelivery", () => {
     expect(delivered).toEqual([
       { messageId: MESSAGE_ID, reply: "Draft reply", idempotencyKey: MESSAGE_ID },
     ]);
-    // The claim is "no outbound row references this question".
+    // The claim is "no CANONICAL reply references this question" — scoped to the
+    // canonical reply exactly like messages_canonical_reply_unique so a follow-up
+    // (same reply_to) is never mistaken for the missing reply.
     expect(selects[0].eqs).toEqual([
       ["reply_to", MESSAGE_ID],
       ["direction", "outbound"],
     ]);
+    expect(selects[0].ors).toEqual(["reply_kind.is.null,reply_kind.eq.reply"]);
     // No status CAS is re-run — the inbound row is already terminally `sent`.
     expect(updates).toHaveLength(0);
     // Exactly one outbound row, threaded like the send path's.
@@ -516,6 +526,38 @@ describe("retryReplyDelivery", () => {
     ).rejects.toThrow(ReplySendConflictError);
     expect(deliver).not.toHaveBeenCalled();
     expect(inserts).toHaveLength(0);
+  });
+
+  it("a follow-up sent in the crash gap is NOT a delivered canonical reply — retry scopes its claim and still recovers the reply", async () => {
+    // The documented crash gap: the inbound is `sent` (the CAS claim won) but the
+    // canonical reply never persisted, and the seller — seeing the composer
+    // unlocked — sent a follow-up. That follow-up shares the question's reply_to.
+    // The existence check is scoped to the canonical reply (reply_kind null/'reply')
+    // exactly like messages_canonical_reply_unique, so the follow-up is filtered
+    // out at the DB → the claim returns empty → retry delivers + inserts the
+    // canonical reply, instead of 409-ing and stranding the buyer's question
+    // permanently undelivered. The `.or(...)` scope is what makes this true.
+    const { client, inserts, selects } = fakeSupabase({
+      // The canonical-scoped query excludes the follow-up → no canonical reply yet.
+      selects: [noOutbound],
+      inserts: [{ data: outboundRow(), error: null }],
+    });
+    const deliver = vi.fn(async () => {});
+
+    const result = await retryReplyDelivery(client, {
+      userId: USER_ID,
+      message: inbound,
+      reply: "Draft reply",
+      deliver,
+    });
+
+    // The claim was scoped to the canonical reply — without this, a follow-up
+    // would be counted and the recovery would wrongly 409.
+    expect(selects[0].ors).toEqual(["reply_kind.is.null,reply_kind.eq.reply"]);
+    // Recovered: delivered exactly once and persisted the canonical reply.
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(inserts).toHaveLength(1);
+    expect(result.outbound.id).toBe(OUTBOUND_ID);
   });
 
   it("concurrent double-retry collapses to ONE outbound row; delivery may at worst double on the true race", async () => {
@@ -567,6 +609,94 @@ describe("retryReplyDelivery", () => {
     expect(deliver).not.toHaveBeenCalled();
     expect(selects).toHaveLength(0);
     expect(inserts).toHaveLength(0);
+  });
+});
+
+describe("sendFollowUpMessage", () => {
+  // The conversation root (the inbound question) the seller already replied to.
+  const question = row({ status: "sent" });
+  const FOLLOWUP_ID = "66666666-6666-4666-8666-666666666666";
+
+  function followUpRow() {
+    return row({
+      id: FOLLOWUP_ID,
+      direction: "outbound",
+      body: "Hold on, let me check the serial number for you.",
+      status: "sent",
+      reply_to: MESSAGE_ID,
+      reply_kind: "followup",
+      sent_at: "2026-06-17T12:00:00.000Z",
+    });
+  }
+
+  it("inserts an outbound 'followup' row threaded to the question, then delivers once keyed by the new row id", async () => {
+    const { client, inserts, updates } = fakeSupabase({
+      inserts: [{ data: followUpRow(), error: null }],
+    });
+    const delivered: { messageId: string; reply: string; idempotencyKey: string }[] = [];
+
+    const result = await sendFollowUpMessage(client, {
+      userId: USER_ID,
+      message: question,
+      body: "  Hold on, let me check the serial number for you.  ", // trimmed
+      deliver: async (args) => {
+        delivered.push(args);
+        // No CAS claim for a follow-up — the row is inserted first so its id can
+        // serve as a stable idempotency key for a real adapter.
+        expect(inserts).toHaveLength(1);
+      },
+    });
+
+    // A follow-up is NOT a reply-to-question: no status CAS, no draft.
+    expect(updates).toHaveLength(0);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].table).toBe("messages");
+    expect(inserts[0].payload).toEqual({
+      user_id: USER_ID,
+      item_id: ITEM_ID,
+      listing_id: LISTING_ID,
+      direction: "outbound",
+      body: "Hold on, let me check the serial number for you.",
+      status: "sent",
+      reply_to: MESSAGE_ID,
+      reply_kind: "followup",
+      sent_at: inserts[0].payload.sent_at,
+    });
+    // Threaded to the conversation root so it lands in the same thread.
+    expect(inserts[0].payload.reply_to).toBe(MESSAGE_ID);
+    // Delivered exactly once; the key is the new row id (stable per follow-up).
+    expect(delivered).toEqual([
+      {
+        messageId: MESSAGE_ID,
+        reply: "Hold on, let me check the serial number for you.",
+        idempotencyKey: FOLLOWUP_ID,
+      },
+    ]);
+    expect(result.outbound.id).toBe(FOLLOWUP_ID);
+  });
+
+  it("rejects an empty body WITHOUT inserting or delivering", async () => {
+    const { client, inserts } = fakeSupabase({});
+    const deliver = vi.fn(async () => {});
+    await expect(
+      sendFollowUpMessage(client, { userId: USER_ID, message: question, body: "   ", deliver }),
+    ).rejects.toThrow(/non-empty/);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+  });
+
+  it("throws (never swallows) on a failed insert", async () => {
+    const { client } = fakeSupabase({
+      inserts: [{ data: null, error: { message: "row-level security" } }],
+    });
+    await expect(
+      sendFollowUpMessage(client, {
+        userId: USER_ID,
+        message: question,
+        body: "Following up",
+        deliver: async () => {},
+      }),
+    ).rejects.toThrow(/Failed to persist follow-up/);
   });
 });
 

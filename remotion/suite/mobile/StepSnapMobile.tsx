@@ -296,7 +296,7 @@ function SnapMobileAct() {
               fontWeight: 800,
               letterSpacing: 1,
               color: VIOLET,
-              background: "var(--sl-violet-soft, rgba(99,91,255,0.1))",
+              background: "var(--sl-violet-soft, rgba(0,128,96,0.1))",
               borderRadius: 99,
               padding: "6px 12px",
             }}
@@ -315,8 +315,8 @@ function SnapMobileAct() {
             height: COVER.h,
             borderRadius: 22,
             overflow: "hidden",
-            border: count > 0 ? `1.5px solid ${LINE}` : `2.5px dashed var(--sl-violet-border, rgba(99,91,255,0.3))`,
-            background: count > 0 ? "#000" : "var(--sl-violet-soft, rgba(99,91,255,0.06))",
+            border: count > 0 ? `1.5px solid ${LINE}` : `2.5px dashed var(--sl-violet-border, rgba(0,128,96,0.3))`,
+            background: count > 0 ? "#000" : "var(--sl-violet-soft, rgba(0,128,96,0.06))",
             boxSizing: "border-box",
             display: "flex",
             flexDirection: "column",
@@ -401,7 +401,7 @@ function SnapMobileAct() {
             width: BTN.w,
             height: BTN.h,
             borderRadius: 18,
-            background: btnLive ? VIOLET : "var(--sl-violet-soft, rgba(99,91,255,0.12))",
+            background: btnLive ? VIOLET : "var(--sl-violet-soft, rgba(0,128,96,0.12))",
             color: btnLive ? "white" : FAINT,
             display: "flex",
             alignItems: "center",
@@ -410,7 +410,7 @@ function SnapMobileAct() {
             fontSize: 20,
             fontWeight: 800,
             transform: `translateY(${(1 - (btnLive ? readyIn : 0)) * 6}px)`,
-            boxShadow: btnLive ? "0 12px 26px -10px rgba(99,91,255,0.6)" : "none",
+            boxShadow: btnLive ? "0 12px 26px -10px rgba(0,128,96,0.6)" : "none",
           }}
         >
           Identify item

@@ -162,7 +162,7 @@ export function Shell({
                 width: 30,
                 height: 30,
                 borderRadius: 99,
-                background: "linear-gradient(135deg, #7a73ff, #635bff)",
+                background: "linear-gradient(135deg, #1fb88c, #008060)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -433,7 +433,7 @@ export function PhotoFrame({
                 height: 64,
                 transform: "translateY(-50%)",
                 background:
-                  "linear-gradient(180deg, transparent, rgba(99,91,255,0.22), rgba(255,255,255,0.32), rgba(99,91,255,0.22), transparent)",
+                  "linear-gradient(180deg, transparent, rgba(0,128,96,0.22), rgba(255,255,255,0.32), rgba(0,128,96,0.22), transparent)",
               }}
             />
           ) : null}
@@ -713,7 +713,7 @@ export function Chip({
       ? { color: GREEN, background: GREEN_SOFT, border: "1px solid rgba(22,163,74,0.3)" }
       : tone === "plain"
         ? { color: DIM, background: SLAB, border: `1px solid ${LINE}` }
-        : { color: VIOLET, background: "rgba(99,91,255,0.08)", border: `1px solid ${VIOLET_BORDER}` };
+        : { color: VIOLET, background: "rgba(0,128,96,0.08)", border: `1px solid ${VIOLET_BORDER}` };
   return (
     <div
       style={{
@@ -934,7 +934,7 @@ export function PrimaryButton({
             fontSize: 15,
             fontWeight: 700,
             transform: `scale(${1 - press * 0.04})`,
-            boxShadow: `0 ${8 - press * 6}px ${20 - press * 12}px -8px rgba(99,91,255,0.55)`,
+            boxShadow: `0 ${8 - press * 6}px ${20 - press * 12}px -8px rgba(0,128,96,0.55)`,
             boxSizing: "border-box",
           }}
         >

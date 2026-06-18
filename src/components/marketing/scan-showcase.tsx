@@ -172,7 +172,7 @@ export function ScanShowcase() {
   return (
     <div className="glass-panel grid overflow-hidden rounded-2xl md:grid-cols-[1.12fr_1fr]">
       {/* ------------------------------------------------ the one photo in */}
-      <div className="relative aspect-[4/3] md:aspect-auto md:min-h-[460px]">
+      <div className="relative aspect-[4/3] md:aspect-auto md:min-h-[540px]">
         {PRODUCTS.map((p, i) => (
           <Image
             key={p.slug}
@@ -192,10 +192,6 @@ export function ScanShowcase() {
         <span aria-hidden className="absolute right-3 top-3 size-5 rounded-tr-lg border-r-2 border-t-2 border-white/80 mix-blend-difference" />
         <span aria-hidden className="absolute bottom-3 left-3 size-5 rounded-bl-lg border-b-2 border-l-2 border-white/80 mix-blend-difference" />
         <span aria-hidden className="absolute bottom-3 right-3 size-5 rounded-br-lg border-b-2 border-r-2 border-white/80 mix-blend-difference" />
-
-        <span className="absolute left-4 top-4 rounded-md bg-night/80 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-flash backdrop-blur dark:bg-night/80">
-          One photo in
-        </span>
 
         {/* scanning beam — re-keyed per photo so the sweep restarts in sync
             with each crossfade; the output flips exactly when it lands. */}
@@ -240,8 +236,10 @@ export function ScanShowcase() {
             </p>
 
             {/* What the model pulled out of the photo — fills the panel with
-                real extracted attributes instead of dead space (owner). */}
-            <ul className="mt-5 space-y-2">
+                real extracted attributes instead of dead space (owner). The
+                `mb` opens a gap to the divider on mobile, where `mt-auto` below
+                collapses to nothing (desktop keeps the auto gap). */}
+            <ul className="mt-5 mb-7 space-y-2 sm:mb-0">
               {listing.details.map((detail) => (
                 <li
                   key={detail}

@@ -3,6 +3,7 @@ import {
   DashboardView,
   type DashboardRow,
 } from "@/app/(app)/dashboard/dashboard-view";
+import type { BulkListingUpdate } from "@/app/(app)/dashboard/actions";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
 import { UploadView } from "@/app/(app)/upload/upload-form";
 import {
@@ -27,53 +28,74 @@ const FIXTURE_ROWS: DashboardRow[] = [
   {
     itemId: "fx-1",
     listingId: "l-1",
-    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones",
+    title: "Sony WH-1000XM4",
     status: "draft",
     createdAt: "2026-06-11T15:00:00Z",
     price: 178,
-    thumbUrl: null,
+    thumbUrl: "/demo/headphones.jpg",
+    category: "Electronics",
+    condition: "Good",
   },
   {
     itemId: "fx-2",
     listingId: "l-2",
-    title: "LEGO Star Wars Millennium Falcon 75257, complete in box",
+    title: "Nintendo Game Boy Color",
     status: "queued",
     createdAt: "2026-06-11T13:30:00Z",
     price: 112,
-    thumbUrl: null,
+    thumbUrl: "/demo/gameboy.jpg",
+    category: "Video games",
+    condition: "Fair",
   },
   {
     itemId: "fx-3",
     listingId: "l-3",
-    title: "Patagonia Better Sweater Fleece Jacket, Men's M",
+    title: "Patagonia Better Sweater Fleece",
     status: "published",
     createdAt: "2026-06-10T19:12:00Z",
     price: 64,
-    thumbUrl: null,
+    thumbUrl: "/demo/jacket.jpg",
+    category: "Apparel",
+    condition: "Like new",
   },
   {
     itemId: "fx-4",
     listingId: "l-4",
-    title: "KitchenAid Artisan Stand Mixer 5-qt, Empire Red",
+    title: "Canon EOS 80D",
     status: "failed",
     createdAt: "2026-06-10T16:40:00Z",
-    price: 210,
-    thumbUrl: null,
+    price: 429,
+    thumbUrl: "/demo/camera.jpg",
+    category: "Electronics",
+    condition: "Good",
   },
   {
     itemId: "fx-5",
     listingId: null,
-    title: "The Pragmatic Programmer (20th Anniversary, hardcover)",
+    title: "The Pragmatic Programmer",
     status: "new",
     createdAt: "2026-06-09T11:05:00Z",
     price: null,
     thumbUrl: null,
+    category: "Books",
+    condition: "Like new",
+  },
+  {
+    itemId: "fx-6",
+    listingId: "l-6",
+    title: "KitchenAid Artisan Stand Mixer",
+    status: "archived",
+    createdAt: "2026-06-08T09:00:00Z",
+    price: 220,
+    thumbUrl: null,
+    category: "Home & kitchen",
+    condition: "Good",
   },
 ];
 
 const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
-  photoUrls: ["/demo/jacket.jpg", "/demo/headphones.jpg"],
+  photoUrls: ["/demo/headphones.jpg", "/demo/boombox.jpg"],
   identification: {
     label: "Sony WH-1000XM4 Wireless Headphones",
     confident: true,
@@ -85,7 +107,7 @@ const FIXTURE_REVIEW: ReviewData = {
     { key: "brand", value: "Sony" },
     { key: "model", value: "WH-1000XM4" },
     { key: "category", value: "Consumer electronics" },
-    { key: "condition", value: "Good, light wear on the headband" },
+    { key: "condition", value: "Good" },
     { key: "upc", value: "027242919623" },
     { key: "isbn", value: null },
   ],
@@ -103,6 +125,19 @@ const FIXTURE_REVIEW: ReviewData = {
   range: { low: 155, high: 205 },
   confidence: 0.82,
   tier: "web_tight",
+  strategies: [
+    { key: "quick", label: "Quick sell", price: 167, blurb: "Priced to move — toward the lower end of real listed prices." },
+    { key: "balanced", label: "Balanced", price: 178, blurb: "The typical listed price — a safe bet." },
+    { key: "maximize", label: "Maximize", price: 194, blurb: "Top of what comparable items list for — expect a longer wait." },
+  ],
+  clarifyOptions: [
+    { label: "Original carry case included", spec: "with carry case" },
+    { label: "Ear pads in good condition", spec: "ear pads good condition" },
+    { label: "Battery holds a full charge", spec: "battery holds full charge" },
+    { label: "All buttons fully functional", spec: "all buttons functional" },
+    { label: "Pairs reliably over Bluetooth", spec: "bluetooth pairs reliably" },
+    { label: "Original box and USB-C cable", spec: "original box and cable" },
+  ],
   banner: {
     variant: "warning",
     title: "Waiting for your review",
@@ -180,6 +215,12 @@ export default async function PreviewPage({
   async function noopAction(_formData: FormData) {
     "use server";
   }
+  async function noopIds(_ids: string[]) {
+    "use server";
+  }
+  async function noopBulk(_updates: BulkListingUpdate[]) {
+    "use server";
+  }
 
   switch (screen) {
     case "dashboard":
@@ -188,6 +229,10 @@ export default async function PreviewPage({
           rows={FIXTURE_ROWS}
           counts={{ draft: 1, attention: 1, live: 1 }}
           filter="all"
+          archiveAction={noopIds}
+          unarchiveAction={noopIds}
+          deleteAction={noopIds}
+          bulkUpdateAction={noopBulk}
         />
       );
     case "dashboard-empty":
@@ -283,7 +328,27 @@ export default async function PreviewPage({
             suggested: 45,
             displayPrice: 45,
             range: { low: 30, high: 70 },
+            // llm-only / low confidence → a single honest point, no fabricated split.
+            strategies: [
+              {
+                key: "balanced",
+                label: "Suggested",
+                price: 45,
+                blurb:
+                  "Our best estimate — not enough comparable sales for quick / maximize options.",
+              },
+            ],
           }}
+          saveAction={noopAction}
+          sharpenAction={noopAction}
+        />
+      );
+    case "review-sharpen":
+      // Mid-confidence, comp-backed item: shows BOTH new features at once — the
+      // quick/balanced/maximize selector AND the dynamic "Confirm what applies" chips.
+      return (
+        <ReviewView
+          data={{ ...FIXTURE_REVIEW, confidence: 0.68, tier: "web_wide" }}
           saveAction={noopAction}
           sharpenAction={noopAction}
         />

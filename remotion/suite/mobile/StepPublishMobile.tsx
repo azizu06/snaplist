@@ -79,7 +79,7 @@ function PublishMobileAct() {
         {/* header */}
         <div style={{ position: "absolute", left: PAD, top: 30, right: PAD, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.4, color: INK }}>Publish</span>
-          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: VIOLET, background: "var(--sl-violet-soft, rgba(99,91,255,0.1))", borderRadius: 99, padding: "6px 12px" }}>
+          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: VIOLET, background: "var(--sl-violet-soft, rgba(0,128,96,0.1))", borderRadius: 99, padding: "6px 12px" }}>
             STEP 5 · PUBLISH
           </span>
         </div>
@@ -121,7 +121,7 @@ function PublishMobileAct() {
             <div style={{ fontSize: 15, fontWeight: 800, color: VIOLET, marginTop: 10 }}>View on eBay →</div>
           </div>
         ) : (
-          <div style={{ position: "absolute", left: PUBLISH.x, top: PUBLISH.y, width: PUBLISH.w, height: PUBLISH.h, borderRadius: 18, background: VIOLET, color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 20, fontWeight: 800, transform: `scale(${1 - press * 0.03})`, boxShadow: "0 12px 26px -10px rgba(99,91,255,0.6)" }}>
+          <div style={{ position: "absolute", left: PUBLISH.x, top: PUBLISH.y, width: PUBLISH.w, height: PUBLISH.h, borderRadius: 18, background: VIOLET, color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 20, fontWeight: 800, transform: `scale(${1 - press * 0.03})`, boxShadow: "0 12px 26px -10px rgba(0,128,96,0.6)" }}>
             {posting ? "Publishing…" : "Publish to eBay"}
             {!posting ? <span aria-hidden>→</span> : null}
           </div>

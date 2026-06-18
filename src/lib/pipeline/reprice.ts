@@ -53,11 +53,52 @@ export function mergeSpecs(
   return out;
 }
 
+/**
+ * Seller-confirmed identity fields (#3). When the seller corrects or supplies a
+ * field the vision step missed (the exact brand/model/category), each provided,
+ * non-blank value OVERRIDES the extracted attribute. That does two things at once:
+ * it flips the corresponding identification signal in the confidence composite
+ * (each of the four id fields is worth 0.25 of the 0.25-weighted id term) AND it
+ * narrows the pricing search so comps cluster on the right item. Unlike `addedSpecs`
+ * (a query aid only), this raises identification completeness directly.
+ */
+export interface ConfirmedIdentity {
+  brand?: string;
+  model?: string;
+  category?: string;
+}
+
+/**
+ * Apply seller-confirmed identity over extracted attributes: a provided, non-blank
+ * value wins (the seller is the authority, US #14); blanks/whitespace are ignored so
+ * a cleared field never wipes a real value. Pure.
+ */
+export function mergeIdentity(
+  attrs: ExtractedAttributes,
+  confirmed: ConfirmedIdentity | undefined,
+): ExtractedAttributes {
+  if (!confirmed) return attrs;
+  const out = { ...attrs };
+  const brand = confirmed.brand?.trim();
+  const model = confirmed.model?.trim();
+  const category = confirmed.category?.trim();
+  if (brand) out.brand = brand;
+  if (model) out.model = model;
+  if (category) out.category = category;
+  return out;
+}
+
 export interface RepriceInput {
   /** The item's current extracted attributes (brand/model/category/specs/…). */
   attributes: ExtractedAttributes;
   /** The discriminating detail(s) the seller supplied to sharpen the estimate. */
   addedSpecs: string[];
+  /**
+   * Seller-confirmed identity (#3): brand/model/category the seller corrected or
+   * supplied. Provided values override the extracted attributes, raising
+   * identification completeness AND narrowing the search. Optional.
+   */
+  confirmedIdentity?: ConfirmedIdentity;
   /** Master autopilot switch the run consumed (forwarded to the gate). */
   autopilotEnabled?: boolean;
   /**
@@ -82,7 +123,10 @@ export async function repriceWithSpecs(
   input: RepriceInput,
 ): Promise<RepriceResult> {
   const mergedSpecs = mergeSpecs(input.attributes.specs, input.addedSpecs);
-  const attributes: ExtractedAttributes = { ...input.attributes, specs: mergedSpecs };
+  // Apply seller-confirmed identity first (#3), then the merged specs — so the
+  // recomputed confidence reflects BOTH improved id completeness and tighter comps.
+  const withIdentity = mergeIdentity(input.attributes, input.confirmedIdentity);
+  const attributes: ExtractedAttributes = { ...withIdentity, specs: mergedSpecs };
 
   const priceItem = input.priceItem ?? createDefaultPricer();
   const signal = attributesToSignal(attributes);

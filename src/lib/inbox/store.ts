@@ -285,6 +285,82 @@ export async function approveAndSendReply(
   return { outbound: messageRowSchema.parse(outbound) };
 }
 
+export interface SendFollowUpMessageInput {
+  /** The owning seller (must equal the client's auth.uid()). */
+  userId: string;
+  /** The conversation root (the inbound question) this follow-up belongs to. */
+  message: Pick<MessageRow, "id" | "item_id" | "listing_id">;
+  /** The seller's free-text follow-up ("Hold on, let me check…"). */
+  body: string;
+  /** Injectable delivery; defaults to the logged no-op stub. */
+  deliver?: DeliverReply;
+}
+
+/**
+ * Send a FOLLOW-UP message in a conversation the seller has already replied to.
+ *
+ * eBay's member messaging is not one-and-done (AddMemberMessageRTQ / AddMember-
+ * MessagesAAQToBidder let a seller send many messages per thread), so after the
+ * canonical reply the seller can keep messaging the buyer. A follow-up is an
+ * outbound row threaded to the same conversation root (`reply_to` = the inbound
+ * question) but marked `reply_kind = 'followup'`, so the
+ * messages_canonical_reply_unique index (which only covers the canonical reply)
+ * never rejects it. Unlike `approveAndSendReply` there is NO status CAS and NO
+ * draft: a follow-up is plain seller-authored text, allowed any number of times.
+ *
+ * v1 ORDERING (deliberate, simpler than the canonical path): insert the row,
+ * THEN deliver keyed by the new row id. While delivery is the stubbed no-op this
+ * is equivalent to the canonical path; it also gives a real adapter a stable
+ * per-follow-up idempotency key. Parity with the canonical claim/retry rigor
+ * (deliver-before-persist, crash recovery) lands with the real eBay adapter (#14).
+ */
+export async function sendFollowUpMessage(
+  supabase: SupabaseClient,
+  input: SendFollowUpMessageInput,
+): Promise<ApproveAndSendReplyResult> {
+  const body = input.body.trim();
+  if (body === "") {
+    throw new Error("sendFollowUpMessage requires a non-empty message");
+  }
+  const deliver = input.deliver ?? stubDeliverReply;
+  const sentAt = new Date().toISOString();
+
+  // Persist the follow-up first: its id is the delivery idempotency key, and the
+  // thread (read over Realtime) is the source of truth for what was sent.
+  const { data: outbound, error: outboundErr } = await supabase
+    .from("messages")
+    .insert({
+      user_id: input.userId,
+      item_id: input.message.item_id,
+      listing_id: input.message.listing_id,
+      direction: "outbound",
+      body,
+      status: "sent",
+      reply_to: input.message.id,
+      reply_kind: "followup",
+      sent_at: sentAt,
+    })
+    .select("*")
+    .single();
+  if (outboundErr || !outbound) {
+    throw new Error(
+      `Failed to persist follow-up message: ${outboundErr?.message ?? "no row returned"}`,
+    );
+  }
+
+  const row = messageRowSchema.parse(outbound);
+
+  // Deliver via the injectable seam (stub logs; real send is issue #14). Keyed
+  // by the persisted row id so a real adapter can dedupe this specific message.
+  await deliver({
+    messageId: input.message.id,
+    reply: body,
+    idempotencyKey: row.id,
+  });
+
+  return { outbound: row };
+}
+
 export interface RetryReplyDeliveryInput {
   /** The owning seller (must equal the client's auth.uid()). */
   userId: string;
@@ -302,9 +378,10 @@ export interface RetryReplyDeliveryInput {
  * before the outbound row was inserted. The seller sees "not delivered" in the
  * inbox and explicitly retries.
  *
- *   1. VERIFY the claim: no outbound row references this question via
- *      `reply_to`. An existing row means the reply was already delivered →
- *      `ReplySendConflictError` (409, idempotent "already done").
+ *   1. VERIFY the claim: no CANONICAL reply references this question via
+ *      `reply_to` (follow-ups share the same `reply_to` and are excluded, just
+ *      as the unique index is). An existing canonical reply means it was already
+ *      delivered → `ReplySendConflictError` (409, idempotent "already done").
  *   2. RE-DELIVER via the injectable seam.
  *   3. INSERT the outbound row. The partial unique index on messages(reply_to)
  *      (20260611004000) is the authoritative dedupe: a 23505 means a concurrent
@@ -333,12 +410,19 @@ export async function retryReplyDelivery(
   const deliver = input.deliver ?? stubDeliverReply;
   const sentAt = new Date().toISOString();
 
-  // 1. The claim: no outbound row may already reference this question.
+  // 1. The claim: no CANONICAL reply may already reference this question.
+  //    Scope to the canonical reply exactly as the messages_canonical_reply_unique
+  //    index does — `reply_kind is null or 'reply'` — so a follow-up the seller
+  //    sent in the crash gap (the inbound is `sent`, the composer is unlocked) is
+  //    NOT mistaken for the missing reply. Without this the existence check would
+  //    count that follow-up, return a 409, and the canonical reply would never be
+  //    recovered. Mirrors the client's `reply_kind !== "followup"` thread split.
   const { data: existing, error: existingErr } = await supabase
     .from("messages")
     .select("id")
     .eq("reply_to", input.message.id)
     .eq("direction", "outbound")
+    .or("reply_kind.is.null,reply_kind.eq.reply")
     .limit(1);
   if (existingErr) {
     throw new Error(

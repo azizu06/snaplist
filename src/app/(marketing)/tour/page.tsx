@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Reveal } from "@/components/marketing/reveal";
 import { DemoClip } from "@/components/marketing/demo-clip";
-import { WaterfallExplorer } from "@/components/marketing/waterfall-explorer";
+import { FaqAccordion } from "@/components/marketing/faq-accordion";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
-import { Eyebrow, LensRings } from "@/components/marketing/visuals";
 
 export const metadata: Metadata = {
   title: "How it works",
@@ -21,17 +19,15 @@ export const metadata: Metadata = {
  * ("After it's live") in the identical alternating text/video format. Section
  * order: hero (headline only) → step-intro header → SIX step clips
  * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4, 1920×1080 loops via DemoClip,
- * alternating sides) → pricing waterfall LAST → CTA. The WaterfallExplorer
- * mirrors the real PricingProvider router tiers — keep in sync. The step
- * clips embed their own assigned items (see DEMO_SURFACE_ASSIGNMENTS). The
- * live scanning showcase now headlines the landing hero instead.
+ * alternating sides) → seller FAQ LAST → CTA. The FAQ (#faq anchor) was
+ * relocated here when the About page was retired. The step clips embed their
+ * own assigned items (see DEMO_SURFACE_ASSIGNMENTS). The live scanning
+ * showcase now headlines the landing hero instead.
  */
 
 const STEPS = [
   {
     n: "01",
-    eyebrow: "Step 1",
-    tint: undefined,
     src: "/demo/steps/snap.mp4",
     // Portrait mobile render exists for this step (public/demo/steps/snap-mobile.mp4
     // + -dark). Under 768px /tour swaps to it so the in-clip UI is legible.
@@ -44,8 +40,6 @@ const STEPS = [
   },
   {
     n: "02",
-    eyebrow: "Step 2",
-    tint: undefined,
     src: "/demo/steps/identify.mp4",
     mobile: true,
     glyph: "identify",
@@ -56,8 +50,6 @@ const STEPS = [
   },
   {
     n: "03",
-    eyebrow: "Step 3",
-    tint: undefined,
     src: "/demo/steps/price.mp4",
     mobile: true,
     glyph: "price",
@@ -68,8 +60,6 @@ const STEPS = [
   },
   {
     n: "04",
-    eyebrow: "Step 4",
-    tint: undefined,
     src: "/demo/steps/write.mp4",
     mobile: true,
     glyph: "write",
@@ -80,8 +70,6 @@ const STEPS = [
   },
   {
     n: "05",
-    eyebrow: "Step 5",
-    tint: undefined,
     src: "/demo/steps/publish.mp4",
     mobile: true,
     glyph: "publish",
@@ -92,8 +80,6 @@ const STEPS = [
   },
   {
     n: "06",
-    eyebrow: "Step 6",
-    tint: undefined,
     src: "/demo/buyer-qa.mp4",
     mobile: true,
     glyph: "chat",
@@ -104,15 +90,51 @@ const STEPS = [
   },
 ] as const;
 
+/**
+ * Seller FAQ — relocated from the retired About page. Replaces the old
+ * "Where the price comes from" waterfall section: the six step clips above
+ * already walk the pipeline, so this page closes on the questions sellers
+ * actually ask (marketplaces, accuracy, privacy, autopilot, cost, eBay).
+ */
+const FAQ = [
+  {
+    q: "Which marketplaces does SnapList support?",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape anything.",
+  },
+  {
+    q: "How accurate is the pricing?",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest, an exact lookup with no guessing. Branded items are priced from what similar ones recently sold for, which is solid. Everyday items get a rougher estimate marked down from the new price, and we label it as less certain. Every price is yours to edit.",
+  },
+  {
+    q: "Is my data private?",
+    a: "Yes. Your photos are private, and only you can reach them. Your account's data is walled off from everyone else's, and your eBay connection is stored encrypted. If you ask eBay to remove your account, that request is honored end to end.",
+  },
+  {
+    q: "Does autopilot post things without asking me?",
+    a: "Only if you turn it on, and only for items it's genuinely sure about. That confidence comes from how the price was found, how closely recent sales agree, and how well it pinned down the item, never the AI grading its own work. Everything else waits for your review, and you can keep autopilot off entirely.",
+  },
+  {
+    q: "What does it cost?",
+    a: "The Free plan covers every core feature for up to 15 items a day. Seller Pro is $10 a month and lifts that to 200 items a day with priority research and bulk uploads. eBay's own selling fees still apply when something sells.",
+  },
+  {
+    q: "Do I need my own eBay account?",
+    a: "Yes, and that's a feature. Listings publish under your own identity and reputation. You connect your account once, and SnapList never sees your eBay password.",
+  },
+] as const;
+
 export default function HowItWorks() {
   return (
     <>
       <section className="aurora grain relative overflow-hidden px-5 pb-16 pt-32 sm:px-8 sm:pt-40">
-        <LensRings className="pointer-events-none absolute -right-40 -top-40 w-[560px] text-iris" />
+        {/* The "How it works" eyebrow + the top-right LensRings dashed circle
+            were removed: the nav active-indicator already says you're on the
+            guide, and the rings were a guide-only flourish that broke
+            consistency with /pricing. Both marketing heroes now share the plain
+            `aurora grain` background so the glow flow matches across pages. */}
         <div className="mx-auto w-full max-w-6xl">
           <Reveal className="mx-auto flex max-w-3xl flex-col items-center text-center">
-            <Eyebrow>How it works</Eyebrow>
-            <h1 className="mt-4 font-display text-[clamp(36px,5.2vw,60px)] font-bold leading-[1.05] tracking-tight text-flash">
+            <h1 className="font-display text-[clamp(36px,5.2vw,60px)] font-bold leading-[1.05] tracking-tight text-flash">
               One photo in.
               <br />A <em className="text-iris">defensible</em> listing out.
             </h1>
@@ -131,7 +153,7 @@ export default function HowItWorks() {
       <section className="mx-auto w-full max-w-[1720px] px-5 pb-24 pt-6 sm:px-8 sm:pb-28 sm:pt-10">
         <div className="space-y-24 sm:space-y-32">
           {STEPS.map((step, i) => {
-            const { n, eyebrow, src, glyph, title, body, poster, label } = step;
+            const { n, src, glyph, title, body, poster, label } = step;
             // Only steps with a portrait render set `mobile`; under 768px the
             // clip swaps to "<name>-mobile.mp4" (see DemoClip/SeamlessThemeVideo).
             const mobileSrc =
@@ -149,12 +171,11 @@ export default function HowItWorks() {
                 }`}
               >
                 <div className={i % 2 === 0 ? "" : "lg:order-2"}>
-                  {/* uniform across all six steps: same violet tint, single
-                      "Step N" label (the old "01 · Step 1" double-numbered,
-                      and step 6 was a different rose color — owner). The
-                      numeral still rides the clip badge via DemoClip n={n}. */}
-                  <Eyebrow>{eyebrow}</Eyebrow>
-                  <h2 className="mt-3 font-display text-[clamp(23px,3.4vw,40px)] font-bold tracking-tight text-flash sm:mt-4">
+                  {/* The per-step "Step N" eyebrow was removed (owner: an
+                      eyebrow on every row reads as AI grammar, and it
+                      double-numbered the step — the numeral already rides the
+                      clip badge via DemoClip n={n}). The title leads now. */}
+                  <h2 className="font-display text-[clamp(23px,3.4vw,40px)] font-bold tracking-tight text-flash">
                     {title}
                   </h2>
                   <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-flash-dim sm:mt-4 sm:text-[16px]">
@@ -188,44 +209,23 @@ export default function HowItWorks() {
         </div>
       </section>
 
-      {/* interactive pricing waterfall — last stop before the CTA */}
-      <section className="border-t border-line bg-night-2">
-        <div className="mx-auto w-full max-w-6xl px-5 py-24 sm:px-8 sm:py-28">
-          <Reveal>
-            <Eyebrow tint="cyan">Where the price comes from</Eyebrow>
-            <h2 className="mt-4 max-w-2xl font-display text-[clamp(28px,3.8vw,42px)] font-bold leading-tight tracking-tight text-flash">
-              The best price source that exists for{" "}
-              <em className="text-iris">your</em> item, honestly labeled
+      {/* seller FAQ — relocated from the retired About page; last stop before
+          the CTA. One clean centered question list on the animated accordion. */}
+      <section id="faq" className="scroll-mt-24 border-t border-line bg-night-2">
+        <div className="mx-auto w-full max-w-3xl px-5 py-24 sm:px-8 sm:py-28">
+          <Reveal className="flex flex-col items-center text-center">
+            <h2 className="font-display text-[clamp(28px,3.6vw,42px)] font-bold tracking-tight text-flash">
+              The questions everyone asks
             </h2>
-            <p className="mt-4 max-w-[58ch] text-[16px] leading-relaxed text-flash-dim">
-              Not every item can be priced the same way. SnapList works down
-              this list, uses the best source it can find for your item, and
-              tells you which one it landed on. Pick one to see how it works.
+            <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-flash-dim">
+              Marketplaces, accuracy, privacy, and what autopilot will never
+              do without you, answered straight.
             </p>
           </Reveal>
-          <Reveal className="mt-12">
-            <WaterfallExplorer />
+          <Reveal delay={0.1} className="mt-12">
+            <FaqAccordion items={FAQ} />
           </Reveal>
         </div>
-      </section>
-
-      <section className="border-t border-line px-5 py-24 text-center sm:px-8 sm:py-28">
-        <Reveal>
-          <h2 className="font-display text-[clamp(30px,4.2vw,46px)] font-bold tracking-tight text-flash">
-            See it on your own shelf
-          </h2>
-          <p className="mx-auto mt-4 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
-            Everything you just read about, on your first photo, free while
-            in beta.
-          </p>
-          <Link
-            href="/login"
-            className="group mt-9 inline-flex items-center gap-2 rounded-full bg-iris px-8 py-4 text-[16.5px] font-semibold text-iris-ink transition-transform hover:scale-[1.03]"
-          >
-            Try it free
-            <span aria-hidden className="transition-transform group-hover:translate-x-1">→</span>
-          </Link>
-        </Reveal>
       </section>
     </>
   );

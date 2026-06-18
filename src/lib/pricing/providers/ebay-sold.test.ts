@@ -5,6 +5,7 @@ import {
   EBAY_SOLD_MIN_COMPS,
   assertSafeEbayUrl,
   buildSoldSearchUrl,
+  coreComps,
   createDefaultFetchPage,
   createEbaySoldPricingProvider,
   ebaySoldConfigured,
@@ -41,6 +42,17 @@ import { TIGHT_AGREEMENT_MIN } from "./web-search";
 
 const FIXTURE_HTML = readFileSync(
   fileURLToPath(new URL("./fixtures/ebay-sold.sample.html", import.meta.url)),
+  "utf8",
+);
+
+/**
+ * The MODERN `.su-card-container` / `li.s-card` SRP layout eBay also serves (the
+ * #59 follow-up to #56's classic `.srp-results > li.s-item` fixture). Captured
+ * live (premium proxy) on 2026-06-16: 12 used Sony WH-1000XM4 comps, 2 "Shop on
+ * eBay" placeholders (no Sold caption), and 2 wrong-model noise cards.
+ */
+const MODERN_FIXTURE_HTML = readFileSync(
+  fileURLToPath(new URL("./fixtures/ebay-sold.modern.sample.html", import.meta.url)),
   "utf8",
 );
 
@@ -147,6 +159,30 @@ describe("buildSoldSearchUrl", () => {
     expect(u.searchParams.get("LH_Sold")).toBe("1");
     expect(u.searchParams.get("LH_Complete")).toBe("1");
     expect(u.searchParams.get("_nkw")).toBe("Sony WH-1000XM4");
+  });
+
+  it("folds a bounded specs hint into a brand+model query so sold comps cluster on the SAME configuration", () => {
+    // Without this, a sharpened multi-config item (Codex P2) prices against EVERY
+    // configuration: the sold tier runs above web search and a brand+model-only sold
+    // query returns mixed configs. Mirror the web-search tier — cap at 3 specs (more
+    // over-narrows eBay's keyword match) so a 4th spec is dropped, blanks/whitespace
+    // ignored.
+    const url = buildSoldSearchUrl({
+      brand: "Dell",
+      model: "XPS 15",
+      specs: ["RTX 4070", " ", "32GB", "1TB SSD", "OLED"],
+    });
+    expect(new URL(url!).searchParams.get("_nkw")).toBe("Dell XPS 15 RTX 4070 32GB 1TB SSD");
+  });
+
+  it("does NOT append specs to a bare UPC/ISBN query (an exact code key, not a keyword search)", () => {
+    // A UPC/ISBN is an exact identifier; gluing generic vision specs onto it ("0272…
+    // wireless over-ear") is noise, not narrowing. Specs only narrow the brand+model form.
+    expect(
+      new URL(
+        buildSoldSearchUrl({ upc: "027242920569", specs: ["wireless", "over-ear"] })!,
+      ).searchParams.get("_nkw"),
+    ).toBe("027242920569");
   });
 
   it("uses a UPC as the query when that is the only identity, and a resolved name otherwise", () => {
@@ -293,6 +329,63 @@ describe("parseSoldComps (saved fixture)", () => {
     </ul>`;
     const parsed = parseSoldComps(html);
     expect(parsed.map((c) => c.price)).toEqual([180]);
+  });
+});
+
+describe("parseSoldComps (modern li.s-card layout — #59 follow-up)", () => {
+  // eBay also serves a MODERN `.su-card-container` / `li.s-card` SRP layout,
+  // distinct from the classic `.srp-results > li.s-item`. The SAME parser must
+  // read both, or a premium-proxy fetch that succeeds still yields zero comps and
+  // the sold tier silently declines to web search (the real-world #59 symptom).
+  const comps = parseSoldComps(MODERN_FIXTURE_HTML);
+
+  it("parses sold comps from the modern card markup", () => {
+    // 12 used WH-1000XM4 comps + 2 wrong-model noise cards; the 2 "Shop on eBay"
+    // placeholders (no Sold caption) are skipped.
+    expect(comps.length).toBeGreaterThanOrEqual(12);
+    expect(comps.some((c) => /shop on ebay/i.test(c.title ?? ""))).toBe(false);
+    for (const c of comps) {
+      expect(c.url.startsWith("https://www.ebay.com/itm/")).toBe(true);
+      expect(c.price).toBeGreaterThan(0);
+      expect(c.title).toBeTruthy();
+    }
+  });
+
+  it("cleans the modern title (strips 'Opens in a new window' suffix + 'New Listing' badge)", () => {
+    expect(comps.some((c) => /opens in a new window/i.test(c.title ?? ""))).toBe(false);
+    expect(comps.some((c) => /^New Listing/i.test(c.title ?? ""))).toBe(false);
+    // A specific known comp from the captured page (sanity that real data parses).
+    expect(
+      comps.some((c) => c.price === 175 && /sony wh-1000xm4/i.test(c.title ?? "")),
+    ).toBe(true);
+  });
+
+  it("reads condition metadata and the Sold date from the modern card", () => {
+    expect(comps.some((c) => c.condition === "Pre-Owned")).toBe(true);
+    // "Sold Jun 16, 2026" → a parsed epoch-ms timestamp on at least one comp.
+    expect(comps.some((c) => typeof c.soldAt === "number")).toBe(true);
+  });
+
+  it("relevance filter drops the wrong-model noise (WF-1000XM5 / WF-1000XM6)", () => {
+    const relevant = filterRelevantComps(comps, BRANDED_SIGNAL);
+    expect(relevant.length).toBeGreaterThanOrEqual(12);
+    expect(relevant.some((c) => /WF-1000XM[56]/i.test(c.title ?? ""))).toBe(false);
+    expect(relevant.some((c) => c.price === 37.61 || c.price === 268.99)).toBe(false);
+  });
+
+  it("prices a used item from the modern sold page end-to-end through the provider", async () => {
+    const provider = createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(MODERN_FIXTURE_HTML),
+    });
+    const result = await provider.price(BRANDED_SIGNAL);
+    expect(result).not.toBeNull();
+    expect(() => priceResultSchema.parse(result)).not.toThrow();
+    expect(result!.tier).toBe("ebay-sold");
+    // Median of the ~12 used comps lands in a sane used band; the $37.61 accessory
+    // and $268.99 new earbuds were filtered out, so they don't drag the suggestion.
+    expect(result!.suggested).toBeGreaterThan(120);
+    expect(result!.suggested).toBeLessThan(200);
+    expect(result!.sources.every((s) => !/WF-1000XM/i.test(s.title ?? ""))).toBe(true);
   });
 });
 
@@ -608,6 +701,71 @@ describe("synthesizeSoldResult", () => {
     expect(scattered.compAgreement!).toBeLessThan(TIGHT_AGREEMENT_MIN);
     // A scattered sold set is honestly less confident than a tight one.
     expect(scattered.confidence).toBeLessThan(result.confidence);
+  });
+});
+
+describe("coreComps — robust outlier trimming (#1 confidence lever)", () => {
+  const mk = (prices: number[]): EbaySoldComp[] =>
+    prices.map((price, i) => ({ url: `https://www.ebay.com/itm/${i}`, price, title: `c${i}` }));
+  const prices = (cs: EbaySoldComp[]) => cs.map((c) => c.price).sort((a, b) => a - b);
+
+  it("drops a single extreme HIGH spike (sealed unit / bundle / wrong model that slipped the filter)", () => {
+    // [120,125,130,135,140] is a tight used cluster; 400 is anomalous.
+    expect(prices(coreComps(mk([120, 125, 130, 135, 140, 400])))).toEqual([120, 125, 130, 135, 140]);
+  });
+
+  it("drops a single extreme LOW spike (a 'for parts / not working' sale)", () => {
+    expect(prices(coreComps(mk([20, 120, 125, 130, 135, 140])))).toEqual([120, 125, 130, 135, 140]);
+  });
+
+  it("catches a spike that masks itself under IQR fences (MAD's 50% breakpoint)", () => {
+    // Under Tukey IQR the 400 inflates Q3 and hides inside the fence; MAD flags it.
+    expect(prices(coreComps(mk([120, 125, 130, 135, 400])))).toEqual([120, 125, 130, 135]);
+  });
+
+  it("does NOT trim a genuinely scattered (uniform) set — no isolated outlier to remove", () => {
+    expect(coreComps(mk([60, 120, 185, 300, 420]))).toHaveLength(5);
+  });
+
+  it("does NOT trim a bimodal set — both clusters are real, neither is noise", () => {
+    expect(coreComps(mk([100, 105, 110, 500, 510, 520]))).toHaveLength(6);
+  });
+
+  it("leaves thin sets (<4 comps) untrimmed — MAD is unreliable on tiny n", () => {
+    expect(coreComps(mk([120, 125, 400]))).toHaveLength(3);
+  });
+
+  it("keeps an all-identical set intact (MAD = 0 → never drops the minority)", () => {
+    expect(coreComps(mk([130, 130, 130, 135]))).toHaveLength(4);
+  });
+});
+
+describe("synthesizeSoldResult — robust core rescues a tight cluster from one spike (#1)", () => {
+  const mk = (prices: number[]): EbaySoldComp[] =>
+    prices.map((price, i) => ({ url: `https://www.ebay.com/itm/${i}`, price, title: `c${i}` }));
+
+  it("trims a high spike so the tight core earns sold-tier agreement, range, and citations", () => {
+    const withSpike = synthesizeSoldResult(mk([120, 125, 130, 135, 140, 400]));
+    // Before the fix the 400 collapses agreement → web_wide; now the core is tight.
+    expect(withSpike.compAgreement!).toBeGreaterThanOrEqual(TIGHT_AGREEMENT_MIN);
+    // Suggested + band describe the DEFENSIBLE core, not the spike.
+    expect(withSpike.suggested).toBeCloseTo(130, 2);
+    expect(withSpike.range.max).toBeCloseTo(140, 2);
+    // Only the core comps are cited as backing the price (the spike is not evidence).
+    expect(withSpike.sources).toHaveLength(5);
+    expect(withSpike.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+  });
+
+  it("trims a low 'for parts' spike the same way", () => {
+    const withLow = synthesizeSoldResult(mk([20, 120, 125, 130, 135, 140]));
+    expect(withLow.compAgreement!).toBeGreaterThanOrEqual(TIGHT_AGREEMENT_MIN);
+    expect(withLow.range.min).toBeCloseTo(120, 2);
+  });
+
+  it("still reports a scattered sold set as sub-tight (honesty preserved)", () => {
+    const scattered = synthesizeSoldResult(mk([60, 120, 185, 300, 420]));
+    expect(scattered.compAgreement!).toBeLessThan(TIGHT_AGREEMENT_MIN);
+    expect(scattered.sources).toHaveLength(5);
   });
 });
 

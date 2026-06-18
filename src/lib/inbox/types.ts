@@ -52,6 +52,11 @@ export const messageRowSchema = z.object({
   status: z.string(),
   sent_at: z.string().nullable(),
   reply_to: z.uuid().nullable(),
+  // Discriminates outbound rows that share a conversation root (20260617120000):
+  // the canonical reply is null/'reply' (deduped by messages_canonical_reply_unique),
+  // any number of seller FOLLOW-UPs are 'followup'. Optional so pre-migration rows
+  // and the many MessageRow fixtures that predate the column still validate.
+  reply_kind: z.string().nullable().optional(),
   draft_model: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),

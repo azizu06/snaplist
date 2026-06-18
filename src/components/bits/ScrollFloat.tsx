@@ -6,6 +6,13 @@
  * iris-violet (our headings always carry one accent phrase), the animation
  * plays ONCE on entry instead of scrubbing (scrubbed headings sit invisible
  * at rest), proper ScrollTrigger cleanup, and a reduced-motion bail-out.
+ *
+ * Default state is fully VISIBLE: SSR / pre-hydration / no-JS / reduced-motion
+ * render the heading at its natural opacity with no transform offset. The
+ * `immediateRender: false` on the fromTo keeps the opacity:0 start-state off
+ * the chars until the ScrollTrigger fires, so a headless/hidden-tab render
+ * (where the trigger may never fire) ships the heading visible instead of
+ * blank. The float-in is a post-hydration enhancement only.
  */
 
 import React, { useEffect, useMemo, useRef, RefObject } from 'react';
@@ -87,6 +94,9 @@ const ScrollFloat: React.FC<ScrollFloatProps> = ({
         scaleY: 1,
         scaleX: 1,
         stagger: stagger,
+        // Don't blank the heading at hydration — defer the opacity:0 start-state
+        // until the trigger fires, so the resting render stays visible.
+        immediateRender: false,
         scrollTrigger: {
           trigger: el,
           scroller,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { motion } from "motion/react";
 import { useTheme } from "next-themes";
 
 /**
@@ -71,6 +72,25 @@ export function ThemeIconToggle({ className = "" }: { className?: string }) {
   );
 }
 
+/** Icon button tuned for the app's neutral top bar (next to the bell). */
+export function ThemeTopbarToggle({ className = "" }: { className?: string }) {
+  const mounted = useMounted();
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = mounted && resolvedTheme === "dark";
+
+  return (
+    <button
+      type="button"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className={`flex size-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong motion-safe:active:scale-[0.96] ${className}`}
+    >
+      {/* size-[18px] to match the notification bell glyph next to it */}
+      {isDark ? <MoonIcon className="size-[18px]" /> : <SunIcon className="size-[18px]" />}
+    </button>
+  );
+}
+
 /** Dropdown row — same chrome as ProfileMenu's MenuItem links. */
 export function ThemeMenuToggle() {
   const mounted = useMounted();
@@ -118,14 +138,22 @@ export function ThemeSegmented() {
             role="radio"
             aria-checked={selected}
             onClick={() => setTheme(value)}
-            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[14px] font-medium transition-colors ${
-              selected
-                ? "bg-surface text-fg-strong shadow-xs"
-                : "text-muted hover:text-fg"
+            className={`relative flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[14px] font-medium transition-colors ${
+              selected ? "text-fg-strong" : "text-muted hover:text-fg"
             }`}
           >
-            <Icon className="size-3.5" />
-            {label}
+            {/* Sliding highlight — the selected pill glides between segments
+                (shared-layout motion) instead of hard-cutting. */}
+            {selected ? (
+              <motion.span
+                layoutId="theme-segment-pill"
+                aria-hidden
+                className="absolute inset-0 rounded-md bg-surface shadow-xs"
+                transition={{ type: "spring", stiffness: 380, damping: 32 }}
+              />
+            ) : null}
+            <Icon className="relative size-3.5" />
+            <span className="relative">{label}</span>
           </button>
         );
       })}

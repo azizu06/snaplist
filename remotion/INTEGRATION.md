@@ -67,8 +67,8 @@ Poster extraction example:
 
 ## Set consistency
 
-All clips share the same Prism-style shell (white canvas, navy `#131e3a` ink,
-violet `#635bff` accent, `#f4f6fb` backdrop), the same top bar with a
+All clips share the same calm shell (white canvas, near-black `#1a1a1a` ink,
+green `#008060` accent, `#f6f6f7` backdrop), the same top bar with a
 step-identity badge (`STEP 1 · SNAP` … `STEP 6 · ANSWER BUYERS`), the same
 live-progress feed, chip, how-sure and cursor primitives — they read as one
 set in a carousel.

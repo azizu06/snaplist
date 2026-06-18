@@ -37,6 +37,18 @@ import type {
 export type FetchJson = (url: string) => Promise<unknown | null>;
 
 /**
+ * Optional sold-comp lookup for the SAME signal (#2 confidence lever). Returns an
+ * eBay-sold `PriceResult` (real completed sales) or `null` when none are found /
+ * the scraper is unconfigured or blocked. Injected by the wiring layer
+ * (`createDefaultPricer`) from the same eBay-sold provider used as the standalone
+ * tier — so a book is priced from REAL used sales, and the result, by citing a
+ * `sold-comp` source, earns the top `isbn` (0.95) confidence tier instead of the
+ * retail-derived `depreciation` floor (see `vision/pipeline.ts` → `hasSoldComp`).
+ * Left undefined the provider keeps its pure catalog-only behavior (offline tests).
+ */
+export type SoldLookup = (signal: ItemSignal) => Promise<PriceResult | null>;
+
+/**
  * Default `fetchJson` over the platform `fetch`. A 404 (missing record) maps to
  * `null` so the provider can treat it as "no match here"; other non-2xx
  * responses throw as upstream failures.
@@ -103,12 +115,17 @@ function conditionFactor(condition?: string): number {
 // API endpoints
 // ---------------------------------------------------------------------------
 
+// The ISBN arrives from vision/barcode extraction and is only trimmed, never
+// charset-validated, so encode it before interpolation. The host is fixed (not
+// an SSRF vector), but a stray `&`/`?`/`#`/space in a misread code would
+// otherwise corrupt the path or inject a query param into the lookup. A valid
+// ISBN (digits, `X`, hyphens — all URL-unreserved) is unchanged by this.
 function openLibraryUrl(isbn: string): string {
-  return `https://openlibrary.org/isbn/${isbn}.json`;
+  return `https://openlibrary.org/isbn/${encodeURIComponent(isbn)}.json`;
 }
 
 function googleBooksUrl(isbn: string): string {
-  return `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+  return `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +334,34 @@ function buildResult(hit: ResolvedHit, signal: ItemSignal): PriceResult | null {
   };
 }
 
+/** Does a (sold) PriceResult cite at least one real completed-sale comp? */
+function hasSoldComp(result: PriceResult): boolean {
+  return result.sources.some((s) => s.kind === "sold-comp");
+}
+
+/**
+ * Combine the structured ISBN identity with real eBay sold comps: price from the
+ * SOLD result (real used sales beat retail × 0.5), keep the `isbn-lookup` tier, and
+ * cite BOTH the catalog identity records and the sold comps. The merged sold-comp
+ * source is what lets the pipeline bridge restore the top `isbn` confidence tier;
+ * `compAgreement` rides along so a scattered sold set is still reflected honestly.
+ * The provisional `confidence` is the higher of the sold result's and the tier's
+ * own clean-hit value (the canonical composite recomputes downstream regardless).
+ */
+function buildSoldGroundedResult(
+  hit: ResolvedHit,
+  sold: PriceResult,
+): PriceResult {
+  return {
+    suggested: sold.suggested,
+    range: sold.range,
+    confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
+    sources: [...hit.sources, ...sold.sources],
+    tier: "isbn-lookup",
+    ...(sold.compAgreement != null ? { compAgreement: sold.compAgreement } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Provider factory
 // ---------------------------------------------------------------------------
@@ -324,6 +369,13 @@ function buildResult(hit: ResolvedHit, signal: ItemSignal): PriceResult | null {
 export interface IsbnPricingProviderOptions {
   /** Injected JSON fetcher; defaults to the platform `fetch`. */
   fetchJson?: FetchJson;
+  /**
+   * Optional sold-comp lookup (#2). When provided and it returns real sold comps,
+   * the book is priced from those (earning the top `isbn` tier); otherwise the
+   * provider falls back to the catalog used-price estimate. Wired by
+   * `createDefaultPricer`; omitted in unit tests for pure offline behavior.
+   */
+  soldLookup?: SoldLookup;
 }
 
 /**
@@ -334,6 +386,7 @@ export function createIsbnPricingProvider(
   options: IsbnPricingProviderOptions = {},
 ): PricingProvider {
   const fetchJson = options.fetchJson ?? defaultFetchJson;
+  const soldLookup = options.soldLookup;
 
   return {
     tier: "isbn-lookup",
@@ -350,6 +403,18 @@ export function createIsbnPricingProvider(
       const hit = await resolveHit(isbn, fetchJson);
       if (hit === null) return null; // Neither API matched → decline.
 
+      // #2: with a structured identity in hand, prefer REAL sold comps over the
+      // retail-derived heuristic. Only after the identity resolves (so we never
+      // spend a sold-comp fetch on an unidentifiable ISBN) and only when the
+      // lookup returns actual completed sales.
+      if (soldLookup) {
+        const sold = await soldLookup(signal);
+        if (sold !== null && hasSoldComp(sold)) {
+          return buildSoldGroundedResult(hit, sold);
+        }
+      }
+
+      // No sold comps → the honest retail-derived estimate (may itself decline).
       return buildResult(hit, signal);
     },
   };

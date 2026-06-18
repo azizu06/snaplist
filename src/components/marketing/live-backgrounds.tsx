@@ -153,13 +153,21 @@ export function HeroPrism() {
   );
 }
 
-/** Violet-white pastel — reads glassy on the white canvas. */
-const IRIDESCENCE_LIGHT: [number, number, number] = [0.93, 0.91, 1];
-/** Capped deep violet — a glow, not a glare, on the navy canvas. */
-const IRIDESCENCE_DARK: [number, number, number] = [0.38, 0.31, 0.86];
+/**
+ * The Iridescence shader (src/components/bits) builds a full holographic
+ * spectrum and multiplies it by this uColor. A near-white color lets the whole
+ * rainbow (incl. violet) through; biasing the vector hard into green/teal masks
+ * the spectrum into the brand band so no purple/lavender can surface. Red is
+ * held well below green so the field can only ever read deep-ink → green
+ * (#008060) → teal/mint — never magenta.
+ */
+/** Mint-green field on the white canvas — green-dominant, red suppressed. */
+const IRIDESCENCE_LIGHT: [number, number, number] = [0.55, 0.85, 0.74];
+/** Deep brand green on the dark canvas — a glow, not a glare. */
+const IRIDESCENCE_DARK: [number, number, number] = [0.03, 0.42, 0.31];
 
 /**
- * Violet iridescent field behind the final CTA band. Mounts on scroll-near
+ * Green iridescent field behind the final CTA band. Mounts on scroll-near
  * only. The shader canvas is opaque, so two veil layers blend it back into
  * the page: edge gradients fade into the canvas color and a center wash
  * keeps the headline contrast-safe in both themes.

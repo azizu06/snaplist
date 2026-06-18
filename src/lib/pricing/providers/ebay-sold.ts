@@ -270,7 +270,24 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
 function identityQuery(signal: ItemSignal): string | null {
   const brand = signal.brand?.trim();
   const model = signal.model?.trim();
-  if (brand && model) return `${brand} ${model}`;
+  if (brand && model) {
+    // Brand+model alone spans EVERY configuration a multi-config product ships in
+    // (a laptop sold as i5/i7, 1660Ti/RTX). The sold tier runs ABOVE web search, so
+    // a brand+model-only sold query would price mixed configs and the "Sharpen" flow
+    // — which feeds the seller's confirmed specs in as `signal.specs` — would be
+    // ignored at this tier (Codex P2). Fold a bounded specs hint into the query so
+    // sold comps cluster on the SAME configuration. Cap at 3, exactly as the
+    // web-search tier does (`buildSearchQueries`): more over-narrows eBay's keyword
+    // match. If the narrowed query then returns < MIN comps the provider declines to
+    // the web-search tier (which itself narrows-then-broadens), so coverage is never
+    // lost — only the wrong-config sold comps are.
+    const specsHint = (signal.specs ?? [])
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(" ");
+    return specsHint ? `${brand} ${model} ${specsHint}` : `${brand} ${model}`;
+  }
   const resolved = signal.resolvedName?.trim();
   if (resolved) return resolved;
   const upc = signal.upc?.trim();
@@ -391,6 +408,48 @@ export function parseSoldDate(captionText: string | undefined): number | undefin
   return Number.isFinite(t) ? t : undefined;
 }
 
+/**
+ * Field selectors for ONE eBay SRP layout. eBay serves two interchangeably: the
+ * CLASSIC `.srp-results > li.s-item` and the MODERN `.su-card-container` /
+ * `li.s-card` (#59). The fields read are identical; only the class names differ,
+ * so the per-card extraction is shared and only the selector set varies.
+ */
+interface CardSelectors {
+  /** The card container (the `.each` root). */
+  card: string;
+  title: string;
+  price: string;
+  caption: string;
+  link: string;
+  /** Condition grade span(s); the first non-empty wins. */
+  condition: string;
+}
+
+/** Classic layout. `card` is SCOPED to `.srp-results` so sponsored/"matching
+ * fewer words" carousels that reuse `li.s-item` outside the results list are
+ * never harvested (#56 review). */
+const CLASSIC_SELECTORS: CardSelectors = {
+  card: ".srp-results li.s-item",
+  title: ".s-item__title",
+  price: ".s-item__price",
+  caption: ".s-item__caption",
+  link: "a.s-item__link",
+  condition: ".s-item__subtitle, .SECONDARY_INFO",
+};
+
+/** Modern layout. `li.s-card` is NOT scoped to a verified results container, so
+ * the mandatory "Sold" caption check below is what excludes sponsored/active
+ * cards (they carry no completed-sale caption) — the same defense the classic
+ * path applies as its second gate. */
+const MODERN_SELECTORS: CardSelectors = {
+  card: "li.s-card",
+  title: ".s-card__title",
+  price: ".s-card__price",
+  caption: ".s-card__caption",
+  link: "a.s-card__link",
+  condition: ".s-card__subtitle",
+};
+
 export function parseSoldComps(
   html: string,
   baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
@@ -400,62 +459,83 @@ export function parseSoldComps(
   const comps: EbaySoldComp[] = [];
   const seen = new Set<string>();
 
-  $(".srp-results li.s-item").each((_i, el) => {
-    if (comps.length >= max) return false; // hit the cap — stop iterating
+  /** Harvest every valid sold comp for one layout. Returns true if the parse cap
+   * was hit (so the caller can stop without scanning the other layout). */
+  const harvest = (sel: CardSelectors): boolean => {
+    let capped = false;
+    $(sel.card).each((_i, el) => {
+      if (comps.length >= max) {
+        capped = true;
+        return false; // hit the cap — stop iterating
+      }
 
-    const card = $(el);
-    const title = card
-      .find(".s-item__title")
-      .first()
-      .text()
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^New Listing/i, "")
-      .trim();
-    if (!title || /^shop on ebay$/i.test(title)) return; // placeholder / empty
+      const card = $(el);
+      const title = card
+        .find(sel.title)
+        .first()
+        .text()
+        .replace(/\s+/g, " ")
+        .trim()
+        // Classic prefixes a "New Listing" badge; the modern card appends an
+        // "Opens in a new window or tab" a11y suffix (glued straight onto the
+        // title text, no space). Strip both — neither belongs in the title, and a
+        // leftover "a NEW window" would wrongly trip the new-condition filter and
+        // drop every comp (#59). `.*$` so the "or tab" tail goes too.
+        .replace(/^New Listing/i, "")
+        .replace(/\s*Opens in a new window.*$/i, "")
+        .trim();
+      if (!title || /^shop on ebay$/i.test(title)) return; // placeholder / empty
 
-    // Require the "Sold" caption — an active/sponsored card reusing li.s-item
-    // (no completed-sale caption) must never be counted as a sold comp. The same
-    // caption carries the sale DATE used by the freshness layer (#59).
-    const captionText = card.find(".s-item__caption").text();
-    if (!/\bsold\b/i.test(captionText)) return;
+      // Require the "Sold" caption — an active/sponsored card (no completed-sale
+      // caption) must never be counted as a sold comp. The same caption carries
+      // the sale DATE used by the freshness layer (#59).
+      const captionText = card.find(sel.caption).text();
+      if (!/\bsold\b/i.test(captionText)) return;
 
-    // Skip Best-Offer-accepted cards: the public card can show the LIST price, not
-    // the accepted transaction amount (the true amount is gated in Product
-    // Research), so its price is unreliable as a sold comp (#56 review). Honest
-    // ceiling: open-web sold pages can't always reveal the real offer price.
-    if (/best\s*offer\s*accepted/i.test(card.text())) return;
+      // Skip Best-Offer-accepted cards: the public card can show the LIST price, not
+      // the accepted transaction amount (the true amount is gated in Product
+      // Research), so its price is unreliable as a sold comp (#56 review). Honest
+      // ceiling: open-web sold pages can't always reveal the real offer price.
+      if (/best\s*offer\s*accepted/i.test(card.text())) return;
 
-    const price = parsePrice(card.find(".s-item__price").first().text());
-    if (price == null) return;
+      const price = parsePrice(card.find(sel.price).first().text());
+      if (price == null) return;
 
-    const href = card.find("a.s-item__link").first().attr("href");
-    if (!href) return;
-    let url: string;
-    try {
-      url = new URL(href, baseUrl).toString();
-    } catch {
-      return;
-    }
-    if (seen.has(url)) return;
-    seen.add(url);
+      const href = card.find(sel.link).first().attr("href");
+      if (!href) return;
+      let url: string;
+      try {
+        url = new URL(href, baseUrl).toString();
+      } catch {
+        return;
+      }
+      if (seen.has(url)) return;
+      seen.add(url);
 
-    // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
-    // authoritative grade even when the title omits it (#56 review).
-    const condition =
-      card.find(".s-item__subtitle, .SECONDARY_INFO").first().text().replace(/\s+/g, " ").trim() ||
-      undefined;
+      // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
+      // authoritative grade even when the title omits it (#56 review).
+      const condition =
+        card.find(sel.condition).first().text().replace(/\s+/g, " ").trim() ||
+        undefined;
 
-    const soldAt = parseSoldDate(captionText);
+      const soldAt = parseSoldDate(captionText);
 
-    comps.push({
-      url,
-      title,
-      price,
-      ...(condition ? { condition } : {}),
-      ...(soldAt != null ? { soldAt } : {}),
+      comps.push({
+        url,
+        title,
+        price,
+        ...(condition ? { condition } : {}),
+        ...(soldAt != null ? { soldAt } : {}),
+      });
     });
-  });
+    return capped;
+  };
+
+  // A real SRP is ONE layout or the other; harvest the classic first, then the
+  // modern (the absent layout yields nothing), deduping by URL across both so the
+  // parser is layout-agnostic. If the classic harvest already hit the cap, skip
+  // the modern scan — we're full.
+  if (!harvest(CLASSIC_SELECTORS)) harvest(MODERN_SELECTORS);
 
   return comps;
 }
@@ -679,6 +759,69 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Below this many comps, MAD-based outlier detection is unreliable (the median +
+ * MAD are themselves too noisy), so we don't trim — on 2–3 comps a divergent
+ * price could be the real market, not noise, and dropping it would manufacture a
+ * false-tight cluster. Honest default: keep all and let the wide spread land the
+ * item sub-gate (web_wide), where a human reviews it.
+ */
+const MIN_COMPS_FOR_OUTLIER_TRIM = 4;
+
+/**
+ * Iglewicz–Hoaglin modified z-score cutoff. |0.6745·(x−median)/MAD| > 3.5 marks a
+ * point an outlier. MAD (median absolute deviation) has a ~50% breakdown point, so
+ * a lone spike cannot inflate the center the way it inflates a range or an IQR
+ * hinge (the masking that lets a tail outlier hide inside Tukey fences).
+ */
+const MAD_OUTLIER_Z = 3.5;
+const MAD_Z_CONST = 0.6745;
+
+/**
+ * The core must retain at least this FRACTION of the comps. Trimming a large
+ * minority is not "removing noise" — e.g. 2 of 5 sales at $510 are real market
+ * signal (a different variant/condition), not an error, and silently dropping
+ * them to report a tight $180 would be over-confident. So we cap the trim at ~1/3
+ * of the set; if more than that look extreme, the set is genuinely dispersed —
+ * keep all and let the honest wide spread land it sub-gate (web_wide) for review.
+ */
+const MIN_CORE_FRACTION = 2 / 3;
+
+/**
+ * The robust CORE of a sold-comp set: the inliers after MAD-based outlier removal
+ * (#1 confidence lever). Pure and total — the primary unit-test target.
+ *
+ * Why this matters: comp agreement is `1 − (max−min)/median`, a RANGE measure with
+ * a near-zero breakdown point — a single wrong-model / "for parts" / sealed-unit
+ * sale that slips `filterRelevantComps` collapses agreement and forces a genuinely
+ * tight used cluster down to the sub-gate `web_wide` tier. Trimming the isolated
+ * spike lets the defensible core earn the `sold` tier it deserves.
+ *
+ * Honest by construction: MAD only removes ISOLATED tail spikes. A uniformly
+ * scattered set has a large MAD (no point is many MADs from the median → nothing
+ * trimmed), and a bimodal set's median sits between the clusters so every point is
+ * a similar distance out (again nothing trimmed). So real dispersion is preserved —
+ * only noise is removed. Below `MIN_COMPS_FOR_OUTLIER_TRIM`, or when MAD is 0
+ * (>half identical), or when a trim would drop below `MIN_CORE_COMPS`, keep all.
+ */
+export function coreComps(
+  comps: readonly EbaySoldComp[],
+): EbaySoldComp[] {
+  if (comps.length < MIN_COMPS_FOR_OUTLIER_TRIM) return [...comps];
+  const sorted = comps.map((c) => c.price).sort((a, b) => a - b);
+  const med = median(sorted);
+  const mad = median(sorted.map((p) => Math.abs(p - med)).sort((a, b) => a - b));
+  // MAD 0 means more than half the comps share a price — already maximally tight.
+  // The modified z-score is then ±∞ for any other point, which would wrongly drop
+  // legitimately-near comps, so keep all.
+  if (mad === 0) return [...comps];
+  const kept = comps.filter(
+    (c) => Math.abs((MAD_Z_CONST * (c.price - med)) / mad) <= MAD_OUTLIER_Z,
+  );
+  if (kept.length < Math.ceil(comps.length * MIN_CORE_FRACTION)) return [...comps];
+  return kept;
+}
+
 /** Freshness inputs for synthesis (#59). Omit to disable age-decay (raw median). */
 export interface SoldSynthesisOptions {
   /** Reference "now" (epoch ms). When set, the suggested price is recency-weighted. */
@@ -707,12 +850,17 @@ export function synthesizeSoldResult(
   if (comps.length === 0) {
     throw new Error("synthesizeSoldResult requires at least one comp");
   }
-  const prices = comps.map((c) => c.price).sort((a, b) => a - b);
+  // Price/range/agreement/citations all describe the robust CORE (#1): a lone
+  // "for parts" / sealed-unit / wrong-model spike that slipped the relevance
+  // filter must not collapse agreement nor widen the band, and is not cited as
+  // evidence backing the suggested price.
+  const core = coreComps(comps);
+  const prices = core.map((c) => c.price).sort((a, b) => a - b);
   const suggested =
     opts.now != null
       ? weightedMedian(
-          comps.map((c) => c.price),
-          comps.map((c) =>
+          core.map((c) => c.price),
+          core.map((c) =>
             recencyWeight(c.soldAt, opts.now as number, opts.halfLifeDays),
           ),
         )
@@ -726,10 +874,10 @@ export function synthesizeSoldResult(
     EBAY_SOLD_MAX_CONFIDENCE,
     EBAY_SOLD_BASE_CONFIDENCE +
       (agreement >= TIGHT_AGREEMENT_MIN ? EBAY_SOLD_AGREEMENT_BONUS : 0) +
-      (comps.length >= EBAY_SOLD_COVERAGE_THRESHOLD ? EBAY_SOLD_COVERAGE_BONUS : 0),
+      (core.length >= EBAY_SOLD_COVERAGE_THRESHOLD ? EBAY_SOLD_COVERAGE_BONUS : 0),
   );
 
-  const sources: PriceSource[] = comps.map((c) => ({
+  const sources: PriceSource[] = core.map((c) => ({
     url: c.url,
     title: c.title,
     kind: "sold-comp",
