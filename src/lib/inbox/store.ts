@@ -378,9 +378,10 @@ export interface RetryReplyDeliveryInput {
  * before the outbound row was inserted. The seller sees "not delivered" in the
  * inbox and explicitly retries.
  *
- *   1. VERIFY the claim: no outbound row references this question via
- *      `reply_to`. An existing row means the reply was already delivered →
- *      `ReplySendConflictError` (409, idempotent "already done").
+ *   1. VERIFY the claim: no CANONICAL reply references this question via
+ *      `reply_to` (follow-ups share the same `reply_to` and are excluded, just
+ *      as the unique index is). An existing canonical reply means it was already
+ *      delivered → `ReplySendConflictError` (409, idempotent "already done").
  *   2. RE-DELIVER via the injectable seam.
  *   3. INSERT the outbound row. The partial unique index on messages(reply_to)
  *      (20260611004000) is the authoritative dedupe: a 23505 means a concurrent
@@ -409,12 +410,19 @@ export async function retryReplyDelivery(
   const deliver = input.deliver ?? stubDeliverReply;
   const sentAt = new Date().toISOString();
 
-  // 1. The claim: no outbound row may already reference this question.
+  // 1. The claim: no CANONICAL reply may already reference this question.
+  //    Scope to the canonical reply exactly as the messages_canonical_reply_unique
+  //    index does — `reply_kind is null or 'reply'` — so a follow-up the seller
+  //    sent in the crash gap (the inbound is `sent`, the composer is unlocked) is
+  //    NOT mistaken for the missing reply. Without this the existence check would
+  //    count that follow-up, return a 409, and the canonical reply would never be
+  //    recovered. Mirrors the client's `reply_kind !== "followup"` thread split.
   const { data: existing, error: existingErr } = await supabase
     .from("messages")
     .select("id")
     .eq("reply_to", input.message.id)
     .eq("direction", "outbound")
+    .or("reply_kind.is.null,reply_kind.eq.reply")
     .limit(1);
   if (existingErr) {
     throw new Error(

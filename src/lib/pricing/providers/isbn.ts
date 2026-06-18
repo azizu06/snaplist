@@ -115,12 +115,17 @@ function conditionFactor(condition?: string): number {
 // API endpoints
 // ---------------------------------------------------------------------------
 
+// The ISBN arrives from vision/barcode extraction and is only trimmed, never
+// charset-validated, so encode it before interpolation. The host is fixed (not
+// an SSRF vector), but a stray `&`/`?`/`#`/space in a misread code would
+// otherwise corrupt the path or inject a query param into the lookup. A valid
+// ISBN (digits, `X`, hyphens — all URL-unreserved) is unchanged by this.
 function openLibraryUrl(isbn: string): string {
-  return `https://openlibrary.org/isbn/${isbn}.json`;
+  return `https://openlibrary.org/isbn/${encodeURIComponent(isbn)}.json`;
 }
 
 function googleBooksUrl(isbn: string): string {
-  return `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+  return `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
 }
 
 // ---------------------------------------------------------------------------

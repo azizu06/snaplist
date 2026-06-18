@@ -942,8 +942,13 @@ export function DashboardView({
   const clearSelection = () => setSelected(new Set());
 
   const selectedRows = visible.filter((r) => selected.has(r.itemId));
+  // Exclude live listings (status "published" = Active): archiveListings skips
+  // them server-side (ending a live eBay listing is the adapter's job, not an
+  // archive toggle), so including them here would make the toast claim N archived
+  // when the server archived fewer. Mirroring the server guard keeps the count
+  // honest and hides the Archive action when only live rows are selected.
   const archiveTargets = selectedRows
-    .filter((r) => r.listingId && r.status !== "archived")
+    .filter((r) => r.listingId && r.status !== "archived" && r.status !== "published")
     .map((r) => r.listingId as string);
   const unarchiveTargets = selectedRows
     .filter((r) => r.listingId && r.status === "archived")

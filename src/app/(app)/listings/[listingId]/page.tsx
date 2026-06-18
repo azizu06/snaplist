@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
+import { isLiveListingRow } from "@/lib/ui/status";
 import { publishToEbay } from "./actions";
 import { PublishView, type PublishData } from "./publish-view";
 
@@ -35,9 +36,9 @@ export default async function ListingPage({
     .maybeSingle();
   if (!listing) notFound();
 
-  const published = Boolean(
-    listing.ebay_status === "published" && listing.ebay_listing_id,
-  );
+  // The ONE definition of "live on eBay" (shared with the dashboard guards) so
+  // the predicate can't drift between the publish page and the mutation paths.
+  const published = isLiveListingRow(listing);
 
   // A short-lived signed thumbnail so the preview looks like the buyer's view,
   // not a wall of text. Same read pattern as the review/export pages.
