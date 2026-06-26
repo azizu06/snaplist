@@ -5,7 +5,8 @@ score and cited price sources. Production-real AI-engineering showcase.
 
 > **Docs:** [`PRD.md`](./PRD.md) is the source of truth for what we build · [`CONTEXT.md`](./CONTEXT.md)
 > is the domain glossary · [`AGENTS.md`](./AGENTS.md) is the agent/engineering guide ·
-> [`PROJECT_BRIEF.md`](./PROJECT_BRIEF.md) is origin context (superseded by the PRD).
+> [`PROJECT_BRIEF.md`](./PROJECT_BRIEF.md) is origin context (superseded by the PRD). See
+> [`docs/`](./docs) for ADRs, architecture, marketplace setup, security, and strategy notes.
 
 ## What it is
 Selling a used item is ~20–30 minutes of repetitive work every time: photograph it, research what
