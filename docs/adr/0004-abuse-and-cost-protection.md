@@ -16,13 +16,16 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
 
 - **Rate limiting — `@upstash/ratelimit` sliding window** on the metered routes (per-minute, keyed by
   Clerk user id, IP fallback), `snaplist:rl` key prefix. `enforceRateLimit` returns a `429` with
-  `Retry-After`. Applied to the AI/metered routes: inbox `simulate` + `send` (model calls) and eBay
+  `Retry-After`. Applied to the AI/metered routes: inbox `simulate` + `send` (model calls), the
+  bulk-capture `POST /api/batch/item` run (one metered pipeline run per haul item, #100), and eBay
   `publish` (external write). The ⌘K `search` route is **deliberately excluded** — it's a cheap RLS'd
-  DB read fired on every keystroke; rate-limiting it would break the palette.
+  DB read fired on every keystroke; rate-limiting it would break the palette. The bulk-capture
+  status poll (`GET /api/batch/status`) is likewise excluded — a cheap RLS'd read, not model work.
 - **Spend guardrail — a per-day counter** (`incrDaily`: Redis `INCR`+expiry | in-memory):
-  - **Per-user/day item cap** (the quota billing #64 gates) — checked in the upload action *before*
-    any photo upload or model call; over-cap redirects with a clear message (friendlier limit UI is
-    deferred to the frontend issue).
+  - **Per-user/day item cap** (the quota billing #64 gates) — checked in the upload action *and* the
+    bulk-capture batch-item route (#100) *before* any photo upload or model call; over-cap redirects
+    with a clear message (single-item) or returns a `quota` signal that blocks the rest of the batch
+    (bulk), so a haul can't spend past the cap (friendlier limit UI is deferred to the frontend issue).
   - **Global OpenAI budget alert** (distinct; warns, never blocks) — counts model-backed pipeline runs
     app-wide per day and fires a ONE-TIME alert (log + Sentry) on the exact first breach.
 - **Offline-safe by construction.** `@upstash/ratelimit` and `@upstash/redis` are loaded ONLY via

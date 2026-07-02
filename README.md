@@ -20,8 +20,9 @@ a defensible used-price range with cited sources, writes per-platform listing co
 review. High-confidence items can post automatically (a confidence-gated autopilot); low-confidence
 ones queue for review. Listings publish to eBay behind an adapter, with copy-paste export packs for
 Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
-SnapList is the seller's **control surface** — payment, checkout, and shipping stay on eBay; buyers
-never see it.
+Clearing a whole haul? **Bulk capture** takes item after item in one session through the same
+pipeline and lands on a live triage list of the batch. SnapList is the seller's **control surface** —
+payment, checkout, and shipping stay on eBay; buyers never see it.
 
 This repo is built as a **production-real AI-engineering showcase**: the AI pipeline *is* the product,
 and the goal is the full stack working end-to-end in a deployed app. The

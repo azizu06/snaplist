@@ -43,6 +43,16 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   tier so a noisy sale spread cannot ride the sold label past the gate.
 - **Autopilot** — the confidence-gated posting behavior: high-confidence items are eligible to post
   automatically; low-confidence items **queue for review**. Toggleable off.
+- **Bulk / haul capture** — the reseller-native capture flow (issue #100) at `/batch`: photograph
+  several items in one session (1–4 photos each), then submit the whole **batch**. Each item runs
+  through the *same* single-item pipeline spine (`POST /api/batch/item`) under the same rate-limit and
+  daily-**item**-cap guardrails, at small bounded concurrency — a haul is a slow trickle of ordinary
+  runs, never a stampede. Additive to the single-item capture, not a replacement.
+- **Triage list** — the live results surface of a bulk **batch**: one row per captured **item**, each
+  showing a **triage status** (processing → needs-review / autopilot-eligible / active, plus failed /
+  daily-limit). Triage statuses are a *reading* of the item's persisted **listing** status — no new
+  persisted vocabulary — and the list polls `GET /api/batch/status` so rows track DB truth (e.g. a
+  `queued` listing flipping to `published`). Every row links to the item's normal review page.
 - **Listing** — generated, platform-specific sale copy for an item (title, item specifics,
   description, tags). One **Item** can have multiple listings (one per platform).
 - **Export pack** — copy-paste listing text for a platform with no write API (Facebook Marketplace,
