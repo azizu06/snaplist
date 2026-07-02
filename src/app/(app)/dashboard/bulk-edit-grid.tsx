@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 import { lifecycleLabel } from "@/lib/ui/status";
 import { Select } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useEscapeToClose, useModalFocus } from "@/components/ui/overlay-behavior";
 import type { DashboardRow } from "./dashboard-view";
 import type { BulkListingUpdate } from "./actions";
@@ -110,8 +111,19 @@ export function BulkEditGrid({
   );
   const dirty = updates.length > 0;
 
+  // Closing a dirty session (Escape, Back, Discard) confirms before dropping
+  // the pending edits — Escape is too easy to hit to silently lose a long
+  // editing pass. A clean session closes instantly. The confirm mounts after
+  // this dialog, so it registers ABOVE it on the escape stack: Escape in the
+  // confirm closes only the confirm.
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const requestClose = () => {
+    if (dirty || hasInvalidPrice) setConfirmingDiscard(true);
+    else onClose();
+  };
+
   const dialogRef = useRef<HTMLDivElement>(null);
-  useEscapeToClose(true, onClose);
+  useEscapeToClose(true, requestClose);
   useModalFocus(true, dialogRef);
 
   // Mobile: a single column — product stacks above a 2-up Status/Price sub-grid
@@ -138,7 +150,7 @@ export function BulkEditGrid({
         <button
           type="button"
           data-autofocus
-          onClick={onClose}
+          onClick={requestClose}
           aria-label="Back to listings"
           className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong"
         >
@@ -160,7 +172,7 @@ export function BulkEditGrid({
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong"
           >
             Discard
@@ -283,6 +295,19 @@ export function BulkEditGrid({
           </div>
         </div>
       </div>
+
+      {confirmingDiscard ? (
+        <ConfirmDialog
+          title="Discard unsaved edits?"
+          body="Your pending changes to these listings will be lost."
+          confirmLabel="Discard"
+          cancelLabel="Keep editing"
+          danger
+          pending={false}
+          onConfirm={onClose}
+          onCancel={() => setConfirmingDiscard(false)}
+        />
+      ) : null}
     </div>
   );
 }

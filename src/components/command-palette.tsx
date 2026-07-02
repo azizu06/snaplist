@@ -275,7 +275,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
 
       {open && anchor ? createPortal(
         <div
-          className="fixed inset-0 z-50 bg-[rgba(26,26,26,0.32)] backdrop-blur-[1px]"
+          className="fixed inset-0 z-[70] bg-[rgba(26,26,26,0.32)] backdrop-blur-[1px]"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}

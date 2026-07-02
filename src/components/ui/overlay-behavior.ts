@@ -12,8 +12,17 @@ import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type RefOb
 
 /** Module-level LIFO stack of open overlays. Mount order mirrors visual
  *  stacking (the overlay opened last registers last), so the last entry is
- *  the topmost layer — the only one Escape may close. */
-const escapeStack: { close: () => void }[] = [];
+ *  the topmost layer — the only one Escape may close. `useModalFocus`
+ *  registers a marker on the same stack so its Tab trap can tell when a
+ *  later overlay (command palette, confirm dialog) is stacked above it and
+ *  suspend itself instead of hijacking that overlay's focus. */
+type OverlayEntry = { kind: "escape"; close: () => void } | { kind: "focus" };
+const overlayStack: OverlayEntry[] = [];
+
+function removeEntry(entry: OverlayEntry) {
+  const i = overlayStack.indexOf(entry);
+  if (i !== -1) overlayStack.splice(i, 1);
+}
 
 /** Close on Escape while `active` — topmost overlay wins. Each active hook
  *  instance registers on the stack; one Escape closes only the top entry and
@@ -32,19 +41,19 @@ export function useEscapeToClose(active: boolean, onClose: () => void) {
 
   useEffect(() => {
     if (!active) return;
-    const entry = { close: () => onCloseRef.current() };
-    escapeStack.push(entry);
+    const entry: OverlayEntry = { kind: "escape", close: () => onCloseRef.current() };
+    overlayStack.push(entry);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (escapeStack[escapeStack.length - 1] !== entry) return;
+      const topEscape = [...overlayStack].reverse().find((o) => o.kind === "escape");
+      if (topEscape !== entry) return;
       e.preventDefault();
       entry.close();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      const i = escapeStack.indexOf(entry);
-      if (i !== -1) escapeStack.splice(i, 1);
+      removeEntry(entry);
     };
   }, [active]);
 }
@@ -70,6 +79,8 @@ export function useModalFocus(
     const container = containerRef.current;
     if (!container) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
+    const entry: OverlayEntry = { kind: "focus" };
+    overlayStack.push(entry);
 
     const initial =
       container.querySelector<HTMLElement>("[data-autofocus]") ??
@@ -78,6 +89,11 @@ export function useModalFocus(
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (!trap || e.key !== "Tab") return;
+      // Suspend the trap while a later overlay is stacked above this one
+      // (e.g. the command palette opened over the bulk-edit editor) — that
+      // overlay owns focus; yanking Tab back here would hijack it.
+      const idx = overlayStack.indexOf(entry);
+      if (overlayStack.slice(idx + 1).some((o) => o.kind === "escape")) return;
       const focusables = [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
         (el) => el.offsetParent !== null || el === document.activeElement,
       );
@@ -97,6 +113,7 @@ export function useModalFocus(
 
     return () => {
       document.removeEventListener("keydown", onKeyDown);
+      removeEntry(entry);
       restoreRef.current?.focus();
       restoreRef.current = null;
     };
