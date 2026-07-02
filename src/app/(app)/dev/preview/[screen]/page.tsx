@@ -126,6 +126,19 @@ const FIXTURE_REVIEW: ReviewData = {
   range: { low: 155, high: 205 },
   confidence: 0.82,
   tier: "web_tight",
+  sources: [
+    {
+      url: "https://www.ebay.com/itm/demo-1",
+      title: "Sony WH-1000XM4 Black — sold listing",
+      kind: "sold-comp",
+    },
+    {
+      url: "https://www.mercari.com/us/item/demo-2",
+      title: "Sony WH1000XM4 headphones (used)",
+      kind: "asking-comp",
+    },
+    { url: "https://www.swappa.com/listing/demo-3", title: null, kind: "asking-comp" },
+  ],
   strategies: [
     { key: "quick", label: "Quick sell", price: 167, blurb: "Priced to move — toward the lower end of real listed prices." },
     { key: "balanced", label: "Balanced", price: 178, blurb: "The typical listed price — a safe bet." },

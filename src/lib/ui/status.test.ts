@@ -7,6 +7,7 @@ import {
   isLiveListingRow,
   lifecycleLabel,
   lifecycleShortLabel,
+  sourceKindLabel,
   tierLabel,
 } from "./status";
 
@@ -198,5 +199,20 @@ describe("tierLabel", () => {
     expect(tierLabel("future_tier_v2")).toBe("AI estimate");
     expect(tierLabel(null)).toBeNull();
     expect(tierLabel(undefined)).toBeNull();
+  });
+});
+
+describe("sourceKindLabel", () => {
+  it("translates every price-source kind the tiers emit to plain language (PRD story 9)", () => {
+    expect(sourceKindLabel("isbn-lookup")).toBe("ISBN lookup");
+    expect(sourceKindLabel("sold-comp")).toBe("Sold comp");
+    expect(sourceKindLabel("asking-comp")).toBe("Asking price");
+    expect(sourceKindLabel("retail-price")).toBe("Retail price");
+  });
+
+  it("never renders a raw unknown kind key — hides the tag instead of guessing", () => {
+    expect(sourceKindLabel("future-kind")).toBeNull();
+    expect(sourceKindLabel(null)).toBeNull();
+    expect(sourceKindLabel(undefined)).toBeNull();
   });
 });

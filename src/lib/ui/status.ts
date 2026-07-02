@@ -200,6 +200,26 @@ export function confidenceLabel(
   }
 }
 
+/**
+ * Price-source `kind` keys (priceSourceSchema) → plain language for the cited
+ * sources list (PRD story 9). Unknown/missing kinds return null — the link
+ * still renders, just without a tag — so a raw key never reaches the user.
+ */
+export function sourceKindLabel(kind: string | null | undefined): string | null {
+  switch (kind) {
+    case "isbn-lookup":
+      return "ISBN lookup";
+    case "sold-comp":
+      return "Sold comp";
+    case "asking-comp":
+      return "Asking price";
+    case "retail-price":
+      return "Retail price";
+    default:
+      return null;
+  }
+}
+
 /** Pricing tier keys → plain language (R-1). Unknown future tiers degrade to a generic honest label. */
 export function tierLabel(tier: string | null | undefined): string | null {
   if (tier == null) return null;
