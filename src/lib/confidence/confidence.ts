@@ -36,8 +36,13 @@ import { z } from "zod";
  * Note the tier is a hint the router supplies about its own comp cluster;
  * `compAgreement` below carries the continuous version of the same idea. Keeping
  * both lets the tier set a floor while agreement fine-tunes within it.
+ *
+ * Named CONFIDENCE tiers (not `PRICING_TIERS`): the routing vocabulary
+ * (`isbn-lookup`/`branded-web`/…) lives in `pricing/types.ts` as `PricingTier`;
+ * this is the TRUST vocabulary the bridge (`from-price.ts`) maps it onto. The two
+ * once shared a name, which cost every grep a wrong turn.
  */
-export const PRICING_TIERS = [
+export const CONFIDENCE_TIERS = [
   "isbn",
   "sold",
   "web_tight",
@@ -46,7 +51,7 @@ export const PRICING_TIERS = [
   "llm_only",
 ] as const;
 
-export type PricingTier = (typeof PRICING_TIERS)[number];
+export type ConfidenceTier = (typeof CONFIDENCE_TIERS)[number];
 
 /**
  * Per-tier base trust in [0,1]. These are the dominant term in the composite:
@@ -62,7 +67,7 @@ export type PricingTier = (typeof PRICING_TIERS)[number];
  * autopilot gate; the bridge already withholds this tier from a scattered sold
  * set (→ `web_wide`), so a wide sale spread cannot ride the label past the gate.
  */
-const TIER_BASE: Record<PricingTier, number> = {
+const TIER_BASE: Record<ConfidenceTier, number> = {
   isbn: 0.95,
   sold: 0.85,
   web_tight: 0.8,
@@ -76,15 +81,19 @@ const TIER_BASE: Record<PricingTier, number> = {
  * resolves: brand + model resolved, barcode decoded cleanly, category
  * unambiguous (PRD). Booleans (not a pre-baked 0–1 score) keep the input shape
  * honest about what the pipeline actually knows and let the weighting live here.
+ *
+ * Named identification SIGNALS (score inputs) — distinct from the user-facing
+ * `identificationSchema` in `pipeline/types.ts` (the "what we think it is" card),
+ * which once shared this name.
  */
-export const identificationSchema = z.object({
+export const identificationSignalsSchema = z.object({
   brandResolved: z.boolean(),
   modelResolved: z.boolean(),
   barcodeDecoded: z.boolean(),
   categoryUnambiguous: z.boolean(),
 });
 
-export type IdentificationSignals = z.infer<typeof identificationSchema>;
+export type IdentificationSignals = z.infer<typeof identificationSignalsSchema>;
 
 /**
  * The full input the pipeline populates. `compAgreement` is a normalized 0–1
@@ -97,9 +106,9 @@ export type IdentificationSignals = z.infer<typeof identificationSchema>;
  * constant — comp agreement is weighted lightly, so it does not distort them.
  */
 export const confidenceSignalsSchema = z.object({
-  tier: z.enum(PRICING_TIERS),
+  tier: z.enum(CONFIDENCE_TIERS),
   compAgreement: z.number().min(0).max(1),
-  identification: identificationSchema,
+  identification: identificationSignalsSchema,
 });
 
 export type ConfidenceSignals = z.infer<typeof confidenceSignalsSchema>;

@@ -7,10 +7,10 @@ import {
   type SearchClient,
 } from "../pricing";
 import { pipelineResultSchema, type ListingCopy } from "../pipeline/types";
+import { priceToConfidence } from "../confidence/from-price";
+import { createDefaultPricer } from "../pricing/default-pricer";
 import {
-  createDefaultPricer,
   createVisionPipeline,
-  priceToConfidence,
   type CreateVisionPipelineOptions,
 } from "./pipeline";
 import type {
@@ -180,7 +180,9 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
       },
       model: "m",
     };
-    const priceItem = vi.fn(async (_signal: ItemSignal) => STUB_PRICE);
+    const priceItem = vi.fn<(signal: ItemSignal) => Promise<PriceResult>>(
+      async () => STUB_PRICE,
+    );
     await makePipeline({ extract: fakeExtract(isbnExtraction), priceItem }).run({
       photos: ["u/a.jpg"],
     });

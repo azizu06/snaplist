@@ -27,6 +27,10 @@ Publish triggers:
 - UI: the "Publish to eBay" button on `/listings/[listingId]`.
 - API: `POST /api/ebay/publish` with `{ "listingId": "<uuid>" }` (cookie-authed).
 
+Both triggers call the shared `publishListingToEbayAndNotify` service, so persistence
+and the activity-feed notifications (success and failure) behave identically from either
+entry point; an idempotent retry of an already-published listing does not re-notify.
+
 ## Tests are offline — always
 
 The entire test suite runs against `MockEbayAdapter` (and a fake `fetch` for

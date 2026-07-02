@@ -3,6 +3,7 @@ import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { firstSearchToken, searchRows } from "@/lib/ui/search";
 import { itemLabel } from "@/lib/ui/item-label";
+import { signPhotoUrlMap } from "@/lib/vision";
 
 /**
  * GET /api/search?q=… — the ⌘K palette's data source. RLS-scoped (the
@@ -104,18 +105,10 @@ export async function GET(request: Request) {
       const first = (it.photos as string[] | null)?.[0];
       if (first) photoByItem.set(id, first);
     }
-    if (photoByItem.size > 0) {
-      const { data: signed } = await supabase.storage
-        .from("photos")
-        .createSignedUrls([...photoByItem.values()], 60 * 10);
-      const urlByPath = new Map<string, string>();
-      for (const entry of signed ?? []) {
-        if (entry.signedUrl && entry.path) urlByPath.set(entry.path, entry.signedUrl);
-      }
-      for (const [id, path] of photoByItem) {
-        const url = urlByPath.get(path);
-        if (url) thumbByItem.set(id, url);
-      }
+    const urlByPath = await signPhotoUrlMap(supabase, [...photoByItem.values()]);
+    for (const [id, path] of photoByItem) {
+      const url = urlByPath.get(path);
+      if (url) thumbByItem.set(id, url);
     }
   }
 

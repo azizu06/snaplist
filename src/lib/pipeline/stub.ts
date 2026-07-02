@@ -1,4 +1,5 @@
 import { computeConfidence, type ConfidenceSignals } from "../confidence/confidence";
+import { identificationSignalsFrom } from "../confidence/from-price";
 import type { ItemSignal, PriceResult } from "../pricing";
 import { priceResultSchema } from "../pricing";
 import type {
@@ -122,16 +123,13 @@ export class StubPipeline implements Pipeline {
     // Real confidence composite over the stub's signals. Maps the pricing tier
     // ("branded-web") onto the confidence tier vocabulary ("web_wide": branded
     // web comps, asking-only → wide). The real pipeline derives `compAgreement`
-    // from the actual comp dispersion; the stub passes a single mid value.
+    // from the actual comp dispersion; the stub passes a single mid value. The
+    // identification booleans come from the SAME shared mapping the real bridge
+    // uses (`identificationSignalsFrom`), so the stub can't drift from it.
     const signals: ConfidenceSignals = {
       tier: "web_wide",
       compAgreement: 0.6,
-      identification: {
-        brandResolved: attributes.brand != null,
-        modelResolved: attributes.model != null,
-        barcodeDecoded: attributes.upc != null || attributes.isbn != null,
-        categoryUnambiguous: attributes.category != null,
-      },
+      identification: identificationSignalsFrom(attributes),
     };
     const confidence = computeConfidence(signals, {
       autopilotEnabled: input.autopilotEnabled ?? true,

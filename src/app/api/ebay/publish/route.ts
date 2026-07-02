@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import {
   createEbayAdapterForUser,
-  publishListingToEbay,
+  publishListingToEbayAndNotify,
   PublishValidationError,
   EbayApiError,
 } from "@/lib/marketplace/ebay";
@@ -45,9 +45,11 @@ export async function POST(request: NextRequest) {
 
   try {
     // Per-user tokens when the seller connected eBay in Settings (issue #17);
-    // app-level env credentials otherwise (the sandbox loop).
-    const outcome = await publishListingToEbay(
+    // app-level env credentials otherwise (the sandbox loop). The shared wrapper
+    // fires the same activity-feed notifications the "Publish" button does.
+    const outcome = await publishListingToEbayAndNotify(
       supabase,
+      userId,
       listingId,
       await createEbayAdapterForUser(supabase),
     );

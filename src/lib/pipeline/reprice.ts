@@ -2,7 +2,8 @@ import type { ExtractedAttributes } from "./types";
 import type { ConfidenceResult } from "../confidence/confidence";
 import type { ItemSignal, PriceResult } from "../pricing";
 import { attributesToSignal } from "./stub";
-import { createDefaultPricer, priceToConfidence } from "../vision/pipeline";
+import { priceToConfidence } from "../confidence/from-price";
+import { createDefaultPricer } from "../pricing/default-pricer";
 
 /**
  * Re-price an existing item with seller-supplied discriminating specs — the engine

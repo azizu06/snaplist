@@ -57,6 +57,10 @@ shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, 
   when the real adapter lands.
 - For non-trivial UI work, use the Open Design workflow (see the user's global instructions) rather
   than hand-writing large CSS/JSX blind.
+- **Mutation seams:** views mutate through **server actions**; API routes serve external/programmatic
+  callers (and client fetch flows like the inbox that need JSON/streaming). When an operation has both
+  entry points, ALL domain behavior (persistence, notifications) lives in the shared `src/lib` service
+  (e.g. `publishListingToEbayAndNotify`) so the two can never diverge.
 - Keep `PRD.md` updated when a decision changes; keep this file's "non-negotiables" in sync.
 
 ## Item domain

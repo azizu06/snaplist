@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { isLiveListingRow } from "@/lib/ui/status";
+import { signPhotoUrlMap } from "@/lib/vision";
 import { publishToEbay } from "./actions";
 import { PublishView, type PublishData } from "./publish-view";
 
@@ -42,19 +43,14 @@ export default async function ListingPage({
 
   // A short-lived signed thumbnail so the preview looks like the buyer's view,
   // not a wall of text. Same read pattern as the review/export pages.
-  let photoUrl: string | null = null;
   const { data: item } = await supabase
     .from("items")
     .select("photos")
     .eq("id", listing.item_id)
     .maybeSingle();
-  const photoPaths = (item?.photos as string[] | null) ?? [];
-  if (photoPaths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from("photos")
-      .createSignedUrl(photoPaths[0], 60 * 10);
-    photoUrl = signed?.signedUrl ?? null;
-  }
+  const firstPhoto = (item?.photos as string[] | null)?.[0];
+  const signedThumb = await signPhotoUrlMap(supabase, firstPhoto ? [firstPhoto] : []);
+  const photoUrl = firstPhoto ? (signedThumb.get(firstPhoto) ?? null) : null;
 
   const data: PublishData = {
     listingId: listing.id as string,

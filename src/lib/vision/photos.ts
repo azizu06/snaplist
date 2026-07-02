@@ -56,6 +56,71 @@ export async function resolvePhotoImages(
   return urls;
 }
 
+/** The narrow BATCH-signing storage surface — keeps test fakes trivial. */
+export interface BatchSignedUrlClient {
+  storage: {
+    from(bucket: string): {
+      createSignedUrls(
+        paths: string[],
+        expiresIn: number,
+      ): Promise<{
+        data: Array<{ path: string | null; signedUrl: string | null }> | null;
+        error: { message: string } | null;
+      }>;
+    };
+  };
+}
+
+/**
+ * Batch-sign paths in ONE storage round-trip, returning a path → signed-url Map.
+ * PER-ENTRY failures (missing/unauthorized object) are dropped — the path is
+ * simply absent from the map — but a BATCH/transport failure (storage outage,
+ * network error) THROWS. The strict-transport policy for flows that must not
+ * mistake an outage for missing photos: the eBay publish path uses this so a
+ * transient storage error surfaces as a retryable failure instead of marking
+ * the listing failed with a "re-upload your photos" message.
+ */
+export async function batchSignPhotoUrls(
+  supabase: SupabaseClient | BatchSignedUrlClient,
+  paths: string[],
+  options: { expiresIn?: number; bucket?: string } = {},
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (paths.length === 0) return map;
+  const expiresIn = options.expiresIn ?? DEFAULT_SIGNED_URL_TTL_SECONDS;
+  const bucket = options.bucket ?? PHOTOS_BUCKET;
+  const store = (supabase as BatchSignedUrlClient).storage.from(bucket);
+  const { data, error } = await store.createSignedUrls(paths, expiresIn);
+  if (error) {
+    throw new Error(`Failed to batch-sign photos: ${error.message}`);
+  }
+  for (const entry of data ?? []) {
+    if (entry.path && entry.signedUrl) map.set(entry.path, entry.signedUrl);
+  }
+  return map;
+}
+
+/**
+ * BEST-EFFORT batch signing for UI surfaces (dashboard/search thumbnails, the
+ * review media card, export/publish previews): `batchSignPhotoUrls` with the
+ * transport failures swallowed too. A missing thumb renders as a placeholder —
+ * unlike the vision call, where a missing image would silently shrink the
+ * model's input, so `resolvePhotoImages` above throws instead. Never throws;
+ * a storage outage yields an empty map (the page still renders).
+ */
+export async function signPhotoUrlMap(
+  supabase: SupabaseClient | BatchSignedUrlClient,
+  paths: string[],
+  options: { expiresIn?: number; bucket?: string } = {},
+): Promise<Map<string, string>> {
+  try {
+    return await batchSignPhotoUrls(supabase, paths, options);
+  } catch {
+    // Best-effort: signing failures degrade to placeholders, never a broken page.
+    return new Map<string, string>();
+  }
+}
+
 /** The narrow storage surface for downloading object BYTES — keeps test fakes trivial. */
 export interface DownloadClient {
   storage: {

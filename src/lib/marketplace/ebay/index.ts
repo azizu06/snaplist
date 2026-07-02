@@ -24,7 +24,11 @@ export {
   toEbayPrice,
   type ListingForPublish,
 } from "./map";
-export { publishListingToEbay, type PublishOutcome } from "./publish";
+export {
+  publishListingToEbay,
+  publishListingToEbayAndNotify,
+  type PublishOutcome,
+} from "./publish";
 export { PublishValidationError } from "./errors";
 export { UserTokenProvider } from "./user-token-provider";
 export {

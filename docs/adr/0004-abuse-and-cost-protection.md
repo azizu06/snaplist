@@ -36,6 +36,9 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
 
 - Works with zero config offline; turning on real, cross-instance limiting is an Upstash env flip.
 - The in-memory fallback does not share state across serverless instances (limits are softer in that
-  mode) — acceptable for dev; production uses Upstash.
+  mode) — acceptable for dev; production uses Upstash. Because a hard env assertion would trade a
+  guardrail for an outage (and break the offline-build constraint), the "production sets Upstash"
+  assumption is guarded by a ONE-TIME alert instead: the first production check that runs on the
+  fallback emits `abuse.store.fallback-in-production` (log + Sentry, mirroring the budget alert).
 - `resolveTier` is the single seam #64 (billing) flips to grant paid limits; nothing else changes.
 - A 429/limit UI polish pass is deferred to the frontend issue (server returns the correct signals).

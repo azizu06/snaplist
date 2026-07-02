@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { EbayAdapter } from "./types";
+import { EbayApiError, type EbayAdapter } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
 import { PublishValidationError } from "./errors";
+import { batchSignPhotoUrls } from "../../vision/photos";
+import { createNotification } from "../../notifications";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -25,7 +27,7 @@ export interface PublishOutcome {
   ebayListingId: string;
   ebayOfferId: string | null;
   ebayStatus: "published";
-  /** True when this call hit eBay; false when the stored result was returned. */
+  /** True when the stored result was returned (idempotent short-circuit, no eBay call); false when this call actually published. */
   alreadyPublished: boolean;
 }
 
@@ -56,6 +58,65 @@ const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
  * publishing under a different currency must reprice, never relabel.
  */
 const PRICING_CURRENCY = "USD";
+
+/**
+ * `publishListingToEbay` + the seller's activity-feed notifications, shared by
+ * BOTH entry points (the /listings/[listingId] server action and the
+ * /api/ebay/publish route) so a publish behaves identically wherever it's
+ * triggered — the route previously skipped the notifications the button fired.
+ * Failures are recorded to the feed and RETHROWN for the caller's own error
+ * handling; `createNotification` is fire-and-forget, so the feed can never
+ * break the publish itself.
+ */
+export async function publishListingToEbayAndNotify(
+  supabase: SupabaseClient,
+  userId: string,
+  listingId: string,
+  adapter: EbayAdapter,
+  options: PublishOptions = {},
+): Promise<PublishOutcome> {
+  let outcome: PublishOutcome;
+  try {
+    outcome = await publishListingToEbay(supabase, listingId, adapter, options);
+  } catch (err) {
+    const userActionable =
+      err instanceof PublishValidationError || err instanceof EbayApiError;
+    await createNotification(supabase, {
+      userId,
+      kind: "listing_failed",
+      title: "Couldn’t publish your listing to eBay",
+      body: userActionable
+        ? (err as Error).message
+        : "Something went wrong while publishing. Please try again.",
+      href: `/listings/${listingId}`,
+      listingId,
+    });
+    throw err;
+  }
+
+  // Notify only when this call ACTUALLY published (rides Realtime to the bell).
+  // An idempotent retry (`alreadyPublished`) already produced this notification
+  // the first time — re-emitting would spam the feed on every re-trigger.
+  if (!outcome.alreadyPublished) {
+    const { data: published } = await supabase
+      .from("listings")
+      .select("title, item_id")
+      .eq("id", listingId)
+      .maybeSingle();
+    await createNotification(supabase, {
+      userId,
+      kind: "listing_published",
+      title: published?.title
+        ? `“${published.title}” is live on eBay`
+        : "Your listing is live on eBay",
+      body: "Buyers can find it now — view or edit it anytime.",
+      href: `/listings/${listingId}`,
+      itemId: (published?.item_id as string | null) ?? null,
+      listingId,
+    });
+  }
+  return outcome;
+}
 
 export async function publishListingToEbay(
   supabase: SupabaseClient,
@@ -240,18 +301,20 @@ async function markPublishFailed(
     .then(undefined, () => undefined);
 }
 
-/** Sign each private photo path; skip (don't fail the publish) on a bad path. */
+/**
+ * Sign each private photo path, IN ORDER; a bad PATH is skipped (a genuinely
+ * missing photo shouldn't block the rest), but a storage/transport failure
+ * THROWS (`batchSignPhotoUrls`) so a transient outage surfaces as a retryable
+ * internal error — never as "none of your photos could be signed, re-upload"
+ * (Codex P2 on #98).
+ */
 async function signPhotoUrls(
   supabase: SupabaseClient,
   paths: string[],
   ttlSeconds: number,
 ): Promise<string[]> {
-  const urls: string[] = [];
-  for (const path of paths) {
-    const { data } = await supabase.storage
-      .from("photos")
-      .createSignedUrl(path, ttlSeconds);
-    if (data?.signedUrl) urls.push(data.signedUrl);
-  }
-  return urls;
+  const signed = await batchSignPhotoUrls(supabase, paths, { expiresIn: ttlSeconds });
+  return paths
+    .map((path) => signed.get(path))
+    .filter((url): url is string => Boolean(url));
 }
