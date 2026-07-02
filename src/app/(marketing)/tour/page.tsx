@@ -15,7 +15,7 @@ export const metadata: Metadata = {
  * Owner round-6 feedback: the step clips were too small ("the user shouldn't
  * have to squint") and the buyer-Q&A band duplicated the step format. Now the
  * pipeline section breaks out of the content column (max-w-[1720px]) and the
- * clip takes ~3/4 of each row; buyer Q&A joined the same section as step 06
+ * clip takes ~3/4 of each row; buyer Q&A joined the same section as step 6
  * ("After it's live") in the identical alternating text/video format. Section
  * order: hero (headline only) → step-intro header → SIX step clips
  * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4, 1920×1080 loops via DemoClip,
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 
 const STEPS = [
   {
-    n: "01",
+    n: "1",
     src: "/demo/steps/snap.mp4",
     // Portrait mobile render exists for this step (public/demo/steps/snap-mobile.mp4
     // + -dark). Under 768px /tour swaps to it so the in-clip UI is legible.
@@ -39,7 +39,7 @@ const STEPS = [
     label: "Demo clip: the Snap step of SnapList",
   },
   {
-    n: "02",
+    n: "2",
     src: "/demo/steps/identify.mp4",
     mobile: true,
     glyph: "identify",
@@ -49,7 +49,7 @@ const STEPS = [
     label: "Demo clip: the Identify step of SnapList",
   },
   {
-    n: "03",
+    n: "3",
     src: "/demo/steps/price.mp4",
     mobile: true,
     glyph: "price",
@@ -59,7 +59,7 @@ const STEPS = [
     label: "Demo clip: the Price step of SnapList",
   },
   {
-    n: "04",
+    n: "4",
     src: "/demo/steps/write.mp4",
     mobile: true,
     glyph: "write",
@@ -69,7 +69,7 @@ const STEPS = [
     label: "Demo clip: the Write step of SnapList",
   },
   {
-    n: "05",
+    n: "5",
     src: "/demo/steps/publish.mp4",
     mobile: true,
     glyph: "publish",
@@ -79,7 +79,7 @@ const STEPS = [
     label: "Demo clip: the Publish step of SnapList",
   },
   {
-    n: "06",
+    n: "6",
     src: "/demo/buyer-qa.mp4",
     mobile: true,
     glyph: "chat",

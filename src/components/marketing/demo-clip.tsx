@@ -31,7 +31,7 @@ export function DemoClip({
   mobileSrc?: string;
   /** Accessible description of the clip's content. */
   label: string;
-  /** Step number for the poster slate (e.g. "03"). */
+  /** Step number for the poster slate (e.g. "3"). */
   n?: string;
   title: string;
   caption: string;
