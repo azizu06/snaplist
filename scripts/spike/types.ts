@@ -90,11 +90,15 @@ export const measurementResponseSchema = z.object({
 export type MeasurementResponse = z.infer<typeof measurementResponseSchema>;
 
 /** One fixture's recorded model run (persisted to predictions.json). */
-export interface PredictionRecord {
-  fixtureId: string;
-  model: string;
-  ok: boolean;
+export const predictionRecordSchema = z.object({
+  fixtureId: z.string().min(1),
+  model: z.string(),
+  ok: z.boolean(),
   /** Set when ok=false — the call or validation failed for this fixture. */
-  error?: string;
-  response?: MeasurementResponse;
-}
+  error: z.string().optional(),
+  response: measurementResponseSchema.optional(),
+});
+export type PredictionRecord = z.infer<typeof predictionRecordSchema>;
+
+/** predictions.json is an array of these — parsed (not cast) so bad data fails loudly. */
+export const predictionRecordsSchema = z.array(predictionRecordSchema);

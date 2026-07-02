@@ -189,12 +189,12 @@ export function scoreSpike(
 
   let verdict: Verdict;
   let verdictReason: string;
-  const disc = overall.discrimination;
+  const disc = withCue.discrimination;
   if (withCue.n < MIN_WITH_CUE_ROWS || disc.pairs < MIN_DISCRIMINATION_PAIRS) {
     verdict = "INSUFFICIENT-DATA";
     verdictReason =
       `Need >=${MIN_WITH_CUE_ROWS} with-cue measurements (have ${withCue.n}) and ` +
-      `>=${MIN_DISCRIMINATION_PAIRS} >=3in-gap pairs (have ${disc.pairs}) to call it.`;
+      `>=${MIN_DISCRIMINATION_PAIRS} with-cue >=3in-gap pairs (have ${disc.pairs}) to call it.`;
   } else if (
     withCue.medianAbsError !== null &&
     withCue.medianAbsError <= 1.5 &&
@@ -204,13 +204,13 @@ export function scoreSpike(
     verdict = "GO";
     verdictReason =
       `With-cue median abs error ${withCue.medianAbsError.toFixed(2)}in <= 1.5in and ` +
-      `size-class discrimination ${(disc.rate * 100).toFixed(0)}% >= 90%.`;
+      `with-cue size-class discrimination ${(disc.rate * 100).toFixed(0)}% >= 90%.`;
   } else {
     verdict = "NO-GO";
     verdictReason =
       `Size-class bar missed: with-cue median abs error ` +
       `${withCue.medianAbsError?.toFixed(2) ?? "n/a"}in (bar 1.5in), ` +
-      `discrimination ${disc.rate === null ? "n/a" : `${(disc.rate * 100).toFixed(0)}%`} (bar 90%).`;
+      `with-cue discrimination ${disc.rate === null ? "n/a" : `${(disc.rate * 100).toFixed(0)}%`} (bar 90%).`;
   }
 
   return {

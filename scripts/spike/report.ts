@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { SPIKE_DIR } from "./env";
 import { scoreSpike, type CohortSummary } from "./score";
-import { goldFixturesSchema, type PredictionRecord } from "./types";
+import { goldFixturesSchema, predictionRecordsSchema } from "./types";
 
 const FIXTURES = path.join(SPIKE_DIR, "fixtures", "fixtures.json");
 const PREDICTIONS = path.join(SPIKE_DIR, "predictions.json");
@@ -26,7 +26,9 @@ function cohortRow(label: string, c: CohortSummary): string {
 
 function main(): void {
   const gold = goldFixturesSchema.parse(JSON.parse(readFileSync(FIXTURES, "utf8")));
-  const predictions = JSON.parse(readFileSync(PREDICTIONS, "utf8")) as PredictionRecord[];
+  const predictions = predictionRecordsSchema.parse(
+    JSON.parse(readFileSync(PREDICTIONS, "utf8")),
+  );
   const s = scoreSpike(gold, predictions);
   const models = [...new Set(predictions.map((p) => p.model))].join("`, `") || "unknown";
 
@@ -117,6 +119,13 @@ function main(): void {
       "hit. The weaker model on the decisive arm biases AGAINST the reference-scaling " +
       "hypothesis, so its strong showing is conservative — but a same-model rerun " +
       "after quota reset is the cheap follow-up before trusting it.",
+  );
+  lines.push(
+    "- **Ordering & cross-model pairs:** the verdict's size-class ordering uses only the " +
+      "**with-cue** cohort, whose pairs are same-model (both cue fixtures ran on one Gemini). " +
+      "The Overall and Without-cue ordering figures above pool pairs across the two models " +
+      "(`gemini-2.5-flash` vs `gemini-2.5-flash-lite`), so they include cross-model " +
+      "comparisons and are context, not the bar.",
   );
   lines.push(
     "- **`method` is the model's self-report**; the cohort split uses the fixture's " +

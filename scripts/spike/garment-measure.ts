@@ -24,6 +24,7 @@ import { loadEnvLocal, SPIKE_DIR } from "./env";
 import {
   goldFixturesSchema,
   measurementResponseSchema,
+  predictionRecordsSchema,
   type GoldFixture,
   type PredictionRecord,
 } from "./types";
@@ -78,6 +79,7 @@ async function measureOne(
   const images = paths.map((p) => readFileSync(p));
 
   let lastError = "";
+  let lastFailureWasSchema = false;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const model = await resolveLanguageModel("vision", {
@@ -95,9 +97,9 @@ async function measureOne(
               {
                 type: "text",
                 text:
-                  (attempt === 0
-                    ? "Estimate this garment's flat-lay measurements in inches."
-                    : "Your previous response was not schema-valid. Re-estimate, strictly matching the schema.") +
+                  (lastFailureWasSchema
+                    ? "Your previous response was not schema-valid. Re-estimate, strictly matching the schema."
+                    : "Estimate this garment's flat-lay measurements in inches.") +
                   (images.length > 1
                     ? " All photos show the SAME garment (different angles or close-ups)."
                     : ""),
@@ -114,8 +116,17 @@ async function measureOne(
       return { fixtureId: fixture.id, model: modelId, ok: true, response: object };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
-      // Rate-limit errors need the full per-minute window, not the normal gap.
-      await delay(/quota|rate.?limit|429/i.test(lastError) ? 35_000 : CALL_GAP_MS);
+      const isRateLimit = /quota|rate.?limit|429/i.test(lastError);
+      lastFailureWasSchema =
+        !isRateLimit &&
+        /no.?object.?generated|type.?validation|schema|validation|invalid.?json|zod/i.test(
+          `${err instanceof Error ? err.name : ""} ${lastError}`,
+        );
+      // No sleep after the final attempt — nothing retries it.
+      if (attempt < MAX_ATTEMPTS - 1) {
+        // Rate-limit errors need the full per-minute window, not the normal gap.
+        await delay(isRateLimit ? 35_000 : CALL_GAP_MS);
+      }
     }
   }
   return { fixtureId: fixture.id, model: modelId, ok: false, error: lastError };
@@ -132,6 +143,7 @@ async function main(): Promise<void> {
   const modelId = resolveModelId("vision", {
     provider: "google",
     modelId: flag("model"),
+    env: {},
   });
 
   let gold = goldFixturesSchema.parse(JSON.parse(readFileSync(FIXTURES, "utf8")));
@@ -154,7 +166,7 @@ async function main(): Promise<void> {
   // Merge with any prior run so --only/--limit reruns update records in place
   // instead of discarding the rest of the (paid-for) predictions.
   const prior: PredictionRecord[] = existsSync(PREDICTIONS)
-    ? (JSON.parse(readFileSync(PREDICTIONS, "utf8")) as PredictionRecord[])
+    ? predictionRecordsSchema.parse(JSON.parse(readFileSync(PREDICTIONS, "utf8")))
     : [];
   const freshIds = new Set(fresh.map((p) => p.fixtureId));
   const predictions = [...prior.filter((p) => !freshIds.has(p.fixtureId)), ...fresh];

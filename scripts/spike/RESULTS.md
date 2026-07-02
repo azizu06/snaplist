@@ -2,7 +2,7 @@
 
 ## Verdict: **INSUFFICIENT-DATA**
 
-Need >=5 with-cue measurements (have 3) and >=5 >=3in-gap pairs (have 50) to call it.
+Need >=5 with-cue measurements (have 3) and >=5 with-cue >=3in-gap pairs (have 0) to call it.
 
 Model(s): `gemini-2.5-flash`, `gemini-2.5-flash-lite` (Google/Gemini, dev provider — pinned; no OpenAI spend). 16 fixtures, 38 matched measurements, 4 seller-stated measurements the model did not return.
 
@@ -80,6 +80,7 @@ GO requires, on photos **with** a scale cue: median absolute error ≤ 1.5in **a
 - **Ground-truth noise:** sellers measure by hand; ±0.5in of the reported error is plausibly the seller's, not the model's. That is why the verdict uses the size-class bar rather than the raw ±1in band.
 - **One call per fixture.** Most fixtures are a single photo; the two scale-cue fixtures include 2–3 photos (tape close-up + full flat-lay), matching the product's 1–4-photo vision call and how measurement-photographing sellers actually shoot.
 - **Model split (quota):** the 14 no-cue fixtures ran on `gemini-2.5-flash`; the 2 cue fixtures ran on `gemini-2.5-flash-lite` after the free-tier daily cap was hit. The weaker model on the decisive arm biases AGAINST the reference-scaling hypothesis, so its strong showing is conservative — but a same-model rerun after quota reset is the cheap follow-up before trusting it.
+- **Ordering & cross-model pairs:** the verdict's size-class ordering uses only the **with-cue** cohort, whose pairs are same-model (both cue fixtures ran on one Gemini). The Overall and Without-cue ordering figures above pool pairs across the two models (`gemini-2.5-flash` vs `gemini-2.5-flash-lite`), so they include cross-model comparisons and are context, not the bar.
 - **`method` is the model's self-report**; the cohort split uses the fixture's human-verified `scale_cue` flag, not the model's claim.
 - Fixtures rot as listings end; the verdict table above is the durable artifact.
 

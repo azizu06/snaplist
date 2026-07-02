@@ -47,6 +47,7 @@ async function main(): Promise<void> {
     try {
       const res = await fetch(url, {
         headers: { "user-agent": "snaplist-spike-104/0.1 (fixture re-fetch)" },
+        signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const bytes = Buffer.from(await res.arrayBuffer());
