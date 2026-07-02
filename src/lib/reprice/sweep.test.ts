@@ -314,6 +314,44 @@ describe("runRepriceSweep — auto-apply", () => {
     expect(findInsert(ops, "notifications")).toBeTruthy();
   });
 
+  it("syncs prices and notifies even when the audit-row insert fails (eBay already revised)", async () => {
+    const listing = { ...candidate };
+    const item = { ...identifiedItem };
+    const { client, ops } = fakeSupabase((op) => {
+      if (op.table === "listings" && op.action === "select") return { data: [listing] };
+      if (op.table === "items" && op.action === "select") return { data: [item] };
+      if (op.table === "user_settings" && op.action === "select")
+        return { data: [{ user_id: USER, autopilot_enabled: true, auto_reprice_enabled: true }] };
+      if (op.table === "reprice_suggestions" && op.action === "insert")
+        return { error: { message: "audit insert boom" } };
+      return { data: null, error: null };
+    });
+    const adapter = new MockEbayAdapter();
+
+    const summary = await runRepriceSweep(client, {
+      now: () => NOW,
+      priceItem: async () => soldTightPrice(60),
+      adapter,
+    });
+
+    // The live eBay revision is irreversible, so the run still counts as applied.
+    expect(summary).toMatchObject({ autoApplied: 1, suggested: 0, failed: 0 });
+    expect(adapter.reviseRequests).toHaveLength(1);
+
+    // The consistency writes and notification are NOT skipped by the audit failure.
+    expect(
+      findUpdates(ops, "items").some(
+        (op) => (op.payload as { price_override?: number }).price_override === 60,
+      ),
+    ).toBe(true);
+    expect(
+      findUpdates(ops, "listings").some(
+        (op) => (op.payload as { listed_price?: number }).listed_price === 60,
+      ),
+    ).toBe(true);
+    expect(findInsert(ops, "notifications")).toBeTruthy();
+  });
+
   it("never auto-applies below the seller's floor — clamps and downgrades to a suggestion", async () => {
     const { client, ops } = scenario({
       settings: { auto_reprice_enabled: true },

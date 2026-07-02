@@ -83,6 +83,22 @@ describe("HttpEbayAdapter.revisePrice", () => {
     await expect(adapter.revisePrice(request)).rejects.toBeInstanceOf(EbayApiError);
   });
 
+  it("rejects an HTTP 200 with an empty responses array (no confirmation)", async () => {
+    const { fetch } = fakeFetch(() => json(200, { responses: [] }));
+    const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => env });
+
+    await expect(adapter.revisePrice(request)).rejects.toBeInstanceOf(EbayApiError);
+  });
+
+  it("rejects an HTTP 200 whose response entry carries no statusCode", async () => {
+    const { fetch } = fakeFetch(() =>
+      json(200, { responses: [{ offers: [{ offerId: "offer-9" }] }] }),
+    );
+    const adapter = new HttpEbayAdapter({ fetch, tokenProvider, env: () => env });
+
+    await expect(adapter.revisePrice(request)).rejects.toBeInstanceOf(EbayApiError);
+  });
+
   it("throws EbayApiError on a non-2xx response", async () => {
     const { fetch } = fakeFetch(() =>
       json(403, { errors: [{ errorId: 1001, message: "Insufficient permissions" }] }),

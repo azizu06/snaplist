@@ -259,7 +259,14 @@ export class HttpEbayAdapter implements EbayAdapter {
     const inner = result?.responses?.[0];
     const offer = inner?.offers?.[0];
     const innerStatus = offer?.statusCode ?? inner?.statusCode;
-    if (innerStatus != null && (innerStatus < 200 || innerStatus >= 300)) {
+    if (innerStatus == null) {
+      throw new EbayApiError(
+        `eBay price revision for offer ${request.offerId} returned no per-offer confirmation`,
+        200,
+        result,
+      );
+    }
+    if (innerStatus < 200 || innerStatus >= 300) {
       throw new EbayApiError(
         `eBay price revision for offer ${request.offerId} failed (offer status ${innerStatus})`,
         innerStatus,

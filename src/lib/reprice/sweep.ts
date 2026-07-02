@@ -392,17 +392,23 @@ async function tryAutoApply(
 
   // The revision is LIVE — record it everywhere downstream consumers read:
   // the audit row, the seller's effective price, and the listing's live price.
+  // Every write here is best-effort so an irreversible eBay change is never
+  // stranded by a failing bookkeeping step.
   const nowIso = ctx.now().toISOString();
-  await persistSuggestion(supabase, listing, {
-    currentPrice: apply.currentPrice,
-    decision,
-    price: apply.price,
-    confidence: apply.confidence,
-    runId: apply.runId,
-    status: "auto_applied",
-    appliedPrice: decision.targetPrice,
-    now: ctx.now,
-  });
+  try {
+    await persistSuggestion(supabase, listing, {
+      currentPrice: apply.currentPrice,
+      decision,
+      price: apply.price,
+      confidence: apply.confidence,
+      runId: apply.runId,
+      status: "auto_applied",
+      appliedPrice: decision.targetPrice,
+      now: ctx.now,
+    });
+  } catch (err) {
+    reportServerError("reprice.autoApply.audit", err, { listingId: listing.id });
+  }
   const [{ error: itemError }, { error: listingError }] = await Promise.all([
     supabase
       .from("items")
