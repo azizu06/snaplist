@@ -28,7 +28,7 @@ function main(): void {
   const gold = goldFixturesSchema.parse(JSON.parse(readFileSync(FIXTURES, "utf8")));
   const predictions = JSON.parse(readFileSync(PREDICTIONS, "utf8")) as PredictionRecord[];
   const s = scoreSpike(gold, predictions);
-  const model = predictions.find((p) => p.model)?.model ?? "unknown";
+  const models = [...new Set(predictions.map((p) => p.model))].join("`, `") || "unknown";
 
   const lines: string[] = [];
   lines.push("# Spike #104 — garment measurements from flat-lay photos: results");
@@ -38,7 +38,7 @@ function main(): void {
   lines.push(s.verdictReason);
   lines.push("");
   lines.push(
-    `Model: \`${model}\` (Google/Gemini, dev provider — pinned; no OpenAI spend). ` +
+    `Model(s): \`${models}\` (Google/Gemini, dev provider — pinned; no OpenAI spend). ` +
       `${gold.length} fixtures, ${s.rows.length} matched measurements, ` +
       `${s.missedGold} seller-stated measurements the model did not return` +
       (s.failedFixtures.length > 0
@@ -106,8 +106,17 @@ function main(): void {
       "size-class bar rather than the raw ±1in band.",
   );
   lines.push(
-    "- **One call per fixture, single photo** — matches the planned v1 UX (seller " +
-      "takes one flat-lay shot). Multi-angle input was out of scope for the spike.",
+    "- **One call per fixture.** Most fixtures are a single photo; the two scale-cue " +
+      "fixtures include 2–3 photos (tape close-up + full flat-lay), matching the " +
+      "product's 1–4-photo vision call and how measurement-photographing sellers " +
+      "actually shoot.",
+  );
+  lines.push(
+    "- **Model split (quota):** the 14 no-cue fixtures ran on `gemini-2.5-flash`; the " +
+      "2 cue fixtures ran on `gemini-2.5-flash-lite` after the free-tier daily cap was " +
+      "hit. The weaker model on the decisive arm biases AGAINST the reference-scaling " +
+      "hypothesis, so its strong showing is conservative — but a same-model rerun " +
+      "after quota reset is the cheap follow-up before trusting it.",
   );
   lines.push(
     "- **`method` is the model's self-report**; the cohort split uses the fixture's " +

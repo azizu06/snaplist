@@ -29,13 +29,21 @@ async function main(): Promise<void> {
   let fetched = 0;
   let skipped = 0;
   const failures: string[] = [];
-  for (const f of gold) {
-    const dest = path.join(IMAGES_DIR, `${f.id}.jpg`);
+  const jobs = gold.flatMap((f) => [
+    { id: f.id, file: `${f.id}.jpg`, url: f.image_url },
+    ...(f.extra_image_urls ?? []).map((url, i) => ({
+      id: f.id,
+      file: `${f.id}-${i + 2}.jpg`,
+      url,
+    })),
+  ]);
+  for (const f of jobs) {
+    const dest = path.join(IMAGES_DIR, f.file);
     if (existsSync(dest)) {
       skipped += 1;
       continue;
     }
-    const url = resized(f.image_url);
+    const url = resized(f.url);
     try {
       const res = await fetch(url, {
         headers: { "user-agent": "snaplist-spike-104/0.1 (fixture re-fetch)" },
@@ -45,9 +53,9 @@ async function main(): Promise<void> {
       if (bytes.length < 5_000) throw new Error(`suspiciously small (${bytes.length}B)`);
       writeFileSync(dest, bytes);
       fetched += 1;
-      console.log(`fetched ${f.id} (${Math.round(bytes.length / 1024)}KB)`);
+      console.log(`fetched ${f.file} (${Math.round(bytes.length / 1024)}KB)`);
     } catch (err) {
-      failures.push(`${f.id}: ${err instanceof Error ? err.message : String(err)}`);
+      failures.push(`${f.file}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

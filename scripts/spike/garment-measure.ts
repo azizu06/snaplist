@@ -59,16 +59,23 @@ async function measureOne(
   fixture: GoldFixture,
   modelId: string,
 ): Promise<PredictionRecord> {
-  const imagePath = path.join(IMAGES_DIR, `${fixture.id}.jpg`);
-  if (!existsSync(imagePath)) {
+  // Primary photo + any extras (tape close-ups / full flat-lay), capped at the
+  // product's 4-image vision-call bound.
+  const files = [
+    `${fixture.id}.jpg`,
+    ...(fixture.extra_image_urls ?? []).map((_, i) => `${fixture.id}-${i + 2}.jpg`),
+  ].slice(0, 4);
+  const paths = files.map((f) => path.join(IMAGES_DIR, f));
+  const missing = paths.filter((p) => !existsSync(p));
+  if (missing.length > 0) {
     return {
       fixtureId: fixture.id,
       model: modelId,
       ok: false,
-      error: "image missing locally — run fetch-images.ts first",
+      error: `image(s) missing locally (${missing.length}) — run fetch-images.ts first`,
     };
   }
-  const image = readFileSync(imagePath);
+  const images = paths.map((p) => readFileSync(p));
 
   let lastError = "";
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -88,11 +95,18 @@ async function measureOne(
               {
                 type: "text",
                 text:
-                  attempt === 0
+                  (attempt === 0
                     ? "Estimate this garment's flat-lay measurements in inches."
-                    : "Your previous response was not schema-valid. Re-estimate, strictly matching the schema.",
+                    : "Your previous response was not schema-valid. Re-estimate, strictly matching the schema.") +
+                  (images.length > 1
+                    ? " All photos show the SAME garment (different angles or close-ups)."
+                    : ""),
               },
-              { type: "image", image, mediaType: "image/jpeg" },
+              ...images.map((image) => ({
+                type: "image" as const,
+                image,
+                mediaType: "image/jpeg",
+              })),
             ],
           },
         ],
@@ -100,7 +114,8 @@ async function measureOne(
       return { fixtureId: fixture.id, model: modelId, ok: true, response: object };
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
-      await delay(CALL_GAP_MS);
+      // Rate-limit errors need the full per-minute window, not the normal gap.
+      await delay(/quota|rate.?limit|429/i.test(lastError) ? 35_000 : CALL_GAP_MS);
     }
   }
   return { fixtureId: fixture.id, model: modelId, ok: false, error: lastError };
@@ -127,14 +142,22 @@ async function main(): Promise<void> {
   if (gold.length === 0) throw new Error("No fixtures selected.");
 
   console.log(`Measuring ${gold.length} fixture(s) with ${modelId} (google)…`);
-  const predictions: PredictionRecord[] = [];
+  const fresh: PredictionRecord[] = [];
   for (const [i, fixture] of gold.entries()) {
     const p = await measureOne(fixture, modelId);
-    predictions.push(p);
+    fresh.push(p);
     const got = p.ok ? `${p.response?.measurements?.length ?? 0} measurements` : `FAILED: ${p.error}`;
     console.log(`  [${i + 1}/${gold.length}] ${fixture.id}: ${got}`);
     if (i < gold.length - 1) await delay(CALL_GAP_MS);
   }
+
+  // Merge with any prior run so --only/--limit reruns update records in place
+  // instead of discarding the rest of the (paid-for) predictions.
+  const prior: PredictionRecord[] = existsSync(PREDICTIONS)
+    ? (JSON.parse(readFileSync(PREDICTIONS, "utf8")) as PredictionRecord[])
+    : [];
+  const freshIds = new Set(fresh.map((p) => p.fixtureId));
+  const predictions = [...prior.filter((p) => !freshIds.has(p.fixtureId)), ...fresh];
 
   writeFileSync(PREDICTIONS, `${JSON.stringify(predictions, null, 2)}\n`);
   const failed = predictions.filter((p) => !p.ok).length;

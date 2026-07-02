@@ -1,0 +1,530 @@
+[
+  {
+    "fixtureId": "wander-tee-197225803887",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "tshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 22,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 28,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 8.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 20.5,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "notag-tee-375743877242",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "tshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 22.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 28.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "harley-tee-127327446790",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "tshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 21,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 28.5,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 19.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 8.5,
+          "tolerance_in": 1,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "starter-tee-295475995846",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "tshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 25,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 31,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 9.5,
+          "tolerance_in": 1,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 24,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "champion-sweatshirt-125389445458",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "sweatshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 22,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 26.5,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 24,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "waist",
+          "value_in": 20,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "maryland-sweatshirt-227297660423",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "sweatshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 23,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 27,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 24,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 21,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "krt-sweatshirt-236793882491",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "sweatshirt",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 23,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 28,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 25,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 21,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "yale-hoodie-358536824431",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "hoodie",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 24,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 28,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 25,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 22,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "whitesville-hoodie-206171217363",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "hoodie",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 21,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 26,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 32,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "wrangler-jacket-206017123189",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "denim jacket",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 22.5,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 25,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 24.5,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 20,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "leerider-jacket-167582388296",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "denim jacket",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 21.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "length",
+          "value_in": 24.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "shoulder",
+          "value_in": 18,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 24,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "billblass-jeans-157100443043",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "jeans",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "waist",
+          "value_in": 19,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "rise",
+          "value_in": 10.5,
+          "tolerance_in": 1,
+          "method": "prior-based"
+        },
+        {
+          "name": "inseam",
+          "value_in": 25,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "hip",
+          "value_in": 23,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "bigstar-capris-381859264711",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "jeans",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "waist",
+          "value_in": 15.5,
+          "tolerance_in": 1.5,
+          "method": "prior-based"
+        },
+        {
+          "name": "inseam",
+          "value_in": 29,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "rise",
+          "value_in": 9.5,
+          "tolerance_in": 1,
+          "method": "prior-based"
+        },
+        {
+          "name": "hip",
+          "value_in": 19.5,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "motto-jeans-176931578282",
+    "model": "gemini-2.5-flash",
+    "ok": true,
+    "response": {
+      "garmentType": "jeans",
+      "scaleReferenceFound": false,
+      "scaleReferenceKind": null,
+      "measurements": [
+        {
+          "name": "waist",
+          "value_in": 17,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "inseam",
+          "value_in": 29,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        },
+        {
+          "name": "rise",
+          "value_in": 10,
+          "tolerance_in": 2,
+          "method": "prior-based"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "levis-painter-jeans-298114744967",
+    "model": "gemini-2.5-flash-lite",
+    "ok": true,
+    "response": {
+      "garmentType": "jeans",
+      "scaleReferenceFound": true,
+      "scaleReferenceKind": "tape-measure",
+      "measurements": [
+        {
+          "name": "waist",
+          "value_in": 15.5,
+          "tolerance_in": 0.5,
+          "method": "reference-scaled"
+        }
+      ]
+    }
+  },
+  {
+    "fixtureId": "braves-hoodie-327024382295",
+    "model": "gemini-2.5-flash-lite",
+    "ok": true,
+    "response": {
+      "garmentType": "hoodie",
+      "scaleReferenceFound": true,
+      "scaleReferenceKind": "tape measure",
+      "measurements": [
+        {
+          "name": "pit_to_pit",
+          "value_in": 22,
+          "tolerance_in": 1,
+          "method": "reference-scaled"
+        },
+        {
+          "name": "length",
+          "value_in": 27,
+          "tolerance_in": 1,
+          "method": "reference-scaled"
+        },
+        {
+          "name": "sleeve",
+          "value_in": 24,
+          "tolerance_in": 1.5,
+          "method": "reference-scaled"
+        }
+      ]
+    }
+  }
+]

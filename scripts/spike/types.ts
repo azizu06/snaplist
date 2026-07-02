@@ -32,6 +32,12 @@ export const goldFixtureSchema = z.object({
   size_label: z.string().nullable(),
   scale_cue: z.boolean(),
   scale_cue_kind: z.string().nullable(),
+  /**
+   * Additional photos (tape close-ups, full flat-lay) when one photo can't ground
+   * every stated measurement. Sellers really do shoot multiple angles, and the
+   * product's vision call accepts 1–4 images — the spike mirrors that.
+   */
+  extra_image_urls: z.array(z.string().url()).max(3).optional(),
   /** Seller-stated inches, keyed by measurement name. Ground truth (±~0.5in noise). */
   measurements: z.partialRecord(measurementName, z.number().positive()),
   measurement_source: z.string(),
