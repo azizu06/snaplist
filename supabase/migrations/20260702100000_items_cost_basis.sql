@@ -6,7 +6,8 @@
 -- `public.clerk_user_id() = user_id`, and a new column inherits them.
 
 alter table public.items
-  add column if not exists cost_basis numeric;
+  add column if not exists cost_basis numeric
+    constraint items_cost_basis_non_negative check (cost_basis >= 0);
 
 comment on column public.items.cost_basis is
   'What the seller paid for the item (COGS), in dollars. NULL = unknown (never a fake 0).';
