@@ -206,9 +206,12 @@ export function PublishView({
   const statusChip = lifecycleLabel(data.published ? "published" : data.status);
   const failed =
     data.failed || data.status === "failed" || data.status === "draft_failed";
-  const platformLabel = data.platform
-    ? data.platform.charAt(0).toUpperCase() + data.platform.slice(1)
-    : "eBay";
+  // Brand casing: naive capitalization would render "Ebay" — special-case it
+  // before the generic fallback for any future platform value.
+  const platformLabel =
+    !data.platform || data.platform === "ebay"
+      ? "eBay"
+      : data.platform.charAt(0).toUpperCase() + data.platform.slice(1);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
