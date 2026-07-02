@@ -8,6 +8,7 @@ import { Banner } from "@/components/ui/banner";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { Spinner } from "@/components/ui/spinner";
 import { ACCEPT, MAX_PHOTOS, useUploadDraft } from "./upload-draft-context";
+import { CostBasisCard } from "./cost-basis-card";
 
 /**
  * Upload sell sheet — redesigned on Shopify's create/media pattern (Shopify web
@@ -535,6 +536,10 @@ function FormBody({
           </div>
         </div>
       </section>
+
+      {/* ---- Cost basis (#101): optional "what did you pay", captured while
+           the seller still remembers. Blank = unknown; 0 = free find. ---- */}
+      <CostBasisCard />
 
       {/* ---- sticky action bar — Shopify's bottom "Save" bar, near-black
            primary. The helper line carries the count state so the disabled

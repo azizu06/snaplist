@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { runPipelineAndPersist } from "@/lib/pipeline";
+import { parseCostBasis } from "@/lib/pipeline/autopilot";
 import { createVisionPipeline } from "@/lib/vision";
 import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-settings";
 import { reportServerError } from "@/lib/sentry";
@@ -65,6 +66,18 @@ export async function uploadAndProcess(formData: FormData) {
     }
   }
 
+  // Cost basis (#101): the optional "what did you pay" field. Validate BEFORE
+  // any storage upload or model spend so a junk value fails fast; blank means
+  // unknown (NULL, never a fake $0) and "0" is a real free-find zero.
+  let costBasis: number | null = null;
+  try {
+    costBasis = parseCostBasis(formData.get("costBasis"));
+  } catch {
+    redirect(
+      `/upload?error=${encodeURIComponent("“What did you pay” must be a plain dollar amount (or left blank).")}`,
+    );
+  }
+
   // Spend guardrail (#58): the per-user/day ITEM cap — gate the expensive vision +
   // pricing + listing run BEFORE uploading photos or calling any model. Resolve the
   // billing entitlement (#64) so Pro subscribers get the higher cap; getEntitlement
@@ -122,6 +135,17 @@ export async function uploadAndProcess(formData: FormData) {
       pipeline,
     );
     itemId = res.itemId;
+
+    // Persist the capture-time cost basis (#101) on the freshly created item.
+    // Best-effort AFTER the pipeline: a failure here must not scrap a
+    // successful (paid) run — the seller can still set the cost from review.
+    if (costBasis != null) {
+      const { error: costErr } = await supabase
+        .from("items")
+        .update({ cost_basis: costBasis })
+        .eq("id", itemId);
+      if (costErr) reportServerError("upload.costBasis", costErr, { itemId });
+    }
   } catch (err) {
     // Pipeline errors (vision/model/DB) stay server-side; the client gets a
     // generic message (CWE-209, #57).

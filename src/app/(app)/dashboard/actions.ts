@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { reportServerError } from "@/lib/sentry";
 import { bulkStatusDecision, isLiveListingRow } from "@/lib/ui/status";
-import { parsePriceOverride } from "@/lib/pipeline/autopilot";
+import { parseCostBasis, parsePriceOverride } from "@/lib/pipeline/autopilot";
 
 /**
  * Dashboard mutations (Shopify products-section mirror): archive / unarchive,
@@ -195,6 +195,8 @@ export interface BulkListingUpdate {
   listingId: string | null;
   /** New seller price → persisted as `items.price_override`. null clears it. */
   price?: number | null;
+  /** New cost basis (#101) → `items.cost_basis`. null clears it (unknown); $0 is real. */
+  costBasis?: number | null;
   /** New listing status (only when the item has a listing). */
   status?: string;
 }
@@ -223,35 +225,50 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
       // Supabase's builder is a thenable (PromiseLike), not a Promise; Promise.all
       // accepts PromiseLike, so type the bucket accordingly.
       const writes: PromiseLike<unknown>[] = [];
+      // One merged `items` patch per row (price + cost basis) — a single write
+      // instead of two concurrent updates racing on the same row.
+      const itemPatch: { price_override?: number | null; cost_basis?: number | null } = {};
       if (u.price !== undefined) {
         // Re-validate at the write boundary with the SAME parser the review form
         // uses: null clears the override, otherwise it must be a positive amount.
         // The grid already blocks an invalid price, but a crafted request (or a
         // future caller) must never persist 0/negative/NaN as a price_override the
         // publish flow can't use (Codex P2). Reject → report, don't write junk.
-        let price: number | null = null;
-        let priceOk = true;
         try {
-          price = parsePriceOverride(u.price);
+          itemPatch.price_override = parsePriceOverride(u.price);
         } catch (err) {
-          priceOk = false;
           reportServerError(
             "dashboard.bulkUpdate.price",
             err instanceof Error ? err : new Error(String(err)),
             { itemId: u.itemId },
           );
         }
-        if (priceOk) {
-          writes.push(
-            supabase
-              .from("items")
-              .update({ price_override: price })
-              .eq("id", u.itemId)
-              .then(({ error }) => {
-                if (error) reportServerError("dashboard.bulkUpdate.price", error, { itemId: u.itemId });
-              }),
+      }
+      // Cost basis (#101): same write-boundary re-validation with the shared,
+      // unit-tested parseCostBasis — null clears (unknown), $0 is a real
+      // free-find zero, junk (negative/NaN/non-decimal) is rejected + reported
+      // so a crafted request can't persist a poisoned margin input.
+      if (u.costBasis !== undefined) {
+        try {
+          itemPatch.cost_basis = parseCostBasis(u.costBasis);
+        } catch (err) {
+          reportServerError(
+            "dashboard.bulkUpdate.costBasis",
+            err instanceof Error ? err : new Error(String(err)),
+            { itemId: u.itemId },
           );
         }
+      }
+      if (Object.keys(itemPatch).length > 0) {
+        writes.push(
+          supabase
+            .from("items")
+            .update(itemPatch)
+            .eq("id", u.itemId)
+            .then(({ error }) => {
+              if (error) reportServerError("dashboard.bulkUpdate.item", error, { itemId: u.itemId });
+            }),
+        );
       }
       // Status write boundary (Codex P1): bulk-edit may ONLY set the
       // seller-organizational statuses (draft / archived). `published` is owned by

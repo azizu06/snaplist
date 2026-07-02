@@ -13,6 +13,7 @@ import { matchesQuery } from "@/lib/ui/search";
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 import type { BulkListingUpdate } from "./actions";
 import { BulkEditGrid } from "./bulk-edit-grid";
+import { ProfitSummary, RowNetProfit } from "./profit";
 
 /**
  * Dashboard — Shopify **Products index** (grounded in asset-intake #320 + the
@@ -38,6 +39,8 @@ export interface DashboardRow {
   status: string;
   createdAt: string;
   price: number | null;
+  /** What the seller paid (#101); null = unknown → the row shows price only. */
+  costBasis: number | null;
   thumbUrl: string | null;
   /** Item facets surfaced as their own columns + search filters (Shopify
    *  Products parity). Null when the pipeline couldn't resolve them. */
@@ -327,13 +330,14 @@ function ListingRow({
           {row.condition ?? <span className="font-normal text-faint">—</span>}
         </span>
 
-        {/* Mobile/tablet price (right of the card). */}
-        <span className="shrink-0 text-[15px] font-semibold text-fg-strong md:hidden" data-nums>
+        {/* Mobile/tablet price (right of the card) + projected net (#101). */}
+        <span className="shrink-0 text-right text-[15px] font-semibold text-fg-strong md:hidden" data-nums>
           {row.price != null ? (
             fmtPrice(row.price)
           ) : (
             <span className="text-[12.5px] font-normal text-muted">No price</span>
           )}
+          <RowNetProfit price={row.price} costBasis={row.costBasis} />
         </span>
 
         {/* Desktop columns: price · listed (left-aligned like every other
@@ -344,6 +348,7 @@ function ListingRow({
           ) : (
             <span className="font-normal text-faint">—</span>
           )}
+          <RowNetProfit price={row.price} costBasis={row.costBasis} />
         </span>
         {/* Listed column (lg+ — dropped at md so 2 fixed columns leave the
             title real width on tablets). */}
@@ -1077,6 +1082,9 @@ export function DashboardView({
       </header>
 
       {repriceSlot}
+      {/* #101 — invested / projected-profit band. Renders only when at least
+          one active item carries a cost basis (logic lives in ./profit). */}
+      {rows.length > 0 ? <ProfitSummary rows={rows} /> : null}
 
       {rows.length === 0 ? (
         <DashboardEmpty />

@@ -31,6 +31,7 @@ export interface DashboardItemSource {
   attributes: unknown;
   photos: unknown;
   price_override: unknown;
+  cost_basis: unknown;
   created_at: unknown;
 }
 
@@ -42,6 +43,8 @@ export interface DashboardRowData {
   status: string;
   createdAt: string;
   price: number | null;
+  /** What the seller paid (#101); null = unknown, so margin math must skip it. */
+  costBasis: number | null;
   thumbUrl: string | null;
   category: string | null;
   condition: string | null;
@@ -126,6 +129,15 @@ export function assembleDashboardRows(
     return base != null ? effectivePrice(base, override) : override;
   };
 
+  // #101: the recorded cost basis (numeric arrives as number OR string). An
+  // unparseable/legacy value degrades to null (unknown) — never a fake $0.
+  const rowCostBasis = (itemId: string): number | null => {
+    const raw = itemsById.get(itemId)?.cost_basis;
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
   // One row per item: newest eBay listing wins (input is newest-first).
   const newestPerItem = new Map<string, DashboardListingSource>();
   for (const l of listings ?? []) {
@@ -151,6 +163,7 @@ export function assembleDashboardRows(
             ? positivePrice(l.listed_price)
             : null,
         ),
+        costBasis: rowCostBasis(l.item_id as string),
         thumbUrl: thumbUrlFor(l.item_id as string),
         category: item ? sentenceCase(attrString(item.attributes, "category")) : null,
         condition: item ? sentenceCase(attrString(item.attributes, "condition")) : null,
@@ -165,6 +178,7 @@ export function assembleDashboardRows(
         status: "new",
         createdAt: (item.created_at as string | null) ?? "",
         price: rowPrice(item.id as string, null),
+        costBasis: rowCostBasis(item.id as string),
         thumbUrl: thumbUrlFor(item.id as string),
         category: sentenceCase(attrString(item.attributes, "category")),
         condition: sentenceCase(attrString(item.attributes, "condition")),
@@ -189,7 +203,7 @@ export async function loadDashboardRows(
       .limit(100),
     supabase
       .from("items")
-      .select("id, attributes, photos, price_override, created_at")
+      .select("id, attributes, photos, price_override, cost_basis, created_at")
       .order("created_at", { ascending: false })
       .limit(100),
     supabase

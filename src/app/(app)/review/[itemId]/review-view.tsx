@@ -17,6 +17,7 @@ import {
   tierLabel,
 } from "@/lib/ui/status";
 import { PricingStrategies } from "./pricing-strategies";
+import { CostBasisField } from "./cost-basis-field";
 import type { PricingStrategy } from "@/lib/pricing/strategies";
 
 /** A dynamic clarify chip (#93): seller-facing label + the spec it adds. */
@@ -69,6 +70,8 @@ export interface ReviewData {
   suggested: number | null;
   override: number | null;
   displayPrice: number | null;
+  /** What the seller paid (#101); null = unknown (never a fake $0). */
+  costBasis: number | null;
   range: { low?: number; high?: number } | null;
   confidence: number | null;
   tier: string | null;
@@ -137,7 +140,13 @@ const CATEGORY_SUGGESTIONS = [
  *  must render UPPERCASE (not "Upc"/"Isbn"). Other keys fall back to capitalize. */
 const ATTR_LABELS: Record<string, string> = { upc: "UPC", isbn: "ISBN" };
 
-type FieldKey = "title" | "description" | "category" | "condition" | "price";
+type FieldKey =
+  | "title"
+  | "description"
+  | "category"
+  | "condition"
+  | "price"
+  | "costBasis";
 
 /** Keep the cited-sources list compact; the rest is summarized as a count. */
 const MAX_VISIBLE_SOURCES = 5;
@@ -494,6 +503,7 @@ export function ReviewView({
       category: attr("category"),
       condition: attr("condition"),
       price: data.displayPrice != null ? String(data.displayPrice) : "",
+      costBasis: data.costBasis != null ? String(data.costBasis) : "",
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- derived purely from the serializable prop
     [data],
@@ -769,6 +779,14 @@ export function ReviewView({
               ) : null}
             </div>
 
+            {/* #101 — cost basis + live est. net profit (margin, not list price). */}
+            <CostBasisField
+              value={fields.costBasis}
+              onChange={(v) => setField("costBasis", v)}
+              priceText={fields.price}
+              fallbackPrice={data.suggested}
+            />
+
             {/* intelligence: gauge (the one number) + suggested/range + bar.
                 Suggested is colored green (the AI/brand recommendation) so the
                 eye lands on it; the range stays a strong neutral. */}
@@ -849,6 +867,7 @@ export function ReviewView({
               strategies={data.strategies}
               selected={fields.price}
               onPick={(p) => setField("price", String(p))}
+              costBasisText={fields.costBasis}
             />
           </Card>
 

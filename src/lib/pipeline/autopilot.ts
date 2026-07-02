@@ -96,6 +96,41 @@ export function parsePriceOverride(raw: unknown): number | null {
 }
 
 /**
+ * Parse an untrusted (form/JSON) COST-BASIS value at the write boundary (#101:
+ * what the seller PAID for the item). Same shape discipline as
+ * `parsePriceOverride` — blank means "clear" (→ null, an honest unknown, never
+ * a fake $0), junk throws instead of silently clearing — with ONE semantic
+ * difference: **$0 is a valid cost basis** (a free find / curb rescue is a real
+ * zero the profit math must use), whereas a $0 sale price is rejected there.
+ * Negative values are junk: you can't pay less than nothing for an item.
+ */
+export function parseCostBasis(raw: unknown): number | null {
+  if (raw == null) return null;
+  const text = typeof raw === "string" ? raw.trim() : raw;
+  if (text === "") return null;
+  if (typeof text === "string" && !PRICE_SHAPE.test(text)) {
+    throw new Error(
+      `Invalid cost basis ${JSON.stringify(raw)}: must be a plain decimal number.`,
+    );
+  }
+  const n = typeof text === "number" ? text : Number(text);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(
+      `Invalid cost basis ${JSON.stringify(raw)}: must be zero or a positive number.`,
+    );
+  }
+  // Same decimal-safe cent normalization as the price override; NaN from the
+  // exact-math guard (too many whole digits) must reject, not persist.
+  const cents = roundToCents(typeof text === "string" ? text : String(n));
+  if (!Number.isFinite(cents) || cents < 0) {
+    throw new Error(
+      `Invalid cost basis ${JSON.stringify(raw)}: must be a finite amount.`,
+    );
+  }
+  return cents;
+}
+
+/**
  * The string shapes a price override may take: plain decimal digits with an
  * optional fraction (leading or trailing dot allowed) and an optional
  * exponent. Anything else ("0x10", "+12", "Infinity") is rejected BEFORE

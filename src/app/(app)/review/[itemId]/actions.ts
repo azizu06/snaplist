@@ -62,6 +62,7 @@ export async function saveReview(formData: FormData) {
       category: formData.get("category"),
       condition: formData.get("condition"),
       price: formData.get("price"),
+      costBasis: formData.get("costBasis"),
     });
   } catch (err) {
     backTo(id, err instanceof Error ? err.message : "Invalid edits.");
@@ -93,6 +94,8 @@ export async function saveReview(formData: FormData) {
       attributes,
       condition: edits.condition,
       price_override: edits.override,
+      // #101: what the seller paid — blank clears to NULL (unknown), never $0.
+      cost_basis: edits.costBasis,
     })
     .eq("id", id)
     .select("id");

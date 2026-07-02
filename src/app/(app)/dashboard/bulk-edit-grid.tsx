@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { parsePriceOverride } from "@/lib/pipeline/autopilot";
+import { parseCostBasis, parsePriceOverride } from "@/lib/pipeline/autopilot";
 import { lifecycleLabel } from "@/lib/ui/status";
 import { Select } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -33,6 +33,8 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 
 interface RowEdit {
   price: string;
+  /** What the seller paid (#101). "" = unknown (clears to NULL); "0" is a real zero. */
+  cost: string;
   status: string;
 }
 
@@ -51,7 +53,11 @@ export function BulkEditGrid({
     Object.fromEntries(
       rows.map((r) => [
         r.itemId,
-        { price: r.price != null ? String(r.price) : "", status: r.status },
+        {
+          price: r.price != null ? String(r.price) : "",
+          cost: r.costBasis != null ? String(r.costBasis) : "",
+          status: r.status,
+        },
       ]),
     ),
   );
@@ -80,6 +86,19 @@ export function BulkEditGrid({
     }
   };
 
+  // Cost basis (#101) classified with the shared parseCostBasis: blank → clear
+  // (unknown, NULL — never a fake $0), "0" → a REAL zero (free find), junk
+  // (negative / non-decimal) → invalid, which flags the field and blocks Save.
+  const costState = (s: string): PriceState => {
+    if (s.trim() === "") return { kind: "clear" };
+    try {
+      const value = parseCostBasis(s);
+      return value == null ? { kind: "clear" } : { kind: "value", value };
+    } catch {
+      return { kind: "invalid" };
+    }
+  };
+
   const updates: BulkListingUpdate[] = rows.flatMap((r) => {
     const e = edits[r.itemId];
     if (!e) return [];
@@ -87,18 +106,25 @@ export function BulkEditGrid({
     if (ps.kind === "invalid") return []; // never persist an invalid price
     const newPrice = ps.kind === "clear" ? null : ps.value;
     const priceChanged = newPrice !== r.price;
+    // Cost basis (#101): "0" is a real zero — a change from null to 0 must
+    // persist, so compare the parsed value against the row's current one.
+    const cs = costState(e.cost);
+    if (cs.kind === "invalid") return []; // never persist an invalid cost
+    const newCost = cs.kind === "clear" ? null : cs.value;
+    const costChanged = newCost !== r.costBasis;
     // Status only edits when the item has a listing AND isn't live on eBay — a
     // live (published) listing's status is owned by the eBay state, so bulk-edit
     // must not move it to draft/archived and mislabel it (Codex). The select is
     // disabled for those rows; this mirrors the rule in the change set.
     const statusChanged =
       !!r.listingId && r.status !== "published" && e.status !== r.status;
-    if (!priceChanged && !statusChanged) return [];
+    if (!priceChanged && !costChanged && !statusChanged) return [];
     return [
       {
         itemId: r.itemId,
         listingId: r.listingId,
         ...(priceChanged ? { price: newPrice } : {}),
+        ...(costChanged ? { costBasis: newCost } : {}),
         ...(statusChanged ? { status: e.status } : {}),
       },
     ];
@@ -107,7 +133,10 @@ export function BulkEditGrid({
   // silently dropped (the invalid row is excluded from `updates`, so without this
   // guard Save would quietly skip it).
   const hasInvalidPrice = rows.some(
-    (r) => edits[r.itemId] && priceState(edits[r.itemId].price).kind === "invalid",
+    (r) =>
+      edits[r.itemId] &&
+      (priceState(edits[r.itemId].price).kind === "invalid" ||
+        costState(edits[r.itemId].cost).kind === "invalid"),
   );
   const dirty = updates.length > 0;
 
@@ -126,12 +155,13 @@ export function BulkEditGrid({
   useEscapeToClose(true, requestClose);
   useModalFocus(true, dialogRef);
 
-  // Mobile: a single column — product stacks above a 2-up Status/Price sub-grid
-  // (the sub-grid dissolves via `sm:contents` so the two controls become direct
-  // grid children at sm). sm+: the dense 3-column editor table. minmax(0,1fr)
-  // lets a long title truncate instead of overflowing.
+  // Mobile: a single column — product stacks above a 2-up Status/Price/Cost
+  // sub-grid (the sub-grid dissolves via `sm:contents` so the controls become
+  // direct grid children at sm; the third control wraps to a second sub-row on
+  // phones). sm+: the dense 4-column editor table (#101 added Cost).
+  // minmax(0,1fr) lets a long title truncate instead of overflowing.
   const GRID =
-    "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_160px_130px] sm:items-center sm:gap-5";
+    "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_150px_115px_115px] sm:items-center sm:gap-4";
 
   return (
     // A full-screen editor IS a modal (audit #105): announce it as one, move
@@ -181,7 +211,7 @@ export function BulkEditGrid({
             type="button"
             onClick={() => onSave(updates)}
             disabled={!dirty || pending || hasInvalidPrice}
-            title={hasInvalidPrice ? "Fix the highlighted price before saving" : undefined}
+            title={hasInvalidPrice ? "Fix the highlighted amount before saving" : undefined}
             className="rounded-lg bg-primary px-4 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:opacity-50"
           >
             {pending ? "Saving…" : "Save"}
@@ -198,6 +228,7 @@ export function BulkEditGrid({
               <span>Product</span>
               <span className="text-center">Status</span>
               <span className="text-center">Price</span>
+              <span className="text-center">Cost</span>
             </div>
 
             <ul className="divide-y divide-border">
@@ -209,6 +240,7 @@ export function BulkEditGrid({
               // is read-only here.
               const isLive = r.status === "published";
               const priceInvalid = !!e && priceState(e.price).kind === "invalid";
+              const costInvalid = !!e && costState(e.cost).kind === "invalid";
               return (
                 <li key={r.itemId} className={`${GRID} px-4 py-4 transition-colors hover:bg-surface-2 focus-within:bg-surface-2 sm:py-3.5`}>
                   {/* Product (read-only) */}
@@ -282,6 +314,37 @@ export function BulkEditGrid({
                           placeholder="—"
                           aria-label={`Price for ${r.title}`}
                           aria-invalid={priceInvalid}
+                          className="w-full bg-transparent px-1.5 py-1.5 text-right text-[16px] font-semibold tracking-tight text-fg-strong outline-none"
+                          data-nums
+                        />
+                      </div>
+                    </div>
+
+                    {/* Cost basis (#101) → item.cost_basis. Blank = unknown
+                        (clears to NULL, never $0); "0" is a real free-find
+                        zero; junk rings red and blocks Save like Price. */}
+                    <div className="min-w-0">
+                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.04em] text-muted sm:hidden">
+                        Cost
+                      </span>
+                      <div
+                        className={`flex items-center rounded-lg border bg-surface pl-2.5 transition-colors ${
+                          costInvalid
+                            ? "border-danger ring-2 ring-danger/25"
+                            : "border-border-strong focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25"
+                        }`}
+                      >
+                        <span className="text-[15px] font-medium text-muted">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          inputMode="decimal"
+                          value={e?.cost ?? ""}
+                          onChange={(ev) => setField(r.itemId, "cost", ev.target.value)}
+                          placeholder="—"
+                          aria-label={`What you paid for ${r.title}`}
+                          aria-invalid={costInvalid}
                           className="w-full bg-transparent px-1.5 py-1.5 text-right text-[16px] font-semibold tracking-tight text-fg-strong outline-none"
                           data-nums
                         />
