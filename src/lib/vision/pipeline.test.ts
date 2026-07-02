@@ -180,7 +180,9 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
       },
       model: "m",
     };
-    const priceItem = vi.fn(async (_signal: ItemSignal) => STUB_PRICE);
+    const priceItem = vi.fn<(signal: ItemSignal) => Promise<PriceResult>>(
+      async () => STUB_PRICE,
+    );
     await makePipeline({ extract: fakeExtract(isbnExtraction), priceItem }).run({
       photos: ["u/a.jpg"],
     });
