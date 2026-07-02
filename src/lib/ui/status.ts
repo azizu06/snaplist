@@ -32,6 +32,13 @@ export interface StatusLabel {
    *  (motion-safe). It differentiates them from the *static* blue of Scheduled,
    *  which shares the same info hue under the locked one-blue palette. */
   pulse?: boolean;
+  /** Scheduled (queued) sets this so its badge shows a clock glyph instead of the
+   *  plain dot. Scheduled and Processing share the info hue on purpose — both are
+   *  hands-off, in-flight states moving the item toward Live with no seller action
+   *  needed — so color carries the shared *category* while the glyph names the
+   *  *phase*: a clock ("queued to publish") vs Processing's pulsing dot ("working
+   *  now"). Color = category, glyph = phase. */
+  icon?: "clock";
 }
 
 /** Listing lifecycle → end-user chip. Unknown keys render as themselves (honest), never invented. */
@@ -41,7 +48,7 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
     case "draft":
       return { label: "Draft", tone: "warning" };
     case "queued":
-      return { label: "Scheduled", tone: "info" };
+      return { label: "Scheduled", tone: "info", icon: "clock" };
     case "published":
       return { label: "Active", tone: "success-solid" };
     case "failed":
@@ -72,7 +79,7 @@ export function lifecycleShortLabel(
     case "draft":
       return { label: "Draft", tone: full.tone };
     case "queued":
-      return { label: "Scheduled", tone: full.tone };
+      return { label: "Scheduled", tone: full.tone, icon: full.icon };
     case "failed":
     case "draft_failed":
       return { label: "Attention", tone: full.tone };

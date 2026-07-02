@@ -15,6 +15,7 @@ import {
   type SettingsData,
 } from "@/app/(app)/settings/settings-view";
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
+import { InboxThreadPreview } from "../inbox-thread-preview";
 import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-view";
 
 /**
@@ -285,6 +286,14 @@ export default async function PreviewPage({
             <h2 className="text-[14px] font-semibold text-fg-strong">Messages</h2>
             <InboxEmptyState />
           </section>
+        </main>
+      );
+    case "inbox-thread":
+      // The replied-state thread → mounts the follow-up composer + header, so
+      // the attach-menu / send-button / avatar can be screenshot-iterated.
+      return (
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6">
+          <InboxThreadPreview />
         </main>
       );
     case "upload":

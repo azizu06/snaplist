@@ -1,6 +1,7 @@
 "use client";
 
 import type { ItemOption } from "./inbox-client";
+import { Select } from "@/components/ui/select";
 
 /**
  * Simulator card — presentational shell for the inbox's "simulate a buyer
@@ -76,18 +77,14 @@ export function SimulatorCard({
             <label htmlFor="simulate-item" className="sr-only">
               Item to ask about
             </label>
-            <select
+            <Select
               id="simulate-item"
+              aria-label="Item to ask about"
               value={selectedItem}
-              onChange={(e) => onSelectItem(e.target.value)}
-              className="min-w-0 max-w-full flex-1 rounded-lg border border-border-strong bg-surface px-3 py-2 text-[15px] text-fg outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent/30 sm:max-w-[280px] sm:flex-none"
-            >
-              {items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              onChange={onSelectItem}
+              options={items.map((item) => ({ value: item.id, label: item.label }))}
+              className="min-w-0 max-w-full flex-1 bg-surface px-3 py-2 text-[15px] text-fg sm:max-w-[280px] sm:flex-none"
+            />
             <button
               type="button"
               onClick={onSimulate}

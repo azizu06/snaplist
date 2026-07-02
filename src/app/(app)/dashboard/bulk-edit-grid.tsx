@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 import { lifecycleLabel } from "@/lib/ui/status";
+import { Select } from "@/components/ui/select";
 import type { DashboardRow } from "./dashboard-view";
 import type { BulkListingUpdate } from "./actions";
 
@@ -108,7 +109,12 @@ export function BulkEditGrid({
   );
   const dirty = updates.length > 0;
 
-  const GRID = "grid grid-cols-[1fr_150px_120px] items-center gap-4";
+  // Mobile: a single column — product stacks above a 2-up Status/Price sub-grid
+  // (the sub-grid dissolves via `sm:contents` so the two controls become direct
+  // grid children at sm). sm+: the dense 3-column editor table. minmax(0,1fr)
+  // lets a long title truncate instead of overflowing.
+  const GRID =
+    "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_160px_130px] sm:items-center sm:gap-5";
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-bg">
@@ -124,14 +130,22 @@ export function BulkEditGrid({
             <path d="m15 18-6-6 6-6" />
           </svg>
         </button>
-        <h1 className="text-[15px] font-bold tracking-tight text-fg-strong" data-nums>
-          Editing {rows.length} listing{rows.length === 1 ? "" : "s"}
-        </h1>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <h1 className="font-display text-[16px] font-semibold leading-none tracking-tight text-fg-strong">
+            Bulk edit
+          </h1>
+          <span
+            className="rounded-full bg-surface-2 px-2 py-0.5 text-[12px] font-medium text-muted"
+            data-nums
+          >
+            {rows.length} {rows.length === 1 ? "listing" : "listings"}
+          </span>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
+            className="rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong"
           >
             Discard
           </button>
@@ -140,7 +154,7 @@ export function BulkEditGrid({
             onClick={() => onSave(updates)}
             disabled={!dirty || pending || hasInvalidPrice}
             title={hasInvalidPrice ? "Fix the highlighted price before saving" : undefined}
-            className="rounded-lg bg-primary px-3.5 py-1.5 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:opacity-50"
+            className="rounded-lg bg-primary px-4 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover disabled:opacity-50"
           >
             {pending ? "Saving…" : "Save"}
           </button>
@@ -148,15 +162,17 @@ export function BulkEditGrid({
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-4 py-5 sm:px-6">
-          {/* column headers */}
-          <div className={`${GRID} border-b border-border px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint`}>
-            <span>Product</span>
-            <span>Status</span>
-            <span className="text-right">Price</span>
-          </div>
+        <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-start px-4 py-6 sm:justify-center sm:py-8 sm:px-6">
+          <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-xs">
+            {/* column headers — a real table head; hidden on mobile where the
+                stacked rows carry their own inline captions */}
+            <div className={`${GRID} hidden border-b border-border bg-surface-2 px-4 py-3 text-[12px] font-semibold uppercase tracking-[0.06em] text-muted sm:grid`}>
+              <span>Product</span>
+              <span className="text-center">Status</span>
+              <span className="text-center">Price</span>
+            </div>
 
-          <ul className="divide-y divide-border">
+            <ul className="divide-y divide-border">
             {rows.map((r) => {
               const e = edits[r.itemId];
               const noListing = !r.listingId;
@@ -166,10 +182,10 @@ export function BulkEditGrid({
               const isLive = r.status === "published";
               const priceInvalid = !!e && priceState(e.price).kind === "invalid";
               return (
-                <li key={r.itemId} className={`${GRID} px-3 py-2.5`}>
+                <li key={r.itemId} className={`${GRID} px-4 py-4 transition-colors hover:bg-surface-2 focus-within:bg-surface-2 sm:py-3.5`}>
                   {/* Product (read-only) */}
                   <span className="flex min-w-0 items-center gap-3">
-                    <span className="relative size-10 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2">
+                    <span className="relative size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-2">
                       {r.thumbUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL
                         <img src={r.thumbUrl} alt="" aria-hidden className="size-full object-cover" />
@@ -183,68 +199,72 @@ export function BulkEditGrid({
                         </span>
                       )}
                     </span>
-                    <span className="truncate text-[14px] font-medium text-fg-strong">{r.title}</span>
+                    <span className="truncate text-[15px] font-semibold leading-tight text-fg-strong">{r.title}</span>
                   </span>
 
-                  {/* Status (editable when the item has a listing) */}
-                  <select
-                    value={e?.status ?? r.status}
-                    disabled={noListing || isLive}
-                    title={isLive ? "Live eBay listings are managed from the listing, not bulk-edit" : undefined}
-                    onChange={(ev) => setField(r.itemId, "status", ev.target.value)}
-                    aria-label={`Status for ${r.title}`}
-                    className="w-full rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-[14px] text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-faint"
-                  >
-                    {/* A current status that isn't bulk-settable (Active, Scheduled,
-                        Processing, …) stays selectable so the row shows its REAL
-                        state and can be left unchanged — honestly labeled, never the
-                        raw key. The seller can only switch it to a bulk-editable option. */}
-                    {!STATUS_OPTIONS.some((o) => o.value === r.status) ? (
-                      <option value={r.status}>
-                        {lifecycleLabel(r.status)?.label ?? r.status}
-                      </option>
-                    ) : null}
-                    {STATUS_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Status + Price — a 2-up sub-grid on mobile; `sm:contents`
+                      dissolves it at sm so both controls land in the table's
+                      Status/Price columns. */}
+                  <div className="grid grid-cols-2 gap-3 sm:contents">
+                    {/* Status (editable when the item has a listing). A current
+                        status that isn't bulk-settable is prepended as a
+                        display-only option so the row shows its REAL state and can
+                        be left unchanged; a live row disables the control. */}
+                    <div className="min-w-0">
+                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.04em] text-muted sm:hidden">
+                        Status
+                      </span>
+                      <Select
+                        value={e?.status ?? r.status}
+                        onChange={(v) => setField(r.itemId, "status", v)}
+                        disabled={noListing || isLive}
+                        title={isLive ? "Live eBay listings are managed from the listing, not bulk-edit" : undefined}
+                        aria-label={`Status for ${r.title}`}
+                        options={[
+                          ...(!STATUS_OPTIONS.some((o) => o.value === r.status)
+                            ? [{ value: r.status, label: lifecycleLabel(r.status)?.label ?? r.status }]
+                            : []),
+                          ...STATUS_OPTIONS,
+                        ]}
+                        className="w-full bg-surface px-2.5 py-2 text-[14px] font-medium text-fg"
+                      />
+                    </div>
 
-                  {/* Price → item.price_override. An invalid entry rings red and
-                      blocks Save (instead of silently clearing the override). */}
-                  <div
-                    className={`flex items-center rounded-lg border bg-surface pl-2.5 transition-colors ${
-                      priceInvalid
-                        ? "border-danger ring-2 ring-danger/25"
-                        : "border-border-strong focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25"
-                    }`}
-                  >
-                    <span className="text-[14px] text-faint">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      inputMode="decimal"
-                      value={e?.price ?? ""}
-                      onChange={(ev) => setField(r.itemId, "price", ev.target.value)}
-                      placeholder="—"
-                      aria-label={`Price for ${r.title}`}
-                      aria-invalid={priceInvalid}
-                      className="w-full bg-transparent px-1.5 py-1.5 text-right text-[14px] font-semibold text-fg-strong outline-none"
-                      data-nums
-                    />
+                    {/* Price → item.price_override. An invalid entry rings red and
+                        blocks Save (instead of silently clearing the override). */}
+                    <div className="min-w-0">
+                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.04em] text-muted sm:hidden">
+                        Price
+                      </span>
+                      <div
+                        className={`flex items-center rounded-lg border bg-surface pl-2.5 transition-colors ${
+                          priceInvalid
+                            ? "border-danger ring-2 ring-danger/25"
+                            : "border-border-strong focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25"
+                        }`}
+                      >
+                        <span className="text-[15px] font-medium text-muted">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          inputMode="decimal"
+                          value={e?.price ?? ""}
+                          onChange={(ev) => setField(r.itemId, "price", ev.target.value)}
+                          placeholder="—"
+                          aria-label={`Price for ${r.title}`}
+                          aria-invalid={priceInvalid}
+                          className="w-full bg-transparent px-1.5 py-1.5 text-right text-[16px] font-semibold tracking-tight text-fg-strong outline-none"
+                          data-nums
+                        />
+                      </div>
+                    </div>
                   </div>
                 </li>
               );
             })}
-          </ul>
-
-          <p className="mt-4 px-3 text-[13px] text-faint">
-            Editing {rows.length} selected listing{rows.length === 1 ? "" : "s"}. Price
-            updates the seller price; status moves the listing through its
-            lifecycle. Items still processing (no listing yet) accept a price only.
-          </p>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
