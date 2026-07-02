@@ -4,6 +4,7 @@ import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { loadOrGenerateExportPacks } from "@/lib/export";
 import { reportServerError } from "@/lib/sentry";
+import { signPhotoUrlMap } from "@/lib/vision";
 import { ExportView } from "./export-view";
 
 /**
@@ -46,14 +47,9 @@ export default async function ExportPage({
     attributes.category ||
     "Your item";
 
-  let itemThumb: string | null = null;
-  const photoPaths = (item.photos as string[] | null) ?? [];
-  if (photoPaths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from("photos")
-      .createSignedUrl(photoPaths[0], 60 * 10);
-    itemThumb = signed?.signedUrl ?? null;
-  }
+  const firstPhoto = (item.photos as string[] | null)?.[0];
+  const signedThumb = await signPhotoUrlMap(supabase, firstPhoto ? [firstPhoto] : []);
+  const itemThumb = firstPhoto ? (signedThumb.get(firstPhoto) ?? null) : null;
 
   // The price the item record carries today: the latest logged recommendation.
   const { data: log } = await supabase

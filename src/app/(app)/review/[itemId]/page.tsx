@@ -4,7 +4,7 @@ import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
-import { deriveIdentification } from "@/lib/vision";
+import { deriveIdentification, signPhotoUrlMap } from "@/lib/vision";
 import { deriveStrategies } from "@/lib/pricing/strategies";
 import type { PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
@@ -70,16 +70,11 @@ export default async function ReviewPage({
     .maybeSingle();
 
   // Short-lived signed URLs for ALL the item's private photos (media card).
-  let photoUrls: string[] = [];
   const photoPaths = (item.photos as string[] | null) ?? [];
-  if (photoPaths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from("photos")
-      .createSignedUrls(photoPaths, 60 * 10);
-    photoUrls = (signed ?? [])
-      .map((entry) => entry.signedUrl)
-      .filter((url): url is string => Boolean(url));
-  }
+  const signedPhotos = await signPhotoUrlMap(supabase, photoPaths);
+  const photoUrls = photoPaths
+    .map((path) => signedPhotos.get(path))
+    .filter((url): url is string => Boolean(url));
 
   const rawAttrs = (item.attributes ?? {}) as Record<string, unknown>;
 

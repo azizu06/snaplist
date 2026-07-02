@@ -1,9 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { effectivePrice } from "@/lib/pipeline";
-import { itemLabel } from "@/lib/ui/item-label";
-import { sentenceCase } from "@/lib/ui/format";
+import { loadDashboardRows } from "@/lib/dashboard/rows";
 import { DashboardView, type DashboardRow } from "./dashboard-view";
 // NOT from dashboard-view: that file is "use client", and a runtime value
 // imported across the client boundary arrives as a reference proxy, not the
@@ -18,21 +16,12 @@ import {
 
 /**
  * /dashboard — the seller dashboard (issue #49: the marketing landing now
- * owns `/`; the app lives here). This file is data assembly only: RLS-scoped
- * reads, newest-eBay-listing-per-item union with unlisted items, signed
- * thumbnail URLs, latest logged price per item with the seller override
- * winning. The auth proxy gates the route; the redirect below is
- * defense-in-depth.
+ * owns `/`; the app lives here). Fetch + render only: the row assembly
+ * (newest-eBay-listing-per-item union, latest logged price with the seller
+ * override winning, signed thumbnails) lives in `lib/dashboard/rows.ts`,
+ * where its invariants are unit-tested. The auth proxy gates the route;
+ * the redirect below is defense-in-depth.
  */
-/** Read a trimmed string attribute off an item's JSON `attributes`. */
-function attrString(attrs: unknown, key: string): string | null {
-  if (attrs && typeof attrs === "object" && key in attrs) {
-    const v = (attrs as Record<string, unknown>)[key];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return null;
-}
-
 export default async function Dashboard({
   searchParams,
 }: {
@@ -44,111 +33,7 @@ export default async function Dashboard({
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/dashboard");
 
-  const [{ data: listings }, { data: items }, { data: logs }] = await Promise.all([
-    supabase
-      .from("listings")
-      .select("id, item_id, title, status, created_at")
-      .eq("platform", "ebay")
-      .order("created_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("items")
-      .select("id, attributes, photos, price_override, created_at")
-      .order("created_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("prediction_logs")
-      .select("item_id, price, created_at")
-      .order("created_at", { ascending: false })
-      .limit(200),
-  ]);
-
-  // Latest logged price per item (rows already newest-first).
-  const latestPrice = new Map<string, number>();
-  for (const log of logs ?? []) {
-    const itemId = log.item_id as string;
-    if (!latestPrice.has(itemId) && log.price != null) {
-      latestPrice.set(itemId, Number(log.price));
-    }
-  }
-
-  // Batch-sign first photos (private bucket) for the table thumbnails.
-  const itemsById = new Map(
-    (items ?? []).map((item) => [item.id as string, item] as const),
-  );
-  const firstPhotoByItem = new Map<string, string>();
-  for (const item of items ?? []) {
-    const first = (item.photos as string[] | null)?.[0];
-    if (first) firstPhotoByItem.set(item.id as string, first);
-  }
-  const signedByPath = new Map<string, string>();
-  if (firstPhotoByItem.size > 0) {
-    const { data: signed } = await supabase.storage
-      .from("photos")
-      .createSignedUrls([...firstPhotoByItem.values()], 60 * 10);
-    for (const entry of signed ?? []) {
-      if (entry.signedUrl && entry.path) {
-        signedByPath.set(entry.path, entry.signedUrl);
-      }
-    }
-  }
-
-  const rowPrice = (itemId: string): number | null => {
-    const item = itemsById.get(itemId);
-    const override =
-      item?.price_override != null ? Number(item.price_override) : null;
-    const suggested = latestPrice.get(itemId) ?? null;
-    return suggested != null ? effectivePrice(suggested, override) : override;
-  };
-  const rowThumb = (itemId: string): string | null => {
-    const path = firstPhotoByItem.get(itemId);
-    return path ? (signedByPath.get(path) ?? null) : null;
-  };
-
-  // One row per item: newest eBay listing wins; unlisted items show as
-  // Processing so nothing the seller uploaded disappears.
-  const newestPerItem = new Map<string, NonNullable<typeof listings>[number]>();
-  for (const l of listings ?? []) {
-    if (!newestPerItem.has(l.item_id as string)) {
-      newestPerItem.set(l.item_id as string, l);
-    }
-  }
-
-  const rows: DashboardRow[] = [
-    ...[...newestPerItem.values()].map((l) => {
-      const item = itemsById.get(l.item_id as string);
-      return {
-        itemId: l.item_id as string,
-        listingId: l.id as string,
-        // Dashboard rows show a SHORT name (brand + model, via itemLabel) — NOT
-        // the long, keyword-stuffed eBay SEO title. That title is correct for
-        // eBay (and still lives on the listing for publishing) but drags the row
-        // out. Fall back to the listing title only if attributes can't label it.
-        title: item
-          ? itemLabel(item.attributes, item.id as string)
-          : ((l.title as string | null) ?? "Untitled"),
-        status: (l.status as string | null) ?? "new",
-        createdAt: (l.created_at as string | null) ?? "",
-        price: rowPrice(l.item_id as string),
-        thumbUrl: rowThumb(l.item_id as string),
-        category: item ? sentenceCase(attrString(item.attributes, "category")) : null,
-        condition: item ? sentenceCase(attrString(item.attributes, "condition")) : null,
-      };
-    }),
-    ...(items ?? [])
-      .filter((item) => !newestPerItem.has(item.id as string))
-      .map((item) => ({
-        itemId: item.id as string,
-        listingId: null,
-        title: itemLabel(item.attributes, item.id as string),
-        status: "new",
-        createdAt: (item.created_at as string | null) ?? "",
-        price: rowPrice(item.id as string),
-        thumbUrl: rowThumb(item.id as string),
-        category: sentenceCase(attrString(item.attributes, "category")),
-        condition: sentenceCase(attrString(item.attributes, "condition")),
-      })),
-  ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const rows: DashboardRow[] = await loadDashboardRows(supabase);
 
   const counts = {
     draft: rows.filter((r) => r.status === "draft").length,
