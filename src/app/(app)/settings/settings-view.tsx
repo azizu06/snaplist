@@ -469,13 +469,15 @@ export function SettingsView({
           </CardBody>
       </Card>
 
-      {/* Sign out — held out as a separate, destructive-toned card, last. */}
+      {/* Sign out — held out as a separate card, last. Neutral chrome: signing
+          out isn't destructive (nothing is deleted), so danger red stays
+          reserved for real destructive actions. */}
       <div className="mt-3 border-t border-border pt-5">
-        <Card className="border-danger-border/60">
+        <Card>
           <CardHeader
             title={
               <span className="flex items-center gap-2">
-                <SectionIcon tone="danger">
+                <SectionIcon>
                   <SignOutIcon />
                 </SectionIcon>
                 Sign out
@@ -488,7 +490,7 @@ export function SettingsView({
               stay exactly as you left them.
             </SectionDescription>
             {/* Clerk sign-out (issue #41) — the /auth/signout route is gone. */}
-            <AppSignOutButton className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-danger-border bg-surface px-4 py-2 text-[14px] font-semibold text-danger-soft-fg shadow-xs transition-colors hover:bg-danger-soft" />
+            <AppSignOutButton className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2" />
           </CardBody>
         </Card>
       </div>
