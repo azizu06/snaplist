@@ -53,12 +53,23 @@ export interface DashboardCounts {
 
 type IdsAction = (ids: string[]) => Promise<void>;
 
-const PRICE_FMT = new Intl.NumberFormat("en-US", {
+/** Whole dollars stay clean ("$800"); anything with cents gets BOTH digits
+ *  ("$514.50", never "$514.5" — a half-formatted price reads as a glitch on a
+ *  money surface; audit #105). */
+const PRICE_FMT_WHOLE = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+const PRICE_FMT_CENTS = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const fmtPrice = (n: number) =>
+  (Number.isInteger(n) ? PRICE_FMT_WHOLE : PRICE_FMT_CENTS).format(n);
 
 /** Default ("smart") order: errors → drafts → automatic states → live →
  *  archived. Unknown keys sort with drafts. */
@@ -195,20 +206,25 @@ function RowCheckbox({
  *  select · Product · Status · Category · Condition · Price · Listed. Columns
  *  disclose progressively so narrow screens never crowd — least-important
  *  first to drop:
- *    md  (≥768):  select · Product · Status · Price · Listed
- *    lg  (≥1024): + Category
- *    xl  (≥1280): + Condition
+ *    md  (≥768):  select · Product · Status · Price
+ *    lg  (≥1024): + Listed
+ *    xl  (≥1280): + Category + Condition
  *  Below md the row is a stacked card (the base `grid-cols-[auto_1fr_auto]`).
  *  Cell visibility classes (`hidden md/lg/xl:block`) MUST stay in sync with
  *  these track counts or the grid columns misalign. Data columns are EQUAL
  *  fixed widths (`repeat(n, 120px)`) and every value is CENTER-aligned, so each
- *  value sits on its column's midpoint and the rhythm stays even regardless of
- *  text length (a long "Gaming Laptop" no longer crowds the next column's
- *  "Good"); the title column keeps the flexible `1fr` so names stay full. */
+ *  value sits on its column's midpoint and the rhythm stays even.
+ *
+ *  The title track is `minmax(8rem,1fr)`, NOT `minmax(0,1fr)` (audit #105):
+ *  the zero floor let the fixed columns crush the product name to 5px on
+ *  tablet widths — the dashboard's primary identifier disappeared entirely
+ *  between ~768–900px. The fixed-column budget per breakpoint is sized so
+ *  8rem always fits the narrowest container of its band (md ≈ 471px content
+ *  width with 2×120px columns; lg ≈ 727px with 3; xl ≈ 942px with 5). */
 const ROW_GRID =
-  "md:grid md:items-center md:gap-5 md:grid-cols-[auto_minmax(0,1fr)_repeat(3,120px)] " +
-  "lg:grid-cols-[auto_minmax(0,1fr)_repeat(4,120px)] " +
-  "xl:grid-cols-[auto_minmax(0,1fr)_repeat(5,120px)]";
+  "md:grid md:items-center md:gap-5 md:grid-cols-[auto_minmax(8rem,1fr)_repeat(2,120px)] " +
+  "lg:grid-cols-[auto_minmax(8rem,1fr)_repeat(3,120px)] " +
+  "xl:grid-cols-[auto_minmax(8rem,1fr)_repeat(5,120px)]";
 
 /**
  * One listing row. The whole row links to review (the inner <a> is
@@ -298,10 +314,11 @@ function ListingRow({
           {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} icon={chip.icon} /> : null}
         </span>
 
-        {/* Category column (lg+). One consistent type ramp across every column
-            — same size/weight/ink as the product title (owner request),
-            center-aligned so the rhythm stays even. */}
-        <span className="hidden truncate text-[15px] font-semibold text-fg-strong lg:block lg:text-center">
+        {/* Category column (xl+ — disclosed with Condition; at lg the Listed
+            column takes priority so the title keeps breathing room). One
+            consistent type ramp across every column — same size/weight/ink as
+            the product title (owner request), center-aligned. */}
+        <span className="hidden truncate text-[15px] font-semibold text-fg-strong xl:block xl:text-center">
           {row.category ?? <span className="font-normal text-faint">—</span>}
         </span>
 
@@ -313,7 +330,7 @@ function ListingRow({
         {/* Mobile/tablet price (right of the card). */}
         <span className="shrink-0 text-[15px] font-semibold text-fg-strong md:hidden" data-nums>
           {row.price != null ? (
-            PRICE_FMT.format(row.price)
+            fmtPrice(row.price)
           ) : (
             <span className="text-[12.5px] font-normal text-muted">No price</span>
           )}
@@ -323,12 +340,14 @@ function ListingRow({
             column, so the row keeps one even spacing rhythm). */}
         <span className="hidden text-[15px] font-semibold text-fg-strong md:block md:text-center" data-nums>
           {row.price != null ? (
-            PRICE_FMT.format(row.price)
+            fmtPrice(row.price)
           ) : (
             <span className="font-normal text-faint">—</span>
           )}
         </span>
-        <span className="hidden text-[15px] font-semibold text-fg-strong md:block md:text-center" data-nums>
+        {/* Listed column (lg+ — dropped at md so 2 fixed columns leave the
+            title real width on tablets). */}
+        <span className="hidden text-[15px] font-semibold text-fg-strong lg:block lg:text-center" data-nums>
           {listedLabel(row.createdAt)}
         </span>
     </div>
@@ -752,6 +771,77 @@ function DashboardEmpty() {
           New listing
         </Link>
       </div>
+    </div>
+  );
+}
+
+/** Mobile bulk-bar overflow — below `sm` the bar can't fit four text actions
+ *  (audit #105: Delete + Clear sat off-screen behind an invisible scroll), so
+ *  the destructive/secondary actions collapse into one "More" menu that opens
+ *  UPWARD (the bar hugs the bottom edge). Same popover keyboard contract as
+ *  the toolbar menus. */
+function BulkMoreMenu({
+  canArchive,
+  canUnarchive,
+  pending,
+  onArchive,
+  onUnarchive,
+  onDelete,
+}: {
+  canArchive: boolean;
+  canUnarchive: boolean;
+  pending: boolean;
+  onArchive: () => void;
+  onUnarchive: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEscapeToClose(open, () => setOpen(false));
+  useModalFocus(open, menuRef, { trap: false });
+  const item = (label: string, onPick: () => void, opts?: { danger?: boolean; disabled?: boolean }) => (
+    <button
+      key={label}
+      type="button"
+      role="menuitem"
+      disabled={opts?.disabled}
+      onClick={() => {
+        setOpen(false);
+        onPick();
+      }}
+      className={`flex w-full items-center rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors hover:bg-surface-2 disabled:opacity-50 ${
+        opts?.danger ? "text-danger-soft-fg" : "text-fg"
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="relative sm:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-primary-fg/90 transition-colors hover:bg-primary-fg/10"
+      >
+        More
+      </button>
+      {open ? (
+        <>
+          <button aria-hidden tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default" />
+          <div
+            ref={menuRef}
+            role="menu"
+            onKeyDown={menuArrowNav}
+            className="menu-pop absolute bottom-full right-0 z-50 mb-2 w-44 origin-bottom-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+          >
+            {canArchive ? item("Archive", onArchive) : null}
+            {canUnarchive ? item("Unarchive", onUnarchive, { disabled: pending }) : null}
+            {item("Delete", onDelete, { danger: true })}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1313,14 +1403,17 @@ export function DashboardView({
                   <RowCheckbox checked={allSelected} onToggle={toggleAll} label="Select all listings" />
                   <SortHeader label="Product" k="title" sort={sort} onSort={onSortToggle} />
                   <SortHeader label="Status" k="status" sort={sort} onSort={onSortToggle} align="center" />
-                  <span className="hidden text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-muted lg:block">
+                  <span className="hidden text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-muted xl:block">
                     Category
                   </span>
                   <span className="hidden text-center text-[12px] font-semibold uppercase tracking-[0.08em] text-muted xl:block">
                     Condition
                   </span>
                   <SortHeader label="Price" k="price" sort={sort} onSort={onSortToggle} align="center" />
-                  <SortHeader label="Listed" k="date" sort={sort} onSort={onSortToggle} align="center" />
+                  {/* Listed discloses at lg with its column (ROW_GRID sync). */}
+                  <span className="hidden lg:flex lg:justify-center">
+                    <SortHeader label="Listed" k="date" sort={sort} onSort={onSortToggle} align="center" />
+                  </span>
                 </div>
 
                 {/* Mobile select-all — below md the column header (which hosts
@@ -1385,11 +1478,14 @@ export function DashboardView({
                 Quick edit
               </button>
             ) : null}
+            {/* Inline actions are sm+ only; below sm they collapse into the
+                "More" menu (audit #105: four text actions overflowed a 390px
+                bar and hid Delete + Clear behind an invisible scroll). */}
             {archiveTargets.length > 0 ? (
               <button
                 type="button"
                 onClick={() => setConfirm("archive")}
-                className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-primary-fg/90 transition-colors hover:bg-primary-fg/10"
+                className="hidden rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-primary-fg/90 transition-colors hover:bg-primary-fg/10 sm:block"
               >
                 Archive
               </button>
@@ -1399,7 +1495,7 @@ export function DashboardView({
                 type="button"
                 onClick={runUnarchive}
                 disabled={isPending}
-                className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-primary-fg/90 transition-colors hover:bg-primary-fg/10 disabled:opacity-50"
+                className="hidden rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-primary-fg/90 transition-colors hover:bg-primary-fg/10 disabled:opacity-50 sm:block"
               >
                 Unarchive
               </button>
@@ -1407,10 +1503,18 @@ export function DashboardView({
             <button
               type="button"
               onClick={() => setConfirm("delete")}
-              className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-danger-on-flash transition-colors hover:bg-primary-fg/10"
+              className="hidden rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-danger-on-flash transition-colors hover:bg-primary-fg/10 sm:block"
             >
               Delete
             </button>
+            <BulkMoreMenu
+              canArchive={archiveTargets.length > 0}
+              canUnarchive={unarchiveTargets.length > 0}
+              pending={isPending}
+              onArchive={() => setConfirm("archive")}
+              onUnarchive={runUnarchive}
+              onDelete={() => setConfirm("delete")}
+            />
             <button
               type="button"
               onClick={clearSelection}
