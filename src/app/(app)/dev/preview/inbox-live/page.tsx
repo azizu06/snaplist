@@ -271,7 +271,7 @@ export default function InboxDevPreviewPage() {
             selectedItem={selectedItem}
             onSelectItem={setSelectedItem}
             onSimulate={() => {}}
-            live
+            connection="live"
             simulating={false}
           />
           <InboxEmptyState />
@@ -317,7 +317,7 @@ export default function InboxDevPreviewPage() {
                 selectedItem={selectedItem}
                 onSelectItem={setSelectedItem}
                 onSimulate={() => {}}
-                live
+                connection="live"
                 simulating={false}
               />
             </header>
@@ -333,7 +333,7 @@ export default function InboxDevPreviewPage() {
                 selectedItem={selectedItem}
                 onSelectItem={setSelectedItem}
                 onSimulate={() => {}}
-                live
+                connection="live"
                 simulating={false}
               />
             </div>

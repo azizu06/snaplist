@@ -1,6 +1,7 @@
 "use client";
 
 import type { ItemOption } from "./inbox-client";
+import type { RealtimeConnectionState } from "@/lib/ui/realtime-status";
 import { Select } from "@/components/ui/select";
 
 /**
@@ -15,8 +16,34 @@ import { Select } from "@/components/ui/select";
  * not a filled status pill that competes with the conversation chips below.
  */
 
-/** Live-connection indicator — pulse dot + label, calm by design. */
-function LiveDot({ live }: { live: boolean }) {
+/** Live-connection indicator — pulse dot + label, calm by design. The failed
+ *  state stays quiet too (muted text + a small Retry, no red banner): green is
+ *  reserved for Live, and a dead demo channel is an inconvenience, not an
+ *  emergency. */
+function LiveDot({
+  connection,
+  onRetry,
+}: {
+  connection: RealtimeConnectionState;
+  onRetry?: () => void;
+}) {
+  if (connection === "failed") {
+    return (
+      <span className="inline-flex items-center gap-2 whitespace-nowrap text-[13px] font-medium text-muted">
+        Live updates unavailable
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-md border border-border px-2 py-0.5 text-[12px] font-semibold text-fg transition-colors hover:bg-surface-2"
+          >
+            Retry
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+  const live = connection === "live";
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-medium text-muted">
       <span aria-hidden className="relative flex size-2">
@@ -37,16 +64,20 @@ export function SimulatorCard({
   selectedItem,
   onSelectItem,
   onSimulate,
-  live,
+  connection,
+  onRetryConnection,
   simulating,
 }: {
   items: ItemOption[];
   selectedItem: string;
   onSelectItem: (id: string) => void;
   onSimulate: () => void;
-  live: boolean;
+  connection: RealtimeConnectionState;
+  /** Tear down + re-subscribe the Realtime channel (shown in the failed state). */
+  onRetryConnection?: () => void;
   simulating: boolean;
 }) {
+  const live = connection === "live";
   return (
     <section className="rounded-xl border border-border bg-surface shadow-xs">
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
@@ -64,7 +95,7 @@ export function SimulatorCard({
           </span>
           Simulate a buyer question
         </span>
-        <LiveDot live={live} />
+        <LiveDot connection={connection} onRetry={onRetryConnection} />
       </header>
       <div className="flex flex-col gap-3 px-4 py-4 sm:px-5">
         {items.length === 0 ? (
@@ -92,14 +123,20 @@ export function SimulatorCard({
               // before SUBSCRIBED could let the INSERT land before the listener
               // is active, leaving the question invisible until refresh.
               disabled={simulating || !live}
-              title={live ? undefined : "Waiting for the live connection…"}
+              title={
+                live
+                  ? undefined
+                  : connection === "failed"
+                    ? "Live updates unavailable — retry the connection first"
+                    : "Waiting for the live connection…"
+              }
               className="rounded-lg bg-primary px-4 py-2 text-[15px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
             >
               {simulating
                 ? "Asking…"
-                : live
-                  ? "Simulate buyer question"
-                  : "Connecting…"}
+                : connection === "connecting"
+                  ? "Connecting…"
+                  : "Simulate buyer question"}
             </button>
           </div>
         )}

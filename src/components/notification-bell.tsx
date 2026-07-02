@@ -145,7 +145,13 @@ export function NotificationBell({
           setItems((prev) => prev.map((p) => (p.id === row.id ? row : p)));
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        // The bell degrades gracefully (server-seeded rows still render), but a
+        // dead channel must not die silently — log it for diagnosis (audit).
+        if (err || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[realtime] notifications channel", status, err);
+        }
+      });
     return () => {
       supabase.removeChannel(channel);
     };
