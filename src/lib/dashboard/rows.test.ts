@@ -154,6 +154,8 @@ describe("assembleDashboardRows", () => {
       thumbUrlFor: noThumbs,
     });
     expect(rows[0].price).toBe(70);
+  });
+
   it("carries the cost basis (#101): $0 is real, junk/missing degrades to null — never a fake $0", () => {
     const rows = assembleDashboardRows({
       listings: [],

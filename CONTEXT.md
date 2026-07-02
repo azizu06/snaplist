@@ -36,6 +36,16 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   scattered) is a confidence signal.
 - **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
   user-editable. Never a bare number.
+- **Cost basis (COGS)** — what the seller **paid** for the item (cost of goods sold), captured
+  optionally at upload or review. Blank means *unknown* (stored `NULL`, never a fake $0); a recorded
+  **$0** is a real value (a free find). Persisted as `items.cost_basis`; feeds **net profit**.
+- **Net profit (margin)** — the estimated amount a seller pockets on a sale:
+  `price − estimated platform fees − cost basis`. Resellers think in margin, not list price, so it's
+  surfaced wherever a price is. **Null** (price-only) when no cost basis is recorded — never a fake
+  $0. Pure, unit-tested math in `src/lib/pricing/fees.ts`.
+- **Platform fees** — the per-platform selling-fee **estimate** (`rate × price + fixed`) behind
+  net-profit math: eBay ≈13.25% + $0.30, Facebook Marketplace 5%, Mercari ≈12.9% + $0.50. Always an
+  *estimate* (labeled "est."), not an invoice — real fees vary by category, store level, and promos.
 - **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
   completeness}. Never raw LLM self-report. Drives the **autopilot gate**. The tier-trust ordering
   encodes "sold beats asking": a tight **sold**-comp cluster ranks above the asking-based web tiers
