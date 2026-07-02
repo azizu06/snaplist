@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConfidenceGauge } from "@/components/ui/confidence-gauge";
 import { Banner, type BannerVariant } from "@/components/ui/banner";
 import { PendingButton } from "@/components/ui/button";
@@ -256,16 +257,25 @@ function SharpenCard({
   options,
   candidates,
   action,
+  formDirty,
 }: {
   itemId: string;
   options: ClarifyOption[];
   candidates: string[];
   action: (formData: FormData) => Promise<void>;
+  /** The Save form has unsaved edits — Sharpen must confirm before it re-prices
+   *  (the re-render replaces the fields, silently discarding those edits). */
+  formDirty: boolean;
 }) {
   const [chips, setChips] = useState<string[]>([]);
   const [input, setInput] = useState("");
   // Clarify options the seller confirmed apply, keyed by spec.
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Dirty-guard: intercept the first submit while the Save form is dirty and
+  // route it through the ConfirmDialog; a confirmed re-submit passes through.
+  const formRef = useRef<HTMLFormElement>(null);
+  const confirmedRef = useRef(false);
+  const [confirming, setConfirming] = useState(false);
 
   const addChip = (raw: string) => {
     const value = raw.trim();
@@ -298,7 +308,23 @@ function SharpenCard({
     <Card
       chromeClassName={APP_CARD_CHROME}      className="p-4 sm:p-5"
     >
-      <form action={action}>
+      <form
+        ref={formRef}
+        action={action}
+        onSubmit={(e) => {
+          // Unsaved manual edits would be silently overwritten by the re-price's
+          // re-render — stop the first submit and ask. A confirm re-submits with
+          // the flag set, which passes straight through (and resets the flag).
+          if (confirmedRef.current) {
+            confirmedRef.current = false;
+            return;
+          }
+          if (formDirty) {
+            e.preventDefault();
+            setConfirming(true);
+          }
+        }}
+      >
         <input type="hidden" name="itemId" value={itemId} />
         {chips.map((c, i) => (
           <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
@@ -429,6 +455,22 @@ function SharpenCard({
           </PendingButton>
         </div>
       </form>
+
+      {confirming ? (
+        <ConfirmDialog
+          title="Discard unsaved edits?"
+          body="Sharpen re-runs the pricing research and overwrites the fields you've edited but not saved. Save your changes first if you want to keep them."
+          confirmLabel="Run Sharpen"
+          cancelLabel="Keep editing"
+          pending={false}
+          onConfirm={() => {
+            setConfirming(false);
+            confirmedRef.current = true;
+            formRef.current?.requestSubmit();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -917,6 +959,7 @@ export function ReviewView({
           options={data.clarifyOptions}
           candidates={data.identification?.candidates ?? []}
           action={sharpenAction}
+          formDirty={dirty}
         />
       ) : null}
 
