@@ -67,12 +67,36 @@ export interface EbayPublishResult {
 }
 
 /**
- * The adapter boundary. ONE capability for this slice: publish a listing.
- * Withdraw/revise/etc. are added HERE when their slices land, so callers keep
- * a single seam to mock.
+ * Everything the adapter needs to revise the PRICE of one live listing
+ * (issue #102 — the stale-inventory repricing pipeline's apply path). Like
+ * `EbayPublishRequest`, a plain provider-shaped value object: the caller maps
+ * SnapList rows onto it, the adapter never reaches back into the database.
+ */
+export interface EbayReviseRequest {
+  /** The seller-unique inventory SKU (SnapList: the listing row's UUID). */
+  sku: string;
+  /** The Sell Inventory offer id persisted at publish time (`ebay_offer_id`). */
+  offerId: string;
+  /** The new offer price. `value` is a decimal string per the Sell API money type. */
+  price: { value: string; currency: string };
+}
+
+/** Outcome of a successful price revision. */
+export interface EbayReviseResult {
+  /** The offer whose price was updated. */
+  offerId: string;
+  status: "revised";
+}
+
+/**
+ * The adapter boundary. Two capabilities: publish a listing (issue #14) and
+ * revise a live listing's price (issue #102). Withdraw/etc. are added HERE
+ * when their slices land, so callers keep a single seam to mock.
  */
 export interface EbayAdapter {
   publishListing(request: EbayPublishRequest): Promise<EbayPublishResult>;
+  /** Update the price of an already-published offer (idempotent per price). */
+  revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult>;
 }
 
 /**

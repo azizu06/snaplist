@@ -1,4 +1,10 @@
-import type { EbayAdapter, EbayPublishRequest, EbayPublishResult } from "./types";
+import type {
+  EbayAdapter,
+  EbayPublishRequest,
+  EbayPublishResult,
+  EbayReviseRequest,
+  EbayReviseResult,
+} from "./types";
 
 /**
  * Offline eBay adapter — the ONLY adapter the test suite ever touches (issue #14
@@ -16,6 +22,12 @@ export class MockEbayAdapter implements EbayAdapter {
   /** When set, publishListing rejects with this error instead of succeeding. */
   failWith?: Error;
 
+  /** Every price-revision request received, in order (issue #102). */
+  readonly reviseRequests: EbayReviseRequest[] = [];
+
+  /** When set, revisePrice rejects with this error instead of succeeding. */
+  reviseFailWith?: Error;
+
   async publishListing(request: EbayPublishRequest): Promise<EbayPublishResult> {
     this.requests.push(request);
     if (this.failWith) throw this.failWith;
@@ -24,5 +36,11 @@ export class MockEbayAdapter implements EbayAdapter {
       offerId: `MOCK-EBAY-OFFER-${request.sku}`,
       status: "published",
     };
+  }
+
+  async revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult> {
+    this.reviseRequests.push(request);
+    if (this.reviseFailWith) throw this.reviseFailWith;
+    return { offerId: request.offerId, status: "revised" };
   }
 }

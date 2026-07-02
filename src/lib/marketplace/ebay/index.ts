@@ -10,6 +10,8 @@ export type {
   EbayAdapter,
   EbayPublishRequest,
   EbayPublishResult,
+  EbayReviseRequest,
+  EbayReviseResult,
   EbayTokenProvider,
   EbayCondition,
 } from "./types";

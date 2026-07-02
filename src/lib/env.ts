@@ -72,6 +72,16 @@ const envSchema = z.object({
   EBAY_SOLD_STALE_DAYS: z.string().min(1).optional(),
   EBAY_SOLD_HALFLIFE_DAYS: z.string().min(1).optional(),
 
+  // Stale-inventory repricing cron (issue #102). CRON_SECRET authenticates the
+  // scheduler (Vercel cron sends it as `Authorization: Bearer <CRON_SECRET>`;
+  // a Supabase pg_cron/pg_net job can send the same header). With it UNSET the
+  // cron route refuses to run — the safe default. The numeric knobs are parsed
+  // (with defaults: 14d window, batch 5, 10% drift) in src/lib/reprice/policy.ts.
+  CRON_SECRET: z.string().min(1).optional(),
+  REPRICE_STALE_DAYS: z.string().min(1).optional(),
+  REPRICE_BATCH_SIZE: z.string().min(1).optional(),
+  REPRICE_DRIFT_THRESHOLD_PCT: z.string().min(1).optional(),
+
   // Supabase
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),

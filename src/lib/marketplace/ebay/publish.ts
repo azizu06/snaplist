@@ -262,6 +262,9 @@ export async function publishListingToEbay(
   }
 
   // 7. Persist the live ids + status on the listings row (the acceptance seam).
+  //    `listed_price` / `last_priced_at` record the price the live listing
+  //    actually carries and the price event — the stale-inventory repricing
+  //    pipeline (issue #102) selects on and revises against these.
   const { error: updErr } = await supabase
     .from("listings")
     .update({
@@ -269,6 +272,8 @@ export async function publishListingToEbay(
       ebay_offer_id: result.offerId,
       ebay_status: "published",
       status: "published",
+      listed_price: price,
+      last_priced_at: new Date().toISOString(),
     })
     .eq("id", listingId);
   if (updErr) {
