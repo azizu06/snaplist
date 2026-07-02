@@ -27,7 +27,7 @@ export interface PublishOutcome {
   ebayListingId: string;
   ebayOfferId: string | null;
   ebayStatus: "published";
-  /** True when this call hit eBay; false when the stored result was returned. */
+  /** True when the stored result was returned (idempotent short-circuit, no eBay call); false when this call actually published. */
   alreadyPublished: boolean;
 }
 
@@ -94,23 +94,27 @@ export async function publishListingToEbayAndNotify(
     throw err;
   }
 
-  // The listing is live → notify (rides Realtime to the bell).
-  const { data: published } = await supabase
-    .from("listings")
-    .select("title, item_id")
-    .eq("id", listingId)
-    .maybeSingle();
-  await createNotification(supabase, {
-    userId,
-    kind: "listing_published",
-    title: published?.title
-      ? `“${published.title}” is live on eBay`
-      : "Your listing is live on eBay",
-    body: "Buyers can find it now — view or edit it anytime.",
-    href: `/listings/${listingId}`,
-    itemId: (published?.item_id as string | null) ?? null,
-    listingId,
-  });
+  // Notify only when this call ACTUALLY published (rides Realtime to the bell).
+  // An idempotent retry (`alreadyPublished`) already produced this notification
+  // the first time — re-emitting would spam the feed on every re-trigger.
+  if (!outcome.alreadyPublished) {
+    const { data: published } = await supabase
+      .from("listings")
+      .select("title, item_id")
+      .eq("id", listingId)
+      .maybeSingle();
+    await createNotification(supabase, {
+      userId,
+      kind: "listing_published",
+      title: published?.title
+        ? `“${published.title}” is live on eBay`
+        : "Your listing is live on eBay",
+      body: "Buyers can find it now — view or edit it anytime.",
+      href: `/listings/${listingId}`,
+      itemId: (published?.item_id as string | null) ?? null,
+      listingId,
+    });
+  }
   return outcome;
 }
 
