@@ -2,6 +2,8 @@ import type {
   EbayAdapter,
   EbayPublishRequest,
   EbayPublishResult,
+  EbayReviseRequest,
+  EbayReviseResult,
   EbayTokenProvider,
 } from "./types";
 import { EbayApiError } from "./types";
@@ -209,6 +211,69 @@ export class HttpEbayAdapter implements EbayAdapter {
     }
 
     return { listingId: published.listingId, offerId, status: "published" };
+  }
+
+  /**
+   * Revise a live listing's price (issue #102) via the documented
+   * `POST /sell/inventory/v1/bulk_update_price_quantity` — eBay's endpoint for
+   * updating an offer's price WITHOUT republishing (a full offer PUT requires
+   * re-sending the whole offer body; this touches only the price). One SKU +
+   * offer per call; the bulk shape is just what the API mandates.
+   *
+   * The endpoint can return HTTP 200 with PER-OFFER failures inside the
+   * `responses` array, so success is asserted on the inner statusCode too —
+   * a silent partial failure here would record a reprice that never reached
+   * the live listing.
+   */
+  async revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult> {
+    const env = this.readEnv();
+    const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+    const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
+    const contentLanguage = marketplaceContentLanguage(
+      marketplaceId,
+      env.EBAY_CONTENT_LANGUAGE,
+    );
+
+    const token = await this.tokenProvider.getAccessToken();
+    const body = {
+      requests: [
+        {
+          sku: request.sku,
+          offers: [{ offerId: request.offerId, price: request.price }],
+        },
+      ],
+    };
+    const result = await this.call<{
+      responses?: Array<{
+        statusCode?: number;
+        offers?: Array<{ offerId?: string; statusCode?: number }>;
+      }>;
+    }>(
+      token,
+      "POST",
+      `${baseUrl}/sell/inventory/v1/bulk_update_price_quantity`,
+      body,
+      contentLanguage,
+    );
+
+    const inner = result?.responses?.[0];
+    const offer = inner?.offers?.[0];
+    const innerStatus = offer?.statusCode ?? inner?.statusCode;
+    if (innerStatus == null) {
+      throw new EbayApiError(
+        `eBay price revision for offer ${request.offerId} returned no per-offer confirmation`,
+        200,
+        result,
+      );
+    }
+    if (innerStatus < 200 || innerStatus >= 300) {
+      throw new EbayApiError(
+        `eBay price revision for offer ${request.offerId} failed (offer status ${innerStatus})`,
+        innerStatus,
+        result,
+      );
+    }
+    return { offerId: offer?.offerId ?? request.offerId, status: "revised" };
   }
 
   /**

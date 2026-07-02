@@ -13,6 +13,10 @@ import {
   deleteItems,
   bulkUpdateListings,
 } from "./actions";
+import { listPendingRepriceSuggestions } from "@/lib/reprice";
+import { getRepriceSettings } from "@/lib/settings/user-settings";
+import { RepricePanel } from "./reprice-panel";
+import { applyReprice, dismissReprice, setAutoReprice } from "./reprice-actions";
 
 /**
  * /dashboard — the seller dashboard (issue #49: the marketing landing now
@@ -49,6 +53,25 @@ export default async function Dashboard({
 
   const initialQuery = typeof rawQuery === "string" ? rawQuery : undefined;
 
+  // Stale-inventory repricing (issue #102): pending suggestions + the per-user
+  // auto-reprice opt-in, surfaced as ONE additive slot in the view. Shown only
+  // when relevant (live listings or open suggestions) so the intake dashboard
+  // stays uncluttered for new sellers.
+  const [suggestions, repriceSettings] = await Promise.all([
+    listPendingRepriceSuggestions(supabase),
+    getRepriceSettings(supabase, userId),
+  ]);
+  const repriceSlot =
+    suggestions.length > 0 || counts.live > 0 ? (
+      <RepricePanel
+        suggestions={suggestions}
+        autoRepriceEnabled={repriceSettings.autoRepriceEnabled}
+        applyAction={applyReprice}
+        dismissAction={dismissReprice}
+        toggleAction={setAutoReprice}
+      />
+    ) : null;
+
   return (
     <DashboardView
       rows={rows}
@@ -59,6 +82,7 @@ export default async function Dashboard({
       unarchiveAction={unarchiveListings}
       deleteAction={deleteItems}
       bulkUpdateAction={bulkUpdateListings}
+      repriceSlot={repriceSlot}
     />
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Folder from "@/components/bits/Folder";
 import { menuArrowNav, useEscapeToClose, useModalFocus } from "@/components/ui/overlay-behavior";
@@ -856,6 +856,7 @@ export function DashboardView({
   unarchiveAction,
   deleteAction,
   bulkUpdateAction,
+  repriceSlot,
 }: {
   rows: DashboardRow[];
   counts: DashboardCounts;
@@ -869,6 +870,8 @@ export function DashboardView({
   deleteAction?: IdsAction;
   /** Batched quick-edit (price + status) — opens the full-screen grid. */
   bulkUpdateAction?: (updates: BulkListingUpdate[]) => Promise<void>;
+  /** Additive slot: the stale-inventory reprice panel (issue #102). */
+  repriceSlot?: ReactNode;
 }) {
   const [query, setQuery] = useState(initialQuery ?? "");
   // Search MODE (the expanded Shopify search bar) is distinct from a non-empty
@@ -1072,6 +1075,8 @@ export function DashboardView({
           </Link>
         ) : null}
       </header>
+
+      {repriceSlot}
 
       {rows.length === 0 ? (
         <DashboardEmpty />

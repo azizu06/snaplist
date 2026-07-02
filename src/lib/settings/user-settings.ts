@@ -35,6 +35,58 @@ export async function getAutopilotEnabled(
 }
 
 /**
+ * Default when the user has no settings row: auto-reprice is OFF (issue #102).
+ * Deliberately the opposite polarity of the master autopilot default —
+ * auto-applying a price change to a LIVE listing requires an explicit opt-in.
+ */
+export const AUTO_REPRICE_DEFAULT = false;
+
+/**
+ * Read BOTH switches the repricing pipeline consumes in one round trip:
+ * the master autopilot switch (feeds the composite confidence gate) and the
+ * auto-reprice opt-in. Missing row → defaults (autopilot ON, auto-reprice
+ * OFF). Throws on a real query error — silently defaulting could auto-apply
+ * for a user whose read failed.
+ */
+export async function getRepriceSettings(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ autopilotEnabled: boolean; autoRepriceEnabled: boolean }> {
+  const { data, error } = await supabase
+    .from("user_settings")
+    .select("autopilot_enabled, auto_reprice_enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to read user settings: ${error.message}`);
+  }
+  return {
+    autopilotEnabled: data?.autopilot_enabled ?? AUTOPILOT_DEFAULT,
+    autoRepriceEnabled: data?.auto_reprice_enabled ?? AUTO_REPRICE_DEFAULT,
+  };
+}
+
+/**
+ * Set the user's auto-reprice opt-in (issue #102). Upserts so the first toggle
+ * creates the row; RLS WITH CHECK rejects a spoofed user_id.
+ */
+export async function setAutoRepriceEnabled(
+  supabase: SupabaseClient,
+  userId: string,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from("user_settings")
+    .upsert(
+      { user_id: userId, auto_reprice_enabled: enabled },
+      { onConflict: "user_id" },
+    );
+  if (error) {
+    throw new Error(`Failed to update user settings: ${error.message}`);
+  }
+}
+
+/**
  * Set the user's master autopilot switch. Upserts so the first toggle creates
  * the row; RLS WITH CHECK rejects a spoofed user_id.
  */
