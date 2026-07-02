@@ -6,6 +6,8 @@ import {
   publishListingToEbayAndNotify,
   PublishValidationError,
   EbayApiError,
+  isEbayAuthError,
+  EBAY_RECONNECT_MESSAGE,
 } from "@/lib/marketplace/ebay";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
@@ -63,11 +65,15 @@ export async function POST(request: NextRequest) {
       const status = /not found/i.test(err.message) ? 404 : 422;
       return NextResponse.json({ error: err.message }, { status });
     }
-    // EbayApiError carries an author-controlled, user-actionable summary (reconnect
-    // guidance, eBay's own validation message) — surface it; the raw payload
-    // (`.body`) is never exposed. Plain errors (Supabase/internal) are redacted.
+    // EbayApiError carries an author-controlled, user-actionable summary — surface
+    // it; the raw payload (`.body`) is never exposed. An AUTH failure (expired/
+    // invalid token) is normalized to the ONE actionable reconnect message instead
+    // of the raw HTTP-401 text. Plain errors (Supabase/internal) are redacted.
     if (err instanceof EbayApiError) {
-      return NextResponse.json({ error: err.message }, { status: 502 });
+      return NextResponse.json(
+        { error: isEbayAuthError(err) ? EBAY_RECONNECT_MESSAGE : err.message },
+        { status: 502 },
+      );
     }
     logServerError("ebay.publish", err);
     return NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });

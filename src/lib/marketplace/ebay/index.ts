@@ -29,7 +29,11 @@ export {
   publishListingToEbayAndNotify,
   type PublishOutcome,
 } from "./publish";
-export { PublishValidationError } from "./errors";
+export {
+  PublishValidationError,
+  isEbayAuthError,
+  EBAY_RECONNECT_MESSAGE,
+} from "./errors";
 export { UserTokenProvider } from "./user-token-provider";
 export {
   getEbayConnectionStatus,

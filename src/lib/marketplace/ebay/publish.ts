@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { EbayApiError, type EbayAdapter } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
-import { PublishValidationError } from "./errors";
+import {
+  PublishValidationError,
+  isEbayAuthError,
+  EBAY_RECONNECT_MESSAGE,
+} from "./errors";
 import { batchSignPhotoUrls } from "../../vision/photos";
 import { createNotification } from "../../notifications";
 
@@ -79,15 +83,21 @@ export async function publishListingToEbayAndNotify(
   try {
     outcome = await publishListingToEbay(supabase, listingId, adapter, options);
   } catch (err) {
+    // An AUTH failure (expired/invalid token) has ONE fix — reconnect eBay in
+    // Settings — so the feed shows the actionable reconnect message, matching
+    // the error banner both entry points surface, never the raw HTTP-401 text.
+    const authError = isEbayAuthError(err);
     const userActionable =
       err instanceof PublishValidationError || err instanceof EbayApiError;
     await createNotification(supabase, {
       userId,
       kind: "listing_failed",
       title: "Couldn’t publish your listing to eBay",
-      body: userActionable
-        ? (err as Error).message
-        : "Something went wrong while publishing. Please try again.",
+      body: authError
+        ? EBAY_RECONNECT_MESSAGE
+        : userActionable
+          ? (err as Error).message
+          : "Something went wrong while publishing. Please try again.",
       href: `/listings/${listingId}`,
       listingId,
     });
