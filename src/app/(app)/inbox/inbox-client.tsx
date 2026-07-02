@@ -106,7 +106,6 @@ export function InboxClient({
     useState<RealtimeConnectionState>("connecting");
   // Bumping this tears the channel down and re-subscribes (the quiet Retry).
   const [subscribeAttempt, setSubscribeAttempt] = useState(0);
-  const live = connection === "live";
 
   // Resizable conversation list (desktop) — width persists; drag tracks 1:1.
   // Dragging past the breakpoint snaps to an avatar-only rail (`collapsed`).
@@ -121,7 +120,6 @@ export function InboxClient({
 
   useEffect(() => {
     let cancelled = false;
-    setConnection("connecting");
 
     // Refetch-on-SUBSCRIBED: anything inserted/updated before the listener was
     // active (or while the connection was down) is reconciled in here, so a
@@ -194,7 +192,12 @@ export function InboxClient({
   }, [supabase, userId, subscribeAttempt]);
 
   // Tear down + re-subscribe the Realtime channel (the failed state's Retry).
-  const retryRealtime = () => setSubscribeAttempt((n) => n + 1);
+  // The optimistic "connecting" reset lives here (an event handler), not in the
+  // effect body — setState synchronously inside an effect cascades renders.
+  const retryRealtime = () => {
+    setConnection("connecting");
+    setSubscribeAttempt((n) => n + 1);
+  };
 
   // ── Open conversation ↔ browser history (audit) ──────────────────────────
   // On mobile, opening a conversation swaps the list for the thread; without a
