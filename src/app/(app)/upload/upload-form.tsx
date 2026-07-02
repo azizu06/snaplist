@@ -643,7 +643,14 @@ export function UploadView({
           List an item
         </h1>
         <p className="mt-0.5 text-[14px] text-muted">
-          Add photos and SnapList fills in the rest for your review.
+          Add photos and SnapList fills in the rest for your review.{" "}
+          {/* Entry point to the bulk/haul flow (issue #100) — additive only. */}
+          <a
+            href="/batch"
+            className="font-medium text-accent underline-offset-2 hover:underline"
+          >
+            Listing a whole haul? Try bulk capture.
+          </a>
         </p>
         <JourneyRail />
       </header>
