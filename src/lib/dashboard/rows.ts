@@ -22,6 +22,7 @@ export interface DashboardListingSource {
   title: unknown;
   status: unknown;
   created_at: unknown;
+  listed_price: unknown;
 }
 
 /** The `items` columns the dashboard reads (query is newest-first). */
@@ -89,8 +90,15 @@ export interface AssembleDashboardRowsInput {
  * appended as status `new`; rows sorted newest-first across both branches.
  * Row titles use the SHORT item label (brand + model via `itemLabel`), NOT the
  * keyword-stuffed eBay SEO title; the listing title is only a fallback when the
- * item row is missing/unlabeled. The seller's price override beats the latest
- * suggested price (`effectivePrice`); an override with no logged price still shows.
+ * item row is missing/unlabeled. The seller's price override beats the live
+ * price of record (`effectivePrice`); an override with no base price still shows.
+ *
+ * Price precedence per row: seller `price_override` > (for a PUBLISHED listing)
+ * `listings.listed_price`, the live eBay price > latest logged suggestion. The
+ * `listed_price` step is what keeps a suggest-only reprice sweep (which logs a
+ * fresh `prediction_logs` price the sweep never applied) from showing a price
+ * the live listing doesn't carry. `listed_price` is null for pre-backfill rows
+ * and irrelevant to drafts/queued items, where the latest estimate IS the price.
  */
 export function assembleDashboardRows(
   input: AssembleDashboardRowsInput,
@@ -101,12 +109,21 @@ export function assembleDashboardRows(
     (items ?? []).map((item) => [item.id as string, item] as const),
   );
 
-  const rowPrice = (itemId: string): number | null => {
+  const positivePrice = (value: unknown): number | null => {
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  // `livePrice` overrides the latest logged suggestion as the base price: it is
+  // the published listing's `listed_price` (null everywhere else). The seller's
+  // override still wins on top via `effectivePrice`.
+  const rowPrice = (itemId: string, livePrice: number | null): number | null => {
     const item = itemsById.get(itemId);
     const override =
       item?.price_override != null ? Number(item.price_override) : null;
-    const suggested = latestPrice.get(itemId) ?? null;
-    return suggested != null ? effectivePrice(suggested, override) : override;
+    const base = livePrice ?? latestPrice.get(itemId) ?? null;
+    return base != null ? effectivePrice(base, override) : override;
   };
 
   // One row per item: newest eBay listing wins (input is newest-first).
@@ -128,7 +145,12 @@ export function assembleDashboardRows(
           : ((l.title as string | null) ?? "Untitled"),
         status: (l.status as string | null) ?? "new",
         createdAt: (l.created_at as string | null) ?? "",
-        price: rowPrice(l.item_id as string),
+        price: rowPrice(
+          l.item_id as string,
+          (l.status as string | null) === "published"
+            ? positivePrice(l.listed_price)
+            : null,
+        ),
         thumbUrl: thumbUrlFor(l.item_id as string),
         category: item ? sentenceCase(attrString(item.attributes, "category")) : null,
         condition: item ? sentenceCase(attrString(item.attributes, "condition")) : null,
@@ -142,7 +164,7 @@ export function assembleDashboardRows(
         title: itemLabel(item.attributes, item.id as string),
         status: "new",
         createdAt: (item.created_at as string | null) ?? "",
-        price: rowPrice(item.id as string),
+        price: rowPrice(item.id as string, null),
         thumbUrl: thumbUrlFor(item.id as string),
         category: sentenceCase(attrString(item.attributes, "category")),
         condition: sentenceCase(attrString(item.attributes, "condition")),
@@ -161,7 +183,7 @@ export async function loadDashboardRows(
   const [{ data: listings }, { data: items }, { data: logs }] = await Promise.all([
     supabase
       .from("listings")
-      .select("id, item_id, title, status, created_at")
+      .select("id, item_id, title, status, created_at, listed_price")
       .eq("platform", "ebay")
       .order("created_at", { ascending: false })
       .limit(100),

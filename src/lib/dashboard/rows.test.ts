@@ -20,6 +20,7 @@ function listing(over: Partial<DashboardListingSource> = {}): DashboardListingSo
     title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones — Black, Tested",
     status: "draft",
     created_at: "2026-06-02T00:00:00Z",
+    listed_price: null,
     ...over,
   };
 }
@@ -111,6 +112,47 @@ describe("assembleDashboardRows", () => {
     expect(byId.get("over")?.price).toBe(99);
     expect(byId.get("sugg")?.price).toBe(80);
     expect(byId.get("bare")?.price).toBe(55);
+  });
+
+  it("a PUBLISHED row shows listed_price (the live price), not a newer suggest-only log", () => {
+    const rows = assembleDashboardRows({
+      listings: [listing({ status: "published", listed_price: 100 })],
+      items: [item()],
+      // A suggest-only reprice sweep logged a fresh 70 that was never applied.
+      latestPrice: new Map([["i1", 70]]),
+      thumbUrlFor: noThumbs,
+    });
+    expect(rows[0].price).toBe(100);
+  });
+
+  it("a PUBLISHED row still lets a seller override beat listed_price", () => {
+    const rows = assembleDashboardRows({
+      listings: [listing({ status: "published", listed_price: 100 })],
+      items: [item({ price_override: 88 })],
+      latestPrice: new Map([["i1", 70]]),
+      thumbUrlFor: noThumbs,
+    });
+    expect(rows[0].price).toBe(88);
+  });
+
+  it("a PUBLISHED row with null listed_price (pre-backfill) falls back to the latest log", () => {
+    const rows = assembleDashboardRows({
+      listings: [listing({ status: "published", listed_price: null })],
+      items: [item()],
+      latestPrice: new Map([["i1", 70]]),
+      thumbUrlFor: noThumbs,
+    });
+    expect(rows[0].price).toBe(70);
+  });
+
+  it("a DRAFT row keeps the latest logged estimate even when listed_price is set", () => {
+    const rows = assembleDashboardRows({
+      listings: [listing({ status: "draft", listed_price: 100 })],
+      items: [item()],
+      latestPrice: new Map([["i1", 70]]),
+      thumbUrlFor: noThumbs,
+    });
+    expect(rows[0].price).toBe(70);
   });
 
   it("sorts listed + unlisted rows together, newest first", () => {
