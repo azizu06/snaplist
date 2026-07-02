@@ -145,7 +145,13 @@ export function NotificationBell({
           setItems((prev) => prev.map((p) => (p.id === row.id ? row : p)));
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        // The bell degrades gracefully (server-seeded rows still render), but a
+        // dead channel must not die silently — log it for diagnosis (audit).
+        if (err || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[realtime] notifications channel", status, err);
+        }
+      });
     return () => {
       supabase.removeChannel(channel);
     };
@@ -269,7 +275,10 @@ export function NotificationBell({
                       ) : null}
                     </span>
                     {n.read ? null : (
-                      <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-accent-solid" />
+                      <>
+                        <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-accent-solid" />
+                        <span className="sr-only">Unread</span>
+                      </>
                     )}
                   </button>
                 </li>

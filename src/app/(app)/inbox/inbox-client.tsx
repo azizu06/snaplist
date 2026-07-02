@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useSupabaseClient } from "@/lib/supabase/client";
+import {
+  connectionAfterJoinTimeout,
+  connectionFromChannelStatus,
+  REALTIME_JOIN_TIMEOUT_MS,
+  type RealtimeConnectionState,
+} from "@/lib/ui/realtime-status";
 import { messageRowSchema, type MessageRow } from "@/lib/inbox";
 import { InboxEmptyState } from "./inbox-empty";
 import { SimulatorCard } from "./simulator-card";
@@ -45,6 +51,8 @@ interface InboxClientProps {
   userId: string;
   initialMessages: MessageRow[];
   items: ItemOption[];
+  /** Deep-linked conversation (?c=<id>) resolved by the server page. */
+  initialConversationId?: string | null;
 }
 
 function sortNewestFirst(messages: MessageRow[]): MessageRow[] {
@@ -67,7 +75,12 @@ function reconcileMessages(prev: MessageRow[], fetched: MessageRow[]): MessageRo
   return sortNewestFirst([...byId.values()]);
 }
 
-export function InboxClient({ userId, initialMessages, items }: InboxClientProps) {
+export function InboxClient({
+  userId,
+  initialMessages,
+  items,
+  initialConversationId = null,
+}: InboxClientProps) {
   // Clerk era (issue #41): the hook injects the Clerk session token per
   // request, so Realtime + reads stay RLS-scoped to the signed-in user.
   const supabase = useSupabaseClient();
@@ -81,10 +94,18 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
   // thread view. null → list view on mobile, calm placeholder on desktop.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Seeded from ?c= so a deep link (or refresh) restores the open thread.
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialConversationId,
+  );
   const [busy, setBusy] = useState<string | null>(null); // "simulate" | "send:<id>" | "retry:<id>"
   const [error, setError] = useState<string | null>(null);
-  const [live, setLive] = useState(false);
+  // Honest connection state (audit): "connecting" | "live" | "failed" — the old
+  // boolean could only ever say "Connecting…", even after the channel died.
+  const [connection, setConnection] =
+    useState<RealtimeConnectionState>("connecting");
+  // Bumping this tears the channel down and re-subscribes (the quiet Retry).
+  const [subscribeAttempt, setSubscribeAttempt] = useState(0);
 
   // Resizable conversation list (desktop) — width persists; drag tracks 1:1.
   // Dragging past the breakpoint snaps to an avatar-only rail (`collapsed`).
@@ -147,17 +168,85 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
         },
         (payload) => upsert(payload.new),
       )
-      .subscribe((status) => {
-        const subscribed = status === "SUBSCRIBED";
-        setLive(subscribed);
-        if (subscribed) void refetch();
+      .subscribe((status, err) => {
+        if (cancelled) return;
+        if (err || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error("[realtime] inbox channel", status, err);
+        }
+        setConnection(connectionFromChannelStatus(status));
+        if (status === "SUBSCRIBED") void refetch();
       });
+
+    // Join watchdog: a channel that never reaches SUBSCRIBED (blocked
+    // websocket, dead auth) would otherwise read "Connecting…" forever — past
+    // the timeout it degrades to failed and the quiet Retry shows instead.
+    const joinTimer = setTimeout(() => {
+      if (!cancelled) setConnection((c) => connectionAfterJoinTimeout(c));
+    }, REALTIME_JOIN_TIMEOUT_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(joinTimer);
       supabase.removeChannel(channel);
     };
-  }, [supabase, userId]);
+  }, [supabase, userId, subscribeAttempt]);
+
+  // Tear down + re-subscribe the Realtime channel (the failed state's Retry).
+  // The optimistic "connecting" reset lives here (an event handler), not in the
+  // effect body — setState synchronously inside an effect cascades renders.
+  const retryRealtime = () => {
+    setConnection("connecting");
+    setSubscribeAttempt((n) => n + 1);
+  };
+
+  // ── Open conversation ↔ browser history (audit) ──────────────────────────
+  // On mobile, opening a conversation swaps the list for the thread; without a
+  // history entry the browser/OS back button left the whole inbox. The open
+  // conversation is encoded as ?c=<id> via the native history API (no server
+  // round-trip): list → thread PUSHES (so Back returns to the list), switching
+  // threads REPLACES (Back still closes in one step), and popstate restores
+  // the selection from the URL. A pushed entry is marked in history.state so
+  // the in-app Back button can pop it (keeping history clean) while a ?c=
+  // deep link — where there's no list entry beneath us — just clears the
+  // param in place instead of navigating off-site.
+  function openConversation(id: string) {
+    if (id === selectedId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("c", id);
+    if (selectedId === null) {
+      window.history.pushState(
+        { ...window.history.state, inboxThread: true },
+        "",
+        url,
+      );
+    } else {
+      window.history.replaceState(window.history.state, "", url);
+    }
+    setSelectedId(id);
+  }
+
+  function closeConversation() {
+    if (selectedId === null) return;
+    if (window.history.state?.inboxThread) {
+      // We pushed this entry when opening — pop it; the popstate handler
+      // clears the selection from the URL.
+      window.history.back();
+      return;
+    }
+    // Deep link: no list entry beneath us to pop back to.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("c");
+    window.history.replaceState(window.history.state, "", url);
+    setSelectedId(null);
+  }
+
+  useEffect(() => {
+    const onPopState = () => {
+      setSelectedId(new URL(window.location.href).searchParams.get("c"));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   // Auto-dismiss the error toast so a transient send failure doesn't linger.
   // (It also clears on the next successful action.) Keyed on `error` so each new
@@ -358,7 +447,8 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
           selectedItem={selectedItem}
           onSelectItem={setSelectedItem}
           onSimulate={simulate}
-          live={live}
+          connection={connection}
+          onRetryConnection={retryRealtime}
           simulating={busy === "simulate"}
         />
         <InboxEmptyState />
@@ -386,7 +476,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
         setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))
       }
       onSendFollowUp={sendFollowUp}
-      onBack={() => setSelectedId(null)}
+      onBack={closeConversation}
     />
   ) : null;
 
@@ -445,7 +535,8 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
               onSimulate={simulate}
-              live={live}
+              connection={connection}
+              onRetryConnection={retryRealtime}
               simulating={busy === "simulate"}
             />
           </header>
@@ -461,10 +552,33 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
               selectedItem={selectedItem}
               onSelectItem={setSelectedItem}
               onSimulate={simulate}
-              live={live}
+              connection={connection}
+              onRetryConnection={retryRealtime}
               simulating={busy === "simulate"}
             />
           </div>
+          {/* Quiet failed-connection strip (audit): the simulator (which carries
+              the live dot) is folded into a popover here, so a dead channel
+              needs its own honest, small affordance — muted text + Retry, no
+              red banner; green stays reserved for Live. */}
+          {connection === "failed" ? (
+            <div
+              className={`flex items-center justify-between gap-2 bg-surface-2/60 px-4 py-1.5 ${
+                collapsed ? "lg:hidden" : ""
+              }`}
+            >
+              <span className="truncate text-[12px] text-faint">
+                Live updates unavailable
+              </span>
+              <button
+                type="button"
+                onClick={retryRealtime}
+                className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[12px] font-semibold text-fg transition-colors hover:bg-surface-2"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto">
             {/* full list — mobile always; desktop when expanded */}
             <div className={collapsed ? "lg:hidden" : ""}>
@@ -474,7 +588,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                 busy={busy}
                 itemLabels={itemLabels}
                 selectedId={selectedId}
-                onSelect={setSelectedId}
+                onSelect={openConversation}
               />
             </div>
             {/* collapsed avatar rail — desktop only */}
@@ -486,7 +600,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   busy={busy}
                   itemLabels={itemLabels}
                   selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  onSelect={openConversation}
                 />
               </div>
             ) : null}
@@ -615,7 +729,8 @@ export function SimulatorMenu(props: {
   selectedItem: string;
   onSelectItem: (id: string) => void;
   onSimulate: () => void;
-  live: boolean;
+  connection: RealtimeConnectionState;
+  onRetryConnection?: () => void;
   simulating: boolean;
   compact?: boolean;
 }) {
@@ -664,7 +779,8 @@ export function SimulatorMenu(props: {
                     props.onSimulate();
                     setOpen(false);
                   }}
-                  live={props.live}
+                  connection={props.connection}
+                  onRetryConnection={props.onRetryConnection}
                   simulating={props.simulating}
                 />
               </div>

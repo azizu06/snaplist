@@ -12,10 +12,20 @@ import { InboxClient, type ItemOption } from "./inbox-client";
  * which keeps the list LIVE via a Supabase Realtime subscription — a simulated
  * buyer question appears with no refresh.
  */
-export default async function InboxPage() {
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string | string[] }>;
+}) {
   const supabase = await createClient();
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/inbox");
+
+  // ?c=<conversationId> deep-links into a conversation (and is what the client
+  // pushes into history when one opens, so the back button returns to the
+  // list). An id that doesn't resolve just renders the list/placeholder.
+  const { c } = await searchParams;
+  const initialConversationId = typeof c === "string" && c !== "" ? c : null;
 
   const [{ data: messages }, { data: items }] = await Promise.all([
     supabase
@@ -64,6 +74,7 @@ export default async function InboxPage() {
         userId={userId}
         initialMessages={initialMessages}
         items={itemOptions}
+        initialConversationId={initialConversationId}
       />
     </main>
   );
