@@ -8,11 +8,19 @@
 
 ## Problem Statement
 
-Selling used household items is a repetitive time sink. For each item a seller must: photograph
-it, research what it's actually worth used (not retail), write a competent platform-appropriate
-listing, post it, and then answer the same buyer questions over and over. That's ~20–30 minutes of
-low-value labor per item, and the pricing research in particular is tedious and error-prone — real
-*sold* prices are hard to find and retail prices are misleading for used goods.
+Resellers list in volume, and the per-item work does not scale. Someone flipping thrift finds,
+sneakers, streetwear, electronics, games, or LEGO has to, for every item: photograph it, research
+what it actually *sold* for used (not retail, not the optimistic asking price), write a competent
+platform-appropriate listing, post it, and then answer the same buyer questions over and over.
+That is ~20–30 minutes of low-value labor per item, and the pricing research is the worst of it:
+real completed-sale prices are tedious to dig out and retail prices are misleading for used goods.
+Multiply that by a haul of ten or fifty items and the research alone eats the day. Existing
+cross-listing tools (Vendoo, List Perfectly, Crosslist) copy a listing across marketplaces but
+still make the seller do the identification, the pricing, and the writing by hand.
+
+The **primary user is the reseller** — the person who moves inventory in the hero domain (below),
+where real sold comps exist and pricing can be genuinely defensible. Casual one-off sellers are
+welcome and the flow serves them, but the product is tuned for volume.
 
 (Framing note: this is built as a **production-real AI-engineering showcase**. The primary success
 metric is demonstrating the full AI stack end-to-end in a polished, deployed app — not user growth.
@@ -20,15 +28,18 @@ Market saturation is explicitly irrelevant.)
 
 ## Solution
 
-SnapList turns a **photo of a used item** into a **priced, ready-to-post listing**, and later drafts
-buyer-message replies — collapsing the per-item work into a photo plus a couple of approvals.
+SnapList turns a **photo of a resale item** into a **priced, ready-to-post listing**, and later drafts
+buyer-message replies — collapsing the per-item work into a photo plus a couple of approvals so a
+reseller can clear a whole haul in one pass.
 
 The seller snaps 1–4 photos. The system identifies the item (brand, model, category, condition,
-specs, and any barcode/ISBN), researches a defensible used-price range with cited sources, generates
-platform-specific listing copy, and shows it for review/edit. High-confidence items can post
-automatically (confidence-gated autopilot); low-confidence ones queue for human review. Listings post
-to eBay (real, behind an adapter) and generate copy-paste export packs for Facebook Marketplace and
-Mercari. A buyer-Q&A agent drafts grounded replies the seller approves before sending.
+specs, and any barcode/ISBN), researches a defensible price range from **real sold comps** with cited
+sources, generates platform-specific listing copy, and shows it for review/edit. It captures **hauls
+in bulk** (many items in one session), tracks **cost basis → net profit** per item, and can
+**auto-reprice** listings that go stale. High-confidence items can post automatically
+(confidence-gated autopilot); low-confidence ones queue for human review. Listings post to eBay
+(real, behind an adapter) and generate copy-paste export packs for Facebook Marketplace and Mercari.
+A buyer-Q&A agent drafts grounded replies the seller approves before sending.
 
 SnapList is a **seller's control surface**, not a marketplace — payment, checkout, and shipping stay
 on eBay. Buyers never see SnapList.
@@ -92,6 +103,10 @@ on eBay. Buyers never see SnapList.
 40. As the builder, I want the pricing source behind a swappable interface, so that I can add/replace pricing strategies without rewrites.
 41. As the builder, I want sandbox→production to be a credential flip, not a rewrite, so that going live is low-risk.
 
+**Bulk / haul capture (reseller volume)**
+42. As a reseller, I want to capture many items in one photo session (a "haul") instead of starting a fresh flow per item, so that listing a batch of pickups is one pass, not one-item-at-a-time.
+43. As a reseller, I want each captured item in the haul to run the same identify → price → generate pipeline and land as its own reviewable draft, so that bulk capture never trades away per-item accuracy or my final say.
+
 ## Implementation Decisions
 
 ### Framing & architecture
@@ -137,6 +152,11 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 - **1 photo required, up to ~4 accepted.** All provided images fed to a **single** structured-extraction vision call → attributes + condition + barcode/ISBN. More angles → better condition assessment → higher ID confidence.
 - Output is Zod-validated against the attribute schema.
 
+### Bulk / haul capture (reseller volume)
+- **Batch capture is a first-class flow, not a bolt-on.** A reseller can stage many items in one session — photograph item, "next item", repeat — then process the whole haul at once. This is the volume path the reseller ICP needs; single-item capture remains the simple default.
+- **Same pipeline per item, no accuracy shortcut.** Each staged item runs the *identical* identify → price (sold-comps routing) → generate pipeline and lands as its own reviewable draft with its own confidence. Bulk is a capture/queueing convenience; it never fans out to a cheaper or shared prediction. Confidence-gated autopilot still applies per item.
+- Complements the reseller-facing surfaces already shipped: **cost-basis → net-profit** tracking per item and scheduled **stale-inventory auto-repricing** (both env-configurable, both opt-in where they touch money or posting).
+
 ### Listing generation (per-platform)
 - **One Zod-validated attribute core → many surface renderings** via per-platform prompt + template.
 - v1 targets: **eBay** (structured item-specifics, keyword title, category — the real adapter target), **Facebook Marketplace** (casual, local, short), **Mercari** (short title, hashtags, shipping-oriented). Poshmark optional if branded-apparel slice is added.
@@ -148,7 +168,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 - README discloses honestly if the corpus is synthetic.
 
 ### Item domain
-- **Hero domain + graceful degradation.** Excels at books/media (ISBN), consumer electronics, board games, branded gear. Generic items still flow through but honestly show low confidence. Demo arc: exact barcode → researched comps → correctly-flagged generic.
+- **Hero domain + graceful degradation — a positioning choice, not a caveat.** The hero domain *is* reseller inventory: books/media (ISBN), consumer electronics, video games and consoles, board games, LEGO, sneakers, branded clothing/streetwear, and branded gear. These are exactly the categories where eBay public **sold comps** are dense, so the pricing tier is genuinely strong and the suggestion is defensible. We concentrate there on purpose rather than chasing a "price anything" guarantee. Generic household items still flow through the same pipeline but honestly show low confidence. Demo arc: exact barcode → researched sold comps → correctly-flagged generic.
 
 ### eBay adapter (real, built behind interface, later phase)
 - **Posting:** eBay Sell API publish (sandbox first → production).

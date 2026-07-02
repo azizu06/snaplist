@@ -196,8 +196,8 @@ export default function Pricing() {
             </h1>
             <p className="mx-auto mt-5 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
               Start free with 15 items a day. Move up to Seller Pro when your
-              shelf, or your side hustle, outgrows it. No per-listing fees, no
-              paywall sprung halfway through.
+              volume outgrows it. No per-listing fees, no paywall sprung halfway
+              through.
             </p>
           </Reveal>
         </div>
@@ -213,7 +213,7 @@ export default function Pricing() {
           <div className="relative flex h-full flex-col overflow-hidden rounded-3xl border border-line bg-panel p-8 shadow-card sm:p-9">
             <h2 className="font-display text-[24px] font-bold text-flash">Free</h2>
             <p className="mt-1.5 text-[16px] text-flash-faint">
-              Everything you need to clear the closet
+              Everything you need to start flipping
             </p>
             <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash">
               $0
@@ -254,7 +254,7 @@ export default function Pricing() {
                 Seller Pro
               </h2>
               <p className="mt-1.5 text-[16px] text-flash-faint">
-                For flippers, resellers & steady decluttering
+                For flippers, resellers & busy stores
               </p>
               <p className="nums mt-6 font-display text-[58px] font-bold leading-none tracking-tight text-flash">
                 $10
