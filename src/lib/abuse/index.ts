@@ -5,7 +5,13 @@ import {
   tierLimits,
   type Tier,
 } from "./config";
-import { decrDaily, getLimiter, incrDaily, type LimitResult } from "./store";
+import {
+  decrDaily,
+  getLimiter,
+  incrDaily,
+  upstashConfigured,
+  type LimitResult,
+} from "./store";
 import { logEvent } from "../observability";
 import { captureError } from "../sentry";
 
@@ -27,12 +33,45 @@ export function requestIdentifier(request: Request, userId?: string | null): str
   return `ip:${ip}`;
 }
 
+/**
+ * ADR-0004 assumes "production sets Upstash" — the in-memory fallback is
+ * per-instance, so on serverless every limit and the daily item quota are
+ * bypassable by fanning requests across instances. A hard env assertion would
+ * violate the offline-build constraint (ADR-0003/0004) and trade a guardrail for
+ * an outage, so instead: a ONE-TIME alert (log + Sentry, mirroring the OpenAI
+ * budget alert) the first time production traffic runs on the fallback.
+ */
+let alertedFallbackInProduction = false;
+
+function maybeAlertFallbackInProduction(
+  env: Record<string, string | undefined>,
+): void {
+  if (alertedFallbackInProduction) return;
+  if (env.NODE_ENV !== "production" || upstashConfigured(env)) return;
+  alertedFallbackInProduction = true;
+  logEvent("abuse.store.fallback-in-production", {
+    hint: "Set UPSTASH_REDIS_REST_URL/TOKEN — rate limits and daily quotas are per-instance (bypassable) without it",
+  });
+  captureError(
+    new Error(
+      "Abuse protection is running on the per-instance in-memory fallback in production (Upstash env unset)",
+    ),
+    { context: "abuse.store" },
+  );
+}
+
+/** Test-only: reset the once-per-process alert flag. */
+export function __resetAbuseAlerts(): void {
+  alertedFallbackInProduction = false;
+}
+
 /** Lower-level metered-route check (per-minute sliding window) for a given key. */
 export async function checkRateLimit(
   identifier: string,
   tier: Tier = "free",
   env: Record<string, string | undefined> = process.env,
 ): Promise<LimitResult> {
+  maybeAlertFallbackInProduction(env);
   const limiter = getLimiter("metered", tierLimits(tier, env).meteredPerMinute, 60, env);
   return limiter.limit(identifier);
 }
@@ -104,6 +143,7 @@ export async function checkDailyItemQuota(
   env: Record<string, string | undefined> = process.env,
   tier: Tier = resolveTier(userId),
 ): Promise<QuotaResult> {
+  maybeAlertFallbackInProduction(env);
   const limit = tierLimits(tier, env).itemsPerDay;
   let used: number;
   try {

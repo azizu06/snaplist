@@ -9,9 +9,13 @@ import {
   rateLimitAllows,
   recordPipelineRunAndMaybeAlert,
   refundDailyItem,
+  __resetAbuseAlerts,
 } from "./index";
 
-beforeEach(() => __resetInMemoryStores());
+beforeEach(() => {
+  __resetInMemoryStores();
+  __resetAbuseAlerts();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -79,6 +83,35 @@ describe("abuse spend guardrail", () => {
       .filter((line) => line.includes("openai.budget.exceeded"));
     expect(alerts).toHaveLength(1);
     expect(JSON.parse(alerts[0])).toMatchObject({ count: 3, budget: 2 });
+  });
+});
+
+describe("abuse in-memory fallback in production (ADR-0004 deployment assumption)", () => {
+  it("alerts exactly once when production traffic runs on the per-instance fallback", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const env = { NODE_ENV: "production" }; // no Upstash vars -> in-memory fallback
+    await checkRateLimit("id", "free", env);
+    await checkRateLimit("id", "free", env); // no repeat alert
+    await checkDailyItemQuota("u1", env); // shares the once-per-process flag
+    const alerts = log.mock.calls
+      .map((c) => c[0] as string)
+      .filter((line) => line.includes("abuse.store.fallback-in-production"));
+    expect(alerts).toHaveLength(1);
+  });
+
+  it("stays silent in development and when Upstash is configured", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await checkRateLimit("id", "free", { NODE_ENV: "development" });
+    await checkDailyItemQuota("u1", {
+      NODE_ENV: "production",
+      UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
+      UPSTASH_REDIS_REST_TOKEN: "tok",
+      QUOTA_FREE_ITEMS_PER_DAY: "2",
+    }).catch(() => {}); // Upstash client isn't reachable offline; the alert check runs first
+    const alerts = log.mock.calls
+      .map((c) => c[0] as string)
+      .filter((line) => line.includes("abuse.store.fallback-in-production"));
+    expect(alerts).toHaveLength(0);
   });
 });
 
