@@ -51,6 +51,8 @@ interface InboxClientProps {
   userId: string;
   initialMessages: MessageRow[];
   items: ItemOption[];
+  /** Deep-linked conversation (?c=<id>) resolved by the server page. */
+  initialConversationId?: string | null;
 }
 
 function sortNewestFirst(messages: MessageRow[]): MessageRow[] {
@@ -73,7 +75,12 @@ function reconcileMessages(prev: MessageRow[], fetched: MessageRow[]): MessageRo
   return sortNewestFirst([...byId.values()]);
 }
 
-export function InboxClient({ userId, initialMessages, items }: InboxClientProps) {
+export function InboxClient({
+  userId,
+  initialMessages,
+  items,
+  initialConversationId = null,
+}: InboxClientProps) {
   // Clerk era (issue #41): the hook injects the Clerk session token per
   // request, so Realtime + reads stay RLS-scoped to the signed-in user.
   const supabase = useSupabaseClient();
@@ -87,7 +94,10 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
   // thread view. null → list view on mobile, calm placeholder on desktop.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Seeded from ?c= so a deep link (or refresh) restores the open thread.
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialConversationId,
+  );
   const [busy, setBusy] = useState<string | null>(null); // "simulate" | "send:<id>" | "retry:<id>"
   const [error, setError] = useState<string | null>(null);
   // Honest connection state (audit): "connecting" | "live" | "failed" — the old
@@ -185,6 +195,55 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
   // Tear down + re-subscribe the Realtime channel (the failed state's Retry).
   const retryRealtime = () => setSubscribeAttempt((n) => n + 1);
+
+  // ── Open conversation ↔ browser history (audit) ──────────────────────────
+  // On mobile, opening a conversation swaps the list for the thread; without a
+  // history entry the browser/OS back button left the whole inbox. The open
+  // conversation is encoded as ?c=<id> via the native history API (no server
+  // round-trip): list → thread PUSHES (so Back returns to the list), switching
+  // threads REPLACES (Back still closes in one step), and popstate restores
+  // the selection from the URL. A pushed entry is marked in history.state so
+  // the in-app Back button can pop it (keeping history clean) while a ?c=
+  // deep link — where there's no list entry beneath us — just clears the
+  // param in place instead of navigating off-site.
+  function openConversation(id: string) {
+    if (id === selectedId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("c", id);
+    if (selectedId === null) {
+      window.history.pushState(
+        { ...window.history.state, inboxThread: true },
+        "",
+        url,
+      );
+    } else {
+      window.history.replaceState(window.history.state, "", url);
+    }
+    setSelectedId(id);
+  }
+
+  function closeConversation() {
+    if (selectedId === null) return;
+    if (window.history.state?.inboxThread) {
+      // We pushed this entry when opening — pop it; the popstate handler
+      // clears the selection from the URL.
+      window.history.back();
+      return;
+    }
+    // Deep link: no list entry beneath us to pop back to.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("c");
+    window.history.replaceState(window.history.state, "", url);
+    setSelectedId(null);
+  }
+
+  useEffect(() => {
+    const onPopState = () => {
+      setSelectedId(new URL(window.location.href).searchParams.get("c"));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   // Auto-dismiss the error toast so a transient send failure doesn't linger.
   // (It also clears on the next successful action.) Keyed on `error` so each new
@@ -414,7 +473,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
         setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))
       }
       onSendFollowUp={sendFollowUp}
-      onBack={() => setSelectedId(null)}
+      onBack={closeConversation}
     />
   ) : null;
 
@@ -526,7 +585,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                 busy={busy}
                 itemLabels={itemLabels}
                 selectedId={selectedId}
-                onSelect={setSelectedId}
+                onSelect={openConversation}
               />
             </div>
             {/* collapsed avatar rail — desktop only */}
@@ -538,7 +597,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
                   busy={busy}
                   itemLabels={itemLabels}
                   selectedId={selectedId}
-                  onSelect={setSelectedId}
+                  onSelect={openConversation}
                 />
               </div>
             ) : null}
