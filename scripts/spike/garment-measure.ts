@@ -153,6 +153,12 @@ async function main(): Promise<void> {
   if (limit) gold = gold.slice(0, Number(limit));
   if (gold.length === 0) throw new Error("No fixtures selected.");
 
+  // Validate any prior run BEFORE spending on model calls, so a malformed
+  // predictions.json fails loudly without discarding freshly-paid predictions.
+  const prior: PredictionRecord[] = existsSync(PREDICTIONS)
+    ? predictionRecordsSchema.parse(JSON.parse(readFileSync(PREDICTIONS, "utf8")))
+    : [];
+
   console.log(`Measuring ${gold.length} fixture(s) with ${modelId} (google)…`);
   const fresh: PredictionRecord[] = [];
   for (const [i, fixture] of gold.entries()) {
@@ -163,11 +169,9 @@ async function main(): Promise<void> {
     if (i < gold.length - 1) await delay(CALL_GAP_MS);
   }
 
-  // Merge with any prior run so --only/--limit reruns update records in place
-  // instead of discarding the rest of the (paid-for) predictions.
-  const prior: PredictionRecord[] = existsSync(PREDICTIONS)
-    ? predictionRecordsSchema.parse(JSON.parse(readFileSync(PREDICTIONS, "utf8")))
-    : [];
+  // Merge with the prior run (validated up front) so --only/--limit reruns
+  // update records in place instead of discarding the rest of the (paid-for)
+  // predictions.
   const freshIds = new Set(fresh.map((p) => p.fixtureId));
   const predictions = [...prior.filter((p) => !freshIds.has(p.fixtureId)), ...fresh];
 
