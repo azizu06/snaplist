@@ -244,7 +244,7 @@ export default function InboxDevPreviewPage() {
   ) : null;
 
   return (
-    <main className="relative flex h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full flex-col overflow-hidden lg:h-[calc(100dvh-72px)]">
+    <main className="relative flex h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full flex-col overflow-hidden sm:h-[calc(100dvh-72px)]">
       {/* dev-only view switch — floated over the surface (the shipped /inbox has
           no title strip; this preview matches it). Not part of the screen. */}
       <div className="absolute right-4 top-3 z-20 hidden overflow-hidden rounded-lg border border-border text-[13px] font-medium shadow-sm sm:flex">
@@ -295,7 +295,7 @@ export default function InboxDevPreviewPage() {
           >
             {/* full header — mobile always; desktop when expanded */}
             <header
-              className={`flex h-16 items-center justify-between gap-2 border-b border-border px-4 ${
+              className={`flex h-[72px] items-center justify-between gap-2 bg-surface-2 px-4 ${
                 collapsed ? "lg:hidden" : ""
               }`}
             >
@@ -323,7 +323,7 @@ export default function InboxDevPreviewPage() {
             </header>
             {/* collapsed header — desktop rail only: just the simulate trigger */}
             <div
-              className={`hidden h-16 items-center justify-center border-b border-border ${
+              className={`hidden h-[72px] items-center justify-center bg-surface-2 ${
                 collapsed ? "lg:flex" : ""
               }`}
             >
