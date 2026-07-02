@@ -28,28 +28,29 @@ export function PricingStrategies({
 }) {
   if (strategies.length < 2) return null;
   const sel = selected.trim() !== "" ? Number(selected) : null;
+  const active = sel != null ? strategies.find((s) => s.price === sel) : undefined;
 
   return (
     <div className="mt-4 rounded-lg border border-border bg-surface-2 p-3.5">
       <p className="text-[12px] font-medium text-muted">Pricing strategy</p>
       <div className="mt-2.5 grid grid-cols-3 gap-2">
         {strategies.map((s) => {
-          const active = sel != null && sel === s.price;
+          const on = active?.key === s.key;
           return (
             <button
               key={s.key}
               type="button"
-              aria-pressed={active}
+              aria-pressed={on}
               onClick={() => onPick(s.price)}
               className={`flex flex-col rounded-lg border p-2.5 text-left transition-colors ${
-                active
+                on
                   ? "border-accent bg-brand-soft ring-2 ring-accent/20"
                   : "border-border bg-surface hover:border-accent/50"
               }`}
             >
               <span
                 className={`text-[12px] font-medium ${
-                  active ? "text-accent-soft-fg" : "text-muted"
+                  on ? "text-accent-soft-fg" : "text-muted"
                 }`}
               >
                 {s.label}
@@ -64,6 +65,12 @@ export function PricingStrategies({
           );
         })}
       </div>
+      {/* The chosen strategy's honest, data-grounded one-liner (its `blurb`,
+          derived in deriveStrategies) — the tradeoff behind the number, so the
+          selection is explained rather than a bare price. */}
+      {active ? (
+        <p className="mt-2.5 text-[12.5px] leading-snug text-muted">{active.blurb}</p>
+      ) : null}
     </div>
   );
 }
