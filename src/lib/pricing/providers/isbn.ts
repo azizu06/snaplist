@@ -43,7 +43,7 @@ export type FetchJson = (url: string) => Promise<unknown | null>;
  * (`createDefaultPricer`) from the same eBay-sold provider used as the standalone
  * tier — so a book is priced from REAL used sales, and the result, by citing a
  * `sold-comp` source, earns the top `isbn` (0.95) confidence tier instead of the
- * retail-derived `depreciation` floor (see `vision/pipeline.ts` → `hasSoldComp`).
+ * retail-derived `depreciation` floor (see `confidence/from-price.ts` → `hasSoldComp`).
  * Left undefined the provider keeps its pure catalog-only behavior (offline tests).
  */
 export type SoldLookup = (signal: ItemSignal) => Promise<PriceResult | null>;

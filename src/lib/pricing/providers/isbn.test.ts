@@ -303,7 +303,7 @@ describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
     expect(result!.compAgreement).toBe(0.9);
     // ... and cites BOTH the structured identity (isbn-lookup) AND the sold comps —
     // the sold-comp kind is exactly what the pipeline bridge needs to restore the
-    // top `isbn` (0.95) confidence tier (vision/pipeline.ts: hasSoldComp).
+    // top `isbn` (0.95) confidence tier (confidence/from-price.ts: hasSoldComp).
     expect(result!.sources.some((s) => s.kind === "isbn-lookup")).toBe(true);
     expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(true);
   });
