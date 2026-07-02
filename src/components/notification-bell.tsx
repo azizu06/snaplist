@@ -275,7 +275,10 @@ export function NotificationBell({
                       ) : null}
                     </span>
                     {n.read ? null : (
-                      <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-accent-solid" />
+                      <>
+                        <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-accent-solid" />
+                        <span className="sr-only">Unread</span>
+                      </>
                     )}
                   </button>
                 </li>

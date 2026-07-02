@@ -312,14 +312,19 @@ export function ConversationList({
                     {state.snippet}
                   </span>
                   {state.unread ? (
-                    <span
-                      aria-label="Unread"
-                      className={`size-2 shrink-0 rounded-full ${
-                        state.undelivered || message.status === "draft_failed"
-                          ? "bg-danger"
-                          : "bg-accent-solid"
-                      }`}
-                    />
+                    // aria-label on a plain <span> isn't announced — the dot is
+                    // decorative (aria-hidden) and sr-only text names the state.
+                    <>
+                      <span
+                        aria-hidden
+                        className={`size-2 shrink-0 rounded-full ${
+                          state.undelivered || message.status === "draft_failed"
+                            ? "bg-danger"
+                            : "bg-accent-solid"
+                        }`}
+                      />
+                      <span className="sr-only">Unread</span>
+                    </>
                   ) : null}
                 </span>
               </span>
@@ -360,7 +365,9 @@ export function ConversationRail({
               type="button"
               onClick={() => onSelect(message.id)}
               aria-current={active ? "true" : undefined}
-              aria-label={label}
+              // The unread dot is purely visual here; fold the state into the
+              // accessible name so the rail reads it out too.
+              aria-label={state.unread ? `${label} (unread)` : label}
               title={label}
               className={`relative flex items-center justify-center rounded-xl p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 active ? "bg-surface-3" : "hover:bg-surface-2"
@@ -736,10 +743,15 @@ export function ConversationThread({
           hugs the left and outbound the right — like iMessage. ── */}
       <div className="min-h-0 flex-1 overflow-y-auto bg-surface px-4 py-5 sm:px-5">
         <div className="flex flex-col gap-3">
-          {/* inbound buyer bubble — gray, tail bottom-left */}
+          {/* inbound buyer bubble — gray, tail bottom-left. The sr-only speaker
+              label gives screen readers the attribution the left/right bubble
+              alignment carries visually (audit). */}
           <div className="flex flex-col items-start gap-1">
             <div className="msg-bubble msg-in msg-enter max-w-[80%]">
-              <p className="whitespace-pre-wrap">{message.body}</p>
+              <p className="whitespace-pre-wrap">
+                <span className="sr-only">Buyer: </span>
+                {message.body}
+              </p>
             </div>
             <RelativeTime iso={message.created_at} className="px-1" />
           </div>
@@ -752,6 +764,7 @@ export function ConversationThread({
                 style={{ animationDelay: "80ms" }}
               >
                 <p className="whitespace-pre-wrap">
+                  <span className="sr-only">You: </span>
                   {sentReply?.body ?? message.draft_reply}
                 </p>
               </div>
@@ -770,7 +783,10 @@ export function ConversationThread({
           {followUps.map((m) => (
             <div key={m.id} className="flex flex-col items-end gap-1">
               <div className="msg-bubble msg-out msg-enter max-w-[80%]">
-                <p className="whitespace-pre-wrap">{m.body}</p>
+                <p className="whitespace-pre-wrap">
+                  <span className="sr-only">You: </span>
+                  {m.body}
+                </p>
               </div>
               <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
                 <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
