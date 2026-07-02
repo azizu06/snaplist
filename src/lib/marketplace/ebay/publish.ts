@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { EbayApiError, type EbayAdapter } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
 import { PublishValidationError } from "./errors";
-import { signPhotoUrlMap } from "../../vision/photos";
+import { batchSignPhotoUrls } from "../../vision/photos";
 import { createNotification } from "../../notifications";
 
 /**
@@ -302,16 +302,18 @@ async function markPublishFailed(
 }
 
 /**
- * Sign each private photo path, IN ORDER; skip (don't fail the publish) on a bad
- * path. Delegates to the shared best-effort batch signer (`vision/photos.ts`) so
- * the bucket + skip-on-failure policy is defined once.
+ * Sign each private photo path, IN ORDER; a bad PATH is skipped (a genuinely
+ * missing photo shouldn't block the rest), but a storage/transport failure
+ * THROWS (`batchSignPhotoUrls`) so a transient outage surfaces as a retryable
+ * internal error — never as "none of your photos could be signed, re-upload"
+ * (Codex P2 on #98).
  */
 async function signPhotoUrls(
   supabase: SupabaseClient,
   paths: string[],
   ttlSeconds: number,
 ): Promise<string[]> {
-  const signed = await signPhotoUrlMap(supabase, paths, { expiresIn: ttlSeconds });
+  const signed = await batchSignPhotoUrls(supabase, paths, { expiresIn: ttlSeconds });
   return paths
     .map((path) => signed.get(path))
     .filter((url): url is string => Boolean(url));

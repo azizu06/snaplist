@@ -4,6 +4,7 @@ import {
   PHOTOS_BUCKET,
   resolvePhotoImages,
   resolvePhotoImageData,
+  batchSignPhotoUrls,
   signPhotoUrlMap,
   type BatchSignedUrlClient,
   type SignedUrlClient,
@@ -167,6 +168,30 @@ describe("vision/photos — signPhotoUrlMap (best-effort UI signing)", () => {
     }));
     await signPhotoUrlMap(client, ["u1/a.jpg"], { expiresIn: 30 });
     expect(createSignedUrls).toHaveBeenCalledWith(["u1/a.jpg"], 30);
+  });
+});
+
+describe("vision/photos — batchSignPhotoUrls (strict-transport signing)", () => {
+  it("THROWS on a batch/transport error so publish can't mistake an outage for missing photos", async () => {
+    const { client } = fakeBatchClient(() => ({
+      data: null,
+      error: { message: "storage down" },
+    }));
+    await expect(batchSignPhotoUrls(client, ["u1/a.jpg"])).rejects.toThrow(/storage down/);
+  });
+
+  it("still drops PER-ENTRY failures without throwing (a missing photo isn't an outage)", async () => {
+    const { client } = fakeBatchClient((paths) => ({
+      data: paths.map((p) =>
+        p.endsWith("bad.jpg")
+          ? { path: p, signedUrl: null }
+          : { path: p, signedUrl: `https://signed/${p}` },
+      ),
+      error: null,
+    }));
+    const map = await batchSignPhotoUrls(client, ["u1/a.jpg", "u1/bad.jpg"]);
+    expect(map.get("u1/a.jpg")).toBe("https://signed/u1/a.jpg");
+    expect(map.has("u1/bad.jpg")).toBe(false);
   });
 });
 
