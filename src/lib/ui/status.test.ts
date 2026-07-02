@@ -29,6 +29,7 @@ describe("lifecycleLabel", () => {
     expect(lifecycleLabel("queued")).toEqual({
       label: "Scheduled",
       tone: "info",
+      icon: "clock",
     });
     expect(lifecycleLabel("published")).toEqual({
       label: "Active",
@@ -60,7 +61,7 @@ describe("lifecycleLabel", () => {
 describe("lifecycleShortLabel", () => {
   it("compacts the chip for narrow surfaces, keeping the SAME tone", () => {
     expect(lifecycleShortLabel("draft")).toEqual({ label: "Draft", tone: "warning" });
-    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "info" });
+    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "info", icon: "clock" });
     expect(lifecycleShortLabel("published")).toEqual({ label: "Active", tone: "success-solid" });
     expect(lifecycleShortLabel("failed")).toEqual({ label: "Attention", tone: "danger" });
     expect(lifecycleShortLabel("draft_failed")).toEqual({ label: "Attention", tone: "danger" });

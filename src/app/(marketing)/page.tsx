@@ -247,13 +247,29 @@ export default function Landing() {
             proved). */}
         <div className="relative mx-auto w-full max-w-6xl px-5 sm:px-8">
           <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
-            {/* One headline carries the whole pitch now (owner, Cursor-style):
-                it says what SnapList IS and what it DOES in a single statement,
-                so the explainer paragraph beneath it was dropped. Word-split
-                (not char) so the balanced multi-line wrap never breaks a word. */}
-            <h1 className="mx-auto max-w-[20ch] text-balance font-display text-[clamp(40px,6.4vw,72px)] font-bold leading-[1.03] tracking-tight text-flash">
+            {/* One headline carries the whole pitch (owner, Cursor-style): what
+                SnapList IS and DOES, now in TWO tight rows — the action then the
+                outcome — so the old three-line wrap (too much vertical air)
+                collapses to two. Each row is its own word-split block so the
+                sentence break is deterministic (text-balance only re-evens a row
+                if it wraps on narrow mobile); the `max-w-[26ch]` cap sits one char
+                past the longer row so row 2 never wraps on desktop. The explainer
+                paragraph stays dropped; the rotating "Built for …" line below
+                carries who it's for. */}
+            <h1 className="mx-auto max-w-[26ch] text-balance font-display text-[clamp(38px,5.4vw,54px)] font-bold leading-[1.06] tracking-tight text-flash">
               <SplitText
-                text="Snap a photo. Get a priced, ready-to-post listing."
+                text="Snap a photo."
+                tag="span"
+                className="block"
+                textAlign="center"
+                splitType="words"
+                delay={40}
+                duration={0.8}
+                from={{ opacity: 0, y: 32 }}
+                to={{ opacity: 1, y: 0 }}
+              />
+              <SplitText
+                text="Get it priced and listed."
                 tag="span"
                 className="block"
                 textAlign="center"
@@ -418,9 +434,6 @@ export default function Landing() {
                   sizes="(max-width: 560px) 100vw, 560px"
                   className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
                 />
-                <span className="absolute left-3.5 top-3.5 rounded-md bg-flash/80 px-2.5 py-1 text-[11.5px] font-semibold text-white backdrop-blur dark:bg-night/80 dark:text-flash">
-                  The one photo
-                </span>
               </div>
               <figcaption className="flex items-center justify-between gap-3 border-t border-line px-5 py-3.5">
                 <span className="truncate text-[15px] font-semibold text-flash">

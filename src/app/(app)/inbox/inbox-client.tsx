@@ -159,6 +159,15 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
     };
   }, [supabase, userId]);
 
+  // Auto-dismiss the error toast so a transient send failure doesn't linger.
+  // (It also clears on the next successful action.) Keyed on `error` so each new
+  // message restarts the timer; cleanup cancels a stale timer on re-error/unmount.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   async function simulate() {
     if (!selectedItem) return;
     setBusy("simulate");
@@ -352,8 +361,8 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
           live={live}
           simulating={busy === "simulate"}
         />
-        {error ? <ErrorBanner message={error} /> : null}
         <InboxEmptyState />
+        <ErrorToast error={error} reduceMotion={!!reduceMotion} onDismiss={() => setError(null)} />
       </div>
     );
   }
@@ -383,11 +392,11 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {error ? (
-        <div className="px-4 pt-4 sm:px-6">
-          <ErrorBanner message={error} />
-        </div>
-      ) : null}
+      {/* Error is a FLOATING toast (not an in-flow banner): the old banner sat
+          above the two-pane shell and pushed both panes down when it appeared,
+          reshifting the whole layout. Fixed-position + fade keeps the panes
+          perfectly still. */}
+      <ErrorToast error={error} reduceMotion={!!reduceMotion} onDismiss={() => setError(null)} />
 
       {/* Two-pane messaging shell — fills the surface edge-to-edge (no card
           border/radius): the list and thread each scroll independently. The
@@ -414,7 +423,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
         >
           {/* full header — mobile always; desktop when expanded */}
           <header
-            className={`flex h-16 items-center justify-between gap-2 border-b border-border px-4 ${
+            className={`flex h-[72px] items-center justify-between gap-2 bg-surface-2 px-4 ${
               collapsed ? "lg:hidden" : ""
             }`}
           >
@@ -442,7 +451,7 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
           </header>
           {/* collapsed header — desktop rail only: just the simulate trigger */}
           <div
-            className={`hidden h-16 items-center justify-center border-b border-border ${
+            className={`hidden h-[72px] items-center justify-center bg-surface-2 ${
               collapsed ? "lg:flex" : ""
             }`}
           >
@@ -540,15 +549,56 @@ export function InboxClient({ userId, initialMessages, items }: InboxClientProps
   );
 }
 
-/** Inline error banner (audit). */
-function ErrorBanner({ message }: { message: string }) {
+/**
+ * Floating error toast — danger-styled sibling of the dashboard's confirmation
+ * toast (same fixed/bottom/sidebar-offset + fade choreography), so action
+ * failures ("Failed to send follow-up") never reflow the messaging panes. Fades
+ * in/out via AnimatePresence (keyed on the message), auto-dismisses on a timer
+ * in the client, and is tap-dismissible. Reduced-motion → pure opacity crossfade.
+ */
+function ErrorToast({
+  error,
+  reduceMotion,
+  onDismiss,
+}: {
+  error: string | null;
+  reduceMotion: boolean;
+  onDismiss: () => void;
+}) {
   return (
-    <p
-      role="alert"
-      className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[15px] text-danger-soft-fg"
-    >
-      {message}
-    </p>
+    <AnimatePresence>
+      {error ? (
+        <motion.div
+          key={error}
+          initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+          transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+          className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4 sm:bottom-8 sm:left-[var(--sidebar-w)]"
+        >
+          <div
+            role="alert"
+            className="pointer-events-auto flex max-w-[calc(100vw-2rem)] items-center gap-2.5 rounded-full border border-danger-border bg-danger-soft px-4 py-2.5 text-[13px] font-medium text-danger-soft-fg shadow-lg"
+          >
+            <svg viewBox="0 0 24 24" className="size-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v4m0 4h.01" />
+            </svg>
+            <span className="min-w-0">{error}</span>
+            <button
+              type="button"
+              onClick={onDismiss}
+              aria-label="Dismiss"
+              className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded-full text-danger-soft-fg/70 transition-colors hover:bg-danger-border/40 hover:text-danger-soft-fg"
+            >
+              <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
@@ -597,7 +647,10 @@ export function SimulatorMenu(props: {
       {open
         ? createPortal(
             <div
-              className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(26,26,26,0.32)] p-4 backdrop-blur-[2px]"
+              // Backdrop spans the viewport; the card centers over the CONTENT
+              // area (left pad = sidebar width on sm+) so it doesn't sit
+              // right-of-center past the side panel. Mobile has no sidebar.
+              className="fixed inset-0 z-50 flex items-start justify-center bg-[rgba(26,26,26,0.32)] p-4 backdrop-blur-[2px] sm:pl-[calc(var(--sidebar-w)+1rem)]"
               onPointerDown={(e) => {
                 if (e.target === e.currentTarget) setOpen(false);
               }}

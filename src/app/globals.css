@@ -119,6 +119,12 @@
   --color-danger-soft:    oklch(96% 0.04 25);
   --color-danger-soft-fg: oklch(48% 0.18 27);
   --color-danger-border:  oklch(85% 0.10 25);
+  /* Danger text sitting ON the inverted `flash` bar: the bar is near-black in
+     light mode and near-white in dark mode, so this must contrast against the
+     OPPOSITE polarity and therefore inverts the other way — a bright red on the
+     dark bar (here), a deep red on the light bar (.dark). Saturated, not the pale
+     coral it replaced, so "Delete" reads as a real danger action. */
+  --color-danger-on-flash: oklch(72% 0.18 27);
 
   /* Info / processing — calm slate-blue */
   --color-info-soft:    oklch(96% 0.02 250);
@@ -222,6 +228,7 @@
   --color-danger-soft:    oklch(28% 0.07 26);
   --color-danger-soft-fg: oklch(84% 0.10 25);
   --color-danger-border:  oklch(46% 0.13 27);
+  --color-danger-on-flash: oklch(52% 0.21 27);  /* deep red on the near-white flash bar */
 
   /* Info / processing */
   --color-info-soft:    oklch(27% 0.04 250);

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Folder from "@/components/bits/Folder";
 import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
@@ -265,7 +265,7 @@ function ListingRow({
                 competing element at the same weight; it still lives in the
                 desktop Listed column and on the item's review screen. */}
             <span className="mt-1.5 flex min-w-0 items-center gap-2 md:hidden">
-              {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} /> : null}
+              {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} icon={chip.icon} /> : null}
               {row.category ? (
                 <span className="min-w-0 truncate text-[13px] text-muted">
                   {row.category}
@@ -277,7 +277,7 @@ function ListingRow({
 
         {/* Status column (md+). Centered on the column midpoint. */}
         <span className="hidden md:block md:text-center">
-          {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} /> : null}
+          {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} icon={chip.icon} /> : null}
         </span>
 
         {/* Category column (lg+). One consistent type ramp across every column
@@ -433,7 +433,13 @@ function SortMenu({
           />
           <div
             role="menu"
-            className="menu-pop absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+            // Anchor to the side the trigger sits on: the compact (mobile) trigger
+            // is the LEFT-most toolbar item, so a right-anchored menu shot off the
+            // left edge — open it leftward instead. Desktop trigger is right-aligned.
+            // max-w guard keeps it on-screen on the narrowest phones either way.
+            className={`menu-pop absolute z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface p-1.5 shadow-lg ${
+              compact ? "left-0 origin-top-left" : "right-0 origin-top-right"
+            }`}
           >
             <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
               Sort by
@@ -744,7 +750,10 @@ function ConfirmDialog({
       aria-modal="true"
       aria-label={title}
       onClick={onCancel}
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(26,26,26,0.4)] p-4 backdrop-blur-[2px]"
+      // Backdrop covers the full viewport, but the dialog box centers over the
+      // CONTENT area: left padding = sidebar width on sm+ so it doesn't drift
+      // right-of-center past the side panel (mobile has no sidebar → plain p-4).
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(26,26,26,0.4)] p-4 backdrop-blur-[2px] sm:pl-[calc(var(--sidebar-w)+1rem)]"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -824,6 +833,7 @@ export function DashboardView({
   const [mobileFilters, setMobileFilters] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     if (!toast) return;
@@ -1341,6 +1351,33 @@ export function DashboardView({
                   <SortHeader label="Listed" k="date" sort={sort} onSort={onSortToggle} align="center" />
                 </div>
 
+                {/* Mobile select-all — below md the column header (which hosts
+                    select-all on desktop) is hidden, so surface an equivalent
+                    here for touch bulk-select parity. Tappable label + the same
+                    44px RowCheckbox the rows use. */}
+                <div className="flex items-center gap-3 border-b border-border px-3 py-2 md:hidden">
+                  <RowCheckbox
+                    checked={allSelected}
+                    onToggle={toggleAll}
+                    label={allSelected ? "Deselect all listings" : "Select all listings"}
+                  />
+                  <button
+                    type="button"
+                    onClick={toggleAll}
+                    className="py-1 text-[13.5px] font-medium text-fg"
+                  >
+                    {selected.size > 0 ? (
+                      <>
+                        <span data-nums>{selected.size}</span> selected
+                      </>
+                    ) : (
+                      <>
+                        Select all <span className="text-muted" data-nums>({visible.length})</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 <ul className="divide-y divide-border px-1 py-1">
                   {visible.map((row, i) => (
                     <li key={`${row.itemId}-${row.listingId ?? "item"}`} className="row-enter" style={{ animationDelay: enterDelay(i) }}>
@@ -1356,8 +1393,13 @@ export function DashboardView({
 
       {/* ---- floating bulk action bar (Shopify bulk-edit) ---- */}
       {selected.size > 0 ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4 sm:bottom-8">
-          <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-border-strong bg-flash px-2 py-1.5 text-primary-fg shadow-lg">
+        // Center the bar over the MAIN content area, not the viewport: at sm+ the
+        // sidebar occupies --sidebar-w on the left, so offset the fixed band's left
+        // edge by it (mirrors the topbar's centered search). The live var means the
+        // bar glides as the sidebar collapses/expands; mobile (no sidebar) stays
+        // full-width centered via inset-x-0.
+        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-40 flex justify-center px-4 sm:bottom-8 sm:left-[var(--sidebar-w)]">
+          <div className="pointer-events-auto flex max-w-[calc(100vw-1.5rem)] items-center gap-1 overflow-x-auto rounded-xl border border-border-strong bg-flash px-2 py-1.5 text-primary-fg shadow-lg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
             <span className="px-2 text-[13px] font-medium text-primary-fg/90" data-nums>
               {selected.size} selected
             </span>
@@ -1393,7 +1435,7 @@ export function DashboardView({
             <button
               type="button"
               onClick={() => setConfirm("delete")}
-              className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-[#ff9b91] transition-colors hover:bg-primary-fg/10"
+              className="rounded-lg px-3 py-1.5 text-[13.5px] font-semibold text-danger-on-flash transition-colors hover:bg-primary-fg/10"
             >
               Delete
             </button>
@@ -1401,7 +1443,7 @@ export function DashboardView({
               type="button"
               onClick={clearSelection}
               aria-label="Clear selection"
-              className="ml-0.5 flex size-7 items-center justify-center rounded-lg text-primary-fg/70 transition-colors hover:bg-primary-fg/10 hover:text-primary-fg"
+              className="ml-0.5 flex size-9 items-center justify-center rounded-lg text-primary-fg/70 transition-colors hover:bg-primary-fg/10 hover:text-primary-fg sm:size-7"
             >
               <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                 <path d="M18 6 6 18M6 6l12 12" />
@@ -1433,13 +1475,27 @@ export function DashboardView({
         />
       ) : null}
 
-      {toast ? (
-        <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4 sm:bottom-8">
-          <div className="pointer-events-auto rounded-lg bg-flash px-3.5 py-2 text-[13px] font-medium text-primary-fg shadow-lg" role="status">
-            {toast}
-          </div>
-        </div>
-      ) : null}
+      {/* Confirmation toast. AnimatePresence keeps it mounted through the exit
+          so it FADES out (not a hard cut) when the 3.2s timer clears it; keying
+          on the message animates one toast out and the next in. Offset by the
+          sidebar (like the bulk bar) so it centers over the content, not the
+          full viewport. Reduced-motion users get a pure opacity crossfade. */}
+      <AnimatePresence>
+        {toast ? (
+          <motion.div
+            key={toast}
+            initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4 sm:bottom-8 sm:left-[var(--sidebar-w)]"
+          >
+            <div className="pointer-events-auto rounded-lg bg-flash px-3.5 py-2 text-[13px] font-medium text-primary-fg shadow-lg" role="status">
+              {toast}
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {quickEdit ? (
         <BulkEditGrid

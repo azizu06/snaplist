@@ -25,9 +25,8 @@ export function FaqAccordion({
         return (
           <div
             key={q}
-            className={`rounded-2xl border bg-panel shadow-card transition-colors duration-200 ${
-              isOpen ? "border-iris/40" : "border-line hover:border-line-2"
-            }`}
+            className={`rounded-2xl border bg-panel shadow-card transition-colors duration-200 ${isOpen ? "border-iris/40" : "border-line hover:border-line-2"
+              }`}
           >
             <h3>
               <button
@@ -40,9 +39,8 @@ export function FaqAccordion({
                 {q}
                 <svg
                   viewBox="0 0 24 24"
-                  className={`size-[18px] shrink-0 transition-transform duration-300 ease-out ${
-                    isOpen ? "rotate-180 text-iris" : "text-flash-faint"
-                  }`}
+                  className={`size-[18px] shrink-0 transition-transform duration-300 ease-out ${isOpen ? "rotate-180 text-iris" : "text-flash-faint"
+                    }`}
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2.2"

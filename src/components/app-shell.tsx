@@ -35,7 +35,15 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-full flex-col">
+    <div
+      className="flex min-h-full flex-col"
+      // Signed-out / dev-preview mounts NO sidebar, but globals.css defaults
+      // --sidebar-w to 232px (the signed-in width). Left unset here, content-area
+      // overlays that offset by --sidebar-w (toast, bulk-action bar, confirm
+      // dialog) would shift right by a phantom sidebar and sit off-center. Force
+      // 0 when there's no sidebar; when signed in, AppSidebar owns the var (64/232).
+      style={signedIn ? undefined : ({ "--sidebar-w": "0px" } as React.CSSProperties)}
+    >
       {/* ---- full-width top bar (Shopify): logo · centered search · actions ---- */}
       {/* Solid (not bg-surface/95 + backdrop-blur): the backdrop-filter promoted
           the whole bar to a composited layer and rendered the tiny ⌘K pill

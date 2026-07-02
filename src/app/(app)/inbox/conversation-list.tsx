@@ -64,7 +64,7 @@ function BuyerAvatar({
   return (
     <span
       aria-hidden
-      className={`flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[15px] font-bold text-accent-soft-fg shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${className ?? ""}`}
+      className={`flex size-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[15px] font-bold leading-none text-accent-soft-fg shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${className ?? ""}`}
     >
       {initial}
     </span>
@@ -283,10 +283,10 @@ export function ConversationList({
               type="button"
               onClick={() => onSelect(message.id)}
               aria-current={active ? "true" : undefined}
-              className={`group flex w-full items-start gap-3 border-l-2 px-4 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+              className={`group flex w-full items-start gap-3 px-4 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 active
-                  ? "border-l-accent bg-brand-soft"
-                  : "border-l-transparent hover:bg-surface-2/60"
+                  ? "bg-brand-soft"
+                  : "hover:bg-surface-2/60"
               }`}
             >
               <BuyerAvatar name={buyerLabel(itemLabels, message)} />
@@ -518,7 +518,7 @@ function FollowUpComposer({
             onClick={() => setMenuOpen((o) => !o)}
             aria-label="Add photos"
             aria-expanded={menuOpen}
-            className="flex size-9 cursor-pointer items-center justify-center rounded-full border border-border bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            className="flex size-9 cursor-pointer items-center justify-center rounded-full bg-surface text-muted transition-colors hover:bg-surface-3 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
@@ -534,7 +534,7 @@ function FollowUpComposer({
               />
               <div
                 role="menu"
-                className="palette-pop absolute bottom-full left-0 z-40 mb-2 w-44 overflow-hidden rounded-xl border border-border bg-surface p-1 shadow-lg"
+                className="palette-pop absolute bottom-full -left-1 z-40 mb-3 w-44 overflow-hidden rounded-xl border border-border bg-surface p-1 shadow-lg"
               >
                 <button
                   type="button"
@@ -613,7 +613,7 @@ function FollowUpComposer({
             }}
             rows={1}
             placeholder="Send a follow-up message…"
-            className="max-h-32 min-h-[2.25rem] w-full resize-none rounded-full border border-border-strong bg-surface py-2 pl-4 pr-12 text-[15px] leading-relaxed text-fg outline-none transition-colors placeholder:text-faint focus:border-accent focus:ring-1 focus:ring-accent/30"
+            className="block max-h-32 min-h-[2.25rem] w-full resize-none rounded-full border border-border bg-surface py-2 pl-4 pr-12 text-[15px] leading-relaxed text-fg outline-none transition-colors placeholder:text-faint focus:border-accent focus:ring-1 focus:ring-accent/30"
           />
 
           {/* ↑ send — Apple style, fades+scales in only when there's something
@@ -630,7 +630,15 @@ function FollowUpComposer({
                 animate={{ opacity: 1, scale: 1 }}
                 exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
                 transition={reduceMotion ? { duration: 0 } : { duration: 0.15, ease: "easeOut" }}
-                className="absolute bottom-1 right-1 flex size-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-fg shadow-xs transition-colors hover:bg-primary-hover active:scale-[0.94] disabled:pointer-events-none disabled:opacity-50"
+                // Clear hover/press feedback (the bg shift alone was too subtle):
+                // framer drives the scale (it owns transform, so CSS scale would
+                // fight the mount animation); CSS handles the bg + shadow lift.
+                whileHover={reduceMotion ? undefined : { scale: 1.08 }}
+                whileTap={reduceMotion ? undefined : { scale: 0.94 }}
+                // 7px = (pill 42 − button 28) / 2 → equal top/bottom/right margin,
+                // so the circle is dead-centered vertically and nested symmetrically
+                // in the pill's right cap (not crowding one edge).
+                className="group absolute bottom-[7px] right-[7px] flex size-7 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-fg shadow-sm transition-[background-color,box-shadow] duration-150 ease-out hover:bg-primary-hover hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
               >
                 {sending ? (
                   <span
@@ -638,7 +646,7 @@ function FollowUpComposer({
                     className="size-3 animate-spin rounded-full border-2 border-primary-fg/40 border-t-primary-fg motion-reduce:animate-none"
                   />
                 ) : (
-                  <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <svg viewBox="0 0 24 24" className="size-4 transition-transform duration-150 ease-out group-hover:-translate-y-px motion-reduce:transition-none" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M12 19V5" />
                     <path d="m5 12 7-7 7 7" />
                   </svg>
@@ -695,17 +703,20 @@ export function ConversationThread({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* ── thread header — iMessage style, IDENTICAL on desktop + mobile: the
-          buyer avatar centered on top, the listing title centered below, and a
-          faint status line under it. The back button (mobile only) floats at the
-          left edge so the identity stays dead-centered. Fixed h-16 to line up
-          with the conversation-list header in the pane beside it. ── */}
-      <header className="relative flex h-16 shrink-0 flex-col items-center justify-center gap-1.5 border-b border-border px-12">
+      {/* ── thread header — LEFT-ALIGNED row (back · avatar · name), the
+          two-pane-messenger convention (Gmail, Slack, Linear, Intercom). The old
+          centered stack created a phantom center axis under the global header
+          search: the search centers over the whole content area, but a centered
+          thread header centers over only the right pane (content − list − handle),
+          so the two never lined up and the identity read as off-center. A
+          left-aligned header has no competing center, so nothing is misaligned.
+          Fixed h-[72px] to line up with the conversation-list header beside it. ── */}
+      <header className="flex h-[72px] shrink-0 items-center gap-3 bg-surface-2 px-3 sm:px-4">
         {onBack ? (
           <button
             type="button"
             onClick={onBack}
-            className="absolute left-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 lg:hidden"
+            className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-3 hover:text-fg-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 lg:hidden"
             aria-label="Back to conversations"
           >
             <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -714,7 +725,7 @@ export function ConversationThread({
           </button>
         ) : null}
         <BuyerAvatar name={buyerName} />
-        <p className="max-w-full truncate text-[14px] font-semibold leading-none text-fg-strong">
+        <p className="min-w-0 truncate text-[15px] font-semibold leading-tight text-fg-strong">
           {buyerName}
         </p>
       </header>
@@ -749,7 +760,6 @@ export function ConversationThread({
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
                 Delivered
-                <span className="text-faint/80">· stubbed</span>
               </span>
             </div>
           ) : null}
@@ -767,7 +777,6 @@ export function ConversationThread({
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
                 Delivered
-                <span className="text-faint/80">· stubbed</span>
               </span>
             </div>
           ))}
@@ -775,7 +784,7 @@ export function ConversationThread({
       </div>
 
       {/* ── composer / recovery dock (pinned) ── */}
-      <div className="border-t border-border bg-surface px-4 py-4 sm:px-5">
+      <div className="bg-surface-2 px-4 py-4 sm:px-5">
         {undelivered ? (
           <div className="flex flex-col gap-2 rounded-lg border border-danger-border bg-danger-soft px-3.5 py-3">
             <p className="text-[12.5px] font-semibold text-danger-soft-fg">
