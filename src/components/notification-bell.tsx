@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useEscapeToClose } from "@/components/ui/overlay-behavior";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import type { NotificationKind, NotificationView } from "@/lib/notifications";
 import {
@@ -150,20 +151,16 @@ export function NotificationBell({
     };
   }, [supabase, userId]);
 
-  // Click-outside + Escape close (same behavior as ProfileMenu).
+  // Click-outside close; Escape rides the shared topmost-wins overlay stack.
+  useEscapeToClose(open, () => setOpen(false));
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
     document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
 

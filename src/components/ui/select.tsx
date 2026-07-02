@@ -149,12 +149,19 @@ export function Select({
       if (triggerRef.current?.contains(t) || listRef.current?.contains(t)) return;
       setOpen(false);
     };
-    // capture:true catches scroll on any ancestor (e.g. the bulk-edit grid body).
-    window.addEventListener("scroll", close, true);
+    // capture:true catches scroll on any ancestor (e.g. the bulk-edit grid
+    // body) — but the listbox itself is overflow-auto, so scrolls originating
+    // inside it (wheel, or scrollIntoView chasing the active option) must not
+    // close the menu.
+    const onScroll = (e: Event) => {
+      if (e.target instanceof Node && listRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
@@ -227,7 +234,13 @@ export function Select({
         closeMenu();
         break;
       case "Tab":
+        // Close and put focus back on the trigger WITHOUT preventDefault: the
+        // listbox is portaled to <body>, so tabbing from it would land at
+        // end-of-document (or trip a dialog's focus trap). Refocusing the
+        // trigger synchronously lets the browser's default Tab move on to the
+        // control after the Select.
         setOpen(false);
+        triggerRef.current?.focus();
         break;
       default:
         if (e.key.length === 1) {

@@ -10,18 +10,43 @@ import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type RefOb
  * new overlay can't ship without it.
  */
 
-/** Close on Escape while `active`. Skips events an inner control already
- *  handled (`defaultPrevented`) — e.g. the Select primitive's own Escape
- *  closes just the select, not the dialog hosting it. */
+/** Module-level LIFO stack of open overlays. Mount order mirrors visual
+ *  stacking (the overlay opened last registers last), so the last entry is
+ *  the topmost layer — the only one Escape may close. */
+const escapeStack: { close: () => void }[] = [];
+
+/** Close on Escape while `active` — topmost overlay wins. Each active hook
+ *  instance registers on the stack; one Escape closes only the top entry and
+ *  marks the event handled (`preventDefault`) so no lower layer reacts (e.g.
+ *  Escape on the command palette must not also discard the bulk-edit session
+ *  behind it). Skips events an inner control already handled
+ *  (`defaultPrevented`) — e.g. the Select primitive's own Escape closes just
+ *  the select, not the dialog hosting it. */
 export function useEscapeToClose(active: boolean, onClose: () => void) {
+  // Latest-callback ref: a new onClose identity must not re-register the
+  // entry (that would move this overlay to the top of the stack).
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!active) return;
+    const entry = { close: () => onCloseRef.current() };
+    escapeStack.push(entry);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) onClose();
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (escapeStack[escapeStack.length - 1] !== entry) return;
+      e.preventDefault();
+      entry.close();
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [active, onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      const i = escapeStack.indexOf(entry);
+      if (i !== -1) escapeStack.splice(i, 1);
+    };
+  }, [active]);
 }
 
 const FOCUSABLE =

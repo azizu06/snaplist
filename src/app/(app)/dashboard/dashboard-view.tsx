@@ -1200,7 +1200,10 @@ export function DashboardView({
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") exitSearch();
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          exitSearch();
+                        }
                       }}
                       placeholder="Searching all listings…"
                       aria-label="Search listings by title"

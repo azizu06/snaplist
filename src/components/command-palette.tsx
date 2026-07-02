@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/badge";
+import { useEscapeToClose } from "@/components/ui/overlay-behavior";
 import { lifecycleShortLabel } from "@/lib/ui/status";
 import { searchRows } from "@/lib/ui/search";
 
@@ -140,22 +141,24 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
     return () => window.removeEventListener("resize", onResize);
   }, [open]);
 
-  // ⌘K / Ctrl+K toggles from anywhere. Escape closes at the DIALOG level, not
-  // just from the input (audit #105: focus on a scope chip or the clear button
-  // left Escape dead), skipping events an inner control already consumed.
+  // ⌘K / Ctrl+K toggles from anywhere.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (open) setOpen(false);
         else openPalette();
-      } else if (e.key === "Escape" && open && !e.defaultPrevented) {
-        setOpen(false);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, openPalette]);
+
+  // Escape closes at the DIALOG level, not just from the input (audit #105:
+  // focus on a scope chip or the clear button left Escape dead). The shared
+  // hook makes the palette topmost on the overlay stack, so Escape here can't
+  // also close a dialog underneath.
+  useEscapeToClose(open, () => setOpen(false));
 
   // In-flight work dies with the component.
   useEffect(
@@ -227,6 +230,11 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
       const opt = options[selected];
       if (opt) navigate(opt.href);
     } else if (e.key === "Escape") {
+      // preventDefault marks the event handled: React unmounts the palette
+      // (and pops it off the overlay stack) before the event reaches the
+      // document listeners, so an unmarked Escape would fall through and
+      // close the next overlay down as well.
+      e.preventDefault();
       setOpen(false);
     }
   };
