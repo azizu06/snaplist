@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { EbayAdapter } from "./types";
+import { EbayApiError, type EbayAdapter } from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
 import { PublishValidationError } from "./errors";
+import { signPhotoUrlMap } from "../../vision/photos";
+import { createNotification } from "../../notifications";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -56,6 +58,61 @@ const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
  * publishing under a different currency must reprice, never relabel.
  */
 const PRICING_CURRENCY = "USD";
+
+/**
+ * `publishListingToEbay` + the seller's activity-feed notifications, shared by
+ * BOTH entry points (the /listings/[listingId] server action and the
+ * /api/ebay/publish route) so a publish behaves identically wherever it's
+ * triggered — the route previously skipped the notifications the button fired.
+ * Failures are recorded to the feed and RETHROWN for the caller's own error
+ * handling; `createNotification` is fire-and-forget, so the feed can never
+ * break the publish itself.
+ */
+export async function publishListingToEbayAndNotify(
+  supabase: SupabaseClient,
+  userId: string,
+  listingId: string,
+  adapter: EbayAdapter,
+  options: PublishOptions = {},
+): Promise<PublishOutcome> {
+  let outcome: PublishOutcome;
+  try {
+    outcome = await publishListingToEbay(supabase, listingId, adapter, options);
+  } catch (err) {
+    const userActionable =
+      err instanceof PublishValidationError || err instanceof EbayApiError;
+    await createNotification(supabase, {
+      userId,
+      kind: "listing_failed",
+      title: "Couldn’t publish your listing to eBay",
+      body: userActionable
+        ? (err as Error).message
+        : "Something went wrong while publishing. Please try again.",
+      href: `/listings/${listingId}`,
+      listingId,
+    });
+    throw err;
+  }
+
+  // The listing is live → notify (rides Realtime to the bell).
+  const { data: published } = await supabase
+    .from("listings")
+    .select("title, item_id")
+    .eq("id", listingId)
+    .maybeSingle();
+  await createNotification(supabase, {
+    userId,
+    kind: "listing_published",
+    title: published?.title
+      ? `“${published.title}” is live on eBay`
+      : "Your listing is live on eBay",
+    body: "Buyers can find it now — view or edit it anytime.",
+    href: `/listings/${listingId}`,
+    itemId: (published?.item_id as string | null) ?? null,
+    listingId,
+  });
+  return outcome;
+}
 
 export async function publishListingToEbay(
   supabase: SupabaseClient,
@@ -240,18 +297,18 @@ async function markPublishFailed(
     .then(undefined, () => undefined);
 }
 
-/** Sign each private photo path; skip (don't fail the publish) on a bad path. */
+/**
+ * Sign each private photo path, IN ORDER; skip (don't fail the publish) on a bad
+ * path. Delegates to the shared best-effort batch signer (`vision/photos.ts`) so
+ * the bucket + skip-on-failure policy is defined once.
+ */
 async function signPhotoUrls(
   supabase: SupabaseClient,
   paths: string[],
   ttlSeconds: number,
 ): Promise<string[]> {
-  const urls: string[] = [];
-  for (const path of paths) {
-    const { data } = await supabase.storage
-      .from("photos")
-      .createSignedUrl(path, ttlSeconds);
-    if (data?.signedUrl) urls.push(data.signedUrl);
-  }
-  return urls;
+  const signed = await signPhotoUrlMap(supabase, paths, { expiresIn: ttlSeconds });
+  return paths
+    .map((path) => signed.get(path))
+    .filter((url): url is string => Boolean(url));
 }

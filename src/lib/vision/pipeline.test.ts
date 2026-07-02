@@ -7,10 +7,10 @@ import {
   type SearchClient,
 } from "../pricing";
 import { pipelineResultSchema, type ListingCopy } from "../pipeline/types";
+import { priceToConfidence } from "../confidence/from-price";
+import { createDefaultPricer } from "../pricing/default-pricer";
 import {
-  createDefaultPricer,
   createVisionPipeline,
-  priceToConfidence,
   type CreateVisionPipelineOptions,
 } from "./pipeline";
 import type {

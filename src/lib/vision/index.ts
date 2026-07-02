@@ -20,15 +20,15 @@ export {
 export {
   resolvePhotoImages,
   resolvePhotoImageData,
+  signPhotoUrlMap,
   PHOTOS_BUCKET,
   DEFAULT_SIGNED_URL_TTL_SECONDS,
+  type BatchSignedUrlClient,
   type SignedUrlClient,
   type DownloadClient,
   type PhotoImageData,
 } from "./photos";
 export {
   createVisionPipeline,
-  createDefaultPricer,
   type CreateVisionPipelineOptions,
-  type CreateDefaultPricerOptions,
 } from "./pipeline";
