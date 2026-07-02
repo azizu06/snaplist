@@ -357,12 +357,14 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ====== 1.5 · finished-listings band — what SnapList produces ====== */}
+      {/* ====== 1.5 · finished-listings band — what SnapList produces ======
+          The eyebrow sits tight against the marquee (mt-3, not a full block
+          gap) so it reads as the loop's caption, not an orphaned band. */}
       <section className="border-b border-line bg-night py-10">
         <p className="px-5 text-center text-[13.5px] font-semibold uppercase tracking-[0.18em] text-flash-faint">
           From camera roll to cash
         </p>
-        <div className="mt-6">
+        <div className="mt-3">
           <MarketplaceLoop />
         </div>
       </section>
