@@ -30,4 +30,17 @@ describe("safeNext", () => {
     expect(safeNext("\\/evil.example")).toBe("/upload");
     expect(safeNext("\\\\evil.example")).toBe("/upload");
   });
+
+  it("rejects the control characters WHATWG URL parsing strips before resolving", () => {
+    // Browsers strip ASCII tab/LF/CR from a Location before parsing, so
+    // "/\t/evil.example" navigates to //evil.example — cross-origin.
+    expect(safeNext("/\t/evil.example")).toBe("/upload");
+    expect(safeNext("/\n/evil.example")).toBe("/upload");
+    expect(safeNext("/\r/evil.example")).toBe("/upload");
+    // Still-encoded forms are rejected too (defense in depth for callers
+    // passing a value that hasn't been query-decoded yet).
+    expect(safeNext("/%09/evil.example")).toBe("/upload");
+    expect(safeNext("/%0a/evil.example")).toBe("/upload");
+    expect(safeNext("/%0d/evil.example")).toBe("/upload");
+  });
 });
