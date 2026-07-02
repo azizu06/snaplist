@@ -4,10 +4,12 @@
  * reject an absolute external URL like `?next=https://attacker.example` — Next's
  * `redirect()` would otherwise follow it (an open redirect).
  *
- * Only same-origin absolute paths (`/...`, but not protocol-relative `//...`) pass;
- * anything else falls back to `/upload`.
+ * Only same-origin absolute paths pass; anything else falls back to `/upload`.
+ * Rejected: protocol-relative `//...` AND its backslash equivalence class
+ * (`/\...`) — WHATWG URL parsing normalizes `\` to `/` in http(s), so a
+ * Location of `/\evil.example` resolves cross-origin just like `//evil.example`.
  */
 export function safeNext(raw: unknown): string {
   const next = typeof raw === "string" ? raw : "";
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/upload";
+  return /^\/(?![/\\])/.test(next) ? next : "/upload";
 }
