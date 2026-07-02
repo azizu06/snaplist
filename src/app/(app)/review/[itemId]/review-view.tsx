@@ -236,7 +236,8 @@ function RangeBar({
   const at = suggested != null ? clamp01((suggested - low) / (high - low)) : null;
   return (
     <div>
-      <div className="relative h-1.5 rounded-full bg-surface-3">
+      {/* Decorative track — the $low/$high text below carries the values. */}
+      <div aria-hidden className="relative h-1.5 rounded-full bg-surface-3">
         <span className="absolute inset-y-0 left-[6%] right-[6%] rounded-full bg-gradient-to-r from-brand-muted via-brand to-brand-muted opacity-80" />
         {at != null ? (
           <span
@@ -358,7 +359,9 @@ function SharpenCard({
                       type="button"
                       aria-pressed={on}
                       onClick={() => toggleOption(o.spec)}
-                      className={`inline-flex items-center gap-1.5 rounded-full border py-1.5 text-[13px] font-medium transition-colors ${
+                      // relative + ::before extends the tap target to ~44px
+                      // effective on touch without inflating the chip visually.
+                      className={`relative inline-flex items-center gap-1.5 rounded-full border py-1.5 text-[13px] font-medium transition-colors before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] ${
                         on
                           ? "border-accent bg-brand-soft pl-2 pr-3 text-accent-soft-fg"
                           : "border-border-strong bg-surface px-3 text-fg hover:border-accent/60 hover:text-accent"
@@ -420,7 +423,9 @@ function SharpenCard({
                     type="button"
                     onClick={() => removeChip(i)}
                     aria-label={`Remove ${c}`}
-                    className="grid size-4 place-items-center rounded-full text-[15px] leading-none text-accent/70 transition-colors hover:bg-brand-tint hover:text-accent-soft-fg"
+                    // ::before widens the 16px glyph's tap target (~32px) while
+                    // keeping the × visually small inside the chip.
+                    className="relative grid size-4 place-items-center rounded-full text-[15px] leading-none text-accent/70 transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-brand-tint hover:text-accent-soft-fg"
                   >
                     ×
                   </button>
@@ -437,7 +442,8 @@ function SharpenCard({
                   key={`sugg-${i}`}
                   type="button"
                   onClick={() => addChip(s)}
-                  className="rounded-full border border-border bg-surface px-3 py-1 text-[13px] text-muted transition-colors hover:border-accent/60 hover:text-accent"
+                  // Same ::before hit-area trick as the toggle chips above.
+                  className="relative rounded-full border border-border bg-surface px-3 py-1 text-[13px] text-muted transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:border-accent/60 hover:text-accent"
                 >
                   + {s}
                 </button>
@@ -762,6 +768,7 @@ export function ReviewView({
                   name="price"
                   form="rv-save"
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0.01"
                   value={fields.price}

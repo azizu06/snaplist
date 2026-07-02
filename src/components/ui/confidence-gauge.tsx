@@ -23,6 +23,11 @@ export function ConfidenceGauge({
 
   return (
     <div style={{ width: size }} className="shrink-0">
+      {/* The svg (arc + % text) stays decorative for AT — this span carries
+          the actual value for screen readers. */}
+      <span className="sr-only">
+        {pct != null ? `Confidence ${pct}%` : "Confidence not yet available"}
+      </span>
       <svg viewBox="0 0 140 84" className="w-full" aria-hidden>
         <path
           d="M 16 76 A 54 54 0 0 1 124 76"
