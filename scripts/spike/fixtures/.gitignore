@@ -1,0 +1,4 @@
+# Fixture photos are other sellers' eBay images — NOT republished in this public
+# repo (decision 2026-07-02). Run `pnpm exec tsx scripts/spike/fetch-images.ts`
+# to pull them locally from the source URLs in fixtures.json.
+images/
