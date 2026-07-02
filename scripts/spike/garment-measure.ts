@@ -171,14 +171,21 @@ async function main(): Promise<void> {
 
   // Merge with the prior run (validated up front) so --only/--limit reruns
   // update records in place instead of discarding the rest of the (paid-for)
-  // predictions.
-  const freshIds = new Set(fresh.map((p) => p.fixtureId));
-  const predictions = [...prior.filter((p) => !freshIds.has(p.fixtureId)), ...fresh];
+  // predictions. A fresh failure never clobbers a prior good prediction — a
+  // 429/network error on a rerun must not throw away a paid-for success.
+  const priorById = new Map(prior.map((p) => [p.fixtureId, p]));
+  const merged = new Map(priorById);
+  for (const p of fresh) {
+    if (!p.ok && priorById.get(p.fixtureId)?.ok) continue;
+    merged.set(p.fixtureId, p);
+  }
+  const predictions = [...merged.values()];
 
   writeFileSync(PREDICTIONS, `${JSON.stringify(predictions, null, 2)}\n`);
-  const failed = predictions.filter((p) => !p.ok).length;
-  console.log(`\nWrote ${PREDICTIONS} (${predictions.length} records, ${failed} failed).`);
-  if (failed > 0) process.exitCode = 1;
+  const freshFailed = fresh.filter((p) => !p.ok).length;
+  const storedFailed = predictions.filter((p) => !p.ok).length;
+  console.log(`\nWrote ${PREDICTIONS} (${predictions.length} records, ${storedFailed} failed).`);
+  if (freshFailed > 0 || storedFailed > 0) process.exitCode = 1;
 }
 
 main();
