@@ -56,6 +56,9 @@ interface CapturedItem {
 
 const ACCEPTED_TYPES = ACCEPT.split(",");
 const POLL_MS = 5000;
+// Keep in sync with the status route's MAX_IDS cap: a haul can hold more done
+// items than one request accepts, so the poll fans out in bounded chunks.
+const STATUS_IDS_PER_REQUEST = 50;
 
 /** POST one item's photos through the single-item pipeline route. */
 async function submitItem(files: File[]): Promise<BatchRunOutcome> {
@@ -284,17 +287,24 @@ export function BatchCaptureView() {
         .map((it, i) => ({ it, i }))
         .filter(({ it }) => it.state.phase === "done");
       if (created.length === 0) return;
-      const ids = created.map(({ it }) =>
-        it.state.phase === "done" ? it.state.itemId : "",
+      const ids = created.flatMap(({ it }) =>
+        it.state.phase === "done" ? [it.state.itemId] : [],
       );
       try {
-        const res = await fetch(`/api/batch/status?ids=${ids.join(",")}`);
-        if (!res.ok) return;
-        const body = (await res.json()) as {
-          items?: Array<{ id: string; listingStatus: string | null; title: string | null }>;
-        };
-        if (!body.items) return;
-        const byId = new Map(body.items.map((r) => [r.id, r]));
+        const byId = new Map<
+          string,
+          { id: string; listingStatus: string | null; title: string | null }
+        >();
+        for (let start = 0; start < ids.length; start += STATUS_IDS_PER_REQUEST) {
+          const chunk = ids.slice(start, start + STATUS_IDS_PER_REQUEST);
+          const res = await fetch(`/api/batch/status?ids=${chunk.join(",")}`);
+          if (!res.ok) continue;
+          const body = (await res.json()) as {
+            items?: Array<{ id: string; listingStatus: string | null; title: string | null }>;
+          };
+          if (!body.items) continue;
+          for (const row of body.items) byId.set(row.id, row);
+        }
         for (const { it, i } of created) {
           if (it.state.phase !== "done") continue;
           const row = byId.get(it.state.itemId);
