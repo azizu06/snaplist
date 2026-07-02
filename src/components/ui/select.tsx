@@ -66,6 +66,11 @@ interface MenuPos {
   /** Exactly one of top/bottom is set (fixed-anchored from the trigger rect). */
   top?: number;
   bottom?: number;
+  /** Clamped to the space between the trigger and the viewport edge, so the
+   *  menu can never extend off-screen (which would make scrollIntoView scroll
+   *  the WINDOW chasing the active option — and the scroll-closes listener
+   *  would instantly dismiss the menu). */
+  maxHeight: number;
 }
 
 export function Select({
@@ -93,6 +98,9 @@ export function Select({
     buffer: "",
     timer: null,
   });
+  // True while our own scrollIntoView may still emit scroll events — the
+  // scroll-closes-menu listener must not treat that as a user scroll.
+  const selfScroll = useRef(false);
 
   const reactId = useId();
   const listboxId = `${reactId}-listbox`;
@@ -114,12 +122,14 @@ export function Select({
     // Flip above only when below is genuinely tight AND there's more room up top
     // — anchoring by `bottom` avoids needing the (unrendered) menu height.
     const above = spaceBelow < 280 && r.top > spaceBelow;
+    const avail = (above ? r.top : spaceBelow) - 6 - 8;
     setPos({
       left: r.left,
       width: r.width,
       above,
       top: above ? undefined : r.bottom + 6,
       bottom: above ? window.innerHeight - r.top + 6 : undefined,
+      maxHeight: Math.max(96, Math.min(256, avail)),
     });
   }, []);
 
@@ -142,6 +152,7 @@ export function Select({
 
   useEffect(() => {
     if (!open) return;
+    selfScroll.current = false;
     listRef.current?.focus({ preventScroll: true });
     const close = () => setOpen(false);
     const onPointerDown = (e: PointerEvent) => {
@@ -149,12 +160,20 @@ export function Select({
       if (triggerRef.current?.contains(t) || listRef.current?.contains(t)) return;
       setOpen(false);
     };
-    // capture:true catches scroll on any ancestor (e.g. the bulk-edit grid body).
-    window.addEventListener("scroll", close, true);
+    // capture:true catches scroll on any ancestor (e.g. the bulk-edit grid
+    // body) — but the listbox itself is overflow-auto, so scrolls originating
+    // inside it (wheel, or scrollIntoView chasing the active option) must not
+    // close the menu.
+    const onScroll = (e: Event) => {
+      if (selfScroll.current) return;
+      if (e.target instanceof Node && listRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => {
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
@@ -163,7 +182,14 @@ export function Select({
   // Keep the keyboard-active option in view in a long list.
   useEffect(() => {
     if (!open || activeIndex < 0) return;
+    selfScroll.current = true;
     document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
+    // Scroll events dispatch during the next rendering update ("run the scroll
+    // steps"), before rAF callbacks — so clearing the flag in rAF covers them.
+    const raf = requestAnimationFrame(() => {
+      selfScroll.current = false;
+    });
+    return () => cancelAnimationFrame(raf);
     // optionId is derived from a stable reactId; safe to omit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, activeIndex]);
@@ -227,7 +253,13 @@ export function Select({
         closeMenu();
         break;
       case "Tab":
+        // Close and put focus back on the trigger WITHOUT preventDefault: the
+        // listbox is portaled to <body>, so tabbing from it would land at
+        // end-of-document (or trip a dialog's focus trap). Refocusing the
+        // trigger synchronously lets the browser's default Tab move on to the
+        // control after the Select.
         setOpen(false);
+        triggerRef.current?.focus();
         break;
       default:
         if (e.key.length === 1) {
@@ -315,9 +347,10 @@ export function Select({
                     top: pos.top,
                     bottom: pos.bottom,
                     minWidth: pos.width,
+                    maxHeight: pos.maxHeight,
                     transformOrigin: pos.above ? "bottom center" : "top center",
                   }}
-                  className="z-[70] max-h-64 overflow-auto rounded-xl border border-border bg-surface p-1 shadow-lg outline-none"
+                  className="z-[70] overflow-auto rounded-xl border border-border bg-surface p-1 shadow-lg outline-none"
                 >
                   {options.map((o, i) => {
                     const isSelected = o.value === value;

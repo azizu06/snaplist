@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Folder from "@/components/bits/Folder";
+import { menuArrowNav, useEscapeToClose, useModalFocus } from "@/components/ui/overlay-behavior";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
 import { lifecycleShortLabel } from "@/lib/ui/status";
@@ -231,16 +233,32 @@ function ListingRow({
   const chip = lifecycleShortLabel(row.status);
   return (
     <div
-      className={`group/row relative grid grid-cols-[auto_1fr_auto] items-center gap-3.5 rounded-lg px-2.5 py-3 transition-colors duration-150 hover:bg-surface-2 active:bg-surface-3 md:px-4 md:py-2.5 lg:px-5 lg:py-2.5 ${ROW_GRID} before:pointer-events-none before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent before:opacity-0 before:transition-opacity hover:before:opacity-100 ${
-        selected ? "bg-accent-soft/50" : ""
+      // Hover/selection are NEUTRAL tints (audit #105): the reserved green now
+      // marks only nav-active / Live / positive states, so it never competes
+      // with a real status signal. Selection reads one step deeper than hover.
+      className={`group/row relative grid grid-cols-[auto_1fr_auto] items-center gap-3.5 rounded-lg px-2.5 py-3 transition-colors duration-150 hover:bg-surface-2 active:bg-surface-3 md:px-4 md:py-2.5 lg:px-5 lg:py-2.5 ${ROW_GRID} ${
+        selected ? "bg-surface-3/70" : ""
       }`}
     >
-      <RowCheckbox checked={selected} onToggle={onToggle} label={`Select ${row.title}`} />
+      {/* Above the stretched link so it stays clickable. */}
+      <span className="relative z-[2] flex">
+        <RowCheckbox checked={selected} onToggle={onToggle} label={`Select ${row.title}`} />
+      </span>
 
-      <Link href={`/review/${row.itemId}`} className="contents">
-        {/* Product cell: cover thumbnail + title. Status/category/condition are
-            their own columns at md+; the mobile meta line below carries them. */}
-        <span className="flex min-w-0 items-center gap-3 lg:gap-4">
+      {/* Whole-row navigation as a STRETCHED overlay link (not
+          `display:contents` — a contents anchor is unfocusable in Chromium, so
+          keyboard users couldn't open a listing at all; audit #105). The box
+          also gives the global :focus-visible outline something to draw
+          around, so Tab shows exactly which row is active. */}
+      <Link
+        href={`/review/${row.itemId}`}
+        className="absolute inset-0 z-[1] rounded-lg"
+        aria-label={`Open ${row.title}`}
+      />
+
+      {/* Product cell: cover thumbnail + title. Status/category/condition are
+          their own columns at md+; the mobile meta line below carries them. */}
+      <span className="flex min-w-0 items-center gap-3 lg:gap-4">
           <span className="relative size-14 shrink-0 overflow-hidden rounded-xl border border-border bg-surface-2 md:size-11 md:rounded-lg">
             {row.thumbUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- short-lived signed Storage URL
@@ -313,7 +331,6 @@ function ListingRow({
         <span className="hidden text-[15px] font-semibold text-fg-strong md:block md:text-center" data-nums>
           {listedLabel(row.createdAt)}
         </span>
-      </Link>
     </div>
   );
 }
@@ -403,6 +420,11 @@ function SortMenu({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Popover keyboard contract (#105): Esc closes (like the bell/profile menus),
+  // focus moves into the menu and back to the trigger, arrows rove the items.
+  useEscapeToClose(open, () => setOpen(false));
+  useModalFocus(open, menuRef, { trap: false });
   return (
     <div className="relative">
       <button
@@ -432,7 +454,9 @@ function SortMenu({
             className="fixed inset-0 z-40 cursor-default"
           />
           <div
+            ref={menuRef}
             role="menu"
+            onKeyDown={menuArrowNav}
             // Anchor to the side the trigger sits on: the compact (mobile) trigger
             // is the LEFT-most toolbar item, so a right-anchored menu shot off the
             // left edge — open it leftward instead. Desktop trigger is right-aligned.
@@ -537,6 +561,9 @@ function FilterDropdown({
   onRemove?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEscapeToClose(open, () => setOpen(false));
+  useModalFocus(open, menuRef, { trap: false });
   const count = selected.size;
   const active = count > 0;
   const summary =
@@ -585,7 +612,7 @@ function FilterDropdown({
       {open ? (
         <>
           <button aria-hidden tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default" />
-          <div role="menu" className="menu-pop absolute left-0 z-50 mt-2 max-h-72 w-52 origin-top-left overflow-y-auto rounded-xl border border-border bg-surface p-1.5 shadow-lg">
+          <div ref={menuRef} role="menu" onKeyDown={menuArrowNav} className="menu-pop absolute left-0 z-50 mt-2 max-h-72 w-52 origin-top-left overflow-y-auto rounded-xl border border-border bg-surface p-1.5 shadow-lg">
             {options.length === 0 ? (
               <p className="px-2.5 py-2 text-[13px] text-muted">No options.</p>
             ) : (
@@ -630,6 +657,9 @@ function AddFilterMenu({
   onAdd: (key: FacetKey) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEscapeToClose(open, () => setOpen(false));
+  useModalFocus(open, menuRef, { trap: false });
   if (available.length === 0) return null;
   return (
     <div className="relative">
@@ -648,7 +678,7 @@ function AddFilterMenu({
       {open ? (
         <>
           <button aria-hidden tabIndex={-1} onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default" />
-          <div role="menu" className="menu-pop absolute left-0 z-50 mt-2 w-44 origin-top-left rounded-xl border border-border bg-surface p-1.5 shadow-lg">
+          <div ref={menuRef} role="menu" onKeyDown={menuArrowNav} className="menu-pop absolute left-0 z-50 mt-2 w-44 origin-top-left rounded-xl border border-border bg-surface p-1.5 shadow-lg">
             {available.map((f) => (
               <button
                 key={f.key}
@@ -721,67 +751,6 @@ function DashboardEmpty() {
         >
           New listing
         </Link>
-      </div>
-    </div>
-  );
-}
-
-/** Confirm dialog for archive / delete (mirrors Shopify's "Archive N?" modal). */
-function ConfirmDialog({
-  title,
-  body,
-  confirmLabel,
-  danger,
-  pending,
-  onConfirm,
-  onCancel,
-}: {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  danger?: boolean;
-  pending: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={onCancel}
-      // Backdrop covers the full viewport, but the dialog box centers over the
-      // CONTENT area: left padding = sidebar width on sm+ so it doesn't drift
-      // right-of-center past the side panel (mobile has no sidebar → plain p-4).
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(26,26,26,0.4)] p-4 backdrop-blur-[2px] sm:pl-[calc(var(--sidebar-w)+1rem)]"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-2xl"
-      >
-        <h2 className="text-[16px] font-bold tracking-tight text-fg-strong">{title}</h2>
-        <p className="mt-1.5 text-[14px] leading-relaxed text-muted">{body}</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-border-strong bg-surface px-3.5 py-2 text-[14px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={pending}
-            className={`rounded-lg px-3.5 py-2 text-[14px] font-semibold shadow-xs transition-colors disabled:opacity-50 ${
-              danger
-                ? "bg-danger text-white hover:bg-danger-solid"
-                : "bg-primary text-primary-fg hover:bg-primary-hover"
-            }`}
-          >
-            {pending ? "Working…" : confirmLabel}
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -1163,7 +1132,10 @@ export function DashboardView({
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") exitSearch();
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          exitSearch();
+                        }
                       }}
                       placeholder="Searching all listings…"
                       aria-label="Search listings by title"

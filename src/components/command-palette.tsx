@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/badge";
+import { useEscapeToClose } from "@/components/ui/overlay-behavior";
 import { lifecycleShortLabel } from "@/lib/ui/status";
 import { searchRows } from "@/lib/ui/search";
 
@@ -153,6 +154,12 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, openPalette]);
 
+  // Escape closes at the DIALOG level, not just from the input (audit #105:
+  // focus on a scope chip or the clear button left Escape dead). The shared
+  // hook makes the palette topmost on the overlay stack, so Escape here can't
+  // also close a dialog underneath.
+  useEscapeToClose(open, () => setOpen(false));
+
   // In-flight work dies with the component.
   useEffect(
     () => () => {
@@ -223,6 +230,11 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
       const opt = options[selected];
       if (opt) navigate(opt.href);
     } else if (e.key === "Escape") {
+      // preventDefault marks the event handled: React unmounts the palette
+      // (and pops it off the overlay stack) before the event reaches the
+      // document listeners, so an unmarked Escape would fall through and
+      // close the next overlay down as well.
+      e.preventDefault();
       setOpen(false);
     }
   };
@@ -263,7 +275,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
 
       {open && anchor ? createPortal(
         <div
-          className="fixed inset-0 z-50 bg-[rgba(26,26,26,0.32)] backdrop-blur-[1px]"
+          className="fixed inset-0 z-[70] bg-[rgba(26,26,26,0.32)] backdrop-blur-[1px]"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
@@ -308,6 +320,12 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                   onKeyDown={onInputKeyDown}
                   placeholder={scope ? `Search ${scope}…` : "Search SnapList…"}
                   aria-label="Search SnapList"
+                  // Combobox wiring (audit #105): without aria-activedescendant
+                  // the arrow-key highlight was silent to screen readers.
+                  role="combobox"
+                  aria-expanded="true"
+                  aria-controls="cmdk-results"
+                  aria-activedescendant={options.length > 0 ? `cmdk-opt-${selected}` : undefined}
                   className="h-full w-full bg-transparent text-[14px] text-fg-strong outline-none placeholder:text-muted"
                 />
                 {/* trailing controls — clear · divider · filter, clustered
@@ -376,7 +394,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
               </div>
             ) : null}
 
-            <div role="listbox" aria-label="Results" className="max-h-[56vh] overflow-y-auto border-t border-border p-2">
+            <div id="cmdk-results" role="listbox" aria-label="Results" className="max-h-[56vh] overflow-y-auto border-t border-border p-2">
 
               {/* Shop results — the scope chip already labels this "Listings",
                   so the group header just reads "Shop results" with its count
@@ -393,13 +411,16 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                     return (
                       <button
                         key={h.itemId}
+                        id={`cmdk-opt-${i}`}
                         type="button"
                         role="option"
                         aria-selected={selected === i}
                         onClick={() => navigate(`/review/${h.itemId}`)}
                         onPointerMove={() => setSelected(i)}
+                        // Neutral selection tint (audit #105) — green stays
+                        // reserved for nav-active / Live / positive states.
                         className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors ${
-                          selected === i ? "bg-accent-soft" : ""
+                          selected === i ? "bg-surface-3" : ""
                         }`}
                       >
                         <span className="size-9 shrink-0 overflow-hidden rounded-md border border-border bg-surface-2">
@@ -416,7 +437,7 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                             </span>
                           )}
                         </span>
-                        <span className={`min-w-0 flex-1 truncate text-[14.5px] font-medium ${selected === i ? "text-accent-soft-fg" : "text-fg"}`}>
+                        <span className={`min-w-0 flex-1 truncate text-[14.5px] font-medium ${selected === i ? "text-fg-strong" : "text-fg"}`}>
                           {h.title}
                         </span>
                         {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot={false} /> : null}
@@ -437,16 +458,17 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                     return (
                       <button
                         key={p.href}
+                        id={`cmdk-opt-${i}`}
                         type="button"
                         role="option"
                         aria-selected={selected === i}
                         onClick={() => navigate(p.href)}
                         onPointerMove={() => setSelected(i)}
                         className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[15px] transition-colors ${
-                          selected === i ? "bg-accent-soft" : ""
+                          selected === i ? "bg-surface-3" : ""
                         }`}
                       >
-                        <span className={`font-medium ${selected === i ? "text-accent-soft-fg" : "text-fg"}`}>
+                        <span className={`font-medium ${selected === i ? "text-fg-strong" : "text-fg"}`}>
                           {p.label}
                         </span>
                       </button>
@@ -466,15 +488,16 @@ export function CommandPalette({ fixtures }: { fixtures?: PaletteHit[] }) {
                       <div className="my-1 border-t border-border" />
                       <button
                         type="button"
+                        id={`cmdk-opt-${i}`}
                         role="option"
                         aria-selected={selected === i}
                         onClick={() => navigate(searchAllHref)}
                         onPointerMove={() => setSelected(i)}
                         className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[13.5px] transition-colors ${
-                          selected === i ? "bg-accent-soft" : ""
+                          selected === i ? "bg-surface-3" : ""
                         }`}
                       >
-                        <span className={selected === i ? "text-accent-soft-fg" : "text-muted"}>
+                        <span className={selected === i ? "text-fg-strong" : "text-muted"}>
                           See all results for{" "}
                           <span className={`font-semibold ${selected === i ? "" : "text-fg"}`}>“{trimmed}”</span>
                         </span>

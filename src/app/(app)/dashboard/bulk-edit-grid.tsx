@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { parsePriceOverride } from "@/lib/pipeline/autopilot";
 import { lifecycleLabel } from "@/lib/ui/status";
 import { Select } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useEscapeToClose, useModalFocus } from "@/components/ui/overlay-behavior";
 import type { DashboardRow } from "./dashboard-view";
 import type { BulkListingUpdate } from "./actions";
 
@@ -109,6 +111,21 @@ export function BulkEditGrid({
   );
   const dirty = updates.length > 0;
 
+  // Closing a dirty session (Escape, Back, Discard) confirms before dropping
+  // the pending edits — Escape is too easy to hit to silently lose a long
+  // editing pass. A clean session closes instantly. The confirm mounts after
+  // this dialog, so it registers ABOVE it on the escape stack: Escape in the
+  // confirm closes only the confirm.
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const requestClose = () => {
+    if (dirty || hasInvalidPrice) setConfirmingDiscard(true);
+    else onClose();
+  };
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEscapeToClose(true, requestClose);
+  useModalFocus(true, dialogRef);
+
   // Mobile: a single column — product stacks above a 2-up Status/Price sub-grid
   // (the sub-grid dissolves via `sm:contents` so the two controls become direct
   // grid children at sm). sm+: the dense 3-column editor table. minmax(0,1fr)
@@ -117,12 +134,23 @@ export function BulkEditGrid({
     "grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_160px_130px] sm:items-center sm:gap-5";
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-bg">
+    // A full-screen editor IS a modal (audit #105): announce it as one, move
+    // focus into it (Back button, via data-autofocus), trap Tab, close on
+    // Escape (the Select's own Escape preventDefaults, so closing an open
+    // dropdown doesn't also discard the editor), restore focus on exit.
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Bulk edit ${rows.length} ${rows.length === 1 ? "listing" : "listings"}`}
+      className="fixed inset-0 z-[60] flex flex-col bg-bg"
+    >
       {/* header — Shopify's "← Back · Editing N · Discard · Save" bar */}
       <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4 sm:px-6">
         <button
           type="button"
-          onClick={onClose}
+          data-autofocus
+          onClick={requestClose}
           aria-label="Back to listings"
           className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted shadow-xs transition-colors hover:bg-surface-2 hover:text-fg-strong"
         >
@@ -144,7 +172,7 @@ export function BulkEditGrid({
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg-strong"
           >
             Discard
@@ -267,6 +295,19 @@ export function BulkEditGrid({
           </div>
         </div>
       </div>
+
+      {confirmingDiscard ? (
+        <ConfirmDialog
+          title="Discard unsaved edits?"
+          body="Your pending changes to these listings will be lost."
+          confirmLabel="Discard"
+          cancelLabel="Keep editing"
+          danger
+          pending={false}
+          onConfirm={onClose}
+          onCancel={() => setConfirmingDiscard(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,10 @@
 .pnp.*
 .yarn/*
 
+# pnpm is the only package manager (packageManager: pnpm@10.28.1);
+# an npm lockfile is an accidental artifact — never track it
+package-lock.json
+
 # next.js / build
 /.next/
 /out/
