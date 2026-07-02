@@ -35,7 +35,11 @@ export function useSupabaseClient(): SupabaseClient {
     // restores the accessToken-callback refresh path. Scheduled as a microtask
     // (setAuth is async; don't block render) right after construction. Remove
     // once upstream stops setting `_manuallySetToken` from the constructor.
-    void Promise.resolve().then(() => client.realtime.setAuth());
+    void Promise.resolve()
+      .then(() => client.realtime.setAuth())
+      .catch((error) => {
+        console.warn("[realtime] setAuth refresh-path reset failed", error);
+      });
     return client;
   }, [session]);
 }
