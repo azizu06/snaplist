@@ -1200,10 +1200,10 @@ export function DashboardView({
                 transition={{ duration: 0.11 }}
                 className="flex flex-col gap-2.5"
               >
-                {/* row 1: search field · Cancel · Save as · Sort (rightmost) —
-                    Shopify keeps search + sort on ONE line; filters drop to row
-                    2. The field unrolls from the right (where the search button
-                    was) for a smooth open. */}
+                {/* row 1: search field · Cancel · Sort (rightmost) — Shopify
+                    keeps search + sort on ONE line; filters drop to row 2. The
+                    field unrolls from the right (where the search button was)
+                    for a smooth open. */}
                 <div className="flex items-center gap-2.5">
                   <motion.label
                     initial={{ scaleX: 0.55, opacity: 0 }}
@@ -1250,19 +1250,6 @@ export function DashboardView({
                     className="shrink-0 rounded-lg px-3 py-2.5 text-[14px] font-semibold text-fg transition-colors hover:bg-surface-2"
                   >
                     Cancel
-                  </button>
-                  {/* Save as (saved views) — present + positioned like Shopify;
-                      disabled until there's something to save, matching their
-                      default greyed state. Full recall is a follow-up. */}
-                  <button
-                    type="button"
-                    disabled={!filtersActive}
-                    title="Save these filters as a view"
-                    className={`shrink-0 rounded-lg px-3 py-2.5 text-[14px] font-semibold transition-colors ${
-                      filtersActive ? "text-fg hover:bg-surface-2" : "cursor-not-allowed text-faint"
-                    }`}
-                  >
-                    Save as
                   </button>
                   <SortMenu sort={sort} setSort={setSort} />
                 </div>

@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { StatusBadge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ConfidenceGauge } from "@/components/ui/confidence-gauge";
 import { Banner, type BannerVariant } from "@/components/ui/banner";
 import { PendingButton } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { EBAY_TITLE_MAX } from "@/lib/pipeline/review-edits";
 import {
   confidenceLabel,
   lifecycleLabel,
+  sourceKindLabel,
   tierLabel,
 } from "@/lib/ui/status";
 import { PricingStrategies } from "./pricing-strategies";
@@ -70,6 +72,8 @@ export interface ReviewData {
   range: { low?: number; high?: number } | null;
   confidence: number | null;
   tier: string | null;
+  /** The cited comps/lookup records behind the price (PRD story 9). */
+  sources: Array<{ url: string; title: string | null; kind: string | null }>;
   /** Quick/Balanced/Maximize points (#94), or a single "Suggested" point. */
   strategies: PricingStrategy[];
   /** Dynamic per-product clarify chips (#93); [] degrades to the detail field. */
@@ -134,6 +138,22 @@ const CATEGORY_SUGGESTIONS = [
 const ATTR_LABELS: Record<string, string> = { upc: "UPC", isbn: "ISBN" };
 
 type FieldKey = "title" | "description" | "category" | "condition" | "price";
+
+/** Keep the cited-sources list compact; the rest is summarized as a count. */
+const MAX_VISIBLE_SOURCES = 5;
+
+/** Readable fallback link text when a source has no title: its bare hostname.
+ *  Only surfaces a hostname for http(s) URLs (the page pre-filters to those);
+ *  anything else yields a neutral label rather than echoing a raw scheme. */
+function sourceHost(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "source";
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
 
 function SparkleIcon({ className }: { className?: string }) {
   return (
@@ -237,16 +257,25 @@ function SharpenCard({
   options,
   candidates,
   action,
+  formDirty,
 }: {
   itemId: string;
   options: ClarifyOption[];
   candidates: string[];
   action: (formData: FormData) => Promise<void>;
+  /** The Save form has unsaved edits — Sharpen must confirm before it re-prices
+   *  (the re-render replaces the fields, silently discarding those edits). */
+  formDirty: boolean;
 }) {
   const [chips, setChips] = useState<string[]>([]);
   const [input, setInput] = useState("");
   // Clarify options the seller confirmed apply, keyed by spec.
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Dirty-guard: intercept the first submit while the Save form is dirty and
+  // route it through the ConfirmDialog; a confirmed re-submit passes through.
+  const formRef = useRef<HTMLFormElement>(null);
+  const confirmedRef = useRef(false);
+  const [confirming, setConfirming] = useState(false);
 
   const addChip = (raw: string) => {
     const value = raw.trim();
@@ -279,7 +308,23 @@ function SharpenCard({
     <Card
       chromeClassName={APP_CARD_CHROME}      className="p-4 sm:p-5"
     >
-      <form action={action}>
+      <form
+        ref={formRef}
+        action={action}
+        onSubmit={(e) => {
+          // Unsaved manual edits would be silently overwritten by the re-price's
+          // re-render — stop the first submit and ask. A confirm re-submits with
+          // the flag set, which passes straight through (and resets the flag).
+          if (confirmedRef.current) {
+            confirmedRef.current = false;
+            return;
+          }
+          if (formDirty) {
+            e.preventDefault();
+            setConfirming(true);
+          }
+        }}
+      >
         <input type="hidden" name="itemId" value={itemId} />
         {chips.map((c, i) => (
           <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
@@ -410,6 +455,22 @@ function SharpenCard({
           </PendingButton>
         </div>
       </form>
+
+      {confirming ? (
+        <ConfirmDialog
+          title="Discard unsaved edits?"
+          body="Sharpen re-runs the pricing research and overwrites the fields you've edited but not saved. Save your changes first if you want to keep them."
+          confirmLabel="Run Sharpen"
+          cancelLabel="Keep editing"
+          pending={false}
+          onConfirm={() => {
+            setConfirming(false);
+            confirmedRef.current = true;
+            formRef.current?.requestSubmit();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -739,6 +800,46 @@ export function ReviewView({
                   {tier ? ` · ${tier}` : ""}
                 </p>
               ) : null}
+
+              {/* Cited sources (PRD story 9): the checkable comps/lookup records
+                  behind the suggestion, so the seller can verify the price
+                  instead of trusting a bare number. Quiet by design — small
+                  muted links with a kind tag, capped with an honest count. */}
+              {data.sources.length > 0 ? (
+                <div className="border-t border-border pt-3">
+                  <p className="text-[12px] font-medium text-muted">Sources behind this price</p>
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {data.sources.slice(0, MAX_VISIBLE_SOURCES).map((s, i) => {
+                      const kind = sourceKindLabel(s.kind);
+                      return (
+                        <li
+                          key={`${s.url}-${i}`}
+                          className="flex items-baseline gap-1.5 text-[12.5px]"
+                        >
+                          <a
+                            href={s.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-w-0 truncate text-muted underline decoration-border-strong underline-offset-2 transition-colors hover:text-accent"
+                          >
+                            {s.title ?? sourceHost(s.url)}
+                          </a>
+                          {kind ? (
+                            <span className="shrink-0 text-[11px] text-faint">{kind}</span>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {data.sources.length > MAX_VISIBLE_SOURCES ? (
+                    <p className="mt-1.5 text-[11.5px] text-faint" data-nums>
+                      +{data.sources.length - MAX_VISIBLE_SOURCES} more comparable
+                      {data.sources.length - MAX_VISIBLE_SOURCES === 1 ? " sale" : " sales"} behind
+                      this price
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             {/* #94 — Quick/Balanced/Maximize selector. Renders only when a real
@@ -858,6 +959,7 @@ export function ReviewView({
           options={data.clarifyOptions}
           candidates={data.identification?.candidates ?? []}
           action={sharpenAction}
+          formDirty={dirty}
         />
       ) : null}
 

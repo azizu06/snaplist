@@ -1,0 +1,63 @@
+import { describe, expect, it } from "vitest";
+import { EBAY_RECONNECT_MESSAGE, isEbayAuthError, PublishValidationError } from "./errors";
+import { EbayApiError } from "./types";
+
+/**
+ * Auth-failure classification for the publish error surfaces (UI/UX audit wave
+ * 3). An expired/invalid eBay token is a condition the seller fixes by
+ * reconnecting in Settings — the UI must say that instead of a generic "try
+ * again" or a raw HTTP-401 message. The classifier is the pure seam both the
+ * server action and the API route share.
+ */
+
+describe("isEbayAuthError", () => {
+  it("classifies an HTTP 401 from the Sell API (invalid/expired access token)", () => {
+    const err = new EbayApiError(
+      "eBay POST /sell/inventory/v1/offer failed (HTTP 401): Invalid access token",
+      401,
+      { errors: [{ errorId: 1001, message: "Invalid access token" }] },
+    );
+    expect(isEbayAuthError(err)).toBe(true);
+  });
+
+  it("classifies a refresh-token grant rejection (invalid_grant), which eBay returns as HTTP 400", () => {
+    const err = new EbayApiError(
+      "eBay user-token refresh failed (HTTP 400); the seller may need to reconnect their eBay account in Settings",
+      400,
+      { error: "invalid_grant", error_description: "the provided authorization refresh token is invalid or was issued to another client" },
+    );
+    expect(isEbayAuthError(err)).toBe(true);
+  });
+
+  it("does NOT classify a non-auth eBay failure (listing validation, server error)", () => {
+    expect(
+      isEbayAuthError(
+        new EbayApiError("eBay POST /sell/inventory/v1/offer failed (HTTP 400): Invalid price", 400, {
+          errors: [{ errorId: 25007, message: "Invalid price" }],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isEbayAuthError(new EbayApiError("eBay GET /x failed (HTTP 500)", 500, undefined)),
+    ).toBe(false);
+    // A non-JSON body (raw text) must not crash the classifier.
+    expect(
+      isEbayAuthError(new EbayApiError("eBay GET /x failed (HTTP 400)", 400, "Bad Request")),
+    ).toBe(false);
+  });
+
+  it("does NOT classify non-EbayApiError failures (validation, internal, non-errors)", () => {
+    expect(isEbayAuthError(new PublishValidationError("Listing has no price"))).toBe(false);
+    expect(isEbayAuthError(new Error("supabase exploded"))).toBe(false);
+    expect(isEbayAuthError(undefined)).toBe(false);
+    expect(isEbayAuthError("string")).toBe(false);
+  });
+});
+
+describe("EBAY_RECONNECT_MESSAGE", () => {
+  it("is actionable: names the expiry and points at reconnecting in Settings", () => {
+    expect(EBAY_RECONNECT_MESSAGE).toBe(
+      "eBay connection expired — reconnect eBay in Settings and try again.",
+    );
+  });
+});

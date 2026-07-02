@@ -9,6 +9,8 @@ import {
   publishListingToEbayAndNotify,
   PublishValidationError,
   EbayApiError,
+  isEbayAuthError,
+  EBAY_RECONNECT_MESSAGE,
 } from "@/lib/marketplace/ebay";
 import { reportServerError } from "@/lib/sentry";
 import { rateLimitAllows } from "@/lib/abuse";
@@ -51,10 +53,20 @@ export async function publishToEbay(formData: FormData) {
     );
   } catch (err) {
     revalidatePath(`/listings/${listingId}`);
-    // A validation error (no price/photo/currency) or an EbayApiError (reconnect
-    // guidance, eBay's own validation message) carries a SAFE, user-actionable
-    // message — show it so the seller can fix and retry. Internal/Supabase errors
-    // are redacted and logged server-side (CWE-209, #57).
+    // An AUTH failure (expired/invalid token) has ONE fix — reconnect eBay in
+    // Settings — so the error banner shows the actionable reconnect message,
+    // never the raw HTTP-401 text or a misleading generic "try again". The
+    // activity-feed notification is owned by publishListingToEbayAndNotify,
+    // which applies the same reconnect message for auth failures.
+    if (isEbayAuthError(err)) {
+      redirect(
+        `/listings/${listingId}?error=${encodeURIComponent(EBAY_RECONNECT_MESSAGE)}`,
+      );
+    }
+    // A validation error (no price/photo/currency) or an EbayApiError (eBay's
+    // own validation message) carries a SAFE, user-actionable message — show it
+    // so the seller can fix and retry. Internal/Supabase errors are redacted
+    // and logged server-side (CWE-209, #57).
     if (err instanceof PublishValidationError || err instanceof EbayApiError) {
       redirect(`/listings/${listingId}?error=${encodeURIComponent(err.message)}`);
     }

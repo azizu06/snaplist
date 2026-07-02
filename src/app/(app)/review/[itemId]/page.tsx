@@ -6,11 +6,23 @@ import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
 import { deriveIdentification, signPhotoUrlMap } from "@/lib/vision";
 import { deriveStrategies } from "@/lib/pricing/strategies";
-import type { PricingTier } from "@/lib/pricing/types";
+import { priceSourceSchema, type PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
 import { saveReview, sharpenEstimate } from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
 import { ConsumeUploadDraft } from "./consume-upload-draft";
+
+/** True only for absolute http(s) URLs — used to keep `javascript:`/`data:` and
+ *  other non-web schemes out of rendered source <a href>s. The URL constructor
+ *  normalizes obfuscated schemes (control chars, casing) that a regex misses. */
+function isHttpUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Review page — reads the persisted item + its listing + the prediction log back
@@ -62,7 +74,7 @@ export default async function ReviewPage({
   const { data: log } = await supabase
     .from("prediction_logs")
     .select(
-      "price, price_range, confidence, tier_fired, model, autopilot_enabled, autopilot_eligible",
+      "price, price_range, confidence, tier_fired, model, sources, autopilot_enabled, autopilot_eligible",
     )
     .eq("item_id", itemId)
     .order("created_at", { ascending: false })
@@ -89,6 +101,23 @@ export default async function ReviewPage({
 
   const range = (log?.price_range ?? null) as { low?: number; high?: number } | null;
   const confidence = typeof log?.confidence === "number" ? log.confidence : null;
+
+  // The cited comps behind the price (PRD story 9: "I want to see the sources").
+  // Schema-validated so a malformed legacy row degrades to an empty list rather
+  // than rendering broken links; optional fields normalize to null for the view.
+  const parsedSources = priceSourceSchema.array().safeParse(log?.sources ?? []);
+  // Source URLs come from the pricing pipeline (web search / scraper / LLM), and
+  // priceSourceSchema only checks non-empty — so a hostile or hallucinated
+  // `javascript:` / `data:` URL could otherwise reach the rendered <a href> and
+  // execute on click. Allowlist http(s) here, at the render boundary, before the
+  // links reach the client (XSS defense-in-depth).
+  const sources = (parsedSources.success ? parsedSources.data : [])
+    .filter((s) => isHttpUrl(s.url))
+    .map((s) => ({
+      url: s.url,
+      title: s.title ?? null,
+      kind: s.kind ?? null,
+    }));
 
   // Seller price override (issue #12): the persisted override wins everywhere.
   const suggested = log?.price != null ? Number(log.price) : null;
@@ -198,6 +227,7 @@ export default async function ReviewPage({
     range,
     confidence,
     tier: (log?.tier_fired as string | null) ?? null,
+    sources,
     strategies,
     clarifyOptions,
     banner,
