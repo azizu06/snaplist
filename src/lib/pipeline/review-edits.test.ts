@@ -8,6 +8,7 @@ const base = {
   category: "Consumer electronics",
   condition: "Good",
   price: "178",
+  costBasis: "",
 };
 
 describe("parseReviewEdits", () => {
@@ -20,6 +21,7 @@ describe("parseReviewEdits", () => {
       category: "Consumer electronics",
       condition: "Good",
       override: 178,
+      costBasis: null,
     });
   });
 
@@ -80,6 +82,18 @@ describe("parseReviewEdits", () => {
 
   it("normalizes price strings to cents", () => {
     expect(parseReviewEdits({ ...base, price: "12.345" }).override).toBe(12.35);
+  });
+
+  it("parses the cost basis (#101): blank clears, $0 is real, junk throws", () => {
+    expect(parseReviewEdits({ ...base, costBasis: "" }).costBasis).toBeNull();
+    expect(parseReviewEdits({ ...base, costBasis: "0" }).costBasis).toBe(0);
+    expect(parseReviewEdits({ ...base, costBasis: "12.345" }).costBasis).toBe(12.35);
+    expect(() => parseReviewEdits({ ...base, costBasis: "abc" })).toThrow(
+      /cost basis/i,
+    );
+    expect(() => parseReviewEdits({ ...base, costBasis: "-5" })).toThrow(
+      /cost basis/i,
+    );
   });
 
   it("rejects non-string field payloads (multipart abuse)", () => {

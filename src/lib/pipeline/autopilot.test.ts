@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeConfidence } from "../confidence/confidence";
-import { effectivePrice, initialListingStatus, parsePriceOverride } from "./autopilot";
+import { effectivePrice, initialListingStatus, parseCostBasis, parsePriceOverride } from "./autopilot";
 
 /**
  * Confidence-gated autopilot disposition + price override — pure-logic unit
@@ -172,5 +172,43 @@ describe("parsePriceOverride — exponent notation", () => {
     expect(parsePriceOverride("1.005e0")).toBe(1.01); // binary fallback gave 1.00
     expect(parsePriceOverride("1005e-3")).toBe(1.01);
     expect(parsePriceOverride("2.5e2")).toBe(250);
+  });
+});
+
+describe("parseCostBasis", () => {
+  it("blank / null means 'clear' → null (unknown cost, never a fake $0)", () => {
+    expect(parseCostBasis(null)).toBeNull();
+    expect(parseCostBasis(undefined)).toBeNull();
+    expect(parseCostBasis("")).toBeNull();
+    expect(parseCostBasis("   ")).toBeNull();
+  });
+
+  it("accepts $0 — a free find is a REAL zero cost (unlike a $0 price)", () => {
+    expect(parseCostBasis("0")).toBe(0);
+    expect(parseCostBasis(0)).toBe(0);
+    expect(parseCostBasis("0.00")).toBe(0);
+  });
+
+  it("normalizes to cents with the same literal-digit half-up rounding", () => {
+    expect(parseCostBasis("12.5")).toBe(12.5);
+    expect(parseCostBasis("1.005")).toBe(1.01);
+    expect(parseCostBasis(19.99)).toBe(19.99);
+  });
+
+  it("throws on junk instead of silently clearing a recorded cost", () => {
+    expect(() => parseCostBasis("abc")).toThrow(/cost basis/i);
+    expect(() => parseCostBasis("0x10")).toThrow(/decimal/);
+    expect(() => parseCostBasis("+12")).toThrow(/decimal/);
+    expect(() => parseCostBasis(Number.NaN)).toThrow(/zero or a positive/);
+  });
+
+  it("rejects negatives — you can't pay less than nothing", () => {
+    expect(() => parseCostBasis("-5")).toThrow(/decimal/);
+    expect(() => parseCostBasis(-5)).toThrow(/zero or a positive/);
+  });
+
+  it("rejects overflow / exact-math-breaking magnitudes like the price parser", () => {
+    expect(() => parseCostBasis("1e307")).toThrow(/finite/);
+    expect(() => parseCostBasis("99999999999999.99")).toThrow(/finite/);
   });
 });

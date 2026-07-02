@@ -54,7 +54,7 @@ export default async function ReviewPage({
   // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
     .from("items")
-    .select("id, photos, attributes, condition, identification, price_override, created_at")
+    .select("id, photos, attributes, condition, identification, price_override, cost_basis, created_at")
     .eq("id", itemId)
     .single();
   if (!item) notFound();
@@ -122,6 +122,8 @@ export default async function ReviewPage({
   // Seller price override (issue #12): the persisted override wins everywhere.
   const suggested = log?.price != null ? Number(log.price) : null;
   const override = item.price_override != null ? Number(item.price_override) : null;
+  // #101: what the seller paid (numeric comes back as number OR string).
+  const costBasis = item.cost_basis != null ? Number(item.cost_basis) : null;
   const displayPrice =
     suggested != null ? effectivePrice(suggested, override) : override;
 
@@ -224,6 +226,7 @@ export default async function ReviewPage({
     suggested,
     override,
     displayPrice,
+    costBasis,
     range,
     confidence,
     tier: (log?.tier_fired as string | null) ?? null,

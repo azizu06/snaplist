@@ -1,6 +1,7 @@
 "use client";
 
 import type { PricingStrategy } from "@/lib/pricing/strategies";
+import { estimateNetProfit } from "@/lib/pricing/fees";
 
 /**
  * Pricing-strategy selector (#94) for the review Price card. Renders the three
@@ -20,15 +21,26 @@ export function PricingStrategies({
   strategies,
   selected,
   onPick,
+  costBasisText,
 }: {
   strategies: PricingStrategy[];
   /** The current price-field value, to mark the active card. */
   selected: string;
   onPick: (price: number) => void;
+  /** The live cost-basis field value (#101); when it holds a valid cost, each
+   *  card also shows projected NET profit (price − est. eBay fees − cost) so
+   *  the quick/maximize tradeoff is legible in margin, not list price. */
+  costBasisText?: string;
 }) {
   if (strategies.length < 2) return null;
   const sel = selected.trim() !== "" ? Number(selected) : null;
   const active = sel != null ? strategies.find((s) => s.price === sel) : undefined;
+  // #101: valid cost basis (0 is a real free-find zero) → per-strategy net.
+  const costRaw = costBasisText?.trim() ?? "";
+  const cost =
+    costRaw !== "" && Number.isFinite(Number(costRaw)) && Number(costRaw) >= 0
+      ? Number(costRaw)
+      : null;
 
   return (
     <div className="mt-4 rounded-lg border border-border bg-surface-2 p-3.5">
@@ -36,6 +48,7 @@ export function PricingStrategies({
       <div className="mt-2.5 grid grid-cols-3 gap-2">
         {strategies.map((s) => {
           const on = active?.key === s.key;
+          const net = cost != null ? estimateNetProfit(s.price, "ebay", cost) : null;
           return (
             <button
               key={s.key}
@@ -61,6 +74,16 @@ export function PricingStrategies({
               >
                 ${s.price}
               </span>
+              {net != null ? (
+                <span
+                  className={`mt-0.5 text-[11.5px] font-semibold ${
+                    net < 0 ? "text-danger-soft-fg" : "text-accent-soft-fg"
+                  }`}
+                  data-nums
+                >
+                  {net < 0 ? "−" : "+"}${Math.abs(net).toFixed(2)} net
+                </span>
+              ) : null}
             </button>
           );
         })}

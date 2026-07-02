@@ -1,4 +1,4 @@
-import { parsePriceOverride } from "./autopilot";
+import { parseCostBasis, parsePriceOverride } from "./autopilot";
 
 /**
  * Review-screen edits (UI pass: "why is it all on auto?"). The review form
@@ -24,6 +24,8 @@ export interface ReviewEdits {
   condition: string | null;
   /** Price override in dollars (cent-normalized), or null to fall back to the suggestion. */
   override: number | null;
+  /** What the seller PAID (#101), cent-normalized. $0 is a real free-find zero; null = unknown. */
+  costBasis: number | null;
 }
 
 export interface RawReviewEdits {
@@ -34,6 +36,7 @@ export interface RawReviewEdits {
   category: unknown;
   condition: unknown;
   price: unknown;
+  costBasis: unknown;
 }
 
 function asTrimmedString(value: unknown, field: string): string {
@@ -75,10 +78,16 @@ export function parseReviewEdits(raw: RawReviewEdits): ReviewEdits {
   // AI suggestion again") — exactly the semantics the price field needs.
   const override = parsePriceOverride(raw.price);
 
+  // Cost basis (#101): same write-boundary discipline — blank clears to null
+  // (an unknown cost is null, never a fake $0), $0 is a real free-find zero,
+  // junk throws instead of silently wiping a recorded cost.
+  const costBasis = parseCostBasis(raw.costBasis);
+
   return {
     listing,
     category: category === "" ? null : category,
     condition: condition === "" ? null : condition,
     override,
+    costBasis,
   };
 }

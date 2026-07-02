@@ -31,6 +31,7 @@ function item(over: Partial<DashboardItemSource> = {}): DashboardItemSource {
     attributes: { brand: "Sony", model: "WH-1000XM4", category: "electronics", condition: "good" },
     photos: ["u1/i1/a.jpg"],
     price_override: null,
+    cost_basis: null,
     created_at: "2026-06-01T00:00:00Z",
     ...over,
   };
@@ -153,6 +154,25 @@ describe("assembleDashboardRows", () => {
       thumbUrlFor: noThumbs,
     });
     expect(rows[0].price).toBe(70);
+  });
+
+  it("carries the cost basis (#101): $0 is real, junk/missing degrades to null — never a fake $0", () => {
+    const rows = assembleDashboardRows({
+      listings: [],
+      items: [
+        item({ id: "paid", cost_basis: "12.5" }), // numeric arrives as string
+        item({ id: "free", cost_basis: 0 }),
+        item({ id: "unknown" }),
+        item({ id: "junk", cost_basis: "not-a-number" }),
+      ],
+      latestPrice: new Map(),
+      thumbUrlFor: noThumbs,
+    });
+    const byId = new Map(rows.map((r) => [r.itemId, r]));
+    expect(byId.get("paid")?.costBasis).toBe(12.5);
+    expect(byId.get("free")?.costBasis).toBe(0);
+    expect(byId.get("unknown")?.costBasis).toBeNull();
+    expect(byId.get("junk")?.costBasis).toBeNull();
   });
 
   it("sorts listed + unlisted rows together, newest first", () => {
