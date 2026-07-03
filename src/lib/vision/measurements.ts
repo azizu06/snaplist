@@ -142,7 +142,6 @@ const BOTTOM_KEYWORDS = [
   "pants",
   "pant",
   "jeans",
-  "jean",
   "shorts",
   "skirt",
   "trousers",
@@ -160,12 +159,12 @@ const BOTTOM_KEYWORDS = [
   "bottoms",
 ];
 
-/** Singular "short" is ambiguous: on its own it names a pair of shorts (a bottom,
- *  e.g. "Nike Dri-FIT Short"), but as an adjective it modifies a TOP ("short trench
- *  coat", "short denim jacket", "short floral dress"). It only decides a class when
- *  no top keyword claims the text first, so it is matched LAST — plural "shorts"
- *  stays an unambiguous bottom keyword above. */
-const AMBIGUOUS_BOTTOM_KEYWORDS = ["short"];
+/** Singular "short" and "jean" are ambiguous: on their own they name a bottom
+ *  ("Nike Dri-FIT Short", denim trousers), but as an adjective/material they modify
+ *  a TOP ("short trench coat", "jean jacket", "denim jean jacket"). They only decide
+ *  a class when no top keyword claims the text first, so they are matched LAST — the
+ *  plurals "shorts"/"jeans" stay unambiguous bottom keywords above. */
+const AMBIGUOUS_BOTTOM_KEYWORDS = ["short", "jean"];
 
 /** Sleeve-length descriptors ("short sleeve", "long-sleeved") name a top's sleeve,
  *  not a garment class — the "short" here would otherwise false-match the shorts
@@ -175,10 +174,11 @@ const SLEEVE_DESCRIPTOR_RE = /\b(?:short|long)[\s-]*sleeve[sd]?\b/g;
 /**
  * Classify free text (category / garment type / title) into a garment class, or
  * null if it isn't a garment. Sleeve-length phrases are neutralized first; then
- * unambiguous bottoms are matched, then tops, and only then the ambiguous singular
- * "short" (so an adjectival "short" on a top like "short trench coat" reads as the
- * top, while a bare "short" still reads as a bottom). All lists are word-boundary
- * matched so "topaz" or "shirtless brand" don't false-positive.
+ * unambiguous bottoms are matched, then tops, and only then the ambiguous singulars
+ * "short"/"jean" (so an adjectival/material "short"/"jean" on a top like "short
+ * trench coat" or "jean jacket" reads as the top, while a bare "short"/"jean" still
+ * reads as a bottom). All lists are word-boundary matched so "topaz" or "shirtless
+ * brand" don't false-positive.
  */
 export function classifyGarment(text: string | null | undefined): GarmentClass | null {
   if (!text) return null;

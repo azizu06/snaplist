@@ -84,6 +84,20 @@ describe("measurements — garment classification", () => {
     expect(classifyGarment("jersey shorts")).toBe("bottom");
   });
 
+  it("reads 'jean' as a material on a top (jean jacket), not a bottom", () => {
+    // singular "jean" is a denim MATERIAL modifying a top noun — the top keyword
+    // must win, exactly like adjectival "short".
+    expect(classifyGarment("Levi's Jean Jacket")).toBe("top");
+    expect(classifyGarment("Vintage Denim Jean Jacket")).toBe("top");
+    expect(classifyGarment("Trucker Jean Jacket")).toBe("top");
+    // ...while genuine denim bottoms stay bottoms: plural "jeans" is unambiguous,
+    // and "jean shorts" is caught by the "shorts" bottom keyword.
+    expect(classifyGarment("Levi's 501 jeans")).toBe("bottom");
+    expect(classifyGarment("vintage jean shorts")).toBe("bottom");
+    // a bare singular "jean" with no top noun still reads as a bottom.
+    expect(classifyGarment("high-waisted jean")).toBe("bottom");
+  });
+
   it("garmentClassOf reads category first, then title, then brand/model", () => {
     expect(garmentClassOf({ category: "Clothing hoodie", title: "x" })).toBe("top");
     expect(garmentClassOf({ title: "Wrangler jeans" })).toBe("bottom");

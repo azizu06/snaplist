@@ -511,6 +511,31 @@ function SharpenCard({
 type MeasureField = NonNullable<ReviewData["measurements"]>["fields"][number];
 
 /**
+ * Whether a live entry still equals the server draft value it was rendered from,
+ * compared at DISPLAY precision: `rendered` is the server value via trimInches (2dp)
+ * while `entered` holds the raw input, so an entry that rounds to the rendered value
+ * ("22.50" → "22.5", "21.999" → "22") reads as unchanged. Rounding both to 2dp
+ * mirrors the save path (`parseMeasurementEdits`), which treats an edit as real only
+ * when it differs at 2dp. Drives both the Unsaved-changes bar and the tolerance-band
+ * display, so a seller-edited value never shows the draft's stale band or method.
+ * Blank/blank and blank/value are handled by the string equality + both-non-empty guard.
+ */
+function sameMeasureValue(entered: string, rendered: string): boolean {
+  const a = entered.trim();
+  const b = rendered.trim();
+  if (a === b) return true;
+  const an = Number(a);
+  const bn = Number(b);
+  return (
+    a !== "" &&
+    b !== "" &&
+    Number.isFinite(an) &&
+    Number.isFinite(bn) &&
+    Number(an.toFixed(2)) === Number(bn.toFixed(2))
+  );
+}
+
+/**
  * Measurements card (issue #104) — clothing only. Renders the garment type's
  * measurement set as confirmable DRAFTS: the four listing-grade measurements arrive
  * pre-filled with an always-shown tolerance band ("~21 in ± 1"); inseam/sleeve (and
@@ -552,12 +577,19 @@ function MeasurementsCard({
       <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {fields.map((f) => {
           const hasValue = values[f.name]?.trim() !== "" && values[f.name] != null;
+          // Once the seller edits the value away from the server draft, that draft's
+          // tolerance band ("~21 in ± 1") and method are stale — the save path treats
+          // the edit as a hand-measured, seller-entered value (tolerance 0). Reflect
+          // that live: hide the band and show "Measured by you" instead of quoting a
+          // number/derivation that no longer matches the input.
+          const edited = hasValue && !sameMeasureValue(values[f.name] ?? "", f.value);
+          const effectiveMethod = edited ? "seller-entered" : f.method;
           const methodNote =
-            f.method === "seller-entered"
+            effectiveMethod === "seller-entered"
               ? "Measured by you"
-              : f.method === "reference-scaled"
+              : effectiveMethod === "reference-scaled"
                 ? "Measured against a reference in the photo"
-                : f.method === "prior-based"
+                : effectiveMethod === "prior-based"
                   ? "Estimated from the photo"
                   : f.needsReference
                     ? "Needs a tape measure in the photo"
@@ -592,7 +624,7 @@ function MeasurementsCard({
                 <span className="pr-2.5 text-[13px] text-muted">in</span>
               </div>
               <p className="text-[12px] text-faint">
-                {hasValue && f.toleranceText && !confirmed[f.name] ? (
+                {hasValue && f.toleranceText && !edited && !confirmed[f.name] ? (
                   <span className="text-muted" data-nums>
                     {f.toleranceText}
                   </span>
@@ -688,27 +720,9 @@ export function ReviewView({
     setMeasureConfirmed(initialMeasures.confirmed);
   };
 
-  // Compare measurement values at the DISPLAY precision: `f.value` is the server
-  // value rendered via trimInches (2dp), while local state holds the raw entry, so
-  // an entry that rounds to the rendered value ("22.50" → "22.5", "21.999" → "22")
-  // must read as unchanged and not pin the Unsaved-changes bar open after a
-  // successful save. Rounding both to 2dp mirrors the save path, which treats an
-  // edit as real only when it differs at 2dp. Blank/blank and blank/value are
-  // handled by the string equality + both-non-empty guard.
-  const sameMeasureValue = (entered: string, rendered: string) => {
-    const a = entered.trim();
-    const b = rendered.trim();
-    if (a === b) return true;
-    const an = Number(a);
-    const bn = Number(b);
-    return (
-      a !== "" &&
-      b !== "" &&
-      Number.isFinite(an) &&
-      Number.isFinite(bn) &&
-      Number(an.toFixed(2)) === Number(bn.toFixed(2))
-    );
-  };
+  // `sameMeasureValue` (module scope) compares a live entry to the server draft at
+  // display precision — shared with the tolerance-band display so both agree on what
+  // counts as an edit.
   const measuresDirty = measureFields.some(
     (f) =>
       !sameMeasureValue(measureValues[f.name] ?? "", f.value) ||
