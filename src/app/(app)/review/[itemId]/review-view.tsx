@@ -84,7 +84,7 @@ export interface ReviewData {
       label: string;
       value: string;
       toleranceText: string | null;
-      method: "reference-scaled" | "prior-based" | null;
+      method: "reference-scaled" | "prior-based" | "seller-entered" | null;
       confirmed: boolean;
       needsReference: boolean;
     }>;
@@ -553,13 +553,15 @@ function MeasurementsCard({
         {fields.map((f) => {
           const hasValue = values[f.name]?.trim() !== "" && values[f.name] != null;
           const methodNote =
-            f.method === "reference-scaled"
-              ? "Measured against a reference in the photo"
-              : f.method === "prior-based"
-                ? "Estimated from the photo"
-                : f.needsReference
-                  ? "Needs a tape measure in the photo"
-                  : "Not measured yet";
+            f.method === "seller-entered"
+              ? "Measured by you"
+              : f.method === "reference-scaled"
+                ? "Measured against a reference in the photo"
+                : f.method === "prior-based"
+                  ? "Estimated from the photo"
+                  : f.needsReference
+                    ? "Needs a tape measure in the photo"
+                    : "Not measured yet";
           return (
             <li
               key={f.name}

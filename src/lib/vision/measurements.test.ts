@@ -319,10 +319,10 @@ describe("measurements — parseMeasurementEdits (seller edits → confirmable d
     const pit = out.find((o) => o.name === "pit_to_pit")!;
     expect(pit.confirmed).toBe(true);
     expect(pit.tolerance_in).toBe(1); // untouched → keep the model's band
-    expect(pit.method).toBe("prior-based"); // NOT flipped to reference-scaled
+    expect(pit.method).toBe("prior-based"); // NOT flipped to a seller-measured method
   });
 
-  it("treats an edited value as hand-measured: tolerance 0, reference-scaled", () => {
+  it("treats an edited value as hand-measured: tolerance 0, seller-entered", () => {
     const out = parseMeasurementEdits(
       existing,
       [{ name: "pit_to_pit", value: "23", confirmed: true }],
@@ -331,7 +331,8 @@ describe("measurements — parseMeasurementEdits (seller edits → confirmable d
     const pit = out.find((o) => o.name === "pit_to_pit")!;
     expect(pit.value_in).toBe(23);
     expect(pit.tolerance_in).toBe(0);
-    expect(pit.method).toBe("reference-scaled");
+    // NOT "reference-scaled": the seller typed it, no in-photo reference is implied.
+    expect(pit.method).toBe("seller-entered");
   });
 
   it("blank clears a measurement; junk throws; out-of-set ignored", () => {
@@ -370,7 +371,9 @@ describe("measurements — display + grounding helpers", () => {
       { name: "length", value_in: 27, tolerance_in: 2, method: "prior-based", confirmed: false },
     ];
     const phrases = confirmedMeasurementPhrases(measurements);
-    expect(phrases).toEqual(["pit to pit 21 inches"]);
+    // No trailing unit word: only the measurement-name tokens bind the number in
+    // the reply guard, so one measurement's value can't launder into another's.
+    expect(phrases).toEqual(["pit to pit 21"]);
     expect(confirmedMeasurementPhrases(undefined)).toEqual([]);
   });
 });

@@ -88,7 +88,7 @@ describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
 
   it("puts confirmed measurements (only) in the grounding corpus", () => {
     const corpus = groundingCorpus(measuredGrounding);
-    expect(corpus).toContain("pit to pit 21 inches");
+    expect(corpus).toContain("pit to pit 21");
     expect(corpus).not.toContain("27"); // the unconfirmed length is excluded
   });
 
@@ -103,6 +103,18 @@ describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
     expect(
       replyAssertsUngroundedNumbers("The chest is 40 inches across.", measuredGrounding),
     ).toBe(true);
+  });
+
+  it("rejects a confirmed number re-attributed to a DIFFERENT measurement", () => {
+    // pit_to_pit=21 is confirmed; sleeve is not. The shared unit word "inches" must
+    // not let 21 bind to a sleeve claim, or a mis-attributed measurement ships.
+    expect(
+      replyAssertsUngroundedNumbers("The sleeve is 21 inches.", measuredGrounding),
+    ).toBe(true);
+    // The genuinely-confirmed measurement still passes when named correctly.
+    expect(
+      replyAssertsUngroundedNumbers("The pit to pit is 21 inches.", measuredGrounding),
+    ).toBe(false);
   });
 
   it("draftBuyerReply answers a measurement question from the stored value", async () => {

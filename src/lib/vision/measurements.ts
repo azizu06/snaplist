@@ -216,8 +216,22 @@ export function isGarment(
 // Stored draft shape + per-type Zod schema (the attribute-surface contract).
 // ---------------------------------------------------------------------------
 
+/** How the vision MODEL may self-report a measurement's derivation. */
 export const measurementMethodSchema = z.enum(["reference-scaled", "prior-based"]);
 export type MeasurementMethod = z.infer<typeof measurementMethodSchema>;
+
+/**
+ * The provenance PERSISTED on a draft: the model's two methods plus `seller-entered`
+ * for a value the seller typed themselves. Distinct because a hand-entered number is
+ * NOT scaled off an in-photo reference — collapsing it into `reference-scaled` would
+ * make the review UI claim a reference that isn't there, defeating the honesty stance.
+ */
+export const storedMeasurementMethodSchema = z.enum([
+  "reference-scaled",
+  "prior-based",
+  "seller-entered",
+]);
+export type StoredMeasurementMethod = z.infer<typeof storedMeasurementMethodSchema>;
 
 /**
  * One measurement as PERSISTED on `items.attributes.measurements`. A draft until
@@ -231,8 +245,8 @@ export const measurementDraftSchema = z.object({
   value_in: z.number().positive(),
   /** The ± error band shown next to the value ("~21 in ± 1"). Seller-entered = 0. */
   tolerance_in: z.number().nonnegative(),
-  /** How the number was derived — a visible reference object, or garment priors. */
-  method: measurementMethodSchema,
+  /** How the number was derived — a visible reference, garment priors, or the seller. */
+  method: storedMeasurementMethodSchema,
   /** True once the seller confirmed it on the review screen. */
   confirmed: z.boolean(),
 });
@@ -374,9 +388,10 @@ export interface SubmittedMeasurement {
 /**
  * Merge the review form's measurement edits over the existing drafts. Blank clears
  * a measurement; a seller-typed/edited value is treated as hand-measured (exact →
- * tolerance 0, method reference-scaled); an untouched vision draft keeps its model
- * tolerance + method. Junk throws (a typo must never silently wipe a measurement).
- * Values outside the garment's set are ignored.
+ * tolerance 0, method seller-entered — NOT reference-scaled, since no in-photo
+ * reference is implied); an untouched vision draft keeps its model tolerance +
+ * method. Junk throws (a typo must never silently wipe a measurement). Values
+ * outside the garment's set are ignored.
  */
 export function parseMeasurementEdits(
   existing: MeasurementDraft[],
@@ -404,7 +419,7 @@ export function parseMeasurementEdits(
       name: s.name,
       value_in: value,
       tolerance_in: edited ? 0 : before!.tolerance_in,
-      method: edited ? "reference-scaled" : before!.method,
+      method: edited ? "seller-entered" : before!.method,
       confirmed: s.confirmed,
     });
   }
@@ -429,10 +444,12 @@ export function formatMeasurement(value: number, toleranceIn: number): string {
 
 /**
  * Phrases the buyer-Q&A agent may ground a reply in — one per CONFIRMED
- * measurement ("pit to pit 21 inches"). Unconfirmed drafts are excluded: the agent
- * must never assert an estimate the seller hasn't vouched for. The phrasing puts
- * the measurement name beside the number so the reply agent's numeric guard binds
- * the value to that measurement's claim context.
+ * measurement ("pit to pit 21"). Unconfirmed drafts are excluded: the agent must
+ * never assert an estimate the seller hasn't vouched for. The phrasing puts the
+ * measurement name beside the number — and NO unit word — so the reply agent's
+ * numeric guard binds the value only to that measurement's own name tokens. A
+ * trailing "inches" would sit in every measurement's (and every sizing reply's)
+ * context window, letting one measurement's number launder into another's claim.
  */
 export function confirmedMeasurementPhrases(
   measurements: MeasurementDraft[] | undefined,
@@ -440,7 +457,7 @@ export function confirmedMeasurementPhrases(
   if (!measurements) return [];
   return measurements
     .filter((m) => m.confirmed)
-    .map((m) => `${measurementWords(m.name)} ${trimInches(m.value_in)} inches`);
+    .map((m) => `${measurementWords(m.name)} ${trimInches(m.value_in)}`);
 }
 
 // ---------------------------------------------------------------------------

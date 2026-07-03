@@ -95,8 +95,20 @@ export async function saveReview(formData: FormData) {
   // on junk (e.g. a non-numeric measurement) so a typo never wipes a value silently.
   const existingParse = extractedAttributesSchema.safeParse(item.attributes ?? {});
   const existingAttrs = existingParse.success ? existingParse.data : {};
-  const garmentClass = garmentClassOf(existingAttrs);
-  let measurements = existingAttrs.measurements;
+  // Classify against the POST-EDIT attributes — the same inputs the reloaded review
+  // page uses (page.tsx). If a category edit changes the garment class (top→bottom)
+  // or drops it (garment→non-garment), the stored drafts must not persist onto a
+  // now-mismatched item, where they'd render invisibly yet still ground buyer-Q&A.
+  const garmentClass = garmentClassOf({
+    ...existingAttrs,
+    category: edits.category ?? undefined,
+  });
+
+  const attributes: Record<string, unknown> = {
+    ...((item.attributes ?? {}) as Record<string, unknown>),
+    category: edits.category,
+  };
+
   if (garmentClass) {
     const confirmedNames = new Set(
       formData
@@ -114,7 +126,10 @@ export async function saveReview(formData: FormData) {
       },
     );
     try {
-      measurements = parseMeasurementEdits(
+      // Parse against the post-edit class: a class-flipping edit submits the OLD
+      // class's fields, which don't match the new set, so those drafts drop out
+      // rather than riding forward onto a mismatched item.
+      attributes.measurements = parseMeasurementEdits(
         existingAttrs.measurements ?? [],
         submitted,
         garmentClass,
@@ -122,14 +137,10 @@ export async function saveReview(formData: FormData) {
     } catch (err) {
       backTo(id, err instanceof Error ? err.message : "Invalid measurement.");
     }
+  } else {
+    // No longer a garment → drop any stored drafts (the spread above re-added them).
+    delete attributes.measurements;
   }
-
-  const attributes = {
-    ...((item.attributes ?? {}) as Record<string, unknown>),
-    category: edits.category,
-    // Only touch measurements for garments; keep the key absent otherwise.
-    ...(garmentClass ? { measurements } : {}),
-  };
 
   const { data: updated, error: itemError } = await supabase
     .from("items")

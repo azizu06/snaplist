@@ -97,8 +97,8 @@ export function groundingCorpus(grounding: ReplyGrounding): string {
       for (const v of value) if (typeof v === "string") parts.push(v);
     }
   }
-  // "pit to pit 21 inches" — the measurement name sits beside the number so the
-  // numeric guard binds the value to that measurement's claim context (issue #104).
+  // "pit to pit 21" — the measurement name (no unit word) sits beside the number so
+  // the numeric guard binds the value to that measurement's claim context (issue #104).
   parts.push(...confirmedMeasurementPhrases(attributes.measurements));
   if (listing) parts.push(listing.title, listing.description);
   return parts.join("\n").toLowerCase();
