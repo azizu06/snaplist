@@ -688,10 +688,12 @@ export function ReviewView({
     setMeasureConfirmed(initialMeasures.confirmed);
   };
 
-  // Compare measurement values NUMERICALLY: `f.value` is the server value rendered
-  // via trimInches (2dp), while local state holds the raw entry, so a normalizable
-  // decimal ("22.50" → "22.5", "22.0" → "22") must read as unchanged and not pin the
-  // Unsaved-changes bar open after a successful save. Blank/blank and blank/value are
+  // Compare measurement values at the DISPLAY precision: `f.value` is the server
+  // value rendered via trimInches (2dp), while local state holds the raw entry, so
+  // an entry that rounds to the rendered value ("22.50" → "22.5", "21.999" → "22")
+  // must read as unchanged and not pin the Unsaved-changes bar open after a
+  // successful save. Rounding both to 2dp mirrors the save path, which treats an
+  // edit as real only when it differs at 2dp. Blank/blank and blank/value are
   // handled by the string equality + both-non-empty guard.
   const sameMeasureValue = (entered: string, rendered: string) => {
     const a = entered.trim();
@@ -699,7 +701,13 @@ export function ReviewView({
     if (a === b) return true;
     const an = Number(a);
     const bn = Number(b);
-    return a !== "" && b !== "" && Number.isFinite(an) && Number.isFinite(bn) && an === bn;
+    return (
+      a !== "" &&
+      b !== "" &&
+      Number.isFinite(an) &&
+      Number.isFinite(bn) &&
+      Number(an.toFixed(2)) === Number(bn.toFixed(2))
+    );
   };
   const measuresDirty = measureFields.some(
     (f) =>

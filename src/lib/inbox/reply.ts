@@ -148,6 +148,19 @@ function tokenInfos(text: string): TokenInfo[] {
 const NUMBER_CONTEXT_WINDOW = 2;
 
 /**
+ * Generic glue words that carry no claim meaning. They are stripped from a
+ * number's binding context so a stopword sitting beside a value — e.g. the "to"
+ * inside a "pit to pit 21" measurement phrase — can never bind that value to an
+ * unrelated reply claim ("I ship to 21 states."). Only content tokens vouch for
+ * a number. A number surrounded ONLY by stopwords is left with no binding
+ * context (never context-free), so any reply use of it is rejected.
+ */
+const NUMBER_CONTEXT_STOPWORDS = new Set([
+  "a", "an", "and", "at", "by", "for", "from", "in", "is", "it", "its",
+  "of", "on", "or", "the", "this", "that", "to", "with",
+]);
+
+/**
  * Split text into sentences so context windows can never straddle a sentence
  * boundary. Without this, "Priced at $180. Ships from a smoke-free home."
  * binds `180` to "ships" and the guard would accept "It ships in 180." —
@@ -186,7 +199,7 @@ function collectNumberGrounding(parts: readonly string[]): NumberGrounding {
       if (!isStandaloneNumber(info.token)) return;
       const key = normalizeNumber(info.token);
       if (info.currency) currencyNumbers.add(key);
-      let added = 0;
+      let neighbors = 0;
       let ctx = contexts.get(key);
       for (
         let j = Math.max(0, i - NUMBER_CONTEXT_WINDOW);
@@ -195,14 +208,17 @@ function collectNumberGrounding(parts: readonly string[]): NumberGrounding {
       ) {
         if (j === i) continue;
         if (isStandaloneNumber(infos[j].token)) continue; // numbers don't vouch for numbers
+        neighbors += 1;
+        if (NUMBER_CONTEXT_STOPWORDS.has(infos[j].token)) continue; // glue words can't bind a claim
         if (!ctx) {
           ctx = new Set();
           contexts.set(key, ctx);
         }
         ctx.add(infos[j].token);
-        added += 1;
       }
-      if (added === 0 && !info.currency) contextFree.add(key);
+      // Context-free only when the number truly had NO non-number neighbors (a
+      // bare "45"); a stopword-only neighborhood leaves it bound to nothing.
+      if (neighbors === 0 && !info.currency) contextFree.add(key);
     });
   }
   return { currencyNumbers, contexts, contextFree };

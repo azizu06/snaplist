@@ -117,6 +117,15 @@ describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
     ).toBe(false);
   });
 
+  it("does not let the 'to' inside pit_to_pit launder its number into a shipping claim", () => {
+    // "pit to pit 21" carries the stopword "to" beside 21; that generic glue word
+    // must not bind 21 to an unrelated claim, or a fabricated "I ship to 21 states."
+    // ships to the buyer.
+    expect(
+      replyAssertsUngroundedNumbers("I ship to 21 states.", measuredGrounding),
+    ).toBe(true);
+  });
+
   it("draftBuyerReply answers a measurement question from the stored value", async () => {
     const generate: ReplyGenerate = async () => ({
       reply: "The pit to pit is 21 inches, measured flat.",
