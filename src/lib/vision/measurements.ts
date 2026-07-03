@@ -161,15 +161,20 @@ const BOTTOM_KEYWORDS = [
   "bottoms",
 ];
 
+/** Sleeve-length descriptors ("short sleeve", "long-sleeved") name a top's sleeve,
+ *  not a garment class — the "short" here would otherwise false-match the shorts
+ *  bottom keyword. Stripped before classification so a short-sleeve top stays a top. */
+const SLEEVE_DESCRIPTOR_RE = /\b(?:short|long)[\s-]*sleeve[sd]?\b/g;
+
 /**
  * Classify free text (category / garment type / title) into a garment class, or
- * null if it isn't a garment. Bottoms are matched first so "shorts sleeve" style
- * ambiguity resolves toward the more specific bottom keywords; both lists are
- * word-boundary matched so "topaz" or "shirtless brand" don't false-positive.
+ * null if it isn't a garment. Sleeve-length phrases are neutralized first; bottoms
+ * are then matched before tops, and both lists are word-boundary matched so "topaz"
+ * or "shirtless brand" don't false-positive.
  */
 export function classifyGarment(text: string | null | undefined): GarmentClass | null {
   if (!text) return null;
-  const hay = text.toLowerCase();
+  const hay = text.toLowerCase().replace(SLEEVE_DESCRIPTOR_RE, " ");
   const hit = (kw: string) => new RegExp(`\\b${kw}\\b`).test(hay);
   if (BOTTOM_KEYWORDS.some(hit)) return "bottom";
   if (TOP_KEYWORDS.some(hit)) return "top";

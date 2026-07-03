@@ -65,6 +65,15 @@ describe("measurements — garment classification", () => {
     expect(classifyGarment(null)).toBeNull();
   });
 
+  it("treats a sleeve-length descriptor as a top, not shorts", () => {
+    expect(classifyGarment("Nike Men's Short Sleeve T-Shirt")).toBe("top");
+    expect(classifyGarment("short-sleeve polo")).toBe("top");
+    expect(classifyGarment("long-sleeved shirt")).toBe("top");
+    // a genuine pair of shorts still classifies as a bottom
+    expect(classifyGarment("Nike Dri-FIT Short")).toBe("bottom");
+    expect(classifyGarment("athletic shorts")).toBe("bottom");
+  });
+
   it("garmentClassOf reads category first, then title, then brand/model", () => {
     expect(garmentClassOf({ category: "Clothing hoodie", title: "x" })).toBe("top");
     expect(garmentClassOf({ title: "Wrangler jeans" })).toBe("bottom");
