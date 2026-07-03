@@ -89,8 +89,10 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
 - **Gold set** — the fixed, labeled set of items used by the eval harness; doubles as the demo set.
   Truth is **independent of the pipeline**; price bands are (re)built from live eBay sold comps by
   `pnpm eval:build-gold` (#61), emitted for a human spot-check rather than auto-overwriting.
-- **Hero domain** — the item categories SnapList excels at (books/media, electronics, board games,
-  branded gear). Generic items still flow through but honestly show low confidence.
+- **Hero domain** — the item categories SnapList excels at, i.e. reseller inventory (books/media,
+  electronics, video games and consoles, board games, LEGO, sneakers, branded clothing/streetwear,
+  branded gear) — exactly where eBay public sold comps are dense. Generic items still flow through
+  but honestly show low confidence.
 
 ## Terms to avoid
 - "metadata" → use **attributes**. "quality" (of an item) → use **condition**. "the model's

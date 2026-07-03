@@ -35,8 +35,8 @@ export function MarketingFooter() {
           <div className="max-w-xs">
             <Logo className="footer-logo-glow text-flash" markClassName="size-7" />
             <p className="mt-3 text-[15px] leading-relaxed text-flash-faint">
-              Snap a photo of something you want to sell. We figure out what it
-              is, price it from real sales, and write the listing.
+              Snap a photo of anything you&apos;re flipping. We identify it,
+              price it from real sold listings, and write the copy.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-10 sm:gap-14">
@@ -64,7 +64,7 @@ export function MarketingFooter() {
 
         <div className="mt-14 flex items-center justify-between border-t border-line pt-6 text-[14px] text-flash-faint">
           <p>© {new Date().getFullYear()} SnapList</p>
-          <p>Built for sellers, not paperwork</p>
+          <p>Built for resellers, not paperwork</p>
         </div>
       </div>
 

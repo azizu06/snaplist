@@ -34,14 +34,14 @@ import {
  */
 
 const ROTATING_CATEGORIES = [
-  "film cameras",
-  "textbooks",
   "sneakers",
-  "vinyl records",
-  "board games",
-  "headphones",
+  "streetwear",
   "game consoles",
-  "watches",
+  "video games",
+  "LEGO sets",
+  "vinyl records",
+  "textbooks",
+  "film cameras",
 ] as const;
 
 /* ---------------------------------------------------------------------------
@@ -104,26 +104,26 @@ const ICONS = {
 const BENTO_CARDS = [
   {
     label: "Pricing engine",
-    title: "Prices that show their work",
+    title: "Priced on real sold comps",
     description:
-      "No black-box numbers. Every suggestion comes with a price, a range, and the recent sale prices behind it. Books are matched by their ISBN, everything else is researched on the web.",
+      "Every price comes from what the same item actually sold for, not retail and not wishful asking prices. You get a suggested number, a range, and the sold listings behind it, plus Quick, Balanced, and Maximize points so you can price to move or hold for margin.",
     icon: <BentoIcon d={[...ICONS.tag]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",
   },
   {
-    label: "Speed",
-    title: "Draft-ready in seconds",
+    label: "Bulk capture",
+    title: "List a whole haul at once",
     description:
-      "About 30 seconds from photo to a priced, written draft. It identifies the item, checks what it actually sold for, and drafts the copy in one pass, so all you do is glance it over and approve.",
+      "Shoot a pile of pickups in one session. SnapList captures the haul, identifies and prices each item, and queues the drafts, so a fifteen-item flip run is one pass instead of fifteen restarts.",
     icon: <BentoIcon d={[...ICONS.zap]} />,
     tint: "violet" as const,
   },
   {
-    label: "Receipts",
-    title: "Every price is sourced",
+    label: "Margin",
+    title: "Cost basis to net profit",
     description:
-      "Each one links the real sold listings it came from, so you can open the sources and check the number yourself before you trust it. Nothing is a black box you have to take on faith.",
+      "Log what you paid per item and SnapList carries it through to net profit after the sale. You know the margin before you price it, not weeks later in a spreadsheet.",
     icon: <BentoIcon d={[...ICONS.fileText]} />,
     tint: "violet" as const,
   },
@@ -131,16 +131,16 @@ const BENTO_CARDS = [
     label: "Confidence gate",
     title: "Autopilot with a conscience",
     description:
-      "How sure we are isn't a guess. It comes from where the price was found, how closely recent sales agree, and how much we could pin down about the item. When we're sure, it can post on its own. When we're not, it waits for you.",
+      "How sure we are isn't a guess. It comes from where the price was found, how closely recent sales agree, and how much we could pin down about the item. When we're sure, it can post on its own; when we're not, it waits for you. Listings that go stale can auto-reprice on a schedule so nothing sits dead.",
     icon: <BentoIcon d={[...ICONS.shieldCheck]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",
   },
   {
-    label: "Generation",
-    title: "Listings that sound native",
+    label: "Cross-listing",
+    title: "One item, every marketplace",
     description:
-      "eBay gets its item specifics, Facebook gets a casual tone, Mercari gets hashtags. One item, written three ways so each one looks like it belongs there.",
+      "eBay gets its item specifics, Facebook gets a casual tone, Mercari gets hashtags. One item written three ways so each listing looks native, and eBay posts straight from your own account.",
     icon: <BentoIcon d={[...ICONS.sparkles]} />,
     tint: "violet" as const,
   },
@@ -302,7 +302,7 @@ export default function Landing() {
                 animate={{ y: 0, opacity: 1 }}
                 exit={{ y: "-120%", opacity: 0 }}
               />
-              <span>and everything shelved beside them.</span>
+              <span>and the rest of your inventory.</span>
             </div>
             {/* CTAs (owner, Cursor-style): two compact pills side by side, each
                 with a → that nudges on hover — a near-solid primary + a quiet
@@ -536,17 +536,18 @@ export default function Landing() {
         <div className="relative mx-auto w-full max-w-3xl px-5 py-28 text-center sm:px-8 sm:py-36">
           <Reveal>
             <h2 className="font-display text-[clamp(32px,5vw,52px)] font-bold leading-tight tracking-tight text-flash">
-              That box in your closet is{" "}
+              Faster listings, better{" "}
               <GradientText
                 colors={["#008060", "#008060", "#3ec9a3", "#008060"]}
                 animationSpeed={5}
               >
-                money
+                margins
               </GradientText>
             </h2>
             <p className="mx-auto mt-5 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
-              Photograph it once. SnapList handles the research, the writing,
-              and the posting. You keep control, and you keep the cash.
+              Photograph the haul once. SnapList researches the sold price,
+              writes every listing, and posts to eBay. You keep control, and
+              you keep the margin.
             </p>
             {/* Magnet removed here too, to match the hero CTA (owner: the
                 magnetic pull was distracting). The mt-9 it carried moves onto

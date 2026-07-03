@@ -1,7 +1,8 @@
 # SnapList
 
-Snap a photo of a used item → get a priced, ready-to-post marketplace listing, with a confidence
-score and cited price sources. Production-real AI-engineering showcase.
+Snap a photo of a resale item → get a priced, ready-to-post marketplace listing, priced from real
+sold comps with a confidence score and cited sources. Built for resellers; a production-real
+AI-engineering showcase.
 
 > **Docs:** [`PRD.md`](./PRD.md) is the source of truth for what we build · [`CONTEXT.md`](./CONTEXT.md)
 > is the domain glossary · [`AGENTS.md`](./AGENTS.md) is the agent/engineering guide ·
@@ -9,14 +10,16 @@ score and cited price sources. Production-real AI-engineering showcase.
 > [`docs/`](./docs) for ADRs, architecture, marketplace setup, security, and strategy notes.
 
 ## What it is
-Selling a used item is ~20–30 minutes of repetitive work every time: photograph it, research what
-it's actually worth *used* (not retail), write a platform-appropriate listing, post it, then answer
-the same buyer questions over and over. Real *sold* prices are the hard part, and retail prices
-mislead for used goods.
+Resellers list in volume, and the per-item work doesn't scale: for every flip — thrift finds,
+sneakers, streetwear, electronics, games, LEGO — you photograph it, research what it actually
+*sold* for used (not retail, not the optimistic asking price), write a platform-appropriate listing,
+post it, then answer the same buyer questions over and over. Real *sold* prices are the hard part,
+and retail prices mislead for used goods. Multiply that by a haul and the research alone eats the day.
 
-SnapList collapses that into a photo plus a couple of approvals. The seller snaps 1–4 photos; the
-system identifies the item (brand, model, category, condition, specs, any barcode/ISBN), researches
-a defensible used-price range with cited sources, writes per-platform listing copy, and shows it for
+SnapList collapses that into a photo plus a couple of approvals so a reseller can clear a whole haul
+in one pass. The seller snaps 1–4 photos; the system identifies the item (brand, model, category,
+condition, specs, any barcode/ISBN), researches a defensible price range from real sold comps with
+cited sources, writes per-platform listing copy, and shows it for
 review. High-confidence items can post automatically (a confidence-gated autopilot); low-confidence
 ones queue for review. Listings publish to eBay behind an adapter, with copy-paste export packs for
 Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
@@ -250,8 +253,9 @@ Being able to state where the system's accuracy tops out is part of the showcase
   bands are plausible ranges, not measured sold prices. Offline eval numbers measure pipeline
   consistency against those authored labels — they are **not** a field-accuracy benchmark, and the
   default `pnpm eval` run scores a checked-in sample-predictions fixture (a harness demo).
-- **Accuracy concentrates on the hero domain** (books/media via ISBN, electronics, board games,
-  branded gear). Generic items flow through but honestly show low confidence — no universal
+- **Accuracy concentrates on the hero domain** (books/media via ISBN, electronics, video games,
+  board games, LEGO, sneakers, and branded gear). Generic items flow through but honestly show low
+  confidence — no universal
   "price anything" claim.
 - **Vision is one multimodal extraction.** Ambiguous identifications are *flagged* (with
   candidates), not solved.
