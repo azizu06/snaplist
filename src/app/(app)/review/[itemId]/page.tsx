@@ -4,7 +4,16 @@ import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
-import { deriveIdentification, signPhotoUrlMap } from "@/lib/vision";
+import {
+  deriveIdentification,
+  signPhotoUrlMap,
+  garmentClassOf,
+  needsReference,
+  formatMeasurement,
+  trimInches,
+  GARMENT_MEASUREMENT_SETS,
+  MEASUREMENT_LABELS,
+} from "@/lib/vision";
 import { deriveStrategies } from "@/lib/pricing/strategies";
 import { priceSourceSchema, type PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
@@ -98,6 +107,30 @@ export default async function ReviewPage({
     : parsedAttrs.success
       ? deriveIdentification(parsedAttrs.data, {})
       : null;
+
+  // Garment measurements (issue #104): render the type's measurement set, each as
+  // a confirmable DRAFT with its tolerance band. The four listing-grade
+  // measurements arrive pre-filled; inseam/sleeve (and other reference-only points)
+  // stay blank with a "measure with a tape" prompt until the seller enters them.
+  const garmentClass = parsedAttrs.success ? garmentClassOf(parsedAttrs.data) : null;
+  const storedMeasurements = parsedAttrs.success ? (parsedAttrs.data.measurements ?? []) : [];
+  const measurements = garmentClass
+    ? {
+        garmentClass,
+        fields: GARMENT_MEASUREMENT_SETS[garmentClass].map((name) => {
+          const draft = storedMeasurements.find((m) => m.name === name);
+          return {
+            name,
+            label: MEASUREMENT_LABELS[name],
+            value: draft ? trimInches(draft.value_in) : "",
+            toleranceText: draft ? formatMeasurement(draft.value_in, draft.tolerance_in) : null,
+            method: draft?.method ?? null,
+            confirmed: draft?.confirmed ?? false,
+            needsReference: needsReference(name),
+          };
+        }),
+      }
+    : null;
 
   const range = (log?.price_range ?? null) as { low?: number; high?: number } | null;
   const confidence = typeof log?.confidence === "number" ? log.confidence : null;
@@ -227,6 +260,7 @@ export default async function ReviewPage({
     override,
     displayPrice,
     costBasis,
+    measurements,
     range,
     confidence,
     tier: (log?.tier_fired as string | null) ?? null,

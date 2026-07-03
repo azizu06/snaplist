@@ -444,7 +444,8 @@ function FormBody({
             <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-muted">
               PNG, JPG, or WEBP. The first one you add becomes the cover photo.
               Good light helps, and a clear shot of any label or barcode helps
-              even more.
+              even more. For clothing, lay it flat and set a tape measure across it
+              so we can size it.
             </span>
           </label>
         ) : (

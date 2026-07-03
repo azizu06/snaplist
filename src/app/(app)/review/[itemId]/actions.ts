@@ -8,6 +8,12 @@ import { parseReviewEdits } from "@/lib/pipeline";
 import { repriceWithSpecs } from "@/lib/pipeline/reprice";
 import { logPrediction } from "@/lib/pipeline/prediction-log";
 import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
+import {
+  garmentClassOf,
+  parseMeasurementEdits,
+  GARMENT_MEASUREMENT_SETS,
+  type SubmittedMeasurement,
+} from "@/lib/vision/measurements";
 import { logEvent } from "@/lib/observability";
 import { reportServerError } from "@/lib/sentry";
 
@@ -83,9 +89,46 @@ export async function saveReview(formData: FormData) {
     backTo(id, "Item not found.");
   }
 
+  // Garment measurements (issue #104): parse the submitted measurement fields +
+  // their confirm boxes into DRAFTS (blank clears, a typed value confirms only when
+  // ticked), merged over the stored ones. Only for garments; the pure parser throws
+  // on junk (e.g. a non-numeric measurement) so a typo never wipes a value silently.
+  const existingParse = extractedAttributesSchema.safeParse(item.attributes ?? {});
+  const existingAttrs = existingParse.success ? existingParse.data : {};
+  const garmentClass = garmentClassOf(existingAttrs);
+  let measurements = existingAttrs.measurements;
+  if (garmentClass) {
+    const confirmedNames = new Set(
+      formData
+        .getAll("measurement_confirmed")
+        .filter((v): v is string => typeof v === "string"),
+    );
+    const submitted: SubmittedMeasurement[] = GARMENT_MEASUREMENT_SETS[garmentClass].map(
+      (name) => {
+        const raw = formData.get(`measurement_${name}`);
+        return {
+          name,
+          value: typeof raw === "string" ? raw : "",
+          confirmed: confirmedNames.has(name),
+        };
+      },
+    );
+    try {
+      measurements = parseMeasurementEdits(
+        existingAttrs.measurements ?? [],
+        submitted,
+        garmentClass,
+      );
+    } catch (err) {
+      backTo(id, err instanceof Error ? err.message : "Invalid measurement.");
+    }
+  }
+
   const attributes = {
     ...((item.attributes ?? {}) as Record<string, unknown>),
     category: edits.category,
+    // Only touch measurements for garments; keep the key absent otherwise.
+    ...(garmentClass ? { measurements } : {}),
   };
 
   const { data: updated, error: itemError } = await supabase

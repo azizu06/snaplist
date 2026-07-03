@@ -16,7 +16,13 @@ import {
   type VisionGenerate,
   type VisionImageInput,
 } from "./extract";
+import {
+  extractGarmentMeasurements,
+  garmentClassOf,
+  type MeasureGenerate,
+} from "./measurements";
 import { resolvePhotoImageData, type DownloadClient } from "./photos";
+import { logEvent } from "../observability";
 
 /**
  * The real vision pipeline (issue #6, integrated with #8 pricing + #9 listing).
@@ -41,6 +47,15 @@ export interface CreateVisionPipelineOptions {
   generate?: VisionGenerate;
   /** Model id override forwarded to extraction (else env / default). */
   model?: string;
+  /**
+   * Injected measurement extraction (issue #104). Defaults to the real
+   * `extractGarmentMeasurements`; runs ONLY for garments and is best-effort — a
+   * failure never breaks the run (measurements are an auxiliary draft, off the
+   * critical path). Tests inject a fake to run offline.
+   */
+  measure?: typeof extractGarmentMeasurements;
+  /** Injected measurement model call forwarded to the default measurement extraction. */
+  measureGenerate?: MeasureGenerate;
   /**
    * Price an item signal. Defaults to the REAL `PriceRouter` over all five PRD
    * tiers (`createDefaultPricer`). Injected in tests so pricing runs offline.
@@ -95,6 +110,7 @@ export function createVisionPipeline(
 ): Pipeline {
   const { supabase, model } = options;
   const extract = options.extract ?? extractItemAttributes;
+  const measure = options.measure ?? extractGarmentMeasurements;
   const priceItem = options.priceItem ?? createDefaultPricer();
   const generateListing =
     options.generateListing ?? createDefaultListingGenerator();
@@ -121,7 +137,36 @@ export function createVisionPipeline(
         generate: options.generate,
         model,
       });
-      const { attributes, identification } = extraction;
+      const { identification } = extraction;
+
+      // 2b. GARMENT MEASUREMENTS (issue #104) — only for clothing, best-effort.
+      //     A second gated vision call (same `vision` registry role) estimates
+      //     flat-lay measurements, auto-suggesting ONLY the four listing-grade ones
+      //     and REFUSING inseam/sleeve unless a tape is visible. Drafts ride in
+      //     `attributes.measurements` (confirmed on review, never auto-filled into
+      //     specifics). It is auxiliary and off the critical path: any failure is
+      //     logged and swallowed so a garment still gets its price + listing.
+      const garmentClass = garmentClassOf(extraction.attributes);
+      let attributes = extraction.attributes;
+      if (garmentClass) {
+        try {
+          const measured = await measure({
+            images,
+            garmentClass,
+            garmentType: extraction.attributes.category ?? extraction.attributes.title,
+            generate: options.measureGenerate,
+            model,
+          });
+          if (measured.measurements.length > 0) {
+            attributes = { ...attributes, measurements: measured.measurements };
+          }
+        } catch (err) {
+          logEvent("pipeline.measure_failed", {
+            garmentClass,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation. The
       //    listing carries its own model id (may differ from the vision model), logged

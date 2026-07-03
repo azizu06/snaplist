@@ -17,6 +17,10 @@ import type {
   ExtractItemAttributesInput,
   ExtractItemAttributesResult,
 } from "./extract";
+import type {
+  MeasureGenerate,
+  ExtractGarmentMeasurementsResult,
+} from "./measurements";
 import type { DownloadClient } from "./photos";
 import { attributesToSignal } from "../pipeline/stub";
 
@@ -92,6 +96,18 @@ const STUB_LISTING: ListingCopy = {
 /** The listing generator now returns its own model id (logged for provenance, #32). */
 const STUB_LISTING_MODEL = "test-listing-model";
 
+/** A garment extraction (issue #104) — routes into the gated measurement call. */
+const GARMENT_EXTRACTION: ExtractItemAttributesResult = {
+  attributes: {
+    brand: "Champion",
+    category: "clothing hoodie",
+    condition: "good",
+    title: "Champion Hoodie",
+  },
+  identification: { label: "Champion Hoodie", confident: false, evidence: 0.5 },
+  model: "test-vision-model",
+};
+
 /** Build a pipeline with all real deps replaced by offline fakes; override per test. */
 function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
   return createVisionPipeline({
@@ -102,6 +118,61 @@ function makePipeline(overrides: Partial<CreateVisionPipelineOptions> = {}) {
     ...overrides,
   });
 }
+
+describe("vision/pipeline — garment measurements (issue #104)", () => {
+  it("attaches gated measurement DRAFTS for a garment (auto-suggest kept, tape-gated refused, never confirmed)", async () => {
+    const measureGenerate: MeasureGenerate = async () => ({
+      garmentType: "hoodie",
+      scaleReferenceFound: null,
+      scaleReferenceKind: null,
+      measurements: [
+        { name: "pit_to_pit", value_in: 22, tolerance_in: 1.5, method: "prior-based" },
+        // inseam is a bottom measurement AND has no tape → dropped for a top.
+        { name: "inseam", value_in: 30, tolerance_in: 2, method: "prior-based" },
+      ],
+    });
+    const result = await makePipeline({
+      extract: fakeExtract(GARMENT_EXTRACTION),
+      measureGenerate,
+    }).run({ photos: ["u/a.jpg"] });
+
+    const measures = result.attributes.measurements ?? [];
+    expect(measures.map((m) => m.name)).toContain("pit_to_pit");
+    expect(measures.map((m) => m.name)).not.toContain("inseam");
+    // Draft-not-autofill: every measurement ships unconfirmed.
+    expect(measures.every((m) => m.confirmed === false)).toBe(true);
+    expect(pipelineResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("skips measurement extraction entirely for non-garments", async () => {
+    const measure = vi.fn(
+      async (): Promise<ExtractGarmentMeasurementsResult> => ({
+        measurements: [],
+        tapeDetected: false,
+        garmentType: null,
+        model: "m",
+      }),
+    );
+    const result = await makePipeline({ measure }).run({ photos: ["u/a.jpg"] });
+    expect(measure).not.toHaveBeenCalled(); // STRONG_EXTRACTION is electronics
+    expect(result.attributes.measurements).toBeUndefined();
+  });
+
+  it("swallows a measurement failure — a garment still gets its price + listing", async () => {
+    const measure = vi.fn(
+      async (): Promise<ExtractGarmentMeasurementsResult> => {
+        throw new Error("model down");
+      },
+    );
+    const result = await makePipeline({
+      extract: fakeExtract(GARMENT_EXTRACTION),
+      measure,
+    }).run({ photos: ["u/a.jpg"] });
+    expect(measure).toHaveBeenCalledOnce();
+    expect(result.attributes.measurements).toBeUndefined();
+    expect(pipelineResultSchema.safeParse(result).success).toBe(true);
+  });
+});
 
 describe("vision/pipeline — createVisionPipeline.run", () => {
   it("downloads photos, extracts, prices, lists, and returns a schema-valid PipelineResult", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { priceResultSchema, type PriceResult } from "../pricing";
 import type { ConfidenceResult } from "../confidence/confidence";
+import { measurementDraftsSchema } from "../vision/measurements";
 
 /**
  * The listing-and-pricing pipeline seam (PRD Phase 1: "photo → vision identify +
@@ -41,6 +42,15 @@ export const extractedAttributesSchema = z.object({
   specs: z.array(z.string()).optional(),
   /** A short human title for the item, used to seed listing copy. */
   title: z.string().optional(),
+  /**
+   * Garment flat-lay measurements (issue #104), present ONLY for clothing. Each is
+   * a DRAFT the seller confirms on review — never silently auto-filled into item
+   * specifics — and carries its own tolerance band + provenance (`method`). Stored
+   * here (the established attribute surface) so it inherits the item's RLS and rides
+   * into `prediction_logs.extracted_attrs`; DELIBERATELY excluded from the
+   * confidence composite (a weak, vision-only signal — see `confidence/from-price`).
+   */
+  measurements: measurementDraftsSchema.optional(),
 });
 
 export type ExtractedAttributes = z.infer<typeof extractedAttributesSchema>;

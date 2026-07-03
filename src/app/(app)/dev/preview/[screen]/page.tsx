@@ -130,6 +130,7 @@ const FIXTURE_REVIEW: ReviewData = {
   override: null,
   displayPrice: 178,
   costBasis: 60,
+  measurements: null,
   range: { low: 155, high: 205 },
   confidence: 0.82,
   tier: "web_tight",

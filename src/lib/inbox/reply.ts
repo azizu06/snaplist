@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ReplyGrounding } from "./types";
 import { itemLabel } from "./simulate";
 import { resolveLanguageModel, resolveModelId } from "../llm";
+import { confirmedMeasurementPhrases } from "../vision/measurements";
 
 /**
  * Buyer-Q&A reply agent (issue #13). Drafts a seller reply to a buyer question,
@@ -85,10 +86,20 @@ export interface DraftBuyerReplyResult {
 export function groundingCorpus(grounding: ReplyGrounding): string {
   const { attributes, listing } = grounding;
   const parts: string[] = [];
-  for (const value of Object.values(attributes)) {
+  for (const [key, value] of Object.entries(attributes)) {
+    // `measurements` is an array of objects, not strings — handled below so a
+    // seller-CONFIRMED measurement grounds a reply while an unconfirmed AI draft
+    // never does (a buyer must not be told an estimate the seller hasn't vouched
+    // for — same stance as identification flagging).
+    if (key === "measurements") continue;
     if (typeof value === "string") parts.push(value);
-    else if (Array.isArray(value)) parts.push(...value);
+    else if (Array.isArray(value)) {
+      for (const v of value) if (typeof v === "string") parts.push(v);
+    }
   }
+  // "pit to pit 21 inches" — the measurement name sits beside the number so the
+  // numeric guard binds the value to that measurement's claim context (issue #104).
+  parts.push(...confirmedMeasurementPhrases(attributes.measurements));
   if (listing) parts.push(listing.title, listing.description);
   return parts.join("\n").toLowerCase();
 }

@@ -1,4 +1,5 @@
 import type { ReplyGrounding } from "./types";
+import { measurementWords } from "../vision/measurements";
 
 /**
  * Simulated buyer questions (issue #13). v1 has no real buyer traffic — the PRD
@@ -53,6 +54,16 @@ export function buyerQuestionCandidates(grounding: ReplyGrounding): string[] {
   if (firstSpec) {
     candidates.push(
       `The listing mentions "${firstSpec}". Can you confirm that works as expected?`,
+    );
+  }
+  // Garment sizing is the #1 buyer question (issue #104). Only ask for a
+  // measurement the seller has CONFIRMED, so the reply agent can answer it from
+  // stored data — pit-to-pit preferred, else the first confirmed measurement.
+  const confirmed = attributes.measurements?.filter((m) => m.confirmed) ?? [];
+  if (confirmed.length > 0) {
+    const m = confirmed.find((x) => x.name === "pit_to_pit") ?? confirmed[0];
+    candidates.push(
+      `What's the ${measurementWords(m.name)} measurement on the ${label}?`,
     );
   }
 

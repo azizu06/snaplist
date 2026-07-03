@@ -57,6 +57,83 @@ describe("groundingCorpus", () => {
   });
 });
 
+describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
+  const measuredGrounding: ReplyGrounding = {
+    attributes: {
+      brand: "Champion",
+      category: "clothing hoodie",
+      condition: "good",
+      title: "Champion Hoodie",
+      measurements: [
+        // Seller-CONFIRMED — the reply agent may state it.
+        {
+          name: "pit_to_pit",
+          value_in: 21,
+          tolerance_in: 0,
+          method: "reference-scaled",
+          confirmed: true,
+        },
+        // Unconfirmed AI draft — must NOT ground a reply to a buyer.
+        {
+          name: "length",
+          value_in: 27,
+          tolerance_in: 2,
+          method: "prior-based",
+          confirmed: false,
+        },
+      ],
+    },
+    listing: null,
+  };
+
+  it("puts confirmed measurements (only) in the grounding corpus", () => {
+    const corpus = groundingCorpus(measuredGrounding);
+    expect(corpus).toContain("pit to pit 21 inches");
+    expect(corpus).not.toContain("27"); // the unconfirmed length is excluded
+  });
+
+  it("accepts a reply stating a confirmed measurement, rejects an unconfirmed/invented one", () => {
+    expect(
+      replyAssertsUngroundedNumbers("The pit to pit measures 21 inches.", measuredGrounding),
+    ).toBe(false);
+    // 27 (unconfirmed) and 40 (invented) are both ungrounded assertions.
+    expect(
+      replyAssertsUngroundedNumbers("The length is 27 inches.", measuredGrounding),
+    ).toBe(true);
+    expect(
+      replyAssertsUngroundedNumbers("The chest is 40 inches across.", measuredGrounding),
+    ).toBe(true);
+  });
+
+  it("draftBuyerReply answers a measurement question from the stored value", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "The pit to pit is 21 inches, measured flat.",
+      answerable: true,
+    });
+    const out = await draftBuyerReply({
+      question: "What's the pit to pit?",
+      grounding: measuredGrounding,
+      generate,
+    });
+    expect(out.usedFallback).toBe(false);
+    expect(out.reply).toContain("21");
+  });
+
+  it("falls back rather than let the model invent a measurement", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "The chest is 40 inches across.", // 40 is nowhere in the grounding
+      answerable: true,
+    });
+    const out = await draftBuyerReply({
+      question: "How wide is the chest?",
+      grounding: measuredGrounding,
+      generate,
+    });
+    expect(out.usedFallback).toBe(true);
+    expect(out.reply).not.toContain("40");
+  });
+});
+
 describe("replyAssertsUngroundedNumbers", () => {
   it("accepts replies whose numbers all trace to the grounding", () => {
     const reply =
