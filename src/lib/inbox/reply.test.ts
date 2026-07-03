@@ -3,6 +3,7 @@ import {
   DEFAULT_REPLY_MODEL,
   draftBuyerReply,
   fallbackBuyerReply,
+  groundedFactAttributes,
   groundingCorpus,
   replyAssertsUngroundedNumbers,
   type ReplyGenerate,
@@ -90,6 +91,42 @@ describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
     const corpus = groundingCorpus(measuredGrounding);
     expect(corpus).toContain("pit to pit 21");
     expect(corpus).not.toContain("27"); // the unconfirmed length is excluded
+  });
+
+  it("hides unconfirmed measurement drafts from the model's fact view (matches the guard corpus)", () => {
+    // The real `createOpenAIReplyGenerate` serializes THIS into the `facts` prompt.
+    // It must carry the confirmed pit_to_pit but never the unconfirmed length draft,
+    // so the model can't quote OR paraphrase (fit/size) an estimate the seller hasn't
+    // vouched for — the numeric guard only catches verbatim numbers.
+    const facts = groundedFactAttributes(measuredGrounding.attributes);
+    expect(facts.measurements).toEqual([
+      {
+        name: "pit_to_pit",
+        value_in: 21,
+        tolerance_in: 0,
+        method: "reference-scaled",
+        confirmed: true,
+      },
+    ]);
+    // Serialized facts (what the prompt actually contains) never mention the draft.
+    expect(JSON.stringify(facts)).not.toContain("27");
+    // Non-measurement facts are untouched, and the input is not mutated.
+    expect(facts.brand).toBe("Champion");
+    expect(measuredGrounding.attributes.measurements).toHaveLength(2);
+  });
+
+  it("drops the measurements key when no draft is confirmed, and passes non-garment attributes through", () => {
+    const noneConfirmed = groundedFactAttributes({
+      brand: "Champion",
+      measurements: [
+        { name: "length", value_in: 27, tolerance_in: 2, method: "prior-based", confirmed: false },
+      ],
+    });
+    expect(noneConfirmed.measurements).toBeUndefined();
+    expect("measurements" in noneConfirmed).toBe(false);
+
+    const noMeasurements = { brand: "Sony", model: "WH-1000XM4" };
+    expect(groundedFactAttributes(noMeasurements)).toBe(noMeasurements); // same object, no copy
   });
 
   it("accepts a reply stating a confirmed measurement, rejects an unconfirmed/invented one", () => {

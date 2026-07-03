@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ReplyGrounding } from "./types";
+import type { ExtractedAttributes } from "../pipeline/types";
 import { itemLabel } from "./simulate";
 import { resolveLanguageModel, resolveModelId } from "../llm";
 import { confirmedMeasurementPhrases } from "../vision/measurements";
@@ -102,6 +103,29 @@ export function groundingCorpus(grounding: ReplyGrounding): string {
   parts.push(...confirmedMeasurementPhrases(attributes.measurements));
   if (listing) parts.push(listing.title, listing.description);
   return parts.join("\n").toLowerCase();
+}
+
+/**
+ * The attribute view the reply MODEL is shown as "the ONLY allowed facts". It MUST
+ * mirror what the deterministic guard's corpus (`groundingCorpus`) permits, so
+ * unconfirmed measurement DRAFTS are stripped here exactly as they are there: a
+ * buyer is never shown an AI estimate the seller hasn't vouched for (same stance
+ * as identification flagging), and — because the model never sees it — cannot
+ * paraphrase it into a fit/size claim the numeric guard (which only catches
+ * verbatim numbers) would miss. Seller-CONFIRMED measurements are kept, so a real
+ * sizing question still answers from stored data. Returns the same object when no
+ * measurements are present (the common non-garment case), a filtered copy
+ * otherwise; the `measurements` key is dropped entirely when none are confirmed.
+ */
+export function groundedFactAttributes(
+  attributes: ExtractedAttributes,
+): ExtractedAttributes {
+  if (attributes.measurements === undefined) return attributes;
+  const confirmed = attributes.measurements.filter((m) => m.confirmed);
+  const next: ExtractedAttributes = { ...attributes };
+  if (confirmed.length > 0) next.measurements = confirmed;
+  else delete next.measurements;
+  return next;
 }
 
 /**
@@ -397,7 +421,10 @@ export function createOpenAIReplyGenerate(
     const { generateObject } = await import("ai");
     const llmModel = await resolveLanguageModel("reply", { modelId: model, apiKey });
 
-    const facts = JSON.stringify(grounding.attributes, null, 2);
+    // Confirmed-only view — the model's allowed facts must match the guard's
+    // corpus (no unconfirmed measurement draft ever reaches the buyer, verbatim
+    // OR paraphrased).
+    const facts = JSON.stringify(groundedFactAttributes(grounding.attributes), null, 2);
     const listing = grounding.listing
       ? `Listing title: ${grounding.listing.title}\nListing description:\n${grounding.listing.description}`
       : "No listing copy is available for this item.";
