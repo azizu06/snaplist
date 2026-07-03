@@ -8,6 +8,12 @@ import { parseReviewEdits } from "@/lib/pipeline";
 import { repriceWithSpecs } from "@/lib/pipeline/reprice";
 import { logPrediction } from "@/lib/pipeline/prediction-log";
 import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
+import {
+  garmentClassOf,
+  parseMeasurementEdits,
+  GARMENT_MEASUREMENT_SETS,
+  type SubmittedMeasurement,
+} from "@/lib/vision/measurements";
 import { logEvent } from "@/lib/observability";
 import { reportServerError } from "@/lib/sentry";
 
@@ -83,10 +89,58 @@ export async function saveReview(formData: FormData) {
     backTo(id, "Item not found.");
   }
 
-  const attributes = {
+  // Garment measurements (issue #104): parse the submitted measurement fields +
+  // their confirm boxes into DRAFTS (blank clears, a typed value confirms only when
+  // ticked), merged over the stored ones. Only for garments; the pure parser throws
+  // on junk (e.g. a non-numeric measurement) so a typo never wipes a value silently.
+  const existingParse = extractedAttributesSchema.safeParse(item.attributes ?? {});
+  const existingAttrs = existingParse.success ? existingParse.data : {};
+  // Classify against the POST-EDIT attributes — the same inputs the reloaded review
+  // page uses (page.tsx). If a category edit changes the garment class (top→bottom)
+  // or drops it (garment→non-garment), the stored drafts must not persist onto a
+  // now-mismatched item, where they'd render invisibly yet still ground buyer-Q&A.
+  const garmentClass = garmentClassOf({
+    ...existingAttrs,
+    category: edits.category ?? undefined,
+  });
+
+  const attributes: Record<string, unknown> = {
     ...((item.attributes ?? {}) as Record<string, unknown>),
     category: edits.category,
   };
+
+  if (garmentClass) {
+    const confirmedNames = new Set(
+      formData
+        .getAll("measurement_confirmed")
+        .filter((v): v is string => typeof v === "string"),
+    );
+    const submitted: SubmittedMeasurement[] = GARMENT_MEASUREMENT_SETS[garmentClass].map(
+      (name) => {
+        const raw = formData.get(`measurement_${name}`);
+        return {
+          name,
+          value: typeof raw === "string" ? raw : "",
+          confirmed: confirmedNames.has(name),
+        };
+      },
+    );
+    try {
+      // Parse against the post-edit class: a class-flipping edit submits the OLD
+      // class's fields, which don't match the new set, so those drafts drop out
+      // rather than riding forward onto a mismatched item.
+      attributes.measurements = parseMeasurementEdits(
+        existingAttrs.measurements ?? [],
+        submitted,
+        garmentClass,
+      );
+    } catch (err) {
+      backTo(id, err instanceof Error ? err.message : "Invalid measurement.");
+    }
+  } else {
+    // No longer a garment → drop any stored drafts (the spread above re-added them).
+    delete attributes.measurements;
+  }
 
   const { data: updated, error: itemError } = await supabase
     .from("items")

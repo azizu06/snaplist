@@ -3,6 +3,7 @@ import {
   DEFAULT_REPLY_MODEL,
   draftBuyerReply,
   fallbackBuyerReply,
+  groundedFactAttributes,
   groundingCorpus,
   replyAssertsUngroundedNumbers,
   type ReplyGenerate,
@@ -54,6 +55,168 @@ describe("groundingCorpus", () => {
   it("works without a listing (attributes-only grounding)", () => {
     const corpus = groundingCorpus({ attributes: { brand: "Acme" }, listing: null });
     expect(corpus).toContain("acme");
+  });
+});
+
+describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
+  const measuredGrounding: ReplyGrounding = {
+    attributes: {
+      brand: "Champion",
+      category: "clothing hoodie",
+      condition: "good",
+      title: "Champion Hoodie",
+      measurements: [
+        // Seller-CONFIRMED — the reply agent may state it.
+        {
+          name: "pit_to_pit",
+          value_in: 21,
+          tolerance_in: 0,
+          method: "reference-scaled",
+          confirmed: true,
+        },
+        // Unconfirmed AI draft — must NOT ground a reply to a buyer.
+        {
+          name: "length",
+          value_in: 27,
+          tolerance_in: 2,
+          method: "prior-based",
+          confirmed: false,
+        },
+      ],
+    },
+    listing: null,
+  };
+
+  it("puts confirmed measurements (only) in the grounding corpus", () => {
+    const corpus = groundingCorpus(measuredGrounding);
+    expect(corpus).toContain("pit to pit 21");
+    expect(corpus).not.toContain("27"); // the unconfirmed length is excluded
+  });
+
+  it("hides unconfirmed measurement drafts from the model's fact view (matches the guard corpus)", () => {
+    // The real `createOpenAIReplyGenerate` serializes THIS into the `facts` prompt.
+    // It must carry the confirmed pit_to_pit but never the unconfirmed length draft,
+    // so the model can't quote OR paraphrase (fit/size) an estimate the seller hasn't
+    // vouched for — the numeric guard only catches verbatim numbers. Confirmed drafts
+    // are reduced to name + value, mirroring the corpus phrase ("pit to pit 21").
+    const facts = groundedFactAttributes(measuredGrounding.attributes);
+    expect(facts.measurements).toEqual([{ name: "pit_to_pit", value_in: 21 }]);
+    // Serialized facts (what the prompt actually contains) never mention the draft.
+    expect(JSON.stringify(facts)).not.toContain("27");
+    // Non-measurement facts are untouched, and the input is not mutated.
+    expect(facts.brand).toBe("Champion");
+    expect(measuredGrounding.attributes.measurements).toHaveLength(2);
+  });
+
+  it("withholds the tolerance band from the model's fact view so a confirmed estimate stays answerable", () => {
+    // A prior-based draft the seller ticked Confirm WITHOUT editing keeps its ±1 band
+    // (tolerance_in > 0). The guard corpus grounds only "pit to pit 21" — never the 1 —
+    // so if the model were shown tolerance_in it could faithfully write "21 in ± 1" and
+    // the numeric guard would reject the standalone 1, forcing a sizing-blind fallback.
+    // The model must therefore see name + value only.
+    const confirmedEstimate: ReplyGrounding = {
+      attributes: {
+        brand: "Champion",
+        title: "Champion Hoodie",
+        measurements: [
+          {
+            name: "pit_to_pit",
+            value_in: 21,
+            tolerance_in: 1,
+            method: "prior-based",
+            confirmed: true,
+          },
+        ],
+      },
+      listing: null,
+    };
+    const facts = groundedFactAttributes(confirmedEstimate.attributes);
+    expect(facts.measurements).toEqual([{ name: "pit_to_pit", value_in: 21 }]);
+    // The tolerance number, method, and confirmed flag never reach the prompt.
+    const serialized = JSON.stringify(facts);
+    expect(serialized).not.toContain("tolerance_in");
+    expect(serialized).not.toContain("method");
+    expect(serialized).not.toContain("prior-based");
+    // A reply stating the confirmed value (no fabricated band) is accepted.
+    expect(
+      replyAssertsUngroundedNumbers("The pit to pit is 21 inches.", confirmedEstimate),
+    ).toBe(false);
+  });
+
+  it("drops the measurements key when no draft is confirmed, and passes non-garment attributes through", () => {
+    const noneConfirmed = groundedFactAttributes({
+      brand: "Champion",
+      measurements: [
+        { name: "length", value_in: 27, tolerance_in: 2, method: "prior-based", confirmed: false },
+      ],
+    });
+    expect(noneConfirmed.measurements).toBeUndefined();
+    expect("measurements" in noneConfirmed).toBe(false);
+
+    const noMeasurements = { brand: "Sony", model: "WH-1000XM4" };
+    expect(groundedFactAttributes(noMeasurements)).toBe(noMeasurements); // same object, no copy
+  });
+
+  it("accepts a reply stating a confirmed measurement, rejects an unconfirmed/invented one", () => {
+    expect(
+      replyAssertsUngroundedNumbers("The pit to pit measures 21 inches.", measuredGrounding),
+    ).toBe(false);
+    // 27 (unconfirmed) and 40 (invented) are both ungrounded assertions.
+    expect(
+      replyAssertsUngroundedNumbers("The length is 27 inches.", measuredGrounding),
+    ).toBe(true);
+    expect(
+      replyAssertsUngroundedNumbers("The chest is 40 inches across.", measuredGrounding),
+    ).toBe(true);
+  });
+
+  it("rejects a confirmed number re-attributed to a DIFFERENT measurement", () => {
+    // pit_to_pit=21 is confirmed; sleeve is not. The shared unit word "inches" must
+    // not let 21 bind to a sleeve claim, or a mis-attributed measurement ships.
+    expect(
+      replyAssertsUngroundedNumbers("The sleeve is 21 inches.", measuredGrounding),
+    ).toBe(true);
+    // The genuinely-confirmed measurement still passes when named correctly.
+    expect(
+      replyAssertsUngroundedNumbers("The pit to pit is 21 inches.", measuredGrounding),
+    ).toBe(false);
+  });
+
+  it("does not let the 'to' inside pit_to_pit launder its number into a shipping claim", () => {
+    // "pit to pit 21" carries the stopword "to" beside 21; that generic glue word
+    // must not bind 21 to an unrelated claim, or a fabricated "I ship to 21 states."
+    // ships to the buyer.
+    expect(
+      replyAssertsUngroundedNumbers("I ship to 21 states.", measuredGrounding),
+    ).toBe(true);
+  });
+
+  it("draftBuyerReply answers a measurement question from the stored value", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "The pit to pit is 21 inches, measured flat.",
+      answerable: true,
+    });
+    const out = await draftBuyerReply({
+      question: "What's the pit to pit?",
+      grounding: measuredGrounding,
+      generate,
+    });
+    expect(out.usedFallback).toBe(false);
+    expect(out.reply).toContain("21");
+  });
+
+  it("falls back rather than let the model invent a measurement", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "The chest is 40 inches across.", // 40 is nowhere in the grounding
+      answerable: true,
+    });
+    const out = await draftBuyerReply({
+      question: "How wide is the chest?",
+      grounding: measuredGrounding,
+      generate,
+    });
+    expect(out.usedFallback).toBe(true);
+    expect(out.reply).not.toContain("40");
   });
 });
 

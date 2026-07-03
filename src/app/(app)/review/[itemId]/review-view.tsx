@@ -72,6 +72,23 @@ export interface ReviewData {
   displayPrice: number | null;
   /** What the seller paid (#101); null = unknown (never a fake $0). */
   costBasis: number | null;
+  /**
+   * Garment measurements (issue #104) — null for non-garments. Each field is a
+   * confirmable DRAFT with its always-shown tolerance band; reference-only points
+   * (inseam/sleeve) prompt for a tape rather than showing a guessed number.
+   */
+  measurements: {
+    garmentClass: "top" | "bottom";
+    fields: Array<{
+      name: string;
+      label: string;
+      value: string;
+      toleranceText: string | null;
+      method: "reference-scaled" | "prior-based" | "seller-entered" | null;
+      confirmed: boolean;
+      needsReference: boolean;
+    }>;
+  } | null;
   range: { low?: number; high?: number } | null;
   confidence: number | null;
   tier: string | null;
@@ -490,6 +507,156 @@ function SharpenCard({
   );
 }
 
+/** One garment measurement field (issue #104). */
+type MeasureField = NonNullable<ReviewData["measurements"]>["fields"][number];
+
+/**
+ * Whether a live entry still equals the server draft value it was rendered from,
+ * compared at DISPLAY precision: `rendered` is the server value via trimInches (2dp)
+ * while `entered` holds the raw input, so an entry that rounds to the rendered value
+ * ("22.50" → "22.5", "21.999" → "22") reads as unchanged. Rounding both to 2dp
+ * mirrors the save path (`parseMeasurementEdits`), which treats an edit as real only
+ * when it differs at 2dp. Drives both the Unsaved-changes bar and the tolerance-band
+ * display, so a seller-edited value never shows the draft's stale band or method.
+ * Blank/blank and blank/value are handled by the string equality + both-non-empty guard.
+ */
+function sameMeasureValue(entered: string, rendered: string): boolean {
+  const a = entered.trim();
+  const b = rendered.trim();
+  if (a === b) return true;
+  const an = Number(a);
+  const bn = Number(b);
+  return (
+    a !== "" &&
+    b !== "" &&
+    Number.isFinite(an) &&
+    Number.isFinite(bn) &&
+    Number(an.toFixed(2)) === Number(bn.toFixed(2))
+  );
+}
+
+/**
+ * Measurements card (issue #104) — clothing only. Renders the garment type's
+ * measurement set as confirmable DRAFTS: the four listing-grade measurements arrive
+ * pre-filled with an always-shown tolerance band ("~21 in ± 1"); inseam/sleeve (and
+ * other reference-only points) stay blank behind a "lay a tape measure" prompt
+ * rather than a guessed number. Only measurements the seller ticks Confirm are used
+ * to ground buyer-Q&A replies; unconfirmed drafts are never quoted to a buyer —
+ * mirroring the confidence-gating philosophy. Fields associate to the Save form by
+ * `form="rv-save"`, so they ride the existing save flow and Unsaved-changes bar.
+ */
+function MeasurementsCard({
+  fields,
+  values,
+  confirmed,
+  onValue,
+  onConfirm,
+}: {
+  fields: MeasureField[];
+  values: Record<string, string>;
+  confirmed: Record<string, boolean>;
+  onValue: (name: string, value: string) => void;
+  onConfirm: (name: string, checked: boolean) => void;
+}) {
+  return (
+    <Card chromeClassName={APP_CARD_CHROME} className="p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-2">
+        <CardTitle>Measurements</CardTitle>
+        <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
+          Draft
+        </span>
+      </div>
+      <p className="mt-2 text-[13px] leading-relaxed text-muted">
+        Estimated flat-lay measurements, in inches. Check each value and tick{" "}
+        <span className="font-medium text-fg-strong">Confirm</span> to vouch for it —
+        only measurements you confirm are used to answer buyer questions about sizing;
+        unconfirmed estimates are never quoted to a buyer. For sleeve and inseam, lay a
+        tape measure across the garment and re-photograph, or type your own measurement.
+      </p>
+
+      <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {fields.map((f) => {
+          const hasValue = values[f.name]?.trim() !== "" && values[f.name] != null;
+          // Once the seller edits the value away from the server draft, that draft's
+          // tolerance band ("~21 in ± 1") and method are stale — the save path treats
+          // the edit as a hand-measured, seller-entered value (tolerance 0). Reflect
+          // that live: hide the band and show "Measured by you" instead of quoting a
+          // number/derivation that no longer matches the input.
+          const edited = hasValue && !sameMeasureValue(values[f.name] ?? "", f.value);
+          const effectiveMethod = edited ? "seller-entered" : f.method;
+          const methodNote =
+            effectiveMethod === "seller-entered"
+              ? "Measured by you"
+              : effectiveMethod === "reference-scaled"
+                ? "Measured against a reference in the photo"
+                : effectiveMethod === "prior-based"
+                  ? "Estimated from the photo"
+                  : f.needsReference
+                    ? "Needs a tape measure in the photo"
+                    : "Not measured yet";
+          return (
+            <li
+              key={f.name}
+              className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface-2 p-3"
+            >
+              <label
+                htmlFor={`measurement-${f.name}`}
+                className="text-[13px] font-medium text-fg-strong"
+              >
+                {f.label}
+              </label>
+              <div className="flex items-center rounded-lg border border-border-strong bg-bg transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25">
+                <input
+                  id={`measurement-${f.name}`}
+                  name={`measurement_${f.name}`}
+                  form="rv-save"
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min="0"
+                  value={values[f.name] ?? ""}
+                  onChange={(e) => onValue(f.name, e.target.value)}
+                  placeholder={f.needsReference ? "Measure with tape" : "0"}
+                  aria-label={`${f.label} in inches`}
+                  className="w-full rounded-lg bg-transparent px-2.5 py-1.5 text-[15px] font-semibold text-fg-strong outline-none"
+                  data-nums
+                />
+                <span className="pr-2.5 text-[13px] text-muted">in</span>
+              </div>
+              <p className="text-[12px] text-faint">
+                {hasValue && f.toleranceText && !edited && !confirmed[f.name] ? (
+                  <span className="text-muted" data-nums>
+                    {f.toleranceText}
+                  </span>
+                ) : (
+                  methodNote
+                )}
+              </p>
+              <label
+                className={`mt-0.5 inline-flex items-center gap-2 text-[13px] ${
+                  hasValue ? "text-fg-strong" : "cursor-not-allowed text-faint"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  name="measurement_confirmed"
+                  value={f.name}
+                  form="rv-save"
+                  checked={confirmed[f.name] ?? false}
+                  disabled={!hasValue}
+                  onChange={(e) => onConfirm(f.name, e.target.checked)}
+                  className="size-4 accent-[var(--color-accent)]"
+                />
+                Confirm
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
 export function ReviewView({
   data,
   saveAction,
@@ -519,18 +686,51 @@ export function ReviewView({
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
 
+  // Garment measurements (issue #104): their own controlled state, folded into the
+  // same dirty/save/discard flow as the other fields.
+  const measureFields = data.measurements?.fields ?? [];
+  const initialMeasures = useMemo(
+    () => ({
+      values: Object.fromEntries(measureFields.map((f) => [f.name, f.value])),
+      confirmed: Object.fromEntries(measureFields.map((f) => [f.name, f.confirmed])),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- derived purely from the serializable prop
+    [data],
+  );
+  const [measureValues, setMeasureValues] = useState(initialMeasures.values);
+  const [measureConfirmed, setMeasureConfirmed] = useState(initialMeasures.confirmed);
+
   const setField = (key: FieldKey, value: string) => {
     setFields((prev) => ({ ...prev, [key]: value }));
     setTouched((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
   };
+  const setMeasureValue = (name: string, value: string) => {
+    setMeasureValues((prev) => ({ ...prev, [name]: value }));
+    // Clearing a value can't stay "confirmed" — a blank measurement isn't a fact.
+    if (value.trim() === "") {
+      setMeasureConfirmed((prev) => ({ ...prev, [name]: false }));
+    }
+  };
+  const setMeasureConfirm = (name: string, checked: boolean) =>
+    setMeasureConfirmed((prev) => ({ ...prev, [name]: checked }));
   const discard = () => {
     setFields(initial);
     setTouched({});
+    setMeasureValues(initialMeasures.values);
+    setMeasureConfirmed(initialMeasures.confirmed);
   };
 
-  const dirty = (Object.keys(initial) as FieldKey[]).some(
-    (key) => fields[key] !== initial[key],
+  // `sameMeasureValue` (module scope) compares a live entry to the server draft at
+  // display precision — shared with the tolerance-band display so both agree on what
+  // counts as an edit.
+  const measuresDirty = measureFields.some(
+    (f) =>
+      !sameMeasureValue(measureValues[f.name] ?? "", f.value) ||
+      (measureConfirmed[f.name] ?? false) !== f.confirmed,
   );
+  const dirty =
+    (Object.keys(initial) as FieldKey[]).some((key) => fields[key] !== initial[key]) ||
+    measuresDirty;
 
   // "Still the AI's value" per field: untouched AND the suggestion existed.
   const ai = (key: FieldKey) =>
@@ -739,6 +939,18 @@ export function ReviewView({
               <p className="mt-3 text-[15px] text-muted">No listing generated yet.</p>
             )}
           </Card>
+
+          {/* Measurements — clothing only (issue #104). Draft measurements the
+              seller confirms to ground buyer-Q&A replies about sizing. */}
+          {data.measurements && measureFields.length > 0 ? (
+            <MeasurementsCard
+              fields={measureFields}
+              values={measureValues}
+              confirmed={measureConfirmed}
+              onValue={setMeasureValue}
+              onConfirm={setMeasureConfirm}
+            />
+          ) : null}
 
         </div>
 

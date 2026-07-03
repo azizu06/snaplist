@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { ReplyGrounding } from "./types";
+import type { ExtractedAttributes } from "../pipeline/types";
 import { itemLabel } from "./simulate";
 import { resolveLanguageModel, resolveModelId } from "../llm";
+import { confirmedMeasurementPhrases, type MeasurementDraft } from "../vision/measurements";
 
 /**
  * Buyer-Q&A reply agent (issue #13). Drafts a seller reply to a buyer question,
@@ -85,12 +87,59 @@ export interface DraftBuyerReplyResult {
 export function groundingCorpus(grounding: ReplyGrounding): string {
   const { attributes, listing } = grounding;
   const parts: string[] = [];
-  for (const value of Object.values(attributes)) {
+  for (const [key, value] of Object.entries(attributes)) {
+    // `measurements` is an array of objects, not strings — handled below so a
+    // seller-CONFIRMED measurement grounds a reply while an unconfirmed AI draft
+    // never does (a buyer must not be told an estimate the seller hasn't vouched
+    // for — same stance as identification flagging).
+    if (key === "measurements") continue;
     if (typeof value === "string") parts.push(value);
-    else if (Array.isArray(value)) parts.push(...value);
+    else if (Array.isArray(value)) {
+      for (const v of value) if (typeof v === "string") parts.push(v);
+    }
   }
+  // "pit to pit 21" — the measurement name (no unit word) sits beside the number so
+  // the numeric guard binds the value to that measurement's claim context (issue #104).
+  parts.push(...confirmedMeasurementPhrases(attributes.measurements));
   if (listing) parts.push(listing.title, listing.description);
   return parts.join("\n").toLowerCase();
+}
+
+/** The measurement view the reply MODEL is shown: name + value ONLY. This mirrors
+ *  the guard corpus (`confirmedMeasurementPhrases` → "pit to pit 21"), which grounds
+ *  the value alone — never the tolerance. */
+export type GroundedMeasurementFact = Pick<MeasurementDraft, "name" | "value_in">;
+
+/** `ExtractedAttributes` with measurements narrowed to the model-facing fact view. */
+export type GroundedFactAttributes = Omit<ExtractedAttributes, "measurements"> & {
+  measurements?: GroundedMeasurementFact[];
+};
+
+/**
+ * The attribute view the reply MODEL is shown as "the ONLY allowed facts". It MUST
+ * mirror what the deterministic guard's corpus (`groundingCorpus`) permits, in BOTH
+ * directions: unconfirmed measurement DRAFTS are stripped (a buyer is never shown an
+ * AI estimate the seller hasn't vouched for — same stance as identification flagging;
+ * and, unseen by the model, it cannot paraphrase one into a fit/size claim the numeric
+ * guard would miss), AND each CONFIRMED measurement is reduced to name + value —
+ * `tolerance_in`/`method`/`confirmed` are withheld because the corpus grounds only the
+ * value ("pit to pit 21"), so surfacing the tolerance would license a faithful
+ * band-quoting reply ("21 in ± 1") that the guard then rejects on the standalone band
+ * number, defeating the sizing answer. Returns the same object when no measurements are
+ * present (the common non-garment case), a filtered copy otherwise; the `measurements`
+ * key is dropped entirely when none are confirmed.
+ */
+export function groundedFactAttributes(
+  attributes: ExtractedAttributes,
+): GroundedFactAttributes {
+  if (attributes.measurements === undefined) return attributes;
+  const confirmed: GroundedMeasurementFact[] = attributes.measurements
+    .filter((m) => m.confirmed)
+    .map((m) => ({ name: m.name, value_in: m.value_in }));
+  const next: GroundedFactAttributes = { ...attributes, measurements: undefined };
+  if (confirmed.length > 0) next.measurements = confirmed;
+  else delete next.measurements;
+  return next;
 }
 
 /**
@@ -137,6 +186,19 @@ function tokenInfos(text: string): TokenInfo[] {
 const NUMBER_CONTEXT_WINDOW = 2;
 
 /**
+ * Generic glue words that carry no claim meaning. They are stripped from a
+ * number's binding context so a stopword sitting beside a value — e.g. the "to"
+ * inside a "pit to pit 21" measurement phrase — can never bind that value to an
+ * unrelated reply claim ("I ship to 21 states."). Only content tokens vouch for
+ * a number. A number surrounded ONLY by stopwords is left with no binding
+ * context (never context-free), so any reply use of it is rejected.
+ */
+const NUMBER_CONTEXT_STOPWORDS = new Set([
+  "a", "an", "and", "at", "by", "for", "from", "in", "is", "it", "its",
+  "of", "on", "or", "the", "this", "that", "to", "with",
+]);
+
+/**
  * Split text into sentences so context windows can never straddle a sentence
  * boundary. Without this, "Priced at $180. Ships from a smoke-free home."
  * binds `180` to "ships" and the guard would accept "It ships in 180." —
@@ -175,7 +237,7 @@ function collectNumberGrounding(parts: readonly string[]): NumberGrounding {
       if (!isStandaloneNumber(info.token)) return;
       const key = normalizeNumber(info.token);
       if (info.currency) currencyNumbers.add(key);
-      let added = 0;
+      let neighbors = 0;
       let ctx = contexts.get(key);
       for (
         let j = Math.max(0, i - NUMBER_CONTEXT_WINDOW);
@@ -184,14 +246,17 @@ function collectNumberGrounding(parts: readonly string[]): NumberGrounding {
       ) {
         if (j === i) continue;
         if (isStandaloneNumber(infos[j].token)) continue; // numbers don't vouch for numbers
+        neighbors += 1;
+        if (NUMBER_CONTEXT_STOPWORDS.has(infos[j].token)) continue; // glue words can't bind a claim
         if (!ctx) {
           ctx = new Set();
           contexts.set(key, ctx);
         }
         ctx.add(infos[j].token);
-        added += 1;
       }
-      if (added === 0 && !info.currency) contextFree.add(key);
+      // Context-free only when the number truly had NO non-number neighbors (a
+      // bare "45"); a stopword-only neighborhood leaves it bound to nothing.
+      if (neighbors === 0 && !info.currency) contextFree.add(key);
     });
   }
   return { currencyNumbers, contexts, contextFree };
@@ -370,7 +435,10 @@ export function createOpenAIReplyGenerate(
     const { generateObject } = await import("ai");
     const llmModel = await resolveLanguageModel("reply", { modelId: model, apiKey });
 
-    const facts = JSON.stringify(grounding.attributes, null, 2);
+    // Confirmed-only view — the model's allowed facts must match the guard's
+    // corpus (no unconfirmed measurement draft ever reaches the buyer, verbatim
+    // OR paraphrased).
+    const facts = JSON.stringify(groundedFactAttributes(grounding.attributes), null, 2);
     const listing = grounding.listing
       ? `Listing title: ${grounding.listing.title}\nListing description:\n${grounding.listing.description}`
       : "No listing copy is available for this item.";
