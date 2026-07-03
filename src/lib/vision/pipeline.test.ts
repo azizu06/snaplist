@@ -6,7 +6,11 @@ import {
   type RetailFinding,
   type SearchClient,
 } from "../pricing";
-import { pipelineResultSchema, type ListingCopy } from "../pipeline/types";
+import {
+  pipelineResultSchema,
+  type ExtractedAttributes,
+  type ListingCopy,
+} from "../pipeline/types";
 import { priceToConfidence } from "../confidence/from-price";
 import { createDefaultPricer } from "../pricing/default-pricer";
 import {
@@ -142,6 +146,37 @@ describe("vision/pipeline — garment measurements (issue #104)", () => {
     // Draft-not-autofill: every measurement ships unconfirmed.
     expect(measures.every((m) => m.confirmed === false)).toBe(true);
     expect(pipelineResultSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("never feeds unconfirmed measurement drafts into listing generation (#104 confirmed-on-review)", async () => {
+    // The listing model treats its attribute input as "the ONLY allowed facts" and its
+    // free-text description is not whitelisted — so an unconfirmed AI measurement must
+    // never reach it. Drafts attach to the PERSISTED attributes after generation only.
+    const measureGenerate: MeasureGenerate = async () => ({
+      garmentType: "hoodie",
+      scaleReferenceFound: null,
+      scaleReferenceKind: null,
+      measurements: [
+        { name: "pit_to_pit", value_in: 22, tolerance_in: 1.5, method: "prior-based" },
+      ],
+    });
+    const generateListing = vi.fn<
+      (args: {
+        attributes: ExtractedAttributes;
+      }) => Promise<{ copy: ListingCopy; model: string }>
+    >(async () => ({ copy: STUB_LISTING, model: STUB_LISTING_MODEL }));
+
+    const result = await makePipeline({
+      extract: fakeExtract(GARMENT_EXTRACTION),
+      measureGenerate,
+      generateListing,
+    }).run({ photos: ["u/a.jpg"] });
+
+    // The generator saw the measurement-free core...
+    expect(generateListing).toHaveBeenCalledOnce();
+    expect(generateListing.mock.calls[0]?.[0].attributes.measurements).toBeUndefined();
+    // ...while the drafts still ride on the result for the review screen.
+    expect((result.attributes.measurements ?? []).map((m) => m.name)).toContain("pit_to_pit");
   });
 
   it("skips measurement extraction entirely for non-garments", async () => {

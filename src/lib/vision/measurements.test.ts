@@ -259,6 +259,25 @@ describe("measurements — parseMeasurementEdits (seller edits → confirmable d
     expect(pit.method).toBe("prior-based");
   });
 
+  it("confirming a fine-precision draft as-rendered is NOT an edit (keeps band + method)", () => {
+    // A reference-scaled/pixel-derived draft can carry >2 decimals; the review input
+    // renders `trimInches` (2dp), so re-submitting it unchanged sends the rounded string.
+    // Edit-detection must compare on that same rounded form or it wrongly drops the
+    // honest tolerance band and mislabels a prior estimate as a seller measurement.
+    const fine: MeasurementDraft[] = [
+      { name: "pit_to_pit", value_in: 21.354, tolerance_in: 1, method: "prior-based", confirmed: false },
+    ];
+    const out = parseMeasurementEdits(
+      fine,
+      [{ name: "pit_to_pit", value: trimInches(21.354), confirmed: true }],
+      "top",
+    );
+    const pit = out.find((o) => o.name === "pit_to_pit")!;
+    expect(pit.confirmed).toBe(true);
+    expect(pit.tolerance_in).toBe(1); // untouched → keep the model's band
+    expect(pit.method).toBe("prior-based"); // NOT flipped to reference-scaled
+  });
+
   it("treats an edited value as hand-measured: tolerance 0, reference-scaled", () => {
     const out = parseMeasurementEdits(
       existing,

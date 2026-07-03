@@ -379,7 +379,7 @@ export function parseMeasurementEdits(
     }
     seen.add(s.name);
     const before = prior.get(s.name);
-    const edited = !before || Math.abs(before.value_in - value) > 1e-9;
+    const edited = !before || trimInches(before.value_in) !== trimInches(value);
     out.push({
       name: s.name,
       value_in: value,

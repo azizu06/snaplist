@@ -20,6 +20,7 @@ import {
   extractGarmentMeasurements,
   garmentClassOf,
   type MeasureGenerate,
+  type MeasurementDraft,
 } from "./measurements";
 import { resolvePhotoImageData, type DownloadClient } from "./photos";
 import { logEvent } from "../observability";
@@ -139,43 +140,57 @@ export function createVisionPipeline(
       });
       const { identification } = extraction;
 
-      // 2b. GARMENT MEASUREMENTS (issue #104) — only for clothing, best-effort.
-      //     A second gated vision call (same `vision` registry role) estimates
-      //     flat-lay measurements, auto-suggesting ONLY the four listing-grade ones
-      //     and REFUSING inseam/sleeve unless a tape is visible. Drafts ride in
-      //     `attributes.measurements` (confirmed on review, never auto-filled into
-      //     specifics). It is auxiliary and off the critical path: any failure is
-      //     logged and swallowed so a garment still gets its price + listing.
-      const garmentClass = garmentClassOf(extraction.attributes);
-      let attributes = extraction.attributes;
-      if (garmentClass) {
-        try {
-          const measured = await measure({
+      // 2b. GARMENT MEASUREMENTS (issue #104) — only for clothing, best-effort, and
+      //     kicked off CONCURRENTLY with pricing + listing (below) so its extra vision
+      //     round-trip never lands on the pipeline's wall-clock. A second gated vision
+      //     call (same `vision` registry role) estimates flat-lay measurements,
+      //     auto-suggesting ONLY the four listing-grade ones and REFUSING inseam/sleeve
+      //     unless a tape is visible. The unconfirmed drafts feed NEITHER pricing
+      //     (`attributesToSignal` ignores them) NOR listing generation — the listing
+      //     model is shown ONLY confirmed facts, so an AI-estimated measurement the
+      //     seller hasn't vouched for can never surface in the publishable copy (#104's
+      //     confirmed-on-review guarantee). They ride on the persisted `attributes` for
+      //     the review screen alone. Any failure is logged and swallowed so a garment
+      //     still gets its price + listing.
+      const baseAttributes = extraction.attributes;
+      const garmentClass = garmentClassOf(baseAttributes);
+      const measurePromise: Promise<MeasurementDraft[]> = garmentClass
+        ? measure({
             images,
             garmentClass,
-            garmentType: extraction.attributes.category ?? extraction.attributes.title,
+            garmentType: baseAttributes.category ?? baseAttributes.title,
             generate: options.measureGenerate,
             model,
-          });
-          if (measured.measurements.length > 0) {
-            attributes = { ...attributes, measurements: measured.measurements };
-          }
-        } catch (err) {
-          logEvent("pipeline.measure_failed", {
-            garmentClass,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+          })
+            .then((measured) => measured.measurements)
+            .catch((err) => {
+              logEvent("pipeline.measure_failed", {
+                garmentClass,
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return [];
+            })
+        : Promise.resolve([]);
 
-      // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation. The
+      // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation over the
+      //    measurement-free attribute core, run ALONGSIDE the measurement call. The
       //    listing carries its own model id (may differ from the vision model), logged
       //    for provenance so listing experiments stay attributable (#32).
-      const signal = attributesToSignal(attributes);
-      const price = await priceItem(signal);
-      const { copy: listing, model: listingModel } = await generateListing({
-        attributes,
-      });
+      const signal = attributesToSignal(baseAttributes);
+      const [price, generated, measurements] = await Promise.all([
+        priceItem(signal),
+        generateListing({ attributes: baseAttributes }),
+        measurePromise,
+      ]);
+      const { copy: listing, model: listingModel } = generated;
+
+      // The unconfirmed measurement drafts ride on the PERSISTED attributes only — the
+      // review screen is where the seller confirms them; they were never serialized into
+      // the listing copy generated above.
+      const attributes: ExtractedAttributes =
+        measurements.length > 0
+          ? { ...baseAttributes, measurements }
+          : baseAttributes;
 
       // 4. REAL confidence composite over deterministic signals (tier #31-calibrated;
       //    the model's self-reported ambiguity stays out of the score — it only flags
