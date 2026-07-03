@@ -97,22 +97,50 @@ describe("buyer-Q&A grounds on stored measurements (issue #104)", () => {
     // The real `createOpenAIReplyGenerate` serializes THIS into the `facts` prompt.
     // It must carry the confirmed pit_to_pit but never the unconfirmed length draft,
     // so the model can't quote OR paraphrase (fit/size) an estimate the seller hasn't
-    // vouched for — the numeric guard only catches verbatim numbers.
+    // vouched for — the numeric guard only catches verbatim numbers. Confirmed drafts
+    // are reduced to name + value, mirroring the corpus phrase ("pit to pit 21").
     const facts = groundedFactAttributes(measuredGrounding.attributes);
-    expect(facts.measurements).toEqual([
-      {
-        name: "pit_to_pit",
-        value_in: 21,
-        tolerance_in: 0,
-        method: "reference-scaled",
-        confirmed: true,
-      },
-    ]);
+    expect(facts.measurements).toEqual([{ name: "pit_to_pit", value_in: 21 }]);
     // Serialized facts (what the prompt actually contains) never mention the draft.
     expect(JSON.stringify(facts)).not.toContain("27");
     // Non-measurement facts are untouched, and the input is not mutated.
     expect(facts.brand).toBe("Champion");
     expect(measuredGrounding.attributes.measurements).toHaveLength(2);
+  });
+
+  it("withholds the tolerance band from the model's fact view so a confirmed estimate stays answerable", () => {
+    // A prior-based draft the seller ticked Confirm WITHOUT editing keeps its ±1 band
+    // (tolerance_in > 0). The guard corpus grounds only "pit to pit 21" — never the 1 —
+    // so if the model were shown tolerance_in it could faithfully write "21 in ± 1" and
+    // the numeric guard would reject the standalone 1, forcing a sizing-blind fallback.
+    // The model must therefore see name + value only.
+    const confirmedEstimate: ReplyGrounding = {
+      attributes: {
+        brand: "Champion",
+        title: "Champion Hoodie",
+        measurements: [
+          {
+            name: "pit_to_pit",
+            value_in: 21,
+            tolerance_in: 1,
+            method: "prior-based",
+            confirmed: true,
+          },
+        ],
+      },
+      listing: null,
+    };
+    const facts = groundedFactAttributes(confirmedEstimate.attributes);
+    expect(facts.measurements).toEqual([{ name: "pit_to_pit", value_in: 21 }]);
+    // The tolerance number, method, and confirmed flag never reach the prompt.
+    const serialized = JSON.stringify(facts);
+    expect(serialized).not.toContain("tolerance_in");
+    expect(serialized).not.toContain("method");
+    expect(serialized).not.toContain("prior-based");
+    // A reply stating the confirmed value (no fabricated band) is accepted.
+    expect(
+      replyAssertsUngroundedNumbers("The pit to pit is 21 inches.", confirmedEstimate),
+    ).toBe(false);
   });
 
   it("drops the measurements key when no draft is confirmed, and passes non-garment attributes through", () => {

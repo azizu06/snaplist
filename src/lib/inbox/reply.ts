@@ -3,7 +3,7 @@ import type { ReplyGrounding } from "./types";
 import type { ExtractedAttributes } from "../pipeline/types";
 import { itemLabel } from "./simulate";
 import { resolveLanguageModel, resolveModelId } from "../llm";
-import { confirmedMeasurementPhrases } from "../vision/measurements";
+import { confirmedMeasurementPhrases, type MeasurementDraft } from "../vision/measurements";
 
 /**
  * Buyer-Q&A reply agent (issue #13). Drafts a seller reply to a buyer question,
@@ -105,24 +105,38 @@ export function groundingCorpus(grounding: ReplyGrounding): string {
   return parts.join("\n").toLowerCase();
 }
 
+/** The measurement view the reply MODEL is shown: name + value ONLY. This mirrors
+ *  the guard corpus (`confirmedMeasurementPhrases` → "pit to pit 21"), which grounds
+ *  the value alone — never the tolerance. */
+export type GroundedMeasurementFact = Pick<MeasurementDraft, "name" | "value_in">;
+
+/** `ExtractedAttributes` with measurements narrowed to the model-facing fact view. */
+export type GroundedFactAttributes = Omit<ExtractedAttributes, "measurements"> & {
+  measurements?: GroundedMeasurementFact[];
+};
+
 /**
  * The attribute view the reply MODEL is shown as "the ONLY allowed facts". It MUST
- * mirror what the deterministic guard's corpus (`groundingCorpus`) permits, so
- * unconfirmed measurement DRAFTS are stripped here exactly as they are there: a
- * buyer is never shown an AI estimate the seller hasn't vouched for (same stance
- * as identification flagging), and — because the model never sees it — cannot
- * paraphrase it into a fit/size claim the numeric guard (which only catches
- * verbatim numbers) would miss. Seller-CONFIRMED measurements are kept, so a real
- * sizing question still answers from stored data. Returns the same object when no
- * measurements are present (the common non-garment case), a filtered copy
- * otherwise; the `measurements` key is dropped entirely when none are confirmed.
+ * mirror what the deterministic guard's corpus (`groundingCorpus`) permits, in BOTH
+ * directions: unconfirmed measurement DRAFTS are stripped (a buyer is never shown an
+ * AI estimate the seller hasn't vouched for — same stance as identification flagging;
+ * and, unseen by the model, it cannot paraphrase one into a fit/size claim the numeric
+ * guard would miss), AND each CONFIRMED measurement is reduced to name + value —
+ * `tolerance_in`/`method`/`confirmed` are withheld because the corpus grounds only the
+ * value ("pit to pit 21"), so surfacing the tolerance would license a faithful
+ * band-quoting reply ("21 in ± 1") that the guard then rejects on the standalone band
+ * number, defeating the sizing answer. Returns the same object when no measurements are
+ * present (the common non-garment case), a filtered copy otherwise; the `measurements`
+ * key is dropped entirely when none are confirmed.
  */
 export function groundedFactAttributes(
   attributes: ExtractedAttributes,
-): ExtractedAttributes {
+): GroundedFactAttributes {
   if (attributes.measurements === undefined) return attributes;
-  const confirmed = attributes.measurements.filter((m) => m.confirmed);
-  const next: ExtractedAttributes = { ...attributes };
+  const confirmed: GroundedMeasurementFact[] = attributes.measurements
+    .filter((m) => m.confirmed)
+    .map((m) => ({ name: m.name, value_in: m.value_in }));
+  const next: GroundedFactAttributes = { ...attributes, measurements: undefined };
   if (confirmed.length > 0) next.measurements = confirmed;
   else delete next.measurements;
   return next;
