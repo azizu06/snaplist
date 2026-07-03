@@ -578,7 +578,7 @@ function MeasurementsCard({
                   form="rv-save"
                   type="number"
                   inputMode="decimal"
-                  step="0.25"
+                  step="any"
                   min="0"
                   value={values[f.name] ?? ""}
                   onChange={(e) => onValue(f.name, e.target.value)}
