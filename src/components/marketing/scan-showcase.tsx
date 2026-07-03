@@ -194,10 +194,15 @@ export function ScanShowcase() {
         <span aria-hidden className="absolute bottom-3 right-3 size-5 rounded-br-lg border-b-2 border-r-2 border-white/80 mix-blend-difference" />
 
         {/* scanning beam — re-keyed per photo so the sweep restarts in sync
-            with each crossfade; the output flips exactly when it lands. */}
+            with each crossfade; the output flips exactly when it lands. The
+            track is a size-container (inset:0 over the frame) so the beam can
+            sweep with a GPU-composited transform in `cqh` units instead of
+            animating `top`, which shifted layout (CLS) and hitched frames. */}
         {!reduced && (
-          <div key={active} aria-hidden className="scan-showcase-beam">
-            <span className="scan-showcase-beam-trail" />
+          <div aria-hidden className="scan-showcase-track">
+            <div key={active} className="scan-showcase-beam">
+              <span className="scan-showcase-beam-trail" />
+            </div>
           </div>
         )}
       </div>
