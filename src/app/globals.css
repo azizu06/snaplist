@@ -864,11 +864,21 @@
    sweeps down each hero photo once per cycle (re-keyed per product, duration
    must equal SCAN_MS in scan-showcase.tsx). Animating `top` keeps the trail
    anchored without measuring the frame. */
+/* Size-container over the frame so the beam can sweep with a GPU-composited
+   transform in `cqh` units (1cqh = 1% of the frame height) instead of
+   animating `top`, which layout-shifted the beam (CLS) and hitched frames. */
+.scan-showcase-track {
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  overflow: hidden;
+  pointer-events: none;
+}
 .scan-showcase-beam {
   position: absolute;
   left: 10px;
   right: 10px;
-  top: 2%;
+  top: 0;
   height: 2.5px;
   border-radius: 9999px;
   background: linear-gradient(
@@ -882,6 +892,7 @@
   box-shadow:
     0 0 14px 2px rgba(0, 163, 122, 0.6),
     0 0 38px 6px rgba(0, 163, 122, 0.28);
+  will-change: transform, opacity;
   animation: scan-showcase-sweep 2.1s cubic-bezier(0.45, 0.05, 0.45, 0.95) forwards;
 }
 /* soft gradient trail above the line — the "already scanned" wake */
@@ -896,7 +907,7 @@
 }
 @keyframes scan-showcase-sweep {
   0% {
-    top: 2%;
+    transform: translateY(2cqh);
     opacity: 0;
   }
   8% {
@@ -906,7 +917,7 @@
     opacity: 1;
   }
   100% {
-    top: 96%;
+    transform: translateY(96cqh);
     opacity: 0;
   }
 }
@@ -1039,6 +1050,7 @@
 /* Working-status rows under the skeleton: small iris dots pulsing in a
    staggered wave (delay set inline per row). */
 .scan-think-dot {
+  position: relative;
   width: 6px;
   height: 6px;
   flex-shrink: 0;
@@ -1046,15 +1058,36 @@
   background-color: var(--color-iris);
   animation: scan-think-pulse 1.2s ease-in-out infinite;
 }
+/* Composited glow: a pseudo-element that only fades (opacity) rather than an
+   animated box-shadow (non-composited paint). `animation-delay: inherit` reuses
+   the per-row stagger set inline on the dot so the glow stays in sync. */
+.scan-think-dot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(0, 163, 122, 0.5), transparent 70%);
+  opacity: 0;
+  will-change: opacity;
+  animation: scan-think-glow 1.2s ease-in-out infinite;
+  animation-delay: inherit;
+}
 @keyframes scan-think-pulse {
   0%,
   100% {
     opacity: 0.25;
-    box-shadow: 0 0 0 0 rgba(0, 163, 122, 0);
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 8px 1px rgba(0, 163, 122, 0.45);
+  }
+}
+@keyframes scan-think-glow {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
   }
 }
 
