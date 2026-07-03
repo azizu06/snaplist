@@ -104,6 +104,33 @@ describe("measurements — garment classification", () => {
     expect(isGarment({ category: "electronics" })).toBe(false);
     expect(isGarment({ title: "Nike sweatshirt" })).toBe(true);
   });
+
+  it("a recognized non-garment category VETOES a stray garment word in the title", () => {
+    // A clear non-garment category must not fall through to a title keyword: a
+    // diecast "Blazer", jumper WIRES, and the "Marco Polo" board game are not tops.
+    expect(
+      garmentClassOf({ category: "Toys & collectibles", title: "1969 Chevy Blazer Diecast" }),
+    ).toBeNull();
+    expect(
+      garmentClassOf({ category: "Electronics", title: "Dupont Jumper Wires" }),
+    ).toBeNull();
+    expect(
+      garmentClassOf({ category: "Board games", title: "The Voyages of Marco Polo" }),
+    ).toBeNull();
+    // The veto also holds for brand/model text (blazer diecast with no title).
+    expect(
+      garmentClassOf({ category: "Toys", brand: "Hot Wheels", model: "Chevy Blazer" }),
+    ).toBeNull();
+  });
+
+  it("the veto never blocks a genuine garment", () => {
+    // Category that IS a garment wins outright, even next to a non-garment word.
+    expect(garmentClassOf({ category: "Game Day Jersey", title: "x" })).toBe("top");
+    // Generic/absent clothing categories still fall through to the title.
+    expect(garmentClassOf({ category: "Men's Clothing", title: "Nike Hoodie" })).toBe("top");
+    expect(garmentClassOf({ category: "Apparel", title: "Levi's 501 Jeans" })).toBe("bottom");
+    expect(garmentClassOf({ title: "Vintage Denim Jacket" })).toBe("top");
+  });
 });
 
 describe("measurements — auto-suggest vs tape-gated policy", () => {

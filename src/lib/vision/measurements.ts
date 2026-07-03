@@ -171,6 +171,43 @@ const AMBIGUOUS_BOTTOM_KEYWORDS = ["short", "jean"];
  *  bottom keyword. Stripped before classification so a short-sleeve top stays a top. */
 const SLEEVE_DESCRIPTOR_RE = /\b(?:short|long)[\s-]*sleeve[sd]?\b/g;
 
+/** Hero-domain categories that are DEFINITIVELY not garments (books/media,
+ *  electronics, games/consoles, toys/collectibles, LEGO, diecast, media formats).
+ *  A category that names one of these VETOES the title/brand fall-through in
+ *  `garmentClassOf`: a diecast "Chevy Blazer", "Dupont Jumper Wires", or the
+ *  "Marco Polo" board game must not read as a garment just because its title
+ *  carries a stray top/bottom word. Word-boundary matched like the garment lists. */
+const NON_GARMENT_CATEGORY_KEYWORDS = [
+  "book",
+  "books",
+  "media",
+  "electronic",
+  "electronics",
+  "game",
+  "games",
+  "console",
+  "toy",
+  "toys",
+  "collectible",
+  "collectibles",
+  "figurine",
+  "lego",
+  "puzzle",
+  "diecast",
+  "dvd",
+  "vinyl",
+  "movie",
+  "music",
+];
+
+/** True when free text names a recognized non-garment category (word-boundary
+ *  matched). Used only to VETO the fall-through — never to classify a garment. */
+function isNonGarmentCategory(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const hay = text.toLowerCase();
+  return NON_GARMENT_CATEGORY_KEYWORDS.some((kw) => new RegExp(`\\b${kw}\\b`).test(hay));
+}
+
 /**
  * Classify free text (category / garment type / title) into a garment class, or
  * null if it isn't a garment. Sleeve-length phrases are neutralized first; then
@@ -192,14 +229,20 @@ export function classifyGarment(text: string | null | undefined): GarmentClass |
 
 /**
  * Decide whether an item is a garment worth measuring, and which class. Reads the
- * category first (most reliable), then the title, then brand/model text. Returns
- * null for non-garments so the pipeline skips the extra vision call entirely.
+ * category first (most reliable): if it names a garment, that wins; if it names a
+ * recognized NON-garment (a book, toy, board game, electronic…), that VETOES —
+ * returning null WITHOUT falling through, so a stray "blazer"/"jumper"/"polo" in the
+ * title can't override a clear non-garment category. Only when the category is
+ * absent or garment-ambiguous do we fall through to the title, then brand/model.
+ * Returns null for non-garments so the pipeline skips the extra vision call entirely.
  */
 export function garmentClassOf(
   attributes: Pick<ExtractedAttributes, "category" | "title" | "brand" | "model">,
 ): GarmentClass | null {
+  const fromCategory = classifyGarment(attributes.category);
+  if (fromCategory) return fromCategory;
+  if (isNonGarmentCategory(attributes.category)) return null;
   return (
-    classifyGarment(attributes.category) ??
     classifyGarment(attributes.title) ??
     classifyGarment(`${attributes.brand ?? ""} ${attributes.model ?? ""}`)
   );
