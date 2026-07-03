@@ -515,10 +515,10 @@ type MeasureField = NonNullable<ReviewData["measurements"]>["fields"][number];
  * measurement set as confirmable DRAFTS: the four listing-grade measurements arrive
  * pre-filled with an always-shown tolerance band ("~21 in ± 1"); inseam/sleeve (and
  * other reference-only points) stay blank behind a "lay a tape measure" prompt
- * rather than a guessed number. Nothing is written to item specifics until the
- * seller ticks Confirm — mirroring the confidence-gating philosophy. Fields
- * associate to the Save form by `form="rv-save"`, so they ride the existing save
- * flow and Unsaved-changes bar.
+ * rather than a guessed number. Only measurements the seller ticks Confirm are used
+ * to ground buyer-Q&A replies; unconfirmed drafts are never quoted to a buyer —
+ * mirroring the confidence-gating philosophy. Fields associate to the Save form by
+ * `form="rv-save"`, so they ride the existing save flow and Unsaved-changes bar.
  */
 function MeasurementsCard({
   fields,
@@ -543,10 +543,10 @@ function MeasurementsCard({
       </div>
       <p className="mt-2 text-[13px] leading-relaxed text-muted">
         Estimated flat-lay measurements, in inches. Check each value and tick{" "}
-        <span className="font-medium text-fg-strong">Confirm</span> before it goes in
-        your listing — nothing is added to the item specifics until you do. For
-        sleeve and inseam, lay a tape measure across the garment and re-photograph, or
-        type your own measurement.
+        <span className="font-medium text-fg-strong">Confirm</span> to vouch for it —
+        only measurements you confirm are used to answer buyer questions about sizing;
+        unconfirmed estimates are never quoted to a buyer. For sleeve and inseam, lay a
+        tape measure across the garment and re-photograph, or type your own measurement.
       </p>
 
       <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -686,9 +686,22 @@ export function ReviewView({
     setMeasureConfirmed(initialMeasures.confirmed);
   };
 
+  // Compare measurement values NUMERICALLY: `f.value` is the server value rendered
+  // via trimInches (2dp), while local state holds the raw entry, so a normalizable
+  // decimal ("22.50" → "22.5", "22.0" → "22") must read as unchanged and not pin the
+  // Unsaved-changes bar open after a successful save. Blank/blank and blank/value are
+  // handled by the string equality + both-non-empty guard.
+  const sameMeasureValue = (entered: string, rendered: string) => {
+    const a = entered.trim();
+    const b = rendered.trim();
+    if (a === b) return true;
+    const an = Number(a);
+    const bn = Number(b);
+    return a !== "" && b !== "" && Number.isFinite(an) && Number.isFinite(bn) && an === bn;
+  };
   const measuresDirty = measureFields.some(
     (f) =>
-      (measureValues[f.name] ?? "") !== f.value ||
+      !sameMeasureValue(measureValues[f.name] ?? "", f.value) ||
       (measureConfirmed[f.name] ?? false) !== f.confirmed,
   );
   const dirty =
@@ -904,7 +917,7 @@ export function ReviewView({
           </Card>
 
           {/* Measurements — clothing only (issue #104). Draft measurements the
-              seller confirms before they enter the listing. */}
+              seller confirms to ground buyer-Q&A replies about sizing. */}
           {data.measurements && measureFields.length > 0 ? (
             <MeasurementsCard
               fields={measureFields}

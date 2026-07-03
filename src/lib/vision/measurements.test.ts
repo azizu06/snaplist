@@ -74,6 +74,16 @@ describe("measurements — garment classification", () => {
     expect(classifyGarment("athletic shorts")).toBe("bottom");
   });
 
+  it("reads adjectival 'short' on a top as the top, not a bottom", () => {
+    // "short" as an adjective modifies a top noun — a top keyword must win over the
+    // ambiguous singular "short" (which only classifies a BARE 'short' as a bottom).
+    expect(classifyGarment("Zara Short Trench Coat")).toBe("top");
+    expect(classifyGarment("H&M Short Denim Jacket")).toBe("top");
+    expect(classifyGarment("Short Floral Dress")).toBe("top");
+    // ...while material/adjective + plural shorts stays a bottom (jersey is a TOP kw).
+    expect(classifyGarment("jersey shorts")).toBe("bottom");
+  });
+
   it("garmentClassOf reads category first, then title, then brand/model", () => {
     expect(garmentClassOf({ category: "Clothing hoodie", title: "x" })).toBe("top");
     expect(garmentClassOf({ title: "Wrangler jeans" })).toBe("bottom");
@@ -132,6 +142,31 @@ describe("measurements — gateMeasurements policy", () => {
     expect(names).toContain("waist");
     expect(names).toContain("rise");
     expect(names).not.toContain("inseam"); // no tape → never a guessed inseam
+  });
+
+  it("forces prior-based + a floored band when the model mislabels method without a tape", () => {
+    // No scale reference, yet the model claims reference-scaled with a sub-inch band.
+    // The gate must not pass that false precision through: without a tape it is a
+    // prior-based estimate and the band floors to ±1in.
+    const res = response({
+      scaleReferenceFound: false,
+      measurements: [m("pit_to_pit", 22, "reference-scaled", 0.5)],
+    });
+    const gated = gateMeasurements(res, "top");
+    const pit = gated.find((g) => g.name === "pit_to_pit")!;
+    expect(pit.method).toBe("prior-based");
+    expect(pit.tolerance_in).toBe(1);
+  });
+
+  it("keeps the model's method + band for a real tape-scaled reading", () => {
+    const res = response({
+      scaleReferenceFound: true,
+      scaleReferenceKind: "tape measure",
+      measurements: [m("pit_to_pit", 22, "reference-scaled", 0.5)],
+    });
+    const pit = gateMeasurements(res, "top").find((g) => g.name === "pit_to_pit")!;
+    expect(pit.method).toBe("reference-scaled");
+    expect(pit.tolerance_in).toBe(0.5);
   });
 
   it("allows inseam/sleeve WHEN a tape is visible", () => {

@@ -144,7 +144,6 @@ const BOTTOM_KEYWORDS = [
   "jeans",
   "jean",
   "shorts",
-  "short",
   "skirt",
   "trousers",
   "trouser",
@@ -161,6 +160,13 @@ const BOTTOM_KEYWORDS = [
   "bottoms",
 ];
 
+/** Singular "short" is ambiguous: on its own it names a pair of shorts (a bottom,
+ *  e.g. "Nike Dri-FIT Short"), but as an adjective it modifies a TOP ("short trench
+ *  coat", "short denim jacket", "short floral dress"). It only decides a class when
+ *  no top keyword claims the text first, so it is matched LAST — plural "shorts"
+ *  stays an unambiguous bottom keyword above. */
+const AMBIGUOUS_BOTTOM_KEYWORDS = ["short"];
+
 /** Sleeve-length descriptors ("short sleeve", "long-sleeved") name a top's sleeve,
  *  not a garment class — the "short" here would otherwise false-match the shorts
  *  bottom keyword. Stripped before classification so a short-sleeve top stays a top. */
@@ -168,9 +174,11 @@ const SLEEVE_DESCRIPTOR_RE = /\b(?:short|long)[\s-]*sleeve[sd]?\b/g;
 
 /**
  * Classify free text (category / garment type / title) into a garment class, or
- * null if it isn't a garment. Sleeve-length phrases are neutralized first; bottoms
- * are then matched before tops, and both lists are word-boundary matched so "topaz"
- * or "shirtless brand" don't false-positive.
+ * null if it isn't a garment. Sleeve-length phrases are neutralized first; then
+ * unambiguous bottoms are matched, then tops, and only then the ambiguous singular
+ * "short" (so an adjectival "short" on a top like "short trench coat" reads as the
+ * top, while a bare "short" still reads as a bottom). All lists are word-boundary
+ * matched so "topaz" or "shirtless brand" don't false-positive.
  */
 export function classifyGarment(text: string | null | undefined): GarmentClass | null {
   if (!text) return null;
@@ -178,6 +186,7 @@ export function classifyGarment(text: string | null | undefined): GarmentClass |
   const hit = (kw: string) => new RegExp(`\\b${kw}\\b`).test(hay);
   if (BOTTOM_KEYWORDS.some(hit)) return "bottom";
   if (TOP_KEYWORDS.some(hit)) return "top";
+  if (AMBIGUOUS_BOTTOM_KEYWORDS.some(hit)) return "bottom";
   return null;
 }
 
@@ -332,11 +341,17 @@ export function gateMeasurements(
     if (needsReference(m.name) && !tape) continue; // REFUSE — no tape, no guess
     if (!Number.isFinite(m.value_in) || m.value_in <= 0) continue;
     seen.add(m.name);
+    const modelTolerance =
+      Number.isFinite(m.tolerance_in) && m.tolerance_in > 0 ? m.tolerance_in : 1;
+    // Without a visible tape EVERY kept measurement is a prior-based estimate — the
+    // model's own `method`/`tolerance_in` are not trusted to claim reference-scaled
+    // precision (or a sub-inch band) it cannot ground, which would show the seller
+    // false precision. Force prior-based and floor the band to ±1in.
     out.push({
       name: m.name,
       value_in: m.value_in,
-      tolerance_in: Number.isFinite(m.tolerance_in) && m.tolerance_in > 0 ? m.tolerance_in : 1,
-      method: m.method,
+      tolerance_in: tape ? modelTolerance : Math.max(modelTolerance, 1),
+      method: tape ? m.method : "prior-based",
       confirmed: false,
     });
   }
