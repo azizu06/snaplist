@@ -100,7 +100,7 @@ const STEPS = [
 const FAQ = [
   {
     q: "Which marketplaces does SnapList support?",
-    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape to post; read-only research of public eBay sold pages is used only to inform pricing.",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. SnapList reads public eBay sold and completed pages for price research, but never scrapes to post. Transactional publishing only happens through the eBay adapter after you explicitly choose Publish.",
   },
   {
     q: "How accurate is the pricing?",
