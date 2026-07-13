@@ -11,6 +11,7 @@ import {
   parseIdentityCorrections,
   regenerateReviewListing,
 } from "@/lib/pipeline/review-regeneration";
+import { isReviewRegenerationBlocked } from "@/lib/pipeline/review-regeneration-policy";
 import { buildPredictionLogRow } from "@/lib/pipeline/prediction-log";
 import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
 import {
@@ -298,6 +299,27 @@ export async function sharpenEstimate(formData: FormData) {
   }
   if (item.review_revision !== expectedReviewRevision) {
     backTo(id, "This review changed. Reload and try again.");
+  }
+
+  const { data: ebayListings, error: listingReadError } = await supabase
+    .from("listings")
+    .select("status, ebay_listing_id, ebay_status")
+    .eq("item_id", id)
+    .eq("platform", "ebay");
+  if (listingReadError) {
+    reportServerError("review.sharpen.listings", listingReadError);
+    backTo(id, "Failed to re-price. Please try again.");
+  }
+  if (
+    (ebayListings ?? []).some((listing) =>
+      isReviewRegenerationBlocked({
+        status: listing.status as string | null,
+        ebayListingId: listing.ebay_listing_id as string | null,
+        ebayStatus: listing.ebay_status as string | null,
+      }),
+    )
+  ) {
+    backTo(id, "A published listing cannot be changed from review.");
   }
 
   // The prior run's model + autopilot switch ride forward so the new log stays

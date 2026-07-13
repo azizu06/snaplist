@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   regenerate: vi.fn(),
   rateLimitAllows: vi.fn(async () => true),
   recordPipelineRunAndMaybeAlert: vi.fn(async () => undefined),
+  repriceWithSpecs: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
@@ -35,10 +36,13 @@ vi.mock("@/lib/abuse", () => ({
   rateLimitAllows: mocks.rateLimitAllows,
   recordPipelineRunAndMaybeAlert: mocks.recordPipelineRunAndMaybeAlert,
 }));
+vi.mock("@/lib/pipeline/reprice", () => ({
+  repriceWithSpecs: mocks.repriceWithSpecs,
+}));
 vi.mock("@/lib/observability", () => ({ logEvent: vi.fn() }));
 vi.mock("@/lib/sentry", () => ({ reportServerError: vi.fn() }));
 
-import { regenerateCorrectedIdentity, saveReview } from "./actions";
+import { regenerateCorrectedIdentity, saveReview, sharpenEstimate } from "./actions";
 
 function correctionForm(): FormData {
   const form = new FormData();
@@ -146,5 +150,48 @@ describe("saveReview", () => {
         p_condition: "good",
       }),
     );
+  });
+});
+
+describe("sharpenEstimate", () => {
+  it("stops before paid pricing work when any eBay row is non-editable", async () => {
+    const itemFilters = {
+      eq: () => itemFilters,
+      maybeSingle: async () => ({
+        data: {
+          id: "item-1",
+          attributes: { brand: "Sony", category: "electronics" },
+          review_revision: "00000000-0000-4000-8000-000000000001",
+        },
+        error: null,
+      }),
+    };
+    const listingFilters = {
+      eq: () => listingFilters,
+      then: (resolve: (value: unknown) => unknown) =>
+        Promise.resolve({
+          data: [
+            {
+              status: "draft",
+              ebay_listing_id: "v1|1234567890|0",
+              ebay_status: "published",
+            },
+          ],
+          error: null,
+        }).then(resolve),
+    };
+    mocks.createClient.mockResolvedValueOnce({
+      from: (table: string) => {
+        if (table === "items") return { select: () => itemFilters };
+        if (table === "listings") return { select: () => listingFilters };
+        throw new Error(`unexpected table ${table}`);
+      },
+    });
+
+    const form = correctionForm();
+    form.set("detail", "512GB");
+
+    await expect(sharpenEstimate(form)).rejects.toThrow(/REDIRECT:/);
+    expect(mocks.repriceWithSpecs).not.toHaveBeenCalled();
   });
 });

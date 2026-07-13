@@ -46,6 +46,18 @@ export interface PublishOptions {
   signedUrlTtlSeconds?: number;
 }
 
+interface PublishClaimSnapshot {
+  claimId: string;
+  listingId: string;
+  itemId: string;
+  title: string | null;
+  description: string | null;
+  copy: Record<string, unknown>;
+  condition: string | null;
+  photos: string[];
+  price: number | string | null;
+}
+
 /**
  * Fallback leaf category when EBAY_DEFAULT_CATEGORY_ID is unset: eBay's
  * "Everything Else > Other" — the generic catch-all. Real category resolution
@@ -167,56 +179,15 @@ export async function publishListingToEbay(
     };
   }
 
-  // 3. Pull the item (condition + photos) and the run's price.
+  // 3. Pull the current review token used by the atomic publish claim.
   const { data: item, error: itemErr } = await supabase
     .from("items")
-    .select("condition, photos, review_revision")
+    .select("review_revision")
     .eq("id", listing.item_id)
     .maybeSingle();
   if (itemErr || !item) {
     throw new Error(
       `Failed to load item for listing ${listingId}: ${itemErr?.message ?? "not found"}`,
-    );
-  }
-
-  const { data: log, error: logErr } = await supabase
-    .from("prediction_logs")
-    .select("price")
-    .eq("item_id", listing.item_id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (logErr) {
-    throw new Error(`Failed to load price for listing ${listingId}: ${logErr.message}`);
-  }
-  const price = log?.price == null ? NaN : Number(log.price);
-  if (!Number.isFinite(price) || price <= 0) {
-    throw new PublishValidationError(
-      `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
-    );
-  }
-
-  // 4. Sign the private photo paths so eBay can fetch (and rehost) the images.
-  const photoPaths = (item.photos as string[] | null) ?? [];
-  const imageUrls = await signPhotoUrls(
-    supabase,
-    photoPaths,
-    options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
-  );
-
-  // eBay requires at least one image, so an empty set is a GUARANTEED failed
-  // publish. Fail fast LOCALLY — before the adapter makes any eBay call (no
-  // partial remote writes) — through the same failed-publish path an adapter
-  // error takes, with a user-attributable reason.
-  if (imageUrls.length === 0) {
-    await markPublishFailed(supabase, listingId);
-    throw new PublishValidationError(
-      photoPaths.length === 0
-        ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
-          "Add a photo to the item before publishing."
-        : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
-          "signed into a fetchable URL, and eBay requires at least one image. " +
-          "Re-upload the item's photos before publishing.",
     );
   }
 
@@ -237,19 +208,6 @@ export async function publishListingToEbay(
     );
   }
 
-  // 5. Map onto the provider shape (pure; throws on unpublishable input).
-  const request = toEbayPublishRequest({
-    listingId,
-    title: (listing.title as string | null) ?? "",
-    description: (listing.description as string | null) ?? "",
-    copy: (listing.copy as Record<string, unknown> | null) ?? {},
-    condition: item.condition as string | null,
-    price,
-    imageUrls,
-    categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
-    currency,
-  });
-
   const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
     p_listing_id: listingId,
     p_expected_run_id: (listing.run_id as string | null) ?? null,
@@ -263,10 +221,60 @@ export async function publishListingToEbay(
     }
     throw new Error(`Failed to start eBay publish: ${claimErr.message}`);
   }
-  if (typeof claimData !== "string" || claimData.length === 0) {
-    throw new Error("Failed to start eBay publish: publish claim id was not returned.");
+  const claim = parsePublishClaimSnapshot(claimData);
+  if (!claim) {
+    throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
-  const claimId = claimData;
+  const claimId = claim.claimId;
+  const price = claim.price == null ? NaN : Number(claim.price);
+  if (!Number.isFinite(price) || price <= 0) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw new PublishValidationError(
+      `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
+    );
+  }
+
+  const photoPaths = claim.photos;
+  let imageUrls: string[];
+  try {
+    imageUrls = await signPhotoUrls(
+      supabase,
+      photoPaths,
+      options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
+    );
+  } catch (error) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw error;
+  }
+  if (imageUrls.length === 0) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw new PublishValidationError(
+      photoPaths.length === 0
+        ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
+          "Add a photo to the item before publishing."
+        : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
+          "signed into a fetchable URL, and eBay requires at least one image. " +
+          "Re-upload the item's photos before publishing.",
+    );
+  }
+
+  let request: ReturnType<typeof toEbayPublishRequest>;
+  try {
+    request = toEbayPublishRequest({
+      listingId,
+      title: claim.title ?? "",
+      description: claim.description ?? "",
+      copy: claim.copy,
+      condition: claim.condition,
+      price,
+      imageUrls,
+      categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
+      currency,
+    });
+  } catch (error) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw error;
+  }
 
   // 6. Publish through the adapter. An ADAPTER failure is persisted as
   //    ebay_status='failed' (then rethrown); persistence problems after a
@@ -314,6 +322,27 @@ export async function publishListingToEbay(
     ebayStatus: "published",
     alreadyPublished: false,
   };
+}
+
+function parsePublishClaimSnapshot(value: unknown): PublishClaimSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.claimId !== "string" ||
+    typeof snapshot.listingId !== "string" ||
+    typeof snapshot.itemId !== "string" ||
+    (snapshot.title !== null && typeof snapshot.title !== "string") ||
+    (snapshot.description !== null && typeof snapshot.description !== "string") ||
+    !snapshot.copy ||
+    typeof snapshot.copy !== "object" ||
+    Array.isArray(snapshot.copy) ||
+    (snapshot.condition !== null && typeof snapshot.condition !== "string") ||
+    !Array.isArray(snapshot.photos) ||
+    !snapshot.photos.every((photo) => typeof photo === "string")
+  ) {
+    return null;
+  }
+  return snapshot as unknown as PublishClaimSnapshot;
 }
 
 /**

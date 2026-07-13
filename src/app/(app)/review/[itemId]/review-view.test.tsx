@@ -155,6 +155,7 @@ describe("review identity correction UI", () => {
       );
       expect(html).not.toContain("Correct item identity");
       expect(html).not.toContain("Re-price &amp; regenerate");
+      expect(html).not.toContain("Sharpen the estimate");
     },
   );
 });

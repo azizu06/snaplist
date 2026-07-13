@@ -386,6 +386,34 @@ describe("review identity regeneration transaction + RLS", () => {
     );
   });
 
+  it("rejects regeneration when any associated eBay row is authoritative live state", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "secondary-authoritative-live");
+    const { error: extraError } = await userA.client.from("listings").insert({
+      user_id: userA.id,
+      item_id: seeded.itemId,
+      platform: "ebay",
+      title: "Older live listing",
+      description: "Already published elsewhere",
+      copy: {},
+      status: "draft",
+      ebay_listing_id: "v1|older-live|0",
+      ebay_status: "published",
+    });
+    expect(extraError).toBeNull();
+
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(
+        commitFor(
+          seeded.itemId,
+          seeded.listingId,
+          crypto.randomUUID(),
+          seeded.reviewRevision,
+        ),
+      ),
+    ).rejects.toThrow(/editable eBay listing not found/i);
+  });
+
   it("checks and advances one review revision while ordinary save preserves identity", async () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "shared-review-revision");
@@ -580,7 +608,7 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(logs ?? []).toHaveLength(0);
   });
 
-  it("advances the review revision when publishing is claimed", async () => {
+  it("advances write exclusion without invalidating export content on publish claim", async () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "publish-revision");
     const claim = await userA.client.rpc("begin_ebay_publish", {
@@ -592,10 +620,30 @@ describe("review identity regeneration transaction + RLS", () => {
 
     const { data: item } = await userA.client
       .from("items")
-      .select("review_revision")
+      .select("review_revision, review_content_revision")
       .eq("id", seeded.itemId)
       .single();
-    expect(item?.review_revision).toBe(claim.data);
+    expect(item?.review_revision).toBe(claim.data.claimId);
+    expect(item?.review_content_revision).toBe(seeded.reviewRevision);
+    expect(claim.data).toMatchObject({
+      listingId: seeded.listingId,
+      title: "Old publish-revision listing",
+      description: "Old coherent copy",
+    });
+
+    const exportAfterClaim = await userA.client.rpc("persist_export_packs", {
+      p_item_id: seeded.itemId,
+      p_source_review_revision: seeded.reviewRevision,
+      p_packs: [
+        {
+          platform: "facebook",
+          title: "Still current pack",
+          description: "Publish did not change review content",
+          copy: { copyBlock: "Still current pack" },
+        },
+      ],
+    });
+    expect(exportAfterClaim.error).toBeNull();
 
     const staleSave = await userA.client.rpc("save_review_edits", {
       p_item_id: seeded.itemId,
@@ -814,7 +862,7 @@ describe("review identity regeneration transaction + RLS", () => {
       p_expected_review_revision: seeded.reviewRevision,
     });
     expect(first.error).toBeNull();
-    expect(typeof first.data).toBe("string");
+    expect(typeof first.data?.claimId).toBe("string");
 
     const overlapping = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
@@ -834,16 +882,16 @@ describe("review identity regeneration transaction + RLS", () => {
     const recovered = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
       p_expected_run_id: null,
-      p_expected_review_revision: first.data as string,
+      p_expected_review_revision: first.data.claimId as string,
     });
     expect(recovered.error).toBeNull();
-    expect(recovered.data).not.toBe(first.data);
+    expect(recovered.data.claimId).not.toBe(first.data.claimId);
 
     const { data: staleFinalize, error: staleFinalizeError } = await userA.client
       .from("listings")
       .update({ ebay_status: "published" })
       .eq("id", seeded.listingId)
-      .eq("ebay_publish_claim_id", first.data as string)
+      .eq("ebay_publish_claim_id", first.data.claimId as string)
       .select("id");
     expect(staleFinalizeError).toBeNull();
     expect(staleFinalize ?? []).toHaveLength(0);
@@ -854,6 +902,6 @@ describe("review identity regeneration transaction + RLS", () => {
       .eq("id", seeded.listingId)
       .single();
     expect(current?.ebay_status).toBe("publishing");
-    expect(current?.ebay_publish_claim_id).toBe(recovered.data);
+    expect(current?.ebay_publish_claim_id).toBe(recovered.data.claimId);
   });
 });

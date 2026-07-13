@@ -32,13 +32,32 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(/ebay_status\s+is\s+distinct\s+from\s+'published'/i);
   });
 
-  it("makes publish acquisition advance the shared review revision", () => {
+  it("makes publish acquisition return one locked publish snapshot", () => {
     const publishFunction = migration.match(
       /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish[\s\S]*?\$\$;/i,
     )?.[0];
     expect(publishFunction).toMatch(/p_expected_review_revision\s+uuid/i);
+    expect(publishFunction).toMatch(/returns\s+jsonb/i);
     expect(publishFunction).toMatch(
       /update\s+public\.items[\s\S]*review_revision\s*=\s*v_claim_id[\s\S]*review_revision\s+is\s+not\s+distinct\s+from\s+p_expected_review_revision/i,
+    );
+    expect(publishFunction).toMatch(/jsonb_build_object[\s\S]*'title'/i);
+    expect(publishFunction).toMatch(/jsonb_build_object[\s\S]*'price'/i);
+  });
+
+  it("keeps publish exclusion separate from export content revisions", () => {
+    expect(migration).toMatch(
+      /alter\s+table\s+public\.items[\s\S]*review_content_revision\s+uuid/i,
+    );
+    const publishFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(publishFunction).not.toMatch(/review_content_revision\s*=/i);
+    const exportFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.persist_export_packs[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(exportFunction).toMatch(
+      /review_content_revision\s+is\s+not\s+distinct\s+from\s+p_source_review_revision/i,
     );
   });
 
@@ -46,7 +65,8 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(/ebay_publish_claim_id\s+uuid/i);
     expect(migration).toMatch(/ebay_publish_claimed_at\s+timestamptz/i);
     expect(migration).toMatch(/ebay_publish_claimed_at\s*<\s*now\(\)\s*-\s*interval/i);
-    expect(migration).toMatch(/returning\s+ebay_publish_claim_id\s+into/i);
+    expect(migration).toMatch(/ebay_publish_claim_id\s*=\s*v_claim_id/i);
+    expect(migration).toMatch(/'claimId'\s*,\s*v_claim_id/i);
   });
 
   it("commits regeneration only against the listing version that was loaded", () => {
@@ -93,6 +113,18 @@ describe("review regeneration migration security guards", () => {
     }
   });
 
+  it("locks and checks every associated eBay row before regeneration", () => {
+    const regenerationFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.regenerate_review_listing[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(regenerationFunction).toMatch(
+      /from\s+public\.listings[\s\S]*item_id\s*=\s*p_item_id[\s\S]*platform\s*=\s*'ebay'[\s\S]*for\s+update/i,
+    );
+    expect(regenerationFunction).toMatch(
+      /if\s+exists\s*\([\s\S]*item_id\s*=\s*p_item_id[\s\S]*ebay_listing_id\s+is\s+not\s+null/i,
+    );
+  });
+
   it("versions export packs and rejects obsolete in-flight persistence", () => {
     expect(migration).toMatch(
       /alter\s+table\s+public\.listings[\s\S]*source_review_revision\s+uuid/i,
@@ -101,7 +133,7 @@ describe("review regeneration migration security guards", () => {
       /create\s+or\s+replace\s+function\s+public\.persist_export_packs/i,
     );
     expect(migration).toMatch(
-      /review_revision\s+is\s+not\s+distinct\s+from\s+p_source_review_revision/i,
+      /review_content_revision\s+is\s+not\s+distinct\s+from\s+p_source_review_revision/i,
     );
   });
 

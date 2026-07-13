@@ -6,6 +6,34 @@
 alter table public.items
   add column if not exists review_revision uuid not null default gen_random_uuid();
 
+alter table public.items
+  add column if not exists review_content_revision uuid;
+
+update public.items
+set review_content_revision = review_revision
+where review_content_revision is null;
+
+create or replace function public.initialize_review_content_revision()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.review_content_revision is null then
+    new.review_content_revision := new.review_revision;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists initialize_review_content_revision on public.items;
+create trigger initialize_review_content_revision
+before insert on public.items
+for each row execute function public.initialize_review_content_revision();
+
+alter table public.items
+  alter column review_content_revision set not null;
+
 alter table public.listings
   add column if not exists ebay_publish_claim_id uuid,
   add column if not exists ebay_publish_claimed_at timestamptz,
@@ -15,13 +43,14 @@ create unique index if not exists listings_source_review_revision_idx
   on public.listings (item_id, platform, source_review_revision);
 
 drop function if exists public.begin_ebay_publish(uuid, uuid);
+drop function if exists public.begin_ebay_publish(uuid, uuid, uuid);
 
 create or replace function public.begin_ebay_publish(
   p_listing_id uuid,
   p_expected_run_id uuid,
   p_expected_review_revision uuid
 )
-returns uuid
+returns jsonb
 language plpgsql
 security invoker
 set search_path = ''
@@ -30,6 +59,12 @@ declare
   v_user_id text := public.clerk_user_id();
   v_claim_id uuid := gen_random_uuid();
   v_item_id uuid;
+  v_condition text;
+  v_photos text[];
+  v_title text;
+  v_description text;
+  v_copy jsonb;
+  v_price numeric;
 begin
   if v_user_id is null or v_user_id = '' then
     raise exception using errcode = '42501', message = 'Authentication required.';
@@ -51,7 +86,8 @@ begin
   set review_revision = v_claim_id
   where id = v_item_id
     and user_id = v_user_id
-    and review_revision is not distinct from p_expected_review_revision;
+    and review_revision is not distinct from p_expected_review_revision
+  returning condition, photos into v_condition, v_photos;
   if not found then
     raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';
   end if;
@@ -72,13 +108,32 @@ begin
       or ebay_publish_claimed_at is null
       or ebay_publish_claimed_at < now() - interval '15 minutes'
     )
-  returning ebay_publish_claim_id into v_claim_id;
+  returning title, description, copy
+  into v_title, v_description, v_copy;
   if not found then
     raise exception using
       errcode = 'P0002',
       message = 'Editable eBay listing changed or is already publishing or published.';
   end if;
-  return v_claim_id;
+  select price
+  into v_price
+  from public.prediction_logs
+  where item_id = v_item_id
+    and user_id = v_user_id
+  order by created_at desc
+  limit 1;
+
+  return jsonb_build_object(
+    'claimId', v_claim_id,
+    'listingId', p_listing_id,
+    'itemId', v_item_id,
+    'title', v_title,
+    'description', v_description,
+    'copy', coalesce(v_copy, '{}'::jsonb),
+    'condition', v_condition,
+    'photos', coalesce(to_jsonb(v_photos), '[]'::jsonb),
+    'price', v_price
+  );
 end;
 $$;
 
@@ -171,11 +226,35 @@ begin
     raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';
   end if;
 
+  perform 1
+  from public.listings
+  where item_id = p_item_id
+    and user_id = v_user_id
+    and platform = 'ebay'
+  for update;
+
+  if exists (
+    select 1
+    from public.listings
+    where item_id = p_item_id
+      and user_id = v_user_id
+      and platform = 'ebay'
+      and (
+        status is not distinct from 'published'
+        or ebay_listing_id is not null
+        or ebay_status is not distinct from 'publishing'
+        or ebay_status is not distinct from 'published'
+      )
+  ) then
+    raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
+  end if;
+
   update public.items
   set attributes = p_attributes,
       condition = p_condition,
       identification = p_identification,
-      review_revision = p_run_id
+      review_revision = p_run_id,
+      review_content_revision = p_run_id
   where id = p_item_id and user_id = v_user_id;
 
   -- Updating in place avoids leaving an older queued/stale draft publishable. A
@@ -297,7 +376,8 @@ begin
       end,
       price_override = p_price_override,
       cost_basis = p_cost_basis,
-      review_revision = p_new_review_revision
+      review_revision = p_new_review_revision,
+      review_content_revision = p_new_review_revision
   where id = p_item_id
     and user_id = v_user_id
     and review_revision is not distinct from p_expected_review_revision;
@@ -420,7 +500,8 @@ begin
 
   update public.items
   set attributes = p_attributes,
-      review_revision = p_run_id
+      review_revision = p_run_id,
+      review_content_revision = p_run_id
   where id = p_item_id
     and user_id = v_user_id
     and review_revision is not distinct from p_expected_review_revision;
@@ -523,7 +604,7 @@ begin
   from public.items
   where id = p_item_id
     and user_id = v_user_id
-    and review_revision is not distinct from p_source_review_revision
+    and review_content_revision is not distinct from p_source_review_revision
   for update;
   if not found then
     raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';

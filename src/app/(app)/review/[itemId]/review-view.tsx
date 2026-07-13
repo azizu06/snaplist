@@ -1002,7 +1002,10 @@ function ReviewViewState({
   // HIGH band starts at 0.75) and there's a priced suggestion to sharpen. Pure UI
   // gate; the action re-validates and re-prices server-side.
   const canSharpen =
-    data.suggested != null && data.confidence != null && data.confidence < 0.75;
+    !regenerationBlocked &&
+    data.suggested != null &&
+    data.confidence != null &&
+    data.confidence < 0.75;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pt-6 pb-28 sm:px-6 sm:pb-24">
