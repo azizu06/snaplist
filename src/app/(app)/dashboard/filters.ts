@@ -15,7 +15,7 @@ export const DASHBOARD_FILTERS: ReadonlyArray<{
   // Shopify's Products tab set: All · Active · Draft · Archived. Active = live
   // on eBay (published). Draft folds in everything pre-live and the states that
   // need the seller (a normal draft, one that errored, plus the automatic
-  // Processing/Scheduled steps) — nothing live, nothing archived.
+  // Processing/Ready-to-publish steps) — nothing live, nothing archived.
   { key: "active", label: "Active", statuses: ["published"] },
   { key: "draft", label: "Draft", statuses: ["draft", "draft_failed", "failed", "new", "queued"] },
   // Archived = hidden from the working set (Shopify pattern). Shown in "All"

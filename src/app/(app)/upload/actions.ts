@@ -169,10 +169,9 @@ export async function uploadAndProcess(formData: FormData) {
 }
 
 /**
- * Toggle the master autopilot switch (issue #12: "autopilot can be turned off
- * entirely"). A plain form action: the form posts `enabled` = "true" | "false";
- * the setting persists per-user in `user_settings` (RLS-scoped upsert) and is
- * read back on every upload before the pipeline runs.
+ * Toggle the legacy-named readiness preference. It only controls whether high-
+ * confidence runs are marked ready; publishing remains an explicit action. A
+ * plain form action posts `enabled` = "true" | "false" and persists per user.
  */
 export async function setAutopilotSetting(formData: FormData) {
   const supabase = await createClient();
@@ -185,12 +184,12 @@ export async function setAutopilotSetting(formData: FormData) {
   } catch (err) {
     reportServerError("settings.autopilot", err);
     redirect(
-      `/settings?error=${encodeURIComponent("Couldn't update autopilot. Please try again.")}`,
+      `/settings?error=${encodeURIComponent("Couldn't update publish eligibility. Please try again.")}`,
     );
   }
 
   // The switch lives on the Settings surface (issue #40, X-11 — moved out of
-  // the upload footer so the auto-publish consequence can be explained).
+  // the upload footer so the readiness consequence can be explained).
   revalidatePath("/settings");
   redirect("/settings");
 }

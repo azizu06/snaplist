@@ -38,9 +38,9 @@ available**, cited web or depreciation evidence when those tiers resolve, or a c
 terminal LLM-only estimate that may be uncited, then generates platform-specific listing copy and
 shows it for review/edit. It captures **hauls
 in bulk** (many items in one session), tracks **cost basis → net profit** per item, and can
-**auto-reprice** listings that go stale. High-confidence items can post automatically
-(confidence-gated autopilot); low-confidence ones queue for human review. Listings post to eBay
-(real, behind an adapter) and generate copy-paste export packs for Facebook Marketplace and Mercari.
+**auto-reprice** listings that go stale. The confidence gate marks high-confidence items **ready to
+publish** and sends lower-confidence ones to review; every eBay publish remains an explicit seller
+action through the adapter. Listings also generate copy-paste export packs for Facebook Marketplace and Mercari.
 A buyer-Q&A agent drafts grounded replies the seller approves before sending.
 
 SnapList is a **seller's control surface**, not a marketplace — payment, checkout, and shipping stay
@@ -76,12 +76,12 @@ on eBay. Buyers never see SnapList.
     re-price and regenerate from those facts, so that I control the final listing without mixing
     stale identity, price, confidence, or copy.
 
-**Review, approval & autopilot**
+**Review, approval & publish eligibility**
 20. As a seller, I want to review and approve a listing before it posts, so that nothing goes live without my consent.
-21. As a seller, I want high-confidence items to be eligible for automatic posting, so that I save time on the easy cases.
-22. As a seller, I want low-confidence items to queue for my review instead of auto-posting, so that mistakes don't go live.
-23. As a seller, I want to see *why* an item was auto-posted or queued (the confidence signals), so that the autopilot is transparent.
-24. As a seller, I want to turn autopilot off entirely, so that I can keep a human in the loop for everything.
+21. As a seller, I want high-confidence items marked ready to publish, so that the easy cases stand out.
+22. As a seller, I want low-confidence items sent to review, so that mistakes do not go live.
+23. As a seller, I want to see *why* an item was marked ready or sent to review (the confidence signals), so that the gate is transparent.
+24. As a seller, I want to turn ready-to-publish eligibility off entirely, so that every item stays in the review flow.
 
 **Posting & export**
 25. As a seller, I want to publish a listing to eBay, so that it's actually for sale.
@@ -166,12 +166,12 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 - **Search providers:** Tavily primary (clean LLM-ready content), Exa secondary (neural search). Both keys already held.
 - Handles the "found nothing useful" path by falling through to the depreciation / LLM-only tier.
 
-### Confidence (signature feature: confidence-gated autopilot)
+### Confidence (signature feature: confidence-gated publish eligibility)
 - **Signal-based composite, NOT LLM self-report.** Inputs:
   - which pricing tier fired (ISBN > tight web comps > wide web comps > depreciation > LLM-only),
   - **comp agreement** (variance/dispersion of found prices — tight cluster = confident),
   - **identification completeness** (brand + model resolved? barcode decoded cleanly? category unambiguous?).
-- Autopilot gate = threshold on the composite. High → eligible to auto-post; low → queue for review. Autopilot is toggleable off. The signals are surfaced to the user for transparency.
+- Publish eligibility gate = threshold on the composite. High → marked ready to publish; low → review. The preference is toggleable off. Eligibility never invokes the eBay adapter; the seller explicitly chooses **Publish to eBay**. The signals are surfaced for transparency.
 - A seller-triggered identity correction is always a pre-publish, human-controlled run: it
   recomputes the composite but resets the regenerated eBay listing to `draft` and never auto-posts.
 
@@ -181,7 +181,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Bulk / haul capture (reseller volume)
 - **Batch capture is a first-class flow, not a bolt-on.** A reseller can stage many items in one session — photograph item, "next item", repeat — then process the whole haul at once. This is the volume path the reseller ICP needs; single-item capture remains the simple default.
-- **Same pipeline per item, no accuracy shortcut.** Each staged item runs the *identical* identify → price (sold-comps routing) → generate pipeline and lands as its own reviewable draft with its own confidence. Bulk is a capture/queueing convenience; it never fans out to a cheaper or shared prediction. Confidence-gated autopilot still applies per item.
+- **Same pipeline per item, no accuracy shortcut.** Each staged item runs the *identical* identify → price (sold-comps routing) → generate pipeline and lands as its own reviewable draft with its own confidence. Bulk is a capture/queueing convenience; it never fans out to a cheaper or shared prediction. Confidence-gated publish eligibility still applies per item; publishing remains manual.
 - Complements the reseller-facing surfaces already shipped: **cost-basis → net-profit** tracking per item and scheduled **stale-inventory auto-repricing** (both env-configurable, both opt-in where they touch money or posting).
 
 ### Listing generation (per-platform)
@@ -283,6 +283,6 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 ### Phase sequencing (tracer-bullet, not rigid)
 - **Phase 0 — setup:** repo, Next.js + TS, Supabase (Auth + Postgres + pgvector + Storage), env-config, secrets, OpenAI + Tavily/Exa keys, eBay sandbox keys.
 - **Phase 1 — core demo (centerpiece):** photo → vision identify + attributes → pricing (start with most-reliable tier, widen) → generated listing → review/edit UI → persist. Behind Auth + RLS, deployed early.
-- **Phase 2 — agentic:** confidence-gated autopilot; buyer-Q&A agent on simulated messages + Realtime inbox.
+- **Phase 2 — agentic:** confidence-gated publish eligibility; buyer-Q&A agent on simulated messages + Realtime inbox.
 - **Phase 3 — posting + export:** eBay Sell API publish (sandbox); FB Marketplace + Mercari export packs.
 - **Phase 4 — go real + polish:** production checklist (account-deletion endpoint, per-user OAuth, credential flip), pgvector eval polish, eval harness in CI, Docker/observability (as Boot.dev lands), README.

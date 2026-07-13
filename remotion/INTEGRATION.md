@@ -54,8 +54,8 @@ Poster extraction example:
   verified tab clicks to Facebook Marketplace (casual/local, copy-paste note)
   and Mercari (short title, hashtag chips, shipping line). Ends
   “3 marketplaces ready”.
-- **step-publish** — review screen: checklist ticks, amber autopilot gate
-  (“only 74% sure, so it waits for your OK”), verified Publish click →
+- **step-publish** — review screen: checklist ticks, amber publish-eligibility gate
+  (“only 74% sure, so it waits for your OK”), explicit verified Publish click →
   posting state → green “Live on eBay” + confirmation card with listing id.
 - **buyer-qa** — trust story (badged STEP 6 · ANSWER BUYERS — it is the sixth
   step of the how-it-works pipeline): buyer question lands in the inbox

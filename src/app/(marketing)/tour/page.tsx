@@ -3,11 +3,12 @@ import { Reveal } from "@/components/marketing/reveal";
 import { DemoClip } from "@/components/marketing/demo-clip";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
+import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Snap a photo and SnapList figures out what your item is, what it's worth with cited evidence when available or a clearly labeled, potentially uncited LLM-only estimate, writes the listing, and posts it to eBay. Here's how each step works.",
+    "Snap a photo and SnapList identifies the item, prices it with cited evidence when available or a clearly labeled, potentially uncited LLM-only estimate, writes the listing, and lets you publish it to eBay. Here's how each step works.",
 };
 
 /**
@@ -74,7 +75,7 @@ const STEPS = [
     mobile: true,
     glyph: "publish",
     title: "Publish",
-    body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
+    body: `Review and edit anything, then choose Publish to eBay under your own connected account. High-confidence items are marked ready; the rest wait for review. ${MANUAL_PUBLISH_SENTENCE}`,
     poster: "Live on eBay, under your name.",
     label: "Demo clip: the Publish step of SnapList",
   },
@@ -94,7 +95,7 @@ const STEPS = [
  * Seller FAQ — relocated from the retired About page. Replaces the old
  * "Where the price comes from" waterfall section: the six step clips above
  * already walk the pipeline, so this page closes on the questions sellers
- * actually ask (marketplaces, accuracy, privacy, autopilot, cost, eBay).
+ * actually ask (marketplaces, accuracy, privacy, publishing, cost, eBay).
  */
 const FAQ = [
   {
@@ -110,8 +111,8 @@ const FAQ = [
     a: "Yes. Your photos are private, and only you can reach them. Your account's data is walled off from everyone else's, and your eBay connection is stored encrypted. If you ask eBay to remove your account, that request is honored end to end.",
   },
   {
-    q: "Does autopilot post things without asking me?",
-    a: "Only if you turn it on, and only for items it's genuinely sure about. That confidence comes from how the price was found, how closely recent sales agree, and how well it pinned down the item, never the AI grading its own work. Everything else waits for your review, and you can keep autopilot off entirely.",
+    q: "Does publish eligibility post things without asking me?",
+    a: `No. The preference only marks high-confidence listings Ready to publish. That confidence comes from how the price was found, how closely recent sales agree, and how well SnapList identified the item, never the AI grading its own work. ${MANUAL_PUBLISH_SENTENCE}`,
   },
   {
     q: "What does it cost?",
@@ -218,7 +219,7 @@ export default function HowItWorks() {
               The questions everyone asks
             </h2>
             <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-flash-dim">
-              Marketplaces, accuracy, privacy, and what autopilot will never
+              Marketplaces, accuracy, privacy, and how publishing works
               do without you, answered straight.
             </p>
           </Reveal>

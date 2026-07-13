@@ -75,7 +75,7 @@ describe("getAutopilotEnabled", () => {
     expect(AUTOPILOT_DEFAULT).toBe(true);
   });
 
-  it("throws on a query error instead of silently defaulting (could auto-post against the user's wishes)", async () => {
+  it("throws on a query error instead of silently marking items ready against the user's wishes", async () => {
     const { client } = fakeReadClient({
       data: null,
       error: { message: "boom" },

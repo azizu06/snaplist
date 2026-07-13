@@ -45,7 +45,7 @@ function independentSourceCount(price: PriceResult): number {
 /**
  * Minimum INDEPENDENT asking sources for the `web_tight` trust bump. A couple of
  * agreeing asking prices is weak; a broad consensus across distinct sites is real
- * evidence — still below completed sales, but enough to be auto-postable.
+ * evidence — still below completed sales, but enough to be publish-eligible.
  */
 const WEB_TIGHT_MIN_SOURCES = 4;
 

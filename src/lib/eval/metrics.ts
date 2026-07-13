@@ -268,14 +268,14 @@ export function calibration(
 }
 
 // ---------------------------------------------------------------------------
-// Autopilot threshold recommendation (#4 — an evidence-driven gate)
+// Publish-eligibility threshold recommendation (#4 — legacy API name retained)
 // ---------------------------------------------------------------------------
 
 /**
- * The recommended autopilot gate plus its measured quality. The gate is
+ * The recommended publish-eligibility gate plus its measured quality. The gate is
  * `confidence >= threshold`; `observedCorrect` is ground truth (price-in-band AND
- * brand/model recovered). Precision = of the auto-posted, fraction actually
- * correct; recall = of the correct items, fraction the gate would auto-post.
+ * brand/model recovered). Precision = of the eligible set, fraction actually
+ * correct; recall = of the correct items, fraction the gate marks eligible.
  */
 export interface ThresholdRecommendation {
   threshold: number;
@@ -283,19 +283,18 @@ export interface ThresholdRecommendation {
   recall: number;
   /** Harmonic mean of precision and recall (0 when either is 0). */
   f1: number;
-  /** Items marked autopilot-eligible at `threshold`. */
+  /** Items marked publish-eligible at `threshold`. */
   eligibleCount: number;
   targetPrecision: number;
-  /** Whether a gate meeting `targetPrecision` with >0 auto-posts was found. */
+  /** Whether a gate meeting `targetPrecision` with >0 eligible items was found. */
   targetMet: boolean;
 }
 
 export interface RecommendThresholdOptions {
   /**
-   * Minimum gate precision to accept (default 0.9). A false auto-post (a wrong
-   * listing goes live) is far costlier than a false queue (a correct item waits
-   * for review), so the gate is chosen to be RIGHT at least this often, then to
-   * auto-post as much as possible within that bound.
+   * Minimum gate precision to accept (default 0.9). A false ready signal is more
+   * costly than a false review hold, so the gate is chosen to be RIGHT at least
+   * this often, then to include as many eligible items as possible within that bound.
    */
   targetPrecision?: number;
   /**
@@ -306,15 +305,15 @@ export interface RecommendThresholdOptions {
 }
 
 /**
- * Recommend the autopilot threshold that best matches REALITY, replacing the
+ * Recommend the eligibility threshold that best matches REALITY, replacing the
  * hand-set `DEFAULT_AUTOPILOT_THRESHOLD` with an evidence-driven value (#4). Pure
  * and deterministic — unit-testable with crafted pairs, reproducible in the harness.
  *
- * Rule: among candidate gates that hit `targetPrecision` AND auto-post something,
- * pick the highest recall (ties → the LOWER threshold, to auto-post more). If none
+ * Rule: among candidate gates that hit `targetPrecision` AND mark something eligible,
+ * pick the highest recall (ties → the LOWER threshold, to include more). If none
  * can (even the strictest gate is too loose for the target), fall back to the
  * most-precise gate (ties → the HIGHER, safest threshold) and report
- * `targetMet: false` — an honest "don't enable autopilot / fix upstream first".
+ * `targetMet: false` — an honest "don't enable eligibility / fix upstream first".
  */
 export function recommendAutopilotThreshold(
   pairs: readonly EvalPair[],

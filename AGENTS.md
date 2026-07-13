@@ -34,7 +34,7 @@ adapter and is **not on the Phase 1 critical path**.
   writes, ignore invalid legacy overrides on reads, and advance `review_revision` whenever the
   override changes so publish/export revision guards fail closed.
 - **Confidence is a signal-based composite** (tier fired + comp agreement + ID completeness), **never**
-  raw LLM self-report. The autopilot gate is a threshold on it.
+  raw LLM self-report. The publish-eligibility gate is a threshold on it; eligibility never publishes.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
   search agent, not a price source.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.

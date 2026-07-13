@@ -17,7 +17,7 @@ export const AUTOPILOT_DEFAULT = true;
 /**
  * Read the user's master autopilot switch. Missing row → the default (enabled).
  * Throws on a real query error — silently defaulting on a failed read could
- * auto-post for a user who explicitly turned autopilot off.
+ * mark ready for a user who explicitly turned publish eligibility off.
  */
 export async function getAutopilotEnabled(
   supabase: SupabaseClient,

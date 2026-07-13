@@ -100,7 +100,7 @@ const BAND_SPREAD = 0.3;
  * downstream from the tier signal (`depreciation` base 0.4), whose composite
  * maximum 0.6·0.4 + 0.25·1 + 0.15·1 = 0.64 sits below the 0.75 autopilot gate
  * BY CONSTRUCTION (asserted in tests): a depreciation estimate can never
- * auto-post no matter how well the item was identified.
+ * be marked ready no matter how well the item was identified.
  */
 export const DEPRECIATION_CONFIDENCE = 0.35;
 

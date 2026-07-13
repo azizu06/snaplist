@@ -5,7 +5,7 @@ import type { StatusLabel } from "../ui/status";
  * persisted (the item's latest listing status, or the absence of a listing)
  * plus the orchestrator's transport state into the triage-list vocabulary:
  *
- *   pending → priced → needs-review / autopilot-eligible (± failed / blocked)
+ *   pending → priced → needs-review / ready-to-publish (± failed / blocked)
  *
  * Reuses the raw listing lifecycle keys the single-item path writes
  * (`initialListingStatus`: `draft` | `queued`; the eBay publish path writes
@@ -17,11 +17,11 @@ import type { StatusLabel } from "../ui/status";
 export type TriageStatusKey =
   /** Run dispatched (or about to be); no listing row yet. */
   | "processing"
-  /** Priced + drafted, below the autopilot gate — queued for human review. */
+  /** Priced + drafted, below the eligibility gate — needs human review. */
   | "needs-review"
-  /** Priced + drafted, above the autopilot gate (listing status `queued`). */
+  /** Priced + drafted, above the eligibility gate (listing status `queued`). */
   | "autopilot-eligible"
-  /** Already live on eBay (autopilot or manual publish caught up with us). */
+  /** Already live on eBay after the seller's manual publish. */
   | "live"
   /** The pipeline run failed for this item — retryable. */
   | "failed"
@@ -69,7 +69,7 @@ export function triageLabel(key: TriageStatusKey): StatusLabel {
     case "needs-review":
       return { label: "Needs review", tone: "warning" };
     case "autopilot-eligible":
-      return { label: "Autopilot-eligible", tone: "success" };
+      return { label: "Ready to publish", tone: "success" };
     case "live":
       return { label: "Active", tone: "success-solid" };
     case "failed":

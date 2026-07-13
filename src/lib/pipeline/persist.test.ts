@@ -342,8 +342,8 @@ function pipelineWithConfidence(
   };
 }
 
-describe("confidence-gated autopilot + price override (issue #12)", () => {
-  it("an autopilot-ELIGIBLE run persists its listing QUEUED for auto-post", async () => {
+describe("confidence-gated publish eligibility + price override (issues #12, #127)", () => {
+  it("an eligible run persists its listing QUEUED as ready for manual publish", async () => {
     if (!reachable) return;
 
     const photoPath = await uploadPhoto(userA);

@@ -36,7 +36,7 @@ import { ACCEPT, MAX_PHOTOS } from "../upload/upload-draft-context";
  * (`runBatch`) so those guardrails stay authoritative. Per-item failure is
  * isolated with a Retry; a daily-quota denial blocks the rest of the batch
  * with a clear message instead of hammering the API. The triage list then
- * polls /api/batch/status so row states track DB truth (queued → published).
+ * polls /api/batch/status so row states track DB truth after a seller publishes.
  *
  * Photos are in-memory Files (like the single-item upload draft): a full page
  * reload starts a fresh capture session, but every item already submitted is
@@ -279,7 +279,7 @@ export function BatchCaptureView() {
   );
 
   // Triage poll: refresh created items' listing status from DB truth every 5s
-  // (covers autopilot `queued` flipping to `published` after the run reported).
+  // (covers a ready `queued` listing becoming `published` after a manual action).
   useEffect(() => {
     if (phase !== "triage") return;
     const tick = async () => {
@@ -598,7 +598,7 @@ function TriagePhase({
                     href={`/review/${itemId}`}
                     className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-[13.5px] font-semibold text-fg shadow-xs transition-colors hover:bg-surface-2"
                   >
-                    Review
+                    {status === "autopilot-eligible" ? "Review & publish" : "Review"}
                     <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M9 18l6-6-6-6" />
                     </svg>

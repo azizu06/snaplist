@@ -66,7 +66,7 @@ sold-comp research is now a first-class tier.
    confidence tier — ranked ABOVE the asking-based web tiers and below only an exact ISBN lookup
    (#60, "sold beats asking") — and to `web_wide` when scattered, since a scattered sold set is real
    evidence of *a* market but not of a defensible tight price and must not ride the sold label past
-   the autopilot gate. Remaining numeric calibration of the sold tier rides with the **gold set** (#61).
+   the publish-eligibility gate. Remaining numeric calibration of the sold tier rides with the **gold set** (#61).
 
 7. **Freshness is live-fetch-first, with a TTL cache + age-decay (#59).** The live sold page is the
    source of truth; a **TTL request cache** keyed by resolved product identity (the search URL)

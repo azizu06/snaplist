@@ -121,7 +121,7 @@ export interface ConfidenceResult {
   score: number;
   /** Bucketed band derived from `score`. */
   band: ConfidenceBand;
-  /** Autopilot gate: enabled AND score >= threshold. */
+  /** Publish-eligibility gate: preference enabled AND score >= threshold. */
   autopilotEligible: boolean;
 }
 
@@ -217,7 +217,7 @@ export function computeConfidence(
 ): ConfidenceResult {
   const { autopilotEnabled = true, threshold = DEFAULT_AUTOPILOT_THRESHOLD } = options;
 
-  // The threshold gates auto-posting, so a malformed value is a safety bug, not a
+  // The threshold gates readiness, so a malformed value is a safety bug, not a
   // stylistic one: a negative threshold would make every result (even llm_only)
   // eligible, and a non-finite / >1 value silently disables the gate. TypeScript's
   // `number` can't catch these at runtime (config, JSON), so fail loud.

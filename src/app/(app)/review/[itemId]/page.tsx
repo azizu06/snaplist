@@ -4,6 +4,7 @@ import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema, identificationSchema } from "@/lib/pipeline/types";
 import { effectivePrice } from "@/lib/pipeline";
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "@/lib/confidence/confidence";
+import { reviewDisposition } from "@/lib/ui/publish-eligibility";
 import {
   deriveIdentification,
   signPhotoUrlMap,
@@ -169,43 +170,11 @@ export default async function ReviewPage({
     confidence != null && confidence < DEFAULT_AUTOPILOT_THRESHOLD;
   const runAutopilotEnabled =
     typeof log?.autopilot_enabled === "boolean" ? log.autopilot_enabled : null;
-  const banner = (() => {
-    switch (listing?.status) {
-      case "queued":
-        return {
-          variant: "success" as const,
-          title: "Queued: autopilot will post",
-          detail:
-            "High confidence and autopilot was on, so this listing is eligible to post without manual approval.",
-        };
-      case "draft":
-        return {
-          variant: "warning" as const,
-          title: "Waiting for your review",
-          detail:
-            runAutopilotEnabled === false
-              ? "Autopilot was off when this listing was generated, so it waits for you."
-              : confidenceFellShort
-                ? "Confidence was below the autopilot threshold when this listing was generated, so it waits for you."
-                : "Autopilot didn't auto-post this listing, so it waits for your approval.",
-        };
-      case "published":
-        return {
-          variant: "success" as const,
-          title: "Live",
-          detail: "This listing is live on the marketplace.",
-        };
-      case "failed":
-        return {
-          variant: "error" as const,
-          title: "Publish failed",
-          detail:
-            "The marketplace rejected or errored on this listing. Review it and retry from the publish page.",
-        };
-      default:
-        return null;
-    }
-  })();
+  const banner = reviewDisposition({
+    status: listing?.status,
+    eligibilityEnabled: runAutopilotEnabled,
+    confidenceFellShort,
+  });
 
   const data: ReviewData = {
     itemId,

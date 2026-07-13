@@ -28,9 +28,8 @@ describe("lifecycleLabel", () => {
       tone: "warning",
     });
     expect(lifecycleLabel("queued")).toEqual({
-      label: "Scheduled",
+      label: "Ready to publish",
       tone: "info",
-      icon: "clock",
     });
     expect(lifecycleLabel("published")).toEqual({
       label: "Active",
@@ -48,7 +47,7 @@ describe("lifecycleLabel", () => {
 
   it("renders an unknown/legacy status honestly instead of guessing", () => {
     // Processing pulses (transient "working" state) so it doesn't blur against
-    // the static-blue Scheduled under the locked one-blue palette.
+    // the static-blue Ready to publish state under the locked one-blue palette.
     expect(lifecycleLabel("new")).toEqual({ label: "Processing", tone: "info", pulse: true });
     expect(lifecycleLabel("something_else")).toEqual({
       label: "something_else",
@@ -62,7 +61,7 @@ describe("lifecycleLabel", () => {
 describe("lifecycleShortLabel", () => {
   it("compacts the chip for narrow surfaces, keeping the SAME tone", () => {
     expect(lifecycleShortLabel("draft")).toEqual({ label: "Draft", tone: "warning" });
-    expect(lifecycleShortLabel("queued")).toEqual({ label: "Scheduled", tone: "info", icon: "clock" });
+    expect(lifecycleShortLabel("queued")).toEqual({ label: "Ready to publish", tone: "info" });
     expect(lifecycleShortLabel("published")).toEqual({ label: "Active", tone: "success-solid" });
     expect(lifecycleShortLabel("failed")).toEqual({ label: "Attention", tone: "danger" });
     expect(lifecycleShortLabel("draft_failed")).toEqual({ label: "Attention", tone: "danger" });
@@ -86,7 +85,7 @@ describe("isBulkEditableStatus", () => {
 
   it("rejects the publish-flow statuses so bulk-edit can't bypass the eBay adapter (Codex P1)", () => {
     // `published` (Live) is written only by the eBay publish path alongside the
-    // ebay_* fields; `queued` (Scheduled) only by the autopilot gate. Neither may
+    // ebay_* fields; `queued` (Ready to publish) only by the eligibility gate. Neither may
     // be set by a bulk metadata edit — incl. a crafted request past the UI.
     expect(isBulkEditableStatus("published")).toBe(false);
     expect(isBulkEditableStatus("queued")).toBe(false);
@@ -147,7 +146,7 @@ describe("bulkStatusDecision", () => {
 });
 
 describe("confidenceBand", () => {
-  it("buckets on the autopilot threshold boundaries (high ≥ .75, medium ≥ .5)", () => {
+  it("buckets on the publish-eligibility threshold boundaries (high ≥ .75, medium ≥ .5)", () => {
     expect(confidenceBand(0.75)).toBe("high");
     expect(confidenceBand(0.9)).toBe("high");
     expect(confidenceBand(0.5)).toBe("medium");
@@ -166,7 +165,7 @@ describe("confidenceLabel", () => {
   it("shows band + percentage + consequence, not a bare number (R-3)", () => {
     expect(confidenceLabel(0.82)).toEqual({
       label: "High confidence (82%)",
-      detail: "Strong enough for autopilot",
+      detail: "Eligible for manual publish",
       tone: "success",
     });
     expect(confidenceLabel(0.6)).toEqual({

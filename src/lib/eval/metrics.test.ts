@@ -319,7 +319,7 @@ describe("recommendAutopilotThreshold (#4 — evidence-driven gate)", () => {
     expect(rec.targetMet).toBe(true);
   });
 
-  it("a looser target precision lets the gate auto-post more (higher recall)", () => {
+  it("a looser target precision lets the gate mark more items eligible (higher recall)", () => {
     // At target 0.6 the gate 0.6 (precision 2/3 ≈ 0.667 ≥ 0.6) beats gate 0.9.
     const rec = recommendAutopilotThreshold(
       [correctAt(0.9), correctAt(0.6), wrongAt(0.7), wrongAt(0.4)],

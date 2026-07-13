@@ -453,7 +453,7 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
       priceItem: async () => soldComped,
     }).run({ photos: ["u/a.jpg"] });
 
-    // Asking-only branded-web evidence cannot auto-post on identification alone (#32)...
+    // Asking-only branded-web evidence cannot be marked ready on identification alone (#32)...
     expect(asking.confidence.autopilotEligible).toBe(false);
     // ...while a real sold comp earns the first-class `sold` tier (#60), scores strictly
     // higher, and IS eligible.
@@ -461,7 +461,7 @@ describe("vision/pipeline — createVisionPipeline.run", () => {
     expect(sold.confidence.autopilotEligible).toBe(true);
   });
 
-  it("#10 round-4: a SCATTERED sold set stays web_wide and cannot auto-post", async () => {
+  it("#10 round-4: a SCATTERED sold set stays web_wide and cannot be marked ready", async () => {
     // $60/$185/$420 sold comps: real sold evidence, but spread (max-min)/median
     // = 1.95 → judged agreement 0. Pre-fix, the sold-comp label alone earned the
     // high tier with a fixed 0.7 agreement (score ≥ 0.75 gate). Now the

@@ -10,9 +10,9 @@
  * Tones map to the semantic status colors in globals.css `@theme` and render as
  * soft tonal badges (see `StatusBadge`), Shopify Products-style, so each state
  * is distinguishable at a glance: Active is green (success), Draft is amber
- * (warning, "unfinished"), Scheduled and Processing are blue (info, "in
- * motion"), Needs attention is red (danger), and only Archived stays calm grey
- * (neutral, "dormant"). Color carries meaning here — it is not decoration.
+ * (warning, "unfinished"), Ready to publish and Processing are blue (info),
+ * Needs attention is red (danger), and only Archived stays calm grey (neutral,
+ * "dormant"). Color carries meaning here — it is not decoration.
  */
 
 import { DEFAULT_AUTOPILOT_THRESHOLD } from "../confidence/confidence";
@@ -29,15 +29,8 @@ export interface StatusLabel {
   label: string;
   tone: StatusTone;
   /** Transient "working" states (Processing) set this so their badge dot pulses
-   *  (motion-safe). It differentiates them from the *static* blue of Scheduled,
-   *  which shares the same info hue under the locked one-blue palette. */
+   *  (motion-safe). It differentiates them from static ready/info states. */
   pulse?: boolean;
-  /** Scheduled (queued) sets this so its badge shows a clock glyph instead of the
-   *  plain dot. Scheduled and Processing share the info hue on purpose — both are
-   *  hands-off, in-flight states moving the item toward Live with no seller action
-   *  needed — so color carries the shared *category* while the glyph names the
-   *  *phase*: a clock ("queued to publish") vs Processing's pulsing dot ("working
-   *  now"). Color = category, glyph = phase. */
   icon?: "clock";
 }
 
@@ -48,15 +41,15 @@ export function lifecycleLabel(status: string | null | undefined): StatusLabel |
     case "draft":
       return { label: "Draft", tone: "warning" };
     case "queued":
-      return { label: "Scheduled", tone: "info", icon: "clock" };
+      return { label: "Ready to publish", tone: "info" };
     case "published":
       return { label: "Active", tone: "success-solid" };
     case "failed":
     case "draft_failed":
       return { label: "Needs attention", tone: "danger" };
     case "new":
-      // Shares info-blue with Scheduled; pulses so the transient "working"
-      // state reads as active and doesn't blur against Scheduled when scanned.
+      // Shares info-blue with Ready to publish; pulses so the transient
+      // working state still reads as active when scanned.
       return { label: "Processing", tone: "info", pulse: true };
     case "archived":
       return { label: "Archived", tone: "neutral" };
@@ -79,7 +72,7 @@ export function lifecycleShortLabel(
     case "draft":
       return { label: "Draft", tone: full.tone };
     case "queued":
-      return { label: "Scheduled", tone: full.tone, icon: full.icon };
+      return { label: "Ready to publish", tone: full.tone };
     case "failed":
     case "draft_failed":
       return { label: "Attention", tone: full.tone };
@@ -94,8 +87,8 @@ export function lifecycleShortLabel(
  *  - `published` (Active/Live) is written ONLY by the eBay publish path, alongside
  *    `ebay_listing_id` + `ebay_status`. Letting a bulk metadata edit write it would
  *    mark an UNPOSTED draft "Live" without ever touching the eBay adapter (Codex P1).
- *  - `queued` (Scheduled) is assigned ONLY by the autopilot confidence gate; setting
- *    it by hand would inject an item into the auto-post pipeline past that gate.
+ *  - `queued` (Ready to publish) is assigned ONLY by the confidence gate; setting
+ *    it by hand would falsely claim an item met that eligibility rule.
  * Both are excluded; bulk-edit can only pull a listing back to review or archive it.
  * Shared by the grid's options AND the `bulkUpdateListings` server guard so the UI
  * and the write boundary can never drift.
@@ -154,7 +147,7 @@ export type ConfidenceBand = "high" | "medium" | "low";
 const MEDIUM_MIN = 0.5;
 
 /**
- * Bands mirror the autopilot gate: high = autopilot-eligible (the SAME
+ * Bands mirror the publish-eligibility gate: high = eligible (the SAME
  * threshold the pipeline gates on, imported so they can't drift), medium ≥ 0.5,
  * else low.
  */
@@ -182,7 +175,7 @@ export function confidenceLabel(
     case "high":
       return {
         label: `High confidence (${pct})`,
-        detail: "Strong enough for autopilot",
+        detail: "Eligible for manual publish",
         tone: "success",
       };
     case "medium":

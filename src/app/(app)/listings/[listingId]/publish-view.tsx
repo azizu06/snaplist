@@ -8,6 +8,7 @@ import { Banner } from "@/components/ui/banner";
 import { PendingButton } from "@/components/ui/button";
 import { buttonClasses } from "@/components/ui/button-styles";
 import { lifecycleLabel } from "@/lib/ui/status";
+import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 
 /**
  * Publish — modelled on Shopify's single-record edit page (reference set
@@ -15,7 +16,7 @@ import { lifecycleLabel } from "@/lib/ui/status";
  * top bar, then a two-column split — a wide LEFT main column holding the record
  * preview, and a narrow RIGHT rail of cards (a "Publishing" card carrying the
  * status spine + the publish action, plus a "Listing details" card). On mobile
- * the rail stacks under the preview (mobile-first). The Draft → Queued → Live
+ * the rail stacks under the preview (mobile-first). The Draft → Ready → Live
  * stepper is the publishing status spine; the live state turns the rail green
  * and surfaces the real eBay listing id. Pure presentation (client only for the
  * motion); the page feeds data and the publish server action passes through.
@@ -47,13 +48,13 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-/* ---- status stepper: Draft → Queued → Live -------------------------------- */
+/* ---- status stepper: Draft → Ready → Live --------------------------------- */
 /* Shopify's "Publishing" card lists where a record stands; here that becomes a
  * vertical lifecycle spine so it reads cleanly inside the narrow right rail. */
 
 const STEPS = [
   { label: "Draft", hint: "Generated from your photos" },
-  { label: "Queued", hint: "Ready to go live" },
+  { label: "Ready", hint: "Waiting for you to publish" },
   { label: "Live", hint: "Visible to buyers on eBay" },
 ] as const;
 
@@ -344,8 +345,9 @@ export function PublishView({
                   </Banner>
                 ) : (
                   <p className="text-[13.5px] leading-relaxed text-muted">
-                    Publishing creates the live eBay listing from this draft. You
-                    can still edit the price on the review page first.
+                    {data.status === "queued"
+                      ? `Confidence marked this listing ready. ${MANUAL_PUBLISH_SENTENCE}`
+                      : "Publishing creates the live eBay listing from this draft. You can still edit the price on the review page first."}
                   </p>
                 )}
                 <form action={publishAction} className="mt-3">

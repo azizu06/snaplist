@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
 import { lifecycleShortLabel } from "@/lib/ui/status";
+import { manualPublishPath } from "@/lib/ui/publish-eligibility";
 import { matchesQuery } from "@/lib/ui/search";
 import { DASHBOARD_FILTERS, type DashboardFilterKey } from "./filters";
 import type { BulkListingUpdate } from "./actions";
@@ -250,6 +251,7 @@ function ListingRow({
   onToggle: () => void;
 }) {
   const chip = lifecycleShortLabel(row.status);
+  const manualPublishHref = manualPublishPath(row);
   return (
     <div
       // Hover/selection are NEUTRAL tints (audit #105): the reserved green now
@@ -303,6 +305,15 @@ function ListingRow({
                 desktop Listed column and on the item's review screen. */}
             <span className="mt-1.5 flex min-w-0 items-center gap-2 md:hidden">
               {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} icon={chip.icon} /> : null}
+              {manualPublishHref ? (
+                <Link
+                  href={manualPublishHref}
+                  aria-label={`Publish ${row.title} to eBay`}
+                  className="relative z-[2] whitespace-nowrap text-[12.5px] font-semibold text-accent hover:underline"
+                >
+                  Publish to eBay
+                </Link>
+              ) : null}
               {row.category ? (
                 <span className="min-w-0 truncate text-[13px] text-muted">
                   {row.category}
@@ -313,8 +324,17 @@ function ListingRow({
         </span>
 
         {/* Status column (md+). Centered on the column midpoint. */}
-        <span className="hidden md:block md:text-center">
+        <span className="relative z-[2] hidden md:flex md:flex-col md:items-center md:gap-1 md:text-center">
           {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} icon={chip.icon} /> : null}
+          {manualPublishHref ? (
+            <Link
+              href={manualPublishHref}
+              aria-label={`Publish ${row.title} to eBay`}
+              className="text-[12px] font-semibold text-accent hover:underline"
+            >
+              Publish to eBay
+            </Link>
+          ) : null}
         </span>
 
         {/* Category column (xl+ — disclosed with Condition; at lg the Listed

@@ -4,8 +4,9 @@ _Working note. Captures the current strategic framing so feature work stays alig
 
 ## One-line positioning
 
-SnapList is an **eBay selling autopilot** — not a "listing tool." The value is the
-whole loop, not any single step:
+SnapList is an **AI resale control surface** — not just a "listing tool." It
+compresses the whole seller workflow while keeping marketplace actions under the
+seller's control:
 
 > price → list → answer buyers → close
 

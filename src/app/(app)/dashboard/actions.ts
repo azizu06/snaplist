@@ -319,8 +319,8 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
       // Status write boundary (Codex P1): bulk-edit may ONLY set the
       // seller-organizational statuses (draft / archived). `published` is owned by
       // the eBay publish path (it sets ebay_listing_id/ebay_status together) and
-      // `queued` by the autopilot gate; writing either here would mark an unposted
-      // item Live / queue it past the gate without ever touching the adapter. The
+      // `queued` by the eligibility gate; writing either here would mark an unposted
+      // item Live / ready past the gate without ever touching the adapter. The
       // grid already hides those options — this rejects an out-of-vocabulary status
       // from a crafted request that bypassed the UI (defense-in-depth). RLS still
       // scopes the row; this scopes the VALUE. Reported, not silently dropped, so a
