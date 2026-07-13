@@ -413,6 +413,28 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(foreignSnapshot).toBeNull();
   });
 
+  it("rejects a listing attached to another tenant's item", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "cross-tenant-item-link");
+
+    const { error } = await userB.client.from("listings").insert({
+      user_id: userB.id,
+      item_id: seeded.itemId,
+      platform: "facebook",
+      title: "Cross-tenant draft",
+      description: "Must never attach to another seller's item",
+      copy: {},
+      status: "draft",
+    });
+    expect(error?.code).toBe("23503");
+
+    const { data: ownerListings } = await userA.client
+      .from("listings")
+      .select("id")
+      .eq("item_id", seeded.itemId);
+    expect(ownerListings ?? []).toHaveLength(1);
+  });
+
   it("checks and advances one review revision while ordinary save preserves identity", async () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "shared-review-revision");

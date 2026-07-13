@@ -42,6 +42,60 @@ alter table public.listings
 create unique index if not exists listings_source_review_revision_idx
   on public.listings (item_id, platform, source_review_revision);
 
+create unique index if not exists items_id_user_id_idx
+  on public.items (id, user_id);
+
+do $constraint$
+begin
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint
+    where conrelid = 'public.listings'::regclass
+      and conname = 'listings_item_user_fkey'
+  ) then
+    alter table public.listings
+      add constraint listings_item_user_fkey
+      foreign key (item_id, user_id)
+      references public.items (id, user_id)
+      on delete cascade
+      not valid;
+  end if;
+end;
+$constraint$;
+
+create or replace function public.assert_legacy_listing_item_ownership()
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_malformed_listing_ids text;
+begin
+  select string_agg(listing.id::text, ', ' order by listing.id::text)
+  into v_malformed_listing_ids
+  from public.listings listing
+  join public.items item on item.id = listing.item_id
+  where listing.user_id is distinct from item.user_id;
+
+  if v_malformed_listing_ids is not null then
+    raise exception using
+      errcode = '23503',
+      message = format(
+        'Cannot enforce listing ownership: malformed cross-tenant listing ownership exists for listing(s): %s',
+        v_malformed_listing_ids
+      );
+  end if;
+end;
+$$;
+
+revoke all on function public.assert_legacy_listing_item_ownership() from public;
+
+select public.assert_legacy_listing_item_ownership();
+
+alter table public.listings
+  validate constraint listings_item_user_fkey;
+
 create or replace function public.reconcile_legacy_ebay_listing_duplicates()
 returns void
 language plpgsql
@@ -56,12 +110,12 @@ declare
   v_dependent_fk record;
   v_has_dependent_rows boolean;
 begin
-  lock table public.listings in share row exclusive mode;
+  lock table public.items, public.listings in share row exclusive mode;
 
   select string_agg(unsafe.item_id::text, ', ' order by unsafe.item_id::text)
   into v_unsafe_item_ids
   from (
-    select item_id
+    select user_id, item_id
     from public.listings
     where platform = 'ebay'
       and (
@@ -70,7 +124,7 @@ begin
         or ebay_status is not distinct from 'publishing'
         or ebay_status is not distinct from 'published'
       )
-    group by item_id
+    group by user_id, item_id
     having count(*) > 1
   ) unsafe;
 
@@ -86,6 +140,7 @@ begin
   with listing_candidates as (
     select
       listing.id,
+      listing.user_id,
       listing.item_id,
       (
         listing.status is not distinct from 'published'
@@ -112,9 +167,11 @@ begin
   ), ranked as (
     select
       id,
+      user_id,
+      item_id,
       is_protected,
       row_number() over (
-        partition by item_id
+        partition by user_id, item_id
         order by
           case when is_protected then 0 else 1 end,
           paired_prediction_created_at desc nulls last,
@@ -178,6 +235,12 @@ begin
     order by child_namespace.nspname, child_table.relname, dependent_constraint.oid
   loop
     execute format(
+      'lock table %I.%I in share row exclusive mode',
+      v_dependent_fk.child_schema,
+      v_dependent_fk.child_table
+    );
+
+    execute format(
       'select exists (
         select 1
         from %I.%I dependent
@@ -225,7 +288,7 @@ revoke all on function public.reconcile_legacy_ebay_listing_duplicates() from pu
 select public.reconcile_legacy_ebay_listing_duplicates();
 
 create unique index if not exists listings_one_ebay_per_item_idx
-  on public.listings (item_id)
+  on public.listings (user_id, item_id)
   where platform = 'ebay';
 
 create or replace function public.get_review_snapshot(p_item_id uuid)

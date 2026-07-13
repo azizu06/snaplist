@@ -34,22 +34,46 @@ describe("review regeneration migration security guards", () => {
 
   it("enforces one eBay listing row per item", () => {
     expect(migration).toMatch(
-      /create\s+unique\s+index\s+if\s+not\s+exists\s+listings_one_ebay_per_item_idx\s+on\s+public\.listings\s*\(item_id\)\s+where\s+platform\s*=\s*'ebay'/i,
+      /create\s+unique\s+index\s+if\s+not\s+exists\s+listings_one_ebay_per_item_idx\s+on\s+public\.listings\s*\(user_id,\s*item_id\)\s+where\s+platform\s*=\s*'ebay'/i,
     );
+  });
+
+  it("enforces listing ownership before reconciling tenant-scoped duplicates", () => {
+    expect(migration).toMatch(
+      /create\s+unique\s+index\s+if\s+not\s+exists\s+items_id_user_id_idx\s+on\s+public\.items\s*\(id,\s*user_id\)/i,
+    );
+    expect(migration).toMatch(
+      /foreign\s+key\s*\(item_id,\s*user_id\)\s+references\s+public\.items\s*\(id,\s*user_id\)/i,
+    );
+    expect(migration).toMatch(/malformed cross-tenant listing ownership/i);
+
+    const ownershipValidation = migration.search(
+      /select\s+public\.assert_legacy_listing_item_ownership\(\)/i,
+    );
+    const reconciliation = migration.search(
+      /select\s+public\.reconcile_legacy_ebay_listing_duplicates\(\)/i,
+    );
+    expect(ownershipValidation).toBeGreaterThan(-1);
+    expect(reconciliation).toBeGreaterThan(ownershipValidation);
   });
 
   it("reconciles legacy eBay duplicates before enforcing uniqueness", () => {
     const reconciliation = migration.match(
       /create\s+or\s+replace\s+function\s+public\.reconcile_legacy_ebay_listing_duplicates[\s\S]*?\$\$;/i,
     )?.[0];
-    expect(reconciliation).toMatch(/lock\s+table\s+public\.listings/i);
+    expect(reconciliation).toMatch(
+      /lock\s+table\s+public\.items,\s*public\.listings\s+in\s+share\s+row\s+exclusive\s+mode/i,
+    );
     expect(reconciliation).toMatch(
       /status\s+is\s+not\s+distinct\s+from\s+'published'[\s\S]*ebay_listing_id\s+is\s+not\s+null[\s\S]*ebay_status\s+is\s+not\s+distinct\s+from\s+'publishing'[\s\S]*ebay_status\s+is\s+not\s+distinct\s+from\s+'published'/i,
     );
     expect(reconciliation).toMatch(/having\s+count\(\*\)\s*>\s*1/i);
     expect(reconciliation).toMatch(/multiple protected eBay listings/i);
     expect(reconciliation).toMatch(
-      /row_number\(\)\s+over\s*\([\s\S]*partition\s+by\s+item_id[\s\S]*created_at\s+desc[\s\S]*id\s+desc/i,
+      /row_number\(\)\s+over\s*\([\s\S]*partition\s+by\s+user_id,\s*item_id[\s\S]*created_at\s+desc[\s\S]*id\s+desc/i,
+    );
+    expect(reconciliation).toMatch(
+      /lock\s+table\s+%I\.%I\s+in\s+share\s+row\s+exclusive\s+mode/i,
     );
     expect(reconciliation).toMatch(/delete\s+from\s+public\.listings/i);
 

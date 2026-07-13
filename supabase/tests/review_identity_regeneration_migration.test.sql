@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(16);
+select extensions.plan(21);
 
 drop index public.listings_one_ebay_per_item_idx;
 
@@ -13,7 +13,64 @@ values
   ('10000000-0000-0000-0000-000000000003', 'migration-test', '{}'),
   ('10000000-0000-0000-0000-000000000004', 'migration-test', '{}'),
   ('10000000-0000-0000-0000-000000000005', 'migration-test', '{}'),
-  ('10000000-0000-0000-0000-000000000006', 'migration-test', '{}');
+  ('10000000-0000-0000-0000-000000000006', 'migration-test', '{}'),
+  ('10000000-0000-0000-0000-000000000007', 'migration-other', '{}');
+
+select extensions.throws_ok(
+  $$
+    insert into public.listings (
+      id, user_id, item_id, platform, status
+    ) values (
+      '20000000-0000-0000-0000-000000000013',
+      'migration-other',
+      '10000000-0000-0000-0000-000000000001',
+      'facebook',
+      'draft'
+    )
+  $$,
+  '23503',
+  null,
+  'a tenant cannot attach its listing to another tenant item'
+);
+
+alter table public.listings
+  drop constraint listings_item_user_fkey;
+
+insert into public.listings (
+  id, user_id, item_id, platform, status
+) values (
+  '20000000-0000-0000-0000-000000000013',
+  'migration-other',
+  '10000000-0000-0000-0000-000000000001',
+  'facebook',
+  'draft'
+);
+
+select extensions.throws_ok(
+  'select public.assert_legacy_listing_item_ownership()',
+  '23503',
+  'Cannot enforce listing ownership: malformed cross-tenant listing ownership exists for listing(s): 20000000-0000-0000-0000-000000000013',
+  'malformed legacy ownership aborts with a clear diagnostic'
+);
+
+select extensions.is(
+  (
+    select user_id
+    from public.listings
+    where id = '20000000-0000-0000-0000-000000000013'
+  ),
+  'migration-other',
+  'malformed legacy ownership remains untouched after the abort'
+);
+
+delete from public.listings
+where id = '20000000-0000-0000-0000-000000000013';
+
+alter table public.listings
+  add constraint listings_item_user_fkey
+  foreign key (item_id, user_id)
+  references public.items (id, user_id)
+  on delete cascade;
 
 insert into public.listings (
   id,
@@ -106,6 +163,34 @@ select extensions.is(
   ),
   '20000000-0000-0000-0000-000000000002'::uuid,
   'the draft paired to the latest applicable prediction survives'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_catalog.pg_locks relation_lock
+    join pg_catalog.pg_class locked_relation
+      on locked_relation.oid = relation_lock.relation
+    join pg_catalog.pg_namespace locked_namespace
+      on locked_namespace.oid = locked_relation.relnamespace
+    where relation_lock.pid = pg_backend_pid()
+      and relation_lock.granted
+      and relation_lock.mode = 'ShareRowExclusiveLock'
+      and locked_namespace.nspname = 'public'
+      and locked_relation.relname = 'messages'
+  ),
+  'reconciliation holds a write-conflicting lock on dependent relations'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from pg_catalog.pg_constraint ownership_constraint
+    where ownership_constraint.conrelid = 'public.listings'::regclass
+      and ownership_constraint.conname = 'listings_item_user_fkey'
+      and ownership_constraint.convalidated
+  ),
+  'the composite listing ownership constraint is validated'
 );
 
 insert into public.listings (
