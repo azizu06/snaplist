@@ -1,8 +1,9 @@
 # SnapList
 
 Snap a photo of a resale item → get a priced, ready-to-post marketplace listing. SnapList prefers
-real sold comps when available, then falls back to cited web sources or clearly labeled estimates,
-always with a confidence score. Built for resellers; a production-real AI-engineering showcase.
+real sold comps when available, then falls back to cited web or depreciation evidence or a clearly
+labeled, potentially uncited LLM-only estimate, always with a confidence score. Built for resellers;
+a production-real AI-engineering showcase.
 
 > **Docs:** [`PRD.md`](./PRD.md) is the source of truth for what we build · [`CONTEXT.md`](./CONTEXT.md)
 > is the domain glossary · [`AGENTS.md`](./AGENTS.md) is the agent/engineering guide ·
@@ -19,7 +20,8 @@ and retail prices mislead for used goods. Multiply that by a haul and the resear
 SnapList collapses that into a photo plus a couple of approvals so a reseller can clear a whole haul
 in one pass. The seller snaps 1–4 photos; the system identifies the item (brand, model, category,
 condition, specs, any barcode/ISBN), researches a defensible price range from real sold comps when
-available and cited fallback sources otherwise, writes per-platform listing copy, and shows it for
+available, cited web or depreciation evidence when those tiers resolve, or a clearly labeled
+terminal LLM-only estimate that may be uncited, writes per-platform listing copy, and shows it for
 review. Before publishing, the seller can correct the load-bearing identity facts and explicitly
 re-price and regenerate a coherent draft without losing a saved price override. High-confidence
 items can post automatically (a confidence-gated autopilot); low-confidence

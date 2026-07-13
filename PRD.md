@@ -34,7 +34,8 @@ reseller can clear a whole haul in one pass.
 
 The seller snaps 1–4 photos. The system identifies the item (brand, model, category, condition,
 specs, and any barcode/ISBN), researches a defensible price range from **real sold comps when
-available** and cited fallback sources otherwise, generates platform-specific listing copy, and
+available**, cited web or depreciation evidence when those tiers resolve, or a clearly labeled
+terminal LLM-only estimate that may be uncited, then generates platform-specific listing copy and
 shows it for review/edit. It captures **hauls
 in bulk** (many items in one session), tracks **cost basis → net profit** per item, and can
 **auto-reprice** listings that go stale. High-confidence items can post automatically

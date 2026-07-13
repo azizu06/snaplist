@@ -54,7 +54,7 @@ const STEPS = [
     mobile: true,
     glyph: "price",
     title: "Price",
-    body: "SnapList prefers relevant recent sold listings, then suggests a price, a realistic range, and the exact sources behind it. If sold comps are unavailable, it falls back to cited web sources or a clearly labeled estimate.",
+    body: "SnapList prefers relevant recent sold listings, then suggests a price and a realistic range. It shows exact sources for sold, web, or depreciation evidence; the terminal LLM-only estimate is clearly labeled and may be uncited.",
     poster: "A defensible number, with its receipts.",
     label: "Demo clip: the Price step of SnapList",
   },
@@ -99,7 +99,7 @@ const STEPS = [
 const FAQ = [
   {
     q: "Which marketplaces does SnapList support?",
-    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape anything.",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape to post; read-only research of public eBay sold pages is used only to inform pricing.",
   },
   {
     q: "How accurate is the pricing?",
