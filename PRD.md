@@ -33,8 +33,9 @@ buyer-message replies — collapsing the per-item work into a photo plus a coupl
 reseller can clear a whole haul in one pass.
 
 The seller snaps 1–4 photos. The system identifies the item (brand, model, category, condition,
-specs, and any barcode/ISBN), researches a defensible price range from **real sold comps** with cited
-sources, generates platform-specific listing copy, and shows it for review/edit. It captures **hauls
+specs, and any barcode/ISBN), researches a defensible price range from **real sold comps when
+available** and cited fallback sources otherwise, generates platform-specific listing copy, and
+shows it for review/edit. It captures **hauls
 in bulk** (many items in one session), tracks **cost basis → net profit** per item, and can
 **auto-reprice** listings that go stale. High-confidence items can post automatically
 (confidence-gated autopilot); low-confidence ones queue for human review. Listings post to eBay

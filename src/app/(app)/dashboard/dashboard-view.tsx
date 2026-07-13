@@ -766,7 +766,8 @@ function DashboardEmpty() {
       <p className="text-base font-semibold text-fg-strong">List your first item</p>
       <p className="max-w-sm text-[15px] text-muted">
         Take a photo of your first item and we&apos;ll identify it, price it
-        from real sold listings, and write the listing for you.
+        from sold listings when available or honest fallbacks, and write the
+        listing for you.
       </p>
       <div className="mt-1">
         <Link

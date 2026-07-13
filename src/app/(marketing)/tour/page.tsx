@@ -54,7 +54,7 @@ const STEPS = [
     mobile: true,
     glyph: "price",
     title: "Price",
-    body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources behind it. Real sale prices, not wishful asking prices.",
+    body: "SnapList prefers relevant recent sold listings, then suggests a price, a realistic range, and the exact sources behind it. If sold comps are unavailable, it falls back to cited web sources or a clearly labeled estimate.",
     poster: "A defensible number, with its receipts.",
     label: "Demo clip: the Price step of SnapList",
   },
@@ -103,7 +103,7 @@ const FAQ = [
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest, an exact lookup with no guessing. Branded items are priced from what similar ones recently sold for, which is solid. Everyday items get a rougher estimate marked down from the new price, and we label it as less certain. Every price is yours to edit.",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest. For identifiable items, relevant sold comps lead when available; if access is blocked or results are too thin, SnapList falls back to cited web sources or a lower-confidence estimate. Every price is yours to edit.",
   },
   {
     q: "Is my data private?",

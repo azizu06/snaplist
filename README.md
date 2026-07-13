@@ -1,8 +1,8 @@
 # SnapList
 
-Snap a photo of a resale item → get a priced, ready-to-post marketplace listing, priced from real
-sold comps with a confidence score and cited sources. Built for resellers; a production-real
-AI-engineering showcase.
+Snap a photo of a resale item → get a priced, ready-to-post marketplace listing. SnapList prefers
+real sold comps when available, then falls back to cited web sources or clearly labeled estimates,
+always with a confidence score. Built for resellers; a production-real AI-engineering showcase.
 
 > **Docs:** [`PRD.md`](./PRD.md) is the source of truth for what we build · [`CONTEXT.md`](./CONTEXT.md)
 > is the domain glossary · [`AGENTS.md`](./AGENTS.md) is the agent/engineering guide ·
@@ -18,8 +18,8 @@ and retail prices mislead for used goods. Multiply that by a haul and the resear
 
 SnapList collapses that into a photo plus a couple of approvals so a reseller can clear a whole haul
 in one pass. The seller snaps 1–4 photos; the system identifies the item (brand, model, category,
-condition, specs, any barcode/ISBN), researches a defensible price range from real sold comps with
-cited sources, writes per-platform listing copy, and shows it for
+condition, specs, any barcode/ISBN), researches a defensible price range from real sold comps when
+available and cited fallback sources otherwise, writes per-platform listing copy, and shows it for
 review. Before publishing, the seller can correct the load-bearing identity facts and explicitly
 re-price and regenerate a coherent draft without losing a saved price override. High-confidence
 items can post automatically (a confidence-gated autopilot); low-confidence
@@ -152,6 +152,7 @@ pnpm dev                     # http://localhost:3000
 | `pnpm test:watch` | Vitest watch mode |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint |
+| `pnpm smoke:sold-comps` | Offline sold-comps egress/router smoke (0 requests by default; [operator procedure](./docs/sold-comps-egress.md)) |
 | `pnpm eval` | Eval harness — offline by default (see below) |
 | `pnpm supabase` | Supabase CLI |
 
@@ -256,10 +257,12 @@ pnpm exec tsx supabase/seed/reference-corpus.ts
 ## Honest accuracy ceiling
 Being able to state where the system's accuracy tops out is part of the showcase:
 
-- **Pricing is bounded by its data.** There is no true sold-price source in v1 (eBay Marketplace
-  Insights is gated; dropped). Web tiers price from live *asking* prices, and asking ≠ sold. The
+- **Pricing is bounded by its data and egress.** The preferred `ebay-sold` tier reads real completed
+  sales from eBay's public sold pages when the environment can reach them and enough relevant comps
+  exist. Hosted egress can be blocked or a query can be too thin; in those cases the router falls
+  through to cited web search (often *asking* prices), depreciation, or the LLM-only floor. The
   corpus-corroboration signal is built on synthetic comps. Treat every price as a *smart
-  suggestion*, not an oracle.
+  suggestion*, not an oracle. See the [operator smoke procedure](./docs/sold-comps-egress.md).
 - **The `llm-only` floor tier is a guess.** When no barcode, brand, or retail anchor resolves, the
   fallback is an LLM estimate — lowest confidence by construction, and surfaced as such.
 - **The gold set is small and partly synthetic.** ~36 hand-authored hero-domain items whose price

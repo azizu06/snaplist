@@ -642,6 +642,22 @@ describe("createDefaultFetchPage (#56 review: SSRF + timeout)", () => {
     expect(requestedUrl).toContain(encodeURIComponent(ebayUrl));
   });
 
+  it("rejects a malformed configured proxy before issuing any request", () => {
+    let called = false;
+    const spyFetch = (async () => {
+      called = true;
+      return new Response("<html></html>");
+    }) as unknown as typeof fetch;
+
+    expect(() =>
+      createDefaultFetchPage({
+        fetchImpl: spyFetch,
+        proxyTemplate: "https://proxy.example/fetch",
+      }),
+    ).toThrow(/EBAY_SOLD_PROXY_TEMPLATE/);
+    expect(called).toBe(false);
+  });
+
   it("still SSRF-validates the eBay target before routing through a proxy", async () => {
     let called = false;
     const spyFetch = (async () => {
@@ -803,6 +819,19 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     // router falls through to the legal web-search tier, don't hard-fail.
     await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
     expect(fetchPage.urls).toHaveLength(1);
+  });
+
+  it("does not leak proxy credentials from a blocked fetch error into logs", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const provider = createEbaySoldPricingProvider({
+      fetchPage: async () => {
+        throw new Error("request failed for https://proxy.example/?token=super-secret");
+      },
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(log.mock.calls.flat().join("\n")).not.toContain("super-secret");
+    log.mockRestore();
   });
 
   it("falls back to the Playwright-style fetcher when the primary is blocked", async () => {

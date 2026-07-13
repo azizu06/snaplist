@@ -38,7 +38,9 @@ sold-comp research is now a first-class tier.
    seam.** No login ⇒ no account-ban risk; the only failure mode is an IP rate-limit / CAPTCHA.
    The concrete headless driver is intentionally **not bundled yet** (heavy dep, unvalidated
    against live blocking) — the `fetchPageFallback` seam and its decline-to-next-tier behavior
-   are tested; wiring a real driver rides with #59.
+   are tested. Hosted environments may route the same in-process fetch through an optional,
+   vendor-neutral `EBAY_SOLD_PROXY_TEMPLATE`; missing config preserves direct fetch, malformed
+   config fails validation before egress, and the operator-controlled smoke is inert by default.
 
 3. **A blocked scrape DECLINES (`null`), never hard-fails.** Being rate-limited is an expected,
    recoverable condition, so the router falls through to the legal web-search tier. The fetch

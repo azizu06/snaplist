@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     template: "%s · SnapList",
   },
   description:
-    "SnapList is built for resellers. Snap a photo of anything you're flipping and it identifies the item, prices it from real sold comps with cited sources, and writes ready-to-post listings for eBay, Facebook, and Mercari.",
+    "SnapList is built for resellers. Snap a photo of anything you're flipping and it identifies the item, prefers real sold comps when available, cites fallback pricing sources, and writes ready-to-post listings for eBay, Facebook, and Mercari.",
 };
 
 /**

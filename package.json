@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke:sold-comps": "tsx scripts/scrape-smoke.ts",
     "eval": "tsx src/lib/eval/run.ts",
     "eval:build-gold": "tsx src/lib/eval/build-gold-set.ts",
     "supabase": "supabase"
