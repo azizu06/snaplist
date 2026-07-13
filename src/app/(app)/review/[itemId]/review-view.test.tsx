@@ -11,6 +11,7 @@ function reviewData(
   return {
     itemId: "item-1",
     reviewRevision: "00000000-0000-4000-8000-000000000001",
+    reviewBlocked: false,
     runId: "run-1",
     photoUrls: [],
     identification: {
@@ -136,6 +137,22 @@ describe("review identity correction UI", () => {
     );
     expect(html).not.toContain("Correct item identity");
     expect(html).not.toContain("Re-price &amp; regenerate");
+  });
+
+  it("does not offer regeneration or sharpen when another eBay row is live", () => {
+    const data = reviewData();
+    data.reviewBlocked = true;
+    const html = renderToStaticMarkup(
+      <ReviewView
+        data={data}
+        saveAction={noop}
+        sharpenAction={noop}
+        regenerateAction={noop}
+      />,
+    );
+    expect(html).not.toContain("Correct item identity");
+    expect(html).not.toContain("Re-price &amp; regenerate");
+    expect(html).not.toContain("Sharpen the estimate");
   });
 
   it.each([

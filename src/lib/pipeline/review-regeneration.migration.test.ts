@@ -101,16 +101,30 @@ describe("review regeneration migration security guards", () => {
         ),
       )?.[0];
       expect(reviewMutation).toMatch(
-        /status\s+is\s+(?:not\s+)?distinct\s+from\s+'published'/i,
+        /status\s+is\s+not\s+distinct\s+from\s+'published'/i,
       );
-      expect(reviewMutation).toMatch(/ebay_listing_id\s+is\s+(?:not\s+)?null/i);
+      expect(reviewMutation).toMatch(/ebay_listing_id\s+is\s+not\s+null/i);
       expect(reviewMutation).toMatch(
-        /ebay_status\s+is\s+(?:not\s+)?distinct\s+from\s+'publishing'/i,
+        /ebay_status\s+is\s+not\s+distinct\s+from\s+'publishing'/i,
       );
       expect(reviewMutation).toMatch(
-        /ebay_status\s+is\s+(?:not\s+)?distinct\s+from\s+'published'/i,
+        /ebay_status\s+is\s+not\s+distinct\s+from\s+'published'/i,
       );
     }
+  });
+
+  it("loads the RLS-scoped review projection and all-row guard in one SQL statement", () => {
+    const reviewSnapshot = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.get_review_snapshot[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(reviewSnapshot).toMatch(/language\s+sql/i);
+    expect(reviewSnapshot).toMatch(/security\s+invoker/i);
+    expect(reviewSnapshot).toMatch(/'item'[\s\S]*'listing'[\s\S]*'prediction'/i);
+    expect(reviewSnapshot).toMatch(
+      /'reviewBlocked'\s*,\s*exists\s*\([\s\S]*ebay_listing_id\s+is\s+not\s+null/i,
+    );
+    const sqlBody = reviewSnapshot?.match(/as\s+\$\$([\s\S]*)\$\$;/i)?.[1];
+    expect(sqlBody?.match(/;/g)).toHaveLength(1);
   });
 
   it("locks and checks every associated eBay row before regeneration", () => {

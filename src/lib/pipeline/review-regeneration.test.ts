@@ -32,6 +32,7 @@ function store(): ReviewRegenerationStore & {
     load: vi.fn(async () => ({
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewBlocked: false,
       attributes: {
         brand: "S0ny",
         model: "WH-1000XM3",
@@ -329,6 +330,7 @@ describe("regenerateReviewListing", () => {
     persistence.load = vi.fn(async () => ({
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewBlocked: false,
       attributes: {
         brand: "Patagonia",
         model: "Better Sweater",
@@ -465,6 +467,7 @@ describe("regenerateReviewListing", () => {
     persistence.load = vi.fn(async () => ({
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewBlocked: true,
       attributes: { brand: "Sony" },
       priceOverride: null,
       listing: {
@@ -512,6 +515,7 @@ describe("regenerateReviewListing", () => {
     persistence.load = vi.fn(async () => ({
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewBlocked: true,
       attributes: { brand: "Sony" },
       priceOverride: null,
       listing: {
@@ -548,6 +552,54 @@ describe("regenerateReviewListing", () => {
         },
       ),
     ).rejects.toThrow(/published/i);
+    expect(priceItem).not.toHaveBeenCalled();
+    expect(persistence.commit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an older non-editable eBay row before running paid work", async () => {
+    const persistence = store();
+    persistence.load = vi.fn(async () => ({
+      itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
+      attributes: { brand: "Sony" },
+      priceOverride: null,
+      listing: {
+        id: "newest-draft",
+        runId: null,
+        status: "draft",
+        ebayListingId: null,
+        ebayStatus: null,
+      },
+      prediction: { model: "vision-model", autopilotEnabled: true },
+      reviewBlocked: true,
+    }));
+    const beforeModelWork = vi.fn(async () => undefined);
+    const priceItem = vi.fn(async () => soldPrice);
+
+    await expect(
+      regenerateReviewListing(
+        persistence,
+        {
+          itemId: "item-1",
+          expectedReviewRevision: REVIEW_REVISION,
+          corrections: {
+            brand: "Sony",
+            model: null,
+            category: "electronics",
+            condition: "good",
+            isbn: null,
+            upc: null,
+            specs: [],
+          },
+        },
+        {
+          beforeModelWork,
+          priceItem,
+          generateListing: async () => ({ copy: generated, model: "listing" }),
+        },
+      ),
+    ).rejects.toThrow(/published/i);
+    expect(beforeModelWork).not.toHaveBeenCalled();
     expect(priceItem).not.toHaveBeenCalled();
     expect(persistence.commit).not.toHaveBeenCalled();
   });

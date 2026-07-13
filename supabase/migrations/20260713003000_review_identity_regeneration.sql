@@ -42,6 +42,86 @@ alter table public.listings
 create unique index if not exists listings_source_review_revision_idx
   on public.listings (item_id, platform, source_review_revision);
 
+create or replace function public.get_review_snapshot(p_item_id uuid)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'item', jsonb_build_object(
+      'id', item.id,
+      'photos', item.photos,
+      'attributes', item.attributes,
+      'condition', item.condition,
+      'identification', item.identification,
+      'price_override', item.price_override,
+      'cost_basis', item.cost_basis,
+      'review_revision', item.review_revision,
+      'created_at', item.created_at
+    ),
+    'listing', case when listing.id is null then null else jsonb_build_object(
+      'id', listing.id,
+      'platform', listing.platform,
+      'title', listing.title,
+      'description', listing.description,
+      'copy', listing.copy,
+      'status', listing.status,
+      'run_id', listing.run_id,
+      'ebay_listing_id', listing.ebay_listing_id,
+      'ebay_status', listing.ebay_status
+    ) end,
+    'prediction', case when prediction.id is null then null else jsonb_build_object(
+      'price', prediction.price,
+      'price_range', prediction.price_range,
+      'confidence', prediction.confidence,
+      'tier_fired', prediction.tier_fired,
+      'model', prediction.model,
+      'sources', prediction.sources,
+      'autopilot_enabled', prediction.autopilot_enabled,
+      'autopilot_eligible', prediction.autopilot_eligible
+    ) end,
+    'reviewBlocked', exists (
+      select 1
+      from public.listings blocked_listing
+      where blocked_listing.item_id = item.id
+        and blocked_listing.user_id = public.clerk_user_id()
+        and blocked_listing.platform = 'ebay'
+        and (
+          blocked_listing.status is not distinct from 'published'
+          or blocked_listing.ebay_listing_id is not null
+          or blocked_listing.ebay_status is not distinct from 'publishing'
+          or blocked_listing.ebay_status is not distinct from 'published'
+        )
+    )
+  )
+  from public.items item
+  left join lateral (
+    select candidate.*
+    from public.listings candidate
+    where candidate.item_id = item.id
+      and candidate.user_id = public.clerk_user_id()
+      and candidate.platform = 'ebay'
+    order by candidate.created_at desc, candidate.id desc
+    limit 1
+  ) listing on true
+  left join lateral (
+    select candidate.*
+    from public.prediction_logs candidate
+    where candidate.item_id = item.id
+      and candidate.user_id = public.clerk_user_id()
+    order by candidate.created_at desc, candidate.id desc
+    limit 1
+  ) prediction on true
+  where item.id = p_item_id
+    and item.user_id = public.clerk_user_id()
+  limit 1;
+$$;
+
+revoke all on function public.get_review_snapshot(uuid) from public;
+grant execute on function public.get_review_snapshot(uuid) to authenticated;
+
 drop function if exists public.begin_ebay_publish(uuid, uuid);
 drop function if exists public.begin_ebay_publish(uuid, uuid, uuid);
 

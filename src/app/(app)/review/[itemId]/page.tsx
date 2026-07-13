@@ -17,6 +17,7 @@ import {
 import { deriveStrategies } from "@/lib/pricing/strategies";
 import { priceSourceSchema, type PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
+import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
 import {
   regenerateCorrectedIdentity,
   saveReview,
@@ -64,35 +65,9 @@ export default async function ReviewPage({
   const userId = await getUserId();
   if (!userId) redirect(`/login?next=/review/${itemId}`);
 
-  // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
-  const { data: item } = await supabase
-    .from("items")
-    .select("id, photos, attributes, condition, identification, price_override, cost_basis, review_revision, created_at")
-    .eq("id", itemId)
-    .single();
-  if (!item) notFound();
-
-  // This page reviews the SALE listing. Export packs (#15) persist as
-  // 'facebook'/'mercari' listings rows for the same item, so pin the platform
-  // or the newest export pack would shadow the eBay draft here.
-  const { data: listing } = await supabase
-    .from("listings")
-    .select("id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_status")
-    .eq("item_id", itemId)
-    .eq("platform", "ebay")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const { data: log } = await supabase
-    .from("prediction_logs")
-    .select(
-      "price, price_range, confidence, tier_fired, model, sources, autopilot_enabled, autopilot_eligible",
-    )
-    .eq("item_id", itemId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const snapshot = await loadReviewSnapshot(supabase, itemId);
+  if (!snapshot) notFound();
+  const { item, listing, prediction: log } = snapshot;
 
   // Short-lived signed URLs for ALL the item's private photos (media card).
   const photoPaths = (item.photos as string[] | null) ?? [];
@@ -235,6 +210,7 @@ export default async function ReviewPage({
   const data: ReviewData = {
     itemId,
     reviewRevision: item.review_revision as string,
+    reviewBlocked: snapshot.reviewBlocked,
     runId: (listing?.run_id as string | null) ?? null,
     photoUrls,
     identification: identification

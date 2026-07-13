@@ -54,6 +54,7 @@ type ClarifyOption = { label: string; spec: string };
 export interface ReviewData {
   itemId: string;
   reviewRevision: string;
+  reviewBlocked: boolean;
   runId?: string | null;
   photoUrls: string[];
   identification: {
@@ -913,9 +914,9 @@ function ReviewViewState({
   const [fields, setFields] = useState(initial);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
-  const regenerationBlocked = data.listing
-    ? isReviewRegenerationBlocked(data.listing)
-    : false;
+  const regenerationBlocked =
+    data.reviewBlocked ||
+    (data.listing ? isReviewRegenerationBlocked(data.listing) : false);
 
   // Garment measurements (issue #104): their own controlled state, folded into the
   // same dirty/save/discard flow as the other fields.

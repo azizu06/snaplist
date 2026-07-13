@@ -20,6 +20,7 @@ import {
 import { buildPredictionLogRow, type PredictionLogRow } from "./prediction-log";
 import { attributesToSignal } from "./stub";
 import { isReviewRegenerationBlocked } from "./review-regeneration-policy";
+import { loadReviewSnapshot } from "./review-snapshot";
 import {
   extractedAttributesSchema,
   type ExtractedAttributes,
@@ -226,6 +227,7 @@ export function applyIdentityCorrections(
 export interface ReviewRegenerationSnapshot {
   itemId: string;
   reviewRevision: string;
+  reviewBlocked: boolean;
   attributes: unknown;
   /** Read for proof/return only. The commit contract intentionally cannot write it. */
   priceOverride: number | string | null;
@@ -304,7 +306,7 @@ export async function regenerateReviewListing(
   if (snapshot.reviewRevision !== input.expectedReviewRevision) {
     throw new Error("This review changed. Reload and try again.");
   }
-  if (isReviewRegenerationBlocked(snapshot.listing)) {
+  if (snapshot.reviewBlocked || isReviewRegenerationBlocked(snapshot.listing)) {
     throw new Error("A published listing cannot be regenerated from review.");
   }
 
@@ -372,42 +374,16 @@ export function createSupabaseReviewRegenerationStore(
 ): ReviewRegenerationStore {
   return {
     async load(itemId) {
-      const { data: item, error: itemError } = await supabase
-        .from("items")
-        .select("id, attributes, price_override, review_revision")
-        .eq("id", itemId)
-        .maybeSingle();
-      if (itemError) throw new Error(`Failed to load item: ${itemError.message}`);
-      if (!item) return null;
-
-      const { data: listing, error: listingError } = await supabase
-        .from("listings")
-        .select("id, run_id, status, ebay_listing_id, ebay_status")
-        .eq("item_id", itemId)
-        .eq("platform", "ebay")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (listingError) {
-        throw new Error(`Failed to load listing: ${listingError.message}`);
-      }
+      const snapshot = await loadReviewSnapshot(supabase, itemId);
+      if (!snapshot) return null;
+      const { item, listing, prediction } = snapshot;
       if (!listing) throw new Error("This item has no eBay listing to regenerate.");
-
-      const { data: prediction, error: predictionError } = await supabase
-        .from("prediction_logs")
-        .select("model, autopilot_enabled")
-        .eq("item_id", itemId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (predictionError) {
-        throw new Error(`Failed to load prediction: ${predictionError.message}`);
-      }
       if (!prediction) throw new Error("This item has not been priced yet.");
 
       return {
         itemId: item.id as string,
         reviewRevision: item.review_revision as string,
+        reviewBlocked: snapshot.reviewBlocked,
         attributes: item.attributes,
         priceOverride: item.price_override as number | string | null,
         listing: {

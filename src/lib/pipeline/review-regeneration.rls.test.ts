@@ -399,8 +399,21 @@ describe("review identity regeneration transaction + RLS", () => {
       status: "draft",
       ebay_listing_id: "v1|older-live|0",
       ebay_status: "published",
+      created_at: "2026-01-01T00:00:00.000Z",
     });
     expect(extraError).toBeNull();
+
+    const [{ data: ownerSnapshot, error: ownerSnapshotError }, { data: foreignSnapshot }] =
+      await Promise.all([
+        userA.client.rpc("get_review_snapshot", { p_item_id: seeded.itemId }),
+        userB.client.rpc("get_review_snapshot", { p_item_id: seeded.itemId }),
+      ]);
+    expect(ownerSnapshotError).toBeNull();
+    expect(ownerSnapshot).toMatchObject({
+      listing: { id: seeded.listingId },
+      reviewBlocked: true,
+    });
+    expect(foreignSnapshot).toBeNull();
 
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(

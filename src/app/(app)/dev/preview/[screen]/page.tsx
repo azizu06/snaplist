@@ -103,6 +103,7 @@ const FIXTURE_ROWS: DashboardRow[] = [
 const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
   reviewRevision: "00000000-0000-4000-8000-000000000001",
+  reviewBlocked: false,
   photoUrls: ["/demo/headphones.jpg", "/demo/boombox.jpg"],
   identification: {
     label: "Sony WH-1000XM4 Wireless Headphones",
