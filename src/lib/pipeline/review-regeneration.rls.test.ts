@@ -269,7 +269,7 @@ describe("review identity regeneration transaction + RLS", () => {
     stale.attributes.brand = "Stale identity";
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(stale),
-    ).rejects.toThrow(/editable eBay listing not found/i);
+    ).rejects.toThrow(/review changed/i);
 
     const [{ data: item }, { data: listing }, { data: staleLogs }] = await Promise.all([
       userA.client.from("items").select("attributes").eq("id", seeded.itemId).single(),
@@ -349,19 +349,19 @@ describe("review identity regeneration transaction + RLS", () => {
     ).rejects.toThrow(/editable eBay listing not found/i);
 
     const publishing = await seedReview(userA, "publishing-claim");
-    const { error: claimError } = await userA.client.rpc("begin_ebay_publish", {
+    const claim = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: publishing.listingId,
       p_expected_run_id: null,
       p_expected_review_revision: publishing.reviewRevision,
     });
-    expect(claimError).toBeNull();
+    expect(claim.error).toBeNull();
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(
         commitFor(
           publishing.itemId,
           publishing.listingId,
           crypto.randomUUID(),
-          publishing.reviewRevision,
+          claim.data.claimId as string,
         ),
       ),
     ).rejects.toThrow(/editable eBay listing not found/i);
@@ -849,6 +849,87 @@ describe("review identity regeneration transaction + RLS", () => {
       .eq("item_id", seeded.itemId)
       .in("platform", ["facebook", "mercari"]);
     expect(afterSharpen ?? []).toHaveLength(0);
+  });
+
+  it("advances the review revision atomically with dashboard seller edits", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "dashboard-revision");
+
+    const dashboardEdit = await userA.client.rpc("update_dashboard_review", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_set_price_override: true,
+      p_price_override: 199,
+      p_set_cost_basis: true,
+      p_cost_basis: 75,
+      p_set_status: true,
+      p_status: "archived",
+    });
+    expect(dashboardEdit.error).toBeNull();
+    expect(dashboardEdit.data).not.toBe(seeded.reviewRevision);
+
+    const [{ data: item }, { data: listing }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("price_override, cost_basis, review_revision")
+        .eq("id", seeded.itemId)
+        .single(),
+      userA.client
+        .from("listings")
+        .select("status")
+        .eq("id", seeded.listingId)
+        .single(),
+    ]);
+    expect(Number(item?.price_override)).toBe(199);
+    expect(Number(item?.cost_basis)).toBe(75);
+    expect(item?.review_revision).toBe(dashboardEdit.data);
+    expect(listing?.status).toBe("archived");
+
+    const staleSave = await userA.client.rpc("save_review_edits", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_new_review_revision: crypto.randomUUID(),
+      p_attributes: { category: "electronics", condition: "fair" },
+      p_condition: "fair",
+      p_price_override: 1,
+      p_cost_basis: 1,
+      p_listing_title: "Stale review title",
+      p_listing_description: "Stale review description",
+    });
+    expect(staleSave.error?.code).toBe("P0002");
+
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(
+        commitFor(
+          seeded.itemId,
+          seeded.listingId,
+          crypto.randomUUID(),
+          seeded.reviewRevision,
+        ),
+      ),
+    ).rejects.toThrow(/Review changed/i);
+
+    const crossTenant = await userB.client.rpc("update_dashboard_review", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_set_price_override: true,
+      p_price_override: 2,
+      p_set_cost_basis: false,
+      p_cost_basis: null,
+      p_set_status: false,
+      p_status: null,
+    });
+    expect(crossTenant.error?.code).toBe("P0002");
+
+    const { data: preserved } = await userA.client
+      .from("items")
+      .select("price_override, cost_basis, review_revision")
+      .eq("id", seeded.itemId)
+      .single();
+    expect(Number(preserved?.price_override)).toBe(199);
+    expect(Number(preserved?.cost_basis)).toBe(75);
+    expect(preserved?.review_revision).toBe(dashboardEdit.data);
   });
 
   it("recovers an expired publish lease without letting the stale owner finalize", async () => {

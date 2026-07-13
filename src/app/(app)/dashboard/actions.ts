@@ -25,6 +25,40 @@ const ARCHIVED = "archived";
 
 type DbClient = Awaited<ReturnType<typeof createClient>>;
 
+interface DashboardReviewMutation {
+  itemId: string | null;
+  listingId: string | null;
+  setPriceOverride: boolean;
+  priceOverride: number | null;
+  setCostBasis: boolean;
+  costBasis: number | null;
+  setStatus: boolean;
+  status: string | null;
+}
+
+async function updateDashboardReview(
+  supabase: DbClient,
+  mutation: DashboardReviewMutation,
+  scope: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("update_dashboard_review", {
+    p_item_id: mutation.itemId,
+    p_listing_id: mutation.listingId,
+    p_set_price_override: mutation.setPriceOverride,
+    p_price_override: mutation.priceOverride,
+    p_set_cost_basis: mutation.setCostBasis,
+    p_cost_basis: mutation.costBasis,
+    p_set_status: mutation.setStatus,
+    p_status: mutation.status,
+  });
+  if (error) {
+    reportServerError(scope, error, {
+      itemId: mutation.itemId,
+      listingId: mutation.listingId,
+    });
+  }
+}
+
 /**
  * The subset of `listingIds` that are LIVE on eBay (ebay_listing_id set +
  * ebay_status "published"). A live listing's lifecycle is owned by the eBay state,
@@ -75,13 +109,24 @@ export async function archiveListings(listingIds: string[]): Promise<void> {
     );
   }
   if (archivable.length > 0) {
-    const { error } = await supabase
-      .from("listings")
-      .update({ status: ARCHIVED })
-      .in("id", archivable);
-    if (error) {
-      reportServerError("dashboard.archive", error, { count: archivable.length });
-    }
+    await Promise.all(
+      archivable.map((listingId) =>
+        updateDashboardReview(
+          supabase,
+          {
+            itemId: null,
+            listingId,
+            setPriceOverride: false,
+            priceOverride: null,
+            setCostBasis: false,
+            costBasis: null,
+            setStatus: true,
+            status: ARCHIVED,
+          },
+          "dashboard.archive",
+        ),
+      ),
+    );
   }
   revalidatePath("/dashboard");
 }
@@ -120,13 +165,24 @@ export async function unarchiveListings(listingIds: string[]): Promise<void> {
   }
 
   const restore = (ids: string[], status: string) =>
-    supabase
-      .from("listings")
-      .update({ status })
-      .in("id", ids)
-      .then(({ error }) => {
-        if (error) reportServerError("dashboard.unarchive", error, { count: ids.length });
-      });
+    Promise.all(
+      ids.map((listingId) =>
+        updateDashboardReview(
+          supabase,
+          {
+            itemId: null,
+            listingId,
+            setPriceOverride: false,
+            priceOverride: null,
+            setCostBasis: false,
+            costBasis: null,
+            setStatus: true,
+            status,
+          },
+          "dashboard.unarchive",
+        ),
+      ),
+    );
 
   await Promise.all([
     ...(live.length > 0 ? [restore(live, "published")] : []),
@@ -259,17 +315,7 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
           );
         }
       }
-      if (Object.keys(itemPatch).length > 0) {
-        writes.push(
-          supabase
-            .from("items")
-            .update(itemPatch)
-            .eq("id", u.itemId)
-            .then(({ error }) => {
-              if (error) reportServerError("dashboard.bulkUpdate.item", error, { itemId: u.itemId });
-            }),
-        );
-      }
+      let status: string | null = null;
       // Status write boundary (Codex P1): bulk-edit may ONLY set the
       // seller-organizational statuses (draft / archived). `published` is owned by
       // the eBay publish path (it sets ebay_listing_id/ebay_status together) and
@@ -303,16 +349,26 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
             { listingId: u.listingId },
           );
         } else if (decision === "write") {
-          writes.push(
-            supabase
-              .from("listings")
-              .update({ status: u.status })
-              .eq("id", u.listingId)
-              .then(({ error }) => {
-                if (error) reportServerError("dashboard.bulkUpdate.status", error, { listingId: u.listingId });
-              }),
-          );
+          status = u.status;
         }
+      }
+      if (Object.keys(itemPatch).length > 0 || status !== null) {
+        writes.push(
+          updateDashboardReview(
+            supabase,
+            {
+              itemId: u.itemId,
+              listingId: u.listingId,
+              setPriceOverride: "price_override" in itemPatch,
+              priceOverride: itemPatch.price_override ?? null,
+              setCostBasis: "cost_basis" in itemPatch,
+              costBasis: itemPatch.cost_basis ?? null,
+              setStatus: status !== null,
+              status,
+            },
+            "dashboard.bulkUpdate",
+          ),
+        );
       }
       return writes;
     }),

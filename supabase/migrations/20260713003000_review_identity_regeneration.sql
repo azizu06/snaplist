@@ -78,31 +78,46 @@ begin
       );
   end if;
 
-  with ranked as (
+  with listing_candidates as (
+    select
+      listing.id,
+      listing.item_id,
+      (
+        listing.status is not distinct from 'published'
+        or listing.ebay_listing_id is not null
+        or listing.ebay_status is not distinct from 'publishing'
+        or listing.ebay_status is not distinct from 'published'
+      ) as is_protected,
+      paired_prediction.created_at as paired_prediction_created_at,
+      paired_prediction.id as paired_prediction_id,
+      listing.created_at,
+      listing.id as listing_id
+    from public.listings listing
+    left join lateral (
+      select prediction.id, prediction.created_at
+      from public.prediction_logs prediction
+      where listing.run_id is not null
+        and prediction.item_id = listing.item_id
+        and prediction.user_id = listing.user_id
+        and prediction.run_id = listing.run_id
+      order by prediction.created_at desc, prediction.id desc
+      limit 1
+    ) paired_prediction on true
+    where listing.platform = 'ebay'
+  ), ranked as (
     select
       id,
-      (
-        status is not distinct from 'published'
-        or ebay_listing_id is not null
-        or ebay_status is not distinct from 'publishing'
-        or ebay_status is not distinct from 'published'
-      ) as is_protected,
+      is_protected,
       row_number() over (
         partition by item_id
         order by
-          case
-            when status is not distinct from 'published'
-              or ebay_listing_id is not null
-              or ebay_status is not distinct from 'publishing'
-              or ebay_status is not distinct from 'published'
-              then 0
-            else 1
-          end,
+          case when is_protected then 0 else 1 end,
+          paired_prediction_created_at desc nulls last,
+          paired_prediction_id desc nulls last,
           created_at desc,
-          id desc
+          listing_id desc
       ) as survivor_rank
-    from public.listings
-    where platform = 'ebay'
+    from listing_candidates
   ), discardable as (
     select id
     from ranked
@@ -608,6 +623,157 @@ revoke all on function public.save_review_edits(
 ) from public;
 grant execute on function public.save_review_edits(
   uuid, uuid, uuid, uuid, jsonb, text, numeric, numeric, text, text
+) to authenticated;
+
+create or replace function public.update_dashboard_review(
+  p_item_id uuid,
+  p_listing_id uuid,
+  p_set_price_override boolean,
+  p_price_override numeric,
+  p_set_cost_basis boolean,
+  p_cost_basis numeric,
+  p_set_status boolean,
+  p_status text
+)
+returns uuid
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_item_id uuid := p_item_id;
+  v_listing_item_id uuid;
+  v_listing_platform text;
+  v_listing_status text;
+  v_ebay_listing_id text;
+  v_ebay_status text;
+  v_new_review_revision uuid := gen_random_uuid();
+begin
+  if v_user_id is null or v_user_id = '' then
+    raise exception using errcode = '42501', message = 'Authentication required.';
+  end if;
+  if not coalesce(p_set_price_override, false)
+    and not coalesce(p_set_cost_basis, false)
+    and not coalesce(p_set_status, false) then
+    raise exception using errcode = '22023', message = 'Dashboard update is empty.';
+  end if;
+  if coalesce(p_set_price_override, false)
+    and p_price_override is not null
+    and p_price_override <= 0 then
+    raise exception using errcode = '22023', message = 'Price override is invalid.';
+  end if;
+  if coalesce(p_set_cost_basis, false)
+    and p_cost_basis is not null
+    and p_cost_basis < 0 then
+    raise exception using errcode = '22023', message = 'Cost basis is invalid.';
+  end if;
+  if coalesce(p_set_status, false)
+    and (p_status is null or p_status not in ('draft', 'archived', 'published')) then
+    raise exception using errcode = '22023', message = 'Listing status is invalid.';
+  end if;
+
+  if p_listing_id is not null then
+    select listing.item_id
+    into v_listing_item_id
+    from public.listings listing
+    where listing.id = p_listing_id
+      and listing.user_id = v_user_id;
+    if not found then
+      raise exception using errcode = 'P0002', message = 'Dashboard listing not found.';
+    end if;
+    if v_item_id is null then
+      v_item_id := v_listing_item_id;
+    elsif v_item_id is distinct from v_listing_item_id then
+      raise exception using errcode = 'P0002', message = 'Dashboard listing not found.';
+    end if;
+  end if;
+
+  if v_item_id is null then
+    raise exception using errcode = '22023', message = 'Item id is required.';
+  end if;
+
+  perform 1
+  from public.items item
+  where item.id = v_item_id
+    and item.user_id = v_user_id
+  for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Dashboard item not found.';
+  end if;
+
+  if p_listing_id is not null then
+    select
+      listing.item_id,
+      listing.platform,
+      listing.status,
+      listing.ebay_listing_id,
+      listing.ebay_status
+    into
+      v_listing_item_id,
+      v_listing_platform,
+      v_listing_status,
+      v_ebay_listing_id,
+      v_ebay_status
+    from public.listings listing
+    where listing.id = p_listing_id
+      and listing.item_id = v_item_id
+      and listing.user_id = v_user_id
+    for update;
+    if not found then
+      raise exception using errcode = 'P0002', message = 'Dashboard listing not found.';
+    end if;
+  elsif coalesce(p_set_status, false) then
+    raise exception using errcode = '22023', message = 'Listing id is required for status updates.';
+  end if;
+
+  if coalesce(p_set_status, false) then
+    if p_status = 'published' then
+      if v_listing_platform is distinct from 'ebay'
+        or v_ebay_listing_id is null
+        or v_ebay_status is distinct from 'published' then
+        raise exception using errcode = 'P0002', message = 'Authoritative live eBay listing not found.';
+      end if;
+    elsif v_listing_platform = 'ebay' and (
+      v_listing_status is not distinct from 'published'
+      or v_ebay_listing_id is not null
+      or v_ebay_status is not distinct from 'publishing'
+      or v_ebay_status is not distinct from 'published'
+    ) then
+      raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
+    end if;
+  end if;
+
+  update public.items item
+  set price_override = case
+        when coalesce(p_set_price_override, false) then p_price_override
+        else item.price_override
+      end,
+      cost_basis = case
+        when coalesce(p_set_cost_basis, false) then p_cost_basis
+        else item.cost_basis
+      end,
+      review_revision = v_new_review_revision
+  where item.id = v_item_id
+    and item.user_id = v_user_id;
+
+  if coalesce(p_set_status, false) then
+    update public.listings listing
+    set status = p_status
+    where listing.id = p_listing_id
+      and listing.item_id = v_item_id
+      and listing.user_id = v_user_id;
+  end if;
+
+  return v_new_review_revision;
+end;
+$$;
+
+revoke all on function public.update_dashboard_review(
+  uuid, uuid, boolean, numeric, boolean, numeric, boolean, text
+) from public;
+grant execute on function public.update_dashboard_review(
+  uuid, uuid, boolean, numeric, boolean, numeric, boolean, text
 ) to authenticated;
 
 create or replace function public.sharpen_review_estimate(

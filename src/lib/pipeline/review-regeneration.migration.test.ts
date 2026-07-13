@@ -214,6 +214,24 @@ describe("review regeneration migration security guards", () => {
     }
   });
 
+  it("prefers the draft paired to the latest applicable prediction run", () => {
+    const reconciliation = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.reconcile_legacy_ebay_listing_duplicates[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(reconciliation).toMatch(/public\.prediction_logs/i);
+    expect(reconciliation).toMatch(/prediction\.run_id\s*=\s*listing\.run_id/i);
+    expect(reconciliation).toMatch(/paired_prediction_created_at\s+desc\s+nulls\s+last/i);
+  });
+
+  it("routes dashboard seller edits through one revision-advancing transaction", () => {
+    const dashboardMutation = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.update_dashboard_review[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(dashboardMutation).toMatch(/review_revision\s*=\s*v_new_review_revision/i);
+    expect(dashboardMutation).toMatch(/user_id\s*=\s*v_user_id/i);
+    expect(dashboardMutation).toMatch(/for\s+update/i);
+  });
+
   it("ordinary saves preserve stored load-bearing identity", () => {
     const saveFunction = migration.match(
       /create\s+or\s+replace\s+function\s+public\.save_review_edits[\s\S]*?\$\$;/i,

@@ -51,6 +51,7 @@ insert into public.listings (
   item_id,
   platform,
   status,
+  run_id,
   created_at
 )
 values
@@ -60,6 +61,7 @@ values
     '10000000-0000-0000-0000-000000000002',
     'ebay',
     'draft',
+    '30000000-0000-0000-0000-000000000001',
     '2026-07-13T12:00:00Z'
   ),
   (
@@ -68,8 +70,26 @@ values
     '10000000-0000-0000-0000-000000000002',
     'ebay',
     'draft',
+    '30000000-0000-0000-0000-000000000002',
     '2026-07-13T13:00:00Z'
   );
+
+insert into public.prediction_logs (
+  user_id,
+  item_id,
+  run_id,
+  model,
+  listing_model,
+  created_at
+)
+values (
+  'migration-test',
+  '10000000-0000-0000-0000-000000000002',
+  '30000000-0000-0000-0000-000000000001',
+  'migration-test-model',
+  'migration-test-model',
+  '2026-07-13T14:00:00Z'
+);
 
 select extensions.lives_ok(
   'select public.reconcile_legacy_ebay_listing_duplicates()',
@@ -82,8 +102,8 @@ select extensions.is(
     from public.listings
     where item_id = '10000000-0000-0000-0000-000000000002'
   ),
-  '20000000-0000-0000-0000-000000000003'::uuid,
-  'the newest draft survives draft-only reconciliation'
+  '20000000-0000-0000-0000-000000000002'::uuid,
+  'the draft paired to the latest applicable prediction survives'
 );
 
 insert into public.listings (
