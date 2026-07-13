@@ -403,4 +403,36 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     ).rejects.toThrowError(/no usable price/i);
     expect(adapter.requests).toHaveLength(0);
   });
+
+  it("rolls back the publish claim when persisted listing copy is malformed", async () => {
+    if (!reachable) return;
+
+    const { itemId, listingId } = await persistedRun(userA);
+    const [{ data: item }, { error: malformedCopyError }] = await Promise.all([
+      userA.client.from("items").select("review_revision").eq("id", itemId).single(),
+      userA.client.from("listings").update({ copy: [] }).eq("id", listingId),
+    ]);
+    expect(malformedCopyError).toBeNull();
+
+    const adapter = new MockEbayAdapter();
+    await expect(
+      publishListingToEbay(userA.client, listingId, adapter),
+    ).rejects.toThrowError(/listing copy must be an object/i);
+    expect(adapter.requests).toHaveLength(0);
+
+    const [{ data: listing }, { data: itemAfter }] = await Promise.all([
+      userA.client
+        .from("listings")
+        .select("status, ebay_status, ebay_publish_claim_id")
+        .eq("id", listingId)
+        .single(),
+      userA.client.from("items").select("review_revision").eq("id", itemId).single(),
+    ]);
+    expect(listing).toMatchObject({
+      status: "draft",
+      ebay_status: null,
+      ebay_publish_claim_id: null,
+    });
+    expect(itemAfter?.review_revision).toBe(item?.review_revision);
+  });
 });

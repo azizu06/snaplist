@@ -32,6 +32,12 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(/ebay_status\s+is\s+distinct\s+from\s+'published'/i);
   });
 
+  it("enforces one eBay listing row per item", () => {
+    expect(migration).toMatch(
+      /create\s+unique\s+index\s+if\s+not\s+exists\s+listings_one_ebay_per_item_idx\s+on\s+public\.listings\s*\(item_id\)\s+where\s+platform\s*=\s*'ebay'/i,
+    );
+  });
+
   it("makes publish acquisition return one locked publish snapshot", () => {
     const publishFunction = migration.match(
       /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish[\s\S]*?\$\$;/i,
@@ -43,6 +49,15 @@ describe("review regeneration migration security guards", () => {
     );
     expect(publishFunction).toMatch(/jsonb_build_object[\s\S]*'title'/i);
     expect(publishFunction).toMatch(/jsonb_build_object[\s\S]*'price'/i);
+  });
+
+  it("rejects malformed listing copy inside the publish claim transaction", () => {
+    const publishFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(publishFunction).toMatch(
+      /jsonb_typeof\s*\(v_copy\)\s+is\s+distinct\s+from\s+'object'/i,
+    );
   });
 
   it("keeps publish exclusion separate from export content revisions", () => {

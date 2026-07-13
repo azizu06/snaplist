@@ -766,12 +766,14 @@ function MeasurementsCard({
   confirmed,
   onValue,
   onConfirm,
+  disabled = false,
 }: {
   fields: MeasureField[];
   values: Record<string, string>;
   confirmed: Record<string, boolean>;
   onValue: (name: string, value: string) => void;
   onConfirm: (name: string, checked: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <Card chromeClassName={APP_CARD_CHROME} className="p-4 sm:p-5">
@@ -830,10 +832,11 @@ function MeasurementsCard({
                   step="any"
                   min="0"
                   value={values[f.name] ?? ""}
+                  disabled={disabled}
                   onChange={(e) => onValue(f.name, e.target.value)}
                   placeholder={f.needsReference ? "Measure with tape" : "0"}
                   aria-label={`${f.label} in inches`}
-                  className="w-full rounded-lg bg-transparent px-2.5 py-1.5 text-[15px] font-semibold text-fg-strong outline-none"
+                  className="w-full rounded-lg bg-transparent px-2.5 py-1.5 text-[15px] font-semibold text-fg-strong outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   data-nums
                 />
                 <span className="pr-2.5 text-[13px] text-muted">in</span>
@@ -858,7 +861,7 @@ function MeasurementsCard({
                   value={f.name}
                   form="rv-save"
                   checked={confirmed[f.name] ?? false}
-                  disabled={!hasValue}
+                  disabled={disabled || !hasValue}
                   onChange={(e) => onConfirm(f.name, e.target.checked)}
                   className="size-4 accent-[var(--color-accent)]"
                 />
@@ -1151,8 +1154,9 @@ function ReviewViewState({
                     type="text"
                     value={fields.title}
                     maxLength={EBAY_TITLE_MAX}
+                    disabled={regenerationBlocked}
                     onChange={(e) => setField("title", e.target.value)}
-                    className={INPUT_CLASSES}
+                    className={`${INPUT_CLASSES} disabled:cursor-not-allowed disabled:opacity-60`}
                   />
                 </div>
                 <div>
@@ -1163,8 +1167,9 @@ function ReviewViewState({
                     form="rv-save"
                     value={fields.description}
                     rows={8}
+                    disabled={regenerationBlocked}
                     onChange={(e) => setField("description", e.target.value)}
-                    className={`${INPUT_CLASSES} min-h-40 resize-y leading-relaxed`}
+                    className={`${INPUT_CLASSES} min-h-40 resize-y leading-relaxed disabled:cursor-not-allowed disabled:opacity-60`}
                   />
                 </div>
               </div>
@@ -1182,6 +1187,7 @@ function ReviewViewState({
               confirmed={measureConfirmed}
               onValue={setMeasureValue}
               onConfirm={setMeasureConfirm}
+              disabled={regenerationBlocked}
             />
           ) : null}
 
@@ -1217,10 +1223,11 @@ function ReviewViewState({
                   step="0.01"
                   min="0.01"
                   value={fields.price}
+                  disabled={regenerationBlocked}
                   onChange={(e) => setField("price", e.target.value)}
                   placeholder={data.suggested != null ? String(data.suggested) : "0.00"}
                   aria-label="Price (USD)"
-                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[26px] font-bold tracking-tight text-fg-strong outline-none"
+                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[26px] font-bold tracking-tight text-fg-strong outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   data-nums
                 />
               </div>
@@ -1237,6 +1244,7 @@ function ReviewViewState({
               onChange={(v) => setField("costBasis", v)}
               priceText={fields.price}
               fallbackPrice={data.suggested}
+              disabled={regenerationBlocked}
             />
 
             {/* intelligence: gauge (the one number) + suggested/range + bar.
@@ -1320,6 +1328,7 @@ function ReviewViewState({
               selected={fields.price}
               onPick={(p) => setField("price", String(p))}
               costBasisText={fields.costBasis}
+              disabled={regenerationBlocked}
             />
           </Card>
 

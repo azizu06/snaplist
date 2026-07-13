@@ -155,6 +155,56 @@ describe("review identity correction UI", () => {
     expect(html).not.toContain("Sharpen the estimate");
   });
 
+  it("disables ordinary review edits when the server blocks review mutations", () => {
+    const data = reviewData();
+    data.reviewBlocked = true;
+    data.measurements = {
+      garmentClass: "top",
+      fields: [
+        {
+          name: "pit_to_pit",
+          label: "Pit to pit",
+          value: "21",
+          toleranceText: "~21 in ± 1",
+          method: "prior-based",
+          confirmed: true,
+          needsReference: false,
+        },
+      ],
+    };
+    data.strategies = [
+      { key: "quick", label: "Quick", price: 150, blurb: "Sell faster" },
+      { key: "balanced", label: "Balanced", price: 165, blurb: "Balanced" },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ReviewView
+        data={data}
+        saveAction={noop}
+        sharpenAction={noop}
+        regenerateAction={noop}
+      />,
+    );
+
+    for (const name of [
+      "title",
+      "description",
+      "price",
+      "costBasis",
+      "measurement_pit_to_pit",
+      "measurement_confirmed",
+    ]) {
+      expect(html).toMatch(
+        new RegExp(
+          `<(?:input|textarea)(?=[^>]*name="${name}")(?=[^>]*disabled="")[^>]*>`,
+        ),
+      );
+    }
+    expect(html).toMatch(
+      /<button(?=[^>]*aria-label="Quick pricing strategy")(?=[^>]*disabled="")[^>]*>/,
+    );
+  });
+
   it.each([
     { listingId: "v1|1234567890|0", status: null },
     { listingId: null, status: "publishing" },

@@ -386,22 +386,19 @@ describe("review identity regeneration transaction + RLS", () => {
     );
   });
 
-  it("rejects regeneration when any associated eBay row is authoritative live state", async () => {
+  it("rejects a sibling eBay listing for the same item", async () => {
     if (!reachable) return;
-    const seeded = await seedReview(userA, "secondary-authoritative-live");
+    const seeded = await seedReview(userA, "duplicate-ebay-listing");
     const { error: extraError } = await userA.client.from("listings").insert({
       user_id: userA.id,
       item_id: seeded.itemId,
       platform: "ebay",
-      title: "Older live listing",
-      description: "Already published elsewhere",
+      title: "Sibling draft",
+      description: "Must not remain independently publishable",
       copy: {},
       status: "draft",
-      ebay_listing_id: "v1|older-live|0",
-      ebay_status: "published",
-      created_at: "2026-01-01T00:00:00.000Z",
     });
-    expect(extraError).toBeNull();
+    expect(extraError?.code).toBe("23505");
 
     const [{ data: ownerSnapshot, error: ownerSnapshotError }, { data: foreignSnapshot }] =
       await Promise.all([
@@ -411,20 +408,9 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(ownerSnapshotError).toBeNull();
     expect(ownerSnapshot).toMatchObject({
       listing: { id: seeded.listingId },
-      reviewBlocked: true,
+      reviewBlocked: false,
     });
     expect(foreignSnapshot).toBeNull();
-
-    await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(
-        commitFor(
-          seeded.itemId,
-          seeded.listingId,
-          crypto.randomUUID(),
-          seeded.reviewRevision,
-        ),
-      ),
-    ).rejects.toThrow(/editable eBay listing not found/i);
   });
 
   it("checks and advances one review revision while ordinary save preserves identity", async () => {

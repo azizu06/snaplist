@@ -221,8 +221,12 @@ export async function publishListingToEbay(
     }
     throw new Error(`Failed to start eBay publish: ${claimErr.message}`);
   }
+  const returnedClaimId = publishClaimId(claimData);
   const claim = parsePublishClaimSnapshot(claimData);
   if (!claim) {
+    if (returnedClaimId) {
+      await markPublishFailed(supabase, listingId, returnedClaimId);
+    }
     throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
   const claimId = claim.claimId;
@@ -343,6 +347,12 @@ function parsePublishClaimSnapshot(value: unknown): PublishClaimSnapshot | null 
     return null;
   }
   return snapshot as unknown as PublishClaimSnapshot;
+}
+
+function publishClaimId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const claimId = (value as Record<string, unknown>).claimId;
+  return typeof claimId === "string" ? claimId : null;
 }
 
 /**

@@ -42,6 +42,10 @@ alter table public.listings
 create unique index if not exists listings_source_review_revision_idx
   on public.listings (item_id, platform, source_review_revision);
 
+create unique index if not exists listings_one_ebay_per_item_idx
+  on public.listings (item_id)
+  where platform = 'ebay';
+
 create or replace function public.get_review_snapshot(p_item_id uuid)
 returns jsonb
 language sql
@@ -194,6 +198,9 @@ begin
     raise exception using
       errcode = 'P0002',
       message = 'Editable eBay listing changed or is already publishing or published.';
+  end if;
+  if jsonb_typeof(v_copy) is distinct from 'object' then
+    raise exception using errcode = '22023', message = 'Listing copy must be an object.';
   end if;
   select price
   into v_price
