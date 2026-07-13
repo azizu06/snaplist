@@ -1,4 +1,5 @@
 import type { EbayCondition, EbayPublishRequest } from "./types";
+import { normalizeConditionAlias } from "../../items/condition";
 import { PublishValidationError } from "./errors";
 
 /**
@@ -34,7 +35,7 @@ export interface ListingForPublish {
  * never NEW — when unknown, so we never overclaim condition on a real listing.
  */
 export function toEbayCondition(condition: string | null | undefined): EbayCondition {
-  const c = (condition ?? "").trim().toLowerCase();
+  const c = normalizeConditionAlias(condition ?? "");
   if (c === "new" || c === "brand new" || c === "new with tags") return "NEW";
   if (c === "like new" || c === "open box" || c === "mint") return "LIKE_NEW";
   if (c === "excellent") return "USED_EXCELLENT";

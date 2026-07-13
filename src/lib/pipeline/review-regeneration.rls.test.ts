@@ -272,4 +272,54 @@ describe("review identity regeneration transaction + RLS", () => {
     });
     expect(logs ?? []).toHaveLength(0);
   });
+
+  it("rejects authoritative live state and an in-flight publish claim", async () => {
+    if (!reachable) return;
+
+    const live = await seedReview(userA, "authoritative-live");
+    const { error: liveStateError } = await userA.client
+      .from("listings")
+      .update({
+        ebay_listing_id: "v1|1234567890|0",
+        ebay_status: "published",
+      })
+      .eq("id", live.listingId);
+    expect(liveStateError).toBeNull();
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(
+        commitFor(live.itemId, live.listingId, crypto.randomUUID()),
+      ),
+    ).rejects.toThrow(/editable eBay listing not found/i);
+
+    const publishing = await seedReview(userA, "publishing-claim");
+    const { error: claimError } = await userA.client.rpc("begin_ebay_publish", {
+      p_listing_id: publishing.listingId,
+      p_expected_run_id: null,
+    });
+    expect(claimError).toBeNull();
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(
+        commitFor(publishing.itemId, publishing.listingId, crypto.randomUUID()),
+      ),
+    ).rejects.toThrow(/editable eBay listing not found/i);
+
+    const [{ data: liveItem }, { data: publishingItem }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("attributes")
+        .eq("id", live.itemId)
+        .single(),
+      userA.client
+        .from("items")
+        .select("attributes")
+        .eq("id", publishing.itemId)
+        .single(),
+    ]);
+    expect((liveItem?.attributes as { brand?: string })?.brand).toBe(
+      "Old authoritative-live",
+    );
+    expect((publishingItem?.attributes as { brand?: string })?.brand).toBe(
+      "Old publishing-claim",
+    );
+  });
 });

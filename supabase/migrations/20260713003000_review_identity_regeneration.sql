@@ -3,6 +3,43 @@
 -- default) and derives the tenant from the Clerk JWT; it never accepts user_id.
 -- Any error rolls back item + listing + prediction-log changes together.
 
+create or replace function public.begin_ebay_publish(
+  p_listing_id uuid,
+  p_expected_run_id uuid
+)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+begin
+  if v_user_id is null or v_user_id = '' then
+    raise exception using errcode = '42501', message = 'Authentication required.';
+  end if;
+
+  update public.listings
+  set ebay_status = 'publishing'
+  where id = p_listing_id
+    and user_id = v_user_id
+    and platform = 'ebay'
+    and run_id is not distinct from p_expected_run_id
+    and status is distinct from 'published'
+    and ebay_listing_id is null
+    and ebay_status is distinct from 'publishing'
+    and ebay_status is distinct from 'published';
+  if not found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'Editable eBay listing changed or is already publishing or published.';
+  end if;
+end;
+$$;
+
+revoke all on function public.begin_ebay_publish(uuid, uuid) from public;
+grant execute on function public.begin_ebay_publish(uuid, uuid) to authenticated;
+
 create or replace function public.regenerate_review_listing(
   p_item_id uuid,
   p_listing_id uuid,
@@ -101,7 +138,10 @@ begin
     and item_id = p_item_id
     and user_id = v_user_id
     and platform = 'ebay'
-    and status is distinct from 'published';
+    and status is distinct from 'published'
+    and ebay_listing_id is null
+    and ebay_status is distinct from 'publishing'
+    and ebay_status is distinct from 'published';
   if not found then
     raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
   end if;

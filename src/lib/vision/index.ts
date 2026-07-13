@@ -47,6 +47,7 @@ export {
   trimInches,
   measurementWords,
   confirmedMeasurementPhrases,
+  listingFactAttributes,
   measurementDraftSchema,
   measurementDraftsSchema,
   measurementResponseSchema,

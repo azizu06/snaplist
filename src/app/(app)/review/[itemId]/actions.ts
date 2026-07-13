@@ -21,6 +21,10 @@ import {
 } from "@/lib/vision/measurements";
 import { logEvent } from "@/lib/observability";
 import { reportServerError } from "@/lib/sentry";
+import {
+  rateLimitAllows,
+  recordPipelineRunAndMaybeAlert,
+} from "@/lib/abuse";
 
 /**
  * Review-page actions (issue #12 + UI pass): the seller's edits.
@@ -221,6 +225,11 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
   const supabase = await createClient();
   const userId = await getUserId();
   if (!userId) redirect(`/login?next=/review/${id}`);
+
+  if (!(await rateLimitAllows(userId))) {
+    backTo(id, "Too many requests. Please slow down and try again shortly.");
+  }
+  await recordPipelineRunAndMaybeAlert();
 
   try {
     const result = await regenerateReviewListing(

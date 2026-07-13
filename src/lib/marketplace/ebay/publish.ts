@@ -140,7 +140,7 @@ export async function publishListingToEbay(
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .select(
-      "id, item_id, platform, title, description, copy, status, ebay_listing_id, ebay_offer_id, ebay_status",
+      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status",
     )
     .eq("id", listingId)
     .maybeSingle();
@@ -250,6 +250,19 @@ export async function publishListingToEbay(
     currency,
   });
 
+  const { error: claimErr } = await supabase.rpc("begin_ebay_publish", {
+    p_listing_id: listingId,
+    p_expected_run_id: (listing.run_id as string | null) ?? null,
+  });
+  if (claimErr) {
+    if (claimErr.code === "P0002") {
+      throw new PublishValidationError(
+        `Listing ${listingId} changed or is already being published. Refresh and try again.`,
+      );
+    }
+    throw new Error(`Failed to start eBay publish: ${claimErr.message}`);
+  }
+
   // 6. Publish through the adapter. An ADAPTER failure is persisted as
   //    ebay_status='failed' (then rethrown); persistence problems after a
   //    SUCCESSFUL publish must NOT be marked failed — the eBay listing is live.
@@ -265,7 +278,7 @@ export async function publishListingToEbay(
   //    `listed_price` / `last_priced_at` record the price the live listing
   //    actually carries and the price event — the stale-inventory repricing
   //    pipeline (issue #102) selects on and revises against these.
-  const { error: updErr } = await supabase
+  const { data: updated, error: updErr } = await supabase
     .from("listings")
     .update({
       ebay_listing_id: result.listingId,
@@ -275,12 +288,14 @@ export async function publishListingToEbay(
       listed_price: price,
       last_priced_at: new Date().toISOString(),
     })
-    .eq("id", listingId);
-  if (updErr) {
+    .eq("id", listingId)
+    .eq("ebay_status", "publishing")
+    .select("id");
+  if (updErr || !updated || updated.length === 0) {
     // The eBay listing IS live; surface a loud, specific error so the operator
     // reconciles instead of the next retry silently double-publishing.
     throw new Error(
-      `eBay listing ${result.listingId} published but persisting it failed: ${updErr.message}`,
+      `eBay listing ${result.listingId} published but persisting it failed: ${updErr?.message ?? "publish claim was lost"}`,
     );
   }
 

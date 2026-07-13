@@ -21,4 +21,14 @@ describe("review regeneration migration security guards", () => {
       /if\s+p_price\s+is\s+null\s+or\s+p_price\s*<=\s*0\s+then/i,
     );
   });
+
+  it("coordinates regeneration with an atomic publish claim and authoritative live fields", () => {
+    expect(migration).toMatch(
+      /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish/i,
+    );
+    expect(migration).toMatch(/set\s+ebay_status\s*=\s*'publishing'/i);
+    expect(migration).toMatch(/run_id\s+is\s+not\s+distinct\s+from\s+p_expected_run_id/i);
+    expect(migration).toMatch(/ebay_listing_id\s+is\s+null/i);
+    expect(migration).toMatch(/ebay_status\s+is\s+distinct\s+from\s+'published'/i);
+  });
 });

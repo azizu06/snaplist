@@ -39,7 +39,12 @@ function store(): ReviewRegenerationStore & {
         title: "S0ny WH-1000XM3 wrong identity",
       },
       priceOverride: 199,
-      listing: { id: "listing-1", status: "draft" },
+      listing: {
+        id: "listing-1",
+        status: "draft",
+        ebayListingId: null,
+        ebayStatus: null,
+      },
       prediction: {
         model: "vision-model",
         autopilotEnabled: true,
@@ -92,6 +97,20 @@ describe("parseIdentityCorrections", () => {
       upc: null,
       specs: [],
     });
+  });
+
+  it("normalizes the vision condition alias when another identity field changes", () => {
+    expect(
+      parseIdentityCorrections({
+        brand: "Sony",
+        model: "WH-1000XM4",
+        category: "electronics",
+        condition: "like-new",
+        isbn: "",
+        upc: "",
+        specifications: "wireless",
+      }).condition,
+    ).toBe("like new");
   });
 
   it("rejects invalid identifiers, conditions, and unbounded specs", () => {
@@ -221,6 +240,83 @@ describe("regenerateReviewListing", () => {
     expect(result.confidence.autopilotEligible).toBe(false);
   });
 
+  it("shows listing generation only seller-confirmed measurements", async () => {
+    const persistence = store();
+    persistence.load = vi.fn(async () => ({
+      itemId: "item-1",
+      attributes: {
+        brand: "Patagonia",
+        model: "Better Sweater",
+        category: "jacket",
+        condition: "good",
+        measurements: [
+          {
+            name: "pit_to_pit",
+            value_in: 21,
+            tolerance_in: 1,
+            method: "prior-based",
+            confirmed: false,
+          },
+          {
+            name: "length",
+            value_in: 27,
+            tolerance_in: 0,
+            method: "seller-entered",
+            confirmed: true,
+          },
+        ],
+      },
+      priceOverride: null,
+      listing: {
+        id: "listing-1",
+        status: "draft",
+        ebayListingId: null,
+        ebayStatus: null,
+      },
+      prediction: { model: "vision-model", autopilotEnabled: false },
+    }));
+    const generateListing = vi.fn(async () => ({ copy: generated, model: "listing-model" }));
+
+    await regenerateReviewListing(
+      persistence,
+      {
+        itemId: "item-1",
+        corrections: {
+          brand: "Patagonia",
+          model: "Better Sweater",
+          category: "jacket",
+          condition: "good",
+          isbn: null,
+          upc: null,
+          specs: [],
+        },
+      },
+      {
+        priceItem: async () => soldPrice,
+        generateListing,
+        randomUUID: () => "00000000-0000-4000-8000-000000000128",
+      },
+    );
+
+    expect(generateListing).toHaveBeenCalledWith({
+      attributes: expect.objectContaining({
+        measurements: [
+          expect.objectContaining({ name: "length", value_in: 27, confirmed: true }),
+        ],
+      }),
+    });
+    expect(persistence.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          measurements: expect.arrayContaining([
+            expect.objectContaining({ name: "pit_to_pit", confirmed: false }),
+            expect.objectContaining({ name: "length", confirmed: true }),
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("does not commit when pricing or listing generation fails", async () => {
     const pricingStore = store();
     await expect(
@@ -281,7 +377,12 @@ describe("regenerateReviewListing", () => {
       itemId: "item-1",
       attributes: { brand: "Sony" },
       priceOverride: null,
-      listing: { id: "listing-1", status: "published" },
+      listing: {
+        id: "listing-1",
+        status: "published",
+        ebayListingId: null,
+        ebayStatus: null,
+      },
       prediction: { model: "vision-model", autopilotEnabled: true },
     }));
     const priceItem = vi.fn(async () => soldPrice);
@@ -300,7 +401,53 @@ describe("regenerateReviewListing", () => {
             specs: [],
           },
         },
-        { priceItem, generateListing: async () => ({ copy: generated, model: "listing" }) },
+        {
+          priceItem,
+          generateListing: async () => ({ copy: generated, model: "listing" }),
+          randomUUID: () => "00000000-0000-4000-8000-000000000129",
+        },
+      ),
+    ).rejects.toThrow(/published/i);
+    expect(priceItem).not.toHaveBeenCalled();
+    expect(persistence.commit).not.toHaveBeenCalled();
+  });
+
+  it("rejects authoritative live eBay state before running paid or external work", async () => {
+    const persistence = store();
+    persistence.load = vi.fn(async () => ({
+      itemId: "item-1",
+      attributes: { brand: "Sony" },
+      priceOverride: null,
+      listing: {
+        id: "listing-1",
+        status: "draft",
+        ebayListingId: "v1|1234567890|0",
+        ebayStatus: "published",
+      },
+      prediction: { model: "vision-model", autopilotEnabled: true },
+    }));
+    const priceItem = vi.fn(async () => soldPrice);
+
+    await expect(
+      regenerateReviewListing(
+        persistence,
+        {
+          itemId: "item-1",
+          corrections: {
+            brand: "Sony",
+            model: null,
+            category: "electronics",
+            condition: "good",
+            isbn: null,
+            upc: null,
+            specs: [],
+          },
+        },
+        {
+          priceItem,
+          generateListing: async () => ({ copy: generated, model: "listing" }),
+          randomUUID: () => "00000000-0000-4000-8000-000000000130",
+        },
       ),
     ).rejects.toThrow(/published/i);
     expect(priceItem).not.toHaveBeenCalled();

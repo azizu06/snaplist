@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeConditionAlias } from "../items/condition";
 import { priceToConfidence } from "../confidence/from-price";
 import type { ConfidenceResult } from "../confidence/confidence";
 import {
@@ -7,7 +8,11 @@ import {
 } from "../listing";
 import { createDefaultPricer } from "../pricing/default-pricer";
 import type { ItemSignal, PriceResult } from "../pricing";
-import { deriveIdentification, garmentClassOf } from "../vision";
+import {
+  deriveIdentification,
+  garmentClassOf,
+  listingFactAttributes,
+} from "../vision";
 import { buildPredictionLogRow, type PredictionLogRow } from "./prediction-log";
 import { attributesToSignal } from "./stub";
 import {
@@ -153,7 +158,9 @@ export function parseIdentityCorrections(
   raw: RawIdentityCorrections,
 ): IdentityCorrections {
   const conditionText = boundedText(raw.condition, "condition");
-  const normalizedCondition = conditionText?.toLowerCase() ?? null;
+  const normalizedCondition = conditionText
+    ? normalizeConditionAlias(conditionText)
+    : null;
   if (
     normalizedCondition &&
     !CONDITIONS.includes(normalizedCondition as (typeof CONDITIONS)[number])
@@ -219,7 +226,12 @@ export interface ReviewRegenerationSnapshot {
   attributes: unknown;
   /** Read for proof/return only. The commit contract intentionally cannot write it. */
   priceOverride: number | string | null;
-  listing: { id: string; status: string | null };
+  listing: {
+    id: string;
+    status: string | null;
+    ebayListingId: string | null;
+    ebayStatus: string | null;
+  };
   prediction: { model: string | null; autopilotEnabled: boolean | null };
 }
 
@@ -281,7 +293,12 @@ export async function regenerateReviewListing(
 ): Promise<RegenerateReviewListingResult> {
   const snapshot = await store.load(input.itemId);
   if (!snapshot) throw new Error("Item not found.");
-  if (snapshot.listing.status === "published") {
+  if (
+    snapshot.listing.status === "published" ||
+    Boolean(snapshot.listing.ebayListingId) ||
+    snapshot.listing.ebayStatus === "published" ||
+    snapshot.listing.ebayStatus === "publishing"
+  ) {
     throw new Error("A published listing cannot be regenerated from review.");
   }
 
@@ -294,8 +311,10 @@ export async function regenerateReviewListing(
   // Manual correction is always human-controlled. The score is unchanged by this
   // choice, but eligibility is false and the transaction resets the listing to draft.
   const confidence = priceToConfidence(attributes, price, { autopilotEnabled: false });
-  const generated = await (deps.generateListing ?? defaultGenerateListing)({ attributes });
-  const runId = (deps.randomUUID ?? crypto.randomUUID)();
+  const generated = await (deps.generateListing ?? defaultGenerateListing)({
+    attributes: listingFactAttributes(attributes),
+  });
+  const runId = deps.randomUUID?.() ?? crypto.randomUUID();
 
   const result: PipelineResult = {
     attributes,
@@ -353,7 +372,7 @@ export function createSupabaseReviewRegenerationStore(
 
       const { data: listing, error: listingError } = await supabase
         .from("listings")
-        .select("id, status")
+        .select("id, status, ebay_listing_id, ebay_status")
         .eq("item_id", itemId)
         .eq("platform", "ebay")
         .order("created_at", { ascending: false })
@@ -383,6 +402,8 @@ export function createSupabaseReviewRegenerationStore(
         listing: {
           id: listing.id as string,
           status: listing.status as string | null,
+          ebayListingId: listing.ebay_listing_id as string | null,
+          ebayStatus: listing.ebay_status as string | null,
         },
         prediction: {
           model: prediction.model as string | null,
