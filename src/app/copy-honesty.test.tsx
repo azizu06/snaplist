@@ -1,7 +1,7 @@
 import { load } from "cheerio";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import HowItWorks from "./(marketing)/tour/page";
+import HowItWorks, { metadata as tourMetadata } from "./(marketing)/tour/page";
 import { SettingsView } from "./(app)/settings/settings-view";
 
 vi.mock("@/components/marketing/reveal", () => ({
@@ -42,6 +42,12 @@ vi.mock("@/components/sign-out-button", () => ({
 }));
 
 describe("pricing evidence copy", () => {
+  it("qualifies sourced pricing in tour metadata", () => {
+    expect(tourMetadata.description).toMatch(/cited web/i);
+    expect(tourMetadata.description).toMatch(/depreciation/i);
+    expect(tourMetadata.description).toMatch(/LLM-only.*may be uncited/i);
+  });
+
   it("qualifies tour citations and the terminal LLM-only fallback", () => {
     const $ = load(renderToStaticMarkup(<HowItWorks />));
     const priceStep = $("#step-price").text();

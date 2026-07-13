@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runSoldCompsSmoke } from "./sold-comps-smoke";
 import type { FetchPage } from "./providers/ebay-sold";
 
@@ -18,6 +18,10 @@ const SIGNAL = {
   condition: "good",
   conditionKnown: true,
 };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("runSoldCompsSmoke", () => {
   it("is inert by default while proving target URL construction and router fallback", async () => {
@@ -58,6 +62,23 @@ describe("runSoldCompsSmoke", () => {
       true,
     );
     expect(report.fallbackReason).toBeUndefined();
+    expect(report.externalRequests).toBe(1);
+  });
+
+  it("uses injected enabled configuration when the ambient environment disables sold comps", async () => {
+    vi.stubEnv("EBAY_SOLD_ENABLED", "false");
+    const fetchPage = vi.fn(async () => FIXTURE_HTML) as FetchPage;
+
+    const report = await runSoldCompsSmoke({
+      mode: "live",
+      signal: SIGNAL,
+      env: { EBAY_SOLD_ENABLED: "true" },
+      fetchPage,
+    });
+
+    expect(fetchPage).toHaveBeenCalledOnce();
+    expect(report.status).toBe("success");
+    expect(report.selectedTier).toBe("ebay-sold");
     expect(report.externalRequests).toBe(1);
   });
 

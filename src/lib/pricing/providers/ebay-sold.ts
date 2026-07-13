@@ -82,6 +82,8 @@ export interface EbaySoldComp {
 }
 
 export interface EbaySoldPricingProviderOptions {
+  /** Explicit kill-switch state; defaults to `EBAY_SOLD_ENABLED` env config. */
+  enabled?: boolean;
   /** Injected page fetcher; defaults to the SSRF-guarded `fetch` over env config. */
   fetchPage?: FetchPage;
   /** Optional Playwright-style fallback, tried when the primary fetch is blocked/thin. */
@@ -977,6 +979,7 @@ export function createDefaultFetchPage(
 export function createEbaySoldPricingProvider(
   options: EbaySoldPricingProviderOptions = {},
 ): PricingProvider {
+  const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
   const configuredEgress = options.fetchPage
@@ -1054,7 +1057,7 @@ export function createEbaySoldPricingProvider(
     tier: "ebay-sold",
     canHandle: identifiable,
     async price(signal: ItemSignal): Promise<PriceResult | null> {
-      if (!ebaySoldConfigured()) return null; // kill-switch → degrade to web tier
+      if (!enabled) return null; // kill-switch → degrade to web tier
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
 

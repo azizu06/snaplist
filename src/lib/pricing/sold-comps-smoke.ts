@@ -130,6 +130,7 @@ export async function runSoldCompsSmoke(
   };
 
   const provider = createEbaySoldPricingProvider({
+    enabled,
     baseUrl,
     fetchPage: observedFetch,
     emitDiagnostic: () => undefined,

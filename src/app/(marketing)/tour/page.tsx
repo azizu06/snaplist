@@ -8,7 +8,7 @@ import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Snap a photo and SnapList identifies the item, prices it with cited evidence when available or a clearly labeled, potentially uncited LLM-only estimate, writes the listing, and lets you publish it to eBay. Here's how each step works.",
+    "SnapList identifies your item and prices it with sold comps or cited web and depreciation evidence when available. Its lowest-confidence LLM-only estimate may be uncited; you choose when to publish.",
 };
 
 /**
