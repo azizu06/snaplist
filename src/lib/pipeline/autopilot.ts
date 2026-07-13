@@ -36,21 +36,21 @@ export function initialListingStatus(
  * The price every downstream consumer must use: the seller's override when one
  * is set and usable, else the pipeline's suggestion.
  *
- * "Usable" = a finite number > 0. The write path (the review action) validates
- * before persisting, but the read path defends independently: `numeric` comes
- * back through drivers/JSON as number OR string, and legacy rows could carry
- * junk — a bad override must degrade to the suggestion, never to NaN on a
- * listing or a $0 auto-post.
+ * The write and read paths share the same cent-safe normalization contract.
+ * `numeric` comes back through drivers/JSON as number OR string, and legacy
+ * rows could carry junk — a bad override must degrade to the suggestion, never
+ * to NaN on a listing or a $0 auto-post.
  */
 export function effectivePrice(
   suggested: number | string | null | undefined,
   override: number | string | null | undefined,
 ): number | null {
   const usable = (candidate: number | string | null | undefined) => {
-    const value = typeof candidate === "string" ? Number(candidate) : candidate;
-    return typeof value === "number" && Number.isFinite(value) && value > 0
-      ? value
-      : null;
+    try {
+      return parsePriceOverride(candidate);
+    } catch {
+      return null;
+    }
   };
 
   return usable(override) ?? usable(suggested);
