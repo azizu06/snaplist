@@ -38,6 +38,31 @@ describe("review regeneration migration security guards", () => {
     );
   });
 
+  it("reconciles legacy eBay duplicates before enforcing uniqueness", () => {
+    const reconciliation = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.reconcile_legacy_ebay_listing_duplicates[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(reconciliation).toMatch(/lock\s+table\s+public\.listings/i);
+    expect(reconciliation).toMatch(
+      /status\s+is\s+not\s+distinct\s+from\s+'published'[\s\S]*ebay_listing_id\s+is\s+not\s+null[\s\S]*ebay_status\s+is\s+not\s+distinct\s+from\s+'publishing'[\s\S]*ebay_status\s+is\s+not\s+distinct\s+from\s+'published'/i,
+    );
+    expect(reconciliation).toMatch(/having\s+count\(\*\)\s*>\s*1/i);
+    expect(reconciliation).toMatch(/multiple protected eBay listings/i);
+    expect(reconciliation).toMatch(
+      /row_number\(\)\s+over\s*\([\s\S]*partition\s+by\s+item_id[\s\S]*created_at\s+desc[\s\S]*id\s+desc/i,
+    );
+    expect(reconciliation).toMatch(/delete\s+from\s+public\.listings/i);
+
+    const reconcileCall = migration.search(
+      /select\s+public\.reconcile_legacy_ebay_listing_duplicates\(\)/i,
+    );
+    const uniqueIndex = migration.search(
+      /create\s+unique\s+index\s+if\s+not\s+exists\s+listings_one_ebay_per_item_idx/i,
+    );
+    expect(reconcileCall).toBeGreaterThan(-1);
+    expect(uniqueIndex).toBeGreaterThan(reconcileCall);
+  });
+
   it("makes publish acquisition return one locked publish snapshot", () => {
     const publishFunction = migration.match(
       /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish[\s\S]*?\$\$;/i,

@@ -42,6 +42,83 @@ alter table public.listings
 create unique index if not exists listings_source_review_revision_idx
   on public.listings (item_id, platform, source_review_revision);
 
+create or replace function public.reconcile_legacy_ebay_listing_duplicates()
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_unsafe_item_ids text;
+begin
+  lock table public.listings in share row exclusive mode;
+
+  select string_agg(unsafe.item_id::text, ', ' order by unsafe.item_id::text)
+  into v_unsafe_item_ids
+  from (
+    select item_id
+    from public.listings
+    where platform = 'ebay'
+      and (
+        status is not distinct from 'published'
+        or ebay_listing_id is not null
+        or ebay_status is not distinct from 'publishing'
+        or ebay_status is not distinct from 'published'
+      )
+    group by item_id
+    having count(*) > 1
+  ) unsafe;
+
+  if v_unsafe_item_ids is not null then
+    raise exception using
+      errcode = '23505',
+      message = format(
+        'Cannot reconcile legacy duplicate eBay listings: multiple protected eBay listings exist for item(s): %s',
+        v_unsafe_item_ids
+      );
+  end if;
+
+  with ranked as (
+    select
+      id,
+      (
+        status is not distinct from 'published'
+        or ebay_listing_id is not null
+        or ebay_status is not distinct from 'publishing'
+        or ebay_status is not distinct from 'published'
+      ) as is_protected,
+      row_number() over (
+        partition by item_id
+        order by
+          case
+            when status is not distinct from 'published'
+              or ebay_listing_id is not null
+              or ebay_status is not distinct from 'publishing'
+              or ebay_status is not distinct from 'published'
+              then 0
+            else 1
+          end,
+          created_at desc,
+          id desc
+      ) as survivor_rank
+    from public.listings
+    where platform = 'ebay'
+  ), discardable as (
+    select id
+    from ranked
+    where survivor_rank > 1
+      and not is_protected
+  )
+  delete from public.listings listing
+  using discardable
+  where listing.id = discardable.id;
+end;
+$$;
+
+revoke all on function public.reconcile_legacy_ebay_listing_duplicates() from public;
+
+select public.reconcile_legacy_ebay_listing_duplicates();
+
 create unique index if not exists listings_one_ebay_per_item_idx
   on public.listings (item_id)
   where platform = 'ebay';
