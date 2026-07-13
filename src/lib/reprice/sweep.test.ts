@@ -275,7 +275,7 @@ describe("runRepriceSweep — suggest-only (the default posture)", () => {
 });
 
 describe("runRepriceSweep — auto-apply", () => {
-  it("revises through the adapter and records the change when gated eligible AND opted in", async () => {
+  it("revises through the adapter and invalidates an in-flight export when opted in", async () => {
     const { client, ops } = scenario({ settings: { auto_reprice_enabled: true } });
     const adapter = new MockEbayAdapter();
 
@@ -307,6 +307,12 @@ describe("runRepriceSweep — auto-apply", () => {
       (op) => (op.payload as { price_override?: number }).price_override === 60,
     );
     expect(itemWrite?.eq).toMatchObject({ id: ITEM, user_id: USER });
+    expect(itemWrite?.payload).toMatchObject({
+      price_override: 60,
+      review_revision: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
+    });
     const listingWrite = findUpdates(ops, "listings").find(
       (op) => (op.payload as { listed_price?: number }).listed_price === 60,
     );

@@ -193,7 +193,10 @@ export async function applyRepriceSuggestion(
       .eq("status", "pending"),
     supabase
       .from("items")
-      .update({ price_override: applyPrice })
+      .update({
+        price_override: applyPrice,
+        review_revision: crypto.randomUUID(),
+      })
       .eq("id", row.item_id),
     supabase
       .from("listings")

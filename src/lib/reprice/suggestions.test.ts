@@ -81,7 +81,7 @@ const SUGGESTION = {
 const env = () => ({ EBAY_MARKETPLACE_ID: "EBAY_US" });
 
 describe("applyRepriceSuggestion", () => {
-  it("revises through the adapter and records the applied price", async () => {
+  it("revises through the adapter and invalidates an in-flight export", async () => {
     const { client, ops } = fakeSupabase((op) =>
       op.table === "reprice_suggestions" && op.action === "select"
         ? { data: SUGGESTION }
@@ -101,6 +101,9 @@ describe("applyRepriceSuggestion", () => {
     ).toMatchObject({ status: "applied", applied_price: 80 });
     expect(writes.find((op) => op.table === "items")?.payload).toMatchObject({
       price_override: 80,
+      review_revision: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
     });
     expect(writes.find((op) => op.table === "listings")?.payload).toMatchObject({
       listed_price: 80,
