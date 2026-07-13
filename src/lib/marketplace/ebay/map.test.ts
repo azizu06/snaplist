@@ -26,6 +26,10 @@ describe("toEbayCondition", () => {
     expect(toEbayCondition("for parts")).toBe("FOR_PARTS_OR_NOT_WORKING");
   });
 
+  it("maps poor to the least-overstating supported used grade", () => {
+    expect(toEbayCondition("poor")).toBe("USED_ACCEPTABLE");
+  });
+
   it("is case/whitespace tolerant", () => {
     expect(toEbayCondition("  GOOD ")).toBe("USED_GOOD");
     expect(toEbayCondition("Like New")).toBe("LIKE_NEW");
@@ -121,6 +125,12 @@ describe("toEbayPublishRequest", () => {
 
   it("uses the listing id as the SKU (idempotent inventory upsert key)", () => {
     expect(toEbayPublishRequest(base).sku).toBe(base.listingId);
+  });
+
+  it("never publishes poor condition as USED_GOOD", () => {
+    expect(toEbayPublishRequest({ ...base, condition: "poor" }).condition).toBe(
+      "USED_ACCEPTABLE",
+    );
   });
 
   it("throws on a missing title or description", () => {

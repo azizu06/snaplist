@@ -41,7 +41,8 @@ export function toEbayCondition(condition: string | null | undefined): EbayCondi
   if (c === "excellent") return "USED_EXCELLENT";
   if (c === "very good") return "USED_VERY_GOOD";
   if (c === "good" || c === "used") return "USED_GOOD";
-  if (c === "fair" || c === "acceptable" || c === "worn") return "USED_ACCEPTABLE";
+  if (c === "fair" || c === "acceptable" || c === "poor" || c === "worn")
+    return "USED_ACCEPTABLE";
   if (c === "for parts" || c === "broken" || c === "not working")
     return "FOR_PARTS_OR_NOT_WORKING";
   return "USED_GOOD";
