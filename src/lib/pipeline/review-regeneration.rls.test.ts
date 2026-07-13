@@ -233,4 +233,43 @@ describe("review identity regeneration transaction + RLS", () => {
       .eq("id", foreign.listingId);
     expect(bVisibleToA ?? []).toHaveLength(0);
   });
+
+  it("rejects a zero-price recommendation and retains the previous coherent state", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "zero-price");
+    const runId = crypto.randomUUID();
+    const invalid = commitFor(seeded.itemId, seeded.listingId, runId);
+    invalid.prediction.price = 0;
+
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(invalid),
+    ).rejects.toThrow(/price is invalid/i);
+
+    const [{ data: item }, { data: listing }, { data: logs }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("attributes, condition, price_override")
+        .eq("id", seeded.itemId)
+        .single(),
+      userA.client
+        .from("listings")
+        .select("title, description, run_id")
+        .eq("id", seeded.listingId)
+        .single(),
+      userA.client
+        .from("prediction_logs")
+        .select("id")
+        .eq("run_id", runId),
+    ]);
+
+    expect((item?.attributes as { brand?: string })?.brand).toBe("Old zero-price");
+    expect(item?.condition).toBe("fair");
+    expect(Number(item?.price_override)).toBe(222);
+    expect(listing).toMatchObject({
+      title: "Old zero-price listing",
+      description: "Old coherent copy",
+      run_id: null,
+    });
+    expect(logs ?? []).toHaveLength(0);
+  });
 });

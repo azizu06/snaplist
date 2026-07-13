@@ -32,7 +32,7 @@ as $$
 declare
   v_user_id text := public.clerk_user_id();
 begin
-  if v_user_id = '' then
+  if v_user_id is null or v_user_id = '' then
     raise exception using errcode = '42501', message = 'Authentication required.';
   end if;
   if p_run_id is null then
@@ -53,7 +53,7 @@ begin
   if jsonb_typeof(p_listing_copy) is distinct from 'object' then
     raise exception using errcode = '22023', message = 'Listing copy must be an object.';
   end if;
-  if p_price is null or p_price < 0 then
+  if p_price is null or p_price <= 0 then
     raise exception using errcode = '22023', message = 'Price is invalid.';
   end if;
   if jsonb_typeof(p_price_range) is distinct from 'object' then
