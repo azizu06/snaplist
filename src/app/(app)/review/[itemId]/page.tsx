@@ -77,7 +77,7 @@ export default async function ReviewPage({
   // or the newest export pack would shadow the eBay draft here.
   const { data: listing } = await supabase
     .from("listings")
-    .select("id, platform, title, description, copy, status")
+    .select("id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_status")
     .eq("item_id", itemId)
     .eq("platform", "ebay")
     .order("created_at", { ascending: false })
@@ -234,6 +234,7 @@ export default async function ReviewPage({
 
   const data: ReviewData = {
     itemId,
+    runId: (listing?.run_id as string | null) ?? null,
     photoUrls,
     identification: identification
       ? {
@@ -259,6 +260,8 @@ export default async function ReviewPage({
           title: (listing.title as string | null) ?? "Untitled",
           description: (listing.description as string | null) ?? "",
           status: listing.status as string | null,
+          ebayListingId: (listing.ebay_listing_id as string | null) ?? null,
+          ebayStatus: (listing.ebay_status as string | null) ?? null,
         }
       : null,
     suggested,

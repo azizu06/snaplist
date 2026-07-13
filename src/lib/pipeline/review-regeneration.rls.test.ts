@@ -322,4 +322,54 @@ describe("review identity regeneration transaction + RLS", () => {
       "Old publishing-claim",
     );
   });
+
+  it("recovers an expired publish lease without letting the stale owner finalize", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "expired-publish-lease");
+
+    const first = await userA.client.rpc("begin_ebay_publish", {
+      p_listing_id: seeded.listingId,
+      p_expected_run_id: null,
+    });
+    expect(first.error).toBeNull();
+    expect(typeof first.data).toBe("string");
+
+    const overlapping = await userA.client.rpc("begin_ebay_publish", {
+      p_listing_id: seeded.listingId,
+      p_expected_run_id: null,
+    });
+    expect(overlapping.error?.code).toBe("P0002");
+
+    const { error: expireError } = await admin
+      .from("listings")
+      .update({
+        ebay_publish_claimed_at: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+      })
+      .eq("id", seeded.listingId);
+    expect(expireError).toBeNull();
+
+    const recovered = await userA.client.rpc("begin_ebay_publish", {
+      p_listing_id: seeded.listingId,
+      p_expected_run_id: null,
+    });
+    expect(recovered.error).toBeNull();
+    expect(recovered.data).not.toBe(first.data);
+
+    const { data: staleFinalize, error: staleFinalizeError } = await userA.client
+      .from("listings")
+      .update({ ebay_status: "published" })
+      .eq("id", seeded.listingId)
+      .eq("ebay_publish_claim_id", first.data as string)
+      .select("id");
+    expect(staleFinalizeError).toBeNull();
+    expect(staleFinalize ?? []).toHaveLength(0);
+
+    const { data: current } = await userA.client
+      .from("listings")
+      .select("ebay_status, ebay_publish_claim_id")
+      .eq("id", seeded.listingId)
+      .single();
+    expect(current?.ebay_status).toBe("publishing");
+    expect(current?.ebay_publish_claim_id).toBe(recovered.data);
+  });
 });

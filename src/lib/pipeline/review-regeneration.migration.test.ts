@@ -31,4 +31,11 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(/ebay_listing_id\s+is\s+null/i);
     expect(migration).toMatch(/ebay_status\s+is\s+distinct\s+from\s+'published'/i);
   });
+
+  it("makes abandoned publish claims recoverable with an owned expiring lease", () => {
+    expect(migration).toMatch(/ebay_publish_claim_id\s+uuid/i);
+    expect(migration).toMatch(/ebay_publish_claimed_at\s+timestamptz/i);
+    expect(migration).toMatch(/ebay_publish_claimed_at\s*<\s*now\(\)\s*-\s*interval/i);
+    expect(migration).toMatch(/returning\s+ebay_publish_claim_id\s+into/i);
+  });
 });

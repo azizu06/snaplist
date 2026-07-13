@@ -110,7 +110,7 @@ describe("parseIdentityCorrections", () => {
         upc: "",
         specifications: "wireless",
       }).condition,
-    ).toBe("like new");
+    ).toBe("like-new");
   });
 
   it("rejects invalid identifiers, conditions, and unbounded specs", () => {
@@ -142,6 +142,7 @@ describe("regenerateReviewListing", () => {
     const persistence = store();
     const priceItem = vi.fn(async () => soldPrice);
     const generateListing = vi.fn(async () => ({ copy: generated, model: "listing-model" }));
+    const beforeModelWork = vi.fn(async () => undefined);
 
     const result = await regenerateReviewListing(
       persistence,
@@ -151,7 +152,7 @@ describe("regenerateReviewListing", () => {
           brand: "Sony",
           model: "WH-1000XM4",
           category: "electronics",
-          condition: "good",
+          condition: "like new",
           isbn: "",
           upc: "027242919662",
           specifications: "wireless\nnoise-cancelling",
@@ -160,15 +161,20 @@ describe("regenerateReviewListing", () => {
       {
         priceItem,
         generateListing,
+        beforeModelWork,
         randomUUID: () => "00000000-0000-4000-8000-000000000126",
       },
     );
 
+    expect(beforeModelWork).toHaveBeenCalledTimes(1);
+    expect(beforeModelWork.mock.invocationCallOrder[0]).toBeLessThan(
+      priceItem.mock.invocationCallOrder[0]!,
+    );
     expect(priceItem).toHaveBeenCalledWith(
       expect.objectContaining({
         brand: "Sony",
         model: "WH-1000XM4",
-        condition: "good",
+        condition: "like-new",
         upc: "027242919662",
         specs: ["wireless", "noise-cancelling"],
       }),
@@ -177,7 +183,7 @@ describe("regenerateReviewListing", () => {
       attributes: expect.objectContaining({
         brand: "Sony",
         model: "WH-1000XM4",
-        condition: "good",
+        condition: "like-new",
         specs: ["wireless", "noise-cancelling"],
       }),
     });
@@ -190,10 +196,10 @@ describe("regenerateReviewListing", () => {
         attributes: expect.objectContaining({
           brand: "Sony",
           model: "WH-1000XM4",
-          condition: "good",
+          condition: "like-new",
           title: "Sony WH-1000XM4",
         }),
-        condition: "good",
+        condition: "like-new",
         listing: generated,
         prediction: expect.objectContaining({
           run_id: "00000000-0000-4000-8000-000000000126",
@@ -386,6 +392,7 @@ describe("regenerateReviewListing", () => {
       prediction: { model: "vision-model", autopilotEnabled: true },
     }));
     const priceItem = vi.fn(async () => soldPrice);
+    const beforeModelWork = vi.fn(async () => undefined);
     await expect(
       regenerateReviewListing(
         persistence,
@@ -403,12 +410,14 @@ describe("regenerateReviewListing", () => {
         },
         {
           priceItem,
+          beforeModelWork,
           generateListing: async () => ({ copy: generated, model: "listing" }),
           randomUUID: () => "00000000-0000-4000-8000-000000000129",
         },
       ),
     ).rejects.toThrow(/published/i);
     expect(priceItem).not.toHaveBeenCalled();
+    expect(beforeModelWork).not.toHaveBeenCalled();
     expect(persistence.commit).not.toHaveBeenCalled();
   });
 

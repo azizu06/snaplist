@@ -1,5 +1,6 @@
 import { computeConfidence, type ConfidenceSignals } from "../confidence/confidence";
 import { identificationSignalsFrom } from "../confidence/from-price";
+import { canonicalizeCondition } from "../items/condition";
 import type { ItemSignal, PriceResult } from "../pricing";
 import { priceResultSchema } from "../pricing";
 import type {
@@ -54,7 +55,7 @@ export function attributesToSignal(attrs: ExtractedAttributes): ItemSignal {
     brand: attrs.brand,
     model: attrs.model,
     category: attrs.category,
-    condition: attrs.condition,
+    condition: attrs.condition ? canonicalizeCondition(attrs.condition) : undefined,
     conditionKnown: attrs.condition != null,
     // Key specs narrow the web-search query so comps cluster on the same
     // configuration (see ItemSignal.specs) — a query aid, never a price source.

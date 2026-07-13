@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { EBAY_TITLE_MAX } from "@/lib/pipeline/review-edits";
 import {
   confidenceLabel,
+  isLiveListingRow,
   lifecycleLabel,
   sourceKindLabel,
   tierLabel,
@@ -51,6 +52,7 @@ type ClarifyOption = { label: string; spec: string };
 
 export interface ReviewData {
   itemId: string;
+  runId?: string | null;
   photoUrls: string[];
   identification: {
     label: string;
@@ -68,6 +70,8 @@ export interface ReviewData {
     title: string;
     description: string;
     status: string | null;
+    ebayListingId?: string | null;
+    ebayStatus?: string | null;
   } | null;
   suggested: number | null;
   override: number | null;
@@ -136,7 +140,13 @@ const READONLY_FIELD =
 
 /** Used-goods condition grades — a fixed taxonomy, so Condition is a dropdown
  *  (an AI-supplied descriptive value is preserved as an extra option). */
-const CONDITION_OPTIONS = ["New", "Like new", "Good", "Fair", "For parts"] as const;
+const CONDITION_OPTIONS = [
+  { value: "new", label: "New" },
+  { value: "like-new", label: "Like new" },
+  { value: "good", label: "Good" },
+  { value: "fair", label: "Fair" },
+  { value: "for-parts", label: "For parts" },
+] as const;
 
 /** Category stays free-text (the taxonomy is open-ended) but offers a typeahead
  *  of common categories so it isn't a blank box. */
@@ -624,10 +634,7 @@ function IdentityCorrectionCard({
                 value={fields.condition}
                 onChange={(value) => setField("condition", value)}
                 placeholder="Select a condition…"
-                options={CONDITION_OPTIONS.map((condition) => ({
-                  value: condition.toLowerCase(),
-                  label: condition,
-                }))}
+                options={[...CONDITION_OPTIONS]}
                 className="w-full bg-bg px-3 py-2 text-[15px] text-fg-strong shadow-xs"
               />
             </div>
@@ -857,17 +864,29 @@ function MeasurementsCard({
   );
 }
 
-export function ReviewView({
-  data,
-  saveAction,
-  sharpenAction,
-  regenerateAction,
-}: {
+interface ReviewViewProps {
   data: ReviewData;
   saveAction: (formData: FormData) => Promise<void>;
   sharpenAction: (formData: FormData) => Promise<void>;
   regenerateAction: (formData: FormData) => Promise<void>;
-}) {
+}
+
+export function reviewStateKey(
+  data: Pick<ReviewData, "itemId" | "runId">,
+): string {
+  return `${data.itemId}:${data.runId ?? "legacy"}`;
+}
+
+export function ReviewView(props: ReviewViewProps) {
+  return <ReviewViewState key={reviewStateKey(props.data)} {...props} />;
+}
+
+function ReviewViewState({
+  data,
+  saveAction,
+  sharpenAction,
+  regenerateAction,
+}: ReviewViewProps) {
   const attr = (key: string) =>
     data.attrs.find((a) => a.key === key)?.value ?? "";
 
@@ -887,6 +906,12 @@ export function ReviewView({
   const [fields, setFields] = useState(initial);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
+  const listingIsLive = data.listing
+    ? isLiveListingRow({
+        ebay_listing_id: data.listing.ebayListingId,
+        ebay_status: data.listing.ebayStatus,
+      })
+    : false;
 
   // Garment measurements (issue #104): their own controlled state, folded into the
   // same dirty/save/discard flow as the other fields.
@@ -1342,7 +1367,7 @@ export function ReviewView({
 
       </div>
 
-      {data.listing && data.listing.status !== "published" ? (
+      {data.listing && data.listing.status !== "published" && !listingIsLive ? (
         <IdentityCorrectionCard
           data={data}
           action={regenerateAction}

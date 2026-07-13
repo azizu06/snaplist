@@ -250,7 +250,7 @@ export async function publishListingToEbay(
     currency,
   });
 
-  const { error: claimErr } = await supabase.rpc("begin_ebay_publish", {
+  const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
     p_listing_id: listingId,
     p_expected_run_id: (listing.run_id as string | null) ?? null,
   });
@@ -262,6 +262,10 @@ export async function publishListingToEbay(
     }
     throw new Error(`Failed to start eBay publish: ${claimErr.message}`);
   }
+  if (typeof claimData !== "string" || claimData.length === 0) {
+    throw new Error("Failed to start eBay publish: publish claim id was not returned.");
+  }
+  const claimId = claimData;
 
   // 6. Publish through the adapter. An ADAPTER failure is persisted as
   //    ebay_status='failed' (then rethrown); persistence problems after a
@@ -270,7 +274,7 @@ export async function publishListingToEbay(
   try {
     result = await adapter.publishListing(request);
   } catch (err) {
-    await markPublishFailed(supabase, listingId);
+    await markPublishFailed(supabase, listingId, claimId);
     throw err;
   }
 
@@ -287,9 +291,12 @@ export async function publishListingToEbay(
       status: "published",
       listed_price: price,
       last_priced_at: new Date().toISOString(),
+      ebay_publish_claim_id: null,
+      ebay_publish_claimed_at: null,
     })
     .eq("id", listingId)
     .eq("ebay_status", "publishing")
+    .eq("ebay_publish_claim_id", claimId)
     .select("id");
   if (updErr || !updated || updated.length === 0) {
     // The eBay listing IS live; surface a loud, specific error so the operator
@@ -322,13 +329,20 @@ export async function publishListingToEbay(
 async function markPublishFailed(
   supabase: SupabaseClient,
   listingId: string,
+  claimId?: string,
 ): Promise<void> {
-  await supabase
+  let query = supabase
     .from("listings")
-    .update({ ebay_status: "failed" })
-    .eq("id", listingId)
-    .or("ebay_status.is.null,ebay_status.neq.published")
-    .then(undefined, () => undefined);
+    .update({
+      ebay_status: "failed",
+      ebay_publish_claim_id: null,
+      ebay_publish_claimed_at: null,
+    })
+    .eq("id", listingId);
+  query = claimId
+    ? query.eq("ebay_status", "publishing").eq("ebay_publish_claim_id", claimId)
+    : query.or("ebay_status.is.null,ebay_status.eq.failed");
+  await query.then(undefined, () => undefined);
 }
 
 /**

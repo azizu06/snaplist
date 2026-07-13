@@ -1,12 +1,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ReviewView, type ReviewData } from "./review-view";
+import { ReviewView, reviewStateKey, type ReviewData } from "./review-view";
 
 const noop = async () => {};
 
-function reviewData(status = "draft"): ReviewData {
+function reviewData(
+  status = "draft",
+  ebay: { listingId?: string | null; status?: string | null } = {},
+): ReviewData {
   return {
     itemId: "item-1",
+    runId: "run-1",
     photoUrls: [],
     identification: {
       label: "Sony WH-1000XM4",
@@ -30,6 +34,8 @@ function reviewData(status = "draft"): ReviewData {
       title: "Sony WH-1000XM4 Wireless Headphones",
       description: "Tested and working.",
       status,
+      ebayListingId: ebay.listingId ?? null,
+      ebayStatus: ebay.status ?? null,
     },
     suggested: 165,
     override: 199,
@@ -48,6 +54,13 @@ function reviewData(status = "draft"): ReviewData {
 }
 
 describe("review identity correction UI", () => {
+  it("changes the controlled-state key when regeneration commits a new run", () => {
+    const before = reviewData();
+    const after = { ...before, runId: "run-2" };
+
+    expect(reviewStateKey(after)).not.toBe(reviewStateKey(before));
+  });
+
   it("renders the bounded editor and explicit regeneration action without removing Sharpen", () => {
     const html = renderToStaticMarkup(
       <ReviewView
@@ -79,6 +92,22 @@ describe("review identity correction UI", () => {
     const html = renderToStaticMarkup(
       <ReviewView
         data={reviewData("published")}
+        saveAction={noop}
+        sharpenAction={noop}
+        regenerateAction={noop}
+      />,
+    );
+    expect(html).not.toContain("Correct item identity");
+    expect(html).not.toContain("Re-price &amp; regenerate");
+  });
+
+  it("does not offer regeneration when authoritative eBay fields say the listing is live", () => {
+    const html = renderToStaticMarkup(
+      <ReviewView
+        data={reviewData("draft", {
+          listingId: "v1|1234567890|0",
+          status: "published",
+        })}
         saveAction={noop}
         sharpenAction={noop}
         regenerateAction={noop}

@@ -229,12 +229,12 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
   if (!(await rateLimitAllows(userId))) {
     backTo(id, "Too many requests. Please slow down and try again shortly.");
   }
-  await recordPipelineRunAndMaybeAlert();
 
   try {
     const result = await regenerateReviewListing(
       createSupabaseReviewRegenerationStore(supabase),
       { itemId: id, corrections },
+      { beforeModelWork: recordPipelineRunAndMaybeAlert },
     );
     logEvent("review.identity_regenerated", {
       itemId: id,

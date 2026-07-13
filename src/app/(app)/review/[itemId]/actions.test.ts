@@ -17,14 +17,7 @@ const mocks = vi.hoisted(() => ({
     specs: [],
   })),
   createStore: vi.fn(() => ({})),
-  regenerate: vi.fn(async () => ({
-    itemId: "item-1",
-    listingId: "listing-1",
-    runId: "run-1",
-    priceOverride: null,
-    price: { tier: "ebay-sold" },
-    confidence: { score: 0.8, band: "high" },
-  })),
+  regenerate: vi.fn(),
   rateLimitAllows: vi.fn(async () => true),
   recordPipelineRunAndMaybeAlert: vi.fn(async () => undefined),
 }));
@@ -58,6 +51,17 @@ describe("regenerateCorrectedIdentity", () => {
     vi.clearAllMocks();
     mocks.getUserId.mockResolvedValue("user-1");
     mocks.rateLimitAllows.mockResolvedValue(true);
+    mocks.regenerate.mockImplementation(async (_store, _input, deps) => {
+      await deps.beforeModelWork();
+      return {
+        itemId: "item-1",
+        listingId: "listing-1",
+        runId: "run-1",
+        priceOverride: null,
+        price: { tier: "ebay-sold" },
+        confidence: { score: 0.8, band: "high" },
+      };
+    });
   });
 
   it("stops before regeneration when the shared metered limit is exhausted", async () => {
@@ -72,15 +76,27 @@ describe("regenerateCorrectedIdentity", () => {
     expect(mocks.recordPipelineRunAndMaybeAlert).not.toHaveBeenCalled();
   });
 
-  it("records an allowed model-backed regeneration before starting it", async () => {
+  it("delegates budget accounting to the post-preflight model-work boundary", async () => {
     await expect(regenerateCorrectedIdentity(correctionForm())).rejects.toThrow(
       /REDIRECT:/,
     );
 
     expect(mocks.recordPipelineRunAndMaybeAlert).toHaveBeenCalledTimes(1);
     expect(mocks.regenerate).toHaveBeenCalledTimes(1);
-    expect(
-      mocks.recordPipelineRunAndMaybeAlert.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.regenerate.mock.invocationCallOrder[0]!);
+    expect(mocks.regenerate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { beforeModelWork: mocks.recordPipelineRunAndMaybeAlert },
+    );
+  });
+
+  it("does not count a regeneration rejected during preflight", async () => {
+    mocks.regenerate.mockRejectedValueOnce(new Error("A published listing cannot be regenerated."));
+
+    await expect(regenerateCorrectedIdentity(correctionForm())).rejects.toThrow(
+      /REDIRECT:/,
+    );
+
+    expect(mocks.recordPipelineRunAndMaybeAlert).not.toHaveBeenCalled();
   });
 });

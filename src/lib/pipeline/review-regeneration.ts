@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { normalizeConditionAlias } from "../items/condition";
+import { canonicalizeCondition } from "../items/condition";
 import { priceToConfidence } from "../confidence/from-price";
 import type { ConfidenceResult } from "../confidence/confidence";
 import {
@@ -37,7 +37,7 @@ export const MAX_IDENTITY_FIELD_LENGTH = 120;
 export const MAX_RELEVANT_SPECS = 12;
 export const MAX_RELEVANT_SPEC_LENGTH = 120;
 
-const CONDITIONS = ["new", "like new", "good", "fair", "for parts"] as const;
+const CONDITIONS = ["new", "like-new", "good", "fair", "for-parts"] as const;
 
 export interface RawIdentityCorrections {
   brand: unknown;
@@ -159,7 +159,7 @@ export function parseIdentityCorrections(
 ): IdentityCorrections {
   const conditionText = boundedText(raw.condition, "condition");
   const normalizedCondition = conditionText
-    ? normalizeConditionAlias(conditionText)
+    ? canonicalizeCondition(conditionText)
     : null;
   if (
     normalizedCondition &&
@@ -262,6 +262,7 @@ export interface RegenerateReviewListingDependencies {
   generateListing?: (args: {
     attributes: ExtractedAttributes;
   }) => Promise<{ copy: ListingCopy; model: string }>;
+  beforeModelWork?: () => Promise<void>;
   randomUUID?: () => string;
 }
 
@@ -305,6 +306,7 @@ export async function regenerateReviewListing(
   const current = extractedAttributesSchema.parse(snapshot.attributes ?? {});
   const attributes = applyIdentityCorrections(current, input.corrections);
   const identification = deriveIdentification(attributes, {});
+  await deps.beforeModelWork?.();
   const priceItem = deps.priceItem ?? createDefaultPricer();
   const price = await priceItem(attributesToSignal(attributes));
 
