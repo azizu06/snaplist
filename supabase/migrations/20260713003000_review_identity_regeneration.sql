@@ -50,6 +50,11 @@ set search_path = ''
 as $$
 declare
   v_unsafe_item_ids text;
+  v_discardable_listing_ids uuid[];
+  v_dependent_relations text[] := array[]::text[];
+  v_dependent_relation text;
+  v_dependent_fk record;
+  v_has_dependent_rows boolean;
 begin
   lock table public.listings in share row exclusive mode;
 
@@ -124,9 +129,94 @@ begin
     where survivor_rank > 1
       and not is_protected
   )
-  delete from public.listings listing
-  using discardable
-  where listing.id = discardable.id;
+  select array_agg(discardable.id order by discardable.id)
+  into v_discardable_listing_ids
+  from discardable;
+
+  if coalesce(cardinality(v_discardable_listing_ids), 0) = 0 then
+    return;
+  end if;
+
+  for v_dependent_fk in
+    select
+      child_namespace.nspname as child_schema,
+      child_table.relname as child_table,
+      string_agg(
+        format(
+          'dependent.%I is not distinct from parent_listing.%I',
+          child_attribute.attname,
+          parent_attribute.attname
+        ),
+        ' and '
+        order by key_pair.key_ordinality
+      ) as join_predicate
+    from pg_catalog.pg_constraint dependent_constraint
+    join pg_catalog.pg_class child_table
+      on child_table.oid = dependent_constraint.conrelid
+    join pg_catalog.pg_namespace child_namespace
+      on child_namespace.oid = child_table.relnamespace
+    join unnest(
+      dependent_constraint.conkey,
+      dependent_constraint.confkey
+    ) with ordinality as key_pair(
+      child_attnum,
+      parent_attnum,
+      key_ordinality
+    ) on true
+    join pg_catalog.pg_attribute child_attribute
+      on child_attribute.attrelid = dependent_constraint.conrelid
+      and child_attribute.attnum = key_pair.child_attnum
+    join pg_catalog.pg_attribute parent_attribute
+      on parent_attribute.attrelid = dependent_constraint.confrelid
+      and parent_attribute.attnum = key_pair.parent_attnum
+    where dependent_constraint.contype = 'f'
+      and dependent_constraint.confrelid = 'public.listings'::regclass
+    group by
+      dependent_constraint.oid,
+      child_namespace.nspname,
+      child_table.relname
+    order by child_namespace.nspname, child_table.relname, dependent_constraint.oid
+  loop
+    execute format(
+      'select exists (
+        select 1
+        from %I.%I dependent
+        join public.listings parent_listing on %s
+        where parent_listing.id = any ($1)
+      )',
+      v_dependent_fk.child_schema,
+      v_dependent_fk.child_table,
+      v_dependent_fk.join_predicate
+    )
+    into v_has_dependent_rows
+    using v_discardable_listing_ids;
+
+    if v_has_dependent_rows then
+      v_dependent_relation := format(
+        '%I.%I',
+        v_dependent_fk.child_schema,
+        v_dependent_fk.child_table
+      );
+      if not v_dependent_relation = any(v_dependent_relations) then
+        v_dependent_relations := array_append(
+          v_dependent_relations,
+          v_dependent_relation
+        );
+      end if;
+    end if;
+  end loop;
+
+  if cardinality(v_dependent_relations) > 0 then
+    raise exception using
+      errcode = '23503',
+      message = format(
+        'Cannot reconcile legacy duplicate eBay listings: dependent rows reference non-surviving listing(s) in %s',
+        array_to_string(v_dependent_relations, ', ')
+      );
+  end if;
+
+  delete from public.listings
+  where id = any(v_discardable_listing_ids);
 end;
 $$;
 

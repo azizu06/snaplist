@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(8);
+select extensions.plan(16);
 
 drop index public.listings_one_ebay_per_item_idx;
 
@@ -11,7 +11,9 @@ values
   ('10000000-0000-0000-0000-000000000001', 'migration-test', '{}'),
   ('10000000-0000-0000-0000-000000000002', 'migration-test', '{}'),
   ('10000000-0000-0000-0000-000000000003', 'migration-test', '{}'),
-  ('10000000-0000-0000-0000-000000000004', 'migration-test', '{}');
+  ('10000000-0000-0000-0000-000000000004', 'migration-test', '{}'),
+  ('10000000-0000-0000-0000-000000000005', 'migration-test', '{}'),
+  ('10000000-0000-0000-0000-000000000006', 'migration-test', '{}');
 
 insert into public.listings (
   id,
@@ -210,6 +212,220 @@ select extensions.is(
   ),
   2,
   'unsafe protected rows remain untouched after the abort'
+);
+
+delete from public.listings
+where item_id = '10000000-0000-0000-0000-000000000004';
+
+insert into public.listings (
+  id,
+  user_id,
+  item_id,
+  platform,
+  status,
+  created_at
+)
+values
+  (
+    '20000000-0000-0000-0000-000000000009',
+    'migration-test',
+    '10000000-0000-0000-0000-000000000005',
+    'ebay',
+    'draft',
+    '2026-07-13T12:00:00Z'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000010',
+    'migration-test',
+    '10000000-0000-0000-0000-000000000005',
+    'ebay',
+    'draft',
+    '2026-07-13T13:00:00Z'
+  );
+
+insert into public.messages (
+  id,
+  user_id,
+  item_id,
+  listing_id,
+  direction,
+  body,
+  status
+)
+values (
+  '40000000-0000-0000-0000-000000000001',
+  'migration-test',
+  '10000000-0000-0000-0000-000000000005',
+  '20000000-0000-0000-0000-000000000009',
+  'inbound',
+  'Does this include the original box?',
+  'new'
+);
+
+insert into public.notifications (
+  id,
+  user_id,
+  kind,
+  title,
+  item_id,
+  listing_id
+)
+values (
+  '50000000-0000-0000-0000-000000000001',
+  'migration-test',
+  'system',
+  'Legacy listing event',
+  '10000000-0000-0000-0000-000000000005',
+  '20000000-0000-0000-0000-000000000009'
+);
+
+insert into public.reprice_suggestions (
+  id,
+  user_id,
+  item_id,
+  listing_id,
+  current_price,
+  suggested_price,
+  target_price,
+  price_range,
+  drift_pct,
+  confidence,
+  tier_fired,
+  status
+)
+values (
+  '60000000-0000-0000-0000-000000000001',
+  'migration-test',
+  '10000000-0000-0000-0000-000000000005',
+  '20000000-0000-0000-0000-000000000009',
+  50,
+  45,
+  45,
+  '{"low":40,"high":50}',
+  -10,
+  0.7,
+  'ebay-sold',
+  'dismissed'
+);
+
+select extensions.throws_ok(
+  'select public.reconcile_legacy_ebay_listing_duplicates()',
+  '23503',
+  'Cannot reconcile legacy duplicate eBay listings: dependent rows reference non-surviving listing(s) in public.messages, public.notifications, public.reprice_suggestions',
+  'referenced duplicate rows abort with a clear diagnostic'
+);
+
+select extensions.is(
+  (
+    select listing_id
+    from public.messages
+    where id = '40000000-0000-0000-0000-000000000001'
+  ),
+  '20000000-0000-0000-0000-000000000009'::uuid,
+  'buyer messages remain attached after the reconciliation abort'
+);
+
+select extensions.is(
+  (
+    select listing_id
+    from public.notifications
+    where id = '50000000-0000-0000-0000-000000000001'
+  ),
+  '20000000-0000-0000-0000-000000000009'::uuid,
+  'activity notifications remain attached after the reconciliation abort'
+);
+
+select extensions.is(
+  (
+    select listing_id
+    from public.reprice_suggestions
+    where id = '60000000-0000-0000-0000-000000000001'
+  ),
+  '20000000-0000-0000-0000-000000000009'::uuid,
+  'reprice suggestions remain attached after the reconciliation abort'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.listings
+    where item_id = '10000000-0000-0000-0000-000000000005'
+  ),
+  2,
+  'both duplicate listings remain after the reconciliation abort'
+);
+
+delete from public.items
+where id = '10000000-0000-0000-0000-000000000005';
+
+alter table public.listings
+  add constraint migration_listings_run_id_key unique (run_id);
+
+create table public.migration_listing_dependents (
+  id uuid primary key,
+  listing_run_id uuid not null references public.listings (run_id) on delete cascade
+);
+
+insert into public.listings (
+  id,
+  user_id,
+  item_id,
+  platform,
+  status,
+  run_id,
+  created_at
+)
+values
+  (
+    '20000000-0000-0000-0000-000000000011',
+    'migration-test',
+    '10000000-0000-0000-0000-000000000006',
+    'ebay',
+    'draft',
+    '80000000-0000-0000-0000-000000000001',
+    '2026-07-13T12:00:00Z'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000012',
+    'migration-test',
+    '10000000-0000-0000-0000-000000000006',
+    'ebay',
+    'draft',
+    '80000000-0000-0000-0000-000000000002',
+    '2026-07-13T13:00:00Z'
+  );
+
+insert into public.migration_listing_dependents (id, listing_run_id)
+values (
+  '70000000-0000-0000-0000-000000000001',
+  '80000000-0000-0000-0000-000000000001'
+);
+
+select extensions.throws_ok(
+  'select public.reconcile_legacy_ebay_listing_duplicates()',
+  '23503',
+  'Cannot reconcile legacy duplicate eBay listings: dependent rows reference non-surviving listing(s) in public.migration_listing_dependents',
+  'an unrecognized foreign-key dependent aborts reconciliation'
+);
+
+select extensions.is(
+  (
+    select listing_run_id
+    from public.migration_listing_dependents
+    where id = '70000000-0000-0000-0000-000000000001'
+  ),
+  '80000000-0000-0000-0000-000000000001'::uuid,
+  'an unrecognized dependent remains attached after the abort'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.listings
+    where item_id = '10000000-0000-0000-0000-000000000006'
+  ),
+  2,
+  'unknown dependencies preserve both duplicate listings'
 );
 
 select * from extensions.finish();
