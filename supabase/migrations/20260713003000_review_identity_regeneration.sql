@@ -14,9 +14,12 @@ alter table public.listings
 create unique index if not exists listings_source_review_revision_idx
   on public.listings (item_id, platform, source_review_revision);
 
+drop function if exists public.begin_ebay_publish(uuid, uuid);
+
 create or replace function public.begin_ebay_publish(
   p_listing_id uuid,
-  p_expected_run_id uuid
+  p_expected_run_id uuid,
+  p_expected_review_revision uuid
 )
 returns uuid
 language plpgsql
@@ -26,9 +29,31 @@ as $$
 declare
   v_user_id text := public.clerk_user_id();
   v_claim_id uuid := gen_random_uuid();
+  v_item_id uuid;
 begin
   if v_user_id is null or v_user_id = '' then
     raise exception using errcode = '42501', message = 'Authentication required.';
+  end if;
+
+  select item_id
+  into v_item_id
+  from public.listings
+  where id = p_listing_id
+    and user_id = v_user_id
+    and platform = 'ebay';
+  if not found then
+    raise exception using
+      errcode = 'P0002',
+      message = 'Editable eBay listing changed or is already publishing or published.';
+  end if;
+
+  update public.items
+  set review_revision = v_claim_id
+  where id = v_item_id
+    and user_id = v_user_id
+    and review_revision is not distinct from p_expected_review_revision;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';
   end if;
 
   update public.listings
@@ -57,8 +82,8 @@ begin
 end;
 $$;
 
-revoke all on function public.begin_ebay_publish(uuid, uuid) from public;
-grant execute on function public.begin_ebay_publish(uuid, uuid) to authenticated;
+revoke all on function public.begin_ebay_publish(uuid, uuid, uuid) from public;
+grant execute on function public.begin_ebay_publish(uuid, uuid, uuid) to authenticated;
 
 create or replace function public.regenerate_review_listing(
   p_item_id uuid,
@@ -280,6 +305,29 @@ begin
     raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';
   end if;
 
+  perform 1
+  from public.listings
+  where item_id = p_item_id
+    and user_id = v_user_id
+    and platform = 'ebay'
+  for update;
+
+  if exists (
+    select 1
+    from public.listings
+    where item_id = p_item_id
+      and user_id = v_user_id
+      and platform = 'ebay'
+      and (
+        status is not distinct from 'published'
+        or ebay_listing_id is not null
+        or ebay_status is not distinct from 'publishing'
+        or ebay_status is not distinct from 'published'
+      )
+  ) then
+    raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
+  end if;
+
   if p_listing_id is not null then
     if p_listing_title is null or btrim(p_listing_title) = '' or char_length(p_listing_title) > 80 then
       raise exception using errcode = '22023', message = 'Listing title is invalid.';
@@ -294,7 +342,11 @@ begin
     where id = p_listing_id
       and item_id = p_item_id
       and user_id = v_user_id
-      and platform = 'ebay';
+      and platform = 'ebay'
+      and status is distinct from 'published'
+      and ebay_listing_id is null
+      and ebay_status is distinct from 'publishing'
+      and ebay_status is distinct from 'published';
     if not found then
       raise exception using errcode = 'P0002', message = 'Listing not found.';
     end if;
@@ -374,6 +426,29 @@ begin
     and review_revision is not distinct from p_expected_review_revision;
   if not found then
     raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';
+  end if;
+
+  perform 1
+  from public.listings
+  where item_id = p_item_id
+    and user_id = v_user_id
+    and platform = 'ebay'
+  for update;
+
+  if exists (
+    select 1
+    from public.listings
+    where item_id = p_item_id
+      and user_id = v_user_id
+      and platform = 'ebay'
+      and (
+        status is not distinct from 'published'
+        or ebay_listing_id is not null
+        or ebay_status is not distinct from 'publishing'
+        or ebay_status is not distinct from 'published'
+      )
+  ) then
+    raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
   end if;
 
   insert into public.prediction_logs (

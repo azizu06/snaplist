@@ -170,7 +170,7 @@ export async function publishListingToEbay(
   // 3. Pull the item (condition + photos) and the run's price.
   const { data: item, error: itemErr } = await supabase
     .from("items")
-    .select("condition, photos")
+    .select("condition, photos, review_revision")
     .eq("id", listing.item_id)
     .maybeSingle();
   if (itemErr || !item) {
@@ -253,6 +253,7 @@ export async function publishListingToEbay(
   const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
     p_listing_id: listingId,
     p_expected_run_id: (listing.run_id as string | null) ?? null,
+    p_expected_review_revision: item.review_revision as string,
   });
   if (claimErr) {
     if (claimErr.code === "P0002") {

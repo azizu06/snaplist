@@ -352,6 +352,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const { error: claimError } = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: publishing.listingId,
       p_expected_run_id: null,
+      p_expected_review_revision: publishing.reviewRevision,
     });
     expect(claimError).toBeNull();
     await expect(
@@ -484,6 +485,153 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(item?.condition).toBe("fair");
     expect(listing?.title).toBe("Seller edited title");
     expect(logs ?? []).toHaveLength(1);
+  });
+
+  it("rejects ordinary review saves for an authoritative live eBay listing", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "live-save-guard");
+    const { error: liveStateError } = await userA.client
+      .from("listings")
+      .update({
+        ebay_listing_id: "v1|9876543210|0",
+        ebay_status: "published",
+      })
+      .eq("id", seeded.listingId);
+    expect(liveStateError).toBeNull();
+
+    const saved = await userA.client.rpc("save_review_edits", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_new_review_revision: crypto.randomUUID(),
+      p_attributes: { brand: "Forged", category: "electronics" },
+      p_condition: "fair",
+      p_price_override: 199,
+      p_cost_basis: 80,
+      p_listing_title: "Stale seller title",
+      p_listing_description: "Stale seller description",
+    });
+    expect(saved.error?.code).toBe("P0002");
+
+    const [{ data: item }, { data: listing }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("price_override, review_revision")
+        .eq("id", seeded.itemId)
+        .single(),
+      userA.client
+        .from("listings")
+        .select("title, description")
+        .eq("id", seeded.listingId)
+        .single(),
+    ]);
+    expect(Number(item?.price_override)).toBe(222);
+    expect(item?.review_revision).toBe(seeded.reviewRevision);
+    expect(listing).toMatchObject({
+      title: "Old live-save-guard listing",
+      description: "Old coherent copy",
+    });
+  });
+
+  it("rejects sharpened estimates for an authoritative live eBay listing", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "live-sharpen-guard");
+    const { error: liveStateError } = await userA.client
+      .from("listings")
+      .update({ ebay_status: "publishing" })
+      .eq("id", seeded.listingId);
+    expect(liveStateError).toBeNull();
+
+    const runId = crypto.randomUUID();
+    const sharpened = await userA.client.rpc("sharpen_review_estimate", {
+      p_item_id: seeded.itemId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_run_id: runId,
+      p_attributes: {
+        brand: "Stale sharpened brand",
+        category: "electronics",
+        condition: "fair",
+      },
+      p_price: 175,
+      p_price_range: { low: 160, high: 190 },
+      p_confidence: 0.8,
+      p_tier_fired: "ebay-sold",
+      p_model: "vision-model",
+      p_listing_model: "listing-model",
+      p_pricing_model: null,
+      p_sources: [],
+      p_autopilot_enabled: false,
+      p_autopilot_eligible: false,
+    });
+    expect(sharpened.error?.code).toBe("P0002");
+
+    const [{ data: item }, { data: logs }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("attributes, review_revision")
+        .eq("id", seeded.itemId)
+        .single(),
+      userA.client.from("prediction_logs").select("id").eq("run_id", runId),
+    ]);
+    expect((item?.attributes as { brand?: string })?.brand).toBe(
+      "Old live-sharpen-guard",
+    );
+    expect(item?.review_revision).toBe(seeded.reviewRevision);
+    expect(logs ?? []).toHaveLength(0);
+  });
+
+  it("advances the review revision when publishing is claimed", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "publish-revision");
+    const claim = await userA.client.rpc("begin_ebay_publish", {
+      p_listing_id: seeded.listingId,
+      p_expected_run_id: null,
+      p_expected_review_revision: seeded.reviewRevision,
+    });
+    expect(claim.error).toBeNull();
+
+    const { data: item } = await userA.client
+      .from("items")
+      .select("review_revision")
+      .eq("id", seeded.itemId)
+      .single();
+    expect(item?.review_revision).toBe(claim.data);
+
+    const staleSave = await userA.client.rpc("save_review_edits", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_new_review_revision: crypto.randomUUID(),
+      p_attributes: { brand: "Stale", category: "electronics" },
+      p_condition: "fair",
+      p_price_override: null,
+      p_cost_basis: null,
+      p_listing_title: "Stale title",
+      p_listing_description: "Stale description",
+    });
+    expect(staleSave.error?.code).toBe("P0002");
+
+    const staleSharpen = await userA.client.rpc("sharpen_review_estimate", {
+      p_item_id: seeded.itemId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_run_id: crypto.randomUUID(),
+      p_attributes: {
+        brand: "Stale sharpen",
+        category: "electronics",
+        condition: "fair",
+      },
+      p_price: 175,
+      p_price_range: { low: 160, high: 190 },
+      p_confidence: 0.8,
+      p_tier_fired: "ebay-sold",
+      p_model: "vision-model",
+      p_listing_model: "listing-model",
+      p_pricing_model: null,
+      p_sources: [],
+      p_autopilot_enabled: false,
+      p_autopilot_eligible: false,
+    });
+    expect(staleSharpen.error?.code).toBe("P0002");
   });
 
   it("rejects an export pack persisted from an obsolete review revision", async () => {
@@ -663,6 +811,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const first = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
       p_expected_run_id: null,
+      p_expected_review_revision: seeded.reviewRevision,
     });
     expect(first.error).toBeNull();
     expect(typeof first.data).toBe("string");
@@ -670,6 +819,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const overlapping = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
       p_expected_run_id: null,
+      p_expected_review_revision: seeded.reviewRevision,
     });
     expect(overlapping.error?.code).toBe("P0002");
 
@@ -684,6 +834,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const recovered = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
       p_expected_run_id: null,
+      p_expected_review_revision: first.data as string,
     });
     expect(recovered.error).toBeNull();
     expect(recovered.data).not.toBe(first.data);

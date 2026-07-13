@@ -32,6 +32,16 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(/ebay_status\s+is\s+distinct\s+from\s+'published'/i);
   });
 
+  it("makes publish acquisition advance the shared review revision", () => {
+    const publishFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.begin_ebay_publish[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(publishFunction).toMatch(/p_expected_review_revision\s+uuid/i);
+    expect(publishFunction).toMatch(
+      /update\s+public\.items[\s\S]*review_revision\s*=\s*v_claim_id[\s\S]*review_revision\s+is\s+not\s+distinct\s+from\s+p_expected_review_revision/i,
+    );
+  });
+
   it("makes abandoned publish claims recoverable with an owned expiring lease", () => {
     expect(migration).toMatch(/ebay_publish_claim_id\s+uuid/i);
     expect(migration).toMatch(/ebay_publish_claimed_at\s+timestamptz/i);
@@ -56,6 +66,31 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(
       /review_revision\s+is\s+not\s+distinct\s+from\s+p_expected_review_revision/i,
     );
+  });
+
+  it("blocks every review mutation against non-editable eBay state", () => {
+    for (const functionName of [
+      "regenerate_review_listing",
+      "save_review_edits",
+      "sharpen_review_estimate",
+    ]) {
+      const reviewMutation = migration.match(
+        new RegExp(
+          `create\\s+or\\s+replace\\s+function\\s+public\\.${functionName}[\\s\\S]*?\\$\\$;`,
+          "i",
+        ),
+      )?.[0];
+      expect(reviewMutation).toMatch(
+        /status\s+is\s+(?:not\s+)?distinct\s+from\s+'published'/i,
+      );
+      expect(reviewMutation).toMatch(/ebay_listing_id\s+is\s+(?:not\s+)?null/i);
+      expect(reviewMutation).toMatch(
+        /ebay_status\s+is\s+(?:not\s+)?distinct\s+from\s+'publishing'/i,
+      );
+      expect(reviewMutation).toMatch(
+        /ebay_status\s+is\s+(?:not\s+)?distinct\s+from\s+'published'/i,
+      );
+    }
   });
 
   it("versions export packs and rejects obsolete in-flight persistence", () => {
