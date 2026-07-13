@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { canonicalizeCondition } from "../items/condition";
+import {
+  canonicalizeCondition,
+  isItemCondition,
+  type ItemCondition,
+} from "../items/condition";
 import { priceToConfidence } from "../confidence/from-price";
 import type { ConfidenceResult } from "../confidence/confidence";
 import {
@@ -15,6 +19,7 @@ import {
 } from "../vision";
 import { buildPredictionLogRow, type PredictionLogRow } from "./prediction-log";
 import { attributesToSignal } from "./stub";
+import { isReviewRegenerationBlocked } from "./review-regeneration-policy";
 import {
   extractedAttributesSchema,
   type ExtractedAttributes,
@@ -36,8 +41,6 @@ import {
 export const MAX_IDENTITY_FIELD_LENGTH = 120;
 export const MAX_RELEVANT_SPECS = 12;
 export const MAX_RELEVANT_SPEC_LENGTH = 120;
-
-const CONDITIONS = ["new", "like-new", "good", "fair", "for-parts"] as const;
 
 export interface RawIdentityCorrections {
   brand: unknown;
@@ -161,13 +164,10 @@ export function parseIdentityCorrections(
   const normalizedCondition = conditionText
     ? canonicalizeCondition(conditionText)
     : null;
-  if (
-    normalizedCondition &&
-    !CONDITIONS.includes(normalizedCondition as (typeof CONDITIONS)[number])
-  ) {
-    throw new Error("Condition must be New, Like new, Good, Fair, or For parts.");
+  if (normalizedCondition && !isItemCondition(normalizedCondition)) {
+    throw new Error("Condition is not a supported used-goods grade.");
   }
-  const condition = normalizedCondition as (typeof CONDITIONS)[number] | null;
+  const condition = normalizedCondition as ItemCondition | null;
 
   return {
     brand: boundedText(raw.brand, "brand"),
@@ -228,6 +228,7 @@ export interface ReviewRegenerationSnapshot {
   priceOverride: number | string | null;
   listing: {
     id: string;
+    runId: string | null;
     status: string | null;
     ebayListingId: string | null;
     ebayStatus: string | null;
@@ -239,6 +240,7 @@ export interface ReviewRegenerationCommit {
   itemId: string;
   listingId: string;
   runId: string;
+  expectedRunId: string | null;
   attributes: ExtractedAttributes;
   condition: string | null;
   identification: Identification;
@@ -294,12 +296,7 @@ export async function regenerateReviewListing(
 ): Promise<RegenerateReviewListingResult> {
   const snapshot = await store.load(input.itemId);
   if (!snapshot) throw new Error("Item not found.");
-  if (
-    snapshot.listing.status === "published" ||
-    Boolean(snapshot.listing.ebayListingId) ||
-    snapshot.listing.ebayStatus === "published" ||
-    snapshot.listing.ebayStatus === "publishing"
-  ) {
+  if (isReviewRegenerationBlocked(snapshot.listing)) {
     throw new Error("A published listing cannot be regenerated from review.");
   }
 
@@ -308,14 +305,15 @@ export async function regenerateReviewListing(
   const identification = deriveIdentification(attributes, {});
   await deps.beforeModelWork?.();
   const priceItem = deps.priceItem ?? createDefaultPricer();
-  const price = await priceItem(attributesToSignal(attributes));
+  const generateListing = deps.generateListing ?? defaultGenerateListing;
+  const [price, generated] = await Promise.all([
+    priceItem(attributesToSignal(attributes)),
+    generateListing({ attributes: listingFactAttributes(attributes) }),
+  ]);
 
   // Manual correction is always human-controlled. The score is unchanged by this
   // choice, but eligibility is false and the transaction resets the listing to draft.
   const confidence = priceToConfidence(attributes, price, { autopilotEnabled: false });
-  const generated = await (deps.generateListing ?? defaultGenerateListing)({
-    attributes: listingFactAttributes(attributes),
-  });
   const runId = deps.randomUUID?.() ?? crypto.randomUUID();
 
   const result: PipelineResult = {
@@ -338,6 +336,7 @@ export async function regenerateReviewListing(
     itemId: input.itemId,
     listingId: snapshot.listing.id,
     runId,
+    expectedRunId: snapshot.listing.runId,
     attributes,
     condition: attributes.condition ?? null,
     identification,
@@ -374,7 +373,7 @@ export function createSupabaseReviewRegenerationStore(
 
       const { data: listing, error: listingError } = await supabase
         .from("listings")
-        .select("id, status, ebay_listing_id, ebay_status")
+        .select("id, run_id, status, ebay_listing_id, ebay_status")
         .eq("item_id", itemId)
         .eq("platform", "ebay")
         .order("created_at", { ascending: false })
@@ -403,6 +402,7 @@ export function createSupabaseReviewRegenerationStore(
         priceOverride: item.price_override as number | string | null,
         listing: {
           id: listing.id as string,
+          runId: listing.run_id as string | null,
           status: listing.status as string | null,
           ebayListingId: listing.ebay_listing_id as string | null,
           ebayStatus: listing.ebay_status as string | null,
@@ -419,6 +419,7 @@ export function createSupabaseReviewRegenerationStore(
         p_item_id: input.itemId,
         p_listing_id: input.listingId,
         p_run_id: input.runId,
+        p_expected_run_id: input.expectedRunId,
         p_attributes: input.attributes,
         p_condition: input.condition,
         p_identification: input.identification,

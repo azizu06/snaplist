@@ -68,7 +68,12 @@ async function seedReview(user: ClerkTestUser, label: string) {
   return { itemId: item.id as string, listingId: listing.id as string };
 }
 
-function commitFor(itemId: string, listingId: string, runId: string): ReviewRegenerationCommit {
+function commitFor(
+  itemId: string,
+  listingId: string,
+  runId: string,
+  expectedRunId: string | null = null,
+): ReviewRegenerationCommit {
   const attributes = {
     brand: "Sony",
     model: "WH-1000XM4",
@@ -82,6 +87,7 @@ function commitFor(itemId: string, listingId: string, runId: string): ReviewRege
     itemId,
     listingId,
     runId,
+    expectedRunId,
     attributes,
     condition: "good",
     identification: {
@@ -232,6 +238,31 @@ describe("review identity regeneration transaction + RLS", () => {
       .select("id")
       .eq("id", foreign.listingId);
     expect(bVisibleToA ?? []).toHaveLength(0);
+  });
+
+  it("rejects a stale regeneration version and keeps the newer coherent run", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "stale-regeneration");
+    const firstRunId = crypto.randomUUID();
+    const first = commitFor(seeded.itemId, seeded.listingId, firstRunId);
+    first.attributes.brand = "Newest identity";
+    await createSupabaseReviewRegenerationStore(userA.client).commit(first);
+
+    const staleRunId = crypto.randomUUID();
+    const stale = commitFor(seeded.itemId, seeded.listingId, staleRunId);
+    stale.attributes.brand = "Stale identity";
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(stale),
+    ).rejects.toThrow(/editable eBay listing not found/i);
+
+    const [{ data: item }, { data: listing }, { data: staleLogs }] = await Promise.all([
+      userA.client.from("items").select("attributes").eq("id", seeded.itemId).single(),
+      userA.client.from("listings").select("run_id").eq("id", seeded.listingId).single(),
+      userA.client.from("prediction_logs").select("id").eq("run_id", staleRunId),
+    ]);
+    expect((item?.attributes as { brand?: string })?.brand).toBe("Newest identity");
+    expect(listing?.run_id).toBe(firstRunId);
+    expect(staleLogs ?? []).toHaveLength(0);
   });
 
   it("rejects a zero-price recommendation and retains the previous coherent state", async () => {

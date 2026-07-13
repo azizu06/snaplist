@@ -41,6 +41,7 @@ function store(): ReviewRegenerationStore & {
       priceOverride: 199,
       listing: {
         id: "listing-1",
+        runId: "00000000-0000-4000-8000-000000000125",
         status: "draft",
         ebayListingId: null,
         ebayStatus: null,
@@ -112,6 +113,23 @@ describe("parseIdentityCorrections", () => {
       }).condition,
     ).toBe("like-new");
   });
+
+  it.each(["very-good", "acceptable", "poor"])(
+    "preserves the supported %s pricing grade when another field changes",
+    (condition) => {
+      expect(
+        parseIdentityCorrections({
+          brand: "Sony",
+          model: "WH-1000XM4",
+          category: "electronics",
+          condition,
+          isbn: "",
+          upc: "",
+          specifications: "wireless",
+        }).condition,
+      ).toBe(condition);
+    },
+  );
 
   it("rejects invalid identifiers, conditions, and unbounded specs", () => {
     const base = {
@@ -191,6 +209,7 @@ describe("regenerateReviewListing", () => {
     expect(persistence.commit).toHaveBeenCalledWith(
       expect.objectContaining({
         runId: "00000000-0000-4000-8000-000000000126",
+        expectedRunId: "00000000-0000-4000-8000-000000000125",
         itemId: "item-1",
         listingId: "listing-1",
         attributes: expect.objectContaining({
@@ -246,6 +265,55 @@ describe("regenerateReviewListing", () => {
     expect(result.confidence.autopilotEligible).toBe(false);
   });
 
+  it("runs independent pricing and listing generation concurrently after metering", async () => {
+    const persistence = store();
+    let releasePrice: ((price: PriceResult) => void) | undefined;
+    const priceItem = vi.fn(
+      () =>
+        new Promise<PriceResult>((resolve) => {
+          releasePrice = resolve;
+        }),
+    );
+    const generateListing = vi.fn(async () => ({ copy: generated, model: "listing-model" }));
+    const beforeModelWork = vi.fn(async () => undefined);
+
+    const regeneration = regenerateReviewListing(
+      persistence,
+      {
+        itemId: "item-1",
+        corrections: {
+          brand: "Sony",
+          model: "WH-1000XM4",
+          category: "electronics",
+          condition: "good",
+          isbn: null,
+          upc: null,
+          specs: [],
+        },
+      },
+      {
+        priceItem,
+        generateListing,
+        beforeModelWork,
+        randomUUID: () => "00000000-0000-4000-8000-000000000131",
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(priceItem).toHaveBeenCalledTimes(1);
+      expect(generateListing).toHaveBeenCalledTimes(1);
+    });
+    expect(beforeModelWork.mock.invocationCallOrder[0]).toBeLessThan(
+      priceItem.mock.invocationCallOrder[0]!,
+    );
+    expect(beforeModelWork.mock.invocationCallOrder[0]).toBeLessThan(
+      generateListing.mock.invocationCallOrder[0]!,
+    );
+
+    releasePrice?.(soldPrice);
+    await regeneration;
+  });
+
   it("shows listing generation only seller-confirmed measurements", async () => {
     const persistence = store();
     persistence.load = vi.fn(async () => ({
@@ -275,6 +343,7 @@ describe("regenerateReviewListing", () => {
       priceOverride: null,
       listing: {
         id: "listing-1",
+        runId: null,
         status: "draft",
         ebayListingId: null,
         ebayStatus: null,
@@ -385,6 +454,7 @@ describe("regenerateReviewListing", () => {
       priceOverride: null,
       listing: {
         id: "listing-1",
+        runId: null,
         status: "published",
         ebayListingId: null,
         ebayStatus: null,
@@ -429,6 +499,7 @@ describe("regenerateReviewListing", () => {
       priceOverride: null,
       listing: {
         id: "listing-1",
+        runId: null,
         status: "draft",
         ebayListingId: "v1|1234567890|0",
         ebayStatus: "published",

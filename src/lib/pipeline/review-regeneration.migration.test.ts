@@ -38,4 +38,14 @@ describe("review regeneration migration security guards", () => {
     expect(migration).toMatch(/ebay_publish_claimed_at\s*<\s*now\(\)\s*-\s*interval/i);
     expect(migration).toMatch(/returning\s+ebay_publish_claim_id\s+into/i);
   });
+
+  it("commits regeneration only against the listing version that was loaded", () => {
+    const regenerationFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.regenerate_review_listing[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(regenerationFunction).toMatch(/p_expected_run_id\s+uuid/i);
+    expect(regenerationFunction).toMatch(
+      /run_id\s+is\s+not\s+distinct\s+from\s+p_expected_run_id/i,
+    );
+  });
 });

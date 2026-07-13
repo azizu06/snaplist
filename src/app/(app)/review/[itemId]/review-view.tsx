@@ -10,13 +10,14 @@ import { Banner, type BannerVariant } from "@/components/ui/banner";
 import { PendingButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { EBAY_TITLE_MAX } from "@/lib/pipeline/review-edits";
+import { canonicalizeCondition, ITEM_CONDITIONS } from "@/lib/items/condition";
 import {
   confidenceLabel,
-  isLiveListingRow,
   lifecycleLabel,
   sourceKindLabel,
   tierLabel,
 } from "@/lib/ui/status";
+import { isReviewRegenerationBlocked } from "@/lib/pipeline/review-regeneration-policy";
 import { PricingStrategies } from "./pricing-strategies";
 import { CostBasisField } from "./cost-basis-field";
 import type { PricingStrategy } from "@/lib/pricing/strategies";
@@ -140,13 +141,13 @@ const READONLY_FIELD =
 
 /** Used-goods condition grades — a fixed taxonomy, so Condition is a dropdown
  *  (an AI-supplied descriptive value is preserved as an extra option). */
-const CONDITION_OPTIONS = [
-  { value: "new", label: "New" },
-  { value: "like-new", label: "Like new" },
-  { value: "good", label: "Good" },
-  { value: "fair", label: "Fair" },
-  { value: "for-parts", label: "For parts" },
-] as const;
+const CONDITION_OPTIONS = ITEM_CONDITIONS.map((value) => ({
+  value,
+  label: value
+    .split("-")
+    .map((part) => `${part[0]?.toUpperCase()}${part.slice(1)}`)
+    .join(" "),
+}));
 
 /** Category stays free-text (the taxonomy is open-ended) but offers a typeahead
  *  of common categories so it isn't a blank box. */
@@ -536,11 +537,12 @@ function IdentityCorrectionCard({
   formDirty: boolean;
 }) {
   const attr = (key: string) => data.attrs.find((a) => a.key === key)?.value ?? "";
+  const initialCondition = attr("condition");
   const [fields, setFields] = useState(() => ({
     brand: attr("brand"),
     model: attr("model"),
     category: attr("category"),
-    condition: attr("condition").toLowerCase(),
+    condition: initialCondition ? canonicalizeCondition(initialCondition) : "",
     isbn: attr("isbn"),
     upc: attr("upc"),
     specifications: data.specs.join("\n"),
@@ -906,11 +908,8 @@ function ReviewViewState({
   const [fields, setFields] = useState(initial);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
-  const listingIsLive = data.listing
-    ? isLiveListingRow({
-        ebay_listing_id: data.listing.ebayListingId,
-        ebay_status: data.listing.ebayStatus,
-      })
+  const regenerationBlocked = data.listing
+    ? isReviewRegenerationBlocked(data.listing)
     : false;
 
   // Garment measurements (issue #104): their own controlled state, folded into the
@@ -1367,7 +1366,7 @@ function ReviewViewState({
 
       </div>
 
-      {data.listing && data.listing.status !== "published" && !listingIsLive ? (
+      {data.listing && !regenerationBlocked ? (
         <IdentityCorrectionCard
           data={data}
           action={regenerateAction}

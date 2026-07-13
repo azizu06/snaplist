@@ -57,6 +57,7 @@ create or replace function public.regenerate_review_listing(
   p_item_id uuid,
   p_listing_id uuid,
   p_run_id uuid,
+  p_expected_run_id uuid,
   p_attributes jsonb,
   p_condition text,
   p_identification jsonb,
@@ -153,6 +154,7 @@ begin
     and item_id = p_item_id
     and user_id = v_user_id
     and platform = 'ebay'
+    and run_id is not distinct from p_expected_run_id
     and status is distinct from 'published'
     and ebay_listing_id is null
     and ebay_status is distinct from 'publishing'
@@ -203,11 +205,11 @@ end;
 $$;
 
 revoke all on function public.regenerate_review_listing(
-  uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric, jsonb,
+  uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric, jsonb,
   numeric, text, text, text, text, jsonb, boolean, boolean
 ) from public;
 
 grant execute on function public.regenerate_review_listing(
-  uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric, jsonb,
+  uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric, jsonb,
   numeric, text, text, text, text, jsonb, boolean, boolean
 ) to authenticated;

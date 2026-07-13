@@ -88,6 +88,22 @@ describe("review identity correction UI", () => {
     expect(html).toContain(">Re-price<");
   });
 
+  it("canonicalizes a persisted condition alias in the correction editor", () => {
+    const data = reviewData();
+    data.attrs = data.attrs.map((attribute) =>
+      attribute.key === "condition" ? { ...attribute, value: "Very good" } : attribute,
+    );
+    const html = renderToStaticMarkup(
+      <ReviewView
+        data={data}
+        saveAction={noop}
+        sharpenAction={noop}
+        regenerateAction={noop}
+      />,
+    );
+    expect(html).toContain('name="condition" value="very-good"');
+  });
+
   it("does not offer pre-publish regeneration for an already published listing", () => {
     const html = renderToStaticMarkup(
       <ReviewView
@@ -116,4 +132,24 @@ describe("review identity correction UI", () => {
     expect(html).not.toContain("Correct item identity");
     expect(html).not.toContain("Re-price &amp; regenerate");
   });
+
+  it.each([
+    { listingId: "v1|1234567890|0", status: null },
+    { listingId: null, status: "publishing" },
+    { listingId: null, status: "published" },
+  ])(
+    "does not offer regeneration for server-blocked eBay state %#",
+    (ebay) => {
+      const html = renderToStaticMarkup(
+        <ReviewView
+          data={reviewData("draft", ebay)}
+          saveAction={noop}
+          sharpenAction={noop}
+          regenerateAction={noop}
+        />,
+      );
+      expect(html).not.toContain("Correct item identity");
+      expect(html).not.toContain("Re-price &amp; regenerate");
+    },
+  );
 });
