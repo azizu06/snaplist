@@ -55,7 +55,7 @@ const STEPS = [
     mobile: true,
     glyph: "price",
     title: "Price",
-    body: "SnapList prefers relevant recent sold listings, then suggests a price and a realistic range. It shows exact sources for sold, web, or depreciation evidence; the terminal LLM-only estimate is clearly labeled and may be uncited.",
+    body: "SnapList prefers relevant recent sold listings, then suggests a price and a realistic range. Evidence-bearing ISBN, sold-comp, and web tiers show the exact sources behind the suggestion. The terminal LLM-only fallback is clearly labeled, lowest-confidence, and may be uncited.",
     poster: "A defensible number, with its receipts.",
     label: "Demo clip: the Price step of SnapList",
   },
@@ -104,7 +104,7 @@ const FAQ = [
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest. For identifiable items, relevant sold comps lead when available; if access is blocked or results are too thin, SnapList falls back to cited web sources or a lower-confidence estimate. Every price is yours to edit.",
+    a: "It depends on the item. Books and media with an ISBN are the strongest, relevant sold comps lead when available, and the web tier provides cited fallback research. Those evidence-bearing tiers show their exact sources. If none can price the item, the terminal LLM-only fallback is clearly labeled, lowest-confidence, and may be uncited. Every price is yours to edit.",
   },
   {
     q: "Is my data private?",

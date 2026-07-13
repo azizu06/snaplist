@@ -80,6 +80,26 @@ describe("runSoldCompsSmoke", () => {
     expect(JSON.stringify(report)).not.toContain("must-not-leak");
   });
 
+  it("rejects URL userinfo without exposing it or reaching the fetch seam", async () => {
+    const fetchPage = vi.fn(async () => FIXTURE_HTML) as FetchPage;
+    const report = await runSoldCompsSmoke({
+      mode: "live",
+      signal: SIGNAL,
+      env: {
+        EBAY_SOLD_BASE_URL: "https://operator:must-not-leak@www.ebay.com",
+      },
+      fetchPage,
+    });
+
+    expect(fetchPage).not.toHaveBeenCalled();
+    expect(report.targetUrl).toBeNull();
+    expect(report.externalRequests).toBe(0);
+    expect(report.status).toBe("fallback");
+    expect(report.fallbackReason).toBe("egress-blocked");
+    expect(JSON.stringify(report)).not.toContain("operator");
+    expect(JSON.stringify(report)).not.toContain("must-not-leak");
+  });
+
   it("distinguishes a fetched no-results page from blocked egress", async () => {
     const report = await runSoldCompsSmoke({
       mode: "live",

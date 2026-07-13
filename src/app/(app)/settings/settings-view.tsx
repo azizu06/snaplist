@@ -372,8 +372,10 @@ export function SettingsView({
               . Anything below that bar waits for review. {MANUAL_PUBLISH_SENTENCE}
             </SectionDescription>
             <CardNote>
-              Changing this affects new uploads; it never rewrites why a past listing
-              was marked ready or held for review.
+              Turning it off also disables automatic repricing changes to existing
+              live listings, even when Auto-reprice is separately enabled; repricing
+              suggestions can still be generated. It never rewrites why a past
+              listing was marked ready or held for review.
             </CardNote>
           </CardBody>
       </Card>
