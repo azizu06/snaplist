@@ -265,8 +265,11 @@ begin
   end if;
 
   update public.items
-  set attributes = p_attributes,
-      condition = p_condition,
+  set attributes = case
+        when p_attributes ? 'measurements'
+          then jsonb_set(attributes, '{measurements}', p_attributes -> 'measurements', true)
+        else attributes - 'measurements'
+      end,
       price_override = p_price_override,
       cost_basis = p_cost_basis,
       review_revision = p_new_review_revision
@@ -296,6 +299,11 @@ begin
       raise exception using errcode = 'P0002', message = 'Listing not found.';
     end if;
   end if;
+
+  delete from public.listings
+  where item_id = p_item_id
+    and user_id = v_user_id
+    and platform in ('facebook', 'mercari');
 end;
 $$;
 
@@ -377,6 +385,11 @@ begin
     p_tier_fired, p_model, p_listing_model, p_pricing_model, p_sources,
     p_autopilot_enabled, p_autopilot_eligible
   );
+
+  delete from public.listings
+  where item_id = p_item_id
+    and user_id = v_user_id
+    and platform in ('facebook', 'mercari');
 end;
 $$;
 
@@ -459,7 +472,12 @@ begin
     description text,
     copy jsonb
   )
-  on conflict (item_id, platform, source_review_revision) do nothing;
+  on conflict (item_id, platform, source_review_revision) do update
+  set title = excluded.title,
+      description = excluded.description,
+      copy = excluded.copy,
+      status = 'draft'
+  where listings.user_id = v_user_id;
 end;
 $$;
 

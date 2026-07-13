@@ -38,7 +38,7 @@ vi.mock("@/lib/abuse", () => ({
 vi.mock("@/lib/observability", () => ({ logEvent: vi.fn() }));
 vi.mock("@/lib/sentry", () => ({ reportServerError: vi.fn() }));
 
-import { regenerateCorrectedIdentity } from "./actions";
+import { regenerateCorrectedIdentity, saveReview } from "./actions";
 
 function correctionForm(): FormData {
   const form = new FormData();
@@ -102,5 +102,49 @@ describe("regenerateCorrectedIdentity", () => {
     );
 
     expect(mocks.recordPipelineRunAndMaybeAlert).not.toHaveBeenCalled();
+  });
+});
+
+describe("saveReview", () => {
+  it("preserves stored category and condition when ordinary-save fields are forged", async () => {
+    const rpc = vi.fn(async () => ({ error: null }));
+    const filters = {
+      eq: () => filters,
+      maybeSingle: async () => ({
+        data: {
+          id: "item-1",
+          attributes: {
+            brand: "Sony",
+            category: "electronics",
+            condition: "good",
+          },
+          condition: "good",
+        },
+        error: null,
+      }),
+    };
+    mocks.createClient.mockResolvedValueOnce({
+      from: () => ({ select: () => filters }),
+      rpc,
+    });
+
+    const form = correctionForm();
+    form.set("listingId", "listing-1");
+    form.set("title", "Seller edited title");
+    form.set("description", "Seller edited description");
+    form.set("category", "forged category");
+    form.set("condition", "poor");
+    form.set("price", "120");
+    form.set("costBasis", "40");
+
+    await expect(saveReview(form)).rejects.toThrow(/REDIRECT:/);
+
+    expect(rpc).toHaveBeenCalledWith(
+      "save_review_edits",
+      expect.objectContaining({
+        p_attributes: expect.objectContaining({ category: "electronics" }),
+        p_condition: "good",
+      }),
+    );
   });
 });

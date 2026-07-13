@@ -69,4 +69,36 @@ describe("review regeneration migration security guards", () => {
       /review_revision\s+is\s+not\s+distinct\s+from\s+p_source_review_revision/i,
     );
   });
+
+  it("replaces an invalid current-revision export pack after regeneration", () => {
+    const persistFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.persist_export_packs[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(persistFunction).toMatch(
+      /on\s+conflict\s*\(item_id,\s*platform,\s*source_review_revision\)\s+do\s+update/i,
+    );
+  });
+
+  it("prunes obsolete export packs whenever save or sharpen advances the review", () => {
+    for (const functionName of ["save_review_edits", "sharpen_review_estimate"]) {
+      const reviewMutation = migration.match(
+        new RegExp(
+          `create\\s+or\\s+replace\\s+function\\s+public\\.${functionName}[\\s\\S]*?\\$\\$;`,
+          "i",
+        ),
+      )?.[0];
+      expect(reviewMutation).toMatch(
+        /delete\s+from\s+public\.listings[\s\S]*platform\s+in\s*\('facebook',\s*'mercari'\)/i,
+      );
+    }
+  });
+
+  it("ordinary saves preserve stored load-bearing identity", () => {
+    const saveFunction = migration.match(
+      /create\s+or\s+replace\s+function\s+public\.save_review_edits[\s\S]*?\$\$;/i,
+    )?.[0];
+    expect(saveFunction).not.toMatch(/set\s+attributes\s*=\s*p_attributes/i);
+    expect(saveFunction).not.toMatch(/condition\s*=\s*p_condition/i);
+    expect(saveFunction).toMatch(/p_attributes\s*->\s*'measurements'/i);
+  });
 });

@@ -62,14 +62,10 @@ function reviewWriteError(err: unknown, fallback: string): string {
 }
 
 /**
- * Save the seller's review edits (UI pass: "the title, category, condition
- * and price — can we not change that?"). One submit persists every AI-filled
- * field the seller may have touched:
+ * Save the seller's non-identity review edits. One submit persists every
+ * editable field the seller may have touched:
  *
  * - listing title + description → `listings` (only when a listing row exists);
- * - category → merged into `items.attributes` (the same JSON the export packs
- *   and re-listing flows read);
- * - condition → `items.condition`;
  * - price → `items.price_override` (blank clears it back to the suggestion).
  *
  * Validation happens in the PURE `parseReviewEdits` helper (unit-tested);
@@ -104,11 +100,10 @@ export async function saveReview(formData: FormData) {
     backTo(id, err instanceof Error ? err.message : "Invalid edits.");
   }
 
-  // Read the current attributes so the category merge never clobbers the rest
-  // of the extracted JSON. RLS scopes the read; a missing/foreign row → error.
+  // RLS scopes the read; a missing/foreign row → error.
   const { data: item, error: readError } = await supabase
     .from("items")
-    .select("id, attributes")
+    .select("id, attributes, condition")
     .eq("id", id)
     .maybeSingle();
   if (readError) {
@@ -125,18 +120,10 @@ export async function saveReview(formData: FormData) {
   // on junk (e.g. a non-numeric measurement) so a typo never wipes a value silently.
   const existingParse = extractedAttributesSchema.safeParse(item.attributes ?? {});
   const existingAttrs = existingParse.success ? existingParse.data : {};
-  // Classify against the POST-EDIT attributes — the same inputs the reloaded review
-  // page uses (page.tsx). If a category edit changes the garment class (top→bottom)
-  // or drops it (garment→non-garment), the stored drafts must not persist onto a
-  // now-mismatched item, where they'd render invisibly yet still ground buyer-Q&A.
-  const garmentClass = garmentClassOf({
-    ...existingAttrs,
-    category: edits.category ?? undefined,
-  });
+  const garmentClass = garmentClassOf(existingAttrs);
 
   const attributes: Record<string, unknown> = {
     ...((item.attributes ?? {}) as Record<string, unknown>),
-    category: edits.category,
   };
 
   if (garmentClass) {
@@ -156,9 +143,6 @@ export async function saveReview(formData: FormData) {
       },
     );
     try {
-      // Parse against the post-edit class: a class-flipping edit submits the OLD
-      // class's fields, which don't match the new set, so those drafts drop out
-      // rather than riding forward onto a mismatched item.
       attributes.measurements = parseMeasurementEdits(
         existingAttrs.measurements ?? [],
         submitted,
@@ -178,7 +162,7 @@ export async function saveReview(formData: FormData) {
     p_expected_review_revision: expectedReviewRevision,
     p_new_review_revision: crypto.randomUUID(),
     p_attributes: attributes,
-    p_condition: edits.condition,
+    p_condition: item.condition,
     p_price_override: edits.override,
     p_cost_basis: edits.costBasis,
     p_listing_title: edits.listing?.title ?? null,

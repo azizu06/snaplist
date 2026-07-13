@@ -116,7 +116,9 @@ function parseIsbn(value: unknown): string | null {
   const normalized = digitsAndX(text);
   const valid =
     (normalized.length === 10 && hasValidIsbn10(normalized)) ||
-    (normalized.length === 13 && hasValidMod10CheckDigit(normalized));
+    (normalized.length === 13 &&
+      /^(978|979)/.test(normalized) &&
+      hasValidMod10CheckDigit(normalized));
   if (!valid) throw new Error("ISBN must be a valid ISBN-10 or ISBN-13.");
   return normalized;
 }

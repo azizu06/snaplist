@@ -385,14 +385,14 @@ describe("review identity regeneration transaction + RLS", () => {
     );
   });
 
-  it("checks and advances one review revision across save and sharpen writes", async () => {
+  it("checks and advances one review revision while ordinary save preserves identity", async () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "shared-review-revision");
     const savedRevision = crypto.randomUUID();
     const savedAttributes = {
-      brand: "Saved brand",
-      category: "electronics",
-      condition: "good",
+      brand: "Forged brand",
+      category: "forged category",
+      condition: "poor",
     };
     const saved = await userA.client.rpc("save_review_edits", {
       p_item_id: seeded.itemId,
@@ -400,7 +400,7 @@ describe("review identity regeneration transaction + RLS", () => {
       p_expected_review_revision: seeded.reviewRevision,
       p_new_review_revision: savedRevision,
       p_attributes: savedAttributes,
-      p_condition: "good",
+      p_condition: "poor",
       p_price_override: 199,
       p_cost_basis: 80,
       p_listing_title: "Seller edited title",
@@ -408,13 +408,26 @@ describe("review identity regeneration transaction + RLS", () => {
     });
     expect(saved.error).toBeNull();
 
+    const { data: savedItem } = await userA.client
+      .from("items")
+      .select("attributes, condition")
+      .eq("id", seeded.itemId)
+      .single();
+    expect((savedItem?.attributes as { brand?: string; category?: string })?.brand).toBe(
+      "Old shared-review-revision",
+    );
+    expect((savedItem?.attributes as { category?: string })?.category).toBe(
+      "electronics",
+    );
+    expect(savedItem?.condition).toBe("fair");
+
     const stale = await userA.client.rpc("save_review_edits", {
       p_item_id: seeded.itemId,
       p_listing_id: seeded.listingId,
       p_expected_review_revision: seeded.reviewRevision,
       p_new_review_revision: crypto.randomUUID(),
       p_attributes: { ...savedAttributes, brand: "Stale brand" },
-      p_condition: "good",
+      p_condition: "poor",
       p_price_override: 199,
       p_cost_basis: 80,
       p_listing_title: "Stale title",
@@ -423,7 +436,12 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(stale.error?.code).toBe("P0002");
 
     const sharpenRevision = crypto.randomUUID();
-    const sharpenedAttributes = { ...savedAttributes, specs: ["512GB"] };
+    const sharpenedAttributes = {
+      brand: "Old shared-review-revision",
+      category: "electronics",
+      condition: "fair",
+      specs: ["512GB"],
+    };
     const sharpened = await userA.client.rpc("sharpen_review_estimate", {
       p_item_id: seeded.itemId,
       p_expected_review_revision: savedRevision,
@@ -445,7 +463,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const [{ data: item }, { data: listing }, { data: logs }] = await Promise.all([
       userA.client
         .from("items")
-        .select("attributes, review_revision")
+        .select("attributes, condition, review_revision")
         .eq("id", seeded.itemId)
         .single(),
       userA.client
@@ -459,7 +477,11 @@ describe("review identity regeneration transaction + RLS", () => {
         .eq("run_id", sharpenRevision),
     ]);
     expect(item?.review_revision).toBe(sharpenRevision);
-    expect((item?.attributes as { brand?: string })?.brand).toBe("Saved brand");
+    expect((item?.attributes as { brand?: string; category?: string })?.brand).toBe(
+      "Old shared-review-revision",
+    );
+    expect((item?.attributes as { category?: string })?.category).toBe("electronics");
+    expect(item?.condition).toBe("fair");
     expect(listing?.title).toBe("Seller edited title");
     expect(logs ?? []).toHaveLength(1);
   });
@@ -512,6 +534,126 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(rows ?? []).toEqual([
       expect.objectContaining({ source_review_revision: currentRevision }),
     ]);
+  });
+
+  it("replaces an invalid current export pack and prunes packs on save and sharpen", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "export-pack-lifecycle");
+    const invalidPack = [
+      {
+        platform: "mercari",
+        title: "x".repeat(41),
+        description: "Invalid cached copy",
+        copy: { copyBlock: "invalid" },
+      },
+    ];
+    expect(
+      (
+        await userA.client.rpc("persist_export_packs", {
+          p_item_id: seeded.itemId,
+          p_source_review_revision: seeded.reviewRevision,
+          p_packs: invalidPack,
+        })
+      ).error,
+    ).toBeNull();
+
+    const validPack = [
+      {
+        platform: "mercari",
+        title: "Valid current pack",
+        description: "Valid regenerated copy",
+        copy: { copyBlock: "Valid current pack\n\nValid regenerated copy" },
+      },
+    ];
+    expect(
+      (
+        await userA.client.rpc("persist_export_packs", {
+          p_item_id: seeded.itemId,
+          p_source_review_revision: seeded.reviewRevision,
+          p_packs: validPack,
+        })
+      ).error,
+    ).toBeNull();
+
+    const { data: replacedRows } = await userA.client
+      .from("listings")
+      .select("title")
+      .eq("item_id", seeded.itemId)
+      .eq("platform", "mercari");
+    expect(replacedRows ?? []).toEqual([{ title: "Valid current pack" }]);
+
+    const savedRevision = crypto.randomUUID();
+    expect(
+      (
+        await userA.client.rpc("save_review_edits", {
+          p_item_id: seeded.itemId,
+          p_listing_id: seeded.listingId,
+          p_expected_review_revision: seeded.reviewRevision,
+          p_new_review_revision: savedRevision,
+          p_attributes: {
+            brand: "Old export-pack-lifecycle",
+            category: "electronics",
+            condition: "fair",
+          },
+          p_condition: "fair",
+          p_price_override: null,
+          p_cost_basis: null,
+          p_listing_title: "Seller edited title",
+          p_listing_description: "Seller edited description",
+        })
+      ).error,
+    ).toBeNull();
+
+    const { data: afterSave } = await userA.client
+      .from("listings")
+      .select("id")
+      .eq("item_id", seeded.itemId)
+      .in("platform", ["facebook", "mercari"]);
+    expect(afterSave ?? []).toHaveLength(0);
+
+    expect(
+      (
+        await userA.client.rpc("persist_export_packs", {
+          p_item_id: seeded.itemId,
+          p_source_review_revision: savedRevision,
+          p_packs: validPack,
+        })
+      ).error,
+    ).toBeNull();
+
+    const sharpenRevision = crypto.randomUUID();
+    expect(
+      (
+        await userA.client.rpc("sharpen_review_estimate", {
+          p_item_id: seeded.itemId,
+          p_expected_review_revision: savedRevision,
+          p_run_id: sharpenRevision,
+          p_attributes: {
+            brand: "Old export-pack-lifecycle",
+            category: "electronics",
+            condition: "fair",
+            specs: ["512GB"],
+          },
+          p_price: 175,
+          p_price_range: { low: 160, high: 190 },
+          p_confidence: 0.8,
+          p_tier_fired: "ebay-sold",
+          p_model: "vision-model",
+          p_listing_model: "listing-model",
+          p_pricing_model: null,
+          p_sources: [],
+          p_autopilot_enabled: false,
+          p_autopilot_eligible: false,
+        })
+      ).error,
+    ).toBeNull();
+
+    const { data: afterSharpen } = await userA.client
+      .from("listings")
+      .select("id")
+      .eq("item_id", seeded.itemId)
+      .in("platform", ["facebook", "mercari"]);
+    expect(afterSharpen ?? []).toHaveLength(0);
   });
 
   it("recovers an expired publish lease without letting the stale owner finalize", async () => {

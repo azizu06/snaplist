@@ -146,6 +146,9 @@ describe("parseIdentityCorrections", () => {
     };
     expect(() => parseIdentityCorrections({ ...base, upc: "123" })).toThrow(/UPC/i);
     expect(() => parseIdentityCorrections({ ...base, isbn: "not-an-isbn" })).toThrow(/ISBN/i);
+    expect(() => parseIdentityCorrections({ ...base, isbn: "4006381333931" })).toThrow(
+      /ISBN/i,
+    );
     expect(() => parseIdentityCorrections({ ...base, condition: "mint-ish" })).toThrow(
       /condition/i,
     );
