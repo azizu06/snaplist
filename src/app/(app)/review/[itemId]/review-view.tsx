@@ -53,8 +53,11 @@ type ClarifyOption = { label: string; spec: string };
 
 export interface ReviewData {
   itemId: string;
+  /** Item-owned optimistic-concurrency token shared by all review mutations. */
   reviewRevision: string;
+  /** Server-derived all-eBay-row guard; true disables every pre-publish review mutation. */
   reviewBlocked: boolean;
+  /** Listing generation run paired with the current review snapshot. */
   runId?: string | null;
   photoUrls: string[];
   identification: {
@@ -882,12 +885,14 @@ interface ReviewViewProps {
   regenerateAction: (formData: FormData) => Promise<void>;
 }
 
+/** Remount controlled review inputs whenever any coherent server write advances the revision. */
 export function reviewStateKey(
   data: Pick<ReviewData, "itemId" | "reviewRevision" | "runId">,
 ): string {
   return `${data.itemId}:${data.reviewRevision || data.runId || "legacy"}`;
 }
 
+/** Render review state keyed to its coherent server revision so stale inputs cannot survive writes. */
 export function ReviewView(props: ReviewViewProps) {
   return <ReviewViewState key={reviewStateKey(props.data)} {...props} />;
 }
@@ -1079,8 +1084,8 @@ function ReviewViewState({
       ) : null}
 
       {/* ---- two-column editor. The LAYOUT wrapper is a plain <div> (NOT a form)
-           so the Sharpen card's own form can sit inside the right rail without
-           nesting in the Save form (nested <form>s are invalid HTML). Every
+           so independent correction/re-price forms can render outside the Save
+           form without nesting (nested <form>s are invalid HTML). Every
            editable field below associates with the Save form by id —
            form="rv-save" — and the form element itself trails the layout,
            carrying the action + the contextual Save bar. ---- */}
@@ -1332,9 +1337,9 @@ function ReviewViewState({
             />
           </Card>
 
-          {/* Item — identification + attributes in ONE quiet meta card (Shopify
-              "Organization"). The identified name leads; editable category/
-              condition and the detected attributes sit below a divider. */}
+          {/* Item — read-only identification + attributes in ONE quiet meta card
+              (Shopify "Organization"). Corrections live in the bounded identity
+              editor below; detected attributes sit here beneath a divider. */}
           <Card
             chromeClassName={APP_CARD_CHROME}            className="p-4 sm:p-5"
           >

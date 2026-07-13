@@ -33,6 +33,10 @@ adapter and is **not on the Phase 1 critical path**.
   simulated. Keep the pipeline testable offline against a mock adapter.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
+- **Review correction stays coherent and pre-publish.** Bounded identity edits must rerun the shared
+  pricing router, composite confidence, and grounded listing generator, then atomically persist the
+  item, eBay draft, and prediction log under RLS. Preserve seller price overrides, invalidate stale
+  export packs, reject stale or authoritative publishing/published state, and never auto-publish.
 
 ## How we build
 - **Tracer-bullet + TDD.** Thin end-to-end threads: one or two backend pieces + minimal frontend to

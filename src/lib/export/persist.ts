@@ -14,9 +14,10 @@ import {
 
 /**
  * Load-or-generate seam for the export page (issue #15): the packs are
- * generated ONCE per item and persisted as `listings` rows (platform
+ * generated once per coherent review-content revision and persisted as `listings` rows (platform
  * 'facebook' / 'mercari' — exactly the platforms the schema migration
- * anticipated), then served from those rows on every later visit. All reads
+ * anticipated), then served from those rows while that revision remains current. Identity or
+ * other content edits advance the revision, so stale packs are ignored and regenerated. All reads
  * and writes go through the caller's USER-SCOPED Supabase client so RLS
  * enforces tenancy (AGENTS.md non-negotiable #1), matching
  * `pipeline/persist.ts`.
@@ -50,9 +51,10 @@ export interface ExportPacksView {
 }
 
 export interface LoadOrGeneratePacksInput {
-  /** The owning user's id (must equal the client's auth.uid()). */
+  /** Owning user id retained for call-site context; the persistence RPC derives tenancy from Clerk. */
   userId: string;
   itemId: string;
+  /** Review-content revision that keys cache reads and rejects obsolete in-flight writes. */
   reviewRevision: string;
   /** The item's validated attribute core (from the `items` row). */
   attributes: ExtractedAttributes;
@@ -117,10 +119,10 @@ function rowToView(
 }
 
 /**
- * Serve both packs for an item: from the persisted `listings` rows when both
- * platforms already have a valid pack, otherwise generate, persist the missing
- * platform rows (status 'draft', user-pinned for RLS WITH CHECK), and return
- * the fresh result.
+ * Serve both packs for an item: from persisted rows for the requested review
+ * revision when both platforms are valid, otherwise generate and persist the
+ * missing draft rows through the Clerk-derived, SECURITY INVOKER RPC. The RPC
+ * rejects a write if the review content advanced while generation was in flight.
  */
 export async function loadOrGenerateExportPacks(
   supabase: SupabaseClient,

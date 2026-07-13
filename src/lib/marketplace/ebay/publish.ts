@@ -20,10 +20,11 @@ import { createNotification } from "../../notifications";
  * simply isn't found) and the write-back. No service-role anywhere.
  *
  * Idempotent: a listing that already published returns its stored result
- * without another eBay call. A FAILED publish persists ebay_status='failed'
- * ONLY — the local `status` lifecycle (draft/queued) is untouched, so review
- * and draft flows keep seeing the listing — and rethrows; re-running retries
- * cleanly because the adapter's SKU/offer steps are themselves idempotent.
+ * without another eBay call. Before external work, an atomic revision/run-id
+ * claim freezes one coherent review snapshot and excludes concurrent edits or
+ * publishes. A FAILED publish persists ebay_status='failed', clears its claim
+ * lease, and leaves the local `status` lifecycle (draft/queued) untouched, so
+ * review/draft flows keep seeing the listing and a retry stays safe.
  */
 
 export interface PublishOutcome {
@@ -358,9 +359,9 @@ function publishClaimId(value: unknown): string | null {
 /**
  * Best-effort failed-publish marker; never masks the error being thrown.
  *
- * Writes ONLY `ebay_status` — that column exists precisely so an eBay failure
- * can be shown without destroying the local listing lifecycle (`status` stays
- * draft/queued and review/draft flows keep seeing the row). The update is also
+ * Writes the eBay failure state and clears this attempt's claim lease without
+ * destroying the local listing lifecycle (`status` stays draft/queued and
+ * review/draft flows keep seeing the row). The update is also
  * conditional on the row not already being published: when two publish calls
  * overlap, the loser's eBay error must not downgrade the winner's live
  * listing to 'failed' (which would disable the stored-result fast path and

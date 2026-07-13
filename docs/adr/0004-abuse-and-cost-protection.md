@@ -14,11 +14,13 @@ budget is exceeded — with limits that billing (#64) can later gate by tier. Co
 
 Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `free` until #64).
 
-- **Rate limiting — `@upstash/ratelimit` sliding window** on the metered routes (per-minute, keyed by
-  Clerk user id, IP fallback), `snaplist:rl` key prefix. `enforceRateLimit` returns a `429` with
-  `Retry-After`. Applied to the AI/metered routes: inbox `simulate` + `send` (model calls), the
-  bulk-capture `POST /api/batch/item` run (one metered pipeline run per haul item, #100), and eBay
-  `publish` (external write). The ⌘K `search` route is **deliberately excluded** — it's a cheap RLS'd
+- **Rate limiting — `@upstash/ratelimit` sliding window** on the metered entry points (per-minute,
+  keyed by Clerk user id, IP fallback where a route provides it), `snaplist:rl` key prefix.
+  `enforceRateLimit` returns a `429` with `Retry-After`; server actions redirect with an equivalent
+  retry message. Applied to inbox `simulate` + `send` (model calls), the bulk-capture
+  `POST /api/batch/item` run (one metered pipeline run per haul item, #100), seller-triggered review
+  identity regeneration (#126), and eBay `publish` (external write). The ⌘K `search` route is
+  **deliberately excluded** — it's a cheap RLS'd
   DB read fired on every keystroke; rate-limiting it would break the palette. The bulk-capture
   status poll (`GET /api/batch/status`) is likewise excluded — a cheap RLS'd read, not model work.
 - **Spend guardrail — a per-day counter** (`incrDaily`: Redis `INCR`+expiry | in-memory):
@@ -27,7 +29,9 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
     with a clear message (single-item) or returns a `quota` signal that blocks the rest of the batch
     (bulk), so a haul can't spend past the cap (friendlier limit UI is deferred to the frontend issue).
   - **Global OpenAI budget alert** (distinct; warns, never blocks) — counts model-backed pipeline runs
-    app-wide per day and fires a ONE-TIME alert (log + Sentry) on the exact first breach.
+    app-wide per day, including accepted review identity regenerations, and fires a ONE-TIME alert
+    (log + Sentry) on the exact first breach. Regenerations rejected by preflight do not consume the
+    counter.
 - **Offline-safe by construction.** `@upstash/ratelimit` and `@upstash/redis` are loaded ONLY via
   dynamic import (never static → never a client bundle, mirroring the Sentry pattern, ADR-0003). With
   no `UPSTASH_REDIS_REST_URL`/`_TOKEN`, an in-memory fallback keeps dev / the offline test suite fully

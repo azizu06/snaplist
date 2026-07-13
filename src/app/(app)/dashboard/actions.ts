@@ -258,9 +258,9 @@ export interface BulkListingUpdate {
 }
 
 /**
- * Batched quick-edit (the repurposed "inventory" grid). Price lives on the item
- * (`price_override`); status lives on the listing. Each row is a small scoped
- * write; RLS constrains every one to the caller's rows.
+ * Batched quick-edit (the repurposed "inventory" grid). Price/cost basis live on
+ * the item; status lives on the listing. Each row uses one RLS-scoped RPC that
+ * updates its fields atomically and advances the shared review revision.
  */
 export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<void> {
   if (updates.length === 0) return;

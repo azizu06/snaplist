@@ -20,7 +20,9 @@ SnapList collapses that into a photo plus a couple of approvals so a reseller ca
 in one pass. The seller snaps 1–4 photos; the system identifies the item (brand, model, category,
 condition, specs, any barcode/ISBN), researches a defensible price range from real sold comps with
 cited sources, writes per-platform listing copy, and shows it for
-review. High-confidence items can post automatically (a confidence-gated autopilot); low-confidence
+review. Before publishing, the seller can correct the load-bearing identity facts and explicitly
+re-price and regenerate a coherent draft without losing a saved price override. High-confidence
+items can post automatically (a confidence-gated autopilot); low-confidence
 ones queue for review. Listings publish to eBay behind an adapter, with copy-paste export packs for
 Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
 Clearing a whole haul? **Bulk capture** takes item after item in one session through the same
@@ -42,6 +44,7 @@ flowchart TD
     subgraph seller["Seller surface · Next.js App Router · Clerk auth"]
         UP["Snap 1–4 photos"]
         REVIEW["Review, edit, approve"]
+        CORRECT["Correct identity<br/>re-price + regenerate"]
         INBOX["Buyer Q&A inbox (Realtime)"]
     end
 
@@ -74,6 +77,9 @@ flowchart TD
     GATE -->|high confidence| LISTING
     GATE -->|low confidence| REVIEW
     REVIEW --> LISTING
+    REVIEW -->|fix facts before publish| CORRECT
+    CORRECT -->|re-price corrected facts| ROUTER
+    CORRECT -->|regenerate grounded copy| LISTING
 
     LISTING --> EBAY["eBay adapter<br/>Sell API · sandbox → prod flip"]
     LISTING --> EXPORT["Export packs<br/>Facebook Marketplace · Mercari"]
@@ -113,6 +119,12 @@ grounded agent drafts a reply for the seller to approve. Cutting across all of i
 provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference corpus that grounds
 copy and corroborates price, per-run prediction logs feeding the eval harness, structured-JSON
 observability, and Clerk auth with Postgres RLS enforcing per-user isolation everywhere.
+
+The pre-publish correction loop replaces bounded identity facts (brand, model, category, condition,
+valid ISBN/UPC, and relevant specifications), then reruns pricing, confidence, and listing generation.
+Its RLS-scoped transaction atomically advances the item, eBay draft, and prediction log, preserves a
+saved seller price override, invalidates stale export packs, rejects stale/live review state, and never
+publishes automatically.
 
 > This diagram tracks the current build and will keep maturing with the project — the messaging
 > delivery path is simulated in v1, and the production eBay poller/queue lands with the go-live work
@@ -160,6 +172,7 @@ idea seen three ways. The map from skill to code:
 | Signal-based confidence (never LLM self-report) | `src/lib/confidence` — pure composite of tier fired + comp agreement + ID completeness; gates the autopilot |
 | Structured outputs | Zod everywhere a model speaks: `src/lib/pipeline/types.ts`, `src/lib/listing/schema.ts` — no ad-hoc JSON parsing |
 | Prompt/context engineering | `src/lib/listing` + `src/lib/export` — per-platform copy generation, used-vs-new disambiguation |
+| Coherent human correction loop | `src/lib/pipeline/review-regeneration.ts` + the review RPCs — bounded identity edits, shared pricing/confidence/listing seams, revision guards, atomic RLS persistence, stale export invalidation |
 | Evals + calibration | `src/lib/eval` — gold set, ID/pricing metrics, reliability buckets + ECE, LLM judge validated against human labels |
 | Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, lazy env validation (`src/lib/env.ts`), eBay account-deletion endpoint |
 | Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell API, sandbox) · export packs for FB Marketplace/Mercari |

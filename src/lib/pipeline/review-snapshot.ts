@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** Item projection returned by the atomic, tenant-scoped review snapshot RPC. */
 export interface ReviewSnapshotItem {
   id: string;
   photos: unknown;
@@ -12,6 +13,7 @@ export interface ReviewSnapshotItem {
   created_at: string;
 }
 
+/** eBay listing projection paired with the review's current applicable run. */
 export interface ReviewSnapshotListing {
   id: string;
   platform: string;
@@ -24,6 +26,7 @@ export interface ReviewSnapshotListing {
   ebay_status: string | null;
 }
 
+/** Latest applicable prediction projection displayed by review. */
 export interface ReviewSnapshotPrediction {
   price: number | string | null;
   price_range: unknown;
@@ -35,6 +38,7 @@ export interface ReviewSnapshotPrediction {
   autopilot_eligible: boolean | null;
 }
 
+/** Coherent item/listing/prediction read plus an all-eBay-row mutation guard. */
 export interface ReviewSnapshot {
   item: ReviewSnapshotItem;
   listing: ReviewSnapshotListing | null;
@@ -42,6 +46,7 @@ export interface ReviewSnapshot {
   reviewBlocked: boolean;
 }
 
+/** Load one RLS-scoped review projection in a single database statement. */
 export async function loadReviewSnapshot(
   supabase: SupabaseClient,
   itemId: string,

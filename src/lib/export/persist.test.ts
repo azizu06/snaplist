@@ -10,11 +10,12 @@ import { loadOrGenerateExportPacks } from "./persist";
  * Supabase client (just the query-builder surface this helper touches) plus an
  * injected fake model call. Asserts the seam behavior:
  *
- *  - first visit: generates, persists ONE draft listings row per platform
- *    (user-pinned for RLS WITH CHECK), returns the fresh packs;
- *  - later visits: serves the persisted rows verbatim, NO model call;
- *  - invalid/partial stored rows fall through to regeneration without
- *    duplicating the platform that was already covered.
+ *  - first visit: generates and persists one draft row per platform through the
+ *    revision-guarded RPC, then returns the fresh packs;
+ *  - later visits at the same review revision reuse persisted model copy with no
+ *    model call while deterministic Facebook price/condition lines stay current;
+ *  - invalid, partial, or obsolete-revision rows regenerate without duplicating
+ *    a valid platform row for the active revision.
  */
 
 interface InsertedRow {

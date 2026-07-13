@@ -68,9 +68,12 @@ function reviewWriteError(err: unknown, fallback: string): string {
  *
  * - listing title + description → `listings` (only when a listing row exists);
  * - price → `items.price_override` (blank clears it back to the suggestion).
+ * - cost basis → `items.cost_basis`;
+ * - confirmed garment measurements → `items.attributes.measurements`.
  *
  * Validation happens in the PURE `parseReviewEdits` helper (unit-tested);
- * this action is only RLS-scoped persistence + redirect plumbing.
+ * one revision-guarded RLS RPC persists the coherent item/listing edit and
+ * invalidates export packs derived from the previous review content.
  */
 export async function saveReview(formData: FormData) {
   const itemId = formData.get("itemId");
@@ -349,8 +352,8 @@ export async function sharpenEstimate(formData: FormData) {
     backTo(id, "We couldn't re-research the price just now. Please try again.");
   }
 
-  // Preserve every existing attribute key (category merged by saveReview, etc.) and
-  // only update specs — parsing strips unknown keys, so merge into the RAW JSON.
+  // Preserve every existing attribute key and only update specs — parsing strips
+  // unknown keys, so merge into the RAW JSON.
   const nextAttributes = { ...rawAttrs, specs: reprice.mergedSpecs };
   const result: PipelineResult = {
     attributes: reprice.attributes,

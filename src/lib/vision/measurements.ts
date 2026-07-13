@@ -297,6 +297,7 @@ export type MeasurementDraft = z.infer<typeof measurementDraftSchema>;
 
 export const measurementDraftsSchema = z.array(measurementDraftSchema);
 
+/** Remove unconfirmed measurement drafts before generating publishable listing copy. */
 export function listingFactAttributes(
   attributes: ExtractedAttributes,
 ): ExtractedAttributes {
