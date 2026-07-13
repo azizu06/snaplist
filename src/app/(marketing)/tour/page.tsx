@@ -7,7 +7,7 @@ import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Snap a photo and SnapList figures out what your item is, what it's worth with real sources, writes the listing, and posts it to eBay. Here's how each step works.",
+    "Snap a photo and SnapList figures out what your item is, what it's worth with cited evidence when available or a clearly labeled, potentially uncited LLM-only estimate, writes the listing, and posts it to eBay. Here's how each step works.",
 };
 
 /**
