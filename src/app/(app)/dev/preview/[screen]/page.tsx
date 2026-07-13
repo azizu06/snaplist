@@ -3,7 +3,6 @@ import {
   DashboardView,
   type DashboardRow,
 } from "@/app/(app)/dashboard/dashboard-view";
-import type { BulkListingUpdate } from "@/app/(app)/dashboard/actions";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
 import { UploadView } from "@/app/(app)/upload/upload-form";
 import {
@@ -237,13 +236,13 @@ export default async function PreviewPage({
   if (process.env.NODE_ENV === "production") notFound();
   const { screen } = await params;
 
-  async function noopAction(_formData: FormData) {
+  async function noopAction() {
     "use server";
   }
-  async function noopIds(_ids: string[]) {
+  async function noopIds() {
     "use server";
   }
-  async function noopBulk(_updates: BulkListingUpdate[]) {
+  async function noopBulk() {
     "use server";
   }
 
