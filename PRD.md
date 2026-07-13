@@ -271,7 +271,7 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
   defaults (single-source-leaning eBay framing, "any household item", `gpt-4o` default, etc.). This
   PRD overrides those. Keep the brief as origin/narrative context.
 - **Skills-on-display map** (for README + interview narrative): multimodal vision (extraction),
-  agents + tool calling (pricing agent, buyer-Q&A agent), RAG/synthesis (cited price range, similar-item
+  agents + tool calling (pricing agent, buyer-Q&A agent), RAG/synthesis (cited web-search range, similar-item
   grounding), structured Zod outputs, prompt/context engineering (per-platform generation,
   used-vs-new disambiguation), pgvector, security (Auth + RLS + secret handling + input validation +
   account-deletion endpoint), cost-aware model routing, evals + calibration, Docker/CI/observability (Phase 4).

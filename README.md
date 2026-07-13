@@ -280,7 +280,8 @@ Being able to state where the system's accuracy tops out is part of the showcase
   corpus-corroboration signal is built on synthetic comps. Treat every price as a *smart
   suggestion*, not an oracle. See the [operator smoke procedure](./docs/sold-comps-egress.md).
 - **The `llm-only` floor tier is a guess.** When no barcode, brand, or retail anchor resolves, the
-  fallback is an LLM estimate — lowest confidence by construction, and surfaced as such.
+  fallback is an LLM estimate — lowest confidence by construction, surfaced as such, and potentially
+  uncited because its `sources[]` may be empty.
 - **The gold set is small and partly synthetic.** ~36 hand-authored hero-domain items whose price
   bands are plausible ranges, not measured sold prices. Offline eval numbers measure pipeline
   consistency against those authored labels — they are **not** a field-accuracy benchmark, and the

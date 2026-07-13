@@ -324,13 +324,13 @@ function ListingRow({
         </span>
 
         {/* Status column (md+). Centered on the column midpoint. */}
-        <span className="relative z-[2] hidden md:flex md:flex-col md:items-center md:gap-1 md:text-center">
+        <span className="hidden md:flex md:flex-col md:items-center md:gap-1 md:text-center">
           {chip ? <StatusBadge label={chip.label} tone={chip.tone} dot pulse={chip.pulse} icon={chip.icon} /> : null}
           {manualPublishHref ? (
             <Link
               href={manualPublishHref}
               aria-label={`Publish ${row.title} to eBay`}
-              className="text-[12px] font-semibold text-accent hover:underline"
+              className="relative z-[2] text-[12px] font-semibold text-accent hover:underline"
             >
               Publish to eBay
             </Link>
