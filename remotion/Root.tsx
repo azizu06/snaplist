@@ -4,25 +4,23 @@ import { HERO_DEMO_LEN, HeroDemoVideo } from "./HeroDemoVideo";
 import { StageIdentify } from "./StageIdentify";
 import { StagePrice } from "./StagePrice";
 import { StagePublish } from "./StagePublish";
-import { BUYER_QA_LEN, BuyerQA } from "./suite/BuyerQA";
+import {
+  REAL_UI_CAPTURE_LEN,
+  RealUiCapture,
+  type RealUiCaptureProps,
+  type RealUiSurface,
+} from "./real-ui/RealUiCapture";
 import { HERO_VISION_LEN, HeroVision } from "./suite/HeroVision";
-import { INBOX_QA_LEN, InboxQA } from "./suite/InboxQA";
-import { STEP_IDENTIFY_LEN, StepIdentify } from "./suite/StepIdentify";
-import { STEP_PRICE_LEN, StepPrice } from "./suite/StepPrice";
-import { STEP_PUBLISH_LEN, StepPublish } from "./suite/StepPublish";
-import { STEP_SNAP_LEN, StepSnap } from "./suite/StepSnap";
-import { STEP_WRITE_LEN, StepWrite } from "./suite/StepWrite";
-import { STEP_SNAP_MOBILE_LEN, StepSnapMobile } from "./suite/mobile/StepSnapMobile";
-import { STEP_IDENTIFY_MOBILE_LEN, StepIdentifyMobile } from "./suite/mobile/StepIdentifyMobile";
-import { STEP_PRICE_MOBILE_LEN, StepPriceMobile } from "./suite/mobile/StepPriceMobile";
-import { STEP_WRITE_MOBILE_LEN, StepWriteMobile } from "./suite/mobile/StepWriteMobile";
-import { STEP_PUBLISH_MOBILE_LEN, StepPublishMobile } from "./suite/mobile/StepPublishMobile";
-import { ANSWER_MOBILE_LEN, StepAnswerMobile } from "./suite/mobile/StepAnswerMobile";
 
 const STAGE_SIZE = { fps: 30, width: 800, height: 600 } as const;
 const SUITE_SIZE = { fps: 30, width: 1920, height: 1080 } as const;
 /** Portrait (4:5) renders of the how-it-works steps for phones. */
 const MOBILE_SIZE = { fps: 30, width: 1080, height: 1350 } as const;
+
+const realUiDefaults = (
+  surface: RealUiSurface,
+  formFactor: RealUiCaptureProps["formFactor"],
+): RealUiCaptureProps => ({ surface, formFactor, theme: "light" });
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -36,47 +34,53 @@ export const RemotionRoot: React.FC = () => {
       />
       <Composition
         id="step-snap"
-        component={StepSnap}
-        durationInFrames={STEP_SNAP_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("snap", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
       <Composition
         id="step-identify"
-        component={StepIdentify}
-        durationInFrames={STEP_IDENTIFY_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("identify", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
       <Composition
         id="step-price"
-        component={StepPrice}
-        durationInFrames={STEP_PRICE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("price", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
       <Composition
         id="step-write"
-        component={StepWrite}
-        durationInFrames={STEP_WRITE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("write", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
       <Composition
         id="step-publish"
-        component={StepPublish}
-        durationInFrames={STEP_PUBLISH_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("publish", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
       <Composition
         id="buyer-qa"
-        component={BuyerQA}
-        durationInFrames={BUYER_QA_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("buyer-qa", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
-      {/* logged-in dashboard inbox teaser — buyer-Q&A on a DIFFERENT item than
-          the tour (brass chess set vs the tour's Canon AE-1) so a user who
-          already watched the tour gets a fresh scenario. */}
+      {/* In-app empty-state teaser: the same real inbox component, captured
+          across list → drafted reply → sent-thread states. */}
       <Composition
         id="inbox-qa"
-        component={InboxQA}
-        durationInFrames={INBOX_QA_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("inbox-qa", "desktop")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...SUITE_SIZE}
       />
 
@@ -84,38 +88,51 @@ export const RemotionRoot: React.FC = () => {
               under 768px so the in-clip UI is legible on phones ---- */}
       <Composition
         id="step-snap-mobile"
-        component={StepSnapMobile}
-        durationInFrames={STEP_SNAP_MOBILE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("snap", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
       <Composition
         id="step-identify-mobile"
-        component={StepIdentifyMobile}
-        durationInFrames={STEP_IDENTIFY_MOBILE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("identify", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
       <Composition
         id="step-price-mobile"
-        component={StepPriceMobile}
-        durationInFrames={STEP_PRICE_MOBILE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("price", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
       <Composition
         id="step-write-mobile"
-        component={StepWriteMobile}
-        durationInFrames={STEP_WRITE_MOBILE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("write", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
       <Composition
         id="step-publish-mobile"
-        component={StepPublishMobile}
-        durationInFrames={STEP_PUBLISH_MOBILE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("publish", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
       <Composition
         id="buyer-qa-mobile"
-        component={StepAnswerMobile}
-        durationInFrames={ANSWER_MOBILE_LEN}
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("buyer-qa", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
+        {...MOBILE_SIZE}
+      />
+      <Composition
+        id="inbox-qa-mobile"
+        component={RealUiCapture}
+        defaultProps={realUiDefaults("inbox-qa", "mobile")}
+        durationInFrames={REAL_UI_CAPTURE_LEN}
         {...MOBILE_SIZE}
       />
 

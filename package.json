@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "demo:capture-ui": "node remotion/scripts/capture-real-ui.mjs",
+    "demo:render-real-ui": "node remotion/scripts/render-real-ui.mjs",
     "smoke:sold-comps": "tsx scripts/scrape-smoke.ts",
     "eval": "tsx src/lib/eval/run.ts",
     "eval:build-gold": "tsx src/lib/eval/build-gold-set.ts",

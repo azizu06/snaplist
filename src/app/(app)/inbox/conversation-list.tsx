@@ -257,6 +257,12 @@ function buyerLabel(itemLabels: Map<string, string>, message: MessageRow): strin
   return item ?? "Buyer question";
 }
 
+export function conversationRowClassName(active: boolean): string {
+  return `group flex min-w-0 w-full max-w-full overflow-hidden items-start gap-3 px-4 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+    active ? "bg-brand-soft" : "hover:bg-surface-2/60"
+  }`;
+}
+
 export function ConversationList({
   inbound,
   repliesByQuestion,
@@ -283,15 +289,11 @@ export function ConversationList({
               type="button"
               onClick={() => onSelect(message.id)}
               aria-current={active ? "true" : undefined}
-              className={`group flex w-full items-start gap-3 px-4 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
-                active
-                  ? "bg-brand-soft"
-                  : "hover:bg-surface-2/60"
-              }`}
+              className={conversationRowClassName(active)}
             >
               <BuyerAvatar name={buyerLabel(itemLabels, message)} />
               <span className="min-w-0 flex-1">
-                <span className="flex items-baseline justify-between gap-2">
+                <span className="flex min-w-0 items-baseline justify-between gap-2">
                   <span
                     className={`truncate text-[15px] ${
                       state.unread
@@ -303,7 +305,7 @@ export function ConversationList({
                   </span>
                   <RelativeTime iso={message.created_at} />
                 </span>
-                <span className="mt-1 flex items-center gap-2">
+                <span className="mt-1 flex min-w-0 items-center gap-2">
                   <span
                     className={`min-w-0 flex-1 truncate text-[13.5px] ${
                       state.unread ? "text-fg" : "text-muted"
