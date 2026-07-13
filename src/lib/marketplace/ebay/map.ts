@@ -1,4 +1,5 @@
 import type { EbayCondition, EbayPublishRequest } from "./types";
+import { normalizeConditionAlias } from "../../items/condition";
 import { PublishValidationError } from "./errors";
 
 /**
@@ -34,13 +35,14 @@ export interface ListingForPublish {
  * never NEW — when unknown, so we never overclaim condition on a real listing.
  */
 export function toEbayCondition(condition: string | null | undefined): EbayCondition {
-  const c = (condition ?? "").trim().toLowerCase();
+  const c = normalizeConditionAlias(condition ?? "");
   if (c === "new" || c === "brand new" || c === "new with tags") return "NEW";
   if (c === "like new" || c === "open box" || c === "mint") return "LIKE_NEW";
   if (c === "excellent") return "USED_EXCELLENT";
   if (c === "very good") return "USED_VERY_GOOD";
   if (c === "good" || c === "used") return "USED_GOOD";
-  if (c === "fair" || c === "acceptable" || c === "worn") return "USED_ACCEPTABLE";
+  if (c === "fair" || c === "acceptable" || c === "poor" || c === "worn")
+    return "USED_ACCEPTABLE";
   if (c === "for parts" || c === "broken" || c === "not working")
     return "FOR_PARTS_OR_NOT_WORKING";
   return "USED_GOOD";

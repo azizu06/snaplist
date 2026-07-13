@@ -6,6 +6,11 @@ import type {
   PricingProvider,
 } from "../types";
 import {
+  canonicalizeCondition,
+  isPricedItemCondition,
+  type PricedItemCondition,
+} from "../../items/condition";
+import {
   createDefaultSearchClient,
   resolvePricingModel,
   truncateSnippet,
@@ -56,7 +61,7 @@ import { resolveLanguageModel } from "../../llm";
  * `USED_PRICE_FRACTION`) through the middle grades, but is steeper at the
  * bottom — generic goods in fair/poor condition lack the price floor books have.
  */
-export const DEPRECIATION_FACTORS: Record<string, number> = {
+export const DEPRECIATION_FACTORS = {
   new: 0.8,
   "like-new": 0.65,
   "very-good": 0.55,
@@ -64,7 +69,7 @@ export const DEPRECIATION_FACTORS: Record<string, number> = {
   acceptable: 0.4,
   fair: 0.35,
   poor: 0.2,
-};
+} satisfies Record<PricedItemCondition, number>;
 
 /**
  * Unknown/unassessed condition prices at the "good" baseline: the tier's whole
@@ -75,8 +80,10 @@ export const DEFAULT_DEPRECIATION_FACTOR = DEPRECIATION_FACTORS.good;
 
 function depreciationFactor(condition?: string): number {
   if (!condition) return DEFAULT_DEPRECIATION_FACTOR;
-  const key = condition.trim().toLowerCase();
-  return DEPRECIATION_FACTORS[key] ?? DEFAULT_DEPRECIATION_FACTOR;
+  const key = canonicalizeCondition(condition);
+  return isPricedItemCondition(key)
+    ? DEPRECIATION_FACTORS[key]
+    : DEFAULT_DEPRECIATION_FACTOR;
 }
 
 /**

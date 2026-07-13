@@ -69,7 +69,10 @@ on eBay. Buyers never see SnapList.
 16. As a seller, I want copy-paste export packs for Facebook Marketplace and Mercari, so that I can list cross-platform without re-typing.
 17. As a seller, I want each platform's copy to follow that platform's conventions (title length, tone, hashtags, structure), so that listings look native.
 18. As a seller, I want the generated copy grounded in real similar listings, so that it reads like a competent human wrote it, not generic filler.
-19. As a seller, I want to edit any generated field before it's used, so that I control the final listing.
+19. As a seller, I want to edit generated listing fields and, before publishing, correct the
+    brand, model, category, condition, ISBN/UPC, or relevant specifications, then explicitly
+    re-price and regenerate from those facts, so that I control the final listing without mixing
+    stale identity, price, confidence, or copy.
 
 **Review, approval & autopilot**
 20. As a seller, I want to review and approve a listing before it posts, so that nothing goes live without my consent.
@@ -117,6 +120,10 @@ on eBay. Buyers never see SnapList.
 - **Multi-tenant from day one.** Supabase Auth; every domain table carries `user_id`; **Postgres row-level security** enforces per-user isolation. This is a primary Security-skill surface.
 - **Postgres + pgvector** (Supabase) holds items, listings, messages, embeddings, and prediction logs.
 - **Photos** in Supabase Storage, paths scoped by `user_id`, access governed by RLS/storage policies.
+- **Review writes are coherent and revision-guarded.** Seller edits, identity regeneration, export
+  packs, and publish acquisition coordinate through an item-owned review revision. Identity
+  regeneration commits the corrected item, regenerated eBay draft, and prediction log in one
+  RLS-scoped transaction; stale writers fail instead of mixing runs.
 - Schema (conceptual, not final): `items` (user_id, attributes JSON, condition, photos[], created_at), `listings` (item_id, platform, generated copy, status), `messages` (item_id/listing_id, direction, body, draft_reply, status), `embeddings`/corpus (vector, source ref, metadata), `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Models & LLM access
@@ -147,6 +154,8 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   - **comp agreement** (variance/dispersion of found prices — tight cluster = confident),
   - **identification completeness** (brand + model resolved? barcode decoded cleanly? category unambiguous?).
 - Autopilot gate = threshold on the composite. High → eligible to auto-post; low → queue for review. Autopilot is toggleable off. The signals are surfaced to the user for transparency.
+- A seller-triggered identity correction is always a pre-publish, human-controlled run: it
+  recomputes the composite but resets the regenerated eBay listing to `draft` and never auto-posts.
 
 ### Vision / identification
 - **1 photo required, up to ~4 accepted.** All provided images fed to a **single** structured-extraction vision call → attributes + condition + barcode/ISBN. More angles → better condition assessment → higher ID confidence.
@@ -159,6 +168,12 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Listing generation (per-platform)
 - **One Zod-validated attribute core → many surface renderings** via per-platform prompt + template.
+- **Bounded pre-publish correction loop.** The review editor can replace brand, model, category,
+  condition, valid ISBN/UPC, and up to 12 relevant specifications. Its explicit re-price/regenerate
+  action reuses the pricing router, confidence bridge, and grounded eBay generator; preserves a
+  saved seller price override; invalidates identity-bearing export packs; and leaves the last
+  coherent result untouched if generation or persistence fails. Published or publishing eBay
+  state is never mutable through this path.
 - v1 targets: **eBay** (structured item-specifics, keyword title, category — the real adapter target), **Facebook Marketplace** (casual, local, short), **Mercari** (short title, hashtags, shipping-oriented). Poshmark optional if branded-apparel slice is added.
 - Generation is **grounded** by pgvector retrieval of similar past/seed listings (few-shot).
 
@@ -208,6 +223,10 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - **Listing generators** — per-platform output validated against platform constraints (e.g. eBay
   title length, required fields present, no attributes hallucinated beyond the validated core).
   Contract + rubric, not exact text.
+- **Review regeneration** — stub pricing/listing dependencies at the public orchestration seam and
+  assert corrected facts feed both outputs; integration-test atomic item/listing/log persistence,
+  price-override preservation, stale-revision rejection, live-listing exclusion, export invalidation,
+  and cross-tenant rollback.
 - **RLS / tenancy** — integration tests asserting a user cannot read/write another user's
   items/listings/messages/photos. Security-critical; tested at the data-access seam.
 - **eBay adapter** — tested against a **stub/mock adapter** (the interface), not live eBay, so the
@@ -225,6 +244,8 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - Real users / growth / marketing as a success metric (showcase first).
 - Payment, checkout, shipping (these stay on eBay).
 - A universal "price anything" guarantee — accuracy concentrates on the hero domain; generics are honestly low-confidence.
+- Automatic publish after seller-triggered identity correction — regeneration always returns to a
+  reviewable draft.
 
 ## Further Notes
 

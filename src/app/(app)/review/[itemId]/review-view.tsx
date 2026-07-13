@@ -10,12 +10,14 @@ import { Banner, type BannerVariant } from "@/components/ui/banner";
 import { PendingButton } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { EBAY_TITLE_MAX } from "@/lib/pipeline/review-edits";
+import { canonicalizeCondition, ITEM_CONDITIONS } from "@/lib/items/condition";
 import {
   confidenceLabel,
   lifecycleLabel,
   sourceKindLabel,
   tierLabel,
 } from "@/lib/ui/status";
+import { isReviewRegenerationBlocked } from "@/lib/pipeline/review-regeneration-policy";
 import { PricingStrategies } from "./pricing-strategies";
 import { CostBasisField } from "./cost-basis-field";
 import type { PricingStrategy } from "@/lib/pricing/strategies";
@@ -51,6 +53,12 @@ type ClarifyOption = { label: string; spec: string };
 
 export interface ReviewData {
   itemId: string;
+  /** Item-owned optimistic-concurrency token shared by all review mutations. */
+  reviewRevision: string;
+  /** Server-derived all-eBay-row guard; true disables every pre-publish review mutation. */
+  reviewBlocked: boolean;
+  /** Listing generation run paired with the current review snapshot. */
+  runId?: string | null;
   photoUrls: string[];
   identification: {
     label: string;
@@ -60,12 +68,16 @@ export interface ReviewData {
     evidence: number;
   } | null;
   attrs: Array<{ key: string; value: string | null }>;
+  /** Current relevant specifications; the correction editor replaces this bounded list. */
+  specs: string[];
   listing: {
     id: string;
     platform: string;
     title: string;
     description: string;
     status: string | null;
+    ebayListingId?: string | null;
+    ebayStatus?: string | null;
   } | null;
   suggested: number | null;
   override: number | null;
@@ -134,7 +146,13 @@ const READONLY_FIELD =
 
 /** Used-goods condition grades — a fixed taxonomy, so Condition is a dropdown
  *  (an AI-supplied descriptive value is preserved as an extra option). */
-const CONDITION_OPTIONS = ["New", "Like new", "Good", "Fair", "For parts"] as const;
+const CONDITION_OPTIONS = ITEM_CONDITIONS.map((value) => ({
+  value,
+  label: value
+    .split("-")
+    .map((part) => `${part[0]?.toUpperCase()}${part.slice(1)}`)
+    .join(" "),
+}));
 
 /** Category stays free-text (the taxonomy is open-ended) but offers a typeahead
  *  of common categories so it isn't a blank box. */
@@ -216,12 +234,12 @@ function CardTitle({ children }: { children: React.ReactNode }) {
 function FieldLabel({
   label,
   htmlFor,
-  ai,
+  ai = false,
   aside,
 }: {
   label: string;
   htmlFor: string;
-  ai: boolean;
+  ai?: boolean;
   aside?: React.ReactNode;
 }) {
   return (
@@ -281,12 +299,14 @@ function RangeBar({
  */
 function SharpenCard({
   itemId,
+  reviewRevision,
   options,
   candidates,
   action,
   formDirty,
 }: {
   itemId: string;
+  reviewRevision: string;
   options: ClarifyOption[];
   candidates: string[];
   action: (formData: FormData) => Promise<void>;
@@ -353,6 +373,7 @@ function SharpenCard({
         }}
       >
         <input type="hidden" name="itemId" value={itemId} />
+        <input type="hidden" name="reviewRevision" value={reviewRevision} />
         {chips.map((c, i) => (
           <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
         ))}
@@ -507,6 +528,203 @@ function SharpenCard({
   );
 }
 
+/**
+ * Bounded seller identity correction (issue #126). Kept additive to the existing
+ * Sharpen flow: this editor replaces load-bearing identity facts and explicitly
+ * re-runs BOTH pricing and listing generation, while Sharpen remains the quick
+ * additive-spec re-price path. Collapsed by default so the normal review hierarchy
+ * and existing Shopify-style design stay intact.
+ */
+function IdentityCorrectionCard({
+  data,
+  action,
+  formDirty,
+}: {
+  data: ReviewData;
+  action: (formData: FormData) => Promise<void>;
+  formDirty: boolean;
+}) {
+  const attr = (key: string) => data.attrs.find((a) => a.key === key)?.value ?? "";
+  const initialCondition = attr("condition");
+  const [fields, setFields] = useState(() => ({
+    brand: attr("brand"),
+    model: attr("model"),
+    category: attr("category"),
+    condition: initialCondition ? canonicalizeCondition(initialCondition) : "",
+    isbn: attr("isbn"),
+    upc: attr("upc"),
+    specifications: data.specs.join("\n"),
+  }));
+  const formRef = useRef<HTMLFormElement>(null);
+  const confirmedRef = useRef(false);
+  const [confirming, setConfirming] = useState(false);
+  const setField = (key: keyof typeof fields, value: string) =>
+    setFields((prev) => ({ ...prev, [key]: value }));
+
+  return (
+    <Card chromeClassName={APP_CARD_CHROME} className="p-4 sm:p-5">
+      <details>
+        <summary className="cursor-pointer list-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+          <span className="flex items-center justify-between gap-4">
+            <span>
+              <span className="block text-[14px] font-semibold tracking-tight text-fg-strong">
+                Correct item identity
+              </span>
+              <span className="mt-1 block text-[13px] leading-relaxed text-muted">
+                Fix the facts that drive comparable sales and generated listing copy.
+              </span>
+            </span>
+            <span className="shrink-0 text-[13px] font-semibold text-accent">
+              Edit details
+            </span>
+          </span>
+        </summary>
+
+        <form
+          ref={formRef}
+          action={action}
+          className="mt-5 border-t border-border pt-5"
+          onSubmit={(event) => {
+            if (confirmedRef.current) {
+              confirmedRef.current = false;
+              return;
+            }
+            if (formDirty) {
+              event.preventDefault();
+              setConfirming(true);
+            }
+          }}
+        >
+          <input type="hidden" name="itemId" value={data.itemId} />
+          <input type="hidden" name="reviewRevision" value={data.reviewRevision} />
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <FieldLabel label="Brand" htmlFor="identity-brand" />
+              <input
+                id="identity-brand"
+                name="brand"
+                value={fields.brand}
+                onChange={(e) => setField("brand", e.target.value)}
+                maxLength={120}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="Model" htmlFor="identity-model" />
+              <input
+                id="identity-model"
+                name="model"
+                value={fields.model}
+                onChange={(e) => setField("model", e.target.value)}
+                maxLength={120}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="Category" htmlFor="identity-category" />
+              <input
+                id="identity-category"
+                name="category"
+                list="identity-category-options"
+                value={fields.category}
+                onChange={(e) => setField("category", e.target.value)}
+                maxLength={120}
+                className={INPUT_CLASSES}
+              />
+              <datalist id="identity-category-options">
+                {CATEGORY_SUGGESTIONS.map((category) => (
+                  <option key={category} value={category} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <FieldLabel label="Condition" htmlFor="identity-condition" />
+              <Select
+                id="identity-condition"
+                name="condition"
+                value={fields.condition}
+                onChange={(value) => setField("condition", value)}
+                placeholder="Select a condition…"
+                options={[...CONDITION_OPTIONS]}
+                className="w-full bg-bg px-3 py-2 text-[15px] text-fg-strong shadow-xs"
+              />
+            </div>
+            <div>
+              <FieldLabel label="ISBN (if applicable)" htmlFor="identity-isbn" />
+              <input
+                id="identity-isbn"
+                name="isbn"
+                inputMode="numeric"
+                value={fields.isbn}
+                onChange={(e) => setField("isbn", e.target.value)}
+                maxLength={20}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="UPC (if applicable)" htmlFor="identity-upc" />
+              <input
+                id="identity-upc"
+                name="upc"
+                inputMode="numeric"
+                value={fields.upc}
+                onChange={(e) => setField("upc", e.target.value)}
+                maxLength={20}
+                className={INPUT_CLASSES}
+              />
+            </div>
+          </div>
+          <div className="mt-4">
+            <FieldLabel
+              label="Relevant specifications"
+              htmlFor="identity-specifications"
+              aside={<span className="text-[12px] text-faint">One per line, max 12</span>}
+            />
+            <textarea
+              id="identity-specifications"
+              name="specifications"
+              value={fields.specifications}
+              onChange={(e) => setField("specifications", e.target.value)}
+              rows={4}
+              placeholder={"e.g. 512GB SSD\nNoise cancelling\nBlack"}
+              className={`${INPUT_CLASSES} resize-y leading-relaxed`}
+            />
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="max-w-xl text-[13px] leading-relaxed text-muted">
+              This replaces the generated suggestion and copy as one saved result. Your
+              saved price override is kept and the listing stays a draft.
+            </p>
+            <PendingButton
+              pendingLabel="Re-pricing & regenerating…"
+              className="w-full sm:w-auto sm:shrink-0"
+            >
+              Re-price &amp; regenerate
+            </PendingButton>
+          </div>
+        </form>
+      </details>
+
+      {confirming ? (
+        <ConfirmDialog
+          title="Discard unsaved listing edits?"
+          body="Re-price and regenerate replaces the current generated suggestion and copy. Save your manual title, description, price, cost-basis, or measurement edits first if you want to keep them. Saved price overrides are always preserved."
+          confirmLabel="Re-price & regenerate"
+          cancelLabel="Keep editing"
+          pending={false}
+          onConfirm={() => {
+            setConfirming(false);
+            confirmedRef.current = true;
+            formRef.current?.requestSubmit();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
 /** One garment measurement field (issue #104). */
 type MeasureField = NonNullable<ReviewData["measurements"]>["fields"][number];
 
@@ -551,12 +769,14 @@ function MeasurementsCard({
   confirmed,
   onValue,
   onConfirm,
+  disabled = false,
 }: {
   fields: MeasureField[];
   values: Record<string, string>;
   confirmed: Record<string, boolean>;
   onValue: (name: string, value: string) => void;
   onConfirm: (name: string, checked: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <Card chromeClassName={APP_CARD_CHROME} className="p-4 sm:p-5">
@@ -615,10 +835,11 @@ function MeasurementsCard({
                   step="any"
                   min="0"
                   value={values[f.name] ?? ""}
+                  disabled={disabled}
                   onChange={(e) => onValue(f.name, e.target.value)}
                   placeholder={f.needsReference ? "Measure with tape" : "0"}
                   aria-label={`${f.label} in inches`}
-                  className="w-full rounded-lg bg-transparent px-2.5 py-1.5 text-[15px] font-semibold text-fg-strong outline-none"
+                  className="w-full rounded-lg bg-transparent px-2.5 py-1.5 text-[15px] font-semibold text-fg-strong outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   data-nums
                 />
                 <span className="pr-2.5 text-[13px] text-muted">in</span>
@@ -643,7 +864,7 @@ function MeasurementsCard({
                   value={f.name}
                   form="rv-save"
                   checked={confirmed[f.name] ?? false}
-                  disabled={!hasValue}
+                  disabled={disabled || !hasValue}
                   onChange={(e) => onConfirm(f.name, e.target.checked)}
                   className="size-4 accent-[var(--color-accent)]"
                 />
@@ -657,15 +878,31 @@ function MeasurementsCard({
   );
 }
 
-export function ReviewView({
-  data,
-  saveAction,
-  sharpenAction,
-}: {
+interface ReviewViewProps {
   data: ReviewData;
   saveAction: (formData: FormData) => Promise<void>;
   sharpenAction: (formData: FormData) => Promise<void>;
-}) {
+  regenerateAction: (formData: FormData) => Promise<void>;
+}
+
+/** Remount controlled review inputs whenever any coherent server write advances the revision. */
+export function reviewStateKey(
+  data: Pick<ReviewData, "itemId" | "reviewRevision" | "runId">,
+): string {
+  return `${data.itemId}:${data.reviewRevision || data.runId || "legacy"}`;
+}
+
+/** Render review state keyed to its coherent server revision so stale inputs cannot survive writes. */
+export function ReviewView(props: ReviewViewProps) {
+  return <ReviewViewState key={reviewStateKey(props.data)} {...props} />;
+}
+
+function ReviewViewState({
+  data,
+  saveAction,
+  sharpenAction,
+  regenerateAction,
+}: ReviewViewProps) {
   const attr = (key: string) =>
     data.attrs.find((a) => a.key === key)?.value ?? "";
 
@@ -685,6 +922,9 @@ export function ReviewView({
   const [fields, setFields] = useState(initial);
   const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
+  const regenerationBlocked =
+    data.reviewBlocked ||
+    (data.listing ? isReviewRegenerationBlocked(data.listing) : false);
 
   // Garment measurements (issue #104): their own controlled state, folded into the
   // same dirty/save/discard flow as the other fields.
@@ -749,8 +989,6 @@ export function ReviewView({
 
   const readOnlyAttrs = data.attrs.filter(
     (a) =>
-      a.key !== "category" &&
-      a.key !== "condition" &&
       // UPC/ISBN are specialized barcodes — only surface them when actually
       // detected, so items without one (e.g. a laptop) don't show confusing
       // empty "Not detected" identifier rows. Brand/model always show.
@@ -773,7 +1011,10 @@ export function ReviewView({
   // HIGH band starts at 0.75) and there's a priced suggestion to sharpen. Pure UI
   // gate; the action re-validates and re-prices server-side.
   const canSharpen =
-    data.suggested != null && data.confidence != null && data.confidence < 0.75;
+    !regenerationBlocked &&
+    data.suggested != null &&
+    data.confidence != null &&
+    data.confidence < 0.75;
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pt-6 pb-28 sm:px-6 sm:pb-24">
@@ -843,8 +1084,8 @@ export function ReviewView({
       ) : null}
 
       {/* ---- two-column editor. The LAYOUT wrapper is a plain <div> (NOT a form)
-           so the Sharpen card's own form can sit inside the right rail without
-           nesting in the Save form (nested <form>s are invalid HTML). Every
+           so independent correction/re-price forms can render outside the Save
+           form without nesting (nested <form>s are invalid HTML). Every
            editable field below associates with the Save form by id —
            form="rv-save" — and the form element itself trails the layout,
            carrying the action + the contextual Save bar. ---- */}
@@ -918,8 +1159,9 @@ export function ReviewView({
                     type="text"
                     value={fields.title}
                     maxLength={EBAY_TITLE_MAX}
+                    disabled={regenerationBlocked}
                     onChange={(e) => setField("title", e.target.value)}
-                    className={INPUT_CLASSES}
+                    className={`${INPUT_CLASSES} disabled:cursor-not-allowed disabled:opacity-60`}
                   />
                 </div>
                 <div>
@@ -930,8 +1172,9 @@ export function ReviewView({
                     form="rv-save"
                     value={fields.description}
                     rows={8}
+                    disabled={regenerationBlocked}
                     onChange={(e) => setField("description", e.target.value)}
-                    className={`${INPUT_CLASSES} min-h-40 resize-y leading-relaxed`}
+                    className={`${INPUT_CLASSES} min-h-40 resize-y leading-relaxed disabled:cursor-not-allowed disabled:opacity-60`}
                   />
                 </div>
               </div>
@@ -949,6 +1192,7 @@ export function ReviewView({
               confirmed={measureConfirmed}
               onValue={setMeasureValue}
               onConfirm={setMeasureConfirm}
+              disabled={regenerationBlocked}
             />
           ) : null}
 
@@ -984,10 +1228,11 @@ export function ReviewView({
                   step="0.01"
                   min="0.01"
                   value={fields.price}
+                  disabled={regenerationBlocked}
                   onChange={(e) => setField("price", e.target.value)}
                   placeholder={data.suggested != null ? String(data.suggested) : "0.00"}
                   aria-label="Price (USD)"
-                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[26px] font-bold tracking-tight text-fg-strong outline-none"
+                  className="w-full rounded-lg bg-transparent px-2 py-2 text-[26px] font-bold tracking-tight text-fg-strong outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   data-nums
                 />
               </div>
@@ -1004,6 +1249,7 @@ export function ReviewView({
               onChange={(v) => setField("costBasis", v)}
               priceText={fields.price}
               fallbackPrice={data.suggested}
+              disabled={regenerationBlocked}
             />
 
             {/* intelligence: gauge (the one number) + suggested/range + bar.
@@ -1087,12 +1333,13 @@ export function ReviewView({
               selected={fields.price}
               onPick={(p) => setField("price", String(p))}
               costBasisText={fields.costBasis}
+              disabled={regenerationBlocked}
             />
           </Card>
 
-          {/* Item — identification + attributes in ONE quiet meta card (Shopify
-              "Organization"). The identified name leads; editable category/
-              condition and the detected attributes sit below a divider. */}
+          {/* Item — read-only identification + attributes in ONE quiet meta card
+              (Shopify "Organization"). Corrections live in the bounded identity
+              editor below; detected attributes sit here beneath a divider. */}
           <Card
             chromeClassName={APP_CARD_CHROME}            className="p-4 sm:p-5"
           >
@@ -1117,48 +1364,6 @@ export function ReviewView({
             ) : null}
 
             <div className="mt-4 flex flex-col gap-3.5 border-t border-border pt-4">
-              <div>
-                <FieldLabel label="Category" htmlFor="review-category" ai={ai("category")} />
-                <input
-                  id="review-category"
-                  name="category"
-                  form="rv-save"
-                  type="text"
-                  list="review-category-options"
-                  value={fields.category}
-                  placeholder="e.g. Consumer electronics"
-                  onChange={(e) => setField("category", e.target.value)}
-                  className={INPUT_CLASSES}
-                />
-                <datalist id="review-category-options">
-                  {CATEGORY_SUGGESTIONS.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <FieldLabel label="Condition" htmlFor="review-condition" ai={ai("condition")} />
-                <Select
-                  id="review-condition"
-                  name="condition"
-                  form="rv-save"
-                  aria-label="Condition"
-                  value={fields.condition}
-                  onChange={(v) => setField("condition", v)}
-                  placeholder="Select a condition…"
-                  options={[
-                    // Preserve an AI-supplied / custom value not in the grades.
-                    ...(fields.condition &&
-                    !CONDITION_OPTIONS.some(
-                      (o) => o.toLowerCase() === fields.condition.toLowerCase(),
-                    )
-                      ? [{ value: fields.condition, label: fields.condition }]
-                      : []),
-                    ...CONDITION_OPTIONS.map((o) => ({ value: o, label: o })),
-                  ]}
-                  className="w-full bg-bg px-3 py-2 text-[15px] text-fg-strong shadow-xs"
-                />
-              </div>
               {readOnlyAttrs.length > 0 ? (
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3.5">
                   {readOnlyAttrs.map(({ key, value }) => (
@@ -1184,6 +1389,14 @@ export function ReviewView({
 
       </div>
 
+      {data.listing && !regenerationBlocked ? (
+        <IdentityCorrectionCard
+          data={data}
+          action={regenerateAction}
+          formDirty={dirty}
+        />
+      ) : null}
+
       {/* Sharpen / re-price — FULL-WIDTH below the two columns. Its OWN form
           (sharpenAction); the layout wrapper above is a plain <div>, so this
           never nests inside the Save form (nested <form>s are invalid HTML).
@@ -1194,6 +1407,7 @@ export function ReviewView({
       {canSharpen ? (
         <SharpenCard
           itemId={data.itemId}
+          reviewRevision={data.reviewRevision}
           options={data.clarifyOptions}
           candidates={data.identification?.candidates ?? []}
           action={sharpenAction}
@@ -1207,6 +1421,12 @@ export function ReviewView({
            PendingButton lives inside this form so useFormStatus reads it. ---- */}
       <form id="rv-save" action={saveAction}>
         <input type="hidden" name="itemId" value={data.itemId} />
+        <input type="hidden" name="reviewRevision" value={data.reviewRevision} />
+        {/* Identity edits belong to the explicit correction/regeneration action.
+            Preserve the current values in the ordinary listing-save payload so
+            `saveReview` cannot clear them while saving copy/price/measurements. */}
+        <input type="hidden" name="category" value={fields.category} />
+        <input type="hidden" name="condition" value={fields.condition} />
         {data.listing ? (
           <input type="hidden" name="listingId" value={data.listing.id} />
         ) : null}

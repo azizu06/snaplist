@@ -3,7 +3,6 @@ import {
   DashboardView,
   type DashboardRow,
 } from "@/app/(app)/dashboard/dashboard-view";
-import type { BulkListingUpdate } from "@/app/(app)/dashboard/actions";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
 import { UploadView } from "@/app/(app)/upload/upload-form";
 import {
@@ -102,6 +101,8 @@ const FIXTURE_ROWS: DashboardRow[] = [
 
 const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
+  reviewRevision: "00000000-0000-4000-8000-000000000001",
+  reviewBlocked: false,
   photoUrls: ["/demo/headphones.jpg", "/demo/boombox.jpg"],
   identification: {
     label: "Sony WH-1000XM4 Wireless Headphones",
@@ -118,6 +119,7 @@ const FIXTURE_REVIEW: ReviewData = {
     { key: "upc", value: "027242919623" },
     { key: "isbn", value: null },
   ],
+  specs: ["wireless", "noise-cancelling", "over-ear"],
   listing: {
     id: "l-1",
     platform: "ebay",
@@ -234,13 +236,13 @@ export default async function PreviewPage({
   if (process.env.NODE_ENV === "production") notFound();
   const { screen } = await params;
 
-  async function noopAction(_formData: FormData) {
+  async function noopAction() {
     "use server";
   }
-  async function noopIds(_ids: string[]) {
+  async function noopIds() {
     "use server";
   }
-  async function noopBulk(_updates: BulkListingUpdate[]) {
+  async function noopBulk() {
     "use server";
   }
 
@@ -267,6 +269,7 @@ export default async function PreviewPage({
           data={FIXTURE_REVIEW}
           saveAction={noopAction}
           sharpenAction={noopAction}
+          regenerateAction={noopAction}
         />
       );
     case "export":
@@ -371,6 +374,7 @@ export default async function PreviewPage({
           }}
           saveAction={noopAction}
           sharpenAction={noopAction}
+          regenerateAction={noopAction}
         />
       );
     case "review-sharpen":
@@ -381,6 +385,7 @@ export default async function PreviewPage({
           data={{ ...FIXTURE_REVIEW, confidence: 0.68, tier: "web_wide" }}
           saveAction={noopAction}
           sharpenAction={noopAction}
+          regenerateAction={noopAction}
         />
       );
     default:

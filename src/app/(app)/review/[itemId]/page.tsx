@@ -17,7 +17,12 @@ import {
 import { deriveStrategies } from "@/lib/pricing/strategies";
 import { priceSourceSchema, type PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
-import { saveReview, sharpenEstimate } from "./actions";
+import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
+import {
+  regenerateCorrectedIdentity,
+  saveReview,
+  sharpenEstimate,
+} from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
 import { ConsumeUploadDraft } from "./consume-upload-draft";
 
@@ -60,35 +65,9 @@ export default async function ReviewPage({
   const userId = await getUserId();
   if (!userId) redirect(`/login?next=/review/${itemId}`);
 
-  // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
-  const { data: item } = await supabase
-    .from("items")
-    .select("id, photos, attributes, condition, identification, price_override, cost_basis, created_at")
-    .eq("id", itemId)
-    .single();
-  if (!item) notFound();
-
-  // This page reviews the SALE listing. Export packs (#15) persist as
-  // 'facebook'/'mercari' listings rows for the same item, so pin the platform
-  // or the newest export pack would shadow the eBay draft here.
-  const { data: listing } = await supabase
-    .from("listings")
-    .select("id, platform, title, description, copy, status")
-    .eq("item_id", itemId)
-    .eq("platform", "ebay")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const { data: log } = await supabase
-    .from("prediction_logs")
-    .select(
-      "price, price_range, confidence, tier_fired, model, sources, autopilot_enabled, autopilot_eligible",
-    )
-    .eq("item_id", itemId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const snapshot = await loadReviewSnapshot(supabase, itemId);
+  if (!snapshot) notFound();
+  const { item, listing, prediction: log } = snapshot;
 
   // Short-lived signed URLs for ALL the item's private photos (media card).
   const photoPaths = (item.photos as string[] | null) ?? [];
@@ -230,6 +209,9 @@ export default async function ReviewPage({
 
   const data: ReviewData = {
     itemId,
+    reviewRevision: item.review_revision as string,
+    reviewBlocked: snapshot.reviewBlocked,
+    runId: (listing?.run_id as string | null) ?? null,
     photoUrls,
     identification: identification
       ? {
@@ -247,6 +229,7 @@ export default async function ReviewPage({
         return { key, value: value == null ? null : String(value) };
       },
     ),
+    specs: parsedAttrs.success ? (parsedAttrs.data.specs ?? []) : [],
     listing: listing
       ? {
           id: listing.id as string,
@@ -254,6 +237,8 @@ export default async function ReviewPage({
           title: (listing.title as string | null) ?? "Untitled",
           description: (listing.description as string | null) ?? "",
           status: listing.status as string | null,
+          ebayListingId: (listing.ebay_listing_id as string | null) ?? null,
+          ebayStatus: (listing.ebay_status as string | null) ?? null,
         }
       : null,
     suggested,
@@ -280,7 +265,12 @@ export default async function ReviewPage({
           /upload (Codex). With the flag, a successful upload still can't leave
           photos behind to be resubmitted as a duplicate. */}
       {fromUpload ? <ConsumeUploadDraft /> : null}
-      <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+      <ReviewView
+        data={data}
+        saveAction={saveReview}
+        sharpenAction={sharpenEstimate}
+        regenerateAction={regenerateCorrectedIdentity}
+      />
     </>
   );
 }

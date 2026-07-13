@@ -31,6 +31,13 @@ Both triggers call the shared `publishListingToEbayAndNotify` service, so persis
 and the activity-feed notifications (success and failure) behave identically from either
 entry point; an idempotent retry of an already-published listing does not re-notify.
 
+Before any external call, the publish service atomically claims one coherent review snapshot
+(listing copy, condition, photos, and effective price) using the item's review revision and listing
+run id. Concurrent review edits/regeneration or another active publish make the claim fail closed;
+a 15-minute claim lease permits safe retry after an abandoned attempt. Once authoritative eBay ids
+or publishing/published state exist, review correction, Sharpen, ordinary review edits, and dashboard
+status changes cannot rewrite that listing as a draft.
+
 ## Tests are offline — always
 
 The entire test suite runs against `MockEbayAdapter` (and a fake `fetch` for

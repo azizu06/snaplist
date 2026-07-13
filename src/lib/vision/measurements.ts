@@ -297,6 +297,18 @@ export type MeasurementDraft = z.infer<typeof measurementDraftSchema>;
 
 export const measurementDraftsSchema = z.array(measurementDraftSchema);
 
+/** Remove unconfirmed measurement drafts before generating publishable listing copy. */
+export function listingFactAttributes(
+  attributes: ExtractedAttributes,
+): ExtractedAttributes {
+  if (attributes.measurements === undefined) return attributes;
+  const confirmed = attributes.measurements.filter((measurement) => measurement.confirmed);
+  if (confirmed.length === attributes.measurements.length) return attributes;
+  const next: ExtractedAttributes = { ...attributes, measurements: confirmed };
+  if (confirmed.length === 0) delete next.measurements;
+  return next;
+}
+
 /**
  * The per-garment-type schema (issue #104 point 1): a measurement array where
  * every entry's `name` is valid for the given garment class. This is the contract

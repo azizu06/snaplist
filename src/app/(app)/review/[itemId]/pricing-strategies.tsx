@@ -22,6 +22,7 @@ export function PricingStrategies({
   selected,
   onPick,
   costBasisText,
+  disabled = false,
 }: {
   strategies: PricingStrategy[];
   /** The current price-field value, to mark the active card. */
@@ -31,6 +32,7 @@ export function PricingStrategies({
    *  card also shows projected NET profit (price − est. eBay fees − cost) so
    *  the quick/maximize tradeoff is legible in margin, not list price. */
   costBasisText?: string;
+  disabled?: boolean;
 }) {
   if (strategies.length < 2) return null;
   const sel = selected.trim() !== "" ? Number(selected) : null;
@@ -53,9 +55,11 @@ export function PricingStrategies({
             <button
               key={s.key}
               type="button"
+              aria-label={`${s.label} pricing strategy`}
               aria-pressed={on}
+              disabled={disabled}
               onClick={() => onPick(s.price)}
-              className={`flex flex-col rounded-lg border p-2.5 text-left transition-colors ${
+              className={`flex flex-col rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 on
                   ? "border-accent bg-brand-soft ring-2 ring-accent/20"
                   : "border-border bg-surface hover:border-accent/50"

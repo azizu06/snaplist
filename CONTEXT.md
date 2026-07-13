@@ -52,7 +52,8 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   and below only an exact ISBN lookup (issue #60); a scattered sold set degrades to the wide-comp
   tier so a noisy sale spread cannot ride the sold label past the gate.
 - **Autopilot** — the confidence-gated posting behavior: high-confidence items are eligible to post
-  automatically; low-confidence items **queue for review**. Toggleable off.
+  automatically; low-confidence items **queue for review**. Toggleable off. A seller-triggered
+  **review correction** always returns to `draft`, regardless of score.
 - **Bulk / haul capture** — the reseller-native capture flow (issue #100) at `/batch`: photograph
   several items in one session (1–4 photos each), then submit the whole **batch**. Each item runs
   through the *same* single-item pipeline spine (`POST /api/batch/item`) under the same rate-limit and
@@ -65,8 +66,17 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   `queued` listing flipping to `published`). Every row links to the item's normal review page.
 - **Listing** — generated, platform-specific sale copy for an item (title, item specifics,
   description, tags). One **Item** can have multiple listings (one per platform).
+- **Review correction** — the bounded, pre-publish replacement of load-bearing identity facts
+  (brand, model, category, condition, valid ISBN/UPC, and relevant specifications), followed by an
+  explicit re-price and regeneration through the shared router, confidence, and listing seams. It
+  preserves a seller's saved price override and never auto-publishes. Distinct from **Sharpen**,
+  which only adds pricing detail and does not regenerate listing copy.
+- **Review revision** — the item-owned concurrency token coordinating review edits, regeneration,
+  export-pack generation, dashboard edits, and publish acquisition. Each coherent write advances it;
+  stale writers fail rather than mixing identity, price, copy, or marketplace state.
 - **Export pack** — copy-paste listing text for a platform with no write API (Facebook Marketplace,
-  Mercari). Distinct from a real **post**.
+  Mercari). Distinct from a real **post**. Packs are tied to the review content revision, so an
+  identity correction or other content edit invalidates stale generated copy.
 - **Post / publish** — actually putting a listing live on eBay via the **adapter**.
 - **Adapter** — the isolating interface around eBay (posting + messaging). The pipeline must run and
   be testable against a **mock adapter** with no live eBay. Sandbox→production is a credential flip.

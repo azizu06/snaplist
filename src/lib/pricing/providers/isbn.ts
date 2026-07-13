@@ -4,6 +4,11 @@ import type {
   PriceSource,
   PricingProvider,
 } from "../types";
+import {
+  canonicalizeCondition,
+  isPricedItemCondition,
+  type PricedItemCondition,
+} from "../../items/condition";
 
 /**
  * Tier 1 — the ISBN `PricingProvider` (`isbn-lookup`).
@@ -95,7 +100,7 @@ const BAND_SPREAD = 0.25;
  * like-new copy prices nearer retail, a poor copy well below. Unknown/absent
  * condition falls back to the baseline.
  */
-const CONDITION_FACTORS: Record<string, number> = {
+const CONDITION_FACTORS = {
   new: 1.4,
   "like-new": 1.25,
   "very-good": 1.1,
@@ -103,12 +108,12 @@ const CONDITION_FACTORS: Record<string, number> = {
   acceptable: 0.85,
   fair: 0.8,
   poor: 0.6,
-};
+} satisfies Record<PricedItemCondition, number>;
 
 function conditionFactor(condition?: string): number {
   if (!condition) return 1;
-  const key = condition.trim().toLowerCase();
-  return CONDITION_FACTORS[key] ?? 1;
+  const key = canonicalizeCondition(condition);
+  return isPricedItemCondition(key) ? CONDITION_FACTORS[key] : 1;
 }
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,7 @@ export default async function ExportPage({
   // RLS scopes this to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
     .from("items")
-    .select("id, attributes, condition, photos")
+    .select("id, attributes, condition, photos, review_content_revision")
     .eq("id", itemId)
     .single();
   if (!item) notFound();
@@ -70,6 +70,7 @@ export default async function ExportPage({
     packs = await loadOrGenerateExportPacks(supabase, {
       userId: userId,
       itemId,
+      reviewRevision: item.review_content_revision as string,
       attributes,
       price: price ?? undefined,
     });

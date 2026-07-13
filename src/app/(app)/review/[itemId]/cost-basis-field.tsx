@@ -36,6 +36,7 @@ export function CostBasisField({
   onChange,
   priceText,
   fallbackPrice,
+  disabled = false,
 }: {
   /** The controlled costBasis field text ("" = unknown). */
   value: string;
@@ -44,6 +45,7 @@ export function CostBasisField({
   priceText: string;
   /** The suggested price used when the price field is blank. */
   fallbackPrice: number | null;
+  disabled?: boolean;
 }) {
   const cost = previewNumber(value);
   const price = previewNumber(priceText) ?? fallbackPrice;
@@ -75,10 +77,11 @@ export function CostBasisField({
           min="0"
           inputMode="decimal"
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
           placeholder="0.00"
           aria-label="What you paid for this item (USD, optional)"
-          className="w-full rounded-lg bg-transparent px-2 py-1.5 text-[16px] font-semibold tracking-tight text-fg-strong outline-none"
+          className="w-full rounded-lg bg-transparent px-2 py-1.5 text-[16px] font-semibold tracking-tight text-fg-strong outline-none disabled:cursor-not-allowed disabled:opacity-60"
           data-nums
         />
       </div>

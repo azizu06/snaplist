@@ -19,6 +19,7 @@ import {
 import {
   extractGarmentMeasurements,
   garmentClassOf,
+  listingFactAttributes,
   type MeasureGenerate,
   type MeasurementDraft,
 } from "./measurements";
@@ -179,7 +180,7 @@ export function createVisionPipeline(
       const signal = attributesToSignal(baseAttributes);
       const [price, generated, measurements] = await Promise.all([
         priceItem(signal),
-        generateListing({ attributes: baseAttributes }),
+        generateListing({ attributes: listingFactAttributes(baseAttributes) }),
         measurePromise,
       ]);
       const { copy: listing, model: listingModel } = generated;

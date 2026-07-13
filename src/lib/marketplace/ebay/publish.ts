@@ -20,10 +20,11 @@ import { createNotification } from "../../notifications";
  * simply isn't found) and the write-back. No service-role anywhere.
  *
  * Idempotent: a listing that already published returns its stored result
- * without another eBay call. A FAILED publish persists ebay_status='failed'
- * ONLY — the local `status` lifecycle (draft/queued) is untouched, so review
- * and draft flows keep seeing the listing — and rethrows; re-running retries
- * cleanly because the adapter's SKU/offer steps are themselves idempotent.
+ * without another eBay call. Before external work, an atomic revision/run-id
+ * claim freezes one coherent review snapshot and excludes concurrent edits or
+ * publishes. A FAILED publish persists ebay_status='failed', clears its claim
+ * lease, and leaves the local `status` lifecycle (draft/queued) untouched, so
+ * review/draft flows keep seeing the listing and a retry stays safe.
  */
 
 export interface PublishOutcome {
@@ -44,6 +45,18 @@ export interface PublishOptions {
    * call; 7 days is comfortable for retries.
    */
   signedUrlTtlSeconds?: number;
+}
+
+interface PublishClaimSnapshot {
+  claimId: string;
+  listingId: string;
+  itemId: string;
+  title: string | null;
+  description: string | null;
+  copy: Record<string, unknown>;
+  condition: string | null;
+  photos: string[];
+  price: number | string | null;
 }
 
 /**
@@ -140,7 +153,7 @@ export async function publishListingToEbay(
   const { data: listing, error: listingErr } = await supabase
     .from("listings")
     .select(
-      "id, item_id, platform, title, description, copy, status, ebay_listing_id, ebay_offer_id, ebay_status",
+      "id, item_id, platform, title, description, copy, status, run_id, ebay_listing_id, ebay_offer_id, ebay_status",
     )
     .eq("id", listingId)
     .maybeSingle();
@@ -167,56 +180,15 @@ export async function publishListingToEbay(
     };
   }
 
-  // 3. Pull the item (condition + photos) and the run's price.
+  // 3. Pull the current review token used by the atomic publish claim.
   const { data: item, error: itemErr } = await supabase
     .from("items")
-    .select("condition, photos")
+    .select("review_revision")
     .eq("id", listing.item_id)
     .maybeSingle();
   if (itemErr || !item) {
     throw new Error(
       `Failed to load item for listing ${listingId}: ${itemErr?.message ?? "not found"}`,
-    );
-  }
-
-  const { data: log, error: logErr } = await supabase
-    .from("prediction_logs")
-    .select("price")
-    .eq("item_id", listing.item_id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (logErr) {
-    throw new Error(`Failed to load price for listing ${listingId}: ${logErr.message}`);
-  }
-  const price = log?.price == null ? NaN : Number(log.price);
-  if (!Number.isFinite(price) || price <= 0) {
-    throw new PublishValidationError(
-      `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
-    );
-  }
-
-  // 4. Sign the private photo paths so eBay can fetch (and rehost) the images.
-  const photoPaths = (item.photos as string[] | null) ?? [];
-  const imageUrls = await signPhotoUrls(
-    supabase,
-    photoPaths,
-    options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
-  );
-
-  // eBay requires at least one image, so an empty set is a GUARANTEED failed
-  // publish. Fail fast LOCALLY — before the adapter makes any eBay call (no
-  // partial remote writes) — through the same failed-publish path an adapter
-  // error takes, with a user-attributable reason.
-  if (imageUrls.length === 0) {
-    await markPublishFailed(supabase, listingId);
-    throw new PublishValidationError(
-      photoPaths.length === 0
-        ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
-          "Add a photo to the item before publishing."
-        : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
-          "signed into a fetchable URL, and eBay requires at least one image. " +
-          "Re-upload the item's photos before publishing.",
     );
   }
 
@@ -237,18 +209,77 @@ export async function publishListingToEbay(
     );
   }
 
-  // 5. Map onto the provider shape (pure; throws on unpublishable input).
-  const request = toEbayPublishRequest({
-    listingId,
-    title: (listing.title as string | null) ?? "",
-    description: (listing.description as string | null) ?? "",
-    copy: (listing.copy as Record<string, unknown> | null) ?? {},
-    condition: item.condition as string | null,
-    price,
-    imageUrls,
-    categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
-    currency,
+  const { data: claimData, error: claimErr } = await supabase.rpc("begin_ebay_publish", {
+    p_listing_id: listingId,
+    p_expected_run_id: (listing.run_id as string | null) ?? null,
+    p_expected_review_revision: item.review_revision as string,
   });
+  if (claimErr) {
+    if (claimErr.code === "P0002") {
+      throw new PublishValidationError(
+        `Listing ${listingId} changed or is already being published. Refresh and try again.`,
+      );
+    }
+    throw new Error(`Failed to start eBay publish: ${claimErr.message}`);
+  }
+  const returnedClaimId = publishClaimId(claimData);
+  const claim = parsePublishClaimSnapshot(claimData);
+  if (!claim) {
+    if (returnedClaimId) {
+      await markPublishFailed(supabase, listingId, returnedClaimId);
+    }
+    throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
+  }
+  const claimId = claim.claimId;
+  const price = claim.price == null ? NaN : Number(claim.price);
+  if (!Number.isFinite(price) || price <= 0) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw new PublishValidationError(
+      `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
+    );
+  }
+
+  const photoPaths = claim.photos;
+  let imageUrls: string[];
+  try {
+    imageUrls = await signPhotoUrls(
+      supabase,
+      photoPaths,
+      options.signedUrlTtlSeconds ?? SIGNED_URL_TTL_SECONDS,
+    );
+  } catch (error) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw error;
+  }
+  if (imageUrls.length === 0) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw new PublishValidationError(
+      photoPaths.length === 0
+        ? `Listing ${listingId} has no photos, and eBay requires at least one image. ` +
+          "Add a photo to the item before publishing."
+        : `Listing ${listingId} has ${photoPaths.length} photo(s) but none could be ` +
+          "signed into a fetchable URL, and eBay requires at least one image. " +
+          "Re-upload the item's photos before publishing.",
+    );
+  }
+
+  let request: ReturnType<typeof toEbayPublishRequest>;
+  try {
+    request = toEbayPublishRequest({
+      listingId,
+      title: claim.title ?? "",
+      description: claim.description ?? "",
+      copy: claim.copy,
+      condition: claim.condition,
+      price,
+      imageUrls,
+      categoryId: env.EBAY_DEFAULT_CATEGORY_ID ?? GENERIC_CATEGORY_ID,
+      currency,
+    });
+  } catch (error) {
+    await markPublishFailed(supabase, listingId, claimId);
+    throw error;
+  }
 
   // 6. Publish through the adapter. An ADAPTER failure is persisted as
   //    ebay_status='failed' (then rethrown); persistence problems after a
@@ -257,7 +288,7 @@ export async function publishListingToEbay(
   try {
     result = await adapter.publishListing(request);
   } catch (err) {
-    await markPublishFailed(supabase, listingId);
+    await markPublishFailed(supabase, listingId, claimId);
     throw err;
   }
 
@@ -265,7 +296,7 @@ export async function publishListingToEbay(
   //    `listed_price` / `last_priced_at` record the price the live listing
   //    actually carries and the price event — the stale-inventory repricing
   //    pipeline (issue #102) selects on and revises against these.
-  const { error: updErr } = await supabase
+  const { data: updated, error: updErr } = await supabase
     .from("listings")
     .update({
       ebay_listing_id: result.listingId,
@@ -274,13 +305,18 @@ export async function publishListingToEbay(
       status: "published",
       listed_price: price,
       last_priced_at: new Date().toISOString(),
+      ebay_publish_claim_id: null,
+      ebay_publish_claimed_at: null,
     })
-    .eq("id", listingId);
-  if (updErr) {
+    .eq("id", listingId)
+    .eq("ebay_status", "publishing")
+    .eq("ebay_publish_claim_id", claimId)
+    .select("id");
+  if (updErr || !updated || updated.length === 0) {
     // The eBay listing IS live; surface a loud, specific error so the operator
     // reconciles instead of the next retry silently double-publishing.
     throw new Error(
-      `eBay listing ${result.listingId} published but persisting it failed: ${updErr.message}`,
+      `eBay listing ${result.listingId} published but persisting it failed: ${updErr?.message ?? "publish claim was lost"}`,
     );
   }
 
@@ -293,12 +329,39 @@ export async function publishListingToEbay(
   };
 }
 
+function parsePublishClaimSnapshot(value: unknown): PublishClaimSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const snapshot = value as Record<string, unknown>;
+  if (
+    typeof snapshot.claimId !== "string" ||
+    typeof snapshot.listingId !== "string" ||
+    typeof snapshot.itemId !== "string" ||
+    (snapshot.title !== null && typeof snapshot.title !== "string") ||
+    (snapshot.description !== null && typeof snapshot.description !== "string") ||
+    !snapshot.copy ||
+    typeof snapshot.copy !== "object" ||
+    Array.isArray(snapshot.copy) ||
+    (snapshot.condition !== null && typeof snapshot.condition !== "string") ||
+    !Array.isArray(snapshot.photos) ||
+    !snapshot.photos.every((photo) => typeof photo === "string")
+  ) {
+    return null;
+  }
+  return snapshot as unknown as PublishClaimSnapshot;
+}
+
+function publishClaimId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const claimId = (value as Record<string, unknown>).claimId;
+  return typeof claimId === "string" ? claimId : null;
+}
+
 /**
  * Best-effort failed-publish marker; never masks the error being thrown.
  *
- * Writes ONLY `ebay_status` — that column exists precisely so an eBay failure
- * can be shown without destroying the local listing lifecycle (`status` stays
- * draft/queued and review/draft flows keep seeing the row). The update is also
+ * Writes the eBay failure state and clears this attempt's claim lease without
+ * destroying the local listing lifecycle (`status` stays draft/queued and
+ * review/draft flows keep seeing the row). The update is also
  * conditional on the row not already being published: when two publish calls
  * overlap, the loser's eBay error must not downgrade the winner's live
  * listing to 'failed' (which would disable the stored-result fast path and
@@ -307,13 +370,20 @@ export async function publishListingToEbay(
 async function markPublishFailed(
   supabase: SupabaseClient,
   listingId: string,
+  claimId?: string,
 ): Promise<void> {
-  await supabase
+  let query = supabase
     .from("listings")
-    .update({ ebay_status: "failed" })
-    .eq("id", listingId)
-    .or("ebay_status.is.null,ebay_status.neq.published")
-    .then(undefined, () => undefined);
+    .update({
+      ebay_status: "failed",
+      ebay_publish_claim_id: null,
+      ebay_publish_claimed_at: null,
+    })
+    .eq("id", listingId);
+  query = claimId
+    ? query.eq("ebay_status", "publishing").eq("ebay_publish_claim_id", claimId)
+    : query.or("ebay_status.is.null,ebay_status.eq.failed");
+  await query.then(undefined, () => undefined);
 }
 
 /**
