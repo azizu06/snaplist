@@ -53,6 +53,7 @@ type ClarifyOption = { label: string; spec: string };
 
 export interface ReviewData {
   itemId: string;
+  reviewRevision: string;
   runId?: string | null;
   photoUrls: string[];
   identification: {
@@ -294,12 +295,14 @@ function RangeBar({
  */
 function SharpenCard({
   itemId,
+  reviewRevision,
   options,
   candidates,
   action,
   formDirty,
 }: {
   itemId: string;
+  reviewRevision: string;
   options: ClarifyOption[];
   candidates: string[];
   action: (formData: FormData) => Promise<void>;
@@ -366,6 +369,7 @@ function SharpenCard({
         }}
       >
         <input type="hidden" name="itemId" value={itemId} />
+        <input type="hidden" name="reviewRevision" value={reviewRevision} />
         {chips.map((c, i) => (
           <input key={`spec-${i}`} type="hidden" name="spec" value={c} />
         ))}
@@ -588,6 +592,7 @@ function IdentityCorrectionCard({
           }}
         >
           <input type="hidden" name="itemId" value={data.itemId} />
+          <input type="hidden" name="reviewRevision" value={data.reviewRevision} />
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <FieldLabel label="Brand" htmlFor="identity-brand" />
@@ -874,9 +879,9 @@ interface ReviewViewProps {
 }
 
 export function reviewStateKey(
-  data: Pick<ReviewData, "itemId" | "runId">,
+  data: Pick<ReviewData, "itemId" | "reviewRevision" | "runId">,
 ): string {
-  return `${data.itemId}:${data.runId ?? "legacy"}`;
+  return `${data.itemId}:${data.reviewRevision || data.runId || "legacy"}`;
 }
 
 export function ReviewView(props: ReviewViewProps) {
@@ -1384,6 +1389,7 @@ function ReviewViewState({
       {canSharpen ? (
         <SharpenCard
           itemId={data.itemId}
+          reviewRevision={data.reviewRevision}
           options={data.clarifyOptions}
           candidates={data.identification?.candidates ?? []}
           action={sharpenAction}
@@ -1397,6 +1403,7 @@ function ReviewViewState({
            PendingButton lives inside this form so useFormStatus reads it. ---- */}
       <form id="rv-save" action={saveAction}>
         <input type="hidden" name="itemId" value={data.itemId} />
+        <input type="hidden" name="reviewRevision" value={data.reviewRevision} />
         {/* Identity edits belong to the explicit correction/regeneration action.
             Preserve the current values in the ordinary listing-save payload so
             `saveReview` cannot clear them while saving copy/price/measurements. */}

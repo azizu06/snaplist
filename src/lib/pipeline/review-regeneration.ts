@@ -223,6 +223,7 @@ export function applyIdentityCorrections(
 
 export interface ReviewRegenerationSnapshot {
   itemId: string;
+  reviewRevision: string;
   attributes: unknown;
   /** Read for proof/return only. The commit contract intentionally cannot write it. */
   priceOverride: number | string | null;
@@ -241,6 +242,7 @@ export interface ReviewRegenerationCommit {
   listingId: string;
   runId: string;
   expectedRunId: string | null;
+  expectedReviewRevision: string;
   attributes: ExtractedAttributes;
   condition: string | null;
   identification: Identification;
@@ -256,6 +258,7 @@ export interface ReviewRegenerationStore {
 
 export interface RegenerateReviewListingInput {
   itemId: string;
+  expectedReviewRevision: string;
   corrections: IdentityCorrections;
 }
 
@@ -296,6 +299,9 @@ export async function regenerateReviewListing(
 ): Promise<RegenerateReviewListingResult> {
   const snapshot = await store.load(input.itemId);
   if (!snapshot) throw new Error("Item not found.");
+  if (snapshot.reviewRevision !== input.expectedReviewRevision) {
+    throw new Error("This review changed. Reload and try again.");
+  }
   if (isReviewRegenerationBlocked(snapshot.listing)) {
     throw new Error("A published listing cannot be regenerated from review.");
   }
@@ -337,6 +343,7 @@ export async function regenerateReviewListing(
     listingId: snapshot.listing.id,
     runId,
     expectedRunId: snapshot.listing.runId,
+    expectedReviewRevision: input.expectedReviewRevision,
     attributes,
     condition: attributes.condition ?? null,
     identification,
@@ -365,7 +372,7 @@ export function createSupabaseReviewRegenerationStore(
     async load(itemId) {
       const { data: item, error: itemError } = await supabase
         .from("items")
-        .select("id, attributes, price_override")
+        .select("id, attributes, price_override, review_revision")
         .eq("id", itemId)
         .maybeSingle();
       if (itemError) throw new Error(`Failed to load item: ${itemError.message}`);
@@ -398,6 +405,7 @@ export function createSupabaseReviewRegenerationStore(
 
       return {
         itemId: item.id as string,
+        reviewRevision: item.review_revision as string,
         attributes: item.attributes,
         priceOverride: item.price_override as number | string | null,
         listing: {
@@ -420,6 +428,7 @@ export function createSupabaseReviewRegenerationStore(
         p_listing_id: input.listingId,
         p_run_id: input.runId,
         p_expected_run_id: input.expectedRunId,
+        p_expected_review_revision: input.expectedReviewRevision,
         p_attributes: input.attributes,
         p_condition: input.condition,
         p_identification: input.identification,

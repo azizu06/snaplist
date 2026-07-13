@@ -48,4 +48,25 @@ describe("review regeneration migration security guards", () => {
       /run_id\s+is\s+not\s+distinct\s+from\s+p_expected_run_id/i,
     );
   });
+
+  it("uses one item-owned review revision for every review mutation", () => {
+    expect(migration).toMatch(/alter\s+table\s+public\.items[\s\S]*review_revision\s+uuid/i);
+    expect(migration).toMatch(/create\s+or\s+replace\s+function\s+public\.save_review_edits/i);
+    expect(migration).toMatch(/create\s+or\s+replace\s+function\s+public\.sharpen_review_estimate/i);
+    expect(migration).toMatch(
+      /review_revision\s+is\s+not\s+distinct\s+from\s+p_expected_review_revision/i,
+    );
+  });
+
+  it("versions export packs and rejects obsolete in-flight persistence", () => {
+    expect(migration).toMatch(
+      /alter\s+table\s+public\.listings[\s\S]*source_review_revision\s+uuid/i,
+    );
+    expect(migration).toMatch(
+      /create\s+or\s+replace\s+function\s+public\.persist_export_packs/i,
+    );
+    expect(migration).toMatch(
+      /review_revision\s+is\s+not\s+distinct\s+from\s+p_source_review_revision/i,
+    );
+  });
 });

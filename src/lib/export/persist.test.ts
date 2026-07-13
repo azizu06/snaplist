@@ -18,13 +18,10 @@ import { loadOrGenerateExportPacks } from "./persist";
  */
 
 interface InsertedRow {
-  user_id: string;
-  item_id: string;
   platform: string;
   title: string;
   description: string;
   copy: Record<string, unknown>;
-  status: string;
 }
 
 interface StoredRow {
@@ -34,24 +31,30 @@ interface StoredRow {
   copy: Record<string, unknown> | null;
 }
 
-/** Fake of exactly the chains persist.ts uses: select().eq().in().order() and insert(). */
-function fakeSupabase(rows: StoredRow[], inserted: InsertedRow[]): SupabaseClient {
+function fakeSupabase(
+  rows: StoredRow[],
+  inserted: InsertedRow[],
+  persistedRevisions: string[] = [],
+  persistError: { message: string } | null = null,
+): SupabaseClient {
+  const filters = {
+    eq: () => filters,
+    in: () => ({
+      order: async () => ({ data: rows, error: null }),
+    }),
+  };
   return {
     from(table: string) {
       if (table !== "listings") throw new Error(`unexpected table ${table}`);
       return {
-        select: () => ({
-          eq: () => ({
-            in: () => ({
-              order: async () => ({ data: rows, error: null }),
-            }),
-          }),
-        }),
-        insert: async (values: InsertedRow[]) => {
-          inserted.push(...values);
-          return { error: null };
-        },
+        select: () => filters,
       };
+    },
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      if (name !== "persist_export_packs") throw new Error(`unexpected rpc ${name}`);
+      inserted.push(...(args.p_packs as InsertedRow[]));
+      persistedRevisions.push(args.p_source_review_revision as string);
+      return { error: persistError };
     },
   } as unknown as SupabaseClient;
 }
@@ -78,6 +81,8 @@ const RAW: RawExportPacks = {
   },
 };
 
+const REVIEW_REVISION = "00000000-0000-4000-8000-000000000001";
+
 function countingGenerate(): { generate: ExportPackGenerate; calls: () => number } {
   let n = 0;
   return {
@@ -92,15 +97,20 @@ function countingGenerate(): { generate: ExportPackGenerate; calls: () => number
 describe("loadOrGenerateExportPacks", () => {
   it("first visit: generates, persists a draft row per platform, returns fresh packs", async () => {
     const inserted: InsertedRow[] = [];
+    const persistedRevisions: string[] = [];
     const { generate, calls } = countingGenerate();
-    const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
-      userId: "user-1",
-      itemId: "item-1",
-      attributes: CORE,
-      price: 120,
-      generate,
-      model: "test-model",
-    });
+    const view = await loadOrGenerateExportPacks(
+      fakeSupabase([], inserted, persistedRevisions),
+      {
+        userId: "user-1",
+        itemId: "item-1",
+        reviewRevision: REVIEW_REVISION,
+        attributes: CORE,
+        price: 120,
+        generate,
+        model: "test-model",
+      },
+    );
 
     expect(calls()).toBe(1);
     expect(view.cached).toBe(false);
@@ -109,12 +119,10 @@ describe("loadOrGenerateExportPacks", () => {
     expect(view.mercari.hashtags.length).toBeGreaterThan(0);
 
     expect(inserted).toHaveLength(2);
+    expect(persistedRevisions).toEqual([REVIEW_REVISION]);
     const platforms = inserted.map((r) => r.platform).sort();
     expect(platforms).toEqual([FACEBOOK_PLATFORM, MERCARI_PLATFORM]);
     for (const row of inserted) {
-      expect(row.user_id).toBe("user-1");
-      expect(row.item_id).toBe("item-1");
-      expect(row.status).toBe("draft");
       expect(typeof row.copy["copyBlock"]).toBe("string");
       // Provenance is persisted WITH the pack so export outputs stay
       // attributable on later cached reads (AGENTS.md: log every run's model).
@@ -148,6 +156,7 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, []), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -179,6 +188,7 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -214,6 +224,7 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: CORE,
       price: 120,
       generate,
@@ -256,6 +267,7 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -280,6 +292,7 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -307,6 +320,7 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase(stored, inserted), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -318,15 +332,15 @@ describe("loadOrGenerateExportPacks", () => {
   });
 
   it("propagates a read error instead of silently regenerating", async () => {
+    const filters = {
+      eq: () => filters,
+      in: () => ({
+        order: async () => ({ data: null, error: { message: "boom" } }),
+      }),
+    };
     const client = {
       from: () => ({
-        select: () => ({
-          eq: () => ({
-            in: () => ({
-              order: async () => ({ data: null, error: { message: "boom" } }),
-            }),
-          }),
-        }),
+        select: () => filters,
       }),
     } as unknown as SupabaseClient;
     const { generate } = countingGenerate();
@@ -334,9 +348,31 @@ describe("loadOrGenerateExportPacks", () => {
       loadOrGenerateExportPacks(client, {
         userId: "user-1",
         itemId: "item-1",
+        reviewRevision: REVIEW_REVISION,
         attributes: CORE,
         generate,
       }),
     ).rejects.toThrow(/Failed to read export packs: boom/);
+  });
+
+  it("does not accept a pack persisted after its source review revision changed", async () => {
+    const { generate } = countingGenerate();
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase(
+          [],
+          [],
+          [],
+          { message: "Review changed. Reload and try again." },
+        ),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          attributes: CORE,
+          generate,
+        },
+      ),
+    ).rejects.toThrow(/Failed to persist export packs: Review changed/i);
   });
 });

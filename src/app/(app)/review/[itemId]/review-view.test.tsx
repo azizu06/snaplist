@@ -10,6 +10,7 @@ function reviewData(
 ): ReviewData {
   return {
     itemId: "item-1",
+    reviewRevision: "00000000-0000-4000-8000-000000000001",
     runId: "run-1",
     photoUrls: [],
     identification: {
@@ -54,9 +55,12 @@ function reviewData(
 }
 
 describe("review identity correction UI", () => {
-  it("changes the controlled-state key when regeneration commits a new run", () => {
+  it("changes the controlled-state key when any review write advances the revision", () => {
     const before = reviewData();
-    const after = { ...before, runId: "run-2" };
+    const after = {
+      ...before,
+      reviewRevision: "00000000-0000-4000-8000-000000000002",
+    };
 
     expect(reviewStateKey(after)).not.toBe(reviewStateKey(before));
   });
@@ -86,6 +90,7 @@ describe("review identity correction UI", () => {
     expect(html).toContain("Your saved price override is kept");
     expect(html).toContain("Sharpen the estimate");
     expect(html).toContain(">Re-price<");
+    expect(html.match(/name="reviewRevision"/g)).toHaveLength(3);
   });
 
   it("canonicalizes a persisted condition alias in the correction editor", () => {

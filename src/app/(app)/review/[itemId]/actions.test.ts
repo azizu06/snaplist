@@ -43,6 +43,7 @@ import { regenerateCorrectedIdentity } from "./actions";
 function correctionForm(): FormData {
   const form = new FormData();
   form.set("itemId", "item-1");
+  form.set("reviewRevision", "00000000-0000-4000-8000-000000000001");
   return form;
 }
 
@@ -85,7 +86,10 @@ describe("regenerateCorrectedIdentity", () => {
     expect(mocks.regenerate).toHaveBeenCalledTimes(1);
     expect(mocks.regenerate).toHaveBeenCalledWith(
       expect.anything(),
-      expect.anything(),
+      expect.objectContaining({
+        itemId: "item-1",
+        expectedReviewRevision: "00000000-0000-4000-8000-000000000001",
+      }),
       { beforeModelWork: mocks.recordPipelineRunAndMaybeAlert },
     );
   });

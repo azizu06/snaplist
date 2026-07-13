@@ -67,7 +67,7 @@ export default async function ReviewPage({
   // RLS scopes these to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
     .from("items")
-    .select("id, photos, attributes, condition, identification, price_override, cost_basis, created_at")
+    .select("id, photos, attributes, condition, identification, price_override, cost_basis, review_revision, created_at")
     .eq("id", itemId)
     .single();
   if (!item) notFound();
@@ -234,6 +234,7 @@ export default async function ReviewPage({
 
   const data: ReviewData = {
     itemId,
+    reviewRevision: item.review_revision as string,
     runId: (listing?.run_id as string | null) ?? null,
     photoUrls,
     identification: identification

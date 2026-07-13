@@ -23,12 +23,15 @@ const generated: ListingCopy = {
   fields: { itemSpecifics: { Brand: "Sony", Model: "WH-1000XM4" } },
 };
 
+const REVIEW_REVISION = "00000000-0000-4000-8000-000000000124";
+
 function store(): ReviewRegenerationStore & {
   commit: ReturnType<typeof vi.fn>;
 } {
   return {
     load: vi.fn(async () => ({
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: {
         brand: "S0ny",
         model: "WH-1000XM3",
@@ -166,6 +169,7 @@ describe("regenerateReviewListing", () => {
       persistence,
       {
         itemId: "item-1",
+        expectedReviewRevision: REVIEW_REVISION,
         corrections: parseIdentityCorrections({
           brand: "Sony",
           model: "WH-1000XM4",
@@ -210,6 +214,7 @@ describe("regenerateReviewListing", () => {
       expect.objectContaining({
         runId: "00000000-0000-4000-8000-000000000126",
         expectedRunId: "00000000-0000-4000-8000-000000000125",
+        expectedReviewRevision: REVIEW_REVISION,
         itemId: "item-1",
         listingId: "listing-1",
         attributes: expect.objectContaining({
@@ -245,6 +250,7 @@ describe("regenerateReviewListing", () => {
       persistence,
       {
         itemId: "item-1",
+        expectedReviewRevision: REVIEW_REVISION,
         corrections: {
           brand: null,
           model: null,
@@ -281,6 +287,7 @@ describe("regenerateReviewListing", () => {
       persistence,
       {
         itemId: "item-1",
+        expectedReviewRevision: REVIEW_REVISION,
         corrections: {
           brand: "Sony",
           model: "WH-1000XM4",
@@ -318,6 +325,7 @@ describe("regenerateReviewListing", () => {
     const persistence = store();
     persistence.load = vi.fn(async () => ({
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: {
         brand: "Patagonia",
         model: "Better Sweater",
@@ -356,6 +364,7 @@ describe("regenerateReviewListing", () => {
       persistence,
       {
         itemId: "item-1",
+        expectedReviewRevision: REVIEW_REVISION,
         corrections: {
           brand: "Patagonia",
           model: "Better Sweater",
@@ -399,6 +408,7 @@ describe("regenerateReviewListing", () => {
         pricingStore,
         {
           itemId: "item-1",
+          expectedReviewRevision: REVIEW_REVISION,
           corrections: {
             brand: "Sony",
             model: "WH-1000XM4",
@@ -425,6 +435,7 @@ describe("regenerateReviewListing", () => {
         listingStore,
         {
           itemId: "item-1",
+          expectedReviewRevision: REVIEW_REVISION,
           corrections: {
             brand: "Sony",
             model: "WH-1000XM4",
@@ -450,6 +461,7 @@ describe("regenerateReviewListing", () => {
     const persistence = store();
     persistence.load = vi.fn(async () => ({
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: { brand: "Sony" },
       priceOverride: null,
       listing: {
@@ -468,6 +480,7 @@ describe("regenerateReviewListing", () => {
         persistence,
         {
           itemId: "item-1",
+          expectedReviewRevision: REVIEW_REVISION,
           corrections: {
             brand: "Sony",
             model: null,
@@ -495,6 +508,7 @@ describe("regenerateReviewListing", () => {
     const persistence = store();
     persistence.load = vi.fn(async () => ({
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
       attributes: { brand: "Sony" },
       priceOverride: null,
       listing: {
@@ -513,6 +527,7 @@ describe("regenerateReviewListing", () => {
         persistence,
         {
           itemId: "item-1",
+          expectedReviewRevision: REVIEW_REVISION,
           corrections: {
             brand: "Sony",
             model: null,
@@ -530,6 +545,39 @@ describe("regenerateReviewListing", () => {
         },
       ),
     ).rejects.toThrow(/published/i);
+    expect(priceItem).not.toHaveBeenCalled();
+    expect(persistence.commit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale rendered review revision before model work", async () => {
+    const persistence = store();
+    const beforeModelWork = vi.fn(async () => undefined);
+    const priceItem = vi.fn(async () => soldPrice);
+
+    await expect(
+      regenerateReviewListing(
+        persistence,
+        {
+          itemId: "item-1",
+          expectedReviewRevision: "00000000-0000-4000-8000-000000000123",
+          corrections: {
+            brand: "Sony",
+            model: "WH-1000XM4",
+            category: "electronics",
+            condition: "good",
+            isbn: null,
+            upc: null,
+            specs: [],
+          },
+        },
+        {
+          beforeModelWork,
+          priceItem,
+          generateListing: async () => ({ copy: generated, model: "listing" }),
+        },
+      ),
+    ).rejects.toThrow(/review changed/i);
+    expect(beforeModelWork).not.toHaveBeenCalled();
     expect(priceItem).not.toHaveBeenCalled();
     expect(persistence.commit).not.toHaveBeenCalled();
   });

@@ -45,7 +45,7 @@ async function seedReview(user: ClerkTestUser, label: string) {
       condition: "fair",
       price_override: 222,
     })
-    .select("id")
+    .select("id, review_revision")
     .single();
   if (itemError || !item) throw new Error(itemError?.message ?? "item seed failed");
 
@@ -65,13 +65,18 @@ async function seedReview(user: ClerkTestUser, label: string) {
   if (listingError || !listing) {
     throw new Error(listingError?.message ?? "listing seed failed");
   }
-  return { itemId: item.id as string, listingId: listing.id as string };
+  return {
+    itemId: item.id as string,
+    listingId: listing.id as string,
+    reviewRevision: item.review_revision as string,
+  };
 }
 
 function commitFor(
   itemId: string,
   listingId: string,
   runId: string,
+  expectedReviewRevision: string,
   expectedRunId: string | null = null,
 ): ReviewRegenerationCommit {
   const attributes = {
@@ -88,6 +93,7 @@ function commitFor(
     listingId,
     runId,
     expectedRunId,
+    expectedReviewRevision,
     attributes,
     condition: "good",
     identification: {
@@ -162,7 +168,7 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(exportSeedError).toBeNull();
     const runId = crypto.randomUUID();
     await createSupabaseReviewRegenerationStore(userA.client).commit(
-      commitFor(seeded.itemId, seeded.listingId, runId),
+      commitFor(seeded.itemId, seeded.listingId, runId, seeded.reviewRevision),
     );
 
     const [{ data: item }, { data: listing }, { data: logs }, { data: exports }] = await Promise.all([
@@ -214,7 +220,7 @@ describe("review identity regeneration transaction + RLS", () => {
     // roll the preceding item update back with the rest of the statement.
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(
-        commitFor(owner.itemId, foreign.listingId, runId),
+        commitFor(owner.itemId, foreign.listingId, runId, owner.reviewRevision),
       ),
     ).rejects.toThrow();
 
@@ -244,12 +250,22 @@ describe("review identity regeneration transaction + RLS", () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "stale-regeneration");
     const firstRunId = crypto.randomUUID();
-    const first = commitFor(seeded.itemId, seeded.listingId, firstRunId);
+    const first = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      firstRunId,
+      seeded.reviewRevision,
+    );
     first.attributes.brand = "Newest identity";
     await createSupabaseReviewRegenerationStore(userA.client).commit(first);
 
     const staleRunId = crypto.randomUUID();
-    const stale = commitFor(seeded.itemId, seeded.listingId, staleRunId);
+    const stale = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      staleRunId,
+      seeded.reviewRevision,
+    );
     stale.attributes.brand = "Stale identity";
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(stale),
@@ -269,7 +285,12 @@ describe("review identity regeneration transaction + RLS", () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "zero-price");
     const runId = crypto.randomUUID();
-    const invalid = commitFor(seeded.itemId, seeded.listingId, runId);
+    const invalid = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      runId,
+      seeded.reviewRevision,
+    );
     invalid.prediction.price = 0;
 
     await expect(
@@ -318,7 +339,12 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(liveStateError).toBeNull();
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(
-        commitFor(live.itemId, live.listingId, crypto.randomUUID()),
+        commitFor(
+          live.itemId,
+          live.listingId,
+          crypto.randomUUID(),
+          live.reviewRevision,
+        ),
       ),
     ).rejects.toThrow(/editable eBay listing not found/i);
 
@@ -330,7 +356,12 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(claimError).toBeNull();
     await expect(
       createSupabaseReviewRegenerationStore(userA.client).commit(
-        commitFor(publishing.itemId, publishing.listingId, crypto.randomUUID()),
+        commitFor(
+          publishing.itemId,
+          publishing.listingId,
+          crypto.randomUUID(),
+          publishing.reviewRevision,
+        ),
       ),
     ).rejects.toThrow(/editable eBay listing not found/i);
 
@@ -352,6 +383,135 @@ describe("review identity regeneration transaction + RLS", () => {
     expect((publishingItem?.attributes as { brand?: string })?.brand).toBe(
       "Old publishing-claim",
     );
+  });
+
+  it("checks and advances one review revision across save and sharpen writes", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "shared-review-revision");
+    const savedRevision = crypto.randomUUID();
+    const savedAttributes = {
+      brand: "Saved brand",
+      category: "electronics",
+      condition: "good",
+    };
+    const saved = await userA.client.rpc("save_review_edits", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_new_review_revision: savedRevision,
+      p_attributes: savedAttributes,
+      p_condition: "good",
+      p_price_override: 199,
+      p_cost_basis: 80,
+      p_listing_title: "Seller edited title",
+      p_listing_description: "Seller edited description",
+    });
+    expect(saved.error).toBeNull();
+
+    const stale = await userA.client.rpc("save_review_edits", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_new_review_revision: crypto.randomUUID(),
+      p_attributes: { ...savedAttributes, brand: "Stale brand" },
+      p_condition: "good",
+      p_price_override: 199,
+      p_cost_basis: 80,
+      p_listing_title: "Stale title",
+      p_listing_description: "Stale description",
+    });
+    expect(stale.error?.code).toBe("P0002");
+
+    const sharpenRevision = crypto.randomUUID();
+    const sharpenedAttributes = { ...savedAttributes, specs: ["512GB"] };
+    const sharpened = await userA.client.rpc("sharpen_review_estimate", {
+      p_item_id: seeded.itemId,
+      p_expected_review_revision: savedRevision,
+      p_run_id: sharpenRevision,
+      p_attributes: sharpenedAttributes,
+      p_price: 175,
+      p_price_range: { low: 160, high: 190 },
+      p_confidence: 0.8,
+      p_tier_fired: "ebay-sold",
+      p_model: "vision-model",
+      p_listing_model: "listing-model",
+      p_pricing_model: null,
+      p_sources: [{ url: "https://www.ebay.com/itm/1", kind: "sold-comp" }],
+      p_autopilot_enabled: false,
+      p_autopilot_eligible: false,
+    });
+    expect(sharpened.error).toBeNull();
+
+    const [{ data: item }, { data: listing }, { data: logs }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("attributes, review_revision")
+        .eq("id", seeded.itemId)
+        .single(),
+      userA.client
+        .from("listings")
+        .select("title")
+        .eq("id", seeded.listingId)
+        .single(),
+      userA.client
+        .from("prediction_logs")
+        .select("run_id")
+        .eq("run_id", sharpenRevision),
+    ]);
+    expect(item?.review_revision).toBe(sharpenRevision);
+    expect((item?.attributes as { brand?: string })?.brand).toBe("Saved brand");
+    expect(listing?.title).toBe("Seller edited title");
+    expect(logs ?? []).toHaveLength(1);
+  });
+
+  it("rejects an export pack persisted from an obsolete review revision", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "stale-export-pack");
+    const currentRevision = crypto.randomUUID();
+    const saved = await userA.client.rpc("save_review_edits", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_expected_review_revision: seeded.reviewRevision,
+      p_new_review_revision: currentRevision,
+      p_attributes: { brand: "Current brand", category: "electronics" },
+      p_condition: "good",
+      p_price_override: null,
+      p_cost_basis: null,
+      p_listing_title: "Current listing",
+      p_listing_description: "Current description",
+    });
+    expect(saved.error).toBeNull();
+
+    const packs = [
+      {
+        platform: "facebook",
+        title: "Stale Facebook pack",
+        description: "Stale identity copy",
+        copy: { copyBlock: "Stale Facebook pack\n\nStale identity copy" },
+      },
+    ];
+    const stale = await userA.client.rpc("persist_export_packs", {
+      p_item_id: seeded.itemId,
+      p_source_review_revision: seeded.reviewRevision,
+      p_packs: packs,
+    });
+    expect(stale.error?.code).toBe("P0002");
+
+    const current = await userA.client.rpc("persist_export_packs", {
+      p_item_id: seeded.itemId,
+      p_source_review_revision: currentRevision,
+      p_packs: packs,
+    });
+    expect(current.error).toBeNull();
+
+    const { data: rows } = await userA.client
+      .from("listings")
+      .select("source_review_revision")
+      .eq("item_id", seeded.itemId)
+      .eq("platform", "facebook");
+    expect(rows ?? []).toEqual([
+      expect.objectContaining({ source_review_revision: currentRevision }),
+    ]);
   });
 
   it("recovers an expired publish lease without letting the stale owner finalize", async () => {

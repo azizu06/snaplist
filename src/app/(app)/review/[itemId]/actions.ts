@@ -11,7 +11,7 @@ import {
   parseIdentityCorrections,
   regenerateReviewListing,
 } from "@/lib/pipeline/review-regeneration";
-import { logPrediction } from "@/lib/pipeline/prediction-log";
+import { buildPredictionLogRow } from "@/lib/pipeline/prediction-log";
 import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
 import {
   garmentClassOf,
@@ -41,6 +41,26 @@ function backTo(itemId: string, error?: string): never {
   redirect(`/review/${itemId}${suffix}`);
 }
 
+function reviewRevisionFrom(formData: FormData, itemId: string): string {
+  const revision = formData.get("reviewRevision");
+  if (typeof revision !== "string" || revision.length === 0) {
+    backTo(itemId, "This review changed. Reload and try again.");
+  }
+  return revision;
+}
+
+function reviewWriteError(err: unknown, fallback: string): string {
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === "object" && err !== null && "message" in err
+        ? String(err.message)
+        : "";
+  return /review changed/i.test(message)
+    ? "This review changed. Reload and try again."
+    : fallback;
+}
+
 /**
  * Save the seller's review edits (UI pass: "the title, category, condition
  * and price — can we not change that?"). One submit persists every AI-filled
@@ -61,6 +81,7 @@ export async function saveReview(formData: FormData) {
     redirect("/upload");
   }
   const id = itemId as string;
+  const expectedReviewRevision = reviewRevisionFrom(formData, id);
   const listingId = formData.get("listingId");
   const hasListing = typeof listingId === "string" && listingId.length > 0;
 
@@ -151,42 +172,24 @@ export async function saveReview(formData: FormData) {
     delete attributes.measurements;
   }
 
-  const { data: updated, error: itemError } = await supabase
-    .from("items")
-    .update({
-      attributes,
-      condition: edits.condition,
-      price_override: edits.override,
-      // #101: what the seller paid — blank clears to NULL (unknown), never $0.
-      cost_basis: edits.costBasis,
-    })
-    .eq("id", id)
-    .select("id");
-  if (itemError) {
-    reportServerError("review.save.item", itemError);
-    backTo(id, "Failed to save changes. Please try again.");
-  }
-  if (!updated || updated.length === 0) {
-    backTo(id, "Item not found.");
-  }
-
-  if (hasListing && edits.listing) {
-    const { data: updatedListing, error: listingError } = await supabase
-      .from("listings")
-      .update({
-        title: edits.listing.title,
-        description: edits.listing.description,
-      })
-      .eq("id", listingId as string)
-      .eq("item_id", id)
-      .select("id");
-    if (listingError) {
-      reportServerError("review.save.listing", listingError);
-      backTo(id, "Failed to save the listing copy. Please try again.");
-    }
-    if (!updatedListing || updatedListing.length === 0) {
-      backTo(id, "Listing not found.");
-    }
+  const { error: saveError } = await supabase.rpc("save_review_edits", {
+    p_item_id: id,
+    p_listing_id: hasListing ? (listingId as string) : null,
+    p_expected_review_revision: expectedReviewRevision,
+    p_new_review_revision: crypto.randomUUID(),
+    p_attributes: attributes,
+    p_condition: edits.condition,
+    p_price_override: edits.override,
+    p_cost_basis: edits.costBasis,
+    p_listing_title: edits.listing?.title ?? null,
+    p_listing_description: edits.listing?.description ?? null,
+  });
+  if (saveError) {
+    reportServerError("review.save", saveError);
+    backTo(
+      id,
+      reviewWriteError(saveError, "Failed to save changes. Please try again."),
+    );
   }
 
   revalidatePath(`/review/${id}`);
@@ -206,6 +209,7 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
     redirect("/upload");
   }
   const id = itemId as string;
+  const expectedReviewRevision = reviewRevisionFrom(formData, id);
 
   let corrections: ReturnType<typeof parseIdentityCorrections>;
   try {
@@ -233,7 +237,7 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
   try {
     const result = await regenerateReviewListing(
       createSupabaseReviewRegenerationStore(supabase),
-      { itemId: id, corrections },
+      { itemId: id, expectedReviewRevision, corrections },
       { beforeModelWork: recordPipelineRunAndMaybeAlert },
     );
     logEvent("review.identity_regenerated", {
@@ -247,7 +251,7 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
   } catch (err) {
     reportServerError("review.identity_regenerate", err);
     const message =
-      err instanceof Error && /published listing/i.test(err.message)
+      err instanceof Error && /(published listing|review changed)/i.test(err.message)
         ? err.message
         : "We couldn’t re-price and regenerate this listing. Your previous result was kept.";
     backTo(id, message);
@@ -278,6 +282,7 @@ export async function sharpenEstimate(formData: FormData) {
     redirect("/upload");
   }
   const id = itemId as string;
+  const expectedReviewRevision = reviewRevisionFrom(formData, id);
 
   // Chips (each a hidden `spec` input) plus any live, un-added `detail` text, so
   // "type then Re-price" works even if the seller never pressed Add. Split on
@@ -297,7 +302,7 @@ export async function sharpenEstimate(formData: FormData) {
 
   const { data: item, error: readError } = await supabase
     .from("items")
-    .select("id, attributes")
+    .select("id, attributes, review_revision")
     .eq("id", id)
     .maybeSingle();
   if (readError) {
@@ -306,6 +311,9 @@ export async function sharpenEstimate(formData: FormData) {
   }
   if (!item) {
     backTo(id, "Item not found.");
+  }
+  if (item.review_revision !== expectedReviewRevision) {
+    backTo(id, "This review changed. Reload and try again.");
   }
 
   // The prior run's model + autopilot switch ride forward so the new log stays
@@ -338,22 +346,6 @@ export async function sharpenEstimate(formData: FormData) {
   // Preserve every existing attribute key (category merged by saveReview, etc.) and
   // only update specs — parsing strips unknown keys, so merge into the RAW JSON.
   const nextAttributes = { ...rawAttrs, specs: reprice.mergedSpecs };
-  const { data: updated, error: itemError } = await supabase
-    .from("items")
-    .update({ attributes: nextAttributes })
-    .eq("id", id)
-    .select("id");
-  if (itemError) {
-    reportServerError("review.sharpen.item", itemError);
-    backTo(id, "Failed to save the re-priced result. Please try again.");
-  }
-  if (!updated || updated.length === 0) {
-    backTo(id, "Item not found.");
-  }
-
-  // Log a fresh prediction (newest row wins on the review page). `buildPredictionLogRow`
-  // does not read `listing`, so a minimal placeholder keeps the PipelineResult type
-  // honest without an extra query for an unused value.
   const result: PipelineResult = {
     attributes: reprice.attributes,
     price: reprice.price,
@@ -363,14 +355,36 @@ export async function sharpenEstimate(formData: FormData) {
     listingModel: (log.listing_model as string | null) ?? undefined,
     pricingModel: reprice.price.model,
   };
-  try {
-    await logPrediction(supabase, userId, id, result, {
-      autopilotEnabled,
-      runId: crypto.randomUUID(),
-    });
-  } catch (err) {
-    reportServerError("review.sharpen.log", err);
-    backTo(id, "We re-priced but couldn't save it. Please try again.");
+  const runId = crypto.randomUUID();
+  const prediction = buildPredictionLogRow(userId, id, result, {
+    autopilotEnabled,
+    runId,
+  });
+  const { error: sharpenError } = await supabase.rpc("sharpen_review_estimate", {
+    p_item_id: id,
+    p_expected_review_revision: expectedReviewRevision,
+    p_run_id: runId,
+    p_attributes: nextAttributes,
+    p_price: prediction.price,
+    p_price_range: prediction.price_range,
+    p_confidence: prediction.confidence,
+    p_tier_fired: prediction.tier_fired,
+    p_model: prediction.model,
+    p_listing_model: prediction.listing_model,
+    p_pricing_model: prediction.pricing_model,
+    p_sources: prediction.sources,
+    p_autopilot_enabled: prediction.autopilot_enabled,
+    p_autopilot_eligible: prediction.autopilot_eligible,
+  });
+  if (sharpenError) {
+    reportServerError("review.sharpen.save", sharpenError);
+    backTo(
+      id,
+      reviewWriteError(
+        sharpenError,
+        "We re-priced but couldn't save it. Please try again.",
+      ),
+    );
   }
 
   logEvent("review.sharpen", {

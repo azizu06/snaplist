@@ -53,6 +53,7 @@ export interface LoadOrGeneratePacksInput {
   /** The owning user's id (must equal the client's auth.uid()). */
   userId: string;
   itemId: string;
+  reviewRevision: string;
   /** The item's validated attribute core (from the `items` row). */
   attributes: ExtractedAttributes;
   /** The item's stored price (whatever the item record carries), if any. */
@@ -130,6 +131,7 @@ export async function loadOrGenerateExportPacks(
     .from("listings")
     .select("platform, title, description, copy")
     .eq("item_id", input.itemId)
+    .eq("source_review_revision", input.reviewRevision)
     .in("platform", [FACEBOOK_PLATFORM, MERCARI_PLATFORM])
     .order("created_at", { ascending: false });
   if (readErr) {
@@ -185,31 +187,29 @@ export async function loadOrGenerateExportPacks(
       ? []
       : [
           {
-            user_id: input.userId,
-            item_id: input.itemId,
             platform: FACEBOOK_PLATFORM,
             title: result.facebook.pack.title,
             description: result.facebook.pack.description,
             copy: { ...result.facebook.copy.fields, model: result.model },
-            status: "draft",
           },
         ]),
     ...(storedMercari
       ? []
       : [
           {
-            user_id: input.userId,
-            item_id: input.itemId,
             platform: MERCARI_PLATFORM,
             title: result.mercari.pack.title,
             description: result.mercari.pack.description,
             copy: { ...result.mercari.copy.fields, model: result.model },
-            status: "draft",
           },
         ]),
   ];
   if (inserts.length > 0) {
-    const { error: insertErr } = await supabase.from("listings").insert(inserts);
+    const { error: insertErr } = await supabase.rpc("persist_export_packs", {
+      p_item_id: input.itemId,
+      p_source_review_revision: input.reviewRevision,
+      p_packs: inserts,
+    });
     if (insertErr) {
       throw new Error(`Failed to persist export packs: ${insertErr.message}`);
     }
