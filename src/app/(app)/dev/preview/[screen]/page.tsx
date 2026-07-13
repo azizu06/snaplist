@@ -118,6 +118,7 @@ const FIXTURE_REVIEW: ReviewData = {
     { key: "upc", value: "027242919623" },
     { key: "isbn", value: null },
   ],
+  specs: ["wireless", "noise-cancelling", "over-ear"],
   listing: {
     id: "l-1",
     platform: "ebay",
@@ -267,6 +268,7 @@ export default async function PreviewPage({
           data={FIXTURE_REVIEW}
           saveAction={noopAction}
           sharpenAction={noopAction}
+          regenerateAction={noopAction}
         />
       );
     case "export":
@@ -371,6 +373,7 @@ export default async function PreviewPage({
           }}
           saveAction={noopAction}
           sharpenAction={noopAction}
+          regenerateAction={noopAction}
         />
       );
     case "review-sharpen":
@@ -381,6 +384,7 @@ export default async function PreviewPage({
           data={{ ...FIXTURE_REVIEW, confidence: 0.68, tier: "web_wide" }}
           saveAction={noopAction}
           sharpenAction={noopAction}
+          regenerateAction={noopAction}
         />
       );
     default:

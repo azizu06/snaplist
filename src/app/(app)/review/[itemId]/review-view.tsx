@@ -60,6 +60,8 @@ export interface ReviewData {
     evidence: number;
   } | null;
   attrs: Array<{ key: string; value: string | null }>;
+  /** Current relevant specifications; the correction editor replaces this bounded list. */
+  specs: string[];
   listing: {
     id: string;
     platform: string;
@@ -216,12 +218,12 @@ function CardTitle({ children }: { children: React.ReactNode }) {
 function FieldLabel({
   label,
   htmlFor,
-  ai,
+  ai = false,
   aside,
 }: {
   label: string;
   htmlFor: string;
-  ai: boolean;
+  ai?: boolean;
   aside?: React.ReactNode;
 }) {
   return (
@@ -507,6 +509,204 @@ function SharpenCard({
   );
 }
 
+/**
+ * Bounded seller identity correction (issue #126). Kept additive to the existing
+ * Sharpen flow: this editor replaces load-bearing identity facts and explicitly
+ * re-runs BOTH pricing and listing generation, while Sharpen remains the quick
+ * additive-spec re-price path. Collapsed by default so the normal review hierarchy
+ * and existing Shopify-style design stay intact.
+ */
+function IdentityCorrectionCard({
+  data,
+  action,
+  formDirty,
+}: {
+  data: ReviewData;
+  action: (formData: FormData) => Promise<void>;
+  formDirty: boolean;
+}) {
+  const attr = (key: string) => data.attrs.find((a) => a.key === key)?.value ?? "";
+  const [fields, setFields] = useState(() => ({
+    brand: attr("brand"),
+    model: attr("model"),
+    category: attr("category"),
+    condition: attr("condition").toLowerCase(),
+    isbn: attr("isbn"),
+    upc: attr("upc"),
+    specifications: data.specs.join("\n"),
+  }));
+  const formRef = useRef<HTMLFormElement>(null);
+  const confirmedRef = useRef(false);
+  const [confirming, setConfirming] = useState(false);
+  const setField = (key: keyof typeof fields, value: string) =>
+    setFields((prev) => ({ ...prev, [key]: value }));
+
+  return (
+    <Card chromeClassName={APP_CARD_CHROME} className="p-4 sm:p-5">
+      <details>
+        <summary className="cursor-pointer list-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+          <span className="flex items-center justify-between gap-4">
+            <span>
+              <span className="block text-[14px] font-semibold tracking-tight text-fg-strong">
+                Correct item identity
+              </span>
+              <span className="mt-1 block text-[13px] leading-relaxed text-muted">
+                Fix the facts that drive comparable sales and generated listing copy.
+              </span>
+            </span>
+            <span className="shrink-0 text-[13px] font-semibold text-accent">
+              Edit details
+            </span>
+          </span>
+        </summary>
+
+        <form
+          ref={formRef}
+          action={action}
+          className="mt-5 border-t border-border pt-5"
+          onSubmit={(event) => {
+            if (confirmedRef.current) {
+              confirmedRef.current = false;
+              return;
+            }
+            if (formDirty) {
+              event.preventDefault();
+              setConfirming(true);
+            }
+          }}
+        >
+          <input type="hidden" name="itemId" value={data.itemId} />
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <FieldLabel label="Brand" htmlFor="identity-brand" />
+              <input
+                id="identity-brand"
+                name="brand"
+                value={fields.brand}
+                onChange={(e) => setField("brand", e.target.value)}
+                maxLength={120}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="Model" htmlFor="identity-model" />
+              <input
+                id="identity-model"
+                name="model"
+                value={fields.model}
+                onChange={(e) => setField("model", e.target.value)}
+                maxLength={120}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="Category" htmlFor="identity-category" />
+              <input
+                id="identity-category"
+                name="category"
+                list="identity-category-options"
+                value={fields.category}
+                onChange={(e) => setField("category", e.target.value)}
+                maxLength={120}
+                className={INPUT_CLASSES}
+              />
+              <datalist id="identity-category-options">
+                {CATEGORY_SUGGESTIONS.map((category) => (
+                  <option key={category} value={category} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <FieldLabel label="Condition" htmlFor="identity-condition" />
+              <Select
+                id="identity-condition"
+                name="condition"
+                value={fields.condition}
+                onChange={(value) => setField("condition", value)}
+                placeholder="Select a condition…"
+                options={CONDITION_OPTIONS.map((condition) => ({
+                  value: condition.toLowerCase(),
+                  label: condition,
+                }))}
+                className="w-full bg-bg px-3 py-2 text-[15px] text-fg-strong shadow-xs"
+              />
+            </div>
+            <div>
+              <FieldLabel label="ISBN (if applicable)" htmlFor="identity-isbn" />
+              <input
+                id="identity-isbn"
+                name="isbn"
+                inputMode="numeric"
+                value={fields.isbn}
+                onChange={(e) => setField("isbn", e.target.value)}
+                maxLength={20}
+                className={INPUT_CLASSES}
+              />
+            </div>
+            <div>
+              <FieldLabel label="UPC (if applicable)" htmlFor="identity-upc" />
+              <input
+                id="identity-upc"
+                name="upc"
+                inputMode="numeric"
+                value={fields.upc}
+                onChange={(e) => setField("upc", e.target.value)}
+                maxLength={20}
+                className={INPUT_CLASSES}
+              />
+            </div>
+          </div>
+          <div className="mt-4">
+            <FieldLabel
+              label="Relevant specifications"
+              htmlFor="identity-specifications"
+              aside={<span className="text-[12px] text-faint">One per line, max 12</span>}
+            />
+            <textarea
+              id="identity-specifications"
+              name="specifications"
+              value={fields.specifications}
+              onChange={(e) => setField("specifications", e.target.value)}
+              rows={4}
+              placeholder={"e.g. 512GB SSD\nNoise cancelling\nBlack"}
+              className={`${INPUT_CLASSES} resize-y leading-relaxed`}
+            />
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="max-w-xl text-[13px] leading-relaxed text-muted">
+              This replaces the generated suggestion and copy as one saved result. Your
+              saved price override is kept and the listing stays a draft.
+            </p>
+            <PendingButton
+              pendingLabel="Re-pricing & regenerating…"
+              className="w-full sm:w-auto sm:shrink-0"
+            >
+              Re-price &amp; regenerate
+            </PendingButton>
+          </div>
+        </form>
+      </details>
+
+      {confirming ? (
+        <ConfirmDialog
+          title="Discard unsaved listing edits?"
+          body="Re-price and regenerate replaces the current generated suggestion and copy. Save your manual title, description, price, cost-basis, or measurement edits first if you want to keep them. Saved price overrides are always preserved."
+          confirmLabel="Re-price & regenerate"
+          cancelLabel="Keep editing"
+          pending={false}
+          onConfirm={() => {
+            setConfirming(false);
+            confirmedRef.current = true;
+            formRef.current?.requestSubmit();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
 /** One garment measurement field (issue #104). */
 type MeasureField = NonNullable<ReviewData["measurements"]>["fields"][number];
 
@@ -661,10 +861,12 @@ export function ReviewView({
   data,
   saveAction,
   sharpenAction,
+  regenerateAction,
 }: {
   data: ReviewData;
   saveAction: (formData: FormData) => Promise<void>;
   sharpenAction: (formData: FormData) => Promise<void>;
+  regenerateAction: (formData: FormData) => Promise<void>;
 }) {
   const attr = (key: string) =>
     data.attrs.find((a) => a.key === key)?.value ?? "";
@@ -749,8 +951,6 @@ export function ReviewView({
 
   const readOnlyAttrs = data.attrs.filter(
     (a) =>
-      a.key !== "category" &&
-      a.key !== "condition" &&
       // UPC/ISBN are specialized barcodes — only surface them when actually
       // detected, so items without one (e.g. a laptop) don't show confusing
       // empty "Not detected" identifier rows. Brand/model always show.
@@ -1117,48 +1317,6 @@ export function ReviewView({
             ) : null}
 
             <div className="mt-4 flex flex-col gap-3.5 border-t border-border pt-4">
-              <div>
-                <FieldLabel label="Category" htmlFor="review-category" ai={ai("category")} />
-                <input
-                  id="review-category"
-                  name="category"
-                  form="rv-save"
-                  type="text"
-                  list="review-category-options"
-                  value={fields.category}
-                  placeholder="e.g. Consumer electronics"
-                  onChange={(e) => setField("category", e.target.value)}
-                  className={INPUT_CLASSES}
-                />
-                <datalist id="review-category-options">
-                  {CATEGORY_SUGGESTIONS.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <FieldLabel label="Condition" htmlFor="review-condition" ai={ai("condition")} />
-                <Select
-                  id="review-condition"
-                  name="condition"
-                  form="rv-save"
-                  aria-label="Condition"
-                  value={fields.condition}
-                  onChange={(v) => setField("condition", v)}
-                  placeholder="Select a condition…"
-                  options={[
-                    // Preserve an AI-supplied / custom value not in the grades.
-                    ...(fields.condition &&
-                    !CONDITION_OPTIONS.some(
-                      (o) => o.toLowerCase() === fields.condition.toLowerCase(),
-                    )
-                      ? [{ value: fields.condition, label: fields.condition }]
-                      : []),
-                    ...CONDITION_OPTIONS.map((o) => ({ value: o, label: o })),
-                  ]}
-                  className="w-full bg-bg px-3 py-2 text-[15px] text-fg-strong shadow-xs"
-                />
-              </div>
               {readOnlyAttrs.length > 0 ? (
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3.5">
                   {readOnlyAttrs.map(({ key, value }) => (
@@ -1184,6 +1342,14 @@ export function ReviewView({
 
       </div>
 
+      {data.listing && data.listing.status !== "published" ? (
+        <IdentityCorrectionCard
+          data={data}
+          action={regenerateAction}
+          formDirty={dirty}
+        />
+      ) : null}
+
       {/* Sharpen / re-price — FULL-WIDTH below the two columns. Its OWN form
           (sharpenAction); the layout wrapper above is a plain <div>, so this
           never nests inside the Save form (nested <form>s are invalid HTML).
@@ -1207,6 +1373,11 @@ export function ReviewView({
            PendingButton lives inside this form so useFormStatus reads it. ---- */}
       <form id="rv-save" action={saveAction}>
         <input type="hidden" name="itemId" value={data.itemId} />
+        {/* Identity edits belong to the explicit correction/regeneration action.
+            Preserve the current values in the ordinary listing-save payload so
+            `saveReview` cannot clear them while saving copy/price/measurements. */}
+        <input type="hidden" name="category" value={fields.category} />
+        <input type="hidden" name="condition" value={fields.condition} />
         {data.listing ? (
           <input type="hidden" name="listingId" value={data.listing.id} />
         ) : null}

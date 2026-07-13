@@ -17,7 +17,11 @@ import {
 import { deriveStrategies } from "@/lib/pricing/strategies";
 import { priceSourceSchema, type PricingTier } from "@/lib/pricing/types";
 import { generateClarifyingOptions } from "@/lib/clarify/generate";
-import { saveReview, sharpenEstimate } from "./actions";
+import {
+  regenerateCorrectedIdentity,
+  saveReview,
+  sharpenEstimate,
+} from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
 import { ConsumeUploadDraft } from "./consume-upload-draft";
 
@@ -247,6 +251,7 @@ export default async function ReviewPage({
         return { key, value: value == null ? null : String(value) };
       },
     ),
+    specs: parsedAttrs.success ? (parsedAttrs.data.specs ?? []) : [],
     listing: listing
       ? {
           id: listing.id as string,
@@ -280,7 +285,12 @@ export default async function ReviewPage({
           /upload (Codex). With the flag, a successful upload still can't leave
           photos behind to be resubmitted as a duplicate. */}
       {fromUpload ? <ConsumeUploadDraft /> : null}
-      <ReviewView data={data} saveAction={saveReview} sharpenAction={sharpenEstimate} />
+      <ReviewView
+        data={data}
+        saveAction={saveReview}
+        sharpenAction={sharpenEstimate}
+        regenerateAction={regenerateCorrectedIdentity}
+      />
     </>
   );
 }

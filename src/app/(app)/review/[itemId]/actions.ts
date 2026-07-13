@@ -6,6 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { parseReviewEdits } from "@/lib/pipeline";
 import { repriceWithSpecs } from "@/lib/pipeline/reprice";
+import {
+  createSupabaseReviewRegenerationStore,
+  parseIdentityCorrections,
+  regenerateReviewListing,
+} from "@/lib/pipeline/review-regeneration";
 import { logPrediction } from "@/lib/pipeline/prediction-log";
 import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
 import {
@@ -181,6 +186,66 @@ export async function saveReview(formData: FormData) {
   }
 
   revalidatePath(`/review/${id}`);
+  backTo(id);
+}
+
+/**
+ * Seller identity correction (issue #126): validate the bounded identity form,
+ * recompute pricing/confidence/listing copy through the shared services, then commit
+ * the entire coherent result through one RLS-scoped database transaction. The
+ * transaction never writes `items.price_override`, so saved seller price intent wins
+ * over the fresh suggestion exactly as it did before regeneration.
+ */
+export async function regenerateCorrectedIdentity(formData: FormData) {
+  const itemId = formData.get("itemId");
+  if (typeof itemId !== "string" || itemId.length === 0) {
+    redirect("/upload");
+  }
+  const id = itemId as string;
+
+  let corrections: ReturnType<typeof parseIdentityCorrections>;
+  try {
+    corrections = parseIdentityCorrections({
+      brand: formData.get("brand"),
+      model: formData.get("model"),
+      category: formData.get("category"),
+      condition: formData.get("condition"),
+      isbn: formData.get("isbn"),
+      upc: formData.get("upc"),
+      specifications: formData.get("specifications"),
+    });
+  } catch (err) {
+    backTo(id, err instanceof Error ? err.message : "Invalid identity corrections.");
+  }
+
+  const supabase = await createClient();
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=/review/${id}`);
+
+  try {
+    const result = await regenerateReviewListing(
+      createSupabaseReviewRegenerationStore(supabase),
+      { itemId: id, corrections },
+    );
+    logEvent("review.identity_regenerated", {
+      itemId: id,
+      runId: result.runId,
+      tier: result.price.tier,
+      confidence: result.confidence.score,
+      band: result.confidence.band,
+      priceOverridePreserved: result.priceOverride != null,
+    });
+  } catch (err) {
+    reportServerError("review.identity_regenerate", err);
+    const message =
+      err instanceof Error && /published listing/i.test(err.message)
+        ? err.message
+        : "We couldn’t re-price and regenerate this listing. Your previous result was kept.";
+    backTo(id, message);
+  }
+
+  revalidatePath(`/review/${id}`);
+  revalidatePath(`/export/${id}`);
   backTo(id);
 }
 

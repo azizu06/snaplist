@@ -40,3 +40,17 @@ export {
   type PredictionLogPriceRange,
   type ReadPredictionLogsFilter,
 } from "./prediction-log";
+export {
+  applyIdentityCorrections,
+  createSupabaseReviewRegenerationStore,
+  parseIdentityCorrections,
+  regenerateReviewListing,
+  type IdentityCorrections,
+  type RawIdentityCorrections,
+  type RegenerateReviewListingDependencies,
+  type RegenerateReviewListingInput,
+  type RegenerateReviewListingResult,
+  type ReviewRegenerationCommit,
+  type ReviewRegenerationSnapshot,
+  type ReviewRegenerationStore,
+} from "./review-regeneration";
