@@ -43,12 +43,17 @@ export function initialListingStatus(
  * listing or a $0 auto-post.
  */
 export function effectivePrice(
-  suggested: number,
+  suggested: number | string | null | undefined,
   override: number | string | null | undefined,
-): number {
-  const o = typeof override === "string" ? Number(override) : override;
-  if (typeof o === "number" && Number.isFinite(o) && o > 0) return o;
-  return suggested;
+): number | null {
+  const usable = (candidate: number | string | null | undefined) => {
+    const value = typeof candidate === "string" ? Number(candidate) : candidate;
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? value
+      : null;
+  };
+
+  return usable(override) ?? usable(suggested);
 }
 
 /**

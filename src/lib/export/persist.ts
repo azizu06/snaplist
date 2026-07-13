@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { effectivePrice } from "../pipeline";
 import type { ExtractedAttributes } from "../pipeline/types";
 import {
   facebookCopyBlock,
@@ -30,6 +31,8 @@ import {
 export interface ExportPackView {
   title: string;
   description: string;
+  /** Current effective price to enter in the platform's separate price field. */
+  price: number | null;
   /** The single paste-ready block. */
   copyBlock: string;
   /** Mercari only; empty for Facebook. */
@@ -58,8 +61,10 @@ export interface LoadOrGeneratePacksInput {
   reviewRevision: string;
   /** The item's validated attribute core (from the `items` row). */
   attributes: ExtractedAttributes;
-  /** The item's stored price (whatever the item record carries), if any. */
-  price?: number;
+  /** Latest AI suggestion from `prediction_logs`, as returned by the driver. */
+  suggestedPrice?: number | string | null;
+  /** Seller decision from `items.price_override`, as returned by the driver. */
+  priceOverride?: number | string | null;
   /** Injected model call, forwarded to `generateExportPacks`. */
   generate?: ExportPackGenerate;
   /** Model id override, forwarded to `generateExportPacks`. */
@@ -90,7 +95,7 @@ interface ListingRow {
  */
 function rowToView(
   row: ListingRow,
-  current: { price?: number; condition?: string },
+  current: { price: number | null; condition?: string },
 ): ExportPackView | null {
   const copyBlock = row.copy?.["copyBlock"];
   if (typeof copyBlock !== "string" || copyBlock.length === 0) return null;
@@ -102,7 +107,11 @@ function rowToView(
     if (!parsed.success) return null;
     return {
       ...parsed.data,
-      copyBlock: facebookCopyBlock(parsed.data, current),
+      price: current.price,
+      copyBlock: facebookCopyBlock(parsed.data, {
+        price: current.price ?? undefined,
+        condition: current.condition,
+      }),
       hashtags: [],
     };
   }
@@ -113,7 +122,7 @@ function rowToView(
       hashtags: row.copy?.["hashtags"] ?? [],
     });
     if (!parsed.success) return null;
-    return { ...parsed.data, copyBlock };
+    return { ...parsed.data, price: current.price, copyBlock };
   }
   return null;
 }
@@ -128,6 +137,8 @@ export async function loadOrGenerateExportPacks(
   supabase: SupabaseClient,
   input: LoadOrGeneratePacksInput,
 ): Promise<ExportPacksView> {
+  const price = effectivePrice(input.suggestedPrice, input.priceOverride);
+
   // Newest-first so the first valid row per platform is the latest one.
   const { data: rows, error: readErr } = await supabase
     .from("listings")
@@ -141,7 +152,7 @@ export async function loadOrGenerateExportPacks(
   }
 
   const current = {
-    price: input.price,
+    price,
     condition: input.attributes.condition,
   };
   let storedFacebook: ExportPackView | null = null;
@@ -174,7 +185,7 @@ export async function loadOrGenerateExportPacks(
 
   const result = await generateExportPacks({
     attributes: input.attributes,
-    price: input.price,
+    price: price ?? undefined,
     generate: input.generate,
     model: input.model,
   });
@@ -221,12 +232,14 @@ export async function loadOrGenerateExportPacks(
     facebook:
       storedFacebook ?? {
         ...result.facebook.pack,
+        price,
         copyBlock: result.facebook.copyBlock,
         hashtags: [],
       },
     mercari:
       storedMercari ?? {
         ...result.mercari.pack,
+        price,
         copyBlock: result.mercari.copyBlock,
       },
     cached: false,

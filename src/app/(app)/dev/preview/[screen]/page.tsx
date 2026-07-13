@@ -211,6 +211,7 @@ const FIXTURE_EXPORT: ExportData = {
       description:
         "For sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.",
       hashtags: [],
+      price: 178,
       copyBlock:
         "Sony WH-1000XM4 Wireless Headphones\n\nFor sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.\n\nCondition: Good\nAsking $178\nLocal pickup, message me if interested!",
     },
@@ -219,6 +220,7 @@ const FIXTURE_EXPORT: ExportData = {
       description:
         "For sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.",
       hashtags: ["#sony", "#wh1000xm4", "#headphones"],
+      price: 178,
       copyBlock:
         "Sony WH-1000XM4 Noise Cancelling Headphones\n\nFor sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.\n\n#sony #wh1000xm4 #headphones",
     },

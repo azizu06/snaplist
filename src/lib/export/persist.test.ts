@@ -96,6 +96,56 @@ function countingGenerate(): { generate: ExportPackGenerate; calls: () => number
 }
 
 describe("loadOrGenerateExportPacks", () => {
+  it("gives every platform pack the seller override instead of the latest AI suggestion", async () => {
+    const inserted: InsertedRow[] = [];
+    const { generate } = countingGenerate();
+
+    const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
+      userId: "user-1",
+      itemId: "item-1",
+      attributes: CORE,
+      suggestedPrice: 44.44,
+      priceOverride: 177.77,
+      generate,
+      model: "test-model",
+    });
+
+    expect(view.facebook.price).toBe(177.77);
+    expect(view.mercari.price).toBe(177.77);
+    expect(view.facebook.copyBlock).toContain("Asking $177.77");
+    expect(inserted).toHaveLength(2);
+    for (const row of inserted) {
+      expect(row.copy["price"]).toBe(177.77);
+    }
+  });
+
+  it.each([
+    { label: "missing", priceOverride: null },
+    { label: "invalid", priceOverride: "not-a-price" },
+  ])(
+    "gives every platform pack the latest AI suggestion for a $label override",
+    async ({ priceOverride }) => {
+      const inserted: InsertedRow[] = [];
+      const { generate } = countingGenerate();
+
+      const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
+        userId: "user-1",
+        itemId: "item-1",
+        attributes: CORE,
+        suggestedPrice: 44.44,
+        priceOverride,
+        generate,
+        model: "test-model",
+      });
+
+      expect(view.facebook.price).toBe(44.44);
+      expect(view.mercari.price).toBe(44.44);
+      for (const row of inserted) {
+        expect(row.copy["price"]).toBe(44.44);
+      }
+    },
+  );
+
   it("first visit: generates, persists a draft row per platform, returns fresh packs", async () => {
     const inserted: InsertedRow[] = [];
     const persistedRevisions: string[] = [];
@@ -107,7 +157,7 @@ describe("loadOrGenerateExportPacks", () => {
         itemId: "item-1",
         reviewRevision: REVIEW_REVISION,
         attributes: CORE,
-        price: 120,
+        suggestedPrice: 120,
         generate,
         model: "test-model",
       },
@@ -201,8 +251,9 @@ describe("loadOrGenerateExportPacks", () => {
     expect(inserted).toHaveLength(0);
   });
 
-  it("a cached Facebook block always reflects the CURRENT price, never the persisted snapshot", async () => {
-    // The pack was generated when the price was 100; a new pricing run says 120.
+  it("cached packs use the CURRENT seller override, never the persisted price snapshot", async () => {
+    // The pack was generated at 100; a new AI run says 120, but the seller has
+    // approved 177.77. Both cached platform packs must carry the override.
     const stored: StoredRow[] = [
       {
         platform: FACEBOOK_PLATFORM,
@@ -227,7 +278,8 @@ describe("loadOrGenerateExportPacks", () => {
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
       attributes: CORE,
-      price: 120,
+      suggestedPrice: 120,
+      priceOverride: 177.77,
       generate,
     });
 
@@ -235,9 +287,12 @@ describe("loadOrGenerateExportPacks", () => {
     expect(calls()).toBe(0);
     expect(view.cached).toBe(true);
     expect(inserted).toHaveLength(0);
+    expect(view.facebook.price).toBe(177.77);
+    expect(view.mercari.price).toBe(177.77);
     // The FB block is rebuilt deterministically from the CURRENT price.
-    expect(view.facebook.copyBlock).toContain("Asking $120");
+    expect(view.facebook.copyBlock).toContain("Asking $177.77");
     expect(view.facebook.copyBlock).not.toContain("$100");
+    expect(view.facebook.copyBlock).not.toContain("$120");
     expect(view.facebook.copyBlock).toContain("Stored FB title");
     expect(view.facebook.copyBlock).toContain("Stored FB description.");
     expect(view.facebook.copyBlock).toContain("Condition: good");

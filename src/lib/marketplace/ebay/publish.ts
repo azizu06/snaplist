@@ -8,6 +8,7 @@ import {
 } from "./errors";
 import { batchSignPhotoUrls } from "../../vision/photos";
 import { createNotification } from "../../notifications";
+import { effectivePrice } from "../../pipeline";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -180,10 +181,12 @@ export async function publishListingToEbay(
     };
   }
 
-  // 3. Pull the current review token used by the atomic publish claim.
+  // 3. Pull the current review token used by the atomic publish claim together
+  // with the seller override from that same review snapshot. The claim rejects
+  // a concurrent review edit before any external work begins.
   const { data: item, error: itemErr } = await supabase
     .from("items")
-    .select("review_revision")
+    .select("review_revision, price_override")
     .eq("id", listing.item_id)
     .maybeSingle();
   if (itemErr || !item) {
@@ -231,8 +234,8 @@ export async function publishListingToEbay(
     throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
   const claimId = claim.claimId;
-  const price = claim.price == null ? NaN : Number(claim.price);
-  if (!Number.isFinite(price) || price <= 0) {
+  const price = effectivePrice(claim.price, item.price_override);
+  if (price == null) {
     await markPublishFailed(supabase, listingId, claimId);
     throw new PublishValidationError(
       `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
