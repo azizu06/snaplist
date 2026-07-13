@@ -58,6 +58,7 @@ interface PublishClaimSnapshot {
   condition: string | null;
   photos: string[];
   price: number | string | null;
+  priceOverride: number | string | null;
 }
 
 /**
@@ -181,12 +182,12 @@ export async function publishListingToEbay(
     };
   }
 
-  // 3. Pull the current review token used by the atomic publish claim together
-  // with the seller override from that same review snapshot. The claim rejects
+  // 3. Pull the current review token used by the atomic publish claim. The claim
+  // returns the seller override from the same locked review snapshot and rejects
   // a concurrent review edit before any external work begins.
   const { data: item, error: itemErr } = await supabase
     .from("items")
-    .select("review_revision, price_override")
+    .select("review_revision")
     .eq("id", listing.item_id)
     .maybeSingle();
   if (itemErr || !item) {
@@ -234,7 +235,7 @@ export async function publishListingToEbay(
     throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
   const claimId = claim.claimId;
-  const price = effectivePrice(claim.price, item.price_override);
+  const price = effectivePrice(claim.price, claim.priceOverride);
   if (price == null) {
     await markPublishFailed(supabase, listingId, claimId);
     throw new PublishValidationError(
@@ -346,7 +347,11 @@ function parsePublishClaimSnapshot(value: unknown): PublishClaimSnapshot | null 
     Array.isArray(snapshot.copy) ||
     (snapshot.condition !== null && typeof snapshot.condition !== "string") ||
     !Array.isArray(snapshot.photos) ||
-    !snapshot.photos.every((photo) => typeof photo === "string")
+    !snapshot.photos.every((photo) => typeof photo === "string") ||
+    !("priceOverride" in snapshot) ||
+    (snapshot.priceOverride !== null &&
+      typeof snapshot.priceOverride !== "number" &&
+      typeof snapshot.priceOverride !== "string")
   ) {
     return null;
   }

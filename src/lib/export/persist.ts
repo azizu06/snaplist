@@ -57,8 +57,10 @@ export interface LoadOrGeneratePacksInput {
   /** Owning user id retained for call-site context; the persistence RPC derives tenancy from Clerk. */
   userId: string;
   itemId: string;
-  /** Review-content revision that keys cache reads and rejects obsolete in-flight writes. */
+  /** Full review revision that advances with seller price edits. */
   reviewRevision: string;
+  /** Content-only revision that keys reusable generated copy. */
+  reviewContentRevision: string;
   /** The item's validated attribute core (from the `items` row). */
   attributes: ExtractedAttributes;
   /** Latest AI suggestion from `prediction_logs`, as returned by the driver. */
@@ -144,7 +146,7 @@ export async function loadOrGenerateExportPacks(
     .from("listings")
     .select("platform, title, description, copy")
     .eq("item_id", input.itemId)
-    .eq("source_review_revision", input.reviewRevision)
+    .eq("source_review_revision", input.reviewContentRevision)
     .in("platform", [FACEBOOK_PLATFORM, MERCARI_PLATFORM])
     .order("created_at", { ascending: false });
   if (readErr) {
@@ -175,6 +177,7 @@ export async function loadOrGenerateExportPacks(
   }
 
   if (storedFacebook && storedMercari) {
+    await assertSellerPriceRevision(supabase, input.itemId, input.reviewRevision);
     return {
       facebook: storedFacebook,
       mercari: storedMercari,
@@ -220,13 +223,16 @@ export async function loadOrGenerateExportPacks(
   if (inserts.length > 0) {
     const { error: insertErr } = await supabase.rpc("persist_export_packs", {
       p_item_id: input.itemId,
-      p_source_review_revision: input.reviewRevision,
+      p_source_review_revision: input.reviewContentRevision,
+      p_expected_review_revision: input.reviewRevision,
       p_packs: inserts,
     });
     if (insertErr) {
       throw new Error(`Failed to persist export packs: ${insertErr.message}`);
     }
   }
+
+  await assertSellerPriceRevision(supabase, input.itemId, input.reviewRevision);
 
   return {
     facebook:
@@ -245,4 +251,22 @@ export async function loadOrGenerateExportPacks(
     cached: false,
     model: result.model,
   };
+}
+
+async function assertSellerPriceRevision(
+  supabase: SupabaseClient,
+  itemId: string,
+  expectedReviewRevision: string,
+): Promise<void> {
+  const { data: item, error } = await supabase
+    .from("items")
+    .select("review_revision")
+    .eq("id", itemId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to verify export price: ${error.message}`);
+  }
+  if (!item || item.review_revision !== expectedReviewRevision) {
+    throw new Error("Seller price changed while export packs were loading. Reload and try again.");
+  }
 }

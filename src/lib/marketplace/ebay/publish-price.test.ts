@@ -85,7 +85,6 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
                   review_revision: reviewRevision,
                   condition: "good",
                   photos: ["user-1/item-1.jpg"],
-                  price_override: priceOverride,
                 },
                 error: null,
               }),
@@ -141,6 +140,7 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
           condition: "good",
           photos: ["user-1/item-1.jpg"],
           price: suggestedPrice,
+          priceOverride,
         },
         error: null,
       };

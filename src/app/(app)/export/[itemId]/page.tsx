@@ -30,7 +30,7 @@ export default async function ExportPage({
   const { data: item } = await supabase
     .from("items")
     .select(
-      "id, attributes, condition, photos, price_override, review_content_revision",
+      "id, attributes, condition, photos, price_override, review_revision, review_content_revision",
     )
     .eq("id", itemId)
     .single();
@@ -71,7 +71,8 @@ export default async function ExportPage({
     packs = await loadOrGenerateExportPacks(supabase, {
       userId: userId,
       itemId,
-      reviewRevision: item.review_content_revision as string,
+      reviewRevision: item.review_revision as string,
+      reviewContentRevision: item.review_content_revision as string,
       attributes,
       suggestedPrice: log?.price,
       priceOverride: item.price_override,

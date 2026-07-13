@@ -32,11 +32,17 @@ interface StoredRow {
   copy: Record<string, unknown> | null;
 }
 
+interface FakeSupabaseOptions {
+  currentReviewRevision?: () => string;
+  afterPersist?: () => void;
+}
+
 function fakeSupabase(
   rows: StoredRow[],
   inserted: InsertedRow[],
   persistedRevisions: string[] = [],
   persistError: { message: string } | null = null,
+  options: FakeSupabaseOptions = {},
 ): SupabaseClient {
   const filters = {
     eq: () => filters,
@@ -46,15 +52,40 @@ function fakeSupabase(
   };
   return {
     from(table: string) {
-      if (table !== "listings") throw new Error(`unexpected table ${table}`);
-      return {
-        select: () => filters,
-      };
+      if (table === "listings") {
+        return {
+          select: () => filters,
+        };
+      }
+      if (table === "items") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  review_revision:
+                    options.currentReviewRevision?.() ?? REVIEW_REVISION,
+                },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
     },
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name !== "persist_export_packs") throw new Error(`unexpected rpc ${name}`);
+      const currentReviewRevision =
+        options.currentReviewRevision?.() ?? REVIEW_REVISION;
+      if (args.p_expected_review_revision !== currentReviewRevision) {
+        return {
+          error: { message: "Seller price changed. Reload and try again." },
+        };
+      }
       inserted.push(...(args.p_packs as InsertedRow[]));
       persistedRevisions.push(args.p_source_review_revision as string);
+      options.afterPersist?.();
       return { error: persistError };
     },
   } as unknown as SupabaseClient;
@@ -103,6 +134,8 @@ describe("loadOrGenerateExportPacks", () => {
     const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
       userId: "user-1",
       itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       suggestedPrice: 44.44,
       priceOverride: 177.77,
@@ -131,6 +164,8 @@ describe("loadOrGenerateExportPacks", () => {
       const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
         userId: "user-1",
         itemId: "item-1",
+        reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
         attributes: CORE,
         suggestedPrice: 44.44,
         priceOverride,
@@ -156,6 +191,7 @@ describe("loadOrGenerateExportPacks", () => {
         userId: "user-1",
         itemId: "item-1",
         reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
         attributes: CORE,
         suggestedPrice: 120,
         generate,
@@ -208,6 +244,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -240,6 +277,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -277,6 +315,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       suggestedPrice: 120,
       priceOverride: 177.77,
@@ -324,6 +363,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -349,6 +389,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -377,6 +418,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -405,6 +447,7 @@ describe("loadOrGenerateExportPacks", () => {
         userId: "user-1",
         itemId: "item-1",
         reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
         attributes: CORE,
         generate,
       }),
@@ -425,10 +468,103 @@ describe("loadOrGenerateExportPacks", () => {
           userId: "user-1",
           itemId: "item-1",
           reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
           attributes: CORE,
           generate,
         },
       ),
     ).rejects.toThrow(/Failed to persist export packs: Review changed/i);
+  });
+
+  it("does not serve cached packs after the seller price revision changed", async () => {
+    const stored: StoredRow[] = [
+      {
+        platform: FACEBOOK_PLATFORM,
+        title: "Stored FB title",
+        description: "Stored FB description.",
+        copy: { copyBlock: "Stored FB block." },
+      },
+      {
+        platform: MERCARI_PLATFORM,
+        title: "Stored Mercari title",
+        description: "Stored Mercari description.",
+        copy: { copyBlock: "Stored Mercari block.", hashtags: [] },
+      },
+    ];
+    const changedRevision = "00000000-0000-4000-8000-000000000002";
+
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase(stored, [], [], null, {
+          currentReviewRevision: () => changedRevision,
+        }),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
+          attributes: CORE,
+          suggestedPrice: 44.44,
+          priceOverride: 177.77,
+        },
+      ),
+    ).rejects.toThrow(/seller price changed/i);
+  });
+
+  it("does not return generated packs when the seller price changes after persistence", async () => {
+    let currentReviewRevision = REVIEW_REVISION;
+    const changedRevision = "00000000-0000-4000-8000-000000000003";
+    const inserted: InsertedRow[] = [];
+
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase([], inserted, [], null, {
+          currentReviewRevision: () => currentReviewRevision,
+          afterPersist: () => {
+            currentReviewRevision = changedRevision;
+          },
+        }),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
+          attributes: CORE,
+          suggestedPrice: 44.44,
+          priceOverride: 177.77,
+          generate: countingGenerate().generate,
+          model: "test-model",
+        },
+      ),
+    ).rejects.toThrow(/seller price changed/i);
+  });
+
+  it("does not persist generated packs when the seller price changes during generation", async () => {
+    let currentReviewRevision = REVIEW_REVISION;
+    const changedRevision = "00000000-0000-4000-8000-000000000004";
+    const inserted: InsertedRow[] = [];
+
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase([], inserted, [], null, {
+          currentReviewRevision: () => currentReviewRevision,
+        }),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
+          attributes: CORE,
+          suggestedPrice: 44.44,
+          priceOverride: 177.77,
+          generate: async () => {
+            currentReviewRevision = changedRevision;
+            return RAW;
+          },
+          model: "test-model",
+        },
+      ),
+    ).rejects.toThrow(/Failed to persist export packs: Seller price changed/i);
+    expect(inserted).toHaveLength(0);
   });
 });
