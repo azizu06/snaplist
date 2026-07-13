@@ -19,9 +19,11 @@ interface FakeListing {
   description: string;
   copy: Record<string, unknown>;
   status: string;
+  run_id: string | null;
   ebay_listing_id: string | null;
   ebay_offer_id: string | null;
   ebay_status: string | null;
+  ebay_publish_claim_id: string | null;
   listed_price?: number;
   last_priced_at?: string;
 }
@@ -30,6 +32,8 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
   client: SupabaseClient;
   listing: FakeListing;
 } {
+  const reviewRevision = "review-revision-1";
+  const claimId = "publish-claim-1";
   const listing: FakeListing = {
     id: "listing-1",
     item_id: "item-1",
@@ -38,9 +42,11 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
     description: "Tested and ready to ship.",
     copy: { itemSpecifics: { Brand: "Sony" } },
     status: "draft",
+    run_id: null,
     ebay_listing_id: null,
     ebay_offer_id: null,
     ebay_status: null,
+    ebay_publish_claim_id: null,
   };
 
   const client = {
@@ -52,12 +58,22 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
               maybeSingle: async () => ({ data: listing, error: null }),
             }),
           }),
-          update: (patch: Partial<FakeListing>) => ({
-            eq: async () => {
-              Object.assign(listing, patch);
-              return { error: null };
-            },
-          }),
+          update: (patch: Partial<FakeListing>) => {
+            const filters: Array<[keyof FakeListing, unknown]> = [];
+            const builder = {
+              eq(column: keyof FakeListing, value: unknown) {
+                filters.push([column, value]);
+                return builder;
+              },
+              async select() {
+                const matches = filters.every(([column, value]) => listing[column] === value);
+                if (!matches) return { data: [], error: null };
+                Object.assign(listing, patch);
+                return { data: [{ id: listing.id }], error: null };
+              },
+            };
+            return builder;
+          },
         };
       }
       if (table === "items") {
@@ -66,6 +82,7 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
             eq: () => ({
               maybeSingle: async () => ({
                 data: {
+                  review_revision: reviewRevision,
                   condition: "good",
                   photos: ["user-1/item-1.jpg"],
                   price_override: priceOverride,
@@ -96,6 +113,37 @@ function fakePublishClient(priceOverride: unknown, suggestedPrice = 44.44): {
         return { insert: async () => ({ error: null }) };
       }
       throw new Error(`unexpected table ${table}`);
+    },
+    async rpc(name: string, params: Record<string, unknown>) {
+      if (name !== "begin_ebay_publish") {
+        throw new Error(`unexpected rpc ${name}`);
+      }
+      if (
+        params.p_listing_id !== listing.id ||
+        params.p_expected_run_id !== listing.run_id ||
+        params.p_expected_review_revision !== reviewRevision
+      ) {
+        return {
+          data: null,
+          error: { code: "P0002", message: "Publish snapshot changed." },
+        };
+      }
+      listing.ebay_status = "publishing";
+      listing.ebay_publish_claim_id = claimId;
+      return {
+        data: {
+          claimId,
+          listingId: listing.id,
+          itemId: listing.item_id,
+          title: listing.title,
+          description: listing.description,
+          copy: listing.copy,
+          condition: "good",
+          photos: ["user-1/item-1.jpg"],
+          price: suggestedPrice,
+        },
+        error: null,
+      };
     },
     storage: {
       from: () => ({
