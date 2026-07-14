@@ -31,7 +31,7 @@ export class MessageDeliveryAttemptError extends Error {
 
 export interface DeliveryRepository {
   loadConversationRoot(messageId: string): Promise<MessageRow | null>;
-  canonicalDelivered(messageId: string): Promise<MessageRow | null>;
+  canonicalDelivered(root: MessageRow): Promise<MessageRow | null>;
   claimCanonical(
     root: MessageRow,
     body: string,
@@ -86,8 +86,10 @@ export async function sendCanonicalReply(
   if (!root || root.direction !== "inbound") {
     throw new MessageDeliveryConflictError("Buyer question not found");
   }
-  const alreadyDelivered = await input.repository.canonicalDelivered(root.id);
-  if (alreadyDelivered) return alreadyDelivered;
+  const alreadyDelivered = await input.repository.canonicalDelivered(root);
+  if (alreadyDelivered && canonicalDeliveryMatches(root, alreadyDelivered)) {
+    return alreadyDelivered;
+  }
   const at = input.now?.() ?? new Date();
   if (
     input.retry === true &&
@@ -147,7 +149,10 @@ export async function sendSellerFollowUp(
   input: SendFollowUpInput,
 ): Promise<MessageRow> {
   const root = await input.repository.loadConversationRoot(input.conversationId);
-  if (!root || !(await input.repository.canonicalDelivered(root.id))) {
+  const delivered = root
+    ? await input.repository.canonicalDelivered(root)
+    : null;
+  if (!root || !delivered || !canonicalDeliveryMatches(root, delivered)) {
     throw new MessageDeliveryConflictError(
       "Reply to this question before sending a follow-up",
     );
@@ -285,6 +290,20 @@ function deliveryIsUnconfirmed(message: MessageRow, at: Date): boolean {
   );
 }
 
+function canonicalDeliveryMatches(root: MessageRow, reply: MessageRow): boolean {
+  const rootMarketplace = root.marketplace ?? "simulated";
+  const replyMarketplace = reply.marketplace ?? "simulated";
+  if (
+    reply.reply_to !== root.id ||
+    reply.direction !== "outbound" ||
+    replyMarketplace !== rootMarketplace ||
+    reply.delivery_status !== "delivered"
+  ) {
+    return false;
+  }
+  return rootMarketplace !== "ebay" || Boolean(reply.external_delivery_id);
+}
+
 /** Supabase implementation; every statement is explicitly pinned to userId. */
 export class SupabaseDeliveryRepository implements DeliveryRepository {
   constructor(
@@ -306,15 +325,20 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     return data ? messageRowSchema.parse(data) : null;
   }
 
-  async canonicalDelivered(messageId: string): Promise<MessageRow | null> {
-    const { data, error } = await this.supabase
+  async canonicalDelivered(root: MessageRow): Promise<MessageRow | null> {
+    let query = this.supabase
       .from("messages")
       .select("*")
       .eq("user_id", this.userId)
-      .eq("reply_to", messageId)
+      .eq("reply_to", root.id)
       .eq("direction", "outbound")
-      .or("reply_kind.is.null,reply_kind.eq.reply")
-      .maybeSingle();
+      .eq("marketplace", root.marketplace ?? "simulated")
+      .eq("delivery_status", "delivered")
+      .or("reply_kind.is.null,reply_kind.eq.reply");
+    if (root.marketplace === "ebay") {
+      query = query.not("external_delivery_id", "is", null);
+    }
+    const { data, error } = await query.maybeSingle();
     if (error) throw new Error(`Failed to read canonical reply: ${error.message}`);
     return data ? messageRowSchema.parse(data) : null;
   }
@@ -434,7 +458,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       .select("*")
       .maybeSingle();
     if (error?.code === PG_UNIQUE_VIOLATION) {
-      const existing = await this.canonicalDelivered(root.id);
+      const existing = await this.canonicalDelivered(root);
       if (existing) return existing;
     }
     if (error || !data) {

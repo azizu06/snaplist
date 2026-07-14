@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(41);
+select extensions.plan(46);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -76,6 +76,38 @@ select extensions.is(
   'external message identity is unique per tenant, not globally'
 );
 
+select extensions.throws_ok(
+  $$
+    insert into public.messages (
+      user_id, item_id, listing_id, direction, body, status, reply_to,
+      marketplace, delivery_status
+    ) values (
+      'message-tenant-a',
+      '91000000-0000-4000-8000-000000000001',
+      '92000000-0000-4000-8000-000000000001',
+      'outbound',
+      'Spoofed local delivery',
+      'sent',
+      '93000000-0000-4000-8000-000000000001',
+      'simulated',
+      'delivered'
+    )
+  $$,
+  '23514',
+  null,
+  'a simulated reply cannot claim an eBay question'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages reply
+    where reply.reply_to = '93000000-0000-4000-8000-000000000001'
+  ),
+  0,
+  'a rejected cross-marketplace reply cannot occupy the canonical reply slot'
+);
+
 insert into public.ebay_message_sync_state (user_id, cursor_at)
 values
   ('message-tenant-a', '2026-07-13T12:00:00Z'),
@@ -109,6 +141,48 @@ select extensions.is(
   (select count(*)::integer from public.ebay_message_sync_state),
   1,
   'tenant A sees only its own sync cursor'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'import_question',
+      jsonb_build_object(
+        'item_id', '91000000-0000-4000-8000-000000000001',
+        'listing_id', '92000000-0000-4000-8000-000000000001',
+        'body', 'Was this answered directly?',
+        'external_message_id', 'externally-answered-question-a',
+        'external_parent_id', 'externally-answered-question-a',
+        'external_conversation_id', 'conversation-external-answer-a',
+        'external_listing_id', 'sandbox-item-a',
+        'external_buyer_id', 'buyer-external-answer-a',
+        'external_created_at', '2026-07-13T11:58:00Z'
+      )
+    )
+  $$,
+  'reconciliation can import an actionable eBay question'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'mark_externally_answered',
+      jsonb_build_object(
+        'external_message_id', 'externally-answered-question-a'
+      )
+    )
+  $$,
+  'reconciliation can retire an eBay question answered outside SnapList'
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply, draft_model
+    from public.messages
+    where external_message_id = 'externally-answered-question-a'
+  $$,
+  $$values ('externally_answered'::text, null::text, null::text)$$,
+  'an externally answered question is durable and non-actionable'
 );
 
 select extensions.lives_ok(
@@ -278,7 +352,7 @@ select extensions.throws_ok(
       'reply'
     )
   $$,
-  '23503',
+  '23514',
   null,
   'tenant A cannot thread or send against tenant B question identity'
 );
@@ -654,7 +728,8 @@ select extensions.lives_ok(
   $$
     insert into public.messages (
       user_id, item_id, listing_id, direction, body, status, reply_to,
-      reply_kind, marketplace, delivery_request_id, delivery_status
+      reply_kind, marketplace, delivery_request_id, delivery_status,
+      external_delivery_id
     ) values (
       'message-tenant-a',
       '91000000-0000-4000-8000-000000000001',
@@ -666,7 +741,8 @@ select extensions.lives_ok(
       'reply',
       'ebay',
       'delivery-a',
-      'delivered'
+      'delivered',
+      'ebay-acknowledgement-a'
     )
   $$,
   'the trusted server can persist a delivered eBay reply'

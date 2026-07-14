@@ -22,7 +22,9 @@ export type MessageDirection = z.infer<typeof messageDirectionSchema>;
  * `draft_failed` is the explicit terminal-until-retried state for an inbound
  * row whose draft generation crashed AFTER the insert (serverless interrupt,
  * model/database error) — without it the row would render "drafting…" forever
- * with no recovery path. `approved` is reserved for a future split of
+ * with no recovery path. `externally_answered` retires an imported question
+ * that a complete provider reconciliation no longer reports as unanswered.
+ * `approved` is reserved for a future split of
  * "approve" from "send" — today the seller's approve action sends
  * immediately, so it is never persisted.
  */
@@ -31,6 +33,7 @@ export const messageStatusSchema = z.enum([
   "drafting",
   "drafted",
   "draft_failed",
+  "externally_answered",
   "approved",
   "sent",
 ]);

@@ -119,6 +119,17 @@ begin
     where pending.user_id = p_user_id
       and pending.external_message_id = p_payload->>'external_message_id';
     return 'null'::jsonb;
+  elsif p_operation = 'mark_externally_answered' then
+    update public.messages message
+    set status = 'externally_answered',
+        draft_reply = null,
+        draft_model = null
+    where message.user_id = p_user_id
+      and message.marketplace = 'ebay'
+      and message.direction = 'inbound'
+      and message.external_message_id = p_payload->>'external_message_id'
+      and message.status in ('new', 'drafting', 'drafted', 'draft_failed');
+    return 'null'::jsonb;
   elsif p_operation = 'import_question' then
     select listing.*
     into v_listing
@@ -371,7 +382,9 @@ begin
       where reply.user_id = p_user_id
         and reply.reply_to = v_root.id
         and reply.direction = 'outbound'
+        and reply.marketplace = 'ebay'
         and reply.delivery_status = 'delivered'
+        and reply.external_delivery_id is not null
         and (reply.reply_kind is null or reply.reply_kind = 'reply')
     ) then
       raise exception using errcode = 'P0002', message = 'Delivered conversation not found';
@@ -538,6 +551,7 @@ begin
     'upsert_unresolved_question',
     'mark_unresolved_question_failed',
     'remove_unresolved_question',
+    'mark_externally_answered',
     'import_question',
     'ensure_notification',
     'claim_draft',

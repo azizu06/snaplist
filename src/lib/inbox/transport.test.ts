@@ -58,8 +58,8 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   async loadConversationRoot(id: string) {
     return id === this.root.id ? this.root : null;
   }
-  async canonicalDelivered(id: string) {
-    return id === this.root.id ? this.canonical : null;
+  async canonicalDelivered(root: MessageRow) {
+    return root.id === this.root.id ? this.canonical : null;
   }
   async claimCanonical(_root: MessageRow, body: string, at: Date, retry: boolean) {
     if (!retry && this.root.status !== "drafted") return false;
@@ -230,6 +230,31 @@ describe("message delivery transport", () => {
       repository.root.external_message_id,
     );
     expect(repository.root.delivery_status).toBe("delivered");
+  });
+
+  it("does not treat a cross-marketplace row as an acknowledged eBay reply", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemoryDeliveryRepository();
+    repository.canonical = message({
+      id: "55555555-5555-4555-8555-555555555555",
+      direction: "outbound",
+      reply_to: ROOT_ID,
+      reply_kind: "reply",
+      marketplace: "simulated",
+      delivery_status: "delivered",
+      external_delivery_id: null,
+    });
+
+    await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      body: "Yes, it includes the charger.",
+    });
+
+    expect(adapter.replies).toHaveLength(1);
+    expect(repository.canonical?.marketplace).toBe("ebay");
+    expect(repository.canonical?.external_delivery_id).toBeTruthy();
   });
 
   it("keeps rejected/ambiguous delivery visible and retryable without claiming success", async () => {

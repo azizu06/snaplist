@@ -259,7 +259,7 @@ export class HttpEbayMessagingAdapter
       `${baseUrl.replace(/\/$/, "")}/commerce/message/v1/conversation`,
     );
     url.searchParams.set("conversation_type", "FROM_MEMBERS");
-    url.searchParams.set("conversation_status", "ACTIVE");
+    url.searchParams.set("conversationStatus", "ACTIVE");
     url.searchParams.set("reference_type", "LISTING");
     url.searchParams.set("reference_id", input.externalListingId);
     url.searchParams.set("start_time", input.from.toISOString());
@@ -306,7 +306,7 @@ export class HttpEbayMessagingAdapter
         }
       }
       const next = asString(payload.next);
-      pageUrl = next ? new URL(next, baseUrl) : null;
+      pageUrl = next ? validatedPaginationUrl(next, baseUrl) : null;
     }
     const exact = candidates.length === 1 ? asString(candidates[0].conversationId) : null;
     if (!exact) {
@@ -356,7 +356,7 @@ export class HttpEbayMessagingAdapter
         return true;
       }
       const next = asString(payload.next);
-      pageUrl = next ? new URL(next, baseUrl) : null;
+      pageUrl = next ? validatedPaginationUrl(next, baseUrl) : null;
     }
     return false;
   }
@@ -542,6 +542,15 @@ function asIsoString(value: unknown): string | undefined {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Conversation resolution failed";
+}
+
+function validatedPaginationUrl(next: string, baseUrl: string): URL {
+  const configuredBase = new URL(baseUrl);
+  const candidate = new URL(next, configuredBase);
+  if (candidate.protocol !== "https:" || candidate.origin !== configuredBase.origin) {
+    throw new Error("Unsafe eBay pagination URL");
+  }
+  return candidate;
 }
 
 function messageMatches(

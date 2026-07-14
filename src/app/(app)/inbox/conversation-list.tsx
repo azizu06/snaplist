@@ -197,6 +197,7 @@ export function deriveConversationState(
 ): ConversationState {
   const sentReply = repliesByQuestion.get(message.id);
   const delivered = sentReply?.delivery_status === "delivered";
+  const externallyAnswered = message.status === "externally_answered";
   // Claimed-but-undelivered (PR #35 review): the inbound row is `sent` but no
   // outbound row references it — delivery failed (or the process crashed) after
   // the CAS claim, before the outbound insert. While OUR send request is in
@@ -211,7 +212,9 @@ export function deriveConversationState(
       : delivered
         ? "success-solid"
         : "neutral";
-  const statusLabel = undelivered
+  const statusLabel = externallyAnswered
+    ? "Answered on eBay"
+    : undelivered
     ? deliveryRecoveryLabel(
         message.delivery_status,
         message.delivery_attempted_at,
@@ -229,7 +232,7 @@ export function deriveConversationState(
           : "Drafting…";
 
   // Resolved only once the reply is delivered (sent + outbound row present).
-  const unread = !delivered;
+  const unread = !delivered && !externallyAnswered;
 
   const snippet = sentReply
     ? `You: ${sentReply.body}`
@@ -845,7 +848,16 @@ export function ConversationThread({
 
       {/* ── composer / recovery dock (pinned) ── */}
       <div className="bg-surface-2 px-4 py-4 sm:px-5">
-        {undelivered ? (
+        {message.status === "externally_answered" ? (
+          <div className="rounded-lg border border-border bg-surface px-3.5 py-3">
+            <p className="text-[13px] font-semibold text-muted">
+              Answered on eBay
+            </p>
+            <p className="mt-1 text-[13px] text-faint">
+              This question is no longer awaiting a reply.
+            </p>
+          </div>
+        ) : undelivered ? (
           <div className="flex flex-col gap-2 rounded-lg border border-danger-border bg-danger-soft px-3.5 py-3">
             <p className="text-[12.5px] font-semibold text-danger-soft-fg">
               {requiresDuplicateRiskConfirmation(

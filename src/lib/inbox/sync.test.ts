@@ -107,6 +107,28 @@ class MemorySyncRepository implements InboxSyncRepository {
   async countPendingQuestions() {
     return this.pending.size;
   }
+  async listActionableQuestionIds(from: Date, to: Date) {
+    return [...this.imported.values()].filter((message) => {
+      const createdAt = Date.parse(message.external_created_at ?? "");
+      return (
+        ["new", "drafting", "drafted", "draft_failed"].includes(message.status) &&
+        Number.isFinite(createdAt) &&
+        createdAt >= from.getTime() &&
+        createdAt <= to.getTime()
+      );
+    }).flatMap((message) =>
+      message.external_message_id ? [message.external_message_id] : [],
+    );
+  }
+  async markExternallyAnswered(externalMessageId: string) {
+    const message = this.imported.get(externalMessageId);
+    if (!message || !["new", "drafting", "drafted", "draft_failed"].includes(message.status)) {
+      return;
+    }
+    message.status = "externally_answered";
+    message.draft_reply = null;
+    message.draft_model = null;
+  }
   async importQuestion(
     external: MarketplaceQuestion,
     context: SyncListingContext,
@@ -449,6 +471,40 @@ describe("syncInboxForSeller", () => {
       repository.imported.get(question.externalMessageId)
         ?.external_conversation_id,
     ).toBe("commerce-conversation-9");
+  });
+
+  it("retires an imported draft when eBay no longer reports the question as unanswered", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [question];
+    const repository = new MemorySyncRepository();
+    const draft = vi.fn(async () => ({
+      reply: "Yes, the charger is included.",
+      model: "test-reply",
+      usedFallback: false,
+    }));
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      draft,
+      meterDraft: async () => undefined,
+    });
+    adapter.questions = [];
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:10:00.000Z"),
+      draft,
+      meterDraft: async () => undefined,
+    });
+
+    expect(repository.imported.get(question.externalMessageId)).toMatchObject({
+      status: "externally_answered",
+      draft_reply: null,
+      draft_model: null,
+    });
+    expect(draft).toHaveBeenCalledTimes(1);
   });
 
   it("does not advance the cursor when durable import fails", async () => {

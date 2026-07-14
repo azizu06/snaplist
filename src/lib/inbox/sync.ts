@@ -59,6 +59,8 @@ export interface InboxSyncRepository {
   ): Promise<void>;
   removePendingQuestion(externalMessageId: string): Promise<void>;
   countPendingQuestions(): Promise<number>;
+  listActionableQuestionIds(from: Date, to: Date): Promise<string[]>;
+  markExternallyAnswered(externalMessageId: string): Promise<void>;
   findActiveListing(externalListingId: string): Promise<SyncListingContext | null>;
   importQuestion(
     question: MarketplaceQuestion,
@@ -131,6 +133,10 @@ export async function syncInboxForSeller(
   await input.repository.markAttempt(now);
   try {
     const pendingBeforeFetch = await input.repository.listPendingQuestions();
+    const actionableBeforeFetch = await input.repository.listActionableQuestionIds(
+      from,
+      now,
+    );
     const fetched = await input.adapter.fetchUnansweredQuestions({
       from,
       to: now,
@@ -170,6 +176,11 @@ export async function syncInboxForSeller(
       ...fetched.questions.map((question) => question.externalMessageId),
       ...fetched.unresolved.map(({ question }) => question.externalMessageId),
     ]);
+    for (const externalMessageId of actionableBeforeFetch) {
+      if (!observedIds.has(externalMessageId)) {
+        await input.repository.markExternallyAnswered(externalMessageId);
+      }
+    }
     for (const pending of pendingBeforeFetch) {
       if (observedIds.has(pending.externalMessageId)) continue;
       const pendingCreatedAt = Date.parse(pending.createdAt);
@@ -373,6 +384,31 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       throw new Error(`Failed to count unresolved eBay questions: ${error.message}`);
     }
     return count ?? 0;
+  }
+
+  async listActionableQuestionIds(from: Date, to: Date): Promise<string[]> {
+    const { data, error } = await this.supabase
+      .from("messages")
+      .select("external_message_id")
+      .eq("user_id", this.userId)
+      .eq("marketplace", "ebay")
+      .eq("direction", "inbound")
+      .in("status", ["new", "drafting", "drafted", "draft_failed"])
+      .not("external_message_id", "is", null)
+      .gte("external_created_at", from.toISOString())
+      .lte("external_created_at", to.toISOString());
+    if (error) {
+      throw new Error(`Failed to list actionable eBay questions: ${error.message}`);
+    }
+    return (data ?? []).flatMap((row) =>
+      typeof row.external_message_id === "string" ? [row.external_message_id] : [],
+    );
+  }
+
+  async markExternallyAnswered(externalMessageId: string): Promise<void> {
+    await this.applyWrite("mark_externally_answered", {
+      external_message_id: externalMessageId,
+    });
   }
 
   async findActiveListing(

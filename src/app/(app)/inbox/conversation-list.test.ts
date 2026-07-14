@@ -62,4 +62,18 @@ describe("deriveConversationState", () => {
     expect(delivered.delivered).toBe(true);
     expect(delivered.sending).toBe(false);
   });
+
+  it("marks a question answered on eBay as resolved and non-actionable", () => {
+    const state = deriveConversationState(
+      message({ status: "externally_answered", draft_reply: null }),
+      new Map(),
+      null,
+    );
+
+    expect(state).toMatchObject({
+      delivered: false,
+      unread: false,
+      statusLabel: "Answered on eBay",
+    });
+  });
 });

@@ -17,8 +17,11 @@ describe("HttpEbayMessagingAdapter", () => {
   it("imports unanswered active-listing questions with exact Trading message identity", async () => {
     const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url).includes("/commerce/message/v1/conversation")) {
-        expect(String(url)).toContain("reference_id=110011001100");
-        expect(String(url)).toContain("conversation_type=FROM_MEMBERS");
+        const parsed = new URL(String(url));
+        expect(parsed.searchParams.get("reference_id")).toBe("110011001100");
+        expect(parsed.searchParams.get("conversation_type")).toBe("FROM_MEMBERS");
+        expect(parsed.searchParams.get("conversationStatus")).toBe("ACTIVE");
+        expect(parsed.searchParams.has("conversation_status")).toBe(false);
         return Response.json({
           conversations: [
             {
@@ -463,6 +466,78 @@ describe("HttpEbayMessagingAdapter", () => {
     expect(conversationUrls).toHaveLength(2);
     expect(conversationUrls[0].searchParams.get("limit")).toBe("10");
     expect(conversationUrls[1].searchParams.get("offset")).toBe("10");
+  });
+
+  it("rejects cross-origin conversation pagination before reusing the seller token", async () => {
+    const fetchSpy = vi.fn(async () =>
+      Response.json({ conversations: [], next: "https://attacker.example/steal" }),
+    );
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.resolveQuestion({
+        marketplace: "ebay",
+        externalMessageId: "question-hostile-next",
+        externalParentId: "question-hostile-next",
+        externalListingId: "listing-hostile-next",
+        externalBuyerId: "buyer-hostile-next",
+        body: "Is this available?",
+        subject: null,
+        createdAt: "2026-07-13T14:03:00.000Z",
+        resolutionWindowFrom: "2026-07-12T14:05:00.000Z",
+        observedCursorAt: "2026-07-13T14:05:00.000Z",
+      }),
+    ).rejects.toThrow("Unsafe eBay pagination URL");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects cross-origin message pagination before reusing the seller token", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/conversation/conversation-hostile-next")) {
+        return Response.json({
+          messages: [],
+          next: "https://attacker.example/steal",
+        });
+      }
+      return Response.json({
+        conversations: [
+          {
+            conversationId: "conversation-hostile-next",
+            latestMessage: {
+              messageId: "another-question",
+              messageBody: "Another question",
+              createdDate: "2026-07-13T14:04:00.000Z",
+            },
+          },
+        ],
+      });
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.resolveQuestion({
+        marketplace: "ebay",
+        externalMessageId: "question-hostile-next",
+        externalParentId: "question-hostile-next",
+        externalListingId: "listing-hostile-next",
+        externalBuyerId: "buyer-hostile-next",
+        body: "Is this available?",
+        subject: null,
+        createdAt: "2026-07-13T14:03:00.000Z",
+        resolutionWindowFrom: "2026-07-12T14:05:00.000Z",
+        observedCursorAt: "2026-07-13T14:05:00.000Z",
+      }),
+    ).rejects.toThrow("Unsafe eBay pagination URL");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("uses the exact question MessageID as ParentMessageID for replies", async () => {
