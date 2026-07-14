@@ -4,6 +4,7 @@ import { DemoClip } from "@/components/marketing/demo-clip";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
 import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
+import { sellerPolicyForTier } from "@/lib/billing";
 
 export const metadata: Metadata = {
   title: "How it works",
@@ -92,6 +93,9 @@ const STEPS = [
   },
 ] as const;
 
+const FREE_POLICY = sellerPolicyForTier("free");
+const PRO_POLICY = sellerPolicyForTier("paid");
+
 /**
  * Seller FAQ — relocated from the retired About page. Replaces the old
  * "Where the price comes from" waterfall section: the six step clips above
@@ -117,7 +121,7 @@ const FAQ = [
   },
   {
     q: "What does it cost?",
-    a: "The Free plan covers every core feature for up to 15 items a day. Seller Pro is $10 a month and lifts that to 200 items a day with priority research and bulk uploads. eBay's own selling fees still apply when something sells.",
+    a: `The Free plan covers every core feature—including bulk / haul capture—for up to ${FREE_POLICY.limits.itemsPerDay} items a day. Seller Pro is $10 a month and lifts capacity to ${PRO_POLICY.limits.itemsPerDay} items a day and ${PRO_POLICY.limits.meteredPerMinute} metered requests a minute. eBay's own selling fees still apply when something sells.`,
   },
   {
     q: "Do I need my own eBay account?",

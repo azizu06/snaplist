@@ -11,7 +11,7 @@ import {
   recordPipelineRunAndMaybeAlert,
   refundDailyItem,
 } from "@/lib/abuse";
-import { getEntitlement } from "@/lib/billing";
+import { resolveSellerPolicy } from "@/lib/billing";
 
 /**
  * POST /api/batch/item — run ONE item of a bulk/haul batch (issue #100)
@@ -44,9 +44,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Per-minute metered limit — shares the same `user:<id>` bucket as every
-  // other metered surface, so a batch can't out-run the single-item path.
-  const limited = await enforceRateLimit(request, userId);
+  // #153 resolves the entitlement exactly once through the RLS-scoped server
+  // policy seam. The same policy drives this route's per-minute guard and its
+  // per-item daily cap, so a haul cannot diverge from single-item capture.
+  const policy = await resolveSellerPolicy(userId, { client: supabase });
+  const limited = await enforceRateLimit(request, userId, { policy });
   if (limited) {
     // Re-shape with `kind` so the orchestrator can back off + retry instead of
     // treating the throttle as a hard failure. Status/headers are preserved.
@@ -94,10 +96,9 @@ export async function POST(request: Request) {
   // storage or model work — exactly as the single-item upload does. A haul
   // that crosses the cap gets `kind: "quota"`, which tells the orchestrator to
   // stop dispatching the rest of the batch (they'd all be denied today).
-  const tier = await getEntitlement(userId);
-  const quota = await checkDailyItemQuota(userId, undefined, tier);
+  const quota = await checkDailyItemQuota(userId, undefined, policy);
   if (!quota.allowed) {
-    const plan = tier === "paid" ? "Pro" : "free";
+    const plan = policy.tier === "paid" ? "Pro" : "free";
     return NextResponse.json(
       {
         error: `Daily limit reached (${quota.limit} items/day on the ${plan} plan). Remaining items will need to wait until tomorrow.`,

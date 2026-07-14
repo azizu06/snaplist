@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import HowItWorks, { metadata as tourMetadata } from "./(marketing)/tour/page";
 import { SettingsView } from "./(app)/settings/settings-view";
+import { sellerPolicyForTier } from "@/lib/billing/policy";
 
 vi.mock("@/components/marketing/reveal", () => ({
   Reveal: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -66,6 +67,40 @@ describe("pricing evidence copy", () => {
 });
 
 describe("publish eligibility settings copy", () => {
+  it("renders the shared core-capability matrix instead of a plan-only bulk claim", () => {
+    const $ = load(
+      renderToStaticMarkup(
+        <SettingsView
+          data={{
+            user: { name: "Seller", email: "seller@example.com", imageUrl: null },
+            autopilotEnabled: true,
+            autoReplyEnabled: false,
+            ebay: { connected: false, ebayUsername: null },
+            billing: {
+              tier: "free",
+              itemsPerDay: 15,
+              proItemsPerDay: 200,
+              capabilities: sellerPolicyForTier("free").capabilities,
+              billingEnabled: false,
+            },
+            error: null,
+            ebayBanner: null,
+          }}
+          autopilotAction={async () => undefined}
+          autoReplyAction={async () => undefined}
+          disconnectEbayAction={async () => undefined}
+        />,
+      ),
+    );
+
+    const billingCard = $("h2")
+      .filter((_, heading) => $(heading).text().includes("Plan & billing"))
+      .closest("section")
+      .text();
+    expect(billingCard).toMatch(/core seller workflows/i);
+    expect(billingCard).toMatch(/bulk \/ haul capture/i);
+  });
+
   it("discloses the automatic repricing dependency", () => {
     const $ = load(
       renderToStaticMarkup(
@@ -79,6 +114,7 @@ describe("publish eligibility settings copy", () => {
               tier: "free",
               itemsPerDay: 15,
               proItemsPerDay: 200,
+              capabilities: sellerPolicyForTier("free").capabilities,
               billingEnabled: false,
             },
             error: null,
@@ -113,6 +149,7 @@ describe("publish eligibility settings copy", () => {
               tier: "free",
               itemsPerDay: 15,
               proItemsPerDay: 200,
+              capabilities: sellerPolicyForTier("free").capabilities,
               billingEnabled: false,
             },
             error: null,

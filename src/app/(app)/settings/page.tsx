@@ -4,8 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { getAutoReplyEnabled, getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { getEbayConnectionStatus } from "@/lib/marketplace/ebay";
-import { tierLimits } from "@/lib/abuse/config";
-import { getEntitlement, stripeConfigured } from "@/lib/billing";
+import { resolveSellerPolicy, sellerPolicyForTier, stripeConfigured } from "@/lib/billing";
 import { setAutopilotSetting } from "@/app/(app)/upload/actions";
 import { disconnectEbay, setAutoReplySetting } from "./actions";
 import { SettingsView, type SettingsData } from "./settings-view";
@@ -31,12 +30,12 @@ export default async function SettingsPage({
   // (getEntitlement) — not the pure resolveTier default — so a Pro subscriber sees
   // Pro and the 200/day cap. getEntitlement is fail-safe (defaults free), reusing
   // the request's user-scoped client (RLS read-own).
-  const [autopilotEnabled, autoReplyEnabled, ebayConnection, clerkUser, tier] = await Promise.all([
+  const [autopilotEnabled, autoReplyEnabled, ebayConnection, clerkUser, policy] = await Promise.all([
     getAutopilotEnabled(supabase, userId),
     getAutoReplyEnabled(supabase, userId),
     getEbayConnectionStatus(supabase),
     currentUser(),
-    getEntitlement(userId, supabase),
+    resolveSellerPolicy(userId, { client: supabase }),
   ]);
 
   const data: SettingsData = {
@@ -58,9 +57,10 @@ export default async function SettingsPage({
         : null,
     },
     billing: {
-      tier,
-      itemsPerDay: tierLimits(tier).itemsPerDay,
-      proItemsPerDay: tierLimits("paid").itemsPerDay,
+      tier: policy.tier,
+      itemsPerDay: policy.limits.itemsPerDay,
+      proItemsPerDay: sellerPolicyForTier("paid").limits.itemsPerDay,
+      capabilities: policy.capabilities,
       billingEnabled: stripeConfigured(),
     },
     error: error ?? null,

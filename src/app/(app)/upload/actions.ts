@@ -11,10 +11,11 @@ import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-se
 import { reportServerError } from "@/lib/sentry";
 import {
   checkDailyItemQuota,
+  rateLimitAllows,
   recordPipelineRunAndMaybeAlert,
   refundDailyItem,
 } from "@/lib/abuse";
-import { getEntitlement } from "@/lib/billing";
+import { resolveSellerPolicy } from "@/lib/billing";
 
 /**
  * Upload server action — the spine wired to the request:
@@ -78,15 +79,21 @@ export async function uploadAndProcess(formData: FormData) {
     );
   }
 
-  // Spend guardrail (#58): the per-user/day ITEM cap — gate the expensive vision +
-  // pricing + listing run BEFORE uploading photos or calling any model. Resolve the
-  // billing entitlement (#64) so Pro subscribers get the higher cap; getEntitlement
-  // is fail-safe (defaults free), so a billing hiccup never blocks an upload. (A
-  // friendlier limit screen is UI polish tracked to the frontend issue.)
-  const tier = await getEntitlement(userId);
-  const quota = await checkDailyItemQuota(userId, undefined, tier);
+  // #153: resolve one RLS-scoped server policy before any storage or model work.
+  // Its tier and limits drive BOTH the per-minute action guard and daily item cap;
+  // no browser plan state can influence either one.
+  const policy = await resolveSellerPolicy(userId, { client: supabase });
+  if (!(await rateLimitAllows(userId, undefined, { policy }))) {
+    redirect(
+      `/upload?error=${encodeURIComponent("Too many requests. Please slow down and try again shortly.")}`,
+    );
+  }
+
+  // Spend guardrail (#58): the per-user/day item cap gates the expensive vision +
+  // pricing + listing run before uploading photos or calling any model.
+  const quota = await checkDailyItemQuota(userId, undefined, policy);
   if (!quota.allowed) {
-    const plan = tier === "paid" ? "Pro" : "free";
+    const plan = policy.tier === "paid" ? "Pro" : "free";
     redirect(
       `/upload?error=${encodeURIComponent(`Daily limit reached (${quota.limit} items/day on the ${plan} plan). Please try again tomorrow.`)}`,
     );

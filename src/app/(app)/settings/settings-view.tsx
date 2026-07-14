@@ -9,6 +9,7 @@ import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSegmented } from "@/components/theme-toggle";
 import type { ProfileUser } from "@/components/profile-menu";
+import { SELLER_CAPABILITY_MATRIX, type SellerCapabilities } from "@/lib/billing/policy";
 import { BillingCta } from "./billing-cta";
 
 /**
@@ -40,6 +41,8 @@ export interface SettingsData {
     tier: "free" | "paid";
     itemsPerDay: number;
     proItemsPerDay: number;
+    /** The explicit #153 matrix resolved by the server policy, never client tier state. */
+    capabilities: SellerCapabilities;
     /** Whether direct-Stripe billing is configured (#64). When false, the free
      *  CTA points at marketing `/pricing` instead of starting a live checkout. */
     billingEnabled: boolean;
@@ -200,6 +203,10 @@ export function SettingsView({
 }) {
   const { user, autopilotEnabled, autoReplyEnabled, ebay, billing } = data;
   const isPaid = billing.tier === "paid";
+  const coreCapabilities = SELLER_CAPABILITY_MATRIX
+    .filter((capability) => billing.capabilities[capability.id])
+    .map((capability) => capability.label)
+    .join(" · ");
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-2 px-4 py-6 sm:px-6">
@@ -294,8 +301,9 @@ export function SettingsView({
                   <strong className="font-medium text-fg-strong">
                     {billing.itemsPerDay} items a day
                   </strong>
-                  , with priority research and bulk uploads.
+                  . Seller Pro gives you more room for high-volume days.
                 </SectionDescription>
+                <CardNote>Core seller workflows on every plan: {coreCapabilities}.</CardNote>
                 <BillingCta
                   endpoint="/api/billing/portal"
                   label="Manage billing"
@@ -314,8 +322,8 @@ export function SettingsView({
                   .
                 </SectionDescription>
                 <CardNote>
-                  Seller Pro lifts that to {billing.proItemsPerDay} a day with priority
-                  research and bulk uploads.
+                  Seller Pro lifts that to {billing.proItemsPerDay} a day. Core seller workflows
+                  included here: {coreCapabilities}.
                   {billing.billingEnabled
                     ? " Beta users keep early-bird pricing."
                     : " It arrives after beta, and beta users keep early-bird pricing."}

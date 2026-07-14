@@ -7,12 +7,13 @@ Status: accepted · Issue #58
 The metered AI endpoints (vision + pricing + listing generation, buyer-reply drafting) cost real
 money per call and are an abuse surface on a deployed, multi-tenant app. We need (a) request rate
 limiting and (b) a spend guardrail that caps per-user daily usage and warns when the global model
-budget is exceeded — with limits that billing (#64) can later gate by tier. Constraints: build offline
+budget is exceeded — with limits that the billing policy can gate by tier. Constraints: build offline
 (no Upstash account required to develop/test), and no `node:`-deps package may reach a client bundle.
 
 ## Decision
 
-Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `free` until #64).
+Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware through the server-resolved
+Seller policy (ADR-0006).
 
 - **Rate limiting — `@upstash/ratelimit` sliding window** on the metered entry points (per-minute,
   keyed by Clerk user id, IP fallback where a route provides it), `snaplist:rl` key prefix.
@@ -25,7 +26,7 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
   DB read fired on every keystroke; rate-limiting it would break the palette. The bulk-capture
   status poll (`GET /api/batch/status`) is likewise excluded — a cheap RLS'd read, not model work.
 - **Spend guardrail — a per-day counter** (`incrDaily`: Redis `INCR`+expiry | in-memory):
-  - **Per-user/day item cap** (the quota billing #64 gates) — checked in the upload action *and* the
+  - **Per-user/day item cap** (the Seller policy gates) — checked in the upload action *and* the
     bulk-capture batch-item route (#100) *before* any photo upload or model call; over-cap redirects
     with a clear message (single-item) or returns a `quota` signal that blocks the rest of the batch
     (bulk), so a haul can't spend past the cap (friendlier limit UI is deferred to the frontend issue).
@@ -48,5 +49,7 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
   guardrail for an outage (and break the offline-build constraint), the "production sets Upstash"
   assumption is guarded by a ONE-TIME alert instead: the first production check that runs on the
   fallback emits `abuse.store.fallback-in-production` (log + Sentry, mirroring the budget alert).
-- `resolveTier` is the single seam #64 (billing) flips to grant paid limits; nothing else changes.
+- `resolveSellerPolicy` is the async, RLS-scoped server seam that resolves the mirrored entitlement
+  before metered route/action enforcement. It fails closed to the Free policy; `resolveTier` is only
+  a lower-level Free fallback. See ADR-0005 and ADR-0006.
 - A 429/limit UI polish pass is deferred to the frontend issue (server returns the correct signals).

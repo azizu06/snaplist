@@ -10,10 +10,9 @@
 SnapList needs freemium subscription billing **for the app itself** (sellers pay for SnapList; buyer
 checkout/shipping stay on eBay). Two cross-cutting constraints:
 
-- The **quota tiers already exist** (`src/lib/abuse/config.ts`, #58): `Tier = "free" | "paid"`,
-  `tierLimits` (free = 15 items/day · 20 req/min; paid = 200 · 60), and `resolveTier(userId)` which
-  returns `"free"` for everyone — its comment names #64 as the issue that sets it. Billing only has to
-  flip that seam, not invent tiers.
+- The **quota tiers already exist** (`src/lib/abuse/config.ts`, #58): `Tier = "free" | "paid"` and
+  env-configurable `tierLimits` (defaults: free = 15 items/day · 20 req/min; paid = 200 · 60).
+  ADR-0006 defines how the entitlement mirror turns those limits into one truthful server policy.
 - It must run **offline and test-mode**: the Stripe account is sandbox-only (live access under review),
   and the offline test suite must not need a key.
 
@@ -34,10 +33,10 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
 3. **The seam the app flips:** `async getEntitlement(userId)` reads the mirror and maps status → tier
    via the single rule `entitlementTierFromStatus` (`active`/`trialing` → `paid`, else `free`). It is
    **fail-safe** — any error/missing row resolves to `free`, so a billing hiccup never grants
-   entitlement nor blocks a request. The pure `resolveTier` stays the default for can't-await/hot
-   paths (the per-request rate limiter); the once-per-upload **quota check** resolves the real
-   entitlement (`checkDailyItemQuota(userId, env, await getEntitlement(userId))`), so Pro actually
-   gets the higher cap.
+   entitlement. ADR-0006 layers `resolveSellerPolicy(userId)` over that read for every metered
+   route/action and the upload/batch daily-item guards, so the same trusted tier drives both capacity
+   values. The pure `resolveTier` remains only a lower-level Free fallback, never a server request
+   entitlement decision.
 
 4. **Three endpoints, lifecycle-safe webhook.** `POST /api/billing/checkout` persists or reuses the
    Customer map, atomically claims one pending hosted Checkout (returning that same URL on retry), and
@@ -72,9 +71,10 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
   the existing tier seam with no quota re-design.
 - **Negative / risks:** a failed first Customer-map write prevents Checkout from opening rather than
   risking a second Customer; ambiguous historical Customer ownership blocks the migration for human
-  repair. The rate limiter stays on the pure `resolveTier` (free limits) to avoid a per-request DB
-  read — paid gating applies to the per-upload quota (the real cost lever), not the per-minute rate
-  limit. Live mode awaits Stripe account verification (a key swap).
+  repair. Metered authenticated requests read the local entitlement mirror unless their seam passes
+  an already-resolved policy; this adds a database read but avoids misrepresenting paid capacity and
+  still never calls Stripe on the request path. Live mode awaits Stripe account verification (a key
+  swap).
 
 ## Docs touched
 

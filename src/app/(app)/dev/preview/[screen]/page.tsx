@@ -13,6 +13,7 @@ import {
   SettingsView,
   type SettingsData,
 } from "@/app/(app)/settings/settings-view";
+import { sellerPolicyForTier } from "@/lib/billing/policy";
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 import { InboxThreadPreview } from "../inbox-thread-preview";
 import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-view";
@@ -180,7 +181,13 @@ const FIXTURE_SETTINGS: SettingsData = {
   autopilotEnabled: true,
   autoReplyEnabled: false,
   ebay: { connected: true, ebayUsername: "aziz_resells" },
-  billing: { tier: "free", itemsPerDay: 15, proItemsPerDay: 200, billingEnabled: true },
+  billing: {
+    tier: "free",
+    itemsPerDay: 15,
+    proItemsPerDay: 200,
+    capabilities: sellerPolicyForTier("free").capabilities,
+    billingEnabled: true,
+  },
   error: null,
   ebayBanner: null,
 };

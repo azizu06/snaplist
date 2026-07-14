@@ -18,6 +18,15 @@ export {
   type BillingLifecycleStore,
 } from "./entitlement";
 export {
+  SELLER_CAPABILITY_MATRIX,
+  resolveSellerPolicy,
+  sellerPolicyForTier,
+  type SellerCapability,
+  type SellerCapabilities,
+  type SellerPolicy,
+  type ResolveSellerPolicyOptions,
+} from "./policy";
+export {
   subscriptionFromStripe,
   subscriptionReferenceFromEvent,
   handleStripeEvent,

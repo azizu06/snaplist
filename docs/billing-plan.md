@@ -1,7 +1,12 @@
-# Billing — freemium subscriptions via direct Stripe (implementation plan, #64)
+# Billing — freemium subscriptions via direct Stripe (historical implementation plan, #64)
 
-> **Status:** frontend landed (this PR); backend is the remaining work and needs a human for the
-> Stripe account + keys. Test mode only. This doc is the handoff spec for the backend slice.
+> **Status:** historical #64 handoff record. The frontend and lifecycle backend are now landed;
+> this plan preserves their original implementation rationale and test-mode boundary.
+
+> **Current policy note (issue #153):** the lifecycle implementation is now landed. The current
+> source of truth for Seller Pro behavior is ADR-0006: both plans include every core seller workflow,
+> including bulk / haul capture; Seller Pro changes only server-enforced per-minute and per-day
+> capacity. The implementation notes below remain the original #64 handoff record.
 
 ## Why this doc
 Issue [#64](https://github.com/azizu06/snaplist/issues/64) is `ready-for-human` because it needs a

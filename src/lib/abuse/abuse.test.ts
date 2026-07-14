@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openAiDailyCallBudget, resolveTier, tierLimits } from "./config";
 import * as store from "./store";
 import { getLimiter, incrDaily, __resetInMemoryStores } from "./store";
+import { sellerPolicyForTier } from "../billing/policy";
 import {
   checkDailyItemQuota,
   checkRateLimit,
@@ -147,6 +148,65 @@ describe("abuse rate limiting", () => {
     expect(blocked!.headers.get("Retry-After")).toBeTruthy();
     const body = await blocked!.json();
     expect(body.error).toMatch(/too many requests/i);
+  });
+
+  it.each([
+    ["free", 2, 2],
+    ["paid", 3, 3],
+  ] as const)(
+    "uses the %s policy for both API-route and server-action per-minute enforcement",
+    async (tier, limit, attempts) => {
+      const env = {
+        RATE_LIMIT_FREE_PER_MINUTE: "2",
+        RATE_LIMIT_PAID_PER_MINUTE: "3",
+      };
+      const policy = sellerPolicyForTier(tier, env);
+      const request = new Request("https://snaplist.test/api/batch/item", { method: "POST" });
+
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        await expect(
+          enforceRateLimit(request, `route-${tier}`, { policy, env }),
+        ).resolves.toBeNull();
+        await expect(
+          rateLimitAllows(`action-${tier}`, env, { policy }),
+        ).resolves.toBe(true);
+      }
+
+      await expect(enforceRateLimit(request, `route-${tier}`, { policy, env })).resolves.toMatchObject({
+        status: 429,
+      });
+      await expect(rateLimitAllows(`action-${tier}`, env, { policy })).resolves.toBe(false);
+      expect(limit).toBe(policy.limits.meteredPerMinute);
+    },
+  );
+});
+
+describe("abuse daily item quota uses the same Seller policy", () => {
+  it.each([
+    ["free", 2],
+    ["paid", 4],
+  ] as const)("allows the %s plan's cap and keeps another tenant independent", async (tier, cap) => {
+    const env = {
+      QUOTA_FREE_ITEMS_PER_DAY: "2",
+      QUOTA_PAID_ITEMS_PER_DAY: "4",
+    };
+    const policy = sellerPolicyForTier(tier, env);
+
+    for (let attempt = 0; attempt < cap; attempt += 1) {
+      await expect(checkDailyItemQuota(`seller-${tier}`, env, policy)).resolves.toMatchObject({
+        allowed: true,
+        limit: cap,
+      });
+    }
+    await expect(checkDailyItemQuota(`seller-${tier}`, env, policy)).resolves.toMatchObject({
+      allowed: false,
+      limit: cap,
+    });
+    await expect(checkDailyItemQuota(`other-${tier}`, env, policy)).resolves.toMatchObject({
+      allowed: true,
+      used: 1,
+      limit: cap,
+    });
   });
 });
 
