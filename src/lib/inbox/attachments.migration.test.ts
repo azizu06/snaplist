@@ -20,6 +20,7 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/enable row level security/i);
     expect(migration).toMatch(/message_attachments_select_own[\s\S]*user_id = public\.clerk_user_id\(\)/i);
     expect(migration).toMatch(/message_attachments_insert_own[\s\S]*delivery_status = 'staged'/i);
+    expect(migration).toMatch(/direction = 'inbound'[\s\S]*provider_url is not null[\s\S]*sb_secret_%/i);
     expect(migration).toMatch(/message_attachments_update_server_own/i);
     expect(migration).toMatch(/enforce_message_attachment_server_update[\s\S]*sb_secret_%/i);
     expect(migration).toMatch(/supabase_realtime add table public\.message_attachments/i);
@@ -34,5 +35,12 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/private\.apply_authenticated_ebay_message_write/i);
     expect(migration).toMatch(/provider_media_id is null[\s\S]*provider_url is null/i);
     expect(migration).toMatch(/set message_id = v_message_id,[\s\S]*delivery_status = 'delivered'/i);
+  });
+
+  it("queues object deletion inside the generation-scoped database erasure", () => {
+    expect(migration).toMatch(/message_photo_object_deletion_queue/i);
+    expect(migration).toMatch(/after delete on public\.message_attachments/i);
+    expect(migration).toMatch(/list_message_photo_object_deletions/i);
+    expect(migration).toMatch(/complete_message_photo_object_deletions/i);
   });
 });

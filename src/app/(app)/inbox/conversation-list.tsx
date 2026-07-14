@@ -265,6 +265,21 @@ export function deriveConversationState(
   };
 }
 
+export function attachmentsForMessageDelivery(
+  attachments: MessageAttachmentRow[],
+  message: MessageRow,
+): MessageAttachmentRow[] {
+  const delivered = message.delivery_status === "delivered";
+  return attachments.filter(
+    (photo) =>
+      photo.message_id === message.id ||
+      (!delivered &&
+        photo.message_id === null &&
+        photo.delivery_request_id ===
+          (message.delivery_request_id ?? message.id)),
+  );
+}
+
 /* ────────────────────────────── left pane: list ───────────────────────────── */
 
 export interface ConversationListProps {
@@ -898,6 +913,7 @@ export function ConversationThread({
           {followUps.map((m) => {
             const delivered = m.delivery_status === "delivered";
             const retrying = busy === `retry-followup:${m.id}`;
+            const messagePhotos = attachmentsForMessageDelivery(attachments, m);
             return (
             <div key={m.id} className="flex flex-col items-end gap-1">
               <div
@@ -911,7 +927,7 @@ export function ConversationThread({
                   <span className="sr-only">You: </span>
                   {m.body}
                 </p>
-                <MessagePhotos photos={attachments.filter((photo) => photo.message_id === m.id)} />
+                <MessagePhotos photos={messagePhotos} />
               </div>
               {delivered ? (
                 <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
@@ -981,6 +997,13 @@ export function ConversationThread({
                 {message.draft_reply}
               </p>
             ) : null}
+            <MessagePhotos
+              photos={attachments.filter(
+                (photo) =>
+                  photo.message_id === null &&
+                  photo.delivery_request_id === message.id,
+              )}
+            />
             <div className="flex justify-end">
               <button
                 type="button"
@@ -1115,16 +1138,26 @@ function MessagePhotos({ photos }: { photos: MessageAttachmentRow[] }) {
   return (
     <div className="mt-2 grid max-w-64 grid-cols-2 gap-1.5">
       {[...photos].sort((a, b) => a.position - b.position).map((photo) => (
-        // The authenticated route rechecks attachment RLS and validates bytes,
-        // MIME, size, signature, provider host, and redirect behavior.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={photo.id}
-          src={`/api/inbox/attachments/${photo.id}`}
-          alt={photo.original_name}
-          loading="lazy"
-          className="max-h-48 w-full rounded-lg object-cover"
-        />
+        <div key={photo.id} className="min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/inbox/attachments/${photo.id}`}
+            alt={photo.original_name}
+            loading="lazy"
+            className="max-h-48 w-full rounded-lg object-cover"
+          />
+          {photo.delivery_status !== "delivered" ? (
+            <span className="mt-0.5 block truncate text-[10px] font-semibold">
+              {photo.delivery_status === "uploaded"
+                ? "Upload ready · retry pending"
+                : photo.delivery_status === "ambiguous"
+                  ? "Delivery unconfirmed"
+                  : photo.delivery_status === "staged"
+                    ? "Ready to retry"
+                    : "Photo not delivered"}
+            </span>
+          ) : null}
+        </div>
       ))}
     </div>
   );

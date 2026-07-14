@@ -14,7 +14,9 @@ import {
   MessagePhotoConflictError,
   stageOutboundPhotos,
   validateFormPhotos,
+  validateStoredPhotos,
 } from "@/lib/inbox/attachment-store";
+import { storedMessagePhotoSchema } from "@/lib/inbox/attachments";
 
 /**
  * POST /api/inbox/[messageId]/send — the seller approved (or edited) the drafted
@@ -27,7 +29,10 @@ import {
  * ownership (another user's messageId 404s).
  */
 
-const bodySchema = z.object({ reply: z.string().trim().min(1).max(2_000) });
+const bodySchema = z.object({
+  reply: z.string().trim().min(1).max(2_000),
+  photos: z.array(storedMessagePhotoSchema).max(5).default([]),
+});
 const paramsSchema = z.object({ messageId: z.uuid() });
 
 export async function POST(
@@ -83,6 +88,24 @@ export async function POST(
       { error: "Photo messages are supported only for imported eBay conversations" },
       { status: 400 },
     );
+  }
+  if (parsed.data.photos.length && message.marketplace !== "ebay") {
+    return NextResponse.json(
+      { error: "Photo messages are supported only for imported eBay conversations" },
+      { status: 400 },
+    );
+  }
+  if (parsed.data.photos.length) {
+    try {
+      photos = await validateStoredPhotos({
+        supabase,
+        userId,
+        conversationRootId: message.id,
+        photos: parsed.data.photos,
+      });
+    } catch {
+      return NextResponse.json({ error: "Invalid or unavailable message photos" }, { status: 400 });
+    }
   }
   try {
     await stageOutboundPhotos({

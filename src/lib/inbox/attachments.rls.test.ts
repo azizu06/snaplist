@@ -69,6 +69,14 @@ describe("message attachment RLS (DB-gated)", () => {
       delivery_status: "delivered",
     };
     expect((await admin.from("message_attachments").insert(row)).error).toBeNull();
+    expect((await b.client.from("message_attachments").insert({
+      ...row,
+      delivery_request_id: "inbound:browser-forgery",
+    })).error).not.toBeNull();
+    expect((await bServer.from("message_attachments").insert({
+      ...row,
+      delivery_request_id: "inbound:foreground-sync",
+    })).error).toBeNull();
     const { data: leaked } = await a.client.from("message_attachments").select("*");
     expect(leaked).toHaveLength(0);
     expect((await a.client.from("message_attachments").insert({ ...row, user_id: b.id })).error).not.toBeNull();

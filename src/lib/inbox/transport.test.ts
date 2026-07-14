@@ -714,6 +714,33 @@ describe("message delivery transport", () => {
     expect(linked).toEqual([{ requestId: ROOT_ID, messageId: delivered.id }]);
   });
 
+  it("rejects new photos on a replay of an already delivered reply", async () => {
+    const repository = new MemoryDeliveryRepository();
+    repository.canonical = message({
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound",
+      reply_to: ROOT_ID,
+      reply_kind: "reply",
+      status: "sent",
+      delivery_status: "delivered",
+      external_delivery_id: "provider-root-reply",
+    });
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => [attachment()];
+    const adapter = new MockMarketplaceMessagingAdapter();
+
+    await expect(sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+    })).rejects.toBeInstanceOf(MessageDeliveryConflictError);
+    expect(adapter.uploads).toHaveLength(0);
+    expect(adapter.replies).toHaveLength(0);
+  });
+
   it("never downgrades a failed photo upload to text-only success", async () => {
     const repository = new MemoryDeliveryRepository();
     const adapter = new MockMarketplaceMessagingAdapter();

@@ -4,6 +4,7 @@ import {
   MAX_MESSAGE_PHOTOS,
   normalizeInboundMessagePhoto,
   validateMessagePhotoBatch,
+  validateStoredMessagePhotoPath,
 } from "./attachments";
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -104,5 +105,30 @@ describe("message photo policy", () => {
         mediaUrl: "http://i.ebayimg.com/image.jpg",
       }),
     ).toThrow(/HTTPS/i);
+  });
+
+  it("binds direct uploads to the owning tenant and conversation", () => {
+    const photo = {
+      name: "condition.jpg",
+      mediaType: "image/jpeg" as const,
+      byteSize: JPEG.length,
+      storagePath:
+        "user_a/11111111-1111-4111-8111-111111111111/pending/22222222-2222-4222-8222-222222222222.jpg",
+    };
+    expect(() => validateStoredMessagePhotoPath({
+      userId: "user_a",
+      conversationRootId: "11111111-1111-4111-8111-111111111111",
+      photo,
+    })).not.toThrow();
+    expect(() => validateStoredMessagePhotoPath({
+      userId: "user_b",
+      conversationRootId: "11111111-1111-4111-8111-111111111111",
+      photo,
+    })).toThrow(/does not belong/i);
+    expect(() => validateStoredMessagePhotoPath({
+      userId: "user_a",
+      conversationRootId: "11111111-1111-4111-8111-111111111111",
+      photo: { ...photo, storagePath: photo.storagePath.replace(/\.jpg$/, ".png") },
+    })).toThrow(/does not belong/i);
   });
 });

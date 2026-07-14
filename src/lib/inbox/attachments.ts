@@ -8,6 +8,14 @@ const supportedTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 export const messagePhotoMediaTypeSchema = z.enum(supportedTypes);
 export type MessagePhotoMediaType = z.infer<typeof messagePhotoMediaTypeSchema>;
 
+export const storedMessagePhotoSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  mediaType: messagePhotoMediaTypeSchema,
+  byteSize: z.number().int().positive().max(MAX_MESSAGE_PHOTO_BYTES),
+  storagePath: z.string().min(1).max(500),
+});
+export type StoredMessagePhoto = z.infer<typeof storedMessagePhotoSchema>;
+
 export interface MessagePhotoCandidate {
   name: string;
   type: string;
@@ -55,6 +63,28 @@ export function validateMessagePhoto(
           ? "png"
           : "webp",
   };
+}
+
+export function validateStoredMessagePhotoPath(input: {
+  userId: string;
+  conversationRootId: string;
+  photo: StoredMessagePhoto;
+}): void {
+  const extension =
+    input.photo.mediaType === "image/jpeg"
+      ? "jpg"
+      : input.photo.mediaType === "image/png"
+        ? "png"
+        : "webp";
+  const prefix = `${input.userId}/${input.conversationRootId}/pending/`;
+  const filename = input.photo.storagePath.slice(prefix.length);
+  if (
+    !input.photo.storagePath.startsWith(prefix) ||
+    !/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(filename) ||
+    !filename.endsWith(`.${extension}`)
+  ) {
+    throw new Error("Photo storage path does not belong to this conversation.");
+  }
 }
 
 function signatureMatches(type: MessagePhotoMediaType, bytes: Uint8Array): boolean {

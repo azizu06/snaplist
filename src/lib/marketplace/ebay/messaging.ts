@@ -557,6 +557,7 @@ export class HttpEbayMessagingAdapter
       true,
       input.accountGeneration,
       input.signal,
+      Boolean(input.media?.length),
     );
 
     return {
@@ -573,6 +574,7 @@ export class HttpEbayMessagingAdapter
     isWrite: boolean,
     expectedAccountGeneration?: string,
     parentSignal?: AbortSignal,
+    warningsAreAmbiguous = false,
   ): Promise<XmlRecord> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
@@ -685,6 +687,18 @@ export class HttpEbayMessagingAdapter
         );
       }
       throw new Error(`eBay ${callName} returned no acknowledgement`);
+    }
+    if (ack === "Warning" && isWrite && warningsAreAmbiguous) {
+      const errors = asArray(root.Errors).map(asRecord).filter(Boolean);
+      const detail = errors
+        .map((error) =>
+          asString(error?.ShortMessage) ?? asString(error?.LongMessage),
+        )
+        .find(Boolean);
+      throw new MarketplaceDeliveryError(
+        "ambiguous",
+        detail ?? "eBay accepted the message with unresolved photo warnings",
+      );
     }
     return root;
   }

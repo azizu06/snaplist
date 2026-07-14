@@ -68,17 +68,38 @@ create policy "message_attachments_insert_own"
   on public.message_attachments for insert
   with check (
     user_id = public.clerk_user_id()
-    and direction = 'outbound'
-    and message_id is null
-    and media_type is not null
-    and byte_size is not null
-    and content_sha256 is not null
-    and storage_path is not null
-    and provider_media_id is null
-    and provider_url is null
-    and provider_expires_at is null
-    and delivery_status = 'staged'
-    and delivery_error is null
+    and (
+      (
+        direction = 'outbound'
+        and message_id is null
+        and media_type is not null
+        and byte_size is not null
+        and content_sha256 is not null
+        and storage_path is not null
+        and provider_media_id is null
+        and provider_url is null
+        and provider_expires_at is null
+        and delivery_status = 'staged'
+        and delivery_error is null
+      )
+      or (
+        direction = 'inbound'
+        and message_id = conversation_root_id
+        and media_type is null
+        and byte_size is null
+        and content_sha256 is null
+        and storage_path is null
+        and provider_media_id is null
+        and provider_url is not null
+        and provider_expires_at is null
+        and delivery_status = 'delivered'
+        and delivery_error is null
+        and coalesce(
+          (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+          ''
+        ) like 'sb_secret_%'
+      )
+    )
   );
 
 -- Provider references and delivery truth are server-managed. Authenticated
@@ -226,3 +247,84 @@ revoke all on function public.complete_ebay_message_write_with_photos(
 grant execute on function public.complete_ebay_message_write_with_photos(
   text, jsonb, uuid, text
 ) to authenticated;
+
+create table private.message_photo_object_deletion_queue (
+  storage_path text primary key,
+  enqueued_at timestamptz not null default statement_timestamp()
+);
+
+revoke all on table private.message_photo_object_deletion_queue
+  from public, anon, authenticated, service_role;
+
+create or replace function private.queue_message_photo_object_deletion()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.storage_path is not null then
+    insert into private.message_photo_object_deletion_queue (storage_path)
+    values (old.storage_path)
+    on conflict (storage_path) do nothing;
+  end if;
+  return old;
+end;
+$$;
+
+revoke all on function private.queue_message_photo_object_deletion()
+  from public, anon, authenticated, service_role;
+
+create trigger message_attachments_queue_object_deletion
+  after delete on public.message_attachments
+  for each row execute function private.queue_message_photo_object_deletion();
+
+create or replace function public.list_message_photo_object_deletions()
+returns text[]
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Account deletion authorization is required';
+  end if;
+  return array(
+    select queue.storage_path
+    from private.message_photo_object_deletion_queue queue
+    order by queue.enqueued_at
+  );
+end;
+$$;
+
+revoke all on function public.list_message_photo_object_deletions()
+  from public, anon, authenticated;
+grant execute on function public.list_message_photo_object_deletions()
+  to service_role;
+
+create or replace function public.complete_message_photo_object_deletions(
+  p_storage_paths text[]
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_deleted integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Account deletion authorization is required';
+  end if;
+  delete from private.message_photo_object_deletion_queue queue
+  where queue.storage_path = any(coalesce(p_storage_paths, '{}'::text[]));
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+revoke all on function public.complete_message_photo_object_deletions(text[])
+  from public, anon, authenticated;
+grant execute on function public.complete_message_photo_object_deletions(text[])
+  to service_role;

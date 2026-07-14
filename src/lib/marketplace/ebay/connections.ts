@@ -312,10 +312,6 @@ export async function eraseEbayUserData(
   ebayUserId: string | undefined,
   ebayUsername: string | undefined,
 ): Promise<number> {
-  await eraseEbayMessagePhotoObjects(
-    serviceClient,
-    [ebayUserId, ebayUsername].filter((value): value is string => Boolean(value)),
-  );
   const { data, error } = await serviceClient.rpc("erase_ebay_user_data", {
     p_ebay_user_id: ebayUserId ?? null,
     p_ebay_username: ebayUsername ?? null,
@@ -324,59 +320,30 @@ export async function eraseEbayUserData(
   if (typeof data !== "number") {
     throw new Error("Deletion erase failed: database returned an invalid result");
   }
+  await drainEbayMessagePhotoDeletionQueue(serviceClient);
   return data;
 }
 
-async function eraseEbayMessagePhotoObjects(
+async function drainEbayMessagePhotoDeletionQueue(
   serviceClient: SupabaseClient,
-  identities: string[],
 ): Promise<void> {
-  if (!identities.length) return;
-  const sellerUserIds = new Set<string>();
-  for (const identity of identities) {
-    for (const column of ["ebay_user_id", "ebay_username"] as const) {
-      const { data, error } = await serviceClient
-        .from("ebay_connections")
-        .select("user_id")
-        .eq(column, identity);
-      if (error) throw new Error(`Deletion photo lookup failed: ${error.message}`);
-      for (const row of data ?? []) sellerUserIds.add(row.user_id as string);
-    }
-  }
-  const roots = new Set<string>();
-  if (sellerUserIds.size) {
-    const { data, error } = await serviceClient
-      .from("messages")
-      .select("id")
-      .eq("marketplace", "ebay")
-      .eq("direction", "inbound")
-      .in("user_id", [...sellerUserIds]);
-    if (error) throw new Error(`Deletion photo lookup failed: ${error.message}`);
-    for (const row of data ?? []) roots.add(row.id as string);
-  }
-  for (const identity of identities) {
-    const { data, error } = await serviceClient
-      .from("messages")
-      .select("id")
-      .eq("marketplace", "ebay")
-      .eq("direction", "inbound")
-      .eq("external_buyer_id", identity);
-    if (error) throw new Error(`Deletion photo lookup failed: ${error.message}`);
-    for (const row of data ?? []) roots.add(row.id as string);
-  }
-  if (!roots.size) return;
-  const { data, error } = await serviceClient
-    .from("message_attachments")
-    .select("storage_path")
-    .in("conversation_root_id", [...roots])
-    .not("storage_path", "is", null);
-  if (error) throw new Error(`Deletion photo lookup failed: ${error.message}`);
-  const paths = (data ?? []).flatMap((row) =>
-    typeof row.storage_path === "string" ? [row.storage_path] : [],
+  const { data, error } = await serviceClient.rpc(
+    "list_message_photo_object_deletions",
   );
+  if (error) throw new Error(`Deletion photo queue failed: ${error.message}`);
+  const paths = Array.isArray(data)
+    ? data.filter((path): path is string => typeof path === "string")
+    : [];
   if (!paths.length) return;
   const removed = await serviceClient.storage.from("message-photos").remove(paths);
   if (removed.error) {
     throw new Error(`Deletion photo erase failed: ${removed.error.message}`);
+  }
+  const completed = await serviceClient.rpc(
+    "complete_message_photo_object_deletions",
+    { p_storage_paths: paths },
+  );
+  if (completed.error) {
+    throw new Error(`Deletion photo queue completion failed: ${completed.error.message}`);
   }
 }

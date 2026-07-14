@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { MessageRow } from "@/lib/inbox";
-import { deriveConversationState } from "./conversation-list";
+import type { MessageAttachmentRow, MessageRow } from "@/lib/inbox";
+import {
+  attachmentsForMessageDelivery,
+  deriveConversationState,
+} from "./conversation-list";
 
 function message(overrides: Partial<MessageRow> = {}): MessageRow {
   return {
@@ -95,5 +98,47 @@ describe("deriveConversationState", () => {
       canRetryFollowUps: false,
       snippet: "The charger is included.",
     });
+  });
+});
+
+describe("attachmentsForMessageDelivery", () => {
+  const pendingPhoto: MessageAttachmentRow = {
+    id: "55555555-5555-4555-8555-555555555555",
+    user_id: "user_a",
+    conversation_root_id: "11111111-1111-4111-8111-111111111111",
+    message_id: null,
+    delivery_request_id: "66666666-6666-4666-8666-666666666666",
+    position: 0,
+    direction: "outbound",
+    media_type: "image/jpeg",
+    byte_size: 4,
+    original_name: "condition.jpg",
+    content_sha256: "a".repeat(64),
+    storage_path: "user_a/root/condition.jpg",
+    provider_media_id: null,
+    provider_url: null,
+    provider_expires_at: null,
+    delivery_status: "failed",
+    delivery_error: "failed",
+    created_at: "2026-07-14T12:00:00.000Z",
+    updated_at: "2026-07-14T12:00:00.000Z",
+  };
+
+  it("keeps failed photos visible by durable delivery request", () => {
+    const followUp = message({
+      id: "77777777-7777-4777-8777-777777777777",
+      direction: "outbound",
+      reply_kind: "followup",
+      delivery_request_id: pendingPhoto.delivery_request_id,
+      delivery_status: "failed",
+    });
+
+    expect(attachmentsForMessageDelivery([pendingPhoto], followUp)).toEqual([
+      pendingPhoto,
+    ]);
+    expect(attachmentsForMessageDelivery(
+      [pendingPhoto],
+      { ...followUp, delivery_status: "delivered" },
+    )).toEqual([]);
   });
 });

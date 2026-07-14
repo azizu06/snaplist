@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import { HttpEbayMessagingAdapter } from "./messaging";
 
 const tokenProvider = {
@@ -132,6 +133,30 @@ describe("eBay message photo mapping", () => {
       media: [hostedPhoto],
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a media-bearing Trading warning visibly ambiguous", async () => {
+    const fetchSpy = vi.fn(async () => new Response(
+      `<AddMemberMessageRTQResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Warning</Ack><Errors><SeverityCode>Warning</SeverityCode><ShortMessage>One or more media entries were not accepted.</ShortMessage></Errors><CorrelationID>reply-1</CorrelationID></AddMemberMessageRTQResponse>`,
+    ));
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: "https://api.sandbox.ebay.com" }),
+    });
+
+    const error = await adapter.replyToQuestion({
+      externalParentId: "exact-question-42",
+      externalConversationId: "commerce-conversation-9",
+      externalListingId: "listing-9",
+      externalBuyerId: "buyer-7",
+      body: "Here is the condition photo.",
+      idempotencyKey: "reply-1",
+      media: [hostedPhoto],
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(MarketplaceDeliveryError);
+    expect(error).toMatchObject({ kind: "ambiguous" });
   });
 
   it("keeps the exact Commerce conversation and maps image-only message media", async () => {

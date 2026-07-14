@@ -63,8 +63,10 @@ The seller must reconnect before messaging can resume.
 Issue #134 supports a deliberately narrow attachment subset: JPEG, PNG, and
 WebP only, at most five images, at most 12 MB each, always accompanied by
 non-empty plain text. SnapList validates both declared MIME and file signature,
-stores originals in the private `message-photos` bucket, then uploads them with
-Commerce Media API
+uploads originals directly from the authenticated browser to the private
+`message-photos` bucket so the 12 MB contract does not cross Vercel's 4.5 MB
+Function payload limit, validates the retained bytes again on the server, then
+uploads them with Commerce Media API
 [`createImageFromFile`](https://developer.ebay.com/api-docs/commerce/media/resources/image/methods/createImageFromFile).
 That call uses multipart key `image`, returns `201`, an image-resource URI in
 `Location`, and EPS `imageUrl`/`expirationDate` metadata. SnapList persists all

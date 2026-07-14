@@ -16,6 +16,10 @@ import {
   type MessageAttachmentRow,
   type MessageRow,
 } from "@/lib/inbox";
+import {
+  MESSAGE_PHOTO_BUCKET,
+  type StoredMessagePhoto,
+} from "@/lib/inbox/attachments";
 import { InboxEmptyState } from "./inbox-empty";
 import { SimulatorCard } from "./simulator-card";
 import {
@@ -340,12 +344,11 @@ export function InboxClient({
     setBusy(`send:${message.id}`);
     setError(null);
     try {
-      const form = new FormData();
-      form.set("reply", reply);
-      photos.forEach((photo) => form.append("photos", photo, photo.name));
+      const uploadedPhotos = await uploadMessagePhotos(message.id, photos);
       const res = await fetch(`/api/inbox/${message.id}/send`, {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reply, photos: uploadedPhotos }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -434,13 +437,11 @@ export function InboxClient({
     setBusy(`followup:${message.id}`);
     setError(null);
     try {
-      const form = new FormData();
-      form.set("message", body);
-      form.set("requestId", requestId);
-      photos.forEach((photo) => form.append("photos", photo, photo.name));
+      const uploadedPhotos = await uploadMessagePhotos(message.id, photos);
       const res = await fetch(`/api/inbox/${message.id}/follow-up`, {
         method: "POST",
-        body: form,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: body, requestId, photos: uploadedPhotos }),
       });
       if (!res.ok) {
         const b = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -458,6 +459,45 @@ export function InboxClient({
       return false;
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function uploadMessagePhotos(
+    conversationRootId: string,
+    photos: File[],
+  ): Promise<StoredMessagePhoto[]> {
+    const uploadedPaths: string[] = [];
+    try {
+      const uploaded: StoredMessagePhoto[] = [];
+      for (const photo of photos) {
+        const extension =
+          photo.type === "image/jpeg"
+            ? "jpg"
+            : photo.type === "image/png"
+              ? "png"
+              : "webp";
+        const storagePath = `${userId}/${conversationRootId}/pending/${window.crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from(MESSAGE_PHOTO_BUCKET)
+          .upload(storagePath, photo, {
+            contentType: photo.type,
+            upsert: false,
+          });
+        if (uploadError) throw new Error("Photo upload failed before delivery.");
+        uploadedPaths.push(storagePath);
+        uploaded.push({
+          name: photo.name,
+          mediaType: photo.type as StoredMessagePhoto["mediaType"],
+          byteSize: photo.size,
+          storagePath,
+        });
+      }
+      return uploaded;
+    } catch (error) {
+      if (uploadedPaths.length) {
+        await supabase.storage.from(MESSAGE_PHOTO_BUCKET).remove(uploadedPaths);
+      }
+      throw error;
     }
   }
 
@@ -585,6 +625,7 @@ export function InboxClient({
   // is mounted at a time, so the composer's `reply-<id>` input id stays unique.
   const conversationThread = selectedMessage ? (
     <ConversationThread
+      key={selectedMessage.id}
       state={deriveConversationState(selectedMessage, repliesByQuestion, busy)}
       buyerName={buyerLabelFor(selectedMessage)}
       edits={edits}

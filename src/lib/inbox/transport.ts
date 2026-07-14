@@ -121,7 +121,11 @@ export async function sendCanonicalReply(
   }
   const alreadyDelivered = await input.repository.canonicalDelivered(root);
   if (alreadyDelivered && canonicalDeliveryMatches(root, alreadyDelivered)) {
-    await input.repository.linkDeliveredPhotos?.(root.id, alreadyDelivered.id);
+    await assertDeliveredPhotoReplay(
+      input.repository,
+      root.id,
+      alreadyDelivered.id,
+    );
     return alreadyDelivered;
   }
   const at = input.now?.() ?? new Date();
@@ -237,7 +241,11 @@ export async function sendSellerFollowUp(
       );
     }
     if (intent.message.delivery_status === "delivered") {
-      await input.repository.linkDeliveredPhotos?.(input.requestId, intent.message.id);
+      await assertDeliveredPhotoReplay(
+        input.repository,
+        input.requestId,
+        intent.message.id,
+      );
     }
     return intent.message;
   }
@@ -248,6 +256,25 @@ export async function sendSellerFollowUp(
     intent.message,
     at,
   );
+}
+
+async function assertDeliveredPhotoReplay(
+  repository: DeliveryRepository,
+  deliveryRequestId: string,
+  messageId: string,
+): Promise<void> {
+  if (!repository.listDeliveryPhotos) return;
+  const photos = await repository.listDeliveryPhotos(deliveryRequestId);
+  if (
+    photos.some(
+      (photo) =>
+        photo.message_id !== messageId || photo.delivery_status !== "delivered",
+    )
+  ) {
+    throw new MessageDeliveryConflictError(
+      "This delivery request is already complete with different photos",
+    );
+  }
 }
 
 export async function retryFollowUpDelivery(input: {
