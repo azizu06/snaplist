@@ -12,7 +12,10 @@ adapter:
 
 - Trading API [`GetMemberMessages`](https://developer.ebay.com/devzone/xml/docs/reference/ebay/GetMemberMessages.html)
   fetches active-listing questions with `MailMessageType=AskSellerQuestion`,
-  `MessageStatus=Unanswered`, inclusive creation-time bounds, and pagination.
+  inclusive creation-time bounds, and separate fully paginated
+  `MessageStatus=Unanswered` and `MessageStatus=Answered` calls. This follows
+  eBay's official [`AskSellerQuestion` workaround](https://developer.ebay.com/support/kb-article?KBid=1170);
+  SnapList deduplicates overlap and treats answered evidence as authoritative.
 - Trading API [`AddMemberMessageRTQ`](https://developer.ebay.com/devzone/xml/docs/reference/ebay/AddMemberMessageRTQ.html)
   sends the seller-approved answer. Its `ParentMessageID` is the exact
   `MemberMessageExchange.Question.MessageID` returned by `GetMemberMessages`.
@@ -129,9 +132,7 @@ round trip.
 
 ## Documentation caveat
 
-The current `GetMemberMessages` reference contains one contradictory field note
-saying `AskSellerQuestion` is not returned, while the same page's overview,
-sample request, sample response, and the RTQ Sandbox procedure explicitly use
-`GetMemberMessages` for unanswered `AskSellerQuestion` messages. SnapList
-follows the documented sample/procedure and keeps an operator Sandbox check as
-the final provider-behavior proof.
+The current `GetMemberMessages` reference contains contradictory field notes
+for `AskSellerQuestion`. SnapList follows eBay's linked workaround by making
+separate status-filtered calls and keeps an operator Sandbox check as the final
+provider-behavior proof.

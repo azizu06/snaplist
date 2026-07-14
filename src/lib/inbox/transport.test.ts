@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MockMarketplaceMessagingAdapter } from "@/lib/marketplace/mock-messaging";
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import type { MessageRow } from "./types";
@@ -52,6 +52,8 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   root = message();
   dispatchGeneration = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   dispatches: Array<{ id: string; attemptedAt: string }> = [];
+  dispatchRenewals: Array<{ id: string; attemptedAt: string }> = [];
+  dispatchRenewalFailure?: Error;
   canonical: MessageRow | null = null;
   followUps = new Map<string, MessageRow>();
   followUpsByRequest = new Map<string, MessageRow>();
@@ -87,6 +89,10 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   async beginProviderDispatch(id: string, attemptedAt: Date) {
     this.dispatches.push({ id, attemptedAt: attemptedAt.toISOString() });
     return { accountGeneration: this.dispatchGeneration };
+  }
+  async renewProviderDispatch(id: string, attemptedAt: Date) {
+    this.dispatchRenewals.push({ id, attemptedAt: attemptedAt.toISOString() });
+    if (this.dispatchRenewalFailure) throw this.dispatchRenewalFailure;
   }
   async failCanonical(
     id: string,
@@ -599,4 +605,73 @@ describe("message delivery transport", () => {
     expect(pending.delivery_status).toBe("delivered");
     expect(pending.external_delivery_id).toBe("followup-retry-delivered");
   });
+
+  it.each(["canonical", "follow-up"])(
+    "aborts an in-flight %s dispatch when its durable lease cannot renew",
+    async (kind) => {
+      vi.useFakeTimers();
+      try {
+        const repository = new MemoryDeliveryRepository();
+        repository.dispatchRenewalFailure = new Error("account erasure started");
+        const adapter = new MockMarketplaceMessagingAdapter();
+        let observedSignal: AbortSignal | undefined;
+        const waitForAbort = async (input: { signal?: AbortSignal }) => {
+          observedSignal = input.signal;
+          return await new Promise<never>((_resolve, reject) => {
+            if (!input.signal) {
+              reject(new Error("provider dispatch had no cancellation signal"));
+              return;
+            }
+            input.signal.addEventListener(
+              "abort",
+              () => reject(new MarketplaceDeliveryError(
+                "ambiguous",
+                "provider dispatch lease ended",
+              )),
+              { once: true },
+            );
+          });
+        };
+        adapter.replyToQuestion = waitForAbort;
+        adapter.sendFollowUp = waitForAbort;
+
+        let delivery: Promise<unknown>;
+        if (kind === "canonical") {
+          delivery = sendCanonicalReply({
+            repository,
+            adapter,
+            messageId: ROOT_ID,
+          }).catch((error: unknown) => error);
+        } else {
+          repository.canonical = message({
+            id: "44444444-4444-4444-8444-444444444444",
+            direction: "outbound",
+            body: "Delivered root reply",
+            reply_to: ROOT_ID,
+            reply_kind: "reply",
+            status: "sent",
+            delivery_status: "delivered",
+            external_delivery_id: "provider-root-reply",
+          });
+          delivery = sendSellerFollowUp({
+            repository,
+            adapter,
+            conversationId: ROOT_ID,
+            body: "One more detail.",
+            requestId: "lease-renewal-followup",
+          }).catch((error: unknown) => error);
+        }
+
+        await vi.advanceTimersByTimeAsync(60_000);
+        const error = await delivery;
+
+        expect(repository.dispatchRenewals).toHaveLength(1);
+        expect(observedSignal?.aborted).toBe(true);
+        expect(error).toBeInstanceOf(MessageDeliveryAttemptError);
+        expect((error as MessageDeliveryAttemptError).kind).toBe("ambiguous");
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });

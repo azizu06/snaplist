@@ -204,4 +204,101 @@ describe("UserTokenProvider", () => {
     ).rejects.toThrow("account generation changed");
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("does not return a refreshed token when its source generation expires", async () => {
+    const accountGeneration = "66666666-6666-4666-8666-666666666666";
+    const encryptionKey = Buffer.from(
+      ENCRYPTION_ENV.EBAY_TOKEN_ENCRYPTION_KEY,
+      "base64",
+    );
+    const rpc = vi.fn(async (name: string) => {
+      if (name === "read_scheduled_ebay_connection") {
+        return {
+          data: {
+            user_id: "scheduled-tenant",
+            account_generation: accountGeneration,
+            refresh_token_enc: encryptSecret("refresh-token-a", encryptionKey),
+            access_token_enc: null,
+            access_token_expires_at: null,
+            scopes: ["scope-a"],
+          },
+          error: null,
+        };
+      }
+      return {
+        data: null,
+        error: { message: "eBay connection account generation expired" },
+      };
+    });
+    const provider = new UserTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      {
+        scheduled: true,
+        userId: "scheduled-tenant",
+        fetch: vi.fn(async () =>
+          Response.json({ access_token: "stale-token-a", expires_in: 3600 }),
+        ),
+        env: () => ({
+          ...ENCRYPTION_ENV,
+          EBAY_CLIENT_ID: "client-id",
+          EBAY_CLIENT_SECRET: "client-secret",
+        }),
+      },
+    );
+
+    await expect(provider.getAccessToken(accountGeneration)).rejects.toThrow(
+      "account generation expired",
+    );
+  });
+
+  it("bounds token refresh before a provider dispatch lease can expire", async () => {
+    const accountGeneration = "77777777-7777-4777-8777-777777777777";
+    const encryptionKey = Buffer.from(
+      ENCRYPTION_ENV.EBAY_TOKEN_ENCRYPTION_KEY,
+      "base64",
+    );
+    let observedSignal: AbortSignal | undefined;
+    const provider = new UserTokenProvider(
+      {
+        rpc: vi.fn(async () => ({
+          data: {
+            user_id: "scheduled-tenant",
+            account_generation: accountGeneration,
+            refresh_token_enc: encryptSecret("refresh-token", encryptionKey),
+            access_token_enc: null,
+            access_token_expires_at: null,
+            scopes: ["scope-a"],
+          },
+          error: null,
+        })),
+      } as unknown as SupabaseClient,
+      {
+        scheduled: true,
+        userId: "scheduled-tenant",
+        fetch: vi.fn(async (_url, init) => {
+          observedSignal = init?.signal ?? undefined;
+          return await new Promise<Response>((_resolve, reject) => {
+            if (!observedSignal) {
+              reject(new Error("token refresh had no abort signal"));
+              return;
+            }
+            observedSignal.addEventListener(
+              "abort",
+              () => reject(observedSignal?.reason),
+              { once: true },
+            );
+          });
+        }) as unknown as typeof fetch,
+        env: () => ({
+          ...ENCRYPTION_ENV,
+          EBAY_CLIENT_ID: "client-id",
+          EBAY_CLIENT_SECRET: "client-secret",
+          EBAY_TOKEN_REFRESH_TIMEOUT_MS: "5",
+        }),
+      },
+    );
+
+    await expect(provider.getAccessToken(accountGeneration)).rejects.toBeTruthy();
+    expect(observedSignal?.aborted).toBe(true);
+  });
 });

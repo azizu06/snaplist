@@ -24,6 +24,8 @@ const SELL_INVENTORY_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.inventor
 
 /** Refresh this many ms before actual expiry. */
 const EXPIRY_SLACK_MS = 60_000;
+const DEFAULT_TOKEN_REFRESH_TIMEOUT_MS = 30_000;
+const MAX_TOKEN_REFRESH_TIMEOUT_MS = 2 * 60_000;
 
 export interface UserTokenProviderOptions {
   fetch?: typeof fetch;
@@ -53,7 +55,10 @@ export class UserTokenProvider implements EbayTokenProvider {
     this.scheduled = options.scheduled ?? false;
   }
 
-  async getAccessToken(expectedAccountGeneration?: string): Promise<string> {
+  async getAccessToken(
+    expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<string> {
     const env = this.readEnv();
     const connection = await getDecryptedConnection(
       this.supabase,
@@ -89,6 +94,7 @@ export class UserTokenProvider implements EbayTokenProvider {
       );
     }
 
+    const refreshSignal = tokenRefreshSignal(env, parentSignal);
     const res = await this.fetchImpl(
       `${ebayApiBaseUrl(env)}/identity/v1/oauth2/token`,
       {
@@ -109,6 +115,7 @@ export class UserTokenProvider implements EbayTokenProvider {
               ? connection.scopes.join(" ")
               : SELL_INVENTORY_SCOPE,
         }).toString(),
+        signal: refreshSignal,
       },
     );
 
@@ -145,4 +152,19 @@ export class UserTokenProvider implements EbayTokenProvider {
     );
     return token;
   }
+}
+
+function tokenRefreshSignal(
+  env: Record<string, string | undefined>,
+  parentSignal?: AbortSignal,
+): AbortSignal {
+  const configured = Number(env.EBAY_TOKEN_REFRESH_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configured) && configured > 0
+      ? Math.min(configured, MAX_TOKEN_REFRESH_TIMEOUT_MS)
+      : DEFAULT_TOKEN_REFRESH_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return parentSignal
+    ? AbortSignal.any([parentSignal, timeoutSignal])
+    : timeoutSignal;
 }

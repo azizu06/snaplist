@@ -18,6 +18,8 @@ const MAX_MESSAGE_BODY = 2_000;
 const ENTRIES_PER_PAGE = 200;
 const CONVERSATIONS_PER_PAGE = 10;
 const MESSAGES_PER_PAGE = 50;
+const DEFAULT_PROVIDER_DISPATCH_TIMEOUT_MS = 4 * 60_000;
+const MAX_PROVIDER_DISPATCH_TIMEOUT_MS = 4 * 60_000;
 const MESSAGE_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/commerce.message",
@@ -84,88 +86,102 @@ export class HttpEbayMessagingAdapter
       throw new Error("Question fetch window starts after it ends");
     }
 
-    const questions: MarketplaceQuestion[] = [];
-    const unresolved: MarketplaceQuestionFetchResult["unresolved"] = [];
-    const answeredExternalMessageIds: string[] = [];
-    let page = 1;
-    let hasMore = false;
-    do {
-      const response = await this.callTrading(
-        "GetMemberMessages",
-        {
-          GetMemberMessagesRequest: {
-            "@_xmlns": XML_NAMESPACE,
-            MailMessageType: "AskSellerQuestion",
-            StartCreationTime: input.from.toISOString(),
-            EndCreationTime: input.to.toISOString(),
-            Pagination: {
-              EntriesPerPage: ENTRIES_PER_PAGE,
-              PageNumber: page,
+    const pendingById = new Map<string, PendingMarketplaceQuestion>();
+    const answeredIds = new Set<string>();
+    for (const requestedStatus of ["Unanswered", "Answered"] as const) {
+      let page = 1;
+      let hasMore = false;
+      do {
+        const response = await this.callTrading(
+          "GetMemberMessages",
+          {
+            GetMemberMessagesRequest: {
+              "@_xmlns": XML_NAMESPACE,
+              MailMessageType: "AskSellerQuestion",
+              MessageStatus: requestedStatus,
+              StartCreationTime: input.from.toISOString(),
+              EndCreationTime: input.to.toISOString(),
+              Pagination: {
+                EntriesPerPage: ENTRIES_PER_PAGE,
+                PageNumber: page,
+              },
             },
           },
-        },
-        false,
-      );
+          false,
+        );
 
-      const exchanges = asArray(
-        asRecord(response.MemberMessage)?.MemberMessageExchange,
-      );
-      for (const raw of exchanges) {
-        const exchange = asRecord(raw);
-        const item = asRecord(exchange?.Item);
-        const question = asRecord(exchange?.Question);
-        const externalMessageId = asString(question?.MessageID);
-        const externalListingId = asString(item?.ItemID);
-        const externalBuyerId = asString(question?.SenderID);
-        const body = asString(question?.Body);
-        const createdAt = asIsoString(exchange?.CreationDate);
-        const messageStatus = asString(exchange?.MessageStatus);
-        if (messageStatus === "Answered") {
-          if (!externalMessageId) {
+        const exchanges = asArray(
+          asRecord(response.MemberMessage)?.MemberMessageExchange,
+        );
+        for (const raw of exchanges) {
+          const exchange = asRecord(raw);
+          const item = asRecord(exchange?.Item);
+          const question = asRecord(exchange?.Question);
+          const externalMessageId = asString(question?.MessageID);
+          const externalListingId = asString(item?.ItemID);
+          const externalBuyerId = asString(question?.SenderID);
+          const body = asString(question?.Body);
+          const createdAt = asIsoString(exchange?.CreationDate);
+          const messageStatus = asString(exchange?.MessageStatus);
+          if (messageStatus === "Answered") {
+            if (!externalMessageId) {
+              throw new Error(
+                "Answered eBay member-message exchange is missing MessageID",
+              );
+            }
+            answeredIds.add(externalMessageId);
+            pendingById.delete(externalMessageId);
+            continue;
+          }
+          if (messageStatus !== "Unanswered") {
             throw new Error(
-              "Answered eBay member-message exchange is missing MessageID",
+              "eBay member-message exchange returned an unknown message status",
             );
           }
-          answeredExternalMessageIds.push(externalMessageId);
-          continue;
+          if (!externalMessageId || !externalListingId) {
+            throw new Error(
+              "Unanswered eBay member-message exchange lacks stable identity",
+            );
+          }
+          if (!answeredIds.has(externalMessageId)) {
+            pendingById.set(externalMessageId, {
+              marketplace: "ebay",
+              externalMessageId,
+              externalParentId: externalMessageId,
+              externalListingId,
+              externalBuyerId: externalBuyerId ?? null,
+              body: body ?? null,
+              subject: asString(question?.Subject) ?? null,
+              createdAt: createdAt ?? null,
+              resolutionWindowFrom: input.from.toISOString(),
+              observedCursorAt: input.to.toISOString(),
+            });
+          }
         }
-        if (messageStatus !== "Unanswered") {
-          throw new Error(
-            "eBay member-message exchange returned an unknown message status",
-          );
-        }
-        if (!externalMessageId || !externalListingId) {
-          throw new Error(
-            "Unanswered eBay member-message exchange lacks stable identity",
-          );
-        }
-        const pendingQuestion: PendingMarketplaceQuestion = {
-          marketplace: "ebay",
-          externalMessageId,
-          externalParentId: externalMessageId,
-          externalListingId,
-          externalBuyerId: externalBuyerId ?? null,
-          body: body ?? null,
-          subject: asString(question?.Subject) ?? null,
-          createdAt: createdAt ?? null,
-          resolutionWindowFrom: input.from.toISOString(),
-          observedCursorAt: input.to.toISOString(),
-        };
-        try {
-          questions.push(await this.resolveQuestion(pendingQuestion));
-        } catch (error) {
-          unresolved.push({
-            question: pendingQuestion,
-            error: errorMessage(error),
-          });
-          continue;
-        }
-      }
-      hasMore = response.HasMoreItems === true || response.HasMoreItems === "true";
-      page += 1;
-    } while (hasMore);
+        hasMore =
+          response.HasMoreItems === true || response.HasMoreItems === "true";
+        page += 1;
+      } while (hasMore);
+    }
 
-    return { questions, unresolved, answeredExternalMessageIds };
+    const questions: MarketplaceQuestion[] = [];
+    const unresolved: MarketplaceQuestionFetchResult["unresolved"] = [];
+    for (const pendingQuestion of pendingById.values()) {
+      try {
+        questions.push(await this.resolveQuestion(pendingQuestion));
+      } catch (error) {
+        unresolved.push({
+          question: pendingQuestion,
+          error: errorMessage(error),
+        });
+      }
+    }
+
+    return {
+      questions,
+      unresolved,
+      answeredExternalMessageIds: [...answeredIds],
+    };
   }
 
   async resolveQuestion(
@@ -220,8 +236,10 @@ export class HttpEbayMessagingAdapter
 
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+    const signal = providerDispatchSignal(env, input.signal);
     const token = await this.tokenProvider.getAccessToken(
       input.accountGeneration,
+      signal,
     );
     let response: Response;
     try {
@@ -238,6 +256,7 @@ export class HttpEbayMessagingAdapter
             conversationId: input.externalConversationId,
             messageText: body,
           }),
+          signal,
         },
       );
     } catch (cause) {
@@ -414,6 +433,7 @@ export class HttpEbayMessagingAdapter
       },
       true,
       input.accountGeneration,
+      input.signal,
     );
 
     return {
@@ -429,12 +449,17 @@ export class HttpEbayMessagingAdapter
     request: XmlRecord,
     isWrite: boolean,
     expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
   ): Promise<XmlRecord> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const endpoint = `${baseUrl.replace(/\/$/, "")}/ws/api.dll`;
+    const signal = isWrite
+      ? providerDispatchSignal(env, parentSignal)
+      : parentSignal;
     const token = await this.tokenProvider.getAccessToken(
       expectedAccountGeneration,
+      signal,
     );
     const xml = `<?xml version="1.0" encoding="utf-8"?>${builder.build(request)}`;
 
@@ -451,6 +476,7 @@ export class HttpEbayMessagingAdapter
           "x-ebay-api-iaf-token": token,
         },
         body: xml,
+        signal,
       });
     } catch (cause) {
       if (isWrite) {
@@ -545,6 +571,21 @@ function asRecord(value: unknown): XmlRecord | undefined {
   return value != null && typeof value === "object" && !Array.isArray(value)
     ? (value as XmlRecord)
     : undefined;
+}
+
+function providerDispatchSignal(
+  env: Record<string, string | undefined>,
+  parentSignal?: AbortSignal,
+): AbortSignal {
+  const configured = Number(env.EBAY_PROVIDER_DISPATCH_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configured) && configured > 0
+      ? Math.min(configured, MAX_PROVIDER_DISPATCH_TIMEOUT_MS)
+      : DEFAULT_PROVIDER_DISPATCH_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return parentSignal
+    ? AbortSignal.any([parentSignal, timeoutSignal])
+    : timeoutSignal;
 }
 
 function asArray(value: unknown): unknown[] {

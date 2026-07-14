@@ -15,6 +15,7 @@ function xmlResponse(body: string, status = 200): Response {
 
 describe("HttpEbayMessagingAdapter", () => {
   it("imports unanswered active-listing questions with exact Trading message identity", async () => {
+    const tradingBodies: string[] = [];
     const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url).includes("/commerce/message/v1/conversation")) {
         const parsed = new URL(String(url));
@@ -40,8 +41,15 @@ describe("HttpEbayMessagingAdapter", () => {
       const headers = init?.headers as Record<string, string>;
       expect(headers["x-ebay-api-call-name"]).toBe("GetMemberMessages");
       expect(headers["x-ebay-api-iaf-token"]).toBe("seller-token");
-      expect(String(init?.body)).toContain("<MailMessageType>AskSellerQuestion</MailMessageType>");
-      expect(String(init?.body)).not.toContain("<MessageStatus>");
+      const requestBody = String(init?.body);
+      tradingBodies.push(requestBody);
+      expect(requestBody).toContain("<MailMessageType>AskSellerQuestion</MailMessageType>");
+      if (requestBody.includes("<MessageStatus>Answered</MessageStatus>")) {
+        return xmlResponse(`<?xml version="1.0" encoding="utf-8"?>
+          <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+            <Ack>Success</Ack><HasMoreItems>false</HasMoreItems>
+          </GetMemberMessagesResponse>`);
+      }
       return xmlResponse(`<?xml version="1.0" encoding="utf-8"?>
         <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
           <Ack>Success</Ack>
@@ -87,7 +95,76 @@ describe("HttpEbayMessagingAdapter", () => {
       unresolved: [],
       answeredExternalMessageIds: [],
     });
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(tradingBodies).toHaveLength(2);
+    expect(tradingBodies).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("<MessageStatus>Unanswered</MessageStatus>"),
+        expect.stringContaining("<MessageStatus>Answered</MessageStatus>"),
+      ]),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("fully paginates both Trading statuses and lets answered evidence win overlaps", async () => {
+    const tradingRequests: Array<{ status: string; page: string }> = [];
+    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-unanswered",
+              latestMessage: {
+                messageId: "question-unanswered",
+                senderUsername: "buyer-unanswered",
+                messageBody: "Still available?",
+                createdDate: "2026-07-13T14:02:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+      const body = String(init?.body);
+      const status = body.match(/<MessageStatus>([^<]+)<\/MessageStatus>/)?.[1];
+      const page = body.match(/<PageNumber>([^<]+)<\/PageNumber>/)?.[1];
+      if (!status || !page) throw new Error("missing Trading status pagination");
+      tradingRequests.push({ status, page });
+      const answered = status === "Answered";
+      const messageId = answered ? "question-overlap" :
+        page === "1" ? "question-overlap" : "question-unanswered";
+      const listingId = messageId === "question-overlap"
+        ? "listing-overlap"
+        : "listing-unanswered";
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>${listingId}</ItemID></Item>
+            <Question><SenderID>buyer</SenderID><Body>Still available?</Body><MessageID>${messageId}</MessageID></Question>
+            <MessageStatus>${status}</MessageStatus><CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>${!answered && page === "1" ? "true" : "false"}</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      questions: [{ externalMessageId: "question-unanswered" }],
+      answeredExternalMessageIds: ["question-overlap"],
+    });
+    expect(tradingRequests).toEqual([
+      { status: "Unanswered", page: "1" },
+      { status: "Unanswered", page: "2" },
+      { status: "Answered", page: "1" },
+    ]);
   });
 
   it("resolves by listing and exact message identity without a buyer username filter", async () => {
@@ -177,7 +254,7 @@ describe("HttpEbayMessagingAdapter", () => {
       unresolved: [],
       answeredExternalMessageIds: ["question-answered"],
     });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("imports every exchange when Trading returns multiple questions", async () => {
@@ -566,7 +643,7 @@ describe("HttpEbayMessagingAdapter", () => {
       unresolved: [],
       answeredExternalMessageIds: [],
     });
-    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(fetchSpy).toHaveBeenCalledTimes(5);
   });
 
   it("paginates Commerce conversation candidates ten at a time", async () => {
@@ -742,6 +819,7 @@ describe("HttpEbayMessagingAdapter", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(tokenProvider.getAccessToken).toHaveBeenLastCalledWith(
       "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      expect.any(AbortSignal),
     );
   });
 
@@ -786,6 +864,7 @@ describe("HttpEbayMessagingAdapter", () => {
     });
     expect(tokenProvider.getAccessToken).toHaveBeenLastCalledWith(
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      expect.any(AbortSignal),
     );
   });
 
@@ -809,6 +888,56 @@ describe("HttpEbayMessagingAdapter", () => {
       .catch((error: unknown) => error);
     expect(err).toBeInstanceOf(MarketplaceDeliveryError);
     expect((err as MarketplaceDeliveryError).kind).toBe("ambiguous");
+  });
+
+  it.each([
+    ["canonical", (adapter: HttpEbayMessagingAdapter) => adapter.replyToQuestion({
+      accountGeneration: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      externalParentId: "parent",
+      externalConversationId: "conversation",
+      externalListingId: "listing",
+      externalBuyerId: "buyer",
+      body: "Reply",
+      idempotencyKey: "canonical-timeout",
+    })],
+    ["follow-up", (adapter: HttpEbayMessagingAdapter) => adapter.sendFollowUp({
+      accountGeneration: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      externalParentId: "parent",
+      externalConversationId: "conversation",
+      externalListingId: "listing",
+      externalBuyerId: "buyer",
+      body: "Follow-up",
+      idempotencyKey: "followup-timeout",
+    })],
+  ])("aborts a %s provider write inside the durable dispatch lease", async (_kind, send) => {
+    let observedSignal: AbortSignal | undefined;
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: vi.fn(async (_url, init) => {
+        observedSignal = init?.signal ?? undefined;
+        return await new Promise<Response>((_resolve, reject) => {
+          if (!observedSignal) {
+            reject(new Error("provider write had no abort signal"));
+            return;
+          }
+          observedSignal.addEventListener(
+            "abort",
+            () => reject(observedSignal?.reason),
+            { once: true },
+          );
+        });
+      }) as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({
+        EBAY_BASE_URL: BASE,
+        EBAY_PROVIDER_DISPATCH_TIMEOUT_MS: "5",
+      }),
+    });
+
+    const error = await send(adapter).catch((caught: unknown) => caught);
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(error).toBeInstanceOf(MarketplaceDeliveryError);
+    expect((error as MarketplaceDeliveryError).kind).toBe("ambiguous");
   });
 
   it("classifies a Trading acknowledgement read failure as ambiguous", async () => {

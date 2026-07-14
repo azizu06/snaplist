@@ -54,6 +54,7 @@ export interface FetchQuestionsInput {
 
 export interface MarketplaceDeliveryInput {
   accountGeneration?: string;
+  signal?: AbortSignal;
   externalParentId: string;
   externalConversationId: string;
   externalListingId: string;

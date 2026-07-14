@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(122);
+select extensions.plan(123);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -2332,7 +2332,7 @@ select extensions.is(
 
 insert into public.messages (
   id, user_id, item_id, listing_id, direction, body, status, marketplace,
-  external_message_id, external_parent_id, external_listing_id,
+  external_message_id, external_parent_id, external_listing_id, external_buyer_id,
   external_created_at
 ) values (
   '99000000-0000-4000-8000-000000000002',
@@ -2346,6 +2346,7 @@ insert into public.messages (
   'generation-question-b',
   'generation-question-b',
   'generation-listing',
+  'generation_seller_a',
   '2026-07-14T15:00:00Z'
 );
 
@@ -2386,7 +2387,7 @@ select extensions.is(
     where id = '99000000-0000-4000-8000-000000000002'
   ),
   1,
-  'historical account deletion preserves replacement account B messages'
+  'stable account A deletion preserves account B buyer data sharing its username'
 );
 
 select extensions.results_eq(
@@ -2630,6 +2631,47 @@ select extensions.is(
    where user_id = 'generation-tenant'),
   2,
   'canonical and follow-up provider writes hold generation-bound dispatch leases'
+);
+
+update private.ebay_provider_dispatch_leases
+set expires_at = statement_timestamp() + interval '5 seconds'
+where user_id = 'generation-tenant';
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select pg_temp.apply_ebay_message_write(
+  'renew_provider_dispatch',
+  '{"message_id":"99000000-0000-4000-8000-000000000002","attempted_at":"2026-07-14T16:10:00Z"}'::jsonb
+);
+select pg_temp.apply_ebay_message_write(
+  'renew_provider_dispatch',
+  jsonb_build_object(
+    'message_id', (select message_id from ebay_followup_dispatch_fixture),
+    'attempted_at', '2026-07-14T16:10:00Z'
+  )
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_provider_dispatch_leases
+    where user_id = 'generation-tenant'
+      and expires_at > statement_timestamp() + interval '4 minutes'
+  ),
+  2,
+  'canonical and follow-up workers renew their exact generation-bound dispatch leases'
 );
 
 set local role service_role;

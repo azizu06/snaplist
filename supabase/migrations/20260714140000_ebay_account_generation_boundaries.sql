@@ -777,6 +777,21 @@ begin
     return jsonb_build_object('account_generation', p_generation);
   end if;
 
+  if p_operation = 'renew_provider_dispatch' then
+    update private.ebay_provider_dispatch_leases lease
+    set expires_at = statement_timestamp() + interval '5 minutes'
+    where lease.user_id = p_user_id
+      and lease.message_id = (p_payload->>'message_id')::uuid
+      and lease.account_generation = p_generation
+      and lease.attempted_at = (p_payload->>'attempted_at')::timestamptz
+      and lease.expires_at > statement_timestamp();
+    get diagnostics v_count = row_count;
+    if v_count <> 1 then
+      raise exception using errcode = '40001', message = 'Provider dispatch lease expired';
+    end if;
+    return to_jsonb(true);
+  end if;
+
   perform set_config(
     'app.ebay_account_generation',
     p_generation::text,
@@ -1064,7 +1079,11 @@ begin
   into v_buyer_hashes
   from unnest(array[
     private.hash_ebay_identity('sender_id', p_ebay_user_id),
-    private.hash_ebay_identity('sender_id', p_ebay_username)
+    case
+      when v_user_id_hash is null
+        then private.hash_ebay_identity('sender_id', p_ebay_username)
+      else null
+    end
   ]) identity(identity_hash)
   where identity_hash is not null;
 

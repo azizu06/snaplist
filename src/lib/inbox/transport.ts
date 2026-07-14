@@ -13,6 +13,7 @@ import { messageRowSchema, type MessageRow } from "./types";
 
 const PG_UNIQUE_VIOLATION = "23505";
 const DELIVERY_LEASE_MS = 5 * 60_000;
+const PROVIDER_DISPATCH_HEARTBEAT_MS = 60_000;
 
 export class MessageDeliveryConflictError extends Error {
   constructor(message = "This message delivery was already claimed") {
@@ -45,6 +46,7 @@ export interface DeliveryRepository {
     messageId: string,
     attemptedAt: Date,
   ): Promise<{ accountGeneration: string }>;
+  renewProviderDispatch(messageId: string, attemptedAt: Date): Promise<void>;
   failCanonical(
     messageId: string,
     kind: MarketplaceDeliveryFailureKind,
@@ -121,8 +123,19 @@ export async function sendCanonicalReply(
   let receipt: MarketplaceDeliveryReceipt;
   try {
     const dispatch = await input.repository.beginProviderDispatch(root.id, at);
-    receipt = await input.adapter.replyToQuestion(
-      deliveryInput(root, body, root.id, dispatch.accountGeneration),
+    receipt = await withProviderDispatchLease(
+      input.repository,
+      root.id,
+      at,
+      (signal) => input.adapter.replyToQuestion(
+        deliveryInput(
+          root,
+          body,
+          root.id,
+          dispatch.accountGeneration,
+          signal,
+        ),
+      ),
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
@@ -242,12 +255,18 @@ async function deliverFollowUp(
       message.id,
       attemptedAt,
     );
-    receipt = await adapter.sendFollowUp(
-      deliveryInput(
-        root,
-        message.body,
-        message.delivery_request_id ?? message.id,
-        dispatch.accountGeneration,
+    receipt = await withProviderDispatchLease(
+      repository,
+      message.id,
+      attemptedAt,
+      (signal) => adapter.sendFollowUp(
+        deliveryInput(
+          root,
+          message.body,
+          message.delivery_request_id ?? message.id,
+          dispatch.accountGeneration,
+          signal,
+        ),
       ),
     );
   } catch (error) {
@@ -272,6 +291,7 @@ function deliveryInput(
   body: string,
   idempotencyKey: string,
   accountGeneration: string,
+  signal?: AbortSignal,
 ) {
   const isSimulated = (root.marketplace ?? "simulated") === "simulated";
   const parent = root.external_parent_id ?? (isSimulated ? root.id : null);
@@ -288,6 +308,7 @@ function deliveryInput(
   }
   return {
     accountGeneration,
+    signal,
     externalParentId: parent,
     externalConversationId: conversation,
     externalListingId: listing,
@@ -295,6 +316,32 @@ function deliveryInput(
     body,
     idempotencyKey,
   };
+}
+
+async function withProviderDispatchLease<T>(
+  repository: DeliveryRepository,
+  messageId: string,
+  attemptedAt: Date,
+  dispatch: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let renewal: Promise<void> | undefined;
+  const timer = setInterval(() => {
+    if (renewal) return;
+    renewal = repository
+      .renewProviderDispatch(messageId, attemptedAt)
+      .catch((error: unknown) => controller.abort(error))
+      .finally(() => {
+        renewal = undefined;
+      });
+  }, PROVIDER_DISPATCH_HEARTBEAT_MS);
+  timer.unref?.();
+  try {
+    return await dispatch(controller.signal);
+  } finally {
+    clearInterval(timer);
+    await renewal?.catch(() => undefined);
+  }
 }
 
 function deliveryFailureKind(error: unknown): MarketplaceDeliveryFailureKind {
@@ -384,6 +431,17 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       throw new Error("Failed to bind eBay provider dispatch to an account");
     }
     return { accountGeneration: data.account_generation };
+  }
+
+  async renewProviderDispatch(
+    messageId: string,
+    attemptedAt: Date,
+  ): Promise<void> {
+    if (!this.serverManaged) return;
+    await this.applyServerWrite("renew_provider_dispatch", {
+      message_id: messageId,
+      attempted_at: attemptedAt.toISOString(),
+    });
   }
 
   async canonicalDelivered(root: MessageRow): Promise<MessageRow | null> {

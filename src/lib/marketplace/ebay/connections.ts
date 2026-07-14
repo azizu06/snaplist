@@ -178,9 +178,7 @@ export async function updateCachedAccessToken(
       })
     : await supabase.rpc("update_ebay_access_token_cache", payload);
   if (error) {
-    // Cache write failure is non-fatal — the caller already holds a valid
-    // access token; the next call just refreshes again.
-    console.warn(`[ebay] failed to cache refreshed access token: ${error.message}`);
+    throw new Error(`Failed to cache refreshed eBay access token: ${error.message}`);
   }
 }
 

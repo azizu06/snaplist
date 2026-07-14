@@ -30,6 +30,8 @@ const SELL_INVENTORY_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.inventor
 
 /** Refresh the cached token this many ms before its actual expiry. */
 const EXPIRY_SLACK_MS = 60_000;
+const DEFAULT_TOKEN_REFRESH_TIMEOUT_MS = 30_000;
+const MAX_TOKEN_REFRESH_TIMEOUT_MS = 2 * 60_000;
 
 export interface EnvTokenProviderOptions {
   /** Injectable for tests; defaults to globalThis.fetch. */
@@ -57,7 +59,10 @@ export class EnvTokenProvider implements EbayTokenProvider {
     this.scopes = options.scopes ?? [SELL_INVENTORY_SCOPE];
   }
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(
+    _expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<string> {
     const env = this.readEnv();
 
     // Mode 1: pre-minted user access token (fast sandbox loop).
@@ -81,6 +86,15 @@ export class EnvTokenProvider implements EbayTokenProvider {
     }
 
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+    const configuredTimeout = Number(env.EBAY_TOKEN_REFRESH_TIMEOUT_MS);
+    const timeoutMs =
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? Math.min(configuredTimeout, MAX_TOKEN_REFRESH_TIMEOUT_MS)
+        : DEFAULT_TOKEN_REFRESH_TIMEOUT_MS;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = parentSignal
+      ? AbortSignal.any([parentSignal, timeoutSignal])
+      : timeoutSignal;
     const res = await this.fetchImpl(`${baseUrl}/identity/v1/oauth2/token`, {
       method: "POST",
       headers: {
@@ -92,6 +106,7 @@ export class EnvTokenProvider implements EbayTokenProvider {
         refresh_token: refreshToken,
         scope: this.scopes.join(" "),
       }).toString(),
+      signal,
     });
 
     const body: unknown = await res.json().catch(() => undefined);
