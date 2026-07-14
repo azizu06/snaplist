@@ -56,7 +56,7 @@ select
 | Observed state | Safe next action |
 | --- | --- |
 | `20260713220000` is absent | Review `pnpm supabase db push --linked --dry-run`, then apply the normal push. |
-| `20260713220000` is recorded; lifecycle control is present; both outbound guards are absent | Review the dry run, which must list only `20260713220100_outbound_price_revision_guards.sql`, then run the normal push. |
+| `20260713220000` is recorded; lifecycle control is present; both outbound guards are absent | Review the dry run. It must include `20260713220100_outbound_price_revision_guards.sql` and may include later migrations that were never reached after the collision; verify every listed version against the expected history, then run the normal push. |
 | `20260713220000` is recorded and all three functions are present | The outbound SQL already landed but its new history key did not. In the maintenance window, record only the renamed version: `pnpm supabase migration repair --status applied 20260713220100 --linked`. Re-run `migration list` afterward. |
 | Any other combination | Stop. Do not guess which SQL owned the old version or mark history blindly; restore/clone the database and reconcile it with the owner. |
 
