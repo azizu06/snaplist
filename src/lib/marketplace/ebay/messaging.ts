@@ -3,7 +3,9 @@ import type {
   FetchQuestionsInput,
   MarketplaceDeliveryInput,
   MarketplaceDeliveryReceipt,
+  MarketplaceHostedPhoto,
   MarketplaceMessagingAdapter,
+  MarketplacePhotoUploadInput,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
   PendingMarketplaceQuestion,
@@ -11,6 +13,7 @@ import type {
 import { MarketplaceDeliveryError } from "../messaging";
 import { EnvTokenProvider } from "./auth";
 import type { EbayTokenProvider } from "./types";
+import { normalizeInboundMessagePhoto } from "@/lib/inbox/attachments";
 
 const XML_NAMESPACE = "urn:ebay:apis:eBLBaseComponents";
 const DEFAULT_COMPATIBILITY_LEVEL = "1455";
@@ -23,6 +26,7 @@ const MAX_PROVIDER_DISPATCH_TIMEOUT_MS = 4 * 60_000;
 const MESSAGE_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/commerce.message",
+  "https://api.ebay.com/oauth/api_scope/sell.inventory",
 ];
 
 export interface HttpEbayMessagingAdapterOptions {
@@ -144,6 +148,9 @@ export class HttpEbayMessagingAdapter
             );
           }
           if (!answeredIds.has(externalMessageId)) {
+            const media = normalizeProviderMedia(
+              question?.MessageMedia ?? exchange?.MessageMedia,
+            );
             pendingById.set(externalMessageId, {
               marketplace: "ebay",
               externalMessageId,
@@ -155,6 +162,7 @@ export class HttpEbayMessagingAdapter
               createdAt: createdAt ?? null,
               resolutionWindowFrom: input.from.toISOString(),
               observedCursorAt: input.to.toISOString(),
+              ...(media.length ? { media } : {}),
             });
           }
         }
@@ -217,6 +225,99 @@ export class HttpEbayMessagingAdapter
       body,
       subject: question.subject,
       createdAt,
+      ...(normalizeQuestionMedia(question, match.message).length
+        ? { media: normalizeQuestionMedia(question, match.message) }
+        : {}),
+    };
+  }
+
+  async uploadPhoto(
+    input: MarketplacePhotoUploadInput,
+  ): Promise<MarketplaceHostedPhoto> {
+    const env = this.readEnv();
+    const baseUrl = mediaApiBaseUrl(env);
+    const signal = providerDispatchSignal(env, input.signal);
+    const token = await this.tokenProvider.getAccessToken(
+      input.accountGeneration,
+      signal,
+    );
+    const form = new FormData();
+    form.append(
+      "image",
+      new Blob([input.bytes.slice().buffer], { type: input.mediaType }),
+      input.name.slice(0, 100),
+    );
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${baseUrl}/commerce/media/v1_beta/image/create_image_from_file`,
+        {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+          body: form,
+          signal,
+        },
+      );
+    } catch (cause) {
+      throw new MarketplaceDeliveryError(
+        "ambiguous",
+        "eBay photo upload ended without an acknowledgement",
+        { cause },
+      );
+    }
+    const payload = (await response.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    if (!response.ok || response.status !== 201) {
+      throw new MarketplaceDeliveryError(
+        response.status >= 500 ? "ambiguous" : "rejected",
+        `eBay photo upload failed (HTTP ${response.status})`,
+      );
+    }
+    const mediaUrl = asString(payload?.imageUrl);
+    const location = response.headers.get("location");
+    if (!mediaUrl || !location) {
+      throw new MarketplaceDeliveryError(
+        "ambiguous",
+        "eBay photo upload acknowledgement was incomplete",
+      );
+    }
+    let locationUrl: URL;
+    let safePhoto;
+    try {
+      locationUrl = new URL(location);
+      safePhoto = normalizeInboundMessagePhoto({
+        mediaName: input.name,
+        mediaType: "IMAGE",
+        mediaUrl,
+      });
+    } catch (cause) {
+      throw new MarketplaceDeliveryError(
+        "ambiguous",
+        "eBay photo upload acknowledgement contained unsafe media metadata",
+        { cause },
+      );
+    }
+    const providerMediaId = locationUrl.pathname.split("/").filter(Boolean).at(-1);
+    if (
+      locationUrl.origin !== new URL(baseUrl).origin ||
+      !locationUrl.pathname.startsWith("/commerce/media/v1_beta/image/") ||
+      !providerMediaId ||
+      !safePhoto ||
+      safePhoto.providerUrl.length > 200
+    ) {
+      throw new MarketplaceDeliveryError(
+        "ambiguous",
+        "eBay photo upload acknowledgement contained an invalid image reference",
+      );
+    }
+    return {
+      providerMediaId,
+      mediaName: input.name.slice(0, 100),
+      mediaType: "IMAGE",
+      mediaUrl: safePhoto.providerUrl,
+      expiresAt: asIsoString(payload?.expirationDate) ?? null,
     };
   }
 
@@ -236,6 +337,7 @@ export class HttpEbayMessagingAdapter
         `eBay message body must contain 1-${MAX_MESSAGE_BODY} characters`,
       );
     }
+    validateDeliveryMedia(input.media);
 
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
@@ -258,6 +360,15 @@ export class HttpEbayMessagingAdapter
           body: JSON.stringify({
             conversationId: input.externalConversationId,
             messageText: body,
+            ...(input.media?.length
+              ? {
+                  messageMedia: input.media.map((media) => ({
+                    mediaName: media.mediaName,
+                    mediaType: media.mediaType,
+                    mediaUrl: media.mediaUrl,
+                  })),
+                }
+              : {}),
           }),
           signal,
         },
@@ -418,6 +529,7 @@ export class HttpEbayMessagingAdapter
         `eBay message body exceeds ${MAX_MESSAGE_BODY} characters`,
       );
     }
+    validateDeliveryMedia(input.media);
 
     const response = await this.callTrading(
       "AddMemberMessageRTQ",
@@ -429,6 +541,14 @@ export class HttpEbayMessagingAdapter
           MemberMessage: {
             Body: body,
             DisplayToPublic: false,
+            ...(input.media?.length
+              ? {
+                  MessageMedia: input.media.map((media) => ({
+                    MediaName: media.mediaName,
+                    MediaURL: media.mediaUrl,
+                  })),
+                }
+              : {}),
             ParentMessageID: input.externalParentId,
             RecipientID: input.externalBuyerId,
           },
@@ -568,6 +688,88 @@ export class HttpEbayMessagingAdapter
     }
     return root;
   }
+}
+
+function normalizeQuestionMedia(
+  question: PendingMarketplaceQuestion,
+  commerceMessage: XmlRecord,
+) {
+  const byUrl = new Map<string, NonNullable<MarketplaceQuestion["media"]>[number]>();
+  for (const media of [
+    ...(question.media ?? []),
+    ...normalizeProviderMedia(commerceMessage.messageMedia),
+  ]) {
+    byUrl.set(media.mediaUrl, media);
+  }
+  const result = [...byUrl.values()];
+  if (result.length > 5) {
+    throw new Error("eBay question contains more than five media entries");
+  }
+  return result;
+}
+
+function validateDeliveryMedia(media: MarketplaceDeliveryInput["media"]): void {
+  if (!media?.length) return;
+  if (media.length > 5) {
+    throw new MarketplaceDeliveryError("rejected", "eBay messages support up to five photos");
+  }
+  for (const photo of media) {
+    if (
+      !photo.mediaName.trim() ||
+      photo.mediaName.length > 100 ||
+      photo.mediaUrl.length > 200 ||
+      photo.mediaType !== "IMAGE"
+    ) {
+      throw new MarketplaceDeliveryError("rejected", "eBay photo metadata is invalid");
+    }
+    try {
+      normalizeInboundMessagePhoto({
+        mediaName: photo.mediaName,
+        mediaType: photo.mediaType,
+        mediaUrl: photo.mediaUrl,
+      });
+    } catch (cause) {
+      throw new MarketplaceDeliveryError("rejected", "eBay photo URL is unsafe", { cause });
+    }
+  }
+}
+
+function normalizeProviderMedia(raw: unknown) {
+  return asArray(raw).flatMap((entry) => {
+    const media = asRecord(entry);
+    const normalized = normalizeInboundMessagePhoto({
+      mediaName: asString(media?.mediaName) ?? asString(media?.MediaName),
+      mediaType: asString(media?.mediaType) ?? "IMAGE",
+      mediaUrl: asString(media?.mediaUrl) ?? asString(media?.MediaURL),
+    });
+    return normalized
+      ? [{
+          mediaName: normalized.name,
+          mediaUrl: normalized.providerUrl,
+          mediaType: normalized.providerMediaType,
+        }]
+      : [];
+  });
+}
+
+function mediaApiBaseUrl(env: Record<string, string | undefined>): string {
+  const configured = env.EBAY_MEDIA_BASE_URL;
+  if (configured) {
+    const parsed = new URL(configured);
+    if (
+      parsed.protocol !== "https:" ||
+      !["apim.ebay.com", "apim.sandbox.ebay.com"].includes(parsed.hostname) ||
+      parsed.username ||
+      parsed.password
+    ) {
+      throw new Error("EBAY_MEDIA_BASE_URL must be an official eBay Media API origin");
+    }
+    return parsed.origin;
+  }
+  const base = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+  return base.includes("sandbox")
+    ? "https://apim.sandbox.ebay.com"
+    : "https://apim.ebay.com";
 }
 
 function asRecord(value: unknown): XmlRecord | undefined {

@@ -92,7 +92,7 @@ on eBay. Buyers never see SnapList.
 28. As a seller, I want incoming buyer questions to appear in a live inbox, so that I don't have to refresh.
 29. As a seller, I want the system to draft a reply grounded in the item's attributes/listing, so that I answer accurately and fast.
 30. As a seller, I want to approve or edit a drafted reply before it sends, so that I control what the buyer sees.
-31. As a seller, I want replies delivered into the buyer's eBay inbox, so that the buyer never needs to leave eBay.
+31. As a seller, I want approved text and supported photos delivered together into the buyer's eBay inbox, so that the buyer never needs to leave eBay and a failed photo can never masquerade as text-only success.
 32. As a seller (demo), I want to simulate an incoming buyer question, so that the messaging flow is demonstrable without real buyer traffic.
 
 **Account, trust & security**
@@ -133,7 +133,8 @@ on eBay. Buyers never see SnapList.
   price_override, review_revision, review_content_revision, created_at), `listings` (item_id,
   platform, generated copy, status, source_review_revision), `messages` (item_id/listing_id,
   direction, body, draft_reply, marketplace, exact external identities, delivery state), per-seller
-  messaging sync/reconciliation state, `embeddings`/corpus (vector, source ref, metadata),
+  `message_attachments` (tenant/message/request identity, private object path, hosted-provider
+  reference, delivery state), messaging sync/reconciliation state, `embeddings`/corpus (vector, source ref, metadata),
   `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Models & LLM access

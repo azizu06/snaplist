@@ -57,6 +57,7 @@ class MemorySyncRepository implements InboxSyncRepository {
   >();
   imported = new Map<string, MessageRow>();
   notifications = new Set<string>();
+  importedPhotos: Array<{ question: MarketplaceQuestion; messageId: string }> = [];
   draftClaims = 0;
   draftWrites = 0;
   failImport = false;
@@ -216,6 +217,11 @@ class MemorySyncRepository implements InboxSyncRepository {
     message: MessageRow,
   ) {
     this.notifications.add(message.id);
+  }
+  async importQuestionPhotos(external: MarketplaceQuestion, message: MessageRow) {
+    if (external.media?.length) {
+      this.importedPhotos.push({ question: external, messageId: message.id });
+    }
   }
   async listDraftCandidates(): Promise<DraftCandidate[]> {
     return [...this.imported.values()]
@@ -625,6 +631,33 @@ describe("syncInboxForSeller", () => {
       repository.imported.get(question.externalMessageId)
         ?.external_conversation_id,
     ).toBe("commerce-conversation-9");
+  });
+
+  it("imports supported inbound media through the repository seam with zero network", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [{
+      ...question,
+      media: [{
+        mediaName: "buyer-condition.jpg",
+        mediaType: "IMAGE",
+        mediaUrl: "https://i.ebayimg.com/images/g/test/s-l1600.jpg",
+      }],
+    }];
+    const repository = new MemorySyncRepository();
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      draft: async () => ({ reply: "Thanks for the photo.", model: "test", usedFallback: false }),
+    });
+
+    expect(repository.importedPhotos).toEqual([{
+      question: adapter.questions[0],
+      messageId: MESSAGE_ID,
+    }]);
+    expect(adapter.fetches).toHaveLength(1);
   });
 
   it("marks an imported draft externally answered only with explicit provider evidence", async () => {

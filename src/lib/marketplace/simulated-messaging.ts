@@ -2,6 +2,8 @@ import type {
   MarketplaceDeliveryInput,
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
+  MarketplacePhotoUploadInput,
+  MarketplaceHostedPhoto,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
 } from "./messaging";
@@ -20,6 +22,18 @@ export class SimulatedMarketplaceMessagingAdapter
 
   async resolveQuestion(): Promise<MarketplaceQuestion> {
     throw new Error("Simulated messages have no external question resolution");
+  }
+
+  async uploadPhoto(
+    input: MarketplacePhotoUploadInput,
+  ): Promise<MarketplaceHostedPhoto> {
+    return {
+      providerMediaId: `simulated-photo:${input.idempotencyKey}`,
+      mediaName: input.name,
+      mediaType: "IMAGE",
+      mediaUrl: `https://i.ebayimg.com/simulated/${input.idempotencyKey}`,
+      expiresAt: null,
+    };
   }
 
   async replyToQuestion(

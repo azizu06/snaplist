@@ -83,6 +83,37 @@ export const messageRowSchema = z.object({
 
 export type MessageRow = z.infer<typeof messageRowSchema>;
 
+export const messageAttachmentRowSchema = z.object({
+  id: z.uuid(),
+  user_id: z.string().min(1),
+  conversation_root_id: z.uuid(),
+  message_id: z.uuid().nullable(),
+  delivery_request_id: z.string().min(1),
+  position: z.number().int().min(0).max(4),
+  direction: messageDirectionSchema,
+  media_type: z.enum(["image/jpeg", "image/png", "image/webp"]).nullable(),
+  byte_size: z.number().int().positive().nullable(),
+  original_name: z.string().min(1).max(100),
+  content_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  storage_path: z.string().nullable(),
+  provider_media_id: z.string().nullable(),
+  provider_url: z.url().startsWith("https://").nullable(),
+  provider_expires_at: z.string().nullable(),
+  delivery_status: z.enum([
+    "staged",
+    "uploaded",
+    "delivered",
+    "rejected",
+    "failed",
+    "ambiguous",
+  ]),
+  delivery_error: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export type MessageAttachmentRow = z.infer<typeof messageAttachmentRowSchema>;
+
 /** The listing copy the reply agent may ground a reply in (title + description). */
 export interface ReplyListingContext {
   title: string;

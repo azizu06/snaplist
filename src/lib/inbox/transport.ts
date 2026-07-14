@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import type {
   MarketplaceDeliveryFailureKind,
+  MarketplaceHostedPhoto,
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
 } from "@/lib/marketplace/messaging";
@@ -8,8 +10,15 @@ import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import {
   applyEbayMessageWrite,
   beginEbayMessageWrite,
+  completeEbayMessageWriteWithPhotos,
 } from "./ebay-server-write";
-import { messageRowSchema, type MessageRow } from "./types";
+import { MESSAGE_PHOTO_BUCKET, validateMessagePhoto } from "./attachments";
+import {
+  messageAttachmentRowSchema,
+  messageRowSchema,
+  type MessageAttachmentRow,
+  type MessageRow,
+} from "./types";
 
 const PG_UNIQUE_VIOLATION = "23505";
 const DELIVERY_LEASE_MS = 5 * 60_000;
@@ -75,7 +84,22 @@ export interface DeliveryRepository {
     messageId: string,
     receipt: MarketplaceDeliveryReceipt,
     attemptedAt: Date,
+    deliveryRequestId?: string,
   ): Promise<MessageRow>;
+  listDeliveryPhotos?(deliveryRequestId: string): Promise<MessageAttachmentRow[]>;
+  readDeliveryPhoto?(photo: MessageAttachmentRow): Promise<Uint8Array>;
+  saveHostedPhoto?(
+    photo: MessageAttachmentRow,
+    hosted: MarketplaceHostedPhoto,
+  ): Promise<void>;
+  linkDeliveredPhotos?(
+    deliveryRequestId: string,
+    messageId: string,
+  ): Promise<void>;
+  failDeliveryPhotos?(
+    deliveryRequestId: string,
+    kind: MarketplaceDeliveryFailureKind,
+  ): Promise<void>;
 }
 
 export interface SendCanonicalInput {
@@ -97,6 +121,7 @@ export async function sendCanonicalReply(
   }
   const alreadyDelivered = await input.repository.canonicalDelivered(root);
   if (alreadyDelivered && canonicalDeliveryMatches(root, alreadyDelivered)) {
+    await input.repository.linkDeliveredPhotos?.(root.id, alreadyDelivered.id);
     return alreadyDelivered;
   }
   const at = input.now?.() ?? new Date();
@@ -127,24 +152,35 @@ export async function sendCanonicalReply(
       input.repository,
       root.id,
       at,
-      (signal) => input.adapter.replyToQuestion(
-        deliveryInput(
+      async (signal) => {
+        const media = await prepareDeliveryPhotos(
+          input.repository,
+          input.adapter,
+          root.id,
+          dispatch.accountGeneration,
+          signal,
+        );
+        return input.adapter.replyToQuestion(deliveryInput(
           root,
           body,
           root.id,
           dispatch.accountGeneration,
           signal,
-        ),
-      ),
+          media,
+        ));
+      },
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
+    await input.repository.failDeliveryPhotos?.(root.id, kind).catch(() => undefined);
     await input.repository.failCanonical(root.id, kind, at);
     throw new MessageDeliveryAttemptError(kind, undefined, { cause: error });
   }
 
   try {
-    return await input.repository.completeCanonical(root, body, receipt, at);
+    const message = await input.repository.completeCanonical(root, body, receipt, at);
+    await input.repository.linkDeliveredPhotos?.(root.id, message.id);
+    return message;
   } catch (error) {
     // eBay acknowledged delivery but local persistence did not complete. Keep
     // the question visibly ambiguous; a replay first checks for an outbound row.
@@ -199,6 +235,9 @@ export async function sendSellerFollowUp(
       throw new MessageDeliveryConflictError(
         "This follow-up request id belongs to different content",
       );
+    }
+    if (intent.message.delivery_status === "delivered") {
+      await input.repository.linkDeliveredPhotos?.(input.requestId, intent.message.id);
     }
     return intent.message;
   }
@@ -259,23 +298,45 @@ async function deliverFollowUp(
       repository,
       message.id,
       attemptedAt,
-      (signal) => adapter.sendFollowUp(
-        deliveryInput(
-          root,
-          message.body,
-          message.delivery_request_id ?? message.id,
+      async (signal) => {
+        const requestId = message.delivery_request_id ?? message.id;
+        const media = await prepareDeliveryPhotos(
+          repository,
+          adapter,
+          requestId,
           dispatch.accountGeneration,
           signal,
-        ),
-      ),
+        );
+        return adapter.sendFollowUp(deliveryInput(
+          root,
+          message.body,
+          requestId,
+          dispatch.accountGeneration,
+          signal,
+          media,
+        ));
+      },
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
+    await repository
+      .failDeliveryPhotos?.(message.delivery_request_id ?? message.id, kind)
+      .catch(() => undefined);
     await repository.failFollowUp(message.id, kind, attemptedAt);
     throw new MessageDeliveryAttemptError(kind, undefined, { cause: error });
   }
   try {
-    return await repository.completeFollowUp(message.id, receipt, attemptedAt);
+    const delivered = await repository.completeFollowUp(
+      message.id,
+      receipt,
+      attemptedAt,
+      message.delivery_request_id ?? message.id,
+    );
+    await repository.linkDeliveredPhotos?.(
+      message.delivery_request_id ?? message.id,
+      delivered.id,
+    );
+    return delivered;
   } catch (error) {
     await repository
       .failFollowUp(message.id, "ambiguous", attemptedAt)
@@ -292,6 +353,7 @@ function deliveryInput(
   idempotencyKey: string,
   accountGeneration: string,
   signal?: AbortSignal,
+  media?: MarketplaceHostedPhoto[],
 ) {
   const isSimulated = (root.marketplace ?? "simulated") === "simulated";
   const parent = root.external_parent_id ?? (isSimulated ? root.id : null);
@@ -315,7 +377,66 @@ function deliveryInput(
     externalBuyerId: buyer,
     body,
     idempotencyKey,
+    ...(media?.length ? { media } : {}),
   };
+}
+
+async function prepareDeliveryPhotos(
+  repository: DeliveryRepository,
+  adapter: MarketplaceMessagingAdapter,
+  deliveryRequestId: string,
+  accountGeneration: string,
+  signal: AbortSignal,
+): Promise<MarketplaceHostedPhoto[]> {
+  if (!repository.listDeliveryPhotos) return [];
+  const photos = await repository.listDeliveryPhotos(deliveryRequestId);
+  const hosted: MarketplaceHostedPhoto[] = [];
+  for (const photo of photos) {
+    if (photo.provider_media_id && photo.provider_url) {
+      hosted.push({
+        providerMediaId: photo.provider_media_id,
+        mediaName: photo.original_name,
+        mediaType: "IMAGE",
+        mediaUrl: photo.provider_url,
+        expiresAt: photo.provider_expires_at,
+      });
+      continue;
+    }
+    if (!repository.readDeliveryPhoto || !repository.saveHostedPhoto) {
+      throw new MarketplaceDeliveryError("failed", "Photo storage is unavailable");
+    }
+    const bytes = await repository.readDeliveryPhoto(photo);
+    if (!photo.media_type) {
+      throw new MarketplaceDeliveryError("rejected", "Photo type is unavailable");
+    }
+    try {
+      validateMessagePhoto({
+        name: photo.original_name,
+        type: photo.media_type,
+        size: bytes.byteLength,
+        bytes,
+      });
+    } catch (cause) {
+      throw new MarketplaceDeliveryError("rejected", "Stored photo failed validation", {
+        cause,
+      });
+    }
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    if (!photo.content_sha256 || contentHash !== photo.content_sha256) {
+      throw new MarketplaceDeliveryError("rejected", "Stored photo changed after approval");
+    }
+    const uploaded = await adapter.uploadPhoto({
+      accountGeneration,
+      signal,
+      name: photo.original_name,
+      mediaType: photo.media_type,
+      bytes,
+      idempotencyKey: `${deliveryRequestId}:${photo.position}:${photo.content_sha256 ?? photo.id}`,
+    });
+    await repository.saveHostedPhoto(photo, uploaded);
+    hosted.push(uploaded);
+  }
+  return hosted;
 }
 
 async function withProviderDispatchLease<T>(
@@ -532,13 +653,19 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     attemptedAt: Date,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
-      const data = await this.applyServerWrite<unknown>("complete_canonical", {
-        message_id: root.id,
-        body,
-        external_delivery_id: receipt.externalDeliveryId,
-        delivered_at: receipt.deliveredAt,
-        attempted_at: attemptedAt.toISOString(),
-      });
+      const data = await completeEbayMessageWriteWithPhotos<unknown>(
+        this.serverWriteClient,
+        "complete_canonical",
+        {
+          message_id: root.id,
+          body,
+          external_delivery_id: receipt.externalDeliveryId,
+          delivered_at: receipt.deliveredAt,
+          attempted_at: attemptedAt.toISOString(),
+        },
+        await this.getWriteGeneration(),
+        root.id,
+      );
       return messageRowSchema.parse(data);
     }
     const { data, error } = await this.supabase
@@ -719,14 +846,21 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     messageId: string,
     receipt: MarketplaceDeliveryReceipt,
     attemptedAt: Date,
+    deliveryRequestId = messageId,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
-      const data = await this.applyServerWrite<unknown>("complete_followup", {
-        message_id: messageId,
-        external_delivery_id: receipt.externalDeliveryId,
-        delivered_at: receipt.deliveredAt,
-        attempted_at: attemptedAt.toISOString(),
-      });
+      const data = await completeEbayMessageWriteWithPhotos<unknown>(
+        this.serverWriteClient,
+        "complete_followup",
+        {
+          message_id: messageId,
+          external_delivery_id: receipt.externalDeliveryId,
+          delivered_at: receipt.deliveredAt,
+          attempted_at: attemptedAt.toISOString(),
+        },
+        await this.getWriteGeneration(),
+        deliveryRequestId,
+      );
       return messageRowSchema.parse(data);
     }
     const { data, error } = await this.supabase
@@ -748,5 +882,83 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       throw new Error(`Failed to finalize follow-up: ${error?.message ?? "claim lost"}`);
     }
     return messageRowSchema.parse(data);
+  }
+
+  async listDeliveryPhotos(deliveryRequestId: string): Promise<MessageAttachmentRow[]> {
+    const { data, error } = await this.serverWriteClient
+      .from("message_attachments")
+      .select("*")
+      .eq("user_id", this.userId)
+      .eq("delivery_request_id", deliveryRequestId)
+      .eq("direction", "outbound")
+      .order("position");
+    if (error) throw new Error(`Failed to load delivery photos: ${error.message}`);
+    return (data ?? []).map((row) => messageAttachmentRowSchema.parse(row));
+  }
+
+  async readDeliveryPhoto(photo: MessageAttachmentRow): Promise<Uint8Array> {
+    if (photo.user_id !== this.userId || !photo.storage_path) {
+      throw new Error("Delivery photo is not available to this tenant");
+    }
+    const { data, error } = await this.supabase.storage
+      .from(MESSAGE_PHOTO_BUCKET)
+      .download(photo.storage_path);
+    if (error || !data) {
+      throw new Error(`Failed to read delivery photo: ${error?.message ?? "missing object"}`);
+    }
+    return new Uint8Array(await data.arrayBuffer());
+  }
+
+  async saveHostedPhoto(
+    photo: MessageAttachmentRow,
+    hosted: MarketplaceHostedPhoto,
+  ): Promise<void> {
+    const { data, error } = await this.serverWriteClient
+      .from("message_attachments")
+      .update({
+        provider_media_id: hosted.providerMediaId,
+        provider_url: hosted.mediaUrl,
+        provider_expires_at: hosted.expiresAt,
+        delivery_status: "uploaded",
+        delivery_error: null,
+      })
+      .eq("user_id", this.userId)
+      .eq("id", photo.id)
+      .in("delivery_status", ["staged", "failed", "rejected", "ambiguous"])
+      .select("id");
+    if (error || data?.length !== 1) {
+      throw new Error(`Failed to persist hosted photo: ${error?.message ?? "claim lost"}`);
+    }
+  }
+
+  async linkDeliveredPhotos(
+    deliveryRequestId: string,
+    messageId: string,
+  ): Promise<void> {
+    const { error } = await this.serverWriteClient
+      .from("message_attachments")
+      .update({
+        message_id: messageId,
+        delivery_status: "delivered",
+        delivery_error: null,
+      })
+      .eq("user_id", this.userId)
+      .eq("delivery_request_id", deliveryRequestId)
+      .eq("direction", "outbound");
+    if (error) throw new Error(`Failed to finalize delivery photos: ${error.message}`);
+  }
+
+  async failDeliveryPhotos(
+    deliveryRequestId: string,
+    kind: MarketplaceDeliveryFailureKind,
+  ): Promise<void> {
+    const { error } = await this.serverWriteClient
+      .from("message_attachments")
+      .update({ delivery_status: kind, delivery_error: kind })
+      .eq("user_id", this.userId)
+      .eq("delivery_request_id", deliveryRequestId)
+      .eq("direction", "outbound")
+      .neq("delivery_status", "delivered");
+    if (error) throw new Error(`Failed to persist photo failure: ${error.message}`);
   }
 }

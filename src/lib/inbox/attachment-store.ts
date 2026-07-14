@@ -1,0 +1,160 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  MESSAGE_PHOTO_BUCKET,
+  validateMessagePhotoBatch,
+  type ValidatedMessagePhoto,
+} from "./attachments";
+import {
+  messageAttachmentRowSchema,
+  type MessageAttachmentRow,
+} from "./types";
+
+export class MessagePhotoConflictError extends Error {
+  constructor() {
+    super("This delivery request id belongs to different photos");
+    this.name = "MessagePhotoConflictError";
+  }
+}
+
+export async function validateFormPhotos(form: FormData): Promise<ValidatedMessagePhoto[]> {
+  const files = form.getAll("photos");
+  if (files.some((value) => !(value instanceof File))) {
+    throw new Error("photos must be image files");
+  }
+  return validateMessagePhotoBatch(
+    await Promise.all(
+      (files as File[]).map(async (file) => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      })),
+    ),
+  );
+}
+
+export async function stageOutboundPhotos(input: {
+  supabase: SupabaseClient;
+  userId: string;
+  conversationRootId: string;
+  deliveryRequestId: string;
+  photos: ValidatedMessagePhoto[];
+}): Promise<MessageAttachmentRow[]> {
+  if (input.photos.length === 0) return [];
+  const existing = await listDeliveryPhotos(
+    input.supabase,
+    input.userId,
+    input.deliveryRequestId,
+  );
+  if (existing.length) {
+    const hashes = input.photos.map((photo) => sha256(photo.bytes));
+    if (
+      existing.length !== hashes.length ||
+      existing.some((row, index) => row.content_sha256 !== hashes[index])
+    ) {
+      throw new MessagePhotoConflictError();
+    }
+    return existing;
+  }
+
+  const uploaded: string[] = [];
+  const rows = input.photos.map((photo, position) => {
+    const id = randomUUID();
+    const extension = extensionFor(photo.mediaType);
+    return {
+      id,
+      user_id: input.userId,
+      conversation_root_id: input.conversationRootId,
+      message_id: null,
+      delivery_request_id: input.deliveryRequestId,
+      position,
+      direction: "outbound",
+      media_type: photo.mediaType,
+      byte_size: photo.bytes.byteLength,
+      original_name: photo.name.slice(0, 100),
+      content_sha256: sha256(photo.bytes),
+      storage_path: `${input.userId}/${input.conversationRootId}/${id}.${extension}`,
+      delivery_status: "staged",
+    };
+  });
+  try {
+    for (const [position, photo] of input.photos.entries()) {
+      const storagePath = rows[position]!.storage_path;
+      const { error: uploadError } = await input.supabase.storage
+        .from(MESSAGE_PHOTO_BUCKET)
+        .upload(storagePath, photo.bytes, {
+          contentType: photo.mediaType,
+          upsert: false,
+        });
+      if (uploadError) throw new Error(`Failed to stage photo: ${uploadError.message}`);
+      uploaded.push(storagePath);
+    }
+    const { data, error } = await input.supabase
+      .from("message_attachments")
+      .insert(rows)
+      .select("*");
+    if (error) {
+      if (error.code === "23505") {
+        const raced = await listDeliveryPhotos(
+          input.supabase,
+          input.userId,
+          input.deliveryRequestId,
+        );
+        if (
+          raced.length === rows.length &&
+          raced.every((row, index) => row.content_sha256 === rows[index]?.content_sha256)
+        ) {
+          const cleanup = await input.supabase.storage
+            .from(MESSAGE_PHOTO_BUCKET)
+            .remove(uploaded);
+          uploaded.length = 0;
+          if (cleanup.error) {
+            throw new Error(`Failed to clean up replayed photos: ${cleanup.error.message}`);
+          }
+          return raced;
+        }
+        throw new MessagePhotoConflictError();
+      }
+      throw new Error(`Failed to persist photos: ${error.message}`);
+    }
+    return (data ?? []).map((row) => messageAttachmentRowSchema.parse(row));
+  } catch (error) {
+    if (uploaded.length) {
+      const cleanup = await input.supabase.storage
+        .from(MESSAGE_PHOTO_BUCKET)
+        .remove(uploaded);
+      if (cleanup.error) {
+        throw new Error(`Failed to clean up staged photos: ${cleanup.error.message}`, {
+          cause: error,
+        });
+      }
+    }
+    throw error;
+  }
+}
+
+export async function listDeliveryPhotos(
+  supabase: SupabaseClient,
+  userId: string,
+  deliveryRequestId: string,
+): Promise<MessageAttachmentRow[]> {
+  const { data, error } = await supabase
+    .from("message_attachments")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("delivery_request_id", deliveryRequestId)
+    .order("position");
+  if (error) throw new Error(`Failed to load message photos: ${error.message}`);
+  return (data ?? []).map((row) => messageAttachmentRowSchema.parse(row));
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function extensionFor(mediaType: ValidatedMessagePhoto["mediaType"]): string {
+  if (mediaType === "image/jpeg") return "jpg";
+  if (mediaType === "image/png") return "png";
+  return "webp";
+}

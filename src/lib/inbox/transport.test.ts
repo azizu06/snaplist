@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MockMarketplaceMessagingAdapter } from "@/lib/marketplace/mock-messaging";
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
-import type { MessageRow } from "./types";
+import type { MessageAttachmentRow, MessageRow } from "./types";
 import {
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
@@ -674,4 +674,148 @@ describe("message delivery transport", () => {
       }
     },
   );
+
+  it("uploads staged photos and includes their provider references in the exact reply", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const photo = attachment();
+    const linked: Array<{ requestId: string; messageId: string }> = [];
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "linkDeliveredPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async (requestId) =>
+      requestId === ROOT_ID ? [photo] : [];
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async (row, hosted) => {
+      row.provider_media_id = hosted.providerMediaId;
+      row.provider_url = hosted.mediaUrl;
+      row.delivery_status = "uploaded";
+    };
+    photoRepository.linkDeliveredPhotos = async (requestId, messageId) => {
+      linked.push({ requestId, messageId });
+    };
+
+    const delivered = await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+    });
+
+    expect(adapter.uploads).toHaveLength(1);
+    expect(adapter.replies[0]?.externalParentId).toBe("exact-question-parent-42");
+    expect(adapter.replies[0]?.media).toEqual([
+      expect.objectContaining({
+        providerMediaId: expect.stringContaining("mock-photo-"),
+        mediaType: "IMAGE",
+      }),
+    ]);
+    expect(linked).toEqual([{ requestId: ROOT_ID, messageId: delivered.id }]);
+  });
+
+  it("never downgrades a failed photo upload to text-only success", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.uploadFailure = new MarketplaceDeliveryError("rejected", "bad image");
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "failDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => [attachment()];
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async () => undefined;
+    const photoFailures: string[] = [];
+    photoRepository.failDeliveryPhotos = async (_requestId, kind) => {
+      photoFailures.push(kind);
+    };
+
+    const error = await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(MessageDeliveryAttemptError);
+    expect((error as MessageDeliveryAttemptError).kind).toBe("rejected");
+    expect(adapter.replies).toHaveLength(0);
+    expect(photoFailures).toEqual(["rejected"]);
+  });
+
+  it("reuses acknowledged photo uploads after a later photo fails", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const photos = [
+      attachment(),
+      attachment({
+        id: "88888888-8888-4888-8888-888888888888",
+        position: 1,
+        original_name: "detail.jpg",
+      }),
+    ];
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "failDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => photos;
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async (row, hosted) => {
+      row.provider_media_id = hosted.providerMediaId;
+      row.provider_url = hosted.mediaUrl;
+    };
+    photoRepository.failDeliveryPhotos = async () => undefined;
+    const upload = adapter.uploadPhoto.bind(adapter);
+    let attempts = 0;
+    adapter.uploadPhoto = async (input) => {
+      attempts += 1;
+      if (attempts === 2) {
+        adapter.uploads.push(input);
+        throw new MarketplaceDeliveryError("rejected", "second photo rejected");
+      }
+      return upload(input);
+    };
+
+    await expect(sendCanonicalReply({ repository, adapter, messageId: ROOT_ID }))
+      .rejects.toMatchObject({ kind: "rejected" });
+    expect(adapter.replies).toHaveLength(0);
+    expect(photos[0]?.provider_media_id).toBeTruthy();
+    expect(photos[1]?.provider_media_id).toBeNull();
+
+    const delivered = await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      retry: true,
+    });
+    expect(delivered.delivery_status).toBe("delivered");
+    expect(adapter.uploads).toHaveLength(3);
+    expect(adapter.replies[0]?.media).toHaveLength(2);
+  });
 });
+
+function attachment(overrides: Partial<MessageAttachmentRow> = {}): MessageAttachmentRow {
+  return {
+    id: "77777777-7777-4777-8777-777777777777",
+    user_id: "user_a",
+    conversation_root_id: ROOT_ID,
+    message_id: null,
+    delivery_request_id: ROOT_ID,
+    position: 0,
+    direction: "outbound",
+    media_type: "image/jpeg",
+    byte_size: 4,
+    original_name: "photo.jpg",
+    content_sha256: "374ffede23adbc8bc625205f4bf86750807ffb6ce71fc7d10cac8bded0872bf5",
+    storage_path: `user_a/${ROOT_ID}/photo.jpg`,
+    provider_media_id: null,
+    provider_url: null,
+    provider_expires_at: null,
+    delivery_status: "staged",
+    delivery_error: null,
+    created_at: "2026-07-14T12:00:00.000Z",
+    updated_at: "2026-07-14T12:00:00.000Z",
+    ...overrides,
+  };
+}

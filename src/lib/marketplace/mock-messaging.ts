@@ -3,6 +3,8 @@ import type {
   MarketplaceDeliveryInput,
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
+  MarketplacePhotoUploadInput,
+  MarketplaceHostedPhoto,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
   MarketplaceQuestionResolutionFailure,
@@ -20,8 +22,10 @@ export class MockMarketplaceMessagingAdapter
   readonly fetches: FetchQuestionsInput[] = [];
   readonly replies: MarketplaceDeliveryInput[] = [];
   readonly followUps: MarketplaceDeliveryInput[] = [];
+  readonly uploads: MarketplacePhotoUploadInput[] = [];
   replyFailure?: Error;
   followUpFailure?: Error;
+  uploadFailure?: Error;
 
   async fetchUnansweredQuestions(
     input: FetchQuestionsInput,
@@ -52,6 +56,20 @@ export class MockMarketplaceMessagingAdapter
     );
     if (!resolved) throw new Error("Mock question resolution failed");
     return resolved;
+  }
+
+  async uploadPhoto(
+    input: MarketplacePhotoUploadInput,
+  ): Promise<MarketplaceHostedPhoto> {
+    this.uploads.push(input);
+    if (this.uploadFailure) throw this.uploadFailure;
+    return {
+      providerMediaId: `mock-photo-${input.idempotencyKey}`,
+      mediaName: input.name,
+      mediaType: "IMAGE",
+      mediaUrl: `https://i.ebayimg.com/mock/${input.idempotencyKey}`,
+      expiresAt: null,
+    };
   }
 
   async replyToQuestion(

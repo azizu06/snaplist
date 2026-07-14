@@ -13,10 +13,22 @@ const ENCRYPTION_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
 };
 
+function deletionClient(rpc: ReturnType<typeof vi.fn>): SupabaseClient {
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    in: vi.fn(() => query),
+    not: vi.fn(() => query),
+    then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve(resolve({ data: [], error: null })),
+  };
+  return { rpc, from: vi.fn(() => query) } as unknown as SupabaseClient;
+}
+
 describe("saveEbayConnection", () => {
   it("disconnects through the tenant-derived serialized RPC", async () => {
     const rpc = vi.fn(async () => ({ data: true, error: null }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await deleteEbayConnection(client);
 
@@ -26,7 +38,7 @@ describe("saveEbayConnection", () => {
 
   it("persists through the tenant-derived erasure boundary", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await saveEbayConnection(
       client,
@@ -100,7 +112,7 @@ describe("saveEbayConnection", () => {
 describe("eraseEbayUserData", () => {
   it("delegates identity-scoped erasure to the transactional database seam", async () => {
     const rpc = vi.fn(async () => ({ data: 1, error: null }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await expect(
       eraseEbayUserData(client, "ebay-user-1", "seller_one"),
@@ -116,7 +128,7 @@ describe("eraseEbayUserData", () => {
       data: null,
       error: { message: "database unavailable" },
     }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await expect(
       eraseEbayUserData(client, "ebay-user-1", undefined),

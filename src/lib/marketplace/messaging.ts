@@ -20,6 +20,13 @@ export interface MarketplaceQuestion {
   body: string;
   subject: string | null;
   createdAt: string;
+  media?: MarketplaceInboundPhoto[];
+}
+
+export interface MarketplaceInboundPhoto {
+  mediaName: string;
+  mediaUrl: string;
+  mediaType: "IMAGE";
 }
 
 export interface PendingMarketplaceQuestion {
@@ -34,6 +41,7 @@ export interface PendingMarketplaceQuestion {
   createdAt: string | null;
   resolutionWindowFrom: string;
   observedCursorAt: string;
+  media?: MarketplaceInboundPhoto[];
 }
 
 export interface MarketplaceQuestionResolutionFailure {
@@ -64,6 +72,24 @@ export interface MarketplaceDeliveryInput {
   body: string;
   /** Local request correlation. Providers are not assumed to dedupe on it. */
   idempotencyKey: string;
+  media?: MarketplaceHostedPhoto[];
+}
+
+export interface MarketplacePhotoUploadInput {
+  accountGeneration?: string;
+  signal?: AbortSignal;
+  name: string;
+  mediaType: "image/jpeg" | "image/png" | "image/webp";
+  bytes: Uint8Array;
+  idempotencyKey: string;
+}
+
+export interface MarketplaceHostedPhoto {
+  providerMediaId: string;
+  mediaName: string;
+  mediaType: "IMAGE";
+  mediaUrl: string;
+  expiresAt: string | null;
 }
 
 export interface MarketplaceDeliveryReceipt {
@@ -79,6 +105,9 @@ export interface MarketplaceMessagingAdapter {
   resolveQuestion(
     question: PendingMarketplaceQuestion,
   ): Promise<MarketplaceQuestion>;
+  uploadPhoto(
+    input: MarketplacePhotoUploadInput,
+  ): Promise<MarketplaceHostedPhoto>;
   replyToQuestion(
     input: MarketplaceDeliveryInput,
   ): Promise<MarketplaceDeliveryReceipt>;

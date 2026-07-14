@@ -10,6 +10,11 @@ import {
 import { createMessagingTransportForConversation } from "@/lib/inbox/adapters";
 import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
+import {
+  MessagePhotoConflictError,
+  stageOutboundPhotos,
+  validateFormPhotos,
+} from "@/lib/inbox/attachment-store";
 
 /**
  * POST /api/inbox/[messageId]/send — the seller approved (or edited) the drafted
@@ -42,13 +47,20 @@ export async function POST(
     return NextResponse.json({ error: "Invalid message id" }, { status: 400 });
   }
 
-  let json: unknown;
+  let payload: unknown;
+  let photos: Awaited<ReturnType<typeof validateFormPhotos>> = [];
   try {
-    json = await request.json();
+    if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+      const form = await request.formData();
+      payload = { reply: form.get("reply") };
+      photos = await validateFormPhotos(form);
+    } else {
+      payload = await request.json();
+    }
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid message photos or request body" }, { status: 400 });
   }
-  const parsed = bodySchema.safeParse(json);
+  const parsed = bodySchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "reply (non-empty string) is required" },
@@ -66,7 +78,20 @@ export async function POST(
   if (!message) {
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
+  if (photos.length && message.marketplace !== "ebay") {
+    return NextResponse.json(
+      { error: "Photo messages are supported only for imported eBay conversations" },
+      { status: 400 },
+    );
+  }
   try {
+    await stageOutboundPhotos({
+      supabase,
+      userId,
+      conversationRootId: message.id,
+      deliveryRequestId: message.id,
+      photos,
+    });
     const transport = await createMessagingTransportForConversation(
       supabase,
       userId,
@@ -79,6 +104,9 @@ export async function POST(
     });
     return NextResponse.json({ outboundId: outbound.id, status: "sent" });
   } catch (err) {
+    if (err instanceof MessagePhotoConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     if (err instanceof MessageDeliveryConflictError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }

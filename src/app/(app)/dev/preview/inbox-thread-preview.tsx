@@ -61,6 +61,7 @@ export function InboxThreadPreview() {
   const repliesByQuestion = new Map<string, MessageRow>([[INBOUND.id, REPLY]]);
   const state = deriveConversationState(INBOUND, repliesByQuestion, null);
   const noop = () => {};
+  const succeed = async () => true;
 
   return (
     <div className="mx-auto flex h-[640px] w-full max-w-[760px] overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
@@ -70,14 +71,15 @@ export function InboxThreadPreview() {
         edits={{}}
         busy={null}
         followUps={[]}
+        attachments={[]}
         followUpValue={value}
         onEdit={noop}
-        onApproveAndSend={noop}
+        onApproveAndSend={succeed}
         onRetryDelivery={noop}
         onRetryFollowUp={noop}
         onRetryDraft={noop}
         onFollowUpChange={(_id, v) => setValue(v)}
-        onSendFollowUp={noop}
+        onSendFollowUp={succeed}
       />
     </div>
   );
