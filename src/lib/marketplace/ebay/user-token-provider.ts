@@ -63,7 +63,7 @@ export class UserTokenProvider implements EbayTokenProvider {
     resourceId: string,
     operation: "publish" | "reprice",
   ) {
-    const accountGeneration = await beginEbayProviderDispatch(
+    const { accountGeneration, attemptToken } = await beginEbayProviderDispatch(
       this.supabase,
       resourceId,
       operation,
@@ -78,6 +78,7 @@ export class UserTokenProvider implements EbayTokenProvider {
         resourceId,
         operation,
         accountGeneration,
+        attemptToken,
       )
         .catch((error) => {
           controller.abort(error);
@@ -98,6 +99,7 @@ export class UserTokenProvider implements EbayTokenProvider {
           resourceId,
           operation,
           accountGeneration,
+          attemptToken,
         ).catch(() => undefined);
       },
     };

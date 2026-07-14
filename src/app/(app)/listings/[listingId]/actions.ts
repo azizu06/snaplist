@@ -14,6 +14,7 @@ import {
 } from "@/lib/marketplace/ebay";
 import { reportServerError } from "@/lib/sentry";
 import { rateLimitAllows } from "@/lib/abuse";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /**
  * Server action behind the "Publish to eBay" button on /listings/[listingId]
@@ -49,7 +50,9 @@ export async function publishToEbay(formData: FormData) {
       supabase,
       userId,
       listingId,
-      await createEbayAdapterForUser(supabase),
+      await createEbayAdapterForUser(supabase, userId, {
+        credentialClient: createTenantServerClient,
+      }),
     );
   } catch (err) {
     revalidatePath(`/listings/${listingId}`);

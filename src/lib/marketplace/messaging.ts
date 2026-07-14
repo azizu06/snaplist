@@ -28,6 +28,7 @@ export interface PendingMarketplaceQuestion {
   externalParentId: string;
   externalListingId: string;
   externalBuyerId: string | null;
+  externalBuyerUsername?: string | null;
   body: string | null;
   subject: string | null;
   createdAt: string | null;

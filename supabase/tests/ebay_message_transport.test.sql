@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(135);
+select extensions.plan(144);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -2543,6 +2543,24 @@ select set_config(
   true
 );
 
+select set_config('request.headers', '{"apikey":"anon-local-test"}', true);
+
+select extensions.throws_ok(
+  $$select public.begin_ebay_transactional_dispatch(
+    '98000000-0000-4000-8000-000000000001',
+    'publish'
+  )$$,
+  '42501',
+  'Server API authorization is required',
+  'a browser cannot fabricate a transactional provider dispatch lease'
+);
+
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
 create temporary table ebay_transactional_dispatch_fixture on commit drop as
 select public.begin_ebay_transactional_dispatch(
   '98000000-0000-4000-8000-000000000001',
@@ -2553,6 +2571,12 @@ select extensions.is(
   (select lease->>'account_generation' from ebay_transactional_dispatch_fixture),
   (select account_generation::text from ebay_account_generation_fixture where account_name = 'account-b'),
   'publish dispatch acquires the current connected seller generation'
+);
+
+select extensions.ok(
+  (select nullif(lease->>'attempt_token', '') is not null
+   from ebay_transactional_dispatch_fixture),
+  'transactional dispatch returns an unforgeable lease attempt token'
 );
 
 reset role;
@@ -2575,6 +2599,36 @@ select set_config(
   '{"sub":"generation-tenant","role":"authenticated"}',
   true
 );
+select set_config(
+  'request.headers',
+  '{"apikey":"anon-local-test"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$select public.renew_ebay_transactional_dispatch(
+    '98000000-0000-4000-8000-000000000001',
+    'publish',
+    (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
+    (select (lease->>'attempt_token')::uuid from ebay_transactional_dispatch_fixture)
+  )$$,
+  '42501',
+  'Server API authorization is required',
+  'a browser cannot renew a transactional provider dispatch lease'
+);
+
+select extensions.throws_ok(
+  $$select public.end_ebay_transactional_dispatch(
+    '98000000-0000-4000-8000-000000000001',
+    'publish',
+    (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
+    (select (lease->>'attempt_token')::uuid from ebay_transactional_dispatch_fixture)
+  )$$,
+  '42501',
+  'Server API authorization is required',
+  'a browser cannot release a transactional provider dispatch lease'
+);
+
 select set_config(
   'request.headers',
   '{"apikey":"sb_secret_local_test"}',
@@ -2610,7 +2664,41 @@ select extensions.throws_ok(
 select public.end_ebay_transactional_dispatch(
   '98000000-0000-4000-8000-000000000001',
   'publish',
-  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b')
+  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
+  '88888888-8888-4888-8888-888888888888'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_provider_dispatch_leases
+    where user_id = 'generation-tenant'
+      and message_id = '98000000-0000-4000-8000-000000000001'
+      and dispatch_kind = 'publish'
+  ),
+  1,
+  'a mismatched attempt token cannot release an active dispatch lease'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select public.end_ebay_transactional_dispatch(
+  '98000000-0000-4000-8000-000000000001',
+  'publish',
+  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
+  (select (lease->>'attempt_token')::uuid from ebay_transactional_dispatch_fixture)
 );
 
 reset role;
@@ -2687,6 +2775,48 @@ select extensions.throws_ok(
   '42501',
   'Sandbox fallback identity generation changed',
   'a connected seller replacement permanently invalidates the old fallback generation'
+);
+
+reset role;
+
+insert into private.ebay_messaging_account_generations (user_id)
+values ('username-only-fallback-tenant');
+
+insert into private.ebay_seller_account_generations (
+  user_id,
+  account_generation
+)
+select account.user_id, account.generation
+from private.ebay_messaging_account_generations account
+where account.user_id = 'username-only-fallback-tenant';
+
+insert into private.ebay_seller_identity_tenants (
+  identity_kind,
+  hash_version,
+  identity_hash,
+  user_id,
+  account_generation
+)
+select
+  'username',
+  1,
+  private.hash_ebay_identity('username', 'legacy_seller_name'),
+  account.user_id,
+  account.generation
+from private.ebay_messaging_account_generations account
+where account.user_id = 'username-only-fallback-tenant';
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.throws_ok(
+  $$select public.bind_scheduled_ebay_sandbox_fallback(
+    'username-only-fallback-tenant',
+    'different-stable-seller-id'
+  )$$,
+  '42501',
+  'Sandbox fallback identity does not match this account generation',
+  'Sandbox fallback rejects a username-only seller generation'
 );
 
 reset role;
@@ -2813,6 +2943,76 @@ select extensions.is(
   ),
   2,
   'imports persist stable-id and legacy-username provenance per account generation'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select public.apply_scheduled_ebay_message_write(
+  'buyer-link-tenant',
+  'upsert_unresolved_question',
+  jsonb_build_object(
+    'external_message_id', 'buyer-provenance-pending-a',
+    'external_parent_id', 'buyer-provenance-pending-a',
+    'external_listing_id', 'buyer-provenance-listing',
+    'external_buyer_id', 'pending-stable-buyer-id',
+    'external_buyer_username', 'pending_legacy_buyer',
+    'body', 'Pending legacy identity question',
+    'subject', null,
+    'external_created_at', '2026-07-14T18:30:00Z',
+    'resolution_window_from', '2026-07-13T18:30:00Z',
+    'observed_cursor_at', '2026-07-14T18:35:00Z',
+    'attempted_at', '2026-07-14T18:35:00Z',
+    'error', 'Commerce lookup unavailable'
+  ),
+  public.begin_scheduled_ebay_message_write('buyer-link-tenant')
+);
+
+reset role;
+update public.ebay_unresolved_questions
+set external_buyer_id = 'pending_legacy_buyer'
+where user_id = 'buyer-link-tenant'
+  and external_message_id = 'buyer-provenance-pending-a';
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_buyer_identity_provenance
+    where user_id = 'buyer-link-tenant'
+      and trading_identity_hash = private.hash_ebay_identity(
+        'sender_id', 'pending-stable-buyer-id'
+      )
+      and username_identity_hash = private.hash_ebay_identity(
+        'sender_id', 'pending_legacy_buyer'
+      )
+  ),
+  1,
+  'unresolved questions persist stable-id and legacy-username provenance'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.is(
+  public.erase_ebay_user_data(
+    'pending-stable-buyer-id',
+    'pending_legacy_buyer'
+  ),
+  1,
+  'buyer deletion resolves pending legacy usernames through generation provenance'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_unresolved_questions
+    where user_id = 'buyer-link-tenant'
+      and external_message_id = 'buyer-provenance-pending-a'
+  ),
+  0,
+  'buyer deletion erases the target generation unresolved legacy question'
 );
 
 set local role service_role;

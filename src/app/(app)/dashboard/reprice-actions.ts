@@ -11,6 +11,7 @@ import {
 } from "@/lib/reprice";
 import { setAutoRepriceEnabled } from "@/lib/settings/user-settings";
 import { reportServerError } from "@/lib/sentry";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /**
  * Dashboard mutations for reprice suggestions (issue #102): one-tap apply,
@@ -37,7 +38,9 @@ export async function applyReprice(
   if (!userId) return { ok: false, message: "Not signed in." };
 
   try {
-    const adapter = await createEbayAdapterForUser(supabase);
+    const adapter = await createEbayAdapterForUser(supabase, userId, {
+      credentialClient: createTenantServerClient,
+    });
     const { appliedPrice } = await applyRepriceSuggestion(
       supabase,
       userId,

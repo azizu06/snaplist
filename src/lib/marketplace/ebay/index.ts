@@ -89,11 +89,17 @@ export function createEbayAdapter(): EbayAdapter {
 export async function createEbayAdapterForUser(
   supabase: SupabaseClient,
   userId?: string,
+  options: {
+    credentialClient?: SupabaseClient | (() => Promise<SupabaseClient>);
+  } = {},
 ): Promise<EbayAdapter> {
   const { connected } = await getEbayConnectionStatus(supabase, userId);
+  const credentialClient = connected
+    ? await resolveCredentialClient(supabase, options.credentialClient)
+    : supabase;
   return connected
     ? new HttpEbayAdapter({
-        tokenProvider: new UserTokenProvider(supabase, { userId }),
+        tokenProvider: new UserTokenProvider(credentialClient, { userId }),
       })
     : new HttpEbayAdapter();
 }
@@ -111,7 +117,7 @@ export async function createEbayMessagingAdapterForUser(
   );
   if (connected) {
     return new HttpEbayMessagingAdapter({
-      tokenProvider: new UserTokenProvider(supabase, {
+      tokenProvider: new UserTokenProvider(options.credentialClient ?? supabase, {
         userId,
         scheduled: options.scheduled,
       }),
@@ -195,4 +201,14 @@ function isExactEbaySandboxApiBase(baseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function resolveCredentialClient(
+  fallback: SupabaseClient,
+  credentialClient?: SupabaseClient | (() => Promise<SupabaseClient>),
+): Promise<SupabaseClient> {
+  if (!credentialClient) return fallback;
+  return typeof credentialClient === "function"
+    ? credentialClient()
+    : credentialClient;
 }

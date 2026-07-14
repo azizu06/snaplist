@@ -501,6 +501,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       external_parent_id: failure.question.externalParentId,
       external_listing_id: failure.question.externalListingId,
       external_buyer_id: failure.question.externalBuyerId,
+      external_buyer_username: failure.question.externalBuyerUsername ?? null,
       body: failure.question.body,
       subject: failure.question.subject,
       external_created_at: failure.question.createdAt,

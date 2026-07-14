@@ -186,18 +186,26 @@ export async function beginEbayProviderDispatch(
   supabase: SupabaseClient,
   resourceId: string,
   operation: "publish" | "reprice",
-): Promise<string> {
+): Promise<{ accountGeneration: string; attemptToken: string }> {
   const { data, error } = await supabase.rpc("begin_ebay_transactional_dispatch", {
     p_resource_id: resourceId,
     p_operation: operation,
   });
   if (error) throw new Error(`Failed to begin eBay provider dispatch: ${error.message}`);
-  const generation = (data as { account_generation?: unknown } | null)
-    ?.account_generation;
-  if (typeof generation !== "string") {
-    throw new Error("Failed to begin eBay provider dispatch: invalid generation");
+  const lease = data as {
+    account_generation?: unknown;
+    attempt_token?: unknown;
+  } | null;
+  if (
+    typeof lease?.account_generation !== "string" ||
+    typeof lease.attempt_token !== "string"
+  ) {
+    throw new Error("Failed to begin eBay provider dispatch: invalid lease");
   }
-  return generation;
+  return {
+    accountGeneration: lease.account_generation,
+    attemptToken: lease.attempt_token,
+  };
 }
 
 export async function renewEbayProviderDispatch(
@@ -205,11 +213,13 @@ export async function renewEbayProviderDispatch(
   resourceId: string,
   operation: "publish" | "reprice",
   accountGeneration: string,
+  attemptToken: string,
 ): Promise<void> {
   const { error } = await supabase.rpc("renew_ebay_transactional_dispatch", {
     p_resource_id: resourceId,
     p_operation: operation,
     p_account_generation: accountGeneration,
+    p_attempt_token: attemptToken,
   });
   if (error) throw new Error(`Failed to renew eBay provider dispatch: ${error.message}`);
 }
@@ -219,11 +229,13 @@ export async function endEbayProviderDispatch(
   resourceId: string,
   operation: "publish" | "reprice",
   accountGeneration: string,
+  attemptToken: string,
 ): Promise<void> {
   const { error } = await supabase.rpc("end_ebay_transactional_dispatch", {
     p_resource_id: resourceId,
     p_operation: operation,
     p_account_generation: accountGeneration,
+    p_attempt_token: attemptToken,
   });
   if (error) throw new Error(`Failed to end eBay provider dispatch: ${error.message}`);
 }

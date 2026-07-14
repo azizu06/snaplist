@@ -11,6 +11,7 @@ import {
 } from "@/lib/marketplace/ebay";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -53,7 +54,9 @@ export async function POST(request: NextRequest) {
       supabase,
       userId,
       listingId,
-      await createEbayAdapterForUser(supabase),
+      await createEbayAdapterForUser(supabase, userId, {
+        credentialClient: createTenantServerClient,
+      }),
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {

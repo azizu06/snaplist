@@ -435,6 +435,56 @@ describe("HttpEbayMessagingAdapter", () => {
     });
   });
 
+  it("preserves resolved buyer provenance when the question remains pending", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-partial",
+              latestMessage: {
+                messageId: "question-partial",
+                senderUsername: "legacy_buyer_name",
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-partial</ItemID></Item>
+            <Question><SenderID>stable-buyer-id</SenderID><MessageID>question-partial</MessageID></Question>
+            <MessageStatus>Unanswered</MessageStatus>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      unresolved: [
+        {
+          question: {
+            externalMessageId: "question-partial",
+            externalBuyerId: "stable-buyer-id",
+            externalBuyerUsername: "legacy_buyer_name",
+          },
+        },
+      ],
+    });
+  });
+
   it("recovers missing Trading details from the exact Commerce message", async () => {
     const fetchSpy = vi.fn(async (url: string) => {
       if (String(url).includes("/commerce/message/v1/conversation")) {
