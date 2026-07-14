@@ -41,6 +41,11 @@ export interface ImportedQuestionResult {
   inserted: boolean;
 }
 
+export interface ActionableQuestionIdentity {
+  externalMessageId: string;
+  createdAt: string;
+}
+
 /** Storage seam for the sync orchestrator; tests use a zero-network fake. */
 export interface InboxSyncRepository {
   getCursor(): Promise<Date | null>;
@@ -59,7 +64,7 @@ export interface InboxSyncRepository {
   ): Promise<void>;
   removePendingQuestion(externalMessageId: string): Promise<void>;
   countPendingQuestions(): Promise<number>;
-  listActionableQuestionIds(from: Date, to: Date): Promise<string[]>;
+  listActionableQuestions(): Promise<ActionableQuestionIdentity[]>;
   markExternallyAnswered(externalMessageId: string): Promise<void>;
   findActiveListing(externalListingId: string): Promise<SyncListingContext | null>;
   importQuestion(
@@ -133,14 +138,33 @@ export async function syncInboxForSeller(
   await input.repository.markAttempt(now);
   try {
     const pendingBeforeFetch = await input.repository.listPendingQuestions();
-    const actionableBeforeFetch = await input.repository.listActionableQuestionIds(
-      from,
-      now,
-    );
+    const actionableBeforeFetch = await input.repository.listActionableQuestions();
     const fetched = await input.adapter.fetchUnansweredQuestions({
       from,
       to: now,
     });
+    const reconcilableBeforeFetch = actionableBeforeFetch.filter((actionable) => {
+      const createdAt = Date.parse(actionable.createdAt);
+      return Number.isFinite(createdAt) && createdAt <= now.getTime();
+    });
+    const actionableIds = new Set(
+      reconcilableBeforeFetch.map(({ externalMessageId }) => externalMessageId),
+    );
+    const oldestActionableAt = reconcilableBeforeFetch.reduce<number | null>(
+      (oldest, actionable) => {
+        const createdAt = Date.parse(actionable.createdAt);
+        if (!Number.isFinite(createdAt)) return oldest;
+        return oldest === null ? createdAt : Math.min(oldest, createdAt);
+      },
+      null,
+    );
+    const reconciliationFetched =
+      oldestActionableAt !== null && oldestActionableAt < from.getTime()
+        ? await input.adapter.fetchUnansweredQuestions({
+            from: new Date(oldestActionableAt),
+            to: from,
+          })
+        : null;
     let imported = 0;
     let skippedUnknownListing = 0;
 
@@ -175,8 +199,14 @@ export async function syncInboxForSeller(
     const observedIds = new Set([
       ...fetched.questions.map((question) => question.externalMessageId),
       ...fetched.unresolved.map(({ question }) => question.externalMessageId),
+      ...(reconciliationFetched?.questions ?? [])
+        .map((candidate) => candidate.externalMessageId)
+        .filter((externalMessageId) => actionableIds.has(externalMessageId)),
+      ...(reconciliationFetched?.unresolved ?? [])
+        .map(({ question: candidate }) => candidate.externalMessageId)
+        .filter((externalMessageId) => actionableIds.has(externalMessageId)),
     ]);
-    for (const externalMessageId of actionableBeforeFetch) {
+    for (const { externalMessageId } of reconcilableBeforeFetch) {
       if (!observedIds.has(externalMessageId)) {
         await input.repository.markExternallyAnswered(externalMessageId);
       }
@@ -386,23 +416,56 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     return count ?? 0;
   }
 
-  async listActionableQuestionIds(from: Date, to: Date): Promise<string[]> {
+  async listActionableQuestions(): Promise<ActionableQuestionIdentity[]> {
     const { data, error } = await this.supabase
       .from("messages")
-      .select("external_message_id")
+      .select("id, external_message_id, external_created_at")
       .eq("user_id", this.userId)
       .eq("marketplace", "ebay")
       .eq("direction", "inbound")
-      .in("status", ["new", "drafting", "drafted", "draft_failed"])
+      .in("status", ["new", "drafting", "drafted", "draft_failed", "sent"])
       .not("external_message_id", "is", null)
-      .gte("external_created_at", from.toISOString())
-      .lte("external_created_at", to.toISOString());
+      .not("external_created_at", "is", null);
     if (error) {
       throw new Error(`Failed to list actionable eBay questions: ${error.message}`);
     }
-    return (data ?? []).flatMap((row) =>
-      typeof row.external_message_id === "string" ? [row.external_message_id] : [],
+    const candidates = data ?? [];
+    if (candidates.length === 0) return [];
+    const { data: delivered, error: deliveredError } = await this.supabase
+      .from("messages")
+      .select("reply_to")
+      .eq("user_id", this.userId)
+      .eq("marketplace", "ebay")
+      .eq("direction", "outbound")
+      .eq("delivery_status", "delivered")
+      .not("external_delivery_id", "is", null)
+      .in("reply_to", candidates.map((row) => row.id))
+      .or("reply_kind.is.null,reply_kind.eq.reply");
+    if (deliveredError) {
+      throw new Error(
+        `Failed to verify delivered eBay questions: ${deliveredError.message}`,
+      );
+    }
+    const deliveredRoots = new Set(
+      (delivered ?? []).flatMap((row) =>
+        typeof row.reply_to === "string" ? [row.reply_to] : [],
+      ),
     );
+    return candidates.flatMap((row) => {
+      if (
+        deliveredRoots.has(row.id) ||
+        typeof row.external_message_id !== "string" ||
+        typeof row.external_created_at !== "string"
+      ) {
+        return [];
+      }
+      return [
+        {
+          externalMessageId: row.external_message_id,
+          createdAt: row.external_created_at,
+        },
+      ];
+    });
   }
 
   async markExternallyAnswered(externalMessageId: string): Promise<void> {

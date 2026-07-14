@@ -128,7 +128,18 @@ begin
       and message.marketplace = 'ebay'
       and message.direction = 'inbound'
       and message.external_message_id = p_payload->>'external_message_id'
-      and message.status in ('new', 'drafting', 'drafted', 'draft_failed');
+      and message.status in ('new', 'drafting', 'drafted', 'draft_failed', 'sent')
+      and not exists (
+        select 1
+        from public.messages reply
+        where reply.user_id = message.user_id
+          and reply.reply_to = message.id
+          and reply.marketplace = 'ebay'
+          and reply.direction = 'outbound'
+          and (reply.reply_kind is null or reply.reply_kind = 'reply')
+          and reply.delivery_status = 'delivered'
+          and reply.external_delivery_id is not null
+      );
     return 'null'::jsonb;
   elsif p_operation = 'import_question' then
     select listing.*
@@ -284,6 +295,7 @@ begin
         )
         or (
           coalesce((p_payload->>'retry')::boolean, false) = true
+          and message.status = 'sent'
           and (
             message.delivery_status in ('rejected', 'failed', 'ambiguous')
             or (

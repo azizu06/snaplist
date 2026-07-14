@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(46);
+select extensions.plan(48);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -183,6 +183,109 @@ select extensions.results_eq(
   $$,
   $$values ('externally_answered'::text, null::text, null::text)$$,
   'an externally answered question is durable and non-actionable'
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Did the ambiguous reply arrive?',
+    'external_message_id', 'ambiguous-question-a',
+    'external_parent_id', 'ambiguous-question-a',
+    'external_conversation_id', 'conversation-ambiguous-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-ambiguous-a',
+    'external_created_at', '2026-07-11T11:58:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'claim_draft',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'ambiguous-question-a'
+    ),
+    'expected_status', 'new'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'attach_draft',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'ambiguous-question-a'
+    ),
+    'draft_reply', 'The charger is included.',
+    'draft_model', 'test-reply'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'claim_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'ambiguous-question-a'
+    ),
+    'body', 'The charger is included.',
+    'at', '2026-07-13T12:06:00Z',
+    'retry', false
+  )
+);
+
+select public.apply_ebay_message_write(
+  'fail_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'ambiguous-question-a'
+    ),
+    'kind', 'ambiguous',
+    'attempted_at', '2026-07-13T12:06:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'mark_externally_answered',
+  jsonb_build_object('external_message_id', 'ambiguous-question-a')
+);
+
+select extensions.results_eq(
+  $$
+    select status, delivery_status, delivery_attempted_at
+    from public.messages
+    where external_message_id = 'ambiguous-question-a'
+  $$,
+  $$
+    values (
+      'externally_answered'::text,
+      'ambiguous'::text,
+      '2026-07-13T12:06:00Z'::timestamptz
+    )
+  $$,
+  'reconciliation retires an unacknowledged send while preserving its history'
+);
+
+select extensions.results_eq(
+  $$
+    select public.apply_ebay_message_write(
+      'claim_canonical',
+      jsonb_build_object(
+        'message_id', (
+          select id from public.messages
+          where external_message_id = 'ambiguous-question-a'
+        ),
+        'body', 'The charger is included.',
+        'at', '2026-07-13T12:12:00Z',
+        'retry', true
+      )
+    )
+  $$,
+  $$values ('false'::jsonb)$$,
+  'an externally answered send cannot be retried into a duplicate delivery'
 );
 
 select extensions.lives_ok(

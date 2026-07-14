@@ -60,6 +60,7 @@ class MemorySyncRepository implements InboxSyncRepository {
   draftClaims = 0;
   draftWrites = 0;
   failImport = false;
+  deliveredCanonicalRoots = new Set<string>();
 
   async getCursor() {
     return this.cursor;
@@ -107,22 +108,31 @@ class MemorySyncRepository implements InboxSyncRepository {
   async countPendingQuestions() {
     return this.pending.size;
   }
-  async listActionableQuestionIds(from: Date, to: Date) {
-    return [...this.imported.values()].filter((message) => {
-      const createdAt = Date.parse(message.external_created_at ?? "");
-      return (
-        ["new", "drafting", "drafted", "draft_failed"].includes(message.status) &&
-        Number.isFinite(createdAt) &&
-        createdAt >= from.getTime() &&
-        createdAt <= to.getTime()
-      );
-    }).flatMap((message) =>
-      message.external_message_id ? [message.external_message_id] : [],
-    );
+  async listActionableQuestions() {
+    return [...this.imported.values()]
+      .filter(
+        (message) =>
+          ["new", "drafting", "drafted", "draft_failed", "sent"].includes(
+            message.status,
+          ) &&
+          !this.deliveredCanonicalRoots.has(message.id) &&
+          Boolean(message.external_message_id) &&
+          Boolean(message.external_created_at),
+      )
+      .map((message) => ({
+        externalMessageId: message.external_message_id!,
+        createdAt: message.external_created_at!,
+      }));
   }
   async markExternallyAnswered(externalMessageId: string) {
     const message = this.imported.get(externalMessageId);
-    if (!message || !["new", "drafting", "drafted", "draft_failed"].includes(message.status)) {
+    if (
+      !message ||
+      !["new", "drafting", "drafted", "draft_failed", "sent"].includes(
+        message.status,
+      ) ||
+      this.deliveredCanonicalRoots.has(message.id)
+    ) {
       return;
     }
     message.status = "externally_answered";
@@ -505,6 +515,171 @@ describe("syncInboxForSeller", () => {
       draft_model: null,
     });
     expect(draft).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires an unacknowledged send claim when eBay no longer reports the question as unanswered", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [question];
+    const repository = new MemorySyncRepository();
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      draft: async () => ({
+        reply: "Yes, the charger is included.",
+        model: "test-reply",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+    });
+    const imported = repository.imported.get(question.externalMessageId)!;
+    imported.status = "sent";
+    imported.delivery_status = "ambiguous";
+    imported.delivery_attempted_at = "2026-07-13T12:06:00.000Z";
+
+    adapter.questions = [];
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:10:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(question.externalMessageId)).toMatchObject({
+      status: "externally_answered",
+      delivery_status: "ambiguous",
+      delivery_attempted_at: "2026-07-13T12:06:00.000Z",
+    });
+  });
+
+  it("reconciles actionable questions older than the ingestion lookback", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    repository.cursor = new Date("2026-07-15T12:00:00.000Z");
+    const oldQuestion = {
+      ...question,
+      externalMessageId: "ebay-question-old-draft",
+      externalParentId: "ebay-question-old-draft",
+      createdAt: "2026-07-11T12:04:00.000Z",
+    };
+    const imported = await repository.importQuestion(oldQuestion, listing);
+    imported.message.status = "drafted";
+    imported.message.draft_reply = "Yes, the charger is included.";
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-15T12:05:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(oldQuestion.externalMessageId)).toMatchObject({
+      status: "externally_answered",
+      draft_reply: null,
+    });
+    expect(adapter.fetches).toEqual([
+      {
+        from: new Date("2026-07-14T12:00:00.000Z"),
+        to: new Date("2026-07-15T12:05:00.000Z"),
+      },
+      {
+        from: new Date("2026-07-11T12:04:00.000Z"),
+        to: new Date("2026-07-14T12:00:00.000Z"),
+      },
+    ]);
+  });
+
+  it("keeps an older unanswered question actionable without importing unrelated history", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    repository.cursor = new Date("2026-07-15T12:00:00.000Z");
+    const oldQuestion = {
+      ...question,
+      externalMessageId: "ebay-question-old-unanswered",
+      externalParentId: "ebay-question-old-unanswered",
+      createdAt: "2026-07-11T12:04:00.000Z",
+    };
+    const unrelatedOldQuestion = {
+      ...question,
+      externalMessageId: "ebay-question-unrelated-history",
+      externalParentId: "ebay-question-unrelated-history",
+      createdAt: "2026-07-12T12:04:00.000Z",
+    };
+    const imported = await repository.importQuestion(oldQuestion, listing);
+    imported.message.status = "drafted";
+    imported.message.draft_reply = "Yes, the charger is included.";
+    adapter.questions = [oldQuestion, unrelatedOldQuestion];
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-15T12:05:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(oldQuestion.externalMessageId)).toMatchObject({
+      status: "drafted",
+      draft_reply: "Yes, the charger is included.",
+    });
+    expect(repository.imported.has(unrelatedOldQuestion.externalMessageId)).toBe(
+      false,
+    );
+    expect(adapter.fetches).toHaveLength(2);
+  });
+
+  it("does not retire a question with a delivered canonical acknowledgement", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    const imported = await repository.importQuestion(question, listing);
+    imported.message.status = "sent";
+    imported.message.delivery_status = "delivered";
+    imported.message.external_delivery_id = "ebay-acknowledgement-42";
+    repository.deliveredCanonicalRoots.add(imported.message.id);
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:10:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(question.externalMessageId)).toMatchObject({
+      status: "sent",
+      delivery_status: "delivered",
+      external_delivery_id: "ebay-acknowledgement-42",
+    });
+  });
+
+  it("does not retire a question whose provider timestamp is beyond the sync cutoff", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    const futureQuestion = {
+      ...question,
+      externalMessageId: "ebay-question-future-clock",
+      externalParentId: "ebay-question-future-clock",
+      createdAt: "2026-07-13T12:11:00.000Z",
+    };
+    const imported = await repository.importQuestion(futureQuestion, listing);
+    imported.message.status = "drafted";
+    imported.message.draft_reply = "Yes, the charger is included.";
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:10:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(futureQuestion.externalMessageId)).toMatchObject({
+      status: "drafted",
+      draft_reply: "Yes, the charger is included.",
+    });
   });
 
   it("does not advance the cursor when durable import fails", async () => {
