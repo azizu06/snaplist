@@ -88,12 +88,7 @@ export async function saveEbayConnection(
 export async function deleteEbayConnection(
   supabase: SupabaseClient,
 ): Promise<void> {
-  const { error } = await supabase.from("ebay_connections").delete().neq(
-    // RLS already pins the row to the caller; the tautological filter exists
-    // because PostgREST refuses DELETE without any filter at all.
-    "user_id",
-    "",
-  );
+  const { error } = await supabase.rpc("disconnect_ebay_connection");
   if (error) throw new Error(`Failed to disconnect eBay: ${error.message}`);
 }
 
@@ -186,15 +181,26 @@ export async function beginEbayProviderDispatch(
   supabase: SupabaseClient,
   resourceId: string,
   operation: "publish" | "reprice",
-): Promise<{ accountGeneration: string; attemptToken: string }> {
-  const { data, error } = await supabase.rpc("begin_ebay_transactional_dispatch", {
-    p_resource_id: resourceId,
-    p_operation: operation,
-  });
+  scheduled = false,
+): Promise<{
+  accountGeneration: string;
+  attemptToken: string;
+  userId?: string;
+}> {
+  const { data, error } = await supabase.rpc(
+    scheduled
+      ? "begin_scheduled_ebay_transactional_dispatch"
+      : "begin_ebay_transactional_dispatch",
+    {
+      p_resource_id: resourceId,
+      p_operation: operation,
+    },
+  );
   if (error) throw new Error(`Failed to begin eBay provider dispatch: ${error.message}`);
   const lease = data as {
     account_generation?: unknown;
     attempt_token?: unknown;
+    user_id?: unknown;
   } | null;
   if (
     typeof lease?.account_generation !== "string" ||
@@ -205,6 +211,7 @@ export async function beginEbayProviderDispatch(
   return {
     accountGeneration: lease.account_generation,
     attemptToken: lease.attempt_token,
+    userId: typeof lease.user_id === "string" ? lease.user_id : undefined,
   };
 }
 
@@ -214,13 +221,19 @@ export async function renewEbayProviderDispatch(
   operation: "publish" | "reprice",
   accountGeneration: string,
   attemptToken: string,
+  scheduled = false,
 ): Promise<void> {
-  const { error } = await supabase.rpc("renew_ebay_transactional_dispatch", {
-    p_resource_id: resourceId,
-    p_operation: operation,
-    p_account_generation: accountGeneration,
-    p_attempt_token: attemptToken,
-  });
+  const { error } = await supabase.rpc(
+    scheduled
+      ? "renew_scheduled_ebay_transactional_dispatch"
+      : "renew_ebay_transactional_dispatch",
+    {
+      p_resource_id: resourceId,
+      p_operation: operation,
+      p_account_generation: accountGeneration,
+      p_attempt_token: attemptToken,
+    },
+  );
   if (error) throw new Error(`Failed to renew eBay provider dispatch: ${error.message}`);
 }
 
@@ -230,13 +243,19 @@ export async function endEbayProviderDispatch(
   operation: "publish" | "reprice",
   accountGeneration: string,
   attemptToken: string,
+  scheduled = false,
 ): Promise<void> {
-  const { error } = await supabase.rpc("end_ebay_transactional_dispatch", {
-    p_resource_id: resourceId,
-    p_operation: operation,
-    p_account_generation: accountGeneration,
-    p_attempt_token: attemptToken,
-  });
+  const { error } = await supabase.rpc(
+    scheduled
+      ? "end_scheduled_ebay_transactional_dispatch"
+      : "end_ebay_transactional_dispatch",
+    {
+      p_resource_id: resourceId,
+      p_operation: operation,
+      p_account_generation: accountGeneration,
+      p_attempt_token: attemptToken,
+    },
+  );
   if (error) throw new Error(`Failed to end eBay provider dispatch: ${error.message}`);
 }
 

@@ -12,6 +12,127 @@ alter table private.ebay_provider_dispatch_leases
 create unique index if not exists ebay_provider_dispatch_leases_attempt_token_key
   on private.ebay_provider_dispatch_leases (attempt_token);
 
+drop policy if exists ebay_connections_delete_own on public.ebay_connections;
+
+create or replace function private.disconnect_ebay_connection_for_tenant(
+  p_user_id text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_account private.ebay_messaging_account_generations%rowtype;
+  v_old_generation uuid;
+  v_new_generation uuid;
+begin
+  v_account := private.lock_ebay_messaging_account(p_user_id);
+  perform private.expire_ebay_provider_dispatch_leases(p_user_id);
+  if exists (
+    select 1
+    from private.ebay_provider_dispatch_leases lease
+    where lease.user_id = p_user_id
+      and lease.account_generation = v_account.generation
+      and lease.expires_at > statement_timestamp()
+  ) then
+    raise exception using errcode = '40001', message = 'eBay provider dispatch is active';
+  end if;
+
+  select connection.account_generation
+  into v_old_generation
+  from public.ebay_connections connection
+  where connection.user_id = p_user_id
+    and connection.account_generation = v_account.generation
+  for update;
+  if not found then
+    return false;
+  end if;
+
+  delete from public.ebay_connections connection
+  where connection.user_id = p_user_id
+    and connection.account_generation = v_old_generation;
+
+  update public.messages message
+  set status = 'provider_unavailable'
+  where message.user_id = p_user_id
+    and message.marketplace = 'ebay'
+    and message.direction = 'inbound'
+    and message.ebay_account_generation = v_old_generation
+    and message.status <> 'externally_answered'
+    and not exists (
+      select 1
+      from public.messages reply
+      where reply.user_id = message.user_id
+        and reply.reply_to = message.id
+        and reply.marketplace = 'ebay'
+        and reply.direction = 'outbound'
+        and reply.delivery_status = 'delivered'
+    );
+
+  delete from public.ebay_unresolved_questions pending
+  where pending.user_id = p_user_id
+    and pending.ebay_account_generation = v_old_generation;
+
+  delete from public.ebay_message_sync_state sync_state
+  where sync_state.user_id = p_user_id
+    and sync_state.ebay_account_generation = v_old_generation;
+
+  delete from private.ebay_sandbox_fallback_bindings binding
+  where binding.user_id = p_user_id
+    and binding.account_generation = v_old_generation;
+
+  v_new_generation := gen_random_uuid();
+  update private.ebay_messaging_account_generations account
+  set generation = v_new_generation,
+      seller_erased = false,
+      updated_at = statement_timestamp()
+  where account.user_id = p_user_id
+    and account.generation = v_old_generation;
+
+  insert into private.ebay_seller_account_generations (
+    user_id,
+    account_generation
+  ) values (
+    p_user_id,
+    v_new_generation
+  ) on conflict (user_id, account_generation) do nothing;
+
+  return true;
+end;
+$$;
+
+revoke all on function private.disconnect_ebay_connection_for_tenant(text)
+  from public, anon, authenticated, service_role;
+
+create or replace function public.disconnect_ebay_connection()
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated' or v_user_id = '' then
+    raise exception using errcode = '42501', message = 'Seller authorization is required';
+  end if;
+  if v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server API authorization is required';
+  end if;
+  return private.disconnect_ebay_connection_for_tenant(v_user_id);
+end;
+$$;
+
+revoke all on function public.disconnect_ebay_connection()
+  from public, anon, service_role;
+grant execute on function public.disconnect_ebay_connection()
+  to authenticated;
+
 create or replace function private.begin_ebay_transactional_dispatch_for_tenant(
   p_user_id text,
   p_resource_id uuid,
@@ -35,11 +156,17 @@ begin
   if v_account.seller_erased then
     raise exception using errcode = '42501', message = 'eBay seller account has been erased';
   end if;
-  perform 1
-  from public.ebay_connections connection
-  where connection.user_id = p_user_id
-    and connection.account_generation = v_account.generation;
-  if not found then
+  if not exists (
+    select 1
+    from public.ebay_connections connection
+    where connection.user_id = p_user_id
+      and connection.account_generation = v_account.generation
+  ) and not exists (
+    select 1
+    from private.ebay_sandbox_fallback_bindings binding
+    where binding.user_id = p_user_id
+      and binding.account_generation = v_account.generation
+  ) then
     raise exception using errcode = '42501', message = 'A current eBay connection is required';
   end if;
   perform 1
@@ -235,6 +362,130 @@ grant execute on function public.end_ebay_transactional_dispatch(
   uuid, text, uuid, uuid
 ) to authenticated;
 
+create or replace function public.begin_scheduled_ebay_transactional_dispatch(
+  p_resource_id uuid,
+  p_operation text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text;
+  v_lease jsonb;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  if p_operation <> 'reprice' then
+    raise exception using errcode = '42501', message = 'Scheduler dispatch operation is not allowed';
+  end if;
+  select listing.user_id
+  into v_user_id
+  from public.listings listing
+  where listing.id = p_resource_id
+    and listing.platform = 'ebay'
+    and listing.ebay_status = 'published';
+  if not found then
+    raise exception using errcode = '42501', message = 'The scheduled eBay dispatch resource is unavailable';
+  end if;
+  v_lease := private.begin_ebay_transactional_dispatch_for_tenant(
+    v_user_id,
+    p_resource_id,
+    p_operation
+  );
+  return v_lease || jsonb_build_object('user_id', v_user_id);
+end;
+$$;
+
+revoke all on function public.begin_scheduled_ebay_transactional_dispatch(
+  uuid, text
+) from public, anon, authenticated;
+grant execute on function public.begin_scheduled_ebay_transactional_dispatch(
+  uuid, text
+) to service_role;
+
+create or replace function public.renew_scheduled_ebay_transactional_dispatch(
+  p_resource_id uuid,
+  p_operation text,
+  p_account_generation uuid,
+  p_attempt_token uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  if p_operation <> 'reprice' then
+    raise exception using errcode = '42501', message = 'Scheduler dispatch operation is not allowed';
+  end if;
+  select lease.user_id
+  into v_user_id
+  from private.ebay_provider_dispatch_leases lease
+  where lease.message_id = p_resource_id
+    and lease.dispatch_kind = p_operation
+    and lease.account_generation = p_account_generation
+    and lease.attempt_token = p_attempt_token;
+  if not found then
+    raise exception using errcode = '40001', message = 'eBay provider dispatch lease expired';
+  end if;
+  perform private.renew_ebay_transactional_dispatch_for_tenant(
+    v_user_id,
+    p_resource_id,
+    p_operation,
+    p_account_generation,
+    p_attempt_token
+  );
+end;
+$$;
+
+revoke all on function public.renew_scheduled_ebay_transactional_dispatch(
+  uuid, text, uuid, uuid
+) from public, anon, authenticated;
+grant execute on function public.renew_scheduled_ebay_transactional_dispatch(
+  uuid, text, uuid, uuid
+) to service_role;
+
+create or replace function public.end_scheduled_ebay_transactional_dispatch(
+  p_resource_id uuid,
+  p_operation text,
+  p_account_generation uuid,
+  p_attempt_token uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  if p_operation <> 'reprice' then
+    raise exception using errcode = '42501', message = 'Scheduler dispatch operation is not allowed';
+  end if;
+  delete from private.ebay_provider_dispatch_leases lease
+  where lease.message_id = p_resource_id
+    and lease.dispatch_kind = p_operation
+    and lease.account_generation = p_account_generation
+    and lease.attempt_token = p_attempt_token;
+end;
+$$;
+
+revoke all on function public.end_scheduled_ebay_transactional_dispatch(
+  uuid, text, uuid, uuid
+) from public, anon, authenticated;
+grant execute on function public.end_scheduled_ebay_transactional_dispatch(
+  uuid, text, uuid, uuid
+) to service_role;
+
 create or replace function private.record_unresolved_ebay_buyer_provenance(
   p_user_id text,
   p_generation uuid,
@@ -255,25 +506,38 @@ declare
     p_payload->>'external_buyer_username'
   );
 begin
-  if v_buyer_hash is null or v_username_hash is null then
-    return;
+  insert into private.ebay_buyer_identity_observations (
+    user_id,
+    account_generation,
+    identity_hash
+  )
+  select p_user_id, p_generation, identity_hash
+  from unnest(array[v_buyer_hash, v_username_hash]) identity(identity_hash)
+  where identity_hash is not null
+  on conflict (user_id, account_generation, identity_hash) do update
+    set observed_at = greatest(
+      private.ebay_buyer_identity_observations.observed_at,
+      excluded.observed_at
+    );
+
+  if v_buyer_hash is not null and v_username_hash is not null then
+    insert into private.ebay_buyer_identity_provenance (
+      user_id,
+      account_generation,
+      trading_identity_hash,
+      username_identity_hash
+    ) values (
+      p_user_id,
+      p_generation,
+      v_buyer_hash,
+      v_username_hash
+    ) on conflict (
+      user_id,
+      account_generation,
+      trading_identity_hash,
+      username_identity_hash
+    ) do nothing;
   end if;
-  insert into private.ebay_buyer_identity_provenance (
-    user_id,
-    account_generation,
-    trading_identity_hash,
-    username_identity_hash
-  ) values (
-    p_user_id,
-    p_generation,
-    v_buyer_hash,
-    v_username_hash
-  ) on conflict (
-    user_id,
-    account_generation,
-    trading_identity_hash,
-    username_identity_hash
-  ) do nothing;
 end;
 $$;
 

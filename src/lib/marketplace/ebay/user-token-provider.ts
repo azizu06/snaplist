@@ -63,11 +63,23 @@ export class UserTokenProvider implements EbayTokenProvider {
     resourceId: string,
     operation: "publish" | "reprice",
   ) {
-    const { accountGeneration, attemptToken } = await beginEbayProviderDispatch(
+    const { accountGeneration, attemptToken, userId } = await beginEbayProviderDispatch(
       this.supabase,
       resourceId,
       operation,
+      this.scheduled,
     );
+    if (this.scheduled && userId !== this.userId) {
+      await endEbayProviderDispatch(
+        this.supabase,
+        resourceId,
+        operation,
+        accountGeneration,
+        attemptToken,
+        true,
+      ).catch(() => undefined);
+      throw new Error("Scheduled eBay dispatch tenant does not match its resource");
+    }
     const controller = new AbortController();
     let renewing = false;
     const timer = setInterval(() => {
@@ -79,6 +91,7 @@ export class UserTokenProvider implements EbayTokenProvider {
         operation,
         accountGeneration,
         attemptToken,
+        this.scheduled,
       )
         .catch((error) => {
           controller.abort(error);
@@ -100,6 +113,7 @@ export class UserTokenProvider implements EbayTokenProvider {
           operation,
           accountGeneration,
           attemptToken,
+          this.scheduled,
         ).catch(() => undefined);
       },
     };

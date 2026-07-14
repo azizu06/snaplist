@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(144);
+select extensions.plan(155);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -1837,8 +1837,31 @@ where user_id = 'message-tenant-a';
 
 select extensions.is(
   (select count(*)::integer from public.ebay_connections where user_id = 'message-tenant-a'),
+  1,
+  'authenticated tenants cannot bypass serialized disconnect with a direct delete'
+);
+
+select extensions.lives_ok(
+  $$ select public.disconnect_ebay_connection() $$,
+  'serialized disconnect succeeds when no provider dispatch is active'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_connections where user_id = 'message-tenant-a'),
   0,
   'disconnect removes live seller identity while preserving deletion discovery'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where user_id = 'message-tenant-a'
+      and marketplace = 'ebay'
+      and status = 'provider_unavailable'
+  ),
+  1,
+  'disconnect makes incompatible eBay messaging history non-actionable'
 );
 
 set local role service_role;
@@ -2717,6 +2740,111 @@ select extensions.is(
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
+create temporary table ebay_scheduled_reprice_dispatch_fixture on commit drop as
+select public.begin_scheduled_ebay_transactional_dispatch(
+  '98000000-0000-4000-8000-000000000001',
+  'reprice'
+) as lease;
+
+select extensions.results_eq(
+  $$
+    select lease->>'user_id', lease->>'account_generation'
+    from ebay_scheduled_reprice_dispatch_fixture
+  $$,
+  $$
+    select 'generation-tenant'::text,
+           account_generation::text
+    from ebay_account_generation_fixture
+    where account_name = 'account-b'
+  $$,
+  'scheduled repricing derives the listing tenant and current account generation'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.erase_ebay_user_data(
+      'generation-account-b',
+      'generation_seller_a'
+    )
+  $$,
+  '40001',
+  'eBay provider dispatch is active',
+  'account erasure cannot acknowledge during scheduled repricing dispatch'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.begin_scheduled_ebay_transactional_dispatch(
+      '98000000-0000-4000-8000-000000000001',
+      'publish'
+    )
+  $$,
+  '42501',
+  'Scheduler dispatch operation is not allowed',
+  'scheduler dispatch authority is limited to repricing'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$ select public.disconnect_ebay_connection() $$,
+  '40001',
+  'eBay provider dispatch is active',
+  'seller disconnect cannot complete during scheduled repricing dispatch'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.save_ebay_connection(
+      'generation-account-c',
+      'generation_seller_c',
+      'v1.generation-c-refresh',
+      'v1.generation-c-access',
+      '2026-07-14T19:00:00Z',
+      array['scope-c']::text[]
+    )
+  $$,
+  '40001',
+  'eBay provider dispatch is active',
+  'seller reconnect cannot complete during scheduled repricing dispatch'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select public.end_scheduled_ebay_transactional_dispatch(
+  '98000000-0000-4000-8000-000000000001',
+  'reprice',
+  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
+  (select (lease->>'attempt_token')::uuid from ebay_scheduled_reprice_dispatch_fixture)
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_provider_dispatch_leases
+    where user_id = 'generation-tenant'
+      and dispatch_kind = 'reprice'
+  ),
+  0,
+  'scheduled repricing releases only its exact generation-bound lease'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
 create temporary table ebay_fallback_generation_fixture on commit drop as
 select public.bind_scheduled_ebay_sandbox_fallback(
   'fresh-operator-tenant',
@@ -2880,7 +3008,38 @@ select public.apply_scheduled_ebay_message_write(
   public.begin_scheduled_ebay_message_write('buyer-link-tenant')
 );
 
+select public.apply_scheduled_ebay_message_write(
+  'buyer-link-tenant',
+  'upsert_unresolved_question',
+  jsonb_build_object(
+    'external_message_id', 'buyer-provenance-partial-a',
+    'external_parent_id', 'buyer-provenance-partial-a',
+    'external_listing_id', 'buyer-provenance-listing',
+    'external_buyer_id', 'buyer-stable-id-a',
+    'body', 'Unresolved partial identity question',
+    'external_created_at', '2026-07-14T17:10:00Z',
+    'resolution_window_from', '2026-07-13T17:10:00Z',
+    'observed_cursor_at', '2026-07-14T17:15:00Z',
+    'attempted_at', '2026-07-14T17:15:00Z',
+    'error', 'Commerce lookup unavailable'
+  ),
+  public.begin_scheduled_ebay_message_write('buyer-link-tenant')
+);
+
 reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_buyer_identity_observations
+    where user_id = 'buyer-link-tenant'
+      and identity_hash = private.hash_ebay_identity(
+        'sender_id', 'buyer-stable-id-a'
+      )
+  ),
+  1,
+  'unresolved questions persist partial generation-bound buyer provenance'
+);
 update public.messages
 set external_buyer_id = 'reused_buyer_username'
 where user_id = 'buyer-link-tenant'
@@ -3019,9 +3178,9 @@ set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 select extensions.is(
-  public.erase_ebay_user_data('buyer-stable-id-a', 'reused_buyer_username'),
+  public.erase_ebay_user_data('buyer-stable-id-a', null),
   1,
-  'buyer deletion resolves the target legacy username through stable generation provenance'
+  'stable-only buyer deletion resolves bound legacy usernames through generation provenance'
 );
 
 reset role;
@@ -3035,6 +3194,17 @@ select extensions.is(
   ),
   0,
   'buyer deletion erases the target generation legacy-username question'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_unresolved_questions
+    where user_id = 'buyer-link-tenant'
+      and external_message_id = 'buyer-provenance-partial-a'
+  ),
+  0,
+  'stable-only buyer deletion erases partial unresolved provenance records'
 );
 
 select extensions.is(

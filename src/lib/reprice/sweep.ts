@@ -5,7 +5,7 @@ import { logPrediction } from "../pipeline/prediction-log";
 import { priceToConfidence } from "../confidence/from-price";
 import { createDefaultPricer } from "../pricing/default-pricer";
 import type { ItemSignal, PriceResult } from "../pricing";
-import { createEbayAdapter, type EbayAdapter } from "../marketplace/ebay";
+import { createEbayAdapterForUser, type EbayAdapter } from "../marketplace/ebay";
 import { marketplaceCurrency } from "../marketplace/ebay/map";
 import { createNotification } from "../notifications";
 import { reportServerError } from "../sentry";
@@ -77,12 +77,12 @@ export interface RepriceSweepDeps {
   /** Price an item signal. Defaults to the REAL PriceRouter over all PRD tiers. */
   priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
   /**
-   * eBay adapter used for auto-apply revisions. Defaults to the app-level env
-   * adapter (the sandbox loop): per-user OAuth token providers need the
-   * seller's RLS-scoped session client, which a cron doesn't have — routing
-   * per-user connections through the sweep is the #17-production follow-up.
+   * Injectable eBay adapter used for every auto-apply revision in tests or
+   * single-seller operator flows.
    */
   adapter?: EbayAdapter;
+  /** Resolve the connected seller's scheduled, generation-bound adapter. */
+  adapterForUser?: (userId: string) => Promise<EbayAdapter>;
   /** Injectable env reader (currency guard); defaults to process.env. */
   env?: () => Record<string, string | undefined>;
   /** Config overrides; defaults to `resolveRepriceConfig(env)`. */
@@ -193,6 +193,13 @@ export async function runRepriceSweep(
         settings: settingsByUser.get(listing.user_id),
         priceItem,
         adapter: deps.adapter,
+        adapterForUser:
+          deps.adapterForUser ??
+          ((userId) =>
+            createEbayAdapterForUser(supabase, userId, {
+              credentialClient: supabase,
+              scheduled: true,
+            })),
         readEnv,
         config,
         now,
@@ -233,6 +240,7 @@ interface RepriceOneContext {
   settings: UserSettingsRow | undefined;
   priceItem: (signal: ItemSignal) => Promise<PriceResult>;
   adapter: EbayAdapter | undefined;
+  adapterForUser: (userId: string) => Promise<EbayAdapter>;
   readEnv: () => Record<string, string | undefined>;
   config: RepriceConfig;
   now: () => Date;
@@ -379,8 +387,8 @@ async function tryAutoApply(
     return false;
   }
 
-  const adapter = ctx.adapter ?? createEbayAdapter();
   try {
+    const adapter = ctx.adapter ?? (await ctx.adapterForUser(listing.user_id));
     await adapter.revisePrice({
       sku: listing.id,
       offerId: listing.ebay_offer_id,

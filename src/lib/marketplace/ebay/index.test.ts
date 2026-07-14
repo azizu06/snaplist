@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getEbayConnectionStatus, userTokenProvider } = vi.hoisted(() => ({
   getEbayConnectionStatus: vi.fn(),
@@ -34,6 +34,10 @@ const operatorEnv = {
 describe("eBay messaging composition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("uses the tenant server client for connected seller credential writes", async () => {
@@ -73,6 +77,29 @@ describe("eBay messaging composition", () => {
 
     expect(credentialClient).not.toHaveBeenCalled();
     expect(userTokenProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps scheduled Sandbox auto-repricing on the operator's bound generation", async () => {
+    getEbayConnectionStatus.mockResolvedValue({
+      connected: false,
+      ebayUsername: null,
+    });
+    for (const [key, value] of Object.entries(operatorEnv)) {
+      vi.stubEnv(key, value);
+    }
+    const credentialClient = { rpc: vi.fn() } as unknown as SupabaseClient;
+
+    await expect(
+      createEbayAdapterForUser({} as SupabaseClient, "user_operator", {
+        credentialClient,
+        scheduled: true,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(userTokenProvider).toHaveBeenCalledWith(credentialClient, {
+      userId: "user_operator",
+      scheduled: true,
+    });
   });
 
   it("allows app-level Sandbox credentials only for the configured operator tenant", () => {

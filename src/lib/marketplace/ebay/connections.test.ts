@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  deleteEbayConnection,
   eraseEbayUserData,
   saveEbayConnection,
   updateCachedAccessToken,
@@ -13,6 +14,16 @@ const ENCRYPTION_ENV = {
 };
 
 describe("saveEbayConnection", () => {
+  it("disconnects through the tenant-derived serialized RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const client = { rpc } as unknown as SupabaseClient;
+
+    await deleteEbayConnection(client);
+
+    expect(rpc).toHaveBeenCalledOnce();
+    expect(rpc).toHaveBeenCalledWith("disconnect_ebay_connection");
+  });
+
   it("persists through the tenant-derived erasure boundary", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
     const client = { rpc } as unknown as SupabaseClient;
@@ -150,6 +161,92 @@ describe("UserTokenProvider", () => {
       p_account_generation: generation,
       p_attempt_token: attemptToken,
     });
+  });
+
+  it("uses the scheduler-only lease seam for scheduled repricing", async () => {
+    const generation = "22222222-2222-4222-8222-222222222222";
+    const attemptToken = "77777777-7777-4777-8777-777777777777";
+    const rpc = vi.fn(async (name: string) => {
+      if (name === "begin_scheduled_ebay_transactional_dispatch") {
+        return {
+          data: {
+            user_id: "scheduled-tenant",
+            account_generation: generation,
+            attempt_token: attemptToken,
+          },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    });
+    const provider = new UserTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      {
+        env: () => ENCRYPTION_ENV,
+        scheduled: true,
+        userId: "scheduled-tenant",
+      },
+    );
+
+    const lease = await provider.beginProviderDispatch(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "reprice",
+    );
+    await lease.release();
+
+    expect(rpc).toHaveBeenCalledWith(
+      "begin_scheduled_ebay_transactional_dispatch",
+      {
+        p_resource_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        p_operation: "reprice",
+      },
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "end_scheduled_ebay_transactional_dispatch",
+      {
+        p_resource_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        p_operation: "reprice",
+        p_account_generation: generation,
+        p_attempt_token: attemptToken,
+      },
+    );
+  });
+
+  it("releases a scheduled lease when its database-derived tenant mismatches", async () => {
+    const generation = "22222222-2222-4222-8222-222222222222";
+    const attemptToken = "77777777-7777-4777-8777-777777777777";
+    const rpc = vi.fn(async (name: string) => {
+      if (name === "begin_scheduled_ebay_transactional_dispatch") {
+        return {
+          data: {
+            user_id: "different-tenant",
+            account_generation: generation,
+            attempt_token: attemptToken,
+          },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    });
+    const provider = new UserTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      {
+        env: () => ENCRYPTION_ENV,
+        scheduled: true,
+        userId: "scheduled-tenant",
+      },
+    );
+
+    await expect(
+      provider.beginProviderDispatch(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "reprice",
+      ),
+    ).rejects.toThrow("tenant does not match");
+    expect(rpc).toHaveBeenCalledWith(
+      "end_scheduled_ebay_transactional_dispatch",
+      expect.objectContaining({ p_attempt_token: attemptToken }),
+    );
   });
 
   it("binds refresh reads and cache writes to the source account generation", async () => {

@@ -154,7 +154,7 @@ describe("ebay_connections (DB-gated)", () => {
     const status = await getEbayConnectionStatus(userA.client);
     expect(status).toEqual({ connected: true, ebayUsername: "seller_a" });
 
-    await deleteEbayConnection(userA.client);
+    await deleteEbayConnection(userAServer);
     const after = await getEbayConnectionStatus(userA.client);
     expect(after.connected).toBe(false);
   });
@@ -244,7 +244,7 @@ describe("UserTokenProvider (DB-gated)", () => {
   it("explains the fix when no eBay account is connected", async () => {
     if (!reachable) return;
 
-    await deleteEbayConnection(userB.client);
+    await deleteEbayConnection(userBServer);
     const provider = new UserTokenProvider(userB.client, {
       env: () => TEST_ENV,
     });

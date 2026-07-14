@@ -65,6 +65,14 @@ create table if not exists private.ebay_buyer_identity_provenance (
   )
 );
 
+create table if not exists private.ebay_buyer_identity_observations (
+  user_id text not null,
+  account_generation uuid not null,
+  identity_hash text not null check (length(identity_hash) = 64),
+  observed_at timestamptz not null default statement_timestamp(),
+  primary key (user_id, account_generation, identity_hash)
+);
+
 create table if not exists private.ebay_erased_buyer_generation_tombstones (
   user_id text not null,
   account_generation uuid not null,
@@ -81,6 +89,7 @@ create table if not exists private.ebay_sandbox_fallback_bindings (
 );
 
 revoke all on table private.ebay_buyer_identity_provenance,
+  private.ebay_buyer_identity_observations,
   private.ebay_erased_buyer_generation_tombstones,
   private.ebay_sandbox_fallback_bindings
   from public, anon, authenticated, service_role;
@@ -299,6 +308,31 @@ alter table public.ebay_unresolved_questions
 
 alter table public.ebay_message_sync_state
   alter column ebay_account_generation set not null;
+
+insert into private.ebay_buyer_identity_observations (
+  user_id,
+  account_generation,
+  identity_hash
+)
+select source.user_id,
+       source.account_generation,
+       private.hash_ebay_identity('sender_id', source.external_buyer_id)
+from (
+  select message.user_id,
+         message.ebay_account_generation as account_generation,
+         message.external_buyer_id
+  from public.messages message
+  where message.marketplace = 'ebay'
+  union all
+  select pending.user_id,
+         pending.ebay_account_generation,
+         pending.external_buyer_id
+  from public.ebay_unresolved_questions pending
+) source
+where private.hash_ebay_identity(
+  'sender_id', source.external_buyer_id
+) is not null
+on conflict (user_id, account_generation, identity_hash) do nothing;
 
 alter table public.messages
   drop constraint if exists messages_ebay_account_generation_required;
@@ -977,6 +1011,21 @@ begin
   ) then
     raise exception using errcode = '42501', message = 'eBay identity has been erased';
   end if;
+  if p_operation in ('upsert_unresolved_question', 'import_question') then
+    insert into private.ebay_buyer_identity_observations (
+      user_id,
+      account_generation,
+      identity_hash
+    )
+    select p_user_id, p_generation, identity_hash
+    from unnest(array[v_buyer_hash, v_buyer_username_hash]) identity(identity_hash)
+    where identity_hash is not null
+    on conflict (user_id, account_generation, identity_hash) do update
+      set observed_at = greatest(
+        private.ebay_buyer_identity_observations.observed_at,
+        excluded.observed_at
+      );
+  end if;
   if p_operation = 'import_question'
     and v_buyer_hash is not null
     and v_buyer_username_hash is not null then
@@ -1457,6 +1506,96 @@ revoke all on function public.bind_scheduled_ebay_sandbox_fallback(text, text)
 grant execute on function public.bind_scheduled_ebay_sandbox_fallback(text, text)
   to service_role;
 
+create or replace function private.resolve_ebay_buyer_identities(
+  p_seed_hashes text[]
+)
+returns table (
+  user_id text,
+  account_generation uuid,
+  identity_hash text
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with recursive identity_graph (
+    user_id,
+    account_generation,
+    identity_hash
+  ) as (
+    select seed.user_id, seed.account_generation, seed.identity_hash
+    from (
+      select message.user_id,
+             message.ebay_account_generation as account_generation,
+             private.hash_ebay_identity(
+               'sender_id', message.external_buyer_id
+             ) as identity_hash
+      from public.messages message
+      where message.marketplace = 'ebay'
+        and private.hash_ebay_identity(
+          'sender_id', message.external_buyer_id
+        ) = any(p_seed_hashes)
+      union
+      select pending.user_id,
+             pending.ebay_account_generation,
+             private.hash_ebay_identity(
+               'sender_id', pending.external_buyer_id
+             )
+      from public.ebay_unresolved_questions pending
+      where private.hash_ebay_identity(
+        'sender_id', pending.external_buyer_id
+      ) = any(p_seed_hashes)
+      union
+      select observation.user_id,
+             observation.account_generation,
+             observation.identity_hash
+      from private.ebay_buyer_identity_observations observation
+      where observation.identity_hash = any(p_seed_hashes)
+      union
+      select provenance.user_id,
+             provenance.account_generation,
+             identity.identity_hash
+      from private.ebay_buyer_identity_provenance provenance
+      cross join lateral (
+        values
+          (provenance.trading_identity_hash),
+          (provenance.username_identity_hash)
+      ) identity(identity_hash)
+      where provenance.trading_identity_hash = any(p_seed_hashes)
+         or provenance.username_identity_hash = any(p_seed_hashes)
+    ) seed
+    where seed.identity_hash is not null
+
+    union
+
+    select current.user_id,
+           current.account_generation,
+           neighbor.identity_hash
+    from identity_graph current
+    join private.ebay_buyer_identity_provenance provenance
+      on provenance.user_id = current.user_id
+      and provenance.account_generation = current.account_generation
+      and current.identity_hash in (
+        provenance.trading_identity_hash,
+        provenance.username_identity_hash
+      )
+    cross join lateral (
+      values
+        (provenance.trading_identity_hash),
+        (provenance.username_identity_hash)
+    ) neighbor(identity_hash)
+    where neighbor.identity_hash is not null
+  )
+  select distinct graph.user_id,
+         graph.account_generation,
+         graph.identity_hash
+  from identity_graph graph
+$$;
+
+revoke all on function private.resolve_ebay_buyer_identities(text[])
+  from public, anon, authenticated, service_role;
+
 create or replace function public.erase_ebay_user_data(
   p_ebay_user_id text default null,
   p_ebay_username text default null
@@ -1474,6 +1613,7 @@ declare
   v_lock_keys text[];
   v_seller_accounts jsonb;
   v_buyer_accounts jsonb;
+  v_buyer_identities jsonb;
   v_seller_user_ids text[];
   v_buyer_user_ids text[];
   v_user_ids text[];
@@ -1580,66 +1720,24 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
     'user_id', matched.user_id,
+    'account_generation', matched.account_generation,
+    'identity_hash', matched.identity_hash
+  )), '[]'::jsonb)
+  into v_buyer_identities
+  from private.resolve_ebay_buyer_identities(v_global_buyer_hashes) matched;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'user_id', matched.user_id,
     'account_generation', matched.account_generation
   )), '[]'::jsonb)
   into v_buyer_accounts
   from (
-    select distinct message.user_id, message.ebay_account_generation as account_generation
-    from public.messages message
-    where message.marketplace = 'ebay'
-      and (
-        private.hash_ebay_identity(
-          'sender_id',
-          message.external_buyer_id
-        ) = any(v_global_buyer_hashes)
-        or (
-          v_user_id_hash is not null
-          and v_username_hash is not null
-          and private.hash_ebay_identity(
-            'sender_id',
-            message.external_buyer_id
-          ) = private.hash_ebay_identity('sender_id', p_ebay_username)
-          and exists (
-            select 1
-            from private.ebay_buyer_identity_provenance provenance
-            where provenance.user_id = message.user_id
-              and provenance.account_generation = message.ebay_account_generation
-              and provenance.trading_identity_hash = private.hash_ebay_identity(
-                'sender_id', p_ebay_user_id
-              )
-              and provenance.username_identity_hash = private.hash_ebay_identity(
-                'sender_id', p_ebay_username
-              )
-          )
-        )
-      )
-    union
-    select distinct pending.user_id, pending.ebay_account_generation
-    from public.ebay_unresolved_questions pending
-    where private.hash_ebay_identity(
-        'sender_id',
-        pending.external_buyer_id
-      ) = any(v_global_buyer_hashes)
-      or (
-        v_user_id_hash is not null
-        and v_username_hash is not null
-        and private.hash_ebay_identity(
-          'sender_id',
-          pending.external_buyer_id
-        ) = private.hash_ebay_identity('sender_id', p_ebay_username)
-        and exists (
-          select 1
-          from private.ebay_buyer_identity_provenance provenance
-          where provenance.user_id = pending.user_id
-            and provenance.account_generation = pending.ebay_account_generation
-            and provenance.trading_identity_hash = private.hash_ebay_identity(
-              'sender_id', p_ebay_user_id
-            )
-            and provenance.username_identity_hash = private.hash_ebay_identity(
-              'sender_id', p_ebay_username
-            )
-        )
-      )
+    select distinct identity.user_id, identity.account_generation
+    from jsonb_to_recordset(v_buyer_identities) as identity(
+      user_id text,
+      account_generation uuid,
+      identity_hash text
+    )
   ) matched;
 
   select coalesce(array_agg(distinct matched.user_id), '{}'::text[])
@@ -1704,14 +1802,13 @@ begin
   )
   select matched.user_id,
          matched.account_generation,
-         private.hash_ebay_identity('sender_id', p_ebay_username),
+         matched.identity_hash,
          statement_timestamp()
-  from jsonb_to_recordset(v_buyer_accounts) as matched(
+  from jsonb_to_recordset(v_buyer_identities) as matched(
     user_id text,
-    account_generation uuid
+    account_generation uuid,
+    identity_hash text
   )
-  where v_user_id_hash is not null
-    and v_username_hash is not null
   on conflict (user_id, account_generation, identity_hash) do update
     set erased_at = greatest(
       private.ebay_erased_buyer_generation_tombstones.erased_at,
@@ -1755,10 +1852,19 @@ begin
             where buyer_account.user_id = message.user_id
               and buyer_account.account_generation = message.ebay_account_generation
           )
-          and private.hash_ebay_identity(
-            'sender_id',
-            message.external_buyer_id
-          ) = any(v_buyer_hashes)
+          and exists (
+            select 1
+            from jsonb_to_recordset(v_buyer_identities) as identity(
+              user_id text,
+              account_generation uuid,
+              identity_hash text
+            )
+            where identity.user_id = message.user_id
+              and identity.account_generation = message.ebay_account_generation
+              and identity.identity_hash = private.hash_ebay_identity(
+                'sender_id', message.external_buyer_id
+              )
+          )
         )
       )
     union
@@ -1797,10 +1903,19 @@ begin
             where buyer_account.user_id = message.user_id
               and buyer_account.account_generation = message.ebay_account_generation
           )
-          and private.hash_ebay_identity(
-            'sender_id',
-            message.external_buyer_id
-          ) = any(v_buyer_hashes)
+          and exists (
+            select 1
+            from jsonb_to_recordset(v_buyer_identities) as identity(
+              user_id text,
+              account_generation uuid,
+              identity_hash text
+            )
+            where identity.user_id = message.user_id
+              and identity.account_generation = message.ebay_account_generation
+              and identity.identity_hash = private.hash_ebay_identity(
+                'sender_id', message.external_buyer_id
+              )
+          )
         )
       )
     union
@@ -1835,10 +1950,19 @@ begin
         where buyer_account.user_id = pending.user_id
           and buyer_account.account_generation = pending.ebay_account_generation
       )
-      and private.hash_ebay_identity(
-        'sender_id',
-        pending.external_buyer_id
-      ) = any(v_buyer_hashes)
+      and exists (
+        select 1
+        from jsonb_to_recordset(v_buyer_identities) as identity(
+          user_id text,
+          account_generation uuid,
+          identity_hash text
+        )
+        where identity.user_id = pending.user_id
+          and identity.account_generation = pending.ebay_account_generation
+          and identity.identity_hash = private.hash_ebay_identity(
+            'sender_id', pending.external_buyer_id
+          )
+      )
     );
 
   delete from public.ebay_message_sync_state sync_state
@@ -1893,31 +2017,41 @@ begin
       where matched.user_id = provenance.user_id
         and matched.account_generation = provenance.account_generation
     )
-    or (
-      (
-        (v_user_id_hash is not null
-          and provenance.trading_identity_hash = private.hash_ebay_identity(
-            'sender_id', p_ebay_user_id
-          )
-          and (v_username_hash is null
-            or provenance.username_identity_hash = private.hash_ebay_identity(
-              'sender_id', p_ebay_username
-            )))
-        or (v_user_id_hash is null
-          and v_username_hash is not null
-          and provenance.username_identity_hash = private.hash_ebay_identity(
-            'sender_id', p_ebay_username
-          ))
+    or exists (
+      select 1
+      from jsonb_to_recordset(v_buyer_identities) as identity(
+        user_id text,
+        account_generation uuid,
+        identity_hash text
       )
-      and exists (
-        select 1
-        from jsonb_to_recordset(v_buyer_accounts) as buyer_account(
-          user_id text,
-          account_generation uuid
+      where identity.user_id = provenance.user_id
+        and identity.account_generation = provenance.account_generation
+        and identity.identity_hash in (
+          provenance.trading_identity_hash,
+          provenance.username_identity_hash
         )
-        where buyer_account.user_id = provenance.user_id
-          and buyer_account.account_generation = provenance.account_generation
+    );
+
+  delete from private.ebay_buyer_identity_observations observation
+  where exists (
+      select 1
+      from jsonb_to_recordset(v_seller_accounts) as matched(
+        user_id text,
+        account_generation uuid
       )
+      where matched.user_id = observation.user_id
+        and matched.account_generation = observation.account_generation
+    )
+    or exists (
+      select 1
+      from jsonb_to_recordset(v_buyer_identities) as identity(
+        user_id text,
+        account_generation uuid,
+        identity_hash text
+      )
+      where identity.user_id = observation.user_id
+        and identity.account_generation = observation.account_generation
+        and identity.identity_hash = observation.identity_hash
     );
 
   delete from private.ebay_seller_identity_tenants seller_identity
@@ -1958,6 +2092,31 @@ begin
       ) values (
         v_user_id,
         v_new_generation,
+        true,
+        statement_timestamp()
+      )
+      on conflict (user_id, account_generation) do update
+        set seller_erased = true,
+            erased_at = excluded.erased_at;
+    elsif not exists (
+      select 1
+      from public.ebay_connections connection
+      where connection.user_id = v_user_id
+        and connection.account_generation = v_account.generation
+    ) then
+      update private.ebay_messaging_account_generations account
+      set seller_erased = true,
+          updated_at = statement_timestamp()
+      where account.user_id = v_user_id
+        and account.generation = v_account.generation;
+      insert into private.ebay_seller_account_generations (
+        user_id,
+        account_generation,
+        seller_erased,
+        erased_at
+      ) values (
+        v_user_id,
+        v_account.generation,
         true,
         statement_timestamp()
       )
@@ -2020,6 +2179,10 @@ begin
       set account_generation = v_new_generation
       where provenance.user_id = v_user_id
         and provenance.account_generation = v_old_generation;
+      update private.ebay_buyer_identity_observations observation
+      set account_generation = v_new_generation
+      where observation.user_id = v_user_id
+        and observation.account_generation = v_old_generation;
       insert into private.ebay_erased_buyer_generation_tombstones (
         user_id,
         account_generation,

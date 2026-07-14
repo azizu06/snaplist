@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runRepriceSweep, REPRICE_SWEEP_MODEL } from "./sweep";
 import { MockEbayAdapter } from "../marketplace/ebay";
@@ -319,6 +319,40 @@ describe("runRepriceSweep — auto-apply", () => {
     );
     expect(listingWrite?.eq).toMatchObject({ id: LISTING, user_id: USER });
     expect(findInsert(ops, "notifications")).toBeTruthy();
+  });
+
+  it("resolves the scheduled adapter for the listing tenant before auto-apply", async () => {
+    const { client } = scenario({ settings: { auto_reprice_enabled: true } });
+    const adapter = new MockEbayAdapter();
+    const adapterForUser = vi.fn(async () => adapter);
+
+    const summary = await runRepriceSweep(client, {
+      now: () => NOW,
+      priceItem: async () => soldTightPrice(60),
+      adapterForUser,
+    });
+
+    expect(summary.autoApplied).toBe(1);
+    expect(adapterForUser).toHaveBeenCalledWith(USER);
+    expect(adapter.reviseRequests).toHaveLength(1);
+  });
+
+  it("degrades to a suggestion when the seller has no scheduled write credentials", async () => {
+    const { client, ops } = scenario({ settings: { auto_reprice_enabled: true } });
+
+    const summary = await runRepriceSweep(client, {
+      now: () => NOW,
+      priceItem: async () => soldTightPrice(60),
+      adapterForUser: async () => {
+        throw new Error("seller connection unavailable");
+      },
+    });
+
+    expect(summary).toMatchObject({ suggested: 1, autoApplied: 0, failed: 0 });
+    expect(findInsert(ops, "reprice_suggestions")?.payload).toMatchObject({
+      status: "pending",
+      applied_price: null,
+    });
   });
 
   it("syncs prices and notifies even when the audit-row insert fails (eBay already revised)", async () => {

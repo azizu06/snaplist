@@ -91,15 +91,41 @@ export async function createEbayAdapterForUser(
   userId?: string,
   options: {
     credentialClient?: SupabaseClient | (() => Promise<SupabaseClient>);
+    scheduled?: boolean;
   } = {},
 ): Promise<EbayAdapter> {
-  const { connected } = await getEbayConnectionStatus(supabase, userId);
+  const { connected } = await getEbayConnectionStatus(
+    supabase,
+    userId,
+    options.scheduled,
+  );
+  if (options.scheduled && !connected) {
+    const sellerId = process.env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID;
+    if (!userId || !sellerId || !hasEbayMessagingSandboxFallback(userId)) {
+      throw new Error("Scheduled eBay writes require the seller's connected account.");
+    }
+    const credentialClient = await resolveCredentialClient(
+      supabase,
+      options.credentialClient,
+    );
+    return new HttpEbayAdapter({
+      tokenProvider: new OperatorSandboxTokenProvider(
+        credentialClient,
+        userId,
+        sellerId,
+        true,
+      ),
+    });
+  }
   const credentialClient = connected
     ? await resolveCredentialClient(supabase, options.credentialClient)
     : supabase;
   return connected
     ? new HttpEbayAdapter({
-        tokenProvider: new UserTokenProvider(credentialClient, { userId }),
+        tokenProvider: new UserTokenProvider(credentialClient, {
+          userId,
+          scheduled: options.scheduled,
+        }),
       })
     : new HttpEbayAdapter();
 }
