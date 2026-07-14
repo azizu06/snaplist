@@ -94,10 +94,31 @@ export interface EbayReviseResult {
  * when their slices land, so callers keep a single seam to mock.
  */
 export interface EbayAdapter {
-  publishListing(request: EbayPublishRequest): Promise<EbayPublishResult>;
+  publishListing(
+    request: EbayPublishRequest,
+    complete?: EbayPublishCompletion,
+  ): Promise<EbayPublishResult>;
   /** Update the price of an already-published offer (idempotent per price). */
-  revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult>;
+  revisePrice(
+    request: EbayReviseRequest,
+    complete?: EbayReviseCompletion,
+  ): Promise<EbayReviseResult>;
 }
+
+export interface EbayDispatchContext {
+  accountGeneration: string;
+  attemptToken: string;
+}
+
+export type EbayPublishCompletion = (
+  result: EbayPublishResult,
+  context: EbayDispatchContext | null,
+) => Promise<void>;
+
+export type EbayReviseCompletion = (
+  result: EbayReviseResult,
+  context: EbayDispatchContext | null,
+) => Promise<void>;
 
 /**
  * Where access tokens come from. The HTTP adapter only ever calls
@@ -118,6 +139,7 @@ export interface EbayTokenProvider {
 
 export interface EbayProviderDispatchLease {
   accountGeneration: string;
+  attemptToken: string;
   signal: AbortSignal;
   release(): Promise<void>;
 }

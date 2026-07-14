@@ -50,13 +50,15 @@ export async function POST(request: NextRequest) {
     // Per-user tokens when the seller connected eBay in Settings (issue #17);
     // app-level env credentials otherwise (the sandbox loop). The shared wrapper
     // fires the same activity-feed notifications the "Publish" button does.
+    const completionClient = await createTenantServerClient();
     const outcome = await publishListingToEbayAndNotify(
       supabase,
       userId,
       listingId,
       await createEbayAdapterForUser(supabase, userId, {
-        credentialClient: createTenantServerClient,
+        credentialClient: completionClient,
       }),
+      { completionClient },
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {

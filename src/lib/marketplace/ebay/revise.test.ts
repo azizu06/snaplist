@@ -43,11 +43,13 @@ function json(status: number, body: unknown): Response {
 describe("HttpEbayAdapter.revisePrice", () => {
   it("holds a generation-bound dispatch lease through repricing", async () => {
     const release = vi.fn(async () => undefined);
+    const complete = vi.fn(async () => undefined);
     const getAccessToken = vi.fn(async () => "generation-token");
     const leasedProvider = {
       getAccessToken,
       beginProviderDispatch: vi.fn(async () => ({
         accountGeneration: "22222222-2222-4222-8222-222222222222",
+        attemptToken: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         signal: new AbortController().signal,
         release,
       })),
@@ -64,7 +66,7 @@ describe("HttpEbayAdapter.revisePrice", () => {
       fetch,
       tokenProvider: leasedProvider,
       env: () => env,
-    }).revisePrice(request);
+    }).revisePrice(request, complete);
 
     expect(leasedProvider.beginProviderDispatch).toHaveBeenCalledWith(
       request.sku,
@@ -73,6 +75,16 @@ describe("HttpEbayAdapter.revisePrice", () => {
     expect(getAccessToken).toHaveBeenCalledWith(
       "22222222-2222-4222-8222-222222222222",
       expect.any(AbortSignal),
+    );
+    expect(complete).toHaveBeenCalledWith(
+      { offerId: "offer-9", status: "revised" },
+      {
+        accountGeneration: "22222222-2222-4222-8222-222222222222",
+        attemptToken: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    );
+    expect(complete.mock.invocationCallOrder[0]).toBeLessThan(
+      release.mock.invocationCallOrder[0],
     );
     expect(release).toHaveBeenCalledOnce();
   });

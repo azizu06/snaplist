@@ -10,6 +10,9 @@ export type {
   EbayPublishResult,
   EbayReviseRequest,
   EbayReviseResult,
+  EbayDispatchContext,
+  EbayPublishCompletion,
+  EbayReviseCompletion,
   EbayTokenProvider,
   EbayCondition,
 } from "./types";

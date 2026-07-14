@@ -1,8 +1,10 @@
 import type {
   EbayAdapter,
   EbayPublishRequest,
+  EbayPublishCompletion,
   EbayPublishResult,
   EbayReviseRequest,
+  EbayReviseCompletion,
   EbayReviseResult,
   EbayTokenProvider,
 } from "./types";
@@ -68,7 +70,10 @@ export class HttpEbayAdapter implements EbayAdapter {
       new EnvTokenProvider({ fetch: options.fetch, env: options.env });
   }
 
-  async publishListing(request: EbayPublishRequest): Promise<EbayPublishResult> {
+  async publishListing(
+    request: EbayPublishRequest,
+    complete?: EbayPublishCompletion,
+  ): Promise<EbayPublishResult> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
@@ -195,11 +200,13 @@ export class HttpEbayAdapter implements EbayAdapter {
         signal,
       );
       if (recovered?.listingId) {
-        return {
+        const result = {
           listingId: recovered.listingId,
           offerId: recovered.offerId,
-          status: "published",
+          status: "published" as const,
         };
+        await complete?.(result, dispatchContext(lease));
+        return result;
       }
       const existing = recovered?.offerId ?? existingOfferIdFrom(err);
       if (!existing) throw err;
@@ -233,7 +240,13 @@ export class HttpEbayAdapter implements EbayAdapter {
       );
     }
 
-      return { listingId: published.listingId, offerId, status: "published" };
+      const result = {
+        listingId: published.listingId,
+        offerId,
+        status: "published" as const,
+      };
+      await complete?.(result, dispatchContext(lease));
+      return result;
     } finally {
       await lease?.release();
     }
@@ -251,7 +264,10 @@ export class HttpEbayAdapter implements EbayAdapter {
    * a silent partial failure here would record a reprice that never reached
    * the live listing.
    */
-  async revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult> {
+  async revisePrice(
+    request: EbayReviseRequest,
+    complete?: EbayReviseCompletion,
+  ): Promise<EbayReviseResult> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
@@ -309,7 +325,12 @@ export class HttpEbayAdapter implements EbayAdapter {
         result,
       );
     }
-      return { offerId: offer?.offerId ?? request.offerId, status: "revised" };
+      const revision = {
+        offerId: offer?.offerId ?? request.offerId,
+        status: "revised" as const,
+      };
+      await complete?.(revision, dispatchContext(lease));
+      return revision;
     } finally {
       await lease?.release();
     }
@@ -433,6 +454,17 @@ export class HttpEbayAdapter implements EbayAdapter {
     }
     return parsed as T | undefined;
   }
+}
+
+function dispatchContext(
+  lease: Awaited<ReturnType<NonNullable<EbayTokenProvider["beginProviderDispatch"]>>> | undefined,
+) {
+  return lease
+    ? {
+        accountGeneration: lease.accountGeneration,
+        attemptToken: lease.attemptToken,
+      }
+    : null;
 }
 
 function providerDispatchSignal(parentSignal?: AbortSignal): AbortSignal {

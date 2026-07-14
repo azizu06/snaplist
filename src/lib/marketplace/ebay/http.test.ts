@@ -61,11 +61,13 @@ function json(status: number, body: unknown): Response {
 describe("HttpEbayAdapter.publishListing", () => {
   it("holds a generation-bound dispatch lease through the publish flow", async () => {
     const release = vi.fn(async () => undefined);
+    const complete = vi.fn(async () => undefined);
     const getAccessToken = vi.fn(async () => "generation-token");
     const leasedProvider = {
       getAccessToken,
       beginProviderDispatch: vi.fn(async () => ({
         accountGeneration: "11111111-1111-4111-8111-111111111111",
+        attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         signal: new AbortController().signal,
         release,
       })),
@@ -80,7 +82,7 @@ describe("HttpEbayAdapter.publishListing", () => {
       fetch,
       tokenProvider: leasedProvider,
       env: () => sellerEnv,
-    }).publishListing(request);
+    }).publishListing(request, complete);
 
     expect(leasedProvider.beginProviderDispatch).toHaveBeenCalledWith(
       request.sku,
@@ -89,6 +91,16 @@ describe("HttpEbayAdapter.publishListing", () => {
     expect(getAccessToken).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
       expect.any(AbortSignal),
+    );
+    expect(complete).toHaveBeenCalledWith(
+      { listingId: "listing-lease", offerId: "offer-lease", status: "published" },
+      {
+        accountGeneration: "11111111-1111-4111-8111-111111111111",
+        attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+    );
+    expect(complete.mock.invocationCallOrder[0]).toBeLessThan(
+      release.mock.invocationCallOrder[0],
     );
     expect(release).toHaveBeenCalledOnce();
   });
@@ -103,6 +115,7 @@ describe("HttpEbayAdapter.publishListing", () => {
         getAccessToken: async () => "generation-token",
         beginProviderDispatch: async () => ({
           accountGeneration: "11111111-1111-4111-8111-111111111111",
+          attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           signal: new AbortController().signal,
           release,
         }),

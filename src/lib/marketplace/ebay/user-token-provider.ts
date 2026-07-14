@@ -104,6 +104,7 @@ export class UserTokenProvider implements EbayTokenProvider {
 
     return {
       accountGeneration,
+      attemptToken,
       signal: controller.signal,
       release: async () => {
         clearInterval(timer);

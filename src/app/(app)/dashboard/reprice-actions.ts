@@ -38,14 +38,16 @@ export async function applyReprice(
   if (!userId) return { ok: false, message: "Not signed in." };
 
   try {
+    const completionClient = await createTenantServerClient();
     const adapter = await createEbayAdapterForUser(supabase, userId, {
-      credentialClient: createTenantServerClient,
+      credentialClient: completionClient,
     });
     const { appliedPrice } = await applyRepriceSuggestion(
       supabase,
       userId,
       suggestionId,
       adapter,
+      { completionClient },
     );
     revalidatePath("/dashboard");
     return { ok: true, message: `New price is live: $${appliedPrice.toFixed(2)}` };

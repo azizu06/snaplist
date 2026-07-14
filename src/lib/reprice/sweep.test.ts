@@ -86,14 +86,19 @@ class FakeBuilder {
 
 function fakeSupabase(respond: Responder) {
   const ops: RecordedOp[] = [];
+  const rpcs: Array<{ name: string; args: Record<string, unknown> }> = [];
   const client = {
+    rpc(name: string, args: Record<string, unknown>) {
+      rpcs.push({ name, args });
+      return Promise.resolve({ data: USER, error: null });
+    },
     from(table: string) {
       const op: RecordedOp = { table, action: "select", eq: {}, in: {} };
       ops.push(op);
       return new FakeBuilder(op, respond);
     },
   } as unknown as SupabaseClient;
-  return { client, ops };
+  return { client, ops, rpcs };
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +340,40 @@ describe("runRepriceSweep — auto-apply", () => {
     expect(summary.autoApplied).toBe(1);
     expect(adapterForUser).toHaveBeenCalledWith(USER);
     expect(adapter.reviseRequests).toHaveLength(1);
+  });
+
+  it("records scheduled repricing through the exact dispatch generation", async () => {
+    const { client, rpcs } = scenario({ settings: { auto_reprice_enabled: true } });
+    const adapter = new MockEbayAdapter();
+    adapter.revisePrice = async (revision, complete) => {
+      adapter.reviseRequests.push(revision);
+      const result = { offerId: revision.offerId, status: "revised" as const };
+      await complete?.(result, {
+        accountGeneration: "44444444-4444-4444-8444-444444444444",
+        attemptToken: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      });
+      return result;
+    };
+
+    const summary = await runRepriceSweep(client, {
+      now: () => NOW,
+      priceItem: async () => soldTightPrice(60),
+      adapter,
+    });
+
+    expect(summary.autoApplied).toBe(1);
+    expect(rpcs).toEqual([
+      {
+        name: "complete_scheduled_ebay_reprice_dispatch",
+        args: expect.objectContaining({
+          p_listing_id: LISTING,
+          p_item_id: ITEM,
+          p_account_generation: "44444444-4444-4444-8444-444444444444",
+          p_attempt_token: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          p_applied_price: 60,
+        }),
+      },
+    ]);
   });
 
   it("degrades to a suggestion when the seller has no scheduled write credentials", async () => {

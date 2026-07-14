@@ -25,7 +25,12 @@ type Responder = (op: RecordedOp) => { data?: unknown; error?: { message: string
 
 function fakeSupabase(respond: Responder) {
   const ops: RecordedOp[] = [];
+  const rpcs: Array<{ name: string; args: Record<string, unknown> }> = [];
   const client = {
+    rpc(name: string, args: Record<string, unknown>) {
+      rpcs.push({ name, args });
+      return Promise.resolve({ data: null, error: null });
+    },
     from(table: string) {
       const op: RecordedOp = { table, action: "select", eq: {} };
       ops.push(op);
@@ -56,7 +61,7 @@ function fakeSupabase(respond: Responder) {
       return builder;
     },
   } as unknown as SupabaseClient;
-  return { client, ops };
+  return { client, ops, rpcs };
 }
 
 const SUGGESTION = {
@@ -123,6 +128,43 @@ describe("applyRepriceSuggestion", () => {
 
     expect(result.appliedPrice).toBe(95);
     expect(adapter.reviseRequests[0].price.value).toBe("95.00");
+  });
+
+  it("records a connected-seller revision through the exact dispatch generation", async () => {
+    const { client } = fakeSupabase((op) =>
+      op.table === "reprice_suggestions" && op.action === "select"
+        ? { data: SUGGESTION }
+        : { data: null, error: null },
+    );
+    const completion = fakeSupabase(() => ({ data: null, error: null }));
+    const adapter = new MockEbayAdapter();
+    adapter.revisePrice = async (revision, complete) => {
+      adapter.reviseRequests.push(revision);
+      const result = { offerId: revision.offerId, status: "revised" as const };
+      await complete?.(result, {
+        accountGeneration: "33333333-3333-4333-8333-333333333333",
+        attemptToken: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      });
+      return result;
+    };
+
+    await applyRepriceSuggestion(client, "user-a", "sug-1", adapter, {
+      env,
+      completionClient: completion.client,
+    });
+
+    expect(completion.rpcs).toEqual([
+      {
+        name: "complete_ebay_reprice_dispatch",
+        args: expect.objectContaining({
+          p_listing_id: "listing-1",
+          p_suggestion_id: "sug-1",
+          p_account_generation: "33333333-3333-4333-8333-333333333333",
+          p_attempt_token: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          p_applied_price: 80,
+        }),
+      },
+    ]);
   });
 
   it("refuses a suggestion that is no longer pending", async () => {
