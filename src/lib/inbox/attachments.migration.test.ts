@@ -84,6 +84,7 @@ describe("message photo attachment migration", () => {
   it("keeps foreground expiry and object draining tenant-derived", () => {
     expect(migration).toMatch(/delete_own_expired_message_photo_upload_intents[\s\S]*candidate\.user_id = v_user_id/i);
     expect(migration).toMatch(/delete_own_expired_message_photo_upload_intents_for_request[\s\S]*candidate\.user_id = v_user_id[\s\S]*candidate\.delivery_request_id = p_delivery_request_id[\s\S]*candidate\.upload_expires_at <= statement_timestamp\(\)/i);
+    expect(migration).toMatch(/delete_own_message_photo_upload_intents_for_request[\s\S]*for update[\s\S]*attachment\.user_id = v_user_id[\s\S]*attachment\.delivery_request_id = p_delivery_request_id[\s\S]*attachment\.delivery_status = 'uploading'/i);
     expect(migration).toMatch(/list_own_message_photo_object_deletions[\s\S]*split_part\(queue\.storage_path, '\/', 1\) = v_user_id/i);
     expect(migration).toMatch(/complete_own_message_photo_object_deletions[\s\S]*split_part\(queue\.storage_path, '\/', 1\) = v_user_id/i);
   });

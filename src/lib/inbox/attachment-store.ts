@@ -46,16 +46,16 @@ export async function stageOutboundPhotos(input: {
   photos: Array<ValidatedMessagePhoto & { storagePath?: string }>;
   requireExistingIntent?: boolean;
 }): Promise<MessageAttachmentRow[]> {
-  const existing = await listDeliveryPhotos(
+  let existing = await listDeliveryPhotos(
     input.supabase,
     input.userId,
     input.deliveryRequestId,
   );
   if (existing.length) {
     if (!deliveryPhotosMatch(existing, input.photos, input.conversationRootId)) {
-      throw new MessagePhotoConflictError();
+      existing = await clearReplaceableUploadIntents(input, existing);
     }
-    if (existing.some((row) => row.delivery_status === "uploading")) {
+    if (existing.length && existing.some((row) => row.delivery_status === "uploading")) {
       const { data, error } = await input.supabase.rpc(
         "stage_message_photo_upload_intents",
         {
@@ -77,17 +77,15 @@ export async function stageOutboundPhotos(input: {
       }
       return staged;
     }
-    return existing;
+    if (existing.length) return existing;
   }
   if (input.requireExistingIntent && input.photos.length) {
     throw new MessagePhotoConflictError();
   }
 
-  const delivered = await findDeliveredMessageForRequest(input);
-  if (delivered && input.photos.length) {
-    throw new MessagePhotoConflictError();
-  }
   if (input.photos.length === 0) return [];
+  const delivered = await findDeliveredMessageForRequest(input);
+  if (delivered) throw new MessagePhotoConflictError();
 
   const createdPaths: string[] = [];
   const rows = input.photos.map((photo, position) => {
@@ -177,9 +175,9 @@ export async function createOutboundPhotoUploadIntents(input: {
   let existing = await listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
   if (existing.length) {
     if (!uploadIntentsMatch(existing, input.photos, input.conversationRootId)) {
-      throw new MessagePhotoConflictError();
+      existing = await clearReplaceableUploadIntents(input, existing);
     }
-    if (existing.some((row) => row.delivery_status === "uploading")) {
+    if (existing.length && existing.some((row) => row.delivery_status === "uploading")) {
       // Canonical retries must keep the original expiry. The question may
       // already have been claimed by another tab/automatic reply, and only the
       // transactional staging guard can authoritatively revalidate it.
@@ -315,6 +313,33 @@ export async function listDeliveryPhotos(
     .order("position");
   if (error) throw new Error(`Failed to load message photos: ${error.message}`);
   return (data ?? []).map((row) => messageAttachmentRowSchema.parse(row));
+}
+
+async function clearReplaceableUploadIntents(
+  input: {
+    supabase: SupabaseClient;
+    userId: string;
+    deliveryRequestId: string;
+  },
+  existing: MessageAttachmentRow[],
+): Promise<MessageAttachmentRow[]> {
+  if (!existing.every((row) => row.delivery_status === "uploading")) {
+    throw new MessagePhotoConflictError();
+  }
+  const { error } = await input.supabase.rpc(
+    "delete_own_message_photo_upload_intents_for_request",
+    { p_delivery_request_id: input.deliveryRequestId },
+  );
+  if (error) {
+    throw new Error(`Failed to replace photo upload: ${error.message}`);
+  }
+  const remaining = await listDeliveryPhotos(
+    input.supabase,
+    input.userId,
+    input.deliveryRequestId,
+  );
+  if (remaining.length) throw new MessagePhotoConflictError();
+  return remaining;
 }
 
 function sha256(bytes: Uint8Array): string {

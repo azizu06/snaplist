@@ -55,6 +55,100 @@ function listClient(rows: MessageAttachmentRow[], remove = vi.fn()) {
 }
 
 describe("outbound photo idempotency", () => {
+  it("abandons a failed live upload intent before preparing a changed photo", async () => {
+    const abandoned = row({
+      delivery_request_id: ROOT,
+      delivery_status: "uploading",
+      upload_expires_at: "2026-07-14T12:15:00.000Z",
+    });
+    const replacement = row({
+      id: "44444444-4444-4444-8444-444444444444",
+      delivery_request_id: ROOT,
+      original_name: "replacement.jpg",
+      content_sha256: "b".repeat(64),
+      storage_path: `user_a/${ROOT}/pending/44444444-4444-4444-8444-444444444444.jpg`,
+      delivery_status: "uploading",
+      upload_expires_at: "2026-07-14T12:16:00.000Z",
+    });
+    let listCount = 0;
+    const attachmentQuery = {
+      select: vi.fn(() => attachmentQuery),
+      eq: vi.fn(() => attachmentQuery),
+      order: vi.fn(async () => ({
+        data: listCount++ === 0 ? [abandoned] : [],
+        error: null,
+      })),
+      insert: vi.fn(() => ({
+        select: vi.fn(async () => ({ data: [replacement], error: null })),
+      })),
+    };
+    const messageQuery = {
+      select: vi.fn(() => messageQuery),
+      eq: vi.fn(() => messageQuery),
+      or: vi.fn(() => messageQuery),
+      maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+    };
+    const rpc = vi.fn(async () => ({ data: 1, error: null }));
+    const client = {
+      from: vi.fn((table: string) => table === "messages" ? messageQuery : attachmentQuery),
+      rpc,
+    } as unknown as SupabaseClient;
+
+    await expect(createOutboundPhotoUploadIntents({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: ROOT,
+      photos: [{
+        name: "replacement.jpg",
+        mediaType: "image/jpeg",
+        byteSize: JPEG.length,
+        contentSha256: "b".repeat(64),
+      }],
+      now: () => Date.parse("2026-07-14T12:01:00.000Z"),
+    })).resolves.toEqual([replacement]);
+    expect(rpc).toHaveBeenCalledWith(
+      "delete_own_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: ROOT },
+    );
+    expect(attachmentQuery.insert).toHaveBeenCalledOnce();
+  });
+
+  it("abandons a failed live upload intent before a text-only retry", async () => {
+    const abandoned = row({
+      delivery_request_id: ROOT,
+      delivery_status: "uploading",
+      upload_expires_at: "2026-07-14T12:15:00.000Z",
+    });
+    let listCount = 0;
+    const attachmentQuery = {
+      select: vi.fn(() => attachmentQuery),
+      eq: vi.fn(() => attachmentQuery),
+      order: vi.fn(async () => ({
+        data: listCount++ === 0 ? [abandoned] : [],
+        error: null,
+      })),
+    };
+    const rpc = vi.fn(async () => ({ data: 1, error: null }));
+    const client = {
+      from: vi.fn(() => attachmentQuery),
+      rpc,
+      storage: { from: vi.fn() },
+    } as unknown as SupabaseClient;
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: ROOT,
+      photos: [],
+    })).resolves.toEqual([]);
+    expect(rpc).toHaveBeenCalledWith(
+      "delete_own_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: ROOT },
+    );
+  });
+
   it("rejects a zero-photo replay when the request durably owns photos", async () => {
     const { client, remove } = listClient([row()]);
 

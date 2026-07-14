@@ -284,6 +284,89 @@ describe("message attachment RLS (DB-gated)", () => {
     })).data).toBe(1);
   });
 
+  it("lets a tenant abandon only its own live upload intents", async () => {
+    if (!reachable) return;
+    const [{ data: rootA, error: rootAError }, { data: rootB, error: rootBError }] = await Promise.all([
+      a.client.from("messages").insert({
+        user_id: a.id,
+        direction: "inbound",
+        body: "Tenant A live upload root",
+      }).select("id").single(),
+      b.client.from("messages").insert({
+        user_id: b.id,
+        direction: "inbound",
+        body: "Tenant B live upload root",
+      }).select("id").single(),
+    ]);
+    expect(rootAError).toBeNull();
+    expect(rootBError).toBeNull();
+
+    const liveUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+    const pathA = `${a.id}/${rootA!.id}/pending/dddddddd-dddd-4ddd-8ddd-dddddddddddd.jpg`;
+    const pathB = `${b.id}/${rootB!.id}/pending/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.jpg`;
+    const intent = (
+      user: ClerkTestUser,
+      rootId: string,
+      requestId: string,
+      storagePath: string,
+      hash: string,
+    ) => ({
+      user_id: user.id,
+      conversation_root_id: rootId,
+      delivery_request_id: requestId,
+      position: 0,
+      direction: "outbound",
+      media_type: "image/jpeg",
+      byte_size: 4,
+      original_name: "abandoned.jpg",
+      content_sha256: hash.repeat(64),
+      storage_path: storagePath,
+      delivery_status: "uploading",
+      upload_expires_at: liveUntil,
+    });
+
+    expect((await aServer.from("message_attachments").insert(
+      intent(a, rootA!.id, "abandon:a", pathA, "d"),
+    )).error).toBeNull();
+    expect((await bServer.from("message_attachments").insert(
+      intent(b, rootB!.id, "abandon:b", pathB, "e"),
+    )).error).toBeNull();
+
+    const aCannotAbandonB = await aServer.rpc(
+      "delete_own_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: "abandon:b" },
+    );
+    expect(aCannotAbandonB.error).toBeNull();
+    expect(aCannotAbandonB.data).toBe(0);
+    expect((await admin.from("message_attachments").select("id").eq("storage_path", pathB)).data)
+      .toHaveLength(1);
+
+    const bAbandonsOwn = await bServer.rpc(
+      "delete_own_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: "abandon:b" },
+    );
+    expect(bAbandonsOwn.error).toBeNull();
+    expect(bAbandonsOwn.data).toBe(1);
+    expect((await admin.from("message_attachments").select("id").eq("storage_path", pathA)).data)
+      .toHaveLength(1);
+    expect((await bServer.rpc("list_own_message_photo_object_deletions", {
+      p_limit: 1000,
+    })).data).toContain(pathB);
+    expect((await aServer.rpc("list_own_message_photo_object_deletions", {
+      p_limit: 1000,
+    })).data).not.toContain(pathB);
+
+    expect((await aServer.rpc("delete_own_message_photo_upload_intents_for_request", {
+      p_delivery_request_id: "abandon:a",
+    })).data).toBe(1);
+    expect((await bServer.rpc("complete_own_message_photo_object_deletions", {
+      p_storage_paths: [pathB],
+    })).data).toBe(1);
+    expect((await aServer.rpc("complete_own_message_photo_object_deletions", {
+      p_storage_paths: [pathA],
+    })).data).toBe(1);
+  });
+
   it("keeps a stale canonical photo intent expiring instead of staging it", async () => {
     if (!reachable) return;
     const { data: root, error: rootError } = await admin
