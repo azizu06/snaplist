@@ -99,8 +99,13 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   be testable against a **mock adapter** with no live eBay. Sandbox→production is a credential flip.
 - **Marketplace messaging adapter** — the provider-neutral seam for fetching unresolved pre-sale
   questions, resolving their provider conversation, replying to the exact question, and sending a
-  later text follow-up. Distinct from both the transactional publish adapter and the public
+  later seller-authored follow-up. Both delivery paths can carry supported hosted photos with the
+  required text. Distinct from both the transactional publish adapter and the public
   **eBay-sold scraper**.
+- **Message attachment** — a tenant-scoped photo on an imported buyer question or an approved
+  seller reply/follow-up. Outbound originals stay in private storage; provider-hosted references
+  share the message's delivery truth and never downgrade a failed text-plus-photo attempt to
+  text-only success. See `docs/ebay-messaging-sandbox.md` for the provider contract and limits.
 - **External question identity** — the identity bundle kept on an imported eBay question: the exact
   Trading `Question.MessageID` used as `ParentMessageID`, plus separate Commerce conversation,
   listing, and buyer identities. These values are not interchangeable.

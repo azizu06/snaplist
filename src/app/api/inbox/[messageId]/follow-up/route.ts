@@ -24,7 +24,7 @@ import { createTenantServerClient } from "@/lib/supabase/tenant-server";
  * conversation they have ALREADY replied to (issue #13, follow-up slice).
  *
  * Unlike /send (which approves the agent's draft for an inbound question), this
- * is plain seller-authored text ("Hold on, let me check…"). eBay's Commerce
+ * is a seller-authored message, optionally with supported photos. eBay's Commerce
  * Message API sends it into the imported conversation. The message is
  * threaded to the conversation root (`reply_to` = this inbound question) and
  * marked `reply_kind = 'followup'`. The question is loaded through the

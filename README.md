@@ -30,6 +30,7 @@ items are marked ready to publish by the confidence gate; lower-confidence items
 review. Nothing posts automatically: the seller explicitly chooses **Publish to eBay**,
 which goes through the adapter. SnapList also provides copy-paste export packs for
 Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
+The seller can add supported photos; approved text and photos are delivered as one eBay message.
 Clearing a whole haul? **Bulk capture** takes item after item in one session through the same
 pipeline and lands on a live triage list of the batch. SnapList is the seller's **control surface** —
 payment, checkout, and shipping stay on eBay; buyers never see it.
@@ -95,11 +96,11 @@ flowchart TD
     EBAY --> LIVE["Live eBay listing"]
 
     EQUESTION["eBay pre-sale question"] --> SYNC["Shared inbox sync<br/>foreground + 5-minute cron<br/>overlap-safe"]
-    SYNC --> MSGDB["Tenant-scoped messages<br/>external identity + delivery truth"]
+    SYNC --> MSGDB["Tenant-scoped messages + attachments<br/>external identity + delivery truth"]
     MSGDB -->|Supabase Realtime| INBOX
     INBOX --> QA["Buyer-Q&A agent<br/>grounded draft reply"]
     QA --> QAPPROVE["Seller approves or edits reply"]
-    QAPPROVE --> DELIVER["eBay message adapter<br/>Sandbox-capable text delivery"]
+    QAPPROVE --> DELIVER["eBay message adapter<br/>Sandbox-capable text + photo delivery"]
     DELIVER --> EBUYER["Buyer's eBay inbox"]
 
     subgraph crosscut["Cross-cutting"]
@@ -130,12 +131,13 @@ the seller chooses **Publish to eBay**, which invokes the adapter (sandbox today
 to production). Listings also render copy-paste export packs for Facebook Marketplace and Mercari.
 A shared overlap-safe service imports active-listing
 questions on foreground refresh and a five-minute cron, persists exact provider identities under
-RLS, and lets Realtime update the inbox. A grounded agent drafts one reply for seller approval;
-acknowledged replies and follow-ups go back through the eBay messaging adapter while failed or
-ambiguous attempts stay visibly retryable. Cutting across all of it: a role-keyed LLM
-provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference corpus that grounds
-copy and corroborates price, per-run prediction logs feeding the eval harness, structured-JSON
-observability, and Clerk auth with Postgres RLS enforcing per-user isolation everywhere.
+RLS, imports supported buyer-photo metadata, renders it through an authenticated proxy, and lets
+Realtime update the inbox. A grounded agent drafts one reply for seller approval; acknowledged
+text-and-photo replies and follow-ups go back through the eBay messaging adapter as one delivery
+attempt, while failed or ambiguous attempts stay visibly retryable. Cutting across all of it: a
+role-keyed LLM provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference
+corpus that grounds copy and corroborates price, per-run prediction logs feeding the eval harness,
+structured-JSON observability, and Clerk auth with Postgres RLS enforcing per-user isolation everywhere.
 
 The pre-publish correction loop replaces bounded identity facts (brand, model, category, condition,
 valid ISBN/UPC, and relevant specifications), then reruns pricing, confidence, and listing generation.
@@ -202,7 +204,7 @@ idea seen three ways. The map from skill to code:
 | Seller-controlled outbound price | `effectivePrice` + eBay publish/export persistence seams — override-first fallback, cent-safe validation, cached-pack freshness, and revision guards |
 | Evals + calibration | `src/lib/eval` — gold set, ID/pricing metrics, reliability buckets + ECE, LLM judge validated against human labels |
 | Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, generation-bound eBay dispatch, lazy env validation (`src/lib/env.ts`), signed account-deletion erasure |
-| Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell + Trading/Message APIs, sandbox) · export packs for FB Marketplace/Mercari |
+| Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell + Trading/Message/Media APIs, sandbox) · export packs for FB Marketplace/Mercari |
 | Docker / CI / observability | `Dockerfile`, `.github/workflows/ci.yml`, `src/lib/observability.ts`, `/api/health` |
 
 ## Eval harness

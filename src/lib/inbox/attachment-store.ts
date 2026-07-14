@@ -64,7 +64,9 @@ export async function stageOutboundPhotos(input: {
         },
       );
       if (error) throw new Error(`Failed to finalize photos: ${error.message}`);
-      const staged = (data ?? []).map((row: unknown) => messageAttachmentRowSchema.parse(row));
+      const staged: MessageAttachmentRow[] = (data ?? []).map((row: unknown) =>
+        messageAttachmentRowSchema.parse(row),
+      );
       if (
         staged.length !== existing.length ||
         staged.some((row) => row.delivery_status !== "staged") ||

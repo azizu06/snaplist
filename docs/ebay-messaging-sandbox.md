@@ -1,6 +1,6 @@
 # eBay pre-sale messaging: Sandbox operator runbook
 
-This runbook verifies issue #133 with two disposable eBay Sandbox users. It is
+This runbook verifies issues #133 and #134 with two disposable eBay Sandbox users. It is
 operator-only: automated tests never call eBay, this procedure never targets
 production, and no token or credential belongs in screenshots, logs, issues, or
 commits.
@@ -29,7 +29,7 @@ adapter:
   with `conversation_type=FROM_MEMBERS` and follows its message pagination so
   an unanswered question need not be the conversation's latest message.
   Commerce Message API [`sendMessage`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/sendMessage)
-  sends later seller-authored text into that existing conversation. SnapList
+  sends later seller-authored follow-ups into that existing conversation. SnapList
   persists this separate conversation ID; it never substitutes the Trading
   question ID.
 

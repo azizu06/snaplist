@@ -16,7 +16,10 @@ describe("message photo deletion queue", () => {
       offset += args.p_storage_paths?.length ?? 0;
       return { data: args.p_storage_paths?.length ?? 0, error: null };
     });
-    const remove = vi.fn(async (_batch: string[]) => ({ error: null }));
+    const remove = vi.fn(async (batch: string[]) => {
+      void batch;
+      return { error: null };
+    });
     const client = {
       rpc,
       storage: { from: vi.fn(() => ({ remove })) },
@@ -44,7 +47,10 @@ describe("message photo deletion queue", () => {
       }
       return { data: 1, error: null };
     });
-    const remove = vi.fn(async (_paths: string[]) => ({ error: null }));
+    const remove = vi.fn(async (paths: string[]) => {
+      void paths;
+      return { error: null };
+    });
     const client = {
       rpc,
       storage: { from: vi.fn(() => ({ remove })) },

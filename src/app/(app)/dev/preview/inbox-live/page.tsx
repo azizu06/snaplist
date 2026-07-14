@@ -232,6 +232,7 @@ export default function InboxDevPreviewPage() {
       followUps={FIXTURE_FOLLOWUPS.get(selectedMessage.id) ?? []}
       attachments={[]}
       followUpValue={followUpDrafts[selectedMessage.id] ?? ""}
+      followUpComposerVersion={0}
       onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
       onApproveAndSend={async () => true}
       onRetryDelivery={() => {}}

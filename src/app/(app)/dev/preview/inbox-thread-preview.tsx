@@ -73,6 +73,7 @@ export function InboxThreadPreview() {
         followUps={[]}
         attachments={[]}
         followUpValue={value}
+        followUpComposerVersion={0}
         onEdit={noop}
         onApproveAndSend={succeed}
         onRetryDelivery={noop}
