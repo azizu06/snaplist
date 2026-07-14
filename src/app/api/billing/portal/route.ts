@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getUserId } from "@/lib/auth";
 import { enforceRateLimit } from "@/lib/abuse";
 import {
   createStripeBillingAdapter,
+  createSupabaseEntitlementStore,
   resolveStripeConfig,
   stripeConfigured,
 } from "@/lib/billing";
@@ -27,14 +28,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("subscriptions")
-      .select("stripe_customer_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const customerId =
-      (data as { stripe_customer_id?: string } | null)?.stripe_customer_id ?? undefined;
+    const customerId = await createSupabaseEntitlementStore(
+      createAdminClient(),
+    ).customerIdForUser(userId);
     if (!customerId) {
       return NextResponse.json(
         { error: "No billing account yet — subscribe first." },

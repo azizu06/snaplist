@@ -1,7 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
-import type { Tier } from "./config";
-import type { EntitlementStore, NormalizedSubscription } from "./webhook";
+import { entitlementTierFromStatus, type Tier } from "./config";
+import type { BillingCustomerStore, CheckoutClaim } from "./lifecycle";
+import type {
+  EntitlementStore,
+  NormalizedSubscription,
+  StripeEventClaim,
+} from "./webhook";
 
 /**
  * Entitlement reads + the Supabase-backed webhook store (issue #64).
@@ -24,10 +29,10 @@ export async function getEntitlement(
     const db = client ?? (await createClient());
     const { data } = await db
       .from("subscriptions")
-      .select("tier")
+      .select("status")
       .eq("user_id", userId)
       .maybeSingle();
-    return (data as { tier?: string } | null)?.tier === "paid" ? "paid" : "free";
+    return entitlementTierFromStatus((data as { status?: string } | null)?.status);
   } catch {
     return "free"; // entitlement is best-effort: a read failure never over-entitles
   }
@@ -39,46 +44,159 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * The trusted billing lifecycle store. All Customer-map and webhook writes go
+ * through a server-only service-role client; users only read their own mirrored
+ * `subscriptions` row through `getEntitlement` above.
+ */
+export interface BillingLifecycleStore extends EntitlementStore, BillingCustomerStore {}
+
+/**
  * The webhook's persistence store, backed by the SERVICE-ROLE admin client (it
  * bypasses RLS — entitlement is written only here, never by the user). Pass
  * `createAdminClient()` from the webhook route.
  */
 export function createSupabaseEntitlementStore(
   admin: SupabaseClient,
-  now: () => Date = () => new Date(),
-): EntitlementStore {
+): BillingLifecycleStore {
   return {
-    async alreadyProcessed(eventId) {
-      const { data } = await admin
-        .from("stripe_events")
-        .select("event_id")
-        .eq("event_id", eventId)
+    async customerIdForUser(userId) {
+      const { data, error } = await admin
+        .from("billing_customers")
+        .select("stripe_customer_id")
+        .eq("user_id", userId)
         .maybeSingle();
-      return data != null;
+      if (error) throw error;
+      return (data as { stripe_customer_id?: string } | null)?.stripe_customer_id ?? null;
     },
 
-    async markProcessed(eventId, type) {
+    async saveCustomerIdForUser(userId, customerId) {
       const { error } = await admin
-        .from("stripe_events")
-        .insert({ event_id: eventId, type });
-      // A concurrent delivery may have inserted the same id first — that's the
-      // idempotency working, not a failure. Re-throw anything else.
-      if (error && !isUniqueViolation(error)) throw error;
+        .from("billing_customers")
+        .insert({ user_id: userId, stripe_customer_id: customerId });
+      if (!error) return;
+      if (!isUniqueViolation(error)) throw error;
+
+      // A concurrent first Checkout may have saved the same Customer first. It is
+      // safe to reuse only if the immutable mapping agrees exactly; a conflicting
+      // map fails closed rather than ever associating a Customer with two tenants.
+      const { data, error: readError } = await admin
+        .from("billing_customers")
+        .select("stripe_customer_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (readError) throw readError;
+      if ((data as { stripe_customer_id?: string } | null)?.stripe_customer_id === customerId) {
+        return;
+      }
+      throw new Error("Stripe Customer mapping conflicts with an existing SnapList user.");
+    },
+
+    async claimCheckout(userId, customerId): Promise<CheckoutClaim> {
+      const { data, error } = await admin.rpc("claim_billing_checkout", {
+        p_user_id: userId,
+        p_stripe_customer_id: customerId,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : null;
+      if (!row || typeof row.state !== "string") throw new Error("Billing Checkout claim returned no state.");
+      if (row.state === "ready" && typeof row.checkout_url === "string") {
+        return { state: "ready", url: row.checkout_url };
+      }
+      if (
+        row.state === "claim" &&
+        typeof row.idempotency_key === "string" &&
+        typeof row.claim_token === "string"
+      ) {
+        return {
+          state: "claim",
+          idempotencyKey: row.idempotency_key,
+          claimToken: row.claim_token,
+        };
+      }
+      if (row.state === "in_progress") return { state: "in_progress" };
+      throw new Error("Billing Checkout claim returned an invalid state.");
+    },
+
+    async completeCheckoutClaim(input) {
+      const { data, error } = await admin.rpc("complete_billing_checkout_claim", {
+        p_user_id: input.userId,
+        p_claim_token: input.claimToken,
+        p_checkout_session_id: input.checkoutSessionId,
+        p_checkout_url: input.checkoutUrl,
+        p_expires_at: input.expiresAt,
+      });
+      if (error) throw error;
+      if (data !== true) throw new Error("Billing Checkout claim was lost before completion.");
+    },
+
+    async releaseCheckoutClaim(userId, claimToken) {
+      const { error } = await admin.rpc("release_billing_checkout_claim", {
+        p_user_id: userId,
+        p_claim_token: claimToken,
+      });
+      if (error) throw error;
+    },
+
+    async userIdForStripeCustomer(customerId) {
+      const { data, error } = await admin
+        .from("billing_customers")
+        .select("user_id")
+        .eq("stripe_customer_id", customerId)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as { user_id?: string } | null)?.user_id ?? null;
+    },
+
+    async claimEvent(eventId, type): Promise<StripeEventClaim> {
+      const { data, error } = await admin.rpc("claim_stripe_event", {
+        p_event_id: eventId,
+        p_type: type,
+      });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : null;
+      if (!row || typeof row.state !== "string") throw new Error("Stripe event claim returned no state.");
+      if (row.state === "claimed" && typeof row.claim_token === "string") {
+        return { state: "claimed", claimToken: row.claim_token };
+      }
+      if (row.state === "duplicate" || row.state === "in_progress") return { state: row.state };
+      throw new Error("Stripe event claim returned an invalid state.");
+    },
+
+    async completeEventClaim(eventId, claimToken) {
+      const { data, error } = await admin.rpc("complete_stripe_event_claim", {
+        p_event_id: eventId,
+        p_claim_token: claimToken,
+      });
+      if (error) throw error;
+      if (data !== true) throw new Error("Stripe event claim was lost before completion.");
+    },
+
+    async releaseEventClaim(eventId, claimToken) {
+      const { error } = await admin.rpc("release_stripe_event_claim", {
+        p_event_id: eventId,
+        p_claim_token: claimToken,
+      });
+      if (error) throw error;
     },
 
     async upsertSubscription(sub: NormalizedSubscription) {
-      const { error } = await admin.from("subscriptions").upsert(
-        {
-          user_id: sub.userId,
-          stripe_customer_id: sub.stripeCustomerId ?? null,
-          stripe_subscription_id: sub.stripeSubscriptionId ?? null,
-          tier: sub.tier,
-          status: sub.status,
-          current_period_end: sub.currentPeriodEnd ?? null,
-          updated_at: now().toISOString(),
-        },
-        { onConflict: "user_id" },
-      );
+      const { error } = await admin.rpc("upsert_billing_subscription", {
+        p_user_id: sub.userId,
+        p_stripe_customer_id: sub.stripeCustomerId,
+        p_stripe_subscription_id: sub.stripeSubscriptionId,
+        p_status: sub.status,
+        p_current_period_end: sub.currentPeriodEnd ?? null,
+        p_stripe_observed_at: sub.stripeObservedAt,
+      });
+      if (error) throw error;
+    },
+
+    async clearCheckoutReservation(input) {
+      const { error } = await admin.rpc("clear_billing_checkout_reservation", {
+        p_user_id: input.userId,
+        p_stripe_customer_id: input.customerId,
+        p_checkout_session_id: input.checkoutSessionId,
+      });
       if (error) throw error;
     },
   };

@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getUserId, getUserEmail } from "@/lib/auth";
 import { enforceRateLimit } from "@/lib/abuse";
 import {
   createStripeBillingAdapter,
+  createSupabaseEntitlementStore,
   resolveStripeConfig,
+  startCheckout,
   stripeConfigured,
 } from "@/lib/billing";
 import { serverErrorJson } from "@/lib/api/errors";
@@ -31,31 +33,27 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Reuse the user's Stripe customer if the webhook has already mirrored one
-    // (RLS read-own); otherwise the adapter creates one.
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("subscriptions")
-      .select("stripe_customer_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const existingCustomerId =
-      (data as { stripe_customer_id?: string } | null)?.stripe_customer_id ?? undefined;
-
     const adapter = await createStripeBillingAdapter(config);
     const email = (await getUserEmail()) ?? undefined;
-    const customerId = await adapter.ensureCustomer({ userId, email, existingCustomerId });
-
     const origin = request.nextUrl.origin;
-    const { url } = await adapter.createCheckoutSession({
+    const result = await startCheckout({
       userId,
-      customerId,
+      email,
       priceId: config.pricePro,
       successUrl: `${origin}/settings?billing=success`,
       cancelUrl: `${origin}/settings?billing=cancelled`,
-      customerEmail: email,
+      adapter,
+      // This trusted server route has already authenticated `userId`; all Customer
+      // map writes stay service-role-only and never become a client mutation path.
+      store: createSupabaseEntitlementStore(createAdminClient()),
     });
-    return NextResponse.json({ url }, { status: 200 });
+    if (result.destination === "checkout_in_progress") {
+      return NextResponse.json(
+        { error: "Checkout is already being started. Please try again in a moment." },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ url: result.url }, { status: 200 });
   } catch (err) {
     return serverErrorJson("billing.checkout", err, "Could not start checkout.");
   }

@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   //    handler is safe to re-run (dedupe + state upsert).
   try {
     const store = createSupabaseEntitlementStore(createAdminClient());
-    const result = await handleStripeEvent(event, store);
+    const result = await handleStripeEvent(event, store, adapter);
     logEvent("billing.webhook.handled", {
       type: event.type,
       processed: result.processed,

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { StripeSubscription, StripeWebhookEvent } from "./adapter";
 import {
   handleStripeEvent,
   isHandledEvent,
-  subscriptionFromEvent,
+  subscriptionFromStripe,
+  subscriptionReferenceFromEvent,
   type EntitlementStore,
   type NormalizedSubscription,
 } from "./webhook";
-import type { StripeWebhookEvent } from "./adapter";
 
 const PERIOD_END = 1_900_000_000; // unix seconds
 
@@ -16,135 +17,305 @@ const evt = (type: string, object: Record<string, unknown>, id = "evt_1"): Strip
   object,
 });
 
-function fakeStore(overrides: Partial<EntitlementStore> = {}) {
+const activeSubscription = (overrides: Partial<StripeSubscription> = {}): StripeSubscription => ({
+  id: "sub_1",
+  customerId: "cus_1",
+  status: "active",
+  currentPeriodEnd: PERIOD_END,
+  ...overrides,
+});
+
+function fakeLifecycle(opts: {
+  customerOwners?: Record<string, string>;
+  subscription?: StripeSubscription;
+  blockingSubscription?: StripeSubscription | null;
+  retrieveThrows?: Error;
+  upsertThrows?: Error;
+} = {}) {
   const processed = new Set<string>();
+  const claims = new Map<string, string>();
   const upserts: NormalizedSubscription[] = [];
   const store: EntitlementStore = {
-    async alreadyProcessed(id) {
-      return processed.has(id);
+    async claimEvent(id) {
+      if (processed.has(id)) return { state: "duplicate" as const };
+      if (claims.has(id)) return { state: "in_progress" as const };
+      const claimToken = `claim_${id}`;
+      claims.set(id, claimToken);
+      return { state: "claimed" as const, claimToken };
     },
-    async markProcessed(id) {
+    async completeEventClaim(id, claimToken) {
+      if (claims.get(id) !== claimToken) throw new Error("claim lost");
+      claims.delete(id);
       processed.add(id);
     },
+    async releaseEventClaim(id, claimToken) {
+      if (claims.get(id) === claimToken) claims.delete(id);
+    },
+    async userIdForStripeCustomer(customerId) {
+      return opts.customerOwners?.[customerId] ?? null;
+    },
     async upsertSubscription(sub) {
+      if (opts.upsertThrows) throw opts.upsertThrows;
       upserts.push(sub);
     },
-    ...overrides,
+    async clearCheckoutReservation() {},
   };
-  return { store, processed, upserts };
+  return {
+    store,
+    processed,
+    upserts,
+    adapter: {
+      async findBlockingSubscription(customerId: string) {
+        const subscription = opts.blockingSubscription ?? null;
+        if (subscription && subscription.customerId !== customerId) {
+          throw new Error("unexpected Customer id");
+        }
+        return subscription;
+      },
+      async retrieveSubscription(subscriptionId: string) {
+        if (opts.retrieveThrows) throw opts.retrieveThrows;
+        const subscription = opts.subscription ?? activeSubscription({ id: subscriptionId });
+        if (subscription.id !== subscriptionId) throw new Error("unexpected Subscription id");
+        return subscription;
+      },
+    },
+  };
 }
 
-describe("subscriptionFromEvent (#64 — pure event → entitlement)", () => {
-  it("checkout.session.completed → active/paid, mapped to the user", () => {
-    const sub = subscriptionFromEvent(
-      evt("checkout.session.completed", {
-        customer: "cus_1",
-        subscription: "sub_1",
-        client_reference_id: "u1",
-      }),
-    );
-    expect(sub).toMatchObject({
-      userId: "u1",
-      stripeCustomerId: "cus_1",
-      stripeSubscriptionId: "sub_1",
-      status: "active",
-      tier: "paid",
-    });
-  });
-
-  it("customer.subscription.updated active → paid with an ISO period end", () => {
-    const sub = subscriptionFromEvent(
-      evt("customer.subscription.updated", {
-        id: "sub_1",
-        customer: "cus_1",
-        status: "active",
-        current_period_end: PERIOD_END,
-        metadata: { user_id: "u1" },
-      }),
-    );
-    expect(sub?.tier).toBe("paid");
-    expect(sub?.status).toBe("active");
-    expect(sub?.currentPeriodEnd).toBe(new Date(PERIOD_END * 1000).toISOString());
-  });
-
-  it("a not-in-good-standing subscription status maps to free", () => {
-    const sub = subscriptionFromEvent(
-      evt("customer.subscription.updated", {
-        id: "sub_1",
-        customer: "cus_1",
-        status: "past_due",
-        metadata: { user_id: "u1" },
-      }),
-    );
-    expect(sub?.tier).toBe("free");
-  });
-
-  it("customer.subscription.deleted → canceled/free", () => {
-    const sub = subscriptionFromEvent(
-      evt("customer.subscription.deleted", { id: "sub_1", customer: "cus_1", metadata: { user_id: "u1" } }),
-    );
-    expect(sub).toMatchObject({ status: "canceled", tier: "free", stripeSubscriptionId: "sub_1" });
-  });
-
-  it("invoice.payment_failed → past_due/free (downgrade on non-payment)", () => {
-    const sub = subscriptionFromEvent(
-      evt("invoice.payment_failed", { customer: "cus_1", subscription: "sub_1", metadata: { user_id: "u1" } }),
-    );
-    expect(sub).toMatchObject({ status: "past_due", tier: "free" });
-  });
-
-  it("ignores unhandled event types", () => {
-    expect(isHandledEvent("customer.created")).toBe(false);
-    expect(subscriptionFromEvent(evt("customer.created", { id: "cus_1" }))).toBeNull();
-  });
-
-  it("ignores a handled event with no resolvable user id", () => {
+describe("subscriptionReferenceFromEvent (#152)", () => {
+  it("takes only Stripe object ids, never metadata or a client reference, from handled events", () => {
     expect(
-      subscriptionFromEvent(evt("customer.subscription.updated", { id: "sub_1", status: "active" })),
-    ).toBeNull();
+      subscriptionReferenceFromEvent(
+        evt("checkout.session.completed", {
+          customer: "cus_1",
+          subscription: "sub_1",
+          client_reference_id: "untrusted_user",
+          metadata: { user_id: "untrusted_user" },
+        }),
+      ),
+    ).toEqual({ customerId: "cus_1", subscriptionId: "sub_1" });
+
+    expect(
+      subscriptionReferenceFromEvent(
+        evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1" }),
+      ),
+    ).toEqual({ customerId: "cus_1", subscriptionId: "sub_1" });
+    expect(
+      subscriptionReferenceFromEvent(
+        evt("invoice.payment_failed", { customer: "cus_1", subscription: "sub_1" }),
+      ),
+    ).toEqual({ customerId: "cus_1", subscriptionId: "sub_1" });
+  });
+
+  it("reads the Subscription from the current nested Invoice parent shape", () => {
+    expect(
+      subscriptionReferenceFromEvent(
+        evt("invoice.payment_failed", {
+          customer: "cus_1",
+          parent: { subscription_details: { subscription: "sub_nested" } },
+        }),
+      ),
+    ).toEqual({ customerId: "cus_1", subscriptionId: "sub_nested" });
+  });
+
+  it("ignores an unhandled event or one without both Stripe ids", () => {
+    expect(isHandledEvent("customer.created")).toBe(false);
+    expect(subscriptionReferenceFromEvent(evt("customer.created", { id: "cus_1" }))).toBeNull();
+    expect(subscriptionReferenceFromEvent(evt("checkout.session.completed", { customer: "cus_1" }))).toBeNull();
   });
 });
 
-describe("handleStripeEvent (#64 — idempotency)", () => {
-  const activeEvent = evt("customer.subscription.updated", {
-    id: "sub_1",
-    customer: "cus_1",
-    status: "active",
-    metadata: { user_id: "u1" },
+describe("subscriptionFromStripe", () => {
+  it("derives the entitlement from the authoritative Subscription status", () => {
+    expect(subscriptionFromStripe("u1", activeSubscription()).tier).toBe("paid");
+    expect(
+      subscriptionFromStripe("u1", activeSubscription({ status: "past_due" })),
+    ).toMatchObject({ status: "past_due", tier: "free" });
   });
+});
 
-  it("processes a fresh event: upserts once and marks processed", async () => {
-    const { store, processed, upserts } = fakeStore();
-    const r = await handleStripeEvent(activeEvent, store);
-    expect(r).toEqual({ processed: true });
-    expect(upserts).toHaveLength(1);
-    expect(upserts[0].tier).toBe("paid");
-    expect(processed.has("evt_1")).toBe(true);
-  });
-
-  it("dedupes a replayed event — no second upsert", async () => {
-    const { store, upserts } = fakeStore();
-    await handleStripeEvent(activeEvent, store);
-    const r2 = await handleStripeEvent(activeEvent, store); // same id, redelivered
-    expect(r2).toEqual({ processed: false, reason: "duplicate" });
-    expect(upserts).toHaveLength(1); // exactly one entitlement write
-  });
-
-  it("marks an ignored event processed without upserting (won't re-evaluate on retry)", async () => {
-    const { store, processed, upserts } = fakeStore();
-    const r = await handleStripeEvent(evt("customer.created", { id: "cus_1" }), store);
-    expect(r).toEqual({ processed: false, reason: "ignored" });
-    expect(upserts).toHaveLength(0);
-    expect(processed.has("evt_1")).toBe(true);
-  });
-
-  it("does NOT mark processed when the upsert fails — so Stripe's retry re-processes", async () => {
-    const { store, processed } = fakeStore({
-      async upsertSubscription() {
-        throw new Error("db down");
-      },
+describe("handleStripeEvent (#152 — idempotent lifecycle convergence)", () => {
+  it("uses the current Subscription state after Checkout completed instead of granting paid from the session", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({
+      customerOwners: { cus_1: "u1" },
+      subscription: activeSubscription({ status: "incomplete" }),
     });
-    await expect(handleStripeEvent(activeEvent, store)).rejects.toThrow("db down");
-    expect(processed.has("evt_1")).toBe(false); // not acked → redelivery will retry
+
+    await handleStripeEvent(
+      evt("checkout.session.completed", { customer: "cus_1", subscription: "sub_1" }, "evt_checkout"),
+      store,
+      adapter,
+    );
+
+    expect(upserts).toEqual([
+      expect.objectContaining({
+        userId: "u1",
+        stripeSubscriptionId: "sub_1",
+        status: "incomplete",
+        tier: "free",
+      }),
+    ]);
+  });
+
+  it("maps invoice.payment_failed by the durable Customer map without invoice metadata", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({
+      customerOwners: { cus_1: "owner_from_server_map" },
+      subscription: activeSubscription({ status: "past_due" }),
+    });
+
+    await handleStripeEvent(
+      evt("invoice.payment_failed", { customer: "cus_1", subscription: "sub_1" }, "evt_invoice"),
+      store,
+      adapter,
+    );
+
+    expect(upserts[0]).toMatchObject({
+      userId: "owner_from_server_map",
+      status: "past_due",
+      tier: "free",
+    });
+  });
+
+  it("never uses attacker-controlled event metadata to choose a tenant", async () => {
+    const { store, upserts, processed, adapter } = fakeLifecycle({
+      subscription: activeSubscription(),
+    });
+
+    const result = await handleStripeEvent(
+      evt(
+        "customer.subscription.updated",
+        { customer: "cus_unknown", id: "sub_1", metadata: { user_id: "attacker" } },
+        "evt_unknown",
+      ),
+      store,
+      adapter,
+    );
+
+    expect(result).toEqual({ processed: false, reason: "ignored" });
+    expect(upserts).toHaveLength(0);
+    expect(processed.has("evt_unknown")).toBe(true);
+  });
+
+  it("keeps an unmapped pre-migration Checkout completion retryable instead of dropping it", async () => {
+    const { store, processed, adapter } = fakeLifecycle({ subscription: activeSubscription() });
+    const event = evt(
+      "checkout.session.completed",
+      { id: "cs_legacy", customer: "cus_legacy", subscription: "sub_1" },
+      "evt_legacy_checkout",
+    );
+
+    await expect(handleStripeEvent(event, store, adapter)).rejects.toThrow(/Customer mapping is missing/i);
+    expect(processed.has(event.id)).toBe(false);
+  });
+
+  it("dedupes an exact replay without a second entitlement write", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({ customerOwners: { cus_1: "u1" } });
+    const event = evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1" });
+
+    await handleStripeEvent(event, store, adapter);
+    const replay = await handleStripeEvent(event, store, adapter);
+
+    expect(replay).toEqual({ processed: false, reason: "duplicate" });
+    expect(upserts).toHaveLength(1);
+  });
+
+  it("keeps a concurrent delivery retryable instead of applying it twice", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({ customerOwners: { cus_1: "u1" } });
+    const event = evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1" }, "evt_racing");
+    await store.claimEvent(event.id, event.type); // another worker owns the atomic DB claim
+
+    await expect(handleStripeEvent(event, store, adapter)).rejects.toThrow(/already being processed/i);
+    expect(upserts).toHaveLength(0);
+  });
+
+  it("converges out-of-order delivery on Stripe's newest Subscription state", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({
+      customerOwners: { cus_1: "u1" },
+      // The older active event arrives after cancellation, but Stripe retrieval
+      // still returns the current canceled state for both deliveries.
+      subscription: activeSubscription({ status: "canceled" }),
+    });
+
+    await handleStripeEvent(
+      evt("customer.subscription.deleted", { customer: "cus_1", id: "sub_1" }, "evt_newer"),
+      store,
+      adapter,
+    );
+    await handleStripeEvent(
+      evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1", status: "active" }, "evt_older"),
+      store,
+      adapter,
+    );
+
+    expect(upserts.map((sub) => ({ status: sub.status, tier: sub.tier }))).toEqual([
+      { status: "canceled", tier: "free" },
+      { status: "canceled", tier: "free" },
+    ]);
+  });
+
+  it("does not let a late terminal event for an old subscription replace a newer active one", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({
+      customerOwners: { cus_1: "u1" },
+      subscription: activeSubscription({ id: "sub_old", status: "canceled" }),
+      blockingSubscription: activeSubscription({ id: "sub_new", status: "active" }),
+    });
+
+    await handleStripeEvent(
+      evt("customer.subscription.deleted", { customer: "cus_1", id: "sub_old" }, "evt_old_deleted"),
+      store,
+      adapter,
+    );
+
+    expect(upserts).toEqual([
+      expect.objectContaining({
+        stripeSubscriptionId: "sub_new",
+        status: "active",
+        tier: "paid",
+      }),
+    ]);
+  });
+
+  it("timestamps the observation before a slow Stripe retrieval can become stale", async () => {
+    let phase: "before" | "after" = "before";
+    const { store, upserts } = fakeLifecycle({ customerOwners: { cus_1: "u1" } });
+    const adapter = {
+      async findBlockingSubscription() {
+        return null;
+      },
+      async retrieveSubscription() {
+        phase = "after";
+        return activeSubscription();
+      },
+    };
+
+    await handleStripeEvent(
+      evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1" }, "evt_slow"),
+      store,
+      adapter,
+      () => new Date(phase === "before" ? "2030-01-01T00:00:00.000Z" : "2030-01-02T00:00:00.000Z"),
+    );
+
+    expect(upserts[0]?.stripeObservedAt).toBe("2030-01-01T00:00:00.000Z");
+  });
+
+  it("does not mark a failed retrieval or write as processed, so Stripe can retry", async () => {
+    const retrieveFailure = fakeLifecycle({
+      customerOwners: { cus_1: "u1" },
+      retrieveThrows: new Error("Stripe unavailable"),
+    });
+    const event = evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1" }, "evt_retry");
+    await expect(handleStripeEvent(event, retrieveFailure.store, retrieveFailure.adapter)).rejects.toThrow(
+      "Stripe unavailable",
+    );
+    expect(retrieveFailure.processed.has("evt_retry")).toBe(false);
+
+    const writeFailure = fakeLifecycle({
+      customerOwners: { cus_1: "u1" },
+      upsertThrows: new Error("DB unavailable"),
+    });
+    await expect(handleStripeEvent(event, writeFailure.store, writeFailure.adapter)).rejects.toThrow(
+      "DB unavailable",
+    );
+    expect(writeFailure.processed.has("evt_retry")).toBe(false);
   });
 });

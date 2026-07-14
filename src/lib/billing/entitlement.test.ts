@@ -9,8 +9,11 @@ function fakeClient(opts: {
   selectThrows?: boolean;
   insertError?: { code?: string } | null;
   upsertError?: unknown;
+  rpcError?: unknown;
+  rpcData?: unknown;
   onInsert?: (row: unknown) => void;
   onUpsert?: (row: unknown, options: unknown) => void;
+  onRpc?: (name: string, args: unknown) => void;
 }): SupabaseClient {
   return {
     from() {
@@ -37,18 +40,28 @@ function fakeClient(opts: {
         },
       };
     },
+    rpc: async (name: string, args: unknown) => {
+      opts.onRpc?.(name, args);
+      return { data: opts.rpcData ?? true, error: opts.rpcError ?? null };
+    },
   } as unknown as SupabaseClient;
 }
 
 describe("getEntitlement (#64 — fail-safe tier read)", () => {
   it("returns paid for a paid mirror row", async () => {
-    expect(await getEntitlement("u1", fakeClient({ selectData: { tier: "paid" } }))).toBe("paid");
+    expect(await getEntitlement("u1", fakeClient({ selectData: { status: "active" } }))).toBe("paid");
   });
 
   it("returns free for a free row, a missing row, or an unknown value", async () => {
-    expect(await getEntitlement("u1", fakeClient({ selectData: { tier: "free" } }))).toBe("free");
+    expect(await getEntitlement("u1", fakeClient({ selectData: { status: "canceled" } }))).toBe("free");
     expect(await getEntitlement("u1", fakeClient({ selectData: null }))).toBe("free");
-    expect(await getEntitlement("u1", fakeClient({ selectData: { tier: "??" } }))).toBe("free");
+    expect(await getEntitlement("u1", fakeClient({ selectData: { status: "??" } }))).toBe("free");
+  });
+
+  it("derives from status rather than trusting a redundant tier column", async () => {
+    expect(
+      await getEntitlement("u1", fakeClient({ selectData: { status: "canceled", tier: "paid" } })),
+    ).toBe("free");
   });
 
   it("NEVER throws / over-entitles on a read error — defaults free", async () => {
@@ -57,26 +70,28 @@ describe("getEntitlement (#64 — fail-safe tier read)", () => {
 });
 
 describe("createSupabaseEntitlementStore", () => {
-  it("alreadyProcessed reflects whether the event row exists", async () => {
-    const seen = createSupabaseEntitlementStore(fakeClient({ selectData: { event_id: "evt_1" } }));
-    const unseen = createSupabaseEntitlementStore(fakeClient({ selectData: null }));
-    expect(await seen.alreadyProcessed("evt_1")).toBe(true);
-    expect(await unseen.alreadyProcessed("evt_1")).toBe(false);
+  it("claims an event atomically through the service-role RPC", async () => {
+    let captured: { name: string; args: unknown } | undefined;
+    const store = createSupabaseEntitlementStore(fakeClient({
+      rpcData: [{ state: "claimed", claim_token: "claim_1" }],
+      onRpc: (name, args) => (captured = { name, args }),
+    }));
+    await expect(store.claimEvent("evt_1", "customer.subscription.updated")).resolves.toEqual({
+      state: "claimed",
+      claimToken: "claim_1",
+    });
+    expect(captured).toEqual({
+      name: "claim_stripe_event",
+      args: { p_event_id: "evt_1", p_type: "customer.subscription.updated" },
+    });
   });
 
-  it("markProcessed swallows a unique-violation (concurrent delivery) but rethrows others", async () => {
-    const dup = createSupabaseEntitlementStore(fakeClient({ insertError: { code: "23505" } }));
-    await expect(dup.markProcessed("evt_1", "t")).resolves.toBeUndefined();
-
-    const fatal = createSupabaseEntitlementStore(fakeClient({ insertError: { code: "42501" } }));
-    await expect(fatal.markProcessed("evt_1", "t")).rejects.toBeTruthy();
-  });
-
-  it("upsertSubscription maps the normalized state to the row and throws on error", async () => {
+  it("upsertSubscription invokes the monotonic service-role RPC and throws on error", async () => {
     let captured: Record<string, unknown> | undefined;
     const store = createSupabaseEntitlementStore(
-      fakeClient({ onUpsert: (row) => (captured = row as Record<string, unknown>) }),
-      () => new Date("2026-06-15T00:00:00.000Z"),
+      fakeClient({ onRpc: (name, args) => {
+        if (name === "upsert_billing_subscription") captured = args as Record<string, unknown>;
+      } }),
     );
     const sub: NormalizedSubscription = {
       userId: "u1",
@@ -84,20 +99,58 @@ describe("createSupabaseEntitlementStore", () => {
       stripeSubscriptionId: "sub_1",
       status: "active",
       currentPeriodEnd: "2026-07-01T00:00:00.000Z",
+      stripeObservedAt: "2026-06-15T00:00:00.000Z",
       tier: "paid",
     };
     await store.upsertSubscription(sub);
     expect(captured).toMatchObject({
-      user_id: "u1",
-      stripe_customer_id: "cus_1",
-      stripe_subscription_id: "sub_1",
-      tier: "paid",
-      status: "active",
-      current_period_end: "2026-07-01T00:00:00.000Z",
-      updated_at: "2026-06-15T00:00:00.000Z",
+      p_user_id: "u1",
+      p_stripe_customer_id: "cus_1",
+      p_stripe_subscription_id: "sub_1",
+      p_status: "active",
+      p_current_period_end: "2026-07-01T00:00:00.000Z",
+      p_stripe_observed_at: "2026-06-15T00:00:00.000Z",
     });
 
-    const failing = createSupabaseEntitlementStore(fakeClient({ upsertError: { message: "nope" } }));
+    const failing = createSupabaseEntitlementStore(fakeClient({ rpcError: { message: "nope" } }));
     await expect(failing.upsertSubscription(sub)).rejects.toBeTruthy();
+  });
+});
+
+describe("billing Customer mapping (#152)", () => {
+  it("persists a Customer once and resolves the owning Clerk user only by that server map", async () => {
+    const customers = new Map<string, { user_id: string; stripe_customer_id: string }>();
+    const admin = {
+      from(table: string) {
+        if (table !== "billing_customers") throw new Error(`unexpected table: ${table}`);
+        return {
+          select() {
+            return {
+              eq(column: "user_id" | "stripe_customer_id", value: string) {
+                return {
+                  maybeSingle: async () => {
+                    const row =
+                      column === "user_id"
+                        ? customers.get(value)
+                        : [...customers.values()].find((customer) => customer.stripe_customer_id === value) ?? null;
+                    return { data: row ?? null, error: null };
+                  },
+                };
+              },
+            };
+          },
+          insert: async (row: { user_id: string; stripe_customer_id: string }) => {
+            customers.set(row.user_id, row);
+            return { error: null };
+          },
+        };
+      },
+    } as unknown as SupabaseClient;
+    const store = createSupabaseEntitlementStore(admin);
+
+    expect(await store.customerIdForUser("user_1")).toBeNull();
+    await store.saveCustomerIdForUser("user_1", "cus_1");
+    expect(await store.customerIdForUser("user_1")).toBe("cus_1");
+    expect(await store.userIdForStripeCustomer("cus_1")).toBe("user_1");
   });
 });

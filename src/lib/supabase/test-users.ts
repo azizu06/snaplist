@@ -59,6 +59,9 @@ export async function provisionClerkTestUser(
 
 /** Tables that carry user_id, children-first so item FKs never block deletes. */
 const OWNED_TABLES = [
+  "billing_checkout_reservations",
+  "subscriptions",
+  "billing_customers",
   "prediction_logs",
   "messages",
   "listings",
