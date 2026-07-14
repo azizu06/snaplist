@@ -27,6 +27,12 @@ adapter and is **not on the Phase 1 critical path**.
   is best-effort: direct fetch is the default, an optional proxy template is validated before use,
   and blocked/thin results fall through. Every evidence-backed tier cites sources; only the clearly
   labeled terminal `llm-only` estimate may return an empty `sources[]`.
+- **One effective price governs every outbound path.** A usable, cent-normalized
+  `items.price_override` wins over the latest `prediction_logs.price`; eBay publish and every
+  Facebook/Mercari export pack (including cached packs) must use that shared precedence. Prediction
+  logs remain recommendation/eval history, never the seller's chosen price. Reject invalid override
+  writes, ignore invalid legacy overrides on reads, and advance `review_revision` whenever the
+  override changes so publish/export revision guards fail closed.
 - **Confidence is a signal-based composite** (tier fired + comp agreement + ID completeness), **never**
   raw LLM self-report. The autopilot gate is a threshold on it.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the

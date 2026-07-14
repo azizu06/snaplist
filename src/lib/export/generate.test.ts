@@ -51,7 +51,7 @@ import {
  *    BOUNDARIES against the core (with deterministic fallbacks), DESCRIPTIONS
  *    are assembled deterministically from the core (model description text is
  *    NEVER published — the only sound defense against invented digit-free
- *    claims), and the price line comes ONLY from the caller-passed stored
+ *    claims), and the price line comes ONLY from the caller-resolved effective
  *    price — never from the model;
  *  - each platform's output is ONE clean copy-paste string.
  */
@@ -500,7 +500,7 @@ describe("published descriptions are deterministic core-backed assembly", () => 
 
   it("the stored price never grounds free text: '50-hour battery' violates even at price 50", () => {
     const grounding = buildNumericGrounding(CORE);
-    // The price is deliberately ABSENT from the grounding context, so a stored
+    // The price is deliberately ABSENT from the grounding context, so an effective
     // price of 50 cannot license "50-hour battery" (or any other 50-claim).
     expect(findUngroundedNumbers("50-hour battery life.", grounding)).toEqual([
       "50-hour",

@@ -23,7 +23,9 @@ condition, specs, any barcode/ISBN), researches a defensible price range from re
 available, cited web or depreciation evidence when those tiers resolve, or a clearly labeled
 terminal LLM-only estimate that may be uncited, writes per-platform listing copy, and shows it for
 review. Before publishing, the seller can correct the load-bearing identity facts and explicitly
-re-price and regenerate a coherent draft without losing a saved price override. High-confidence
+re-price and regenerate a coherent draft without losing a saved price override. That override becomes
+the effective outbound price for eBay and both export packs; the AI suggestion remains separate as
+recommendation and eval history. High-confidence
 items can post automatically (a confidence-gated autopilot); low-confidence
 ones queue for review. Listings publish to eBay behind an adapter, with copy-paste export packs for
 Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
@@ -128,6 +130,12 @@ Its RLS-scoped transaction atomically advances the item, eBay draft, and predict
 saved seller price override, invalidates stale export packs, rejects stale/live review state, and never
 publishes automatically.
 
+Every outbound consumer resolves price through one contract: a valid seller override first, otherwise
+the latest pipeline suggestion. eBay claims that price with the coherent review snapshot before its
+adapter call. Facebook Marketplace and Mercari can reuse cached generated copy, but they attach the
+current effective price and reject an in-flight load if a concurrent seller-price edit advanced the
+review revision.
+
 > This diagram tracks the current build and will keep maturing with the project — the messaging
 > delivery path is simulated in v1, and the production eBay poller/queue lands with the go-live work
 > ([#17](https://github.com/azizu06/snaplist/issues/17), [#65](https://github.com/azizu06/snaplist/issues/65)).
@@ -176,6 +184,7 @@ idea seen three ways. The map from skill to code:
 | Structured outputs | Zod everywhere a model speaks: `src/lib/pipeline/types.ts`, `src/lib/listing/schema.ts` — no ad-hoc JSON parsing |
 | Prompt/context engineering | `src/lib/listing` + `src/lib/export` — per-platform copy generation, used-vs-new disambiguation |
 | Coherent human correction loop | `src/lib/pipeline/review-regeneration.ts` + the review RPCs — bounded identity edits, shared pricing/confidence/listing seams, revision guards, atomic RLS persistence, stale export invalidation |
+| Seller-controlled outbound price | `effectivePrice` + eBay publish/export persistence seams — override-first fallback, cent-safe validation, cached-pack freshness, and revision guards |
 | Evals + calibration | `src/lib/eval` — gold set, ID/pricing metrics, reliability buckets + ECE, LLM judge validated against human labels |
 | Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, lazy env validation (`src/lib/env.ts`), eBay account-deletion endpoint |
 | Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell API, sandbox) · export packs for FB Marketplace/Mercari |

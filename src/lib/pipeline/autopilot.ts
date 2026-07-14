@@ -4,7 +4,7 @@ import type { ConfidenceResult } from "../confidence/confidence";
  * Confidence-gated autopilot disposition + seller price override (issue #12).
  *
  * Two pure decisions live here so they are unit-testable with fake data and
- * shared by every consumer (persistence, review UI, future publish):
+ * shared by every consumer (persistence, review UI, eBay publish, and export):
  *
  *  1. WHERE does a freshly generated listing go? `autopilotEligible` (computed by
  *     the confidence composite: master switch AND score >= threshold) maps onto

@@ -12,8 +12,8 @@ import { loadOrGenerateExportPacks } from "./persist";
  *
  *  - first visit: generates and persists one draft row per platform through the
  *    revision-guarded RPC, then returns the fresh packs;
- *  - later visits at the same review revision reuse persisted model copy with no
- *    model call while deterministic Facebook price/condition lines stay current;
+ *  - later visits at the same content revision reuse persisted model copy with no
+ *    model call while the full review revision keeps the effective price current;
  *  - invalid, partial, or obsolete-revision rows regenerate without duplicating
  *    a valid platform row for the active revision.
  */

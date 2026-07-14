@@ -10,7 +10,8 @@ import type { PriceResult } from "../pricing";
  * (no live eBay call — the acceptance criterion's "mockable, tested offline").
  * The pure decisions themselves are covered in policy.test.ts; these tests pin
  * what the sweep DOES with them: what gets logged, persisted, revised, and
- * notified, and that tenancy rides every write.
+ * notified, that applied prices advance the review revision, and that tenancy
+ * rides every write.
  */
 
 // ---------------------------------------------------------------------------

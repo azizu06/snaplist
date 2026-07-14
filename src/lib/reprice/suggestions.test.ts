@@ -10,8 +10,8 @@ import { MockEbayAdapter } from "../marketplace/ebay";
 /**
  * One-tap apply / dismiss tests (issue #102), offline: a fake Supabase client
  * and the MockEbayAdapter. Pins the money-path invariants — the floor guard
- * re-runs at apply time, a resolved suggestion can't re-apply, and a live
- * revision that fails to record surfaces loudly.
+ * re-runs at apply time, a resolved suggestion can't re-apply, an applied price
+ * advances the review revision, and a live revision that fails to record surfaces loudly.
  */
 
 interface RecordedOp {

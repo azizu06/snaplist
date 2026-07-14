@@ -119,7 +119,8 @@ export interface ApplyRepriceOptions {
 /**
  * One-tap apply: revise the live eBay listing to the suggestion's target price
  * through the adapter, then record the change (suggestion → applied, the
- * seller's effective price, the listing's live price, a bell notification).
+ * seller's effective price, the listing's live price, a bell notification) and
+ * advance the review revision so an in-flight export cannot serve the prior price.
  *
  * The floor guard re-runs here — the seller may have raised the floor since
  * the sweep — so an apply can NEVER set a price below the CURRENT floor.

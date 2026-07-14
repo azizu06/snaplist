@@ -23,9 +23,11 @@ import { effectivePrice } from "../../pipeline";
  * Idempotent: a listing that already published returns its stored result
  * without another eBay call. Before external work, an atomic revision/run-id
  * claim freezes one coherent review snapshot and excludes concurrent edits or
- * publishes. A FAILED publish persists ebay_status='failed', clears its claim
- * lease, and leaves the local `status` lifecycle (draft/queued) untouched, so
- * review/draft flows keep seeing the listing and a retry stays safe.
+ * publishes. The claimed amount uses a valid seller override first and the latest
+ * prediction only as fallback, without rewriting recommendation history. A
+ * FAILED publish persists ebay_status='failed', clears its claim lease, and
+ * leaves the local `status` lifecycle (draft/queued) untouched, so review/draft
+ * flows keep seeing the listing and a retry stays safe.
  */
 
 export interface PublishOutcome {

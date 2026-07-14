@@ -214,7 +214,7 @@ export function reconcileHashtags(
 //  (b) a STANDALONE number is grounded only when the same number appears as a
 //      standalone token in a core value — digits mined out of identifiers
 //      ("4" from "WH-1000XM4") never count;
-//  (c) the stored price NEVER grounds free text: prices are appended
+//  (c) the effective price NEVER grounds free text: prices are appended
 //      deterministically by `facebookCopyBlock`, and currency-like spans
 //      ("$50", "50 dollars") are ALWAYS violations.
 // ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ export interface NumericGrounding {
 /**
  * Build the contextual grounding from the validated core fields (brand, model,
  * category, condition, isbn, upc, specs, title). Deliberately EXCLUDES the
- * stored price: the model is never allowed to write a price, so the price can
+ * effective price: the model is never allowed to write a price, so the price can
  * never ground a number in free text.
  */
 export function buildNumericGrounding(
@@ -473,7 +473,7 @@ export function fallbackMercariTitle(attrs: ExtractedAttributes): string {
   return enforceTitleLength(fallbackTitle(attrs), MERCARI_TITLE_MAX_LENGTH);
 }
 
-/** Render a stored price for the block ("$45" / "$49.99"). */
+/** Render the caller-resolved effective price for the block ("$45" / "$49.99"). */
 export function formatPrice(price: number): string {
   return Number.isInteger(price) ? `$${price}` : `$${price.toFixed(2)}`;
 }
@@ -481,7 +481,7 @@ export function formatPrice(price: number): string {
 /**
  * The Facebook Marketplace copy-paste block: title, blank line, the short
  * casual description, then deterministic meta lines — the core's condition
- * (only if the core established one), the STORED price (only if the caller
+ * (only if the core established one), the effective price (only if the caller
  * passed one), and the constant local-pickup line. Every fact line is
  * assembled here from validated inputs, never model free text.
  */

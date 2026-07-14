@@ -13,7 +13,7 @@ import { ExportView } from "./export-view";
  * + Mercari copy-paste packs for one item. The render now lives in the
  * presentational `ExportView` (preview-harness friendly, like review/publish);
  * this page stays the RLS-scoped data path: load the item + a thumbnail, the
- * latest logged price, and the load-or-generate export packs.
+ * seller override + latest logged suggestion, and the load-or-generate export packs.
  */
 export default async function ExportPage({
   params,

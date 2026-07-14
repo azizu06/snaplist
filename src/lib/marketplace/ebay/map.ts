@@ -19,7 +19,7 @@ export interface ListingForPublish {
   copy: Record<string, unknown>;
   /** Free-text assessed condition from the item row (e.g. "good", "like new"). */
   condition: string | null | undefined;
-  /** Suggested price from the run's prediction log (seller-editable upstream). */
+  /** Effective outbound price resolved upstream (seller override, then suggestion fallback). */
   price: number;
   /** Publicly fetchable photo URLs (signed URLs for the private bucket). */
   imageUrls?: string[];

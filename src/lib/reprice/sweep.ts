@@ -348,7 +348,8 @@ interface ApplyContext {
 }
 
 /**
- * Revise the live listing through the adapter and record the change.
+ * Revise the live listing through the adapter, record the change, and advance
+ * the review revision so in-flight exports cannot serve the prior price.
  * Returns false (degrade to suggest-only) when the listing can't be revised —
  * no offer id, non-USD marketplace without an explicit EBAY_CURRENCY (mirrors
  * the publish guard: relabeling an amount misprices the listing), or an

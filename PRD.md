@@ -123,10 +123,17 @@ on eBay. Buyers never see SnapList.
 - **Postgres + pgvector** (Supabase) holds items, listings, messages, embeddings, and prediction logs.
 - **Photos** in Supabase Storage, paths scoped by `user_id`, access governed by RLS/storage policies.
 - **Review writes are coherent and revision-guarded.** Seller edits, identity regeneration, export
-  packs, and publish acquisition coordinate through an item-owned review revision. Identity
-  regeneration commits the corrected item, regenerated eBay draft, and prediction log in one
-  RLS-scoped transaction; stale writers fail instead of mixing runs.
-- Schema (conceptual, not final): `items` (user_id, attributes JSON, condition, photos[], created_at), `listings` (item_id, platform, generated copy, status), `messages` (item_id/listing_id, direction, body, draft_reply, status), `embeddings`/corpus (vector, source ref, metadata), `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
+  packs, applied reprices, and publish acquisition coordinate through an item-owned review revision.
+  Seller-price changes advance it; export persistence verifies both the reusable content revision and
+  current full revision, while eBay publish atomically claims the full review snapshot before any
+  external call. Identity regeneration commits the corrected item, regenerated eBay draft, and
+  prediction log in one RLS-scoped transaction; stale writers fail instead of mixing runs, and the
+  seller price cannot change while an eBay publish claim is active.
+- Schema (conceptual, not final): `items` (user_id, attributes JSON, condition, photos[],
+  price_override, review_revision, review_content_revision, created_at), `listings` (item_id,
+  platform, generated copy, status, source_review_revision), `messages` (item_id/listing_id,
+  direction, body, draft_reply, status), `embeddings`/corpus (vector, source ref, metadata),
+  `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Models & LLM access
 - **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). Provider is a config flip via `LLM_PROVIDER`: **dev defaults to Gemini** (generous free tier — protects the OpenAI budget), the **showcase runs on OpenAI**. A strong multimodal model handles vision + structured extraction; model ids are per-role and provider-aware, confirmed against current docs at build time. Embeddings stay on a fixed provider (pgvector `vector(1536)` dimension lock).
@@ -142,6 +149,10 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 4. **Recognizable branded item** → **bounded tool-calling web-search pricing agent** (see below).
 5. **Generic, only retail found** → retail × condition-based depreciation factor, labeled low-confidence estimate.
 6. **Ultimate fallback** → LLM-only estimate, lowest confidence.
+- **Outbound price contract:** a valid, positive, cent-normalized seller override is the effective
+  price for eBay publishing and every Facebook/Mercari export pack, including cached packs. Only when
+  no usable override exists do those paths fall back to the latest pipeline suggestion. Prediction
+  logs keep the recommendation for evaluation; choosing an override never rewrites that history.
 - eBay **Browse** API dropped; eBay **Marketplace Insights** (true sold prices) is gated/unavailable to solo devs — not used **as an API**. Instead, eBay's PUBLIC sold-listings *pages* are scraped (ADR-0001) for real sold comps. Open-web comps (web-search tier) remain mostly *asking* prices; the agent seeks resale/sold signals and **down-weights confidence when only asking prices are found**. Honest ceiling: a *smart, sold-grounded suggestion*, not an oracle.
 - **Sold-comps egress is best-effort and configurable.** Direct HTTPS fetch is the default; hosted
   environments may set one validated, vendor-neutral `EBAY_SOLD_PROXY_TEMPLATE`. Missing/blank

@@ -81,8 +81,9 @@ disconnect any time. Publishes now run under the seller's own identity — the
 
 ### 5. First production publish
 
-Upload a real item → review → **Publish to eBay**. Verify the listing on
-ebay.com, then end it from Seller Hub if it was only a smoke test.
+Upload a real item, save a distinctive seller price override, then review → **Publish to eBay**.
+Verify the live offer uses the override rather than the logged suggestion and that the prediction
+log remains unchanged. Then end the listing from Seller Hub if it was only a smoke test.
 
 ## Known constraint: single production seller
 

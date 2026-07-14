@@ -18,8 +18,10 @@ import {
  * generated once per coherent review-content revision and persisted as `listings` rows (platform
  * 'facebook' / 'mercari' — exactly the platforms the schema migration
  * anticipated), then served from those rows while that revision remains current. Identity or
- * other content edits advance the revision, so stale packs are ignored and regenerated. All reads
- * and writes go through the caller's USER-SCOPED Supabase client so RLS
+ * other content edits advance the revision, so stale packs are ignored and regenerated. Price-only
+ * edits reuse the generated copy, attach the current effective price, and are guarded by the full
+ * review revision so an in-flight stale price fails closed. All reads and writes go through the
+ * caller's USER-SCOPED Supabase client so RLS
  * enforces tenancy (AGENTS.md non-negotiable #1), matching
  * `pipeline/persist.ts`.
  *
@@ -133,7 +135,9 @@ function rowToView(
  * Serve both packs for an item: from persisted rows for the requested review
  * revision when both platforms are valid, otherwise generate and persist the
  * missing draft rows through the Clerk-derived, SECURITY INVOKER RPC. The RPC
- * rejects a write if the review content advanced while generation was in flight.
+ * rejects a write if either review content or the seller price advanced while
+ * generation was in flight; cached reads perform the same full-revision price
+ * check before returning.
  */
 export async function loadOrGenerateExportPacks(
   supabase: SupabaseClient,

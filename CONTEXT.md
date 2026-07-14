@@ -79,11 +79,16 @@ Listings post to eBay (behind an **adapter**) and produce **export packs** for o
   preserves a seller's saved price override and never auto-publishes. Distinct from **Sharpen**,
   which only adds pricing detail and does not regenerate listing copy.
 - **Review revision** — the item-owned concurrency token coordinating review edits, regeneration,
-  export-pack generation, dashboard edits, and publish acquisition. Each coherent write advances it;
-  stale writers fail rather than mixing identity, price, copy, or marketplace state.
+  export-pack generation, dashboard edits, applied reprices, and publish acquisition. Any seller-price
+  change advances it; stale writers fail rather than mixing identity, price, copy, or marketplace state.
 - **Export pack** — copy-paste listing text for a platform with no write API (Facebook Marketplace,
-  Mercari). Distinct from a real **post**. Packs are tied to the review content revision, so an
-  identity correction or other content edit invalidates stale generated copy.
+  Mercari). Distinct from a real **post**. Generated copy is tied to the review content revision, while
+  every fresh or cached read carries the current **effective price** and verifies the full review
+  revision. Content edits regenerate copy; price-only edits reuse copy without serving a stale price.
+- **Effective price** — the one amount every outbound consumer uses: a valid, positive,
+  cent-normalized seller `price_override`, otherwise the latest suggested price from the prediction
+  log. Invalid legacy overrides are ignored rather than published; the underlying recommendation log
+  remains unchanged when the seller chooses a different price.
 - **Post / publish** — actually putting a listing live on eBay via the **adapter**.
 - **Adapter** — the isolating interface around eBay (posting + messaging). The pipeline must run and
   be testable against a **mock adapter** with no live eBay. Sandbox→production is a credential flip.
@@ -97,7 +102,8 @@ Listings post to eBay (behind an **adapter**) and produce **export packs** for o
   cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The
   **reference corpus** never serves a stored price as current truth.
 - **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
-  for every pipeline execution. The **eval harness** depends on it.
+  for every pipeline execution. Its price is the pipeline's recommendation, not a seller override or
+  necessarily the outbound **effective price**. The **eval harness** depends on that distinction.
 - **Eval harness** — the offline quality measurement over a fixed **gold set**: ID accuracy,
   pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge). The
   judge is **cross-family** (`--real-judge` runs the OPPOSITE provider from the generator, #61) to
