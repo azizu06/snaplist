@@ -23,6 +23,9 @@ export interface MessagePolicyRepository {
   listPendingAutoSend(
     policyVersion: string,
   ): Promise<Array<{ messageId: string }>>;
+  revalidatePendingAutoSend(
+    messageId: string,
+  ): Promise<{ marketplaceObservedAt: string } | null>;
 }
 
 export async function processMessagePolicyCandidate(input: {
@@ -61,7 +64,10 @@ export async function processMessagePolicyCandidate(input: {
 
 export async function sendPendingAutomaticReplies(input: {
   repository: MessagePolicyRepository;
-  send: (messageId: string) => Promise<unknown>;
+  send: (
+    messageId: string,
+    authorization: { marketplaceObservedAt: string },
+  ) => Promise<unknown>;
 }): Promise<{ sent: number; failed: number }> {
   let sent = 0;
   let failed = 0;
@@ -69,7 +75,11 @@ export async function sendPendingAutomaticReplies(input: {
     MESSAGE_POLICY_VERSION,
   )) {
     try {
-      await input.send(candidate.messageId);
+      const authorization = await input.repository.revalidatePendingAutoSend(
+        candidate.messageId,
+      );
+      if (!authorization) continue;
+      await input.send(candidate.messageId, authorization);
       sent += 1;
     } catch {
       failed += 1;

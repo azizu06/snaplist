@@ -51,6 +51,12 @@ const policyGrounding: AuthoritativeMessageGrounding = {
   active: true,
   current: true,
   conflicts: [],
+  authorization: {
+    listingUpdatedAt: "2026-07-14T12:00:00.000Z",
+    itemUpdatedAt: "2026-07-14T12:00:00.000Z",
+    marketplaceObservedAt: "2026-07-14T12:01:00.000Z",
+    externalListingId: "listing-1",
+  },
   facts: [
     {
       key: "availability",
@@ -65,6 +71,7 @@ class MemoryPolicyRepository implements MessagePolicyRepository {
   enabled = true;
   decisions = new Map<string, MessagePolicyAuditRecord>();
   pending = new Set<string>();
+  marketplaceCurrent = true;
 
   async getEnabled() {
     return this.enabled;
@@ -100,6 +107,12 @@ class MemoryPolicyRepository implements MessagePolicyRepository {
     if (!this.enabled) return [];
     return [...this.pending].map((messageId) => ({ messageId }));
   }
+
+  async revalidatePendingAutoSend(messageId: string) {
+    return this.enabled && this.marketplaceCurrent && this.pending.has(messageId)
+      ? { marketplaceObservedAt: policyGrounding.authorization.marketplaceObservedAt }
+      : null;
+  }
 }
 
 describe("message policy orchestration", () => {
@@ -128,7 +141,9 @@ describe("message policy orchestration", () => {
     await sendPendingAutomaticReplies({ repository, send });
     await sendPendingAutomaticReplies({ repository, send });
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(message.id);
+    expect(send).toHaveBeenCalledWith(message.id, {
+      marketplaceObservedAt: policyGrounding.authorization.marketplaceObservedAt,
+    });
   });
 
   it("generates a seller-reviewable draft for negotiation and never auto-sends it", async () => {
@@ -203,6 +218,24 @@ describe("message policy orchestration", () => {
       meterDraft: vi.fn(),
     });
     repository.enabled = false;
+    const send = vi.fn();
+
+    expect(await sendPendingAutomaticReplies({ repository, send })).toEqual({
+      sent: 0,
+      failed: 0,
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not send after marketplace facts change", async () => {
+    const repository = new MemoryPolicyRepository();
+    await processMessagePolicyCandidate({
+      repository,
+      candidate: { message, grounding: draftGrounding },
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+    repository.marketplaceCurrent = false;
     const send = vi.fn();
 
     expect(await sendPendingAutomaticReplies({ repository, send })).toEqual({

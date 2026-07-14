@@ -47,6 +47,16 @@ export interface MarketplaceQuestionFetchResult {
   answeredExternalMessageIds: string[];
 }
 
+export interface MarketplaceListingSnapshot {
+  externalListingId: string;
+  active: boolean;
+  price: number | null;
+  currency: string | null;
+  condition: string | null;
+  itemSpecifics: Record<string, string>;
+  observedAt: string;
+}
+
 export interface FetchQuestionsInput {
   /** Inclusive lower bound. Callers deliberately overlap windows. */
   from: Date;
@@ -79,6 +89,9 @@ export interface MarketplaceMessagingAdapter {
   resolveQuestion(
     question: PendingMarketplaceQuestion,
   ): Promise<MarketplaceQuestion>;
+  fetchListingSnapshot(
+    externalListingId: string,
+  ): Promise<MarketplaceListingSnapshot>;
   replyToQuestion(
     input: MarketplaceDeliveryInput,
   ): Promise<MarketplaceDeliveryReceipt>;

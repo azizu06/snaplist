@@ -11,6 +11,12 @@ const grounding: AuthoritativeMessageGrounding = {
   active: true,
   current: true,
   conflicts: [],
+  authorization: {
+    listingUpdatedAt: "2026-07-14T12:00:00.000Z",
+    itemUpdatedAt: "2026-07-14T12:00:00.000Z",
+    marketplaceObservedAt: "2026-07-14T12:05:00.000Z",
+    externalListingId: "ebay-listing-1",
+  },
   facts: [
     {
       key: "Brand",
@@ -164,5 +170,21 @@ describe("decideMessagePolicy", () => {
 
     const exact = decide("What is the asking price?");
     expect(exact.proposedReply).toBe("The current asking price is $180.00.");
+  });
+
+  it("matches accessory facts by whole tokens", () => {
+    const result = decide("Does it include a stand?", {
+      facts: [
+        {
+          key: "Edition",
+          value: "Standard package",
+          source: "active_listing_specific",
+          reference: "listing:22222222-2222-4222-8222-222222222222:specific:edition",
+        },
+      ],
+    });
+
+    expect(result.outcome).toBe("escalate");
+    expect(result.reasonCodes).toContain("authoritative_fact_missing");
   });
 });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Bump only when authorization behavior changes; decisions are unique per version. */
-export const MESSAGE_POLICY_VERSION = "grounded-pre-sale-v1";
+export const MESSAGE_POLICY_VERSION = "grounded-pre-sale-v2";
 
 export const messagePolicyOutcomeSchema = z.enum([
   "auto_send",
@@ -50,6 +50,12 @@ export const authoritativeMessageGroundingSchema = z.object({
   current: z.boolean(),
   conflicts: z.array(z.string()),
   facts: z.array(authoritativeFactSchema),
+  authorization: z.object({
+    listingUpdatedAt: z.string().datetime({ offset: true }),
+    itemUpdatedAt: z.string().datetime({ offset: true }),
+    marketplaceObservedAt: z.string().datetime({ offset: true }),
+    externalListingId: z.string().min(1),
+  }),
 });
 export type AuthoritativeMessageGrounding = z.infer<
   typeof authoritativeMessageGroundingSchema
@@ -71,6 +77,7 @@ export const messagePolicyResultSchema = z.object({
   groundingReferences: z.array(authoritativeFactSchema),
   signals: messagePolicySignalsSchema,
   proposedReply: z.string().min(1).max(2_000).nullable(),
+  authorization: authoritativeMessageGroundingSchema.shape.authorization,
 });
 export type MessagePolicyResult = z.infer<typeof messagePolicyResultSchema>;
 
@@ -134,6 +141,7 @@ function result(
     groundingReferences: fact ? [fact] : [],
     signals: signals(input.enabled, input.grounding, fact !== null),
     proposedReply,
+    authorization: input.grounding.authorization,
   });
 }
 
@@ -225,8 +233,13 @@ function exactFactAnswer(
       ) {
         return false;
       }
-      const corpus = normalized(`${candidate.key} ${candidate.value}`);
-      return premiseTokens.length > 0 && premiseTokens.every((token) => corpus.includes(token));
+      const corpusTokens = new Set(
+        normalized(`${candidate.key} ${candidate.value}`).split(" "),
+      );
+      return (
+        premiseTokens.length > 0 &&
+        premiseTokens.every((token) => corpusTokens.has(token))
+      );
     });
     return fact
       ? {

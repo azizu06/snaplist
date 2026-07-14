@@ -85,6 +85,7 @@ export const messageRowSchema = z.object({
   policy_grounding_references: z.array(z.unknown()).optional(),
   policy_safety_signals: z.record(z.string(), z.unknown()).optional(),
   policy_decided_at: z.string().nullable().optional(),
+  policy_delivery_actor: z.enum(["automatic", "seller"]).nullable().optional(),
 });
 
 export type MessageRow = z.infer<typeof messageRowSchema>;

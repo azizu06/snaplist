@@ -66,15 +66,19 @@ async function handle(request: NextRequest) {
           scheduled: true,
         }),
         policy: {
-          repository: new SupabaseMessagePolicyRepository(admin, userId, {
-            client: admin,
-            scheduled: true,
-          }),
-          send: (messageId) =>
+          repository: new SupabaseMessagePolicyRepository(
+            admin,
+            userId,
+            adapter,
+            { client: admin, scheduled: true },
+          ),
+          send: (messageId, authorization) =>
             sendCanonicalReply({
               repository: deliveryRepository,
               adapter,
               messageId,
+              deliveryActor: "automatic",
+              marketplaceObservedAt: authorization.marketplaceObservedAt,
             }),
         },
       });

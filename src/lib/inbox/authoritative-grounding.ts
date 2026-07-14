@@ -1,5 +1,6 @@
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { measurementWords } from "@/lib/vision/measurements";
+import type { MarketplaceListingSnapshot } from "@/lib/marketplace/messaging";
 import {
   authoritativeMessageGroundingSchema,
   type AuthoritativeFact,
@@ -22,7 +23,10 @@ interface ItemGroundingRow {
   id: string;
   condition: string | null;
   attributes: unknown;
+  updated_at: string;
 }
+
+const MARKETPLACE_SNAPSHOT_MAX_AGE_MS = 5 * 60_000;
 
 function nonEmpty(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -63,24 +67,64 @@ function listingSpecifics(copy: unknown): Array<[string, string]> {
 export function buildAuthoritativeMessageGrounding(input: {
   listing: ListingGroundingRow;
   item: ItemGroundingRow;
+  marketplace: MarketplaceListingSnapshot | null;
   now?: Date;
 }): AuthoritativeMessageGrounding {
   const now = input.now ?? new Date();
-  const active =
+  const localActive =
     input.listing.status === "published" &&
     input.listing.ebay_status === "published" &&
     Boolean(nonEmpty(input.listing.ebay_listing_id));
+  const marketplaceObservedAt = input.marketplace
+    ? new Date(input.marketplace.observedAt)
+    : null;
+  const marketplaceFresh =
+    marketplaceObservedAt !== null &&
+    Number.isFinite(marketplaceObservedAt.getTime()) &&
+    marketplaceObservedAt.getTime() <= now.getTime() &&
+    marketplaceObservedAt.getTime() >=
+      now.getTime() - MARKETPLACE_SNAPSHOT_MAX_AGE_MS;
+  const marketplaceIdentityMatches =
+    input.marketplace?.externalListingId === input.listing.ebay_listing_id;
+  const active = Boolean(
+    localActive &&
+      input.marketplace?.active &&
+      marketplaceIdentityMatches &&
+      marketplaceFresh,
+  );
   const pricedAt = input.listing.last_priced_at
     ? new Date(input.listing.last_priced_at)
     : null;
+  const localPrice = input.listing.listed_price;
+  const marketplacePrice = input.marketplace?.price;
+  const priceMatches =
+    typeof localPrice !== "number" ||
+    !Number.isFinite(localPrice) ||
+    localPrice <= 0 ||
+    (typeof marketplacePrice === "number" &&
+      Number.isFinite(marketplacePrice) &&
+      Math.round(marketplacePrice * 100) === Math.round(localPrice * 100));
   const current =
     active &&
+    priceMatches &&
     pricedAt !== null &&
     Number.isFinite(pricedAt.getTime()) &&
     pricedAt.getTime() <= now.getTime();
 
   const facts: AuthoritativeFact[] = [];
+  const conflicts = new Set<string>();
+  const marketplaceSpecifics = new Map(
+    Object.entries(input.marketplace?.itemSpecifics ?? {}).map(([key, value]) => [
+      comparable(key),
+      comparable(value),
+    ]),
+  );
   for (const [key, value] of listingSpecifics(input.listing.copy)) {
+    const marketplaceValue = marketplaceSpecifics.get(comparable(key));
+    if (marketplaceValue !== comparable(value)) {
+      conflicts.add(comparable(key));
+      continue;
+    }
     facts.push({
       key,
       value,
@@ -91,12 +135,20 @@ export function buildAuthoritativeMessageGrounding(input: {
 
   const condition = nonEmpty(input.item.condition);
   if (condition) {
-    facts.push({
-      key: "Condition",
-      value: condition,
-      source: "active_listing_specific",
-      reference: `listing:${input.listing.id}:condition`,
-    });
+    const marketplaceCondition = nonEmpty(input.marketplace?.condition);
+    if (
+      marketplaceCondition &&
+      comparable(marketplaceCondition) === comparable(condition)
+    ) {
+      facts.push({
+        key: "Condition",
+        value: condition,
+        source: "active_listing_specific",
+        reference: `listing:${input.listing.id}:condition`,
+      });
+    } else {
+      conflicts.add("condition");
+    }
   }
 
   const attributes = extractedAttributesSchema.safeParse(input.item.attributes ?? {});
@@ -104,6 +156,12 @@ export function buildAuthoritativeMessageGrounding(input: {
     for (const measurement of attributes.data.measurements ?? []) {
       if (!measurement.confirmed) continue;
       const key = measurementWords(measurement.name);
+      if (
+        marketplaceSpecifics.get(comparable(key)) !==
+        comparable(formatInches(measurement.value_in))
+      ) {
+        continue;
+      }
       facts.push({
         key,
         value: formatInches(measurement.value_in),
@@ -114,13 +172,14 @@ export function buildAuthoritativeMessageGrounding(input: {
   }
 
   if (
-    typeof input.listing.listed_price === "number" &&
-    Number.isFinite(input.listing.listed_price) &&
-    input.listing.listed_price > 0
+    typeof localPrice === "number" &&
+    Number.isFinite(localPrice) &&
+    localPrice > 0 &&
+    priceMatches
   ) {
     facts.push({
       key: "asking price",
-      value: input.listing.listed_price.toFixed(2),
+      value: localPrice.toFixed(2),
       source: "current_asking_price",
       reference: `listing:${input.listing.id}:current-asking-price`,
     });
@@ -134,6 +193,7 @@ export function buildAuthoritativeMessageGrounding(input: {
       reference: `listing:${input.listing.id}:active-state`,
     });
   }
+  if (!priceMatches) conflicts.add("asking price");
 
   const valuesByKey = new Map<string, Set<string>>();
   for (const fact of facts) {
@@ -142,16 +202,26 @@ export function buildAuthoritativeMessageGrounding(input: {
     values.add(comparable(fact.value));
     valuesByKey.set(key, values);
   }
-  const conflicts = [...valuesByKey.entries()]
-    .filter(([, values]) => values.size > 1)
-    .map(([key]) => key)
-    .sort();
+  for (const [key, values] of valuesByKey.entries()) {
+    if (values.size > 1) conflicts.add(key);
+  }
+  const conflictList = [...conflicts].sort();
 
   return authoritativeMessageGroundingSchema.parse({
     listingId: input.listing.id,
     active,
     current,
-    conflicts,
+    conflicts: conflictList,
     facts,
+    authorization: {
+      listingUpdatedAt: new Date(input.listing.updated_at).toISOString(),
+      itemUpdatedAt: new Date(input.item.updated_at).toISOString(),
+      marketplaceObservedAt:
+        marketplaceObservedAt && Number.isFinite(marketplaceObservedAt.getTime())
+          ? marketplaceObservedAt.toISOString()
+          : new Date(0).toISOString(),
+      externalListingId:
+        nonEmpty(input.listing.ebay_listing_id) ?? "unverified-listing",
+    },
   });
 }

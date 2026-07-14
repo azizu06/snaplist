@@ -210,8 +210,10 @@ export function messagePolicyEvidenceLabel(message: MessageRow): string | null {
     typeof reference?.source === "string"
       ? POLICY_SOURCE_LABELS[reference.source]
       : undefined;
-  if (message.policy_outcome === "auto_send") {
-    return `Automatically sent${source ? ` · ${source}` : ""}`;
+  if (message.delivery_status === "delivered") {
+    return message.policy_delivery_actor === "automatic"
+      ? `Automatically sent${source ? ` · ${source}` : ""}`
+      : "Seller-approved reply sent";
   }
   if (message.policy_outcome === "escalate") return "Needs seller check";
   if (message.policy_outcome === "draft_for_approval") return "Needs your approval";
@@ -252,7 +254,7 @@ export function deriveConversationState(
         message.delivery_attempted_at,
       )
     : delivered
-      ? message.policy_outcome === "auto_send"
+      ? message.policy_delivery_actor === "automatic"
         ? "Automatically sent"
         : "Replied"
       : message.status === "sent"

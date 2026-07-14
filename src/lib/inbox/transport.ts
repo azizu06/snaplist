@@ -44,6 +44,8 @@ export interface DeliveryRepository {
     body: string,
     at: Date,
     retry: boolean,
+    deliveryActor?: "automatic" | "seller",
+    marketplaceObservedAt?: string,
   ): Promise<boolean>;
   beginProviderDispatch(
     messageId: string,
@@ -88,6 +90,8 @@ export interface SendCanonicalInput {
   body?: string;
   retry?: boolean;
   confirmDuplicateRisk?: boolean;
+  deliveryActor?: "automatic" | "seller";
+  marketplaceObservedAt?: string;
   now?: () => Date;
 }
 
@@ -120,6 +124,8 @@ export async function sendCanonicalReply(
     body,
     at,
     input.retry === true,
+    input.deliveryActor ?? "seller",
+    input.marketplaceObservedAt,
   );
   if (!claimed) throw new MessageDeliveryConflictError();
 
@@ -500,6 +506,8 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     body: string,
     at: Date,
     retry: boolean,
+    deliveryActor: "automatic" | "seller" = "seller",
+    marketplaceObservedAt?: string,
   ): Promise<boolean> {
     if (this.serverManaged) {
       return this.applyServerWrite<boolean>("claim_canonical", {
@@ -507,6 +515,8 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
         body,
         at: at.toISOString(),
         retry,
+        delivery_actor: deliveryActor,
+        marketplace_observed_at: marketplaceObservedAt,
       });
     }
     let query = this.supabase
@@ -518,6 +528,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
         delivery_status: "sending",
         delivery_attempted_at: at.toISOString(),
         delivery_error: null,
+        policy_delivery_actor: deliveryActor,
       })
       .eq("user_id", this.userId)
       .eq("id", root.id)

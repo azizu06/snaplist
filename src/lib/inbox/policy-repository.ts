@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { MarketplaceMessagingAdapter } from "@/lib/marketplace/messaging";
 import { getAutoReplyEnabled } from "@/lib/settings/user-settings";
 import { buildAuthoritativeMessageGrounding } from "./authoritative-grounding";
 import type { MessagePolicyRepository } from "./autoreply";
@@ -9,11 +10,12 @@ import {
 } from "./ebay-server-write";
 import {
   messagePolicyResultSchema,
+  decideMessagePolicy,
   type MessagePolicyAuditRecord,
   type MessagePolicyResult,
 } from "./policy";
 import type { DraftBuyerReplyResult } from "./reply";
-import type { MessageRow } from "./types";
+import { messageRowSchema, type MessageRow } from "./types";
 
 interface PolicyDecisionRow {
   id: string;
@@ -28,6 +30,10 @@ interface PolicyDecisionRow {
   draft_model: string;
   delivery_status: string;
   decided_at: string;
+  listing_updated_at: string;
+  item_updated_at: string;
+  marketplace_verified_at: string;
+  external_listing_id: string;
 }
 
 function auditRecord(row: PolicyDecisionRow): MessagePolicyAuditRecord {
@@ -38,6 +44,12 @@ function auditRecord(row: PolicyDecisionRow): MessagePolicyAuditRecord {
     groundingReferences: row.grounding_references,
     signals: row.safety_signals,
     proposedReply: row.proposed_reply,
+    authorization: {
+      listingUpdatedAt: row.listing_updated_at,
+      itemUpdatedAt: row.item_updated_at,
+      marketplaceObservedAt: row.marketplace_verified_at,
+      externalListingId: row.external_listing_id,
+    },
   });
   return {
     id: row.id,
@@ -57,6 +69,7 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
+    private readonly marketplace: MarketplaceMessagingAdapter,
     private readonly writeTarget: {
       client: SupabaseClient;
       scheduled: boolean;
@@ -108,7 +121,7 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
           .maybeSingle(),
         this.supabase
           .from("items")
-          .select("id,condition,attributes")
+          .select("id,condition,attributes,updated_at")
           .eq("user_id", this.userId)
           .eq("id", message.item_id)
           .maybeSingle(),
@@ -124,9 +137,20 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
     if (!listing || !item) {
       throw new Error("Authoritative listing grounding was not found");
     }
+    let marketplace = null;
+    if (message.external_listing_id) {
+      try {
+        marketplace = await this.marketplace.fetchListingSnapshot(
+          message.external_listing_id,
+        );
+      } catch {
+        marketplace = null;
+      }
+    }
     return buildAuthoritativeMessageGrounding({
       listing: listing as Parameters<typeof buildAuthoritativeMessageGrounding>[0]["listing"],
       item: item as Parameters<typeof buildAuthoritativeMessageGrounding>[0]["item"],
+      marketplace,
     });
   }
 
@@ -147,6 +171,10 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
         proposed_reply: result.proposedReply,
         draft_reply: draft.reply,
         draft_model: draft.model,
+        listing_updated_at: result.authorization.listingUpdatedAt,
+        item_updated_at: result.authorization.itemUpdatedAt,
+        marketplace_verified_at: result.authorization.marketplaceObservedAt,
+        external_listing_id: result.authorization.externalListingId,
       },
       p_generation: generation,
     };
@@ -192,5 +220,74 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
       throw new Error(`Failed to read pending automatic replies: ${error.message}`);
     }
     return (data ?? []).map((row) => ({ messageId: row.message_id as string }));
+  }
+
+  async revalidatePendingAutoSend(
+    messageId: string,
+  ): Promise<{ marketplaceObservedAt: string } | null> {
+    if (!(await this.getEnabled())) return null;
+    let payload: { message: unknown; decision: unknown } | null;
+    if (this.writeTarget.scheduled) {
+      payload = await readScheduledEbayMessagePolicy<{
+        message: unknown;
+        decision: unknown;
+      } | null>(this.writeTarget.client, this.userId, "pending_auto_send_candidate", {
+        message_id: messageId,
+      });
+    } else {
+      const [
+        { data: message, error: messageError },
+        { data: decision, error: decisionError },
+      ] = await Promise.all([
+          this.supabase
+            .from("messages")
+            .select("*")
+            .eq("user_id", this.userId)
+            .eq("id", messageId)
+            .maybeSingle(),
+          this.supabase
+            .from("message_policy_decisions")
+            .select("*")
+            .eq("user_id", this.userId)
+            .eq("message_id", messageId)
+            .maybeSingle(),
+        ]);
+      if (messageError || decisionError) {
+        throw new Error(
+          `Failed to revalidate automatic reply: ${messageError?.message ?? decisionError?.message}`,
+        );
+      }
+      payload = message && decision ? { message, decision } : null;
+    }
+    if (!payload) return null;
+    const message = messageRowSchema.parse(payload.message);
+    const decision = auditRecord(payload.decision as PolicyDecisionRow);
+    if (
+      message.status !== "drafted" ||
+      decision.outcome !== "auto_send" ||
+      decision.deliveryStatus !== "not_attempted"
+    ) {
+      return null;
+    }
+    const grounding = await this.loadGrounding(message);
+    const current = decideMessagePolicy({
+      enabled: true,
+      question: message.body,
+      grounding,
+    });
+    const authorized =
+      current.outcome === "auto_send" &&
+      current.proposedReply === decision.proposedReply &&
+      JSON.stringify(current.groundingReferences) ===
+        JSON.stringify(decision.groundingReferences) &&
+      current.authorization.listingUpdatedAt ===
+        decision.authorization.listingUpdatedAt &&
+      current.authorization.itemUpdatedAt ===
+        decision.authorization.itemUpdatedAt &&
+      current.authorization.externalListingId ===
+        decision.authorization.externalListingId;
+    return authorized
+      ? { marketplaceObservedAt: current.authorization.marketplaceObservedAt }
+      : null;
   }
 }

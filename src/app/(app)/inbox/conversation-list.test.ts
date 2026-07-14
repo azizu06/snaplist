@@ -68,8 +68,10 @@ describe("deriveConversationState", () => {
 
   it("labels an automatic reply with its authoritative grounding source", () => {
     const root = message({
-      policy_version: "grounded-pre-sale-v1",
+      policy_version: "grounded-pre-sale-v2",
       policy_outcome: "auto_send",
+      policy_delivery_actor: "automatic",
+      delivery_status: "delivered",
       policy_reason_codes: ["exact_authoritative_fact"],
       policy_grounding_references: [
         {
@@ -92,6 +94,26 @@ describe("deriveConversationState", () => {
     expect(messagePolicyEvidenceLabel(root)).toBe(
       "Automatically sent · current asking price",
     );
+  });
+
+  it("labels manual delivery by its actual seller actor", () => {
+    const root = message({
+      policy_version: "grounded-pre-sale-v2",
+      policy_outcome: "auto_send",
+      policy_delivery_actor: "seller",
+      delivery_status: "delivered",
+    });
+    const outbound = message({
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound",
+      reply_to: root.id,
+      reply_kind: "reply",
+      delivery_status: "delivered",
+    });
+
+    expect(deriveConversationState(root, new Map([[root.id, outbound]]), null))
+      .toMatchObject({ statusLabel: "Replied", unread: false });
+    expect(messagePolicyEvidenceLabel(root)).toBe("Seller-approved reply sent");
   });
 
   it("keeps non-authorized outcomes visibly seller-gated", () => {

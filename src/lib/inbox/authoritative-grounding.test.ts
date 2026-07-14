@@ -8,6 +8,19 @@ describe("buildAuthoritativeMessageGrounding", () => {
   it("uses only active-listing facts, current listed price, and seller-confirmed measurements", () => {
     const result = buildAuthoritativeMessageGrounding({
       now: new Date("2026-07-14T12:05:00.000Z"),
+      marketplace: {
+        externalListingId: "ebay-listing-1",
+        active: true,
+        price: 180,
+        currency: "USD",
+        condition: "Used - Excellent",
+        itemSpecifics: {
+          Brand: "Sony",
+          Includes: "USB-C charging cable and carrying case",
+          "pit to pit": "21 in",
+        },
+        observedAt: "2026-07-14T12:05:00.000Z",
+      },
       listing: {
         id: listingId,
         item_id: itemId,
@@ -47,6 +60,7 @@ describe("buildAuthoritativeMessageGrounding", () => {
             },
           ],
         },
+        updated_at: "2026-07-14T12:00:00.000Z",
       },
     });
 
@@ -80,6 +94,15 @@ describe("buildAuthoritativeMessageGrounding", () => {
   it("marks case-insensitive contradictory approved facts as conflicting", () => {
     const result = buildAuthoritativeMessageGrounding({
       now: new Date("2026-07-14T12:05:00.000Z"),
+      marketplace: {
+        externalListingId: "ebay-listing-1",
+        active: true,
+        price: 100,
+        currency: "USD",
+        condition: "Fair",
+        itemSpecifics: { Condition: "Fair" },
+        observedAt: "2026-07-14T12:05:00.000Z",
+      },
       listing: {
         id: listingId,
         item_id: itemId,
@@ -91,7 +114,12 @@ describe("buildAuthoritativeMessageGrounding", () => {
         last_priced_at: "2026-07-14T12:00:00.000Z",
         updated_at: "2026-07-14T12:00:00.000Z",
       },
-      item: { id: itemId, condition: "Good", attributes: {} },
+      item: {
+        id: itemId,
+        condition: "Good",
+        attributes: {},
+        updated_at: "2026-07-14T12:00:00.000Z",
+      },
     });
 
     expect(result.conflicts).toContain("condition");
@@ -100,6 +128,7 @@ describe("buildAuthoritativeMessageGrounding", () => {
   it("marks inactive or unversioned listing state as non-current", () => {
     const result = buildAuthoritativeMessageGrounding({
       now: new Date("2026-07-14T12:05:00.000Z"),
+      marketplace: null,
       listing: {
         id: listingId,
         item_id: itemId,
@@ -111,9 +140,52 @@ describe("buildAuthoritativeMessageGrounding", () => {
         last_priced_at: null,
         updated_at: "2026-07-14T12:00:00.000Z",
       },
-      item: { id: itemId, condition: null, attributes: {} },
+      item: {
+        id: itemId,
+        condition: null,
+        attributes: {},
+        updated_at: "2026-07-14T12:00:00.000Z",
+      },
     });
 
     expect(result).toMatchObject({ active: false, current: false });
+  });
+
+  it.each([
+    ["the listing ended outside SnapList", { active: false }],
+    ["the asking price changed outside SnapList", { price: 199 }],
+  ])("refuses automatic grounding when %s", (_description, override) => {
+    const result = buildAuthoritativeMessageGrounding({
+      now: new Date("2026-07-14T12:05:00.000Z"),
+      listing: {
+        id: listingId,
+        item_id: itemId,
+        status: "published",
+        ebay_status: "published",
+        ebay_listing_id: "ebay-listing-1",
+        copy: { itemSpecifics: { Brand: "Sony" } },
+        listed_price: 180,
+        last_priced_at: "2026-07-14T12:00:00.000Z",
+        updated_at: "2026-07-14T12:00:00.000Z",
+      },
+      item: {
+        id: itemId,
+        condition: null,
+        attributes: {},
+        updated_at: "2026-07-14T12:00:00.000Z",
+      },
+      marketplace: {
+        externalListingId: "ebay-listing-1",
+        active: true,
+        price: 180,
+        currency: "USD",
+        condition: null,
+        itemSpecifics: { Brand: "Sony" },
+        observedAt: "2026-07-14T12:05:00.000Z",
+        ...override,
+      },
+    });
+
+    expect(result.current).toBe(false);
   });
 });

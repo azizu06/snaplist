@@ -47,15 +47,19 @@ export async function POST(request: Request) {
         scheduled: false,
       }),
       policy: {
-        repository: new SupabaseMessagePolicyRepository(supabase, userId, {
-          client: tenantServer,
-          scheduled: false,
-        }),
-        send: (messageId) =>
+        repository: new SupabaseMessagePolicyRepository(
+          supabase,
+          userId,
+          adapter,
+          { client: tenantServer, scheduled: false },
+        ),
+        send: (messageId, authorization) =>
           sendCanonicalReply({
             repository: deliveryRepository,
             adapter,
             messageId,
+            deliveryActor: "automatic",
+            marketplaceObservedAt: authorization.marketplaceObservedAt,
           }),
       },
     });

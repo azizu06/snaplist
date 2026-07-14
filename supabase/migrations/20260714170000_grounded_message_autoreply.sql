@@ -18,7 +18,9 @@ alter table public.messages
   add column if not exists policy_reason_codes text[] not null default '{}'::text[],
   add column if not exists policy_grounding_references jsonb not null default '[]'::jsonb,
   add column if not exists policy_safety_signals jsonb not null default '{}'::jsonb,
-  add column if not exists policy_decided_at timestamptz;
+  add column if not exists policy_decided_at timestamptz,
+  add column if not exists policy_delivery_actor text
+    check (policy_delivery_actor in ('automatic', 'seller'));
 
 create table public.message_policy_decisions (
   id uuid primary key default gen_random_uuid(),
@@ -36,6 +38,12 @@ create table public.message_policy_decisions (
   proposed_reply text,
   draft_reply text not null,
   draft_model text not null,
+  listing_updated_at timestamptz not null,
+  item_updated_at timestamptz not null,
+  marketplace_verified_at timestamptz not null,
+  dispatch_verified_at timestamptz,
+  external_listing_id text not null,
+  delivery_actor text check (delivery_actor in ('automatic', 'seller')),
   delivery_status text not null default 'not_attempted'
     check (delivery_status in (
       'not_attempted', 'not_applicable', 'pending', 'sending',
@@ -105,7 +113,7 @@ begin
   if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
     raise exception using errcode = '22023', message = 'Policy decision payload is required';
   end if;
-  if v_policy_version <> 'grounded-pre-sale-v1' then
+  if v_policy_version <> 'grounded-pre-sale-v2' then
     raise exception using errcode = '22023', message = 'Unsupported message policy version';
   end if;
   if v_outcome not in ('auto_send', 'draft_for_approval', 'escalate') then
@@ -123,6 +131,12 @@ begin
   if v_outcome = 'auto_send'
     and nullif(btrim(p_payload->>'proposed_reply'), '') is null then
     raise exception using errcode = '22023', message = 'Automatic replies require deterministic proposed text';
+  end if;
+  if nullif(btrim(p_payload->>'external_listing_id'), '') is null
+    or (p_payload->>'listing_updated_at')::timestamptz is null
+    or (p_payload->>'item_updated_at')::timestamptz is null
+    or (p_payload->>'marketplace_verified_at')::timestamptz is null then
+    raise exception using errcode = '22023', message = 'Current authorization revisions are required';
   end if;
 
   v_account := private.lock_ebay_messaging_account(p_user_id);
@@ -145,6 +159,20 @@ begin
   if not found then
     raise exception using errcode = 'P0002', message = 'Imported buyer question was not found';
   end if;
+  if not exists (
+    select 1
+    from public.listings listing
+    join public.items item
+      on item.id = v_message.item_id and item.user_id = v_message.user_id
+    where listing.id = v_message.listing_id
+      and listing.user_id = v_message.user_id
+      and listing.updated_at = (p_payload->>'listing_updated_at')::timestamptz
+      and item.updated_at = (p_payload->>'item_updated_at')::timestamptz
+      and listing.ebay_listing_id = btrim(p_payload->>'external_listing_id')
+      and v_message.external_listing_id = listing.ebay_listing_id
+  ) then
+    raise exception using errcode = '40001', message = 'Authoritative listing facts changed before policy persistence';
+  end if;
 
   select decision.* into v_existing
   from public.message_policy_decisions decision
@@ -161,7 +189,9 @@ begin
   insert into public.message_policy_decisions (
     user_id, message_id, listing_id, ebay_account_generation, policy_version,
     outcome, reason_codes, grounding_references, safety_signals,
-    proposed_reply, draft_reply, draft_model, delivery_status
+    proposed_reply, draft_reply, draft_model,
+    listing_updated_at, item_updated_at, marketplace_verified_at,
+    external_listing_id, delivery_status
   ) values (
     p_user_id, p_message_id, v_message.listing_id, p_generation, v_policy_version,
     v_outcome,
@@ -171,6 +201,10 @@ begin
     nullif(btrim(p_payload->>'proposed_reply'), ''),
     v_draft_reply,
     v_draft_model,
+    (p_payload->>'listing_updated_at')::timestamptz,
+    (p_payload->>'item_updated_at')::timestamptz,
+    (p_payload->>'marketplace_verified_at')::timestamptz,
+    btrim(p_payload->>'external_listing_id'),
     case when v_outcome = 'auto_send' then 'not_attempted' else 'not_applicable' end
   ) returning * into v_inserted;
 
@@ -313,6 +347,24 @@ begin
       and pending.delivery_status = 'not_attempted'
       and message.status = 'drafted';
     return v_result;
+  elsif p_operation = 'pending_auto_send_candidate' then
+    select jsonb_build_object(
+      'message', to_jsonb(message),
+      'decision', to_jsonb(decision)
+    ) into v_result
+    from public.message_policy_decisions decision
+    join public.messages message
+      on message.id = decision.message_id and message.user_id = decision.user_id
+    join public.user_settings settings
+      on settings.user_id = decision.user_id and settings.auto_reply_enabled = true
+    where decision.user_id = p_user_id
+      and decision.message_id = (p_payload->>'message_id')::uuid
+      and decision.ebay_account_generation = v_account.generation
+      and decision.policy_version = 'grounded-pre-sale-v2'
+      and decision.outcome = 'auto_send'
+      and decision.delivery_status = 'not_attempted'
+      and message.status = 'drafted';
+    return v_result;
   elsif p_operation = 'delivery_root' then
     select to_jsonb(message) into v_result
     from public.messages message
@@ -391,9 +443,194 @@ create trigger messages_sync_message_policy_delivery
   on public.messages
   for each row execute function private.sync_message_policy_delivery();
 
--- The service-role scheduler may transport an authorized automatic reply, but
--- only via the same generation-bound durable canonical operations used by a
--- seller-approved reply. No provider or marketplace mutation is added here.
+create or replace function private.assert_current_automatic_message_delivery(
+  p_user_id text,
+  p_message_id uuid,
+  p_generation uuid,
+  p_stage text,
+  p_body text default null,
+  p_marketplace_observed_at timestamptz default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_stage not in ('claim', 'dispatch') then
+    raise exception using errcode = '22023', message = 'Invalid automatic delivery stage';
+  end if;
+  if p_stage = 'claim' and (
+    p_marketplace_observed_at is null
+    or p_marketplace_observed_at < statement_timestamp() - interval '5 minutes'
+    or p_marketplace_observed_at > statement_timestamp() + interval '1 minute'
+  ) then
+    raise exception using errcode = '42501', message = 'Marketplace listing verification is stale';
+  end if;
+  if not exists (
+    select 1
+    from public.message_policy_decisions decision
+    join public.messages message
+      on message.id = decision.message_id
+      and message.user_id = decision.user_id
+      and message.ebay_account_generation = decision.ebay_account_generation
+    join public.listings listing
+      on listing.id = decision.listing_id and listing.user_id = decision.user_id
+    join public.items item
+      on item.id = message.item_id and item.user_id = decision.user_id
+    join public.user_settings settings
+      on settings.user_id = decision.user_id and settings.auto_reply_enabled = true
+    where decision.user_id = p_user_id
+      and decision.message_id = p_message_id
+      and decision.ebay_account_generation = p_generation
+      and decision.policy_version = 'grounded-pre-sale-v2'
+      and decision.outcome = 'auto_send'
+      and decision.delivery_status in ('not_attempted', 'sending')
+      and message.policy_version = decision.policy_version
+      and message.policy_outcome = 'auto_send'
+      and message.draft_reply = decision.proposed_reply
+      and listing.updated_at = decision.listing_updated_at
+      and item.updated_at = decision.item_updated_at
+      and listing.status = 'published'
+      and listing.ebay_status = 'published'
+      and listing.ebay_listing_id = decision.external_listing_id
+      and message.external_listing_id = decision.external_listing_id
+      and (
+        (p_stage = 'claim'
+          and message.status = 'drafted'
+          and decision.delivery_status = 'not_attempted'
+          and btrim(p_body) = decision.proposed_reply)
+        or
+        (p_stage = 'dispatch'
+          and message.status = 'sent'
+          and message.delivery_status = 'sending'
+          and message.policy_delivery_actor = 'automatic'
+          and decision.delivery_actor = 'automatic'
+          and decision.dispatch_verified_at >= statement_timestamp() - interval '5 minutes')
+      )
+    for update of decision, message, listing, item, settings
+  ) then
+    raise exception using
+      errcode = '42501',
+      message = 'Automatic delivery is not authorized by current seller and listing state';
+  end if;
+end;
+$$;
+
+revoke all on function private.assert_current_automatic_message_delivery(
+  text, uuid, uuid, text, text, timestamptz
+) from public, anon, authenticated, service_role;
+
+create or replace function private.record_message_delivery_actor(
+  p_user_id text,
+  p_message_id uuid,
+  p_generation uuid,
+  p_actor text,
+  p_marketplace_observed_at timestamptz default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_actor not in ('automatic', 'seller') then
+    raise exception using errcode = '22023', message = 'Invalid message delivery actor';
+  end if;
+  update public.messages message
+  set policy_delivery_actor = p_actor
+  where message.id = p_message_id
+    and message.user_id = p_user_id
+    and message.ebay_account_generation = p_generation;
+  update public.message_policy_decisions decision
+  set delivery_actor = p_actor,
+      dispatch_verified_at = case
+        when p_actor = 'automatic' then p_marketplace_observed_at
+        else null
+      end
+  where decision.message_id = p_message_id
+    and decision.user_id = p_user_id
+    and decision.ebay_account_generation = p_generation;
+end;
+$$;
+
+revoke all on function private.record_message_delivery_actor(
+  text, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role;
+
+create or replace function private.apply_authenticated_ebay_message_write(
+  p_operation text,
+  p_payload jsonb,
+  p_generation uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey', ''
+  );
+  v_actor text := coalesce(nullif(p_payload->>'delivery_actor', ''), 'seller');
+  v_result jsonb;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated' or v_user_id = '' then
+    raise exception using errcode = '42501', message = 'Seller authorization is required';
+  end if;
+  if v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server API authorization is required';
+  end if;
+  if p_operation = 'claim_canonical' and v_actor = 'automatic' then
+    perform private.assert_current_automatic_message_delivery(
+      v_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      'claim',
+      p_payload->>'body',
+      (p_payload->>'marketplace_observed_at')::timestamptz
+    );
+  elsif p_operation = 'begin_provider_dispatch' and exists (
+    select 1 from public.messages message
+    where message.id = (p_payload->>'message_id')::uuid
+      and message.user_id = v_user_id
+      and message.policy_delivery_actor = 'automatic'
+  ) then
+    perform private.assert_current_automatic_message_delivery(
+      v_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      'dispatch'
+    );
+  end if;
+  v_result := private.apply_serialized_ebay_message_write_for_tenant(
+    v_user_id, p_operation, p_payload, p_generation
+  );
+  if p_operation = 'claim_canonical' and v_result = 'true'::jsonb then
+    perform private.record_message_delivery_actor(
+      v_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      v_actor,
+      (p_payload->>'marketplace_observed_at')::timestamptz
+    );
+  elsif p_operation = 'upsert_unresolved_question' then
+    perform private.record_unresolved_ebay_buyer_provenance(
+      v_user_id, p_generation, p_payload
+    );
+  end if;
+  return v_result;
+end;
+$$;
+
+revoke all on function private.apply_authenticated_ebay_message_write(
+  text, jsonb, uuid
+) from public, anon, service_role;
+grant execute on function private.apply_authenticated_ebay_message_write(
+  text, jsonb, uuid
+) to authenticated;
+
 create or replace function private.apply_scheduled_ebay_message_write(
   p_user_id text,
   p_operation text,
@@ -423,9 +660,27 @@ begin
   ) then
     raise exception using errcode = '42501', message = 'Scheduler operation is not allowed';
   end if;
-  if p_operation in (
-    'claim_canonical', 'begin_provider_dispatch', 'renew_provider_dispatch',
-    'fail_canonical', 'complete_canonical'
+  if p_operation = 'claim_canonical' then
+    if p_payload->>'delivery_actor' <> 'automatic' then
+      raise exception using errcode = '42501', message = 'Scheduler may only claim automatic replies';
+    end if;
+    perform private.assert_current_automatic_message_delivery(
+      p_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      'claim',
+      p_payload->>'body',
+      (p_payload->>'marketplace_observed_at')::timestamptz
+    );
+  elsif p_operation = 'begin_provider_dispatch' then
+    perform private.assert_current_automatic_message_delivery(
+      p_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      'dispatch'
+    );
+  elsif p_operation in (
+    'renew_provider_dispatch', 'fail_canonical', 'complete_canonical'
   ) and not exists (
     select 1
     from public.message_policy_decisions decision
@@ -433,26 +688,16 @@ begin
       on message.id = decision.message_id
       and message.user_id = decision.user_id
       and message.ebay_account_generation = decision.ebay_account_generation
-    join public.user_settings settings
-      on settings.user_id = decision.user_id
     where decision.user_id = p_user_id
       and decision.message_id = (p_payload->>'message_id')::uuid
       and decision.ebay_account_generation = p_generation
-      and decision.policy_version = 'grounded-pre-sale-v1'
+      and decision.policy_version = 'grounded-pre-sale-v2'
       and decision.outcome = 'auto_send'
       and message.policy_version = decision.policy_version
       and message.policy_outcome = 'auto_send'
       and message.draft_reply = decision.proposed_reply
-      and (
-        settings.auto_reply_enabled = true
-        or p_operation in (
-          'renew_provider_dispatch', 'fail_canonical', 'complete_canonical'
-        )
-      )
-      and (
-        p_operation not in ('claim_canonical', 'complete_canonical')
-        or p_payload->>'body' = decision.proposed_reply
-      )
+      and message.policy_delivery_actor = 'automatic'
+      and decision.delivery_actor = 'automatic'
   ) then
     raise exception using
       errcode = '42501',
@@ -461,7 +706,15 @@ begin
   v_result := private.apply_serialized_ebay_message_write_for_tenant(
     p_user_id, p_operation, p_payload, p_generation
   );
-  if p_operation = 'upsert_unresolved_question' then
+  if p_operation = 'claim_canonical' and v_result = 'true'::jsonb then
+    perform private.record_message_delivery_actor(
+      p_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      'automatic',
+      (p_payload->>'marketplace_observed_at')::timestamptz
+    );
+  elsif p_operation = 'upsert_unresolved_question' then
     perform private.record_unresolved_ebay_buyer_provenance(
       p_user_id, p_generation, p_payload
     );

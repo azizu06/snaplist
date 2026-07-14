@@ -49,11 +49,17 @@ describe("grounded message autoreply migration", () => {
     expect(migration).toMatch(/auto_reply_enabled\s*=\s*true/i);
     expect(migration).toMatch(/message\.draft_reply\s*=\s*decision\.proposed_reply/i);
     expect(migration).toMatch(/decision\.outcome\s*=\s*'auto_send'/i);
+    expect(migration).toMatch(/assert_current_automatic_message_delivery/i);
+    expect(migration).toMatch(/listing\.updated_at\s*=\s*decision\.listing_updated_at/i);
+    expect(migration).toMatch(/item\.updated_at\s*=\s*decision\.item_updated_at/i);
+    expect(migration).toMatch(/dispatch_verified_at[\s\S]*interval '5 minutes'/i);
   });
 
   it("mirrors real transport truth into the audit record", () => {
     expect(migration).toMatch(/sync_message_policy_delivery/i);
     expect(migration).toMatch(/delivery_status/i);
     expect(migration).toMatch(/external_delivery_id/i);
+    expect(migration).toMatch(/policy_delivery_actor/i);
+    expect(migration).toMatch(/delivery_actor/i);
   });
 });

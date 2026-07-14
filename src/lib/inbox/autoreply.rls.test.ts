@@ -48,7 +48,7 @@ beforeAll(async () => {
     const { data: item, error: itemError } = await admin
       .from("items")
       .insert({ user_id: user.id, attributes: {}, photos: [] })
-      .select("id")
+      .select("id, updated_at")
       .single();
     if (itemError) throw itemError;
     const { data: listing, error: listingError } = await admin
@@ -61,7 +61,7 @@ beforeAll(async () => {
         ebay_status: "published",
         ebay_listing_id: `rls-listing-${index}`,
       })
-      .select("id")
+      .select("id, updated_at")
       .single();
     if (listingError) throw listingError;
     const { data: message, error: messageError } = await admin
@@ -75,6 +75,7 @@ beforeAll(async () => {
         status: "drafting",
         marketplace: "ebay",
         external_message_id: `rls-question-${index}`,
+        external_listing_id: `rls-listing-${index}`,
       })
       .select("id, ebay_account_generation")
       .single();
@@ -87,7 +88,7 @@ beforeAll(async () => {
         p_message_id: message.id,
         p_generation: message.ebay_account_generation,
         p_payload: {
-          policy_version: "grounded-pre-sale-v1",
+          policy_version: "grounded-pre-sale-v2",
           outcome: "auto_send",
           reason_codes: ["exact_authoritative_fact"],
           grounding_references: [
@@ -108,7 +109,11 @@ beforeAll(async () => {
           },
           proposed_reply: "Yes — this listing is currently active on eBay.",
           draft_reply: "Yes — this listing is currently active on eBay.",
-          draft_model: "policy:grounded-pre-sale-v1",
+          draft_model: "policy:grounded-pre-sale-v2",
+          listing_updated_at: listing.updated_at,
+          item_updated_at: item.updated_at,
+          marketplace_verified_at: new Date().toISOString(),
+          external_listing_id: `rls-listing-${index}`,
         },
       },
     );
@@ -140,7 +145,7 @@ describe("message policy audit RLS", () => {
       user_id: userA.id,
       outcome: "auto_send",
       reason_codes: ["exact_authoritative_fact"],
-      policy_version: "grounded-pre-sale-v1",
+      policy_version: "grounded-pre-sale-v2",
     });
     expect(JSON.stringify(data)).not.toContain(userB.id);
   });
@@ -152,7 +157,7 @@ describe("message policy audit RLS", () => {
       message_id: "00000000-0000-4000-8000-000000000001",
       listing_id: "00000000-0000-4000-8000-000000000002",
       ebay_account_generation: "00000000-0000-4000-8000-000000000003",
-      policy_version: "grounded-pre-sale-v1",
+      policy_version: "grounded-pre-sale-v2",
       outcome: "auto_send",
       reason_codes: ["exact_authoritative_fact"],
       grounding_references: [],
@@ -169,7 +174,7 @@ describe("message policy audit RLS", () => {
       admin.rpc("read_scheduled_ebay_message_policy", {
         p_user_id: userA.id,
         p_operation: "pending_auto_send",
-        p_payload: { policy_version: "grounded-pre-sale-v1" },
+        p_payload: { policy_version: "grounded-pre-sale-v2" },
       });
 
     const disabled = await readPending();
@@ -191,6 +196,8 @@ describe("message policy audit RLS", () => {
         body: message!.draft_reply,
         at: "2026-07-14T12:05:00.000Z",
         retry: false,
+        delivery_actor: "automatic",
+        marketplace_observed_at: new Date().toISOString(),
       },
     });
     expect(unauthorized.error?.message).toMatch(/not authorized/i);

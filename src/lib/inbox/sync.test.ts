@@ -254,6 +254,12 @@ const authoritativeGrounding: AuthoritativeMessageGrounding = {
   active: true,
   current: true,
   conflicts: [],
+  authorization: {
+    listingUpdatedAt: "2026-07-13T12:00:00.000Z",
+    itemUpdatedAt: "2026-07-13T12:00:00.000Z",
+    marketplaceObservedAt: "2026-07-13T12:05:00.000Z",
+    externalListingId: question.externalListingId,
+  },
   facts: [
     {
       key: "availability",
@@ -306,6 +312,15 @@ class MemoryMessagePolicyRepository implements MessagePolicyRepository {
 
   async listPendingAutoSend() {
     return [...this.pending].map((messageId) => ({ messageId }));
+  }
+
+  async revalidatePendingAutoSend(messageId: string) {
+    return this.enabled && this.pending.has(messageId)
+      ? {
+          marketplaceObservedAt:
+            authoritativeGrounding.authorization.marketplaceObservedAt,
+        }
+      : null;
   }
 
   markDelivered(messageId: string) {
