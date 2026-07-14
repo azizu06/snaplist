@@ -285,6 +285,63 @@ describe("outbound photo idempotency", () => {
     expect(query.update).not.toHaveBeenCalled();
   });
 
+  it("replaces an expired canonical upload reservation", async () => {
+    const expired = row({
+      delivery_request_id: ROOT,
+      delivery_status: "uploading",
+      upload_expires_at: "2026-07-14T12:15:00.000Z",
+    });
+    const replacement = row({
+      id: "44444444-4444-4444-8444-444444444444",
+      delivery_request_id: ROOT,
+      delivery_status: "uploading",
+      storage_path: `user_a/${ROOT}/pending/44444444-4444-4444-8444-444444444444.jpg`,
+      upload_expires_at: "2026-07-14T12:31:00.000Z",
+    });
+    let listCount = 0;
+    const query = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      order: vi.fn(async () => ({
+        data: listCount++ === 0 ? [expired] : [],
+        error: null,
+      })),
+      insert: vi.fn(() => ({
+        select: vi.fn(async () => ({ data: [replacement], error: null })),
+      })),
+    };
+    const messageQuery = {
+      select: vi.fn(() => messageQuery),
+      eq: vi.fn(() => messageQuery),
+      or: vi.fn(() => messageQuery),
+      maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+    };
+    const rpc = vi.fn(async () => ({ data: 1, error: null }));
+    const client = {
+      from: vi.fn((table: string) => table === "messages" ? messageQuery : query),
+      rpc,
+    } as unknown as SupabaseClient;
+
+    await expect(createOutboundPhotoUploadIntents({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: ROOT,
+      photos: [{
+        name: "condition.jpg",
+        mediaType: "image/jpeg",
+        byteSize: JPEG.length,
+        contentSha256: createHash("sha256").update(JPEG).digest("hex"),
+      }],
+      now: () => Date.parse("2026-07-14T12:16:00.000Z"),
+    })).resolves.toEqual([replacement]);
+    expect(rpc).toHaveBeenCalledWith(
+      "delete_own_expired_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: ROOT },
+    );
+    expect(query.insert).toHaveBeenCalledOnce();
+  });
+
   it("cleans a multipart upload when its delivery identity was already claimed", async () => {
     const attachmentQuery = {
       select: vi.fn(() => attachmentQuery),

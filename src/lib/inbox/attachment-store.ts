@@ -173,7 +173,8 @@ export async function createOutboundPhotoUploadIntents(input: {
   photos: MessagePhotoUploadMetadata[];
   now?: () => number;
 }): Promise<MessageAttachmentRow[]> {
-  const existing = await listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
+  const now = input.now?.() ?? Date.now();
+  let existing = await listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
   if (existing.length) {
     if (!uploadIntentsMatch(existing, input.photos, input.conversationRootId)) {
       throw new MessagePhotoConflictError();
@@ -182,23 +183,48 @@ export async function createOutboundPhotoUploadIntents(input: {
       // Canonical retries must keep the original expiry. The question may
       // already have been claimed by another tab/automatic reply, and only the
       // transactional staging guard can authoritatively revalidate it.
-      if (input.deliveryRequestId === input.conversationRootId) return existing;
-      const uploadExpiresAt = new Date((input.now?.() ?? Date.now()) + 15 * 60_000).toISOString();
-      const { error } = await input.supabase
-        .from("message_attachments")
-        .update({ upload_expires_at: uploadExpiresAt })
-        .eq("user_id", input.userId)
-        .eq("delivery_request_id", input.deliveryRequestId)
-        .eq("delivery_status", "uploading");
-      if (error) throw new Error(`Failed to renew photo upload: ${error.message}`);
-      return listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
+      if (input.deliveryRequestId === input.conversationRootId) {
+        const expired = existing.some((row) => {
+          const expiresAt = Date.parse(row.upload_expires_at ?? "");
+          return !Number.isFinite(expiresAt) || expiresAt <= now;
+        });
+        if (!expired) return existing;
+        const { error } = await input.supabase.rpc(
+          "delete_own_expired_message_photo_upload_intents_for_request",
+          { p_delivery_request_id: input.deliveryRequestId },
+        );
+        if (error) throw new Error(`Failed to replace expired photo upload: ${error.message}`);
+        existing = await listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
+        if (existing.length) {
+          if (!uploadIntentsMatch(existing, input.photos, input.conversationRootId)) {
+            throw new MessagePhotoConflictError();
+          }
+          const stillExpired = existing.some((row) => {
+            if (row.delivery_status !== "uploading") return false;
+            const expiresAt = Date.parse(row.upload_expires_at ?? "");
+            return !Number.isFinite(expiresAt) || expiresAt <= now;
+          });
+          if (stillExpired) throw new Error("Failed to replace expired photo upload");
+          return existing;
+        }
+      } else {
+        const uploadExpiresAt = new Date(now + 15 * 60_000).toISOString();
+        const { error } = await input.supabase
+          .from("message_attachments")
+          .update({ upload_expires_at: uploadExpiresAt })
+          .eq("user_id", input.userId)
+          .eq("delivery_request_id", input.deliveryRequestId)
+          .eq("delivery_status", "uploading");
+        if (error) throw new Error(`Failed to renew photo upload: ${error.message}`);
+        return listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
+      }
     }
-    return existing;
+    if (existing.length) return existing;
   }
   if (input.photos.length === 0) return [];
   if (await findDeliveredMessageForRequest(input)) throw new MessagePhotoConflictError();
 
-  const uploadExpiresAt = new Date((input.now?.() ?? Date.now()) + 15 * 60_000).toISOString();
+  const uploadExpiresAt = new Date(now + 15 * 60_000).toISOString();
   const rows = input.photos.map((photo, position) => {
     const id = randomUUID();
     return {

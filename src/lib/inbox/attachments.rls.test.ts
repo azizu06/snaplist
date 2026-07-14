@@ -224,8 +224,8 @@ describe("message attachment RLS (DB-gated)", () => {
       intent(b, rootB!.id, "cleanup:b", pathB, "b"),
     )).error).toBeNull();
     const aCannotExpireB = await aServer.rpc(
-      "delete_own_expired_message_photo_upload_intents",
-      { p_limit: 1000 },
+      "delete_own_expired_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: "cleanup:b" },
     );
     expect(aCannotExpireB.error).toBeNull();
     expect(aCannotExpireB.data).toBe(0);
@@ -236,8 +236,8 @@ describe("message attachment RLS (DB-gated)", () => {
       intent(a, rootA!.id, "cleanup:a", pathA, "a"),
     )).error).toBeNull();
     const bExpiry = await bServer.rpc(
-      "delete_own_expired_message_photo_upload_intents",
-      { p_limit: 1000 },
+      "delete_own_expired_message_photo_upload_intents_for_request",
+      { p_delivery_request_id: "cleanup:b" },
     );
     expect(bExpiry.error).toBeNull();
     expect(bExpiry.data).toBe(1);
@@ -264,8 +264,8 @@ describe("message attachment RLS (DB-gated)", () => {
       p_storage_paths: [pathB],
     })).data).toBe(1);
 
-    expect((await aServer.rpc("delete_own_expired_message_photo_upload_intents", {
-      p_limit: 1000,
+    expect((await aServer.rpc("delete_own_expired_message_photo_upload_intents_for_request", {
+      p_delivery_request_id: "cleanup:a",
     })).data).toBe(1);
     const bCannotCompleteA = await bServer.rpc(
       "complete_own_message_photo_object_deletions",

@@ -837,6 +837,59 @@ revoke all on function public.delete_own_expired_message_photo_upload_intents(in
 grant execute on function public.delete_own_expired_message_photo_upload_intents(integer)
   to authenticated;
 
+create or replace function public.delete_own_expired_message_photo_upload_intents_for_request(
+  p_delivery_request_id text
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+  v_deleted integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+  if coalesce(p_delivery_request_id, '') = '' then
+    raise exception using errcode = '23514', message = 'Delivery request identity is required';
+  end if;
+  delete from public.message_attachments attachment
+  where attachment.user_id = v_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.delivery_status = 'uploading'
+    and not exists (
+      select 1
+      from public.message_attachments candidate
+      where candidate.user_id = v_user_id
+        and candidate.delivery_request_id = p_delivery_request_id
+        and candidate.delivery_status <> 'uploading'
+    )
+    and exists (
+      select 1
+      from public.message_attachments candidate
+      where candidate.user_id = v_user_id
+        and candidate.delivery_request_id = p_delivery_request_id
+        and candidate.delivery_status = 'uploading'
+        and candidate.upload_expires_at <= statement_timestamp()
+    );
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+revoke all on function public.delete_own_expired_message_photo_upload_intents_for_request(text)
+  from public, anon, service_role;
+grant execute on function public.delete_own_expired_message_photo_upload_intents_for_request(text)
+  to authenticated;
+
 create or replace function public.list_own_message_photo_object_deletions(
   p_limit integer default 1000
 )
