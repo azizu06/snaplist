@@ -63,6 +63,7 @@ const OWNED_TABLES = [
   "subscriptions",
   "billing_customers",
   "prediction_logs",
+  "message_attachments",
   "messages",
   "listings",
   "embeddings",

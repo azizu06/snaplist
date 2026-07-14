@@ -4,9 +4,11 @@
  */
 export {
   messageDirectionSchema,
+  messageAttachmentRowSchema,
   messageRowSchema,
   messageStatusSchema,
   type MessageDirection,
+  type MessageAttachmentRow,
   type MessageRow,
   type MessageStatus,
   type ReplyGrounding,

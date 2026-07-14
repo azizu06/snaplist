@@ -94,7 +94,7 @@ on eBay. Buyers never see SnapList.
 28. As a seller, I want incoming buyer questions to appear in a live inbox, so that I don't have to refresh.
 29. As a seller, I want the system to draft a reply grounded in the item's attributes/listing, so that I answer accurately and fast.
 30. As a seller, I want to approve or edit a drafted reply before it sends, so that I control what the buyer sees.
-31. As a seller, I want replies delivered into the buyer's eBay inbox, so that the buyer never needs to leave eBay.
+31. As a seller, I want approved text and supported photos delivered together into the buyer's eBay inbox, so that the buyer never needs to leave eBay and a failed photo can never masquerade as text-only success.
 32. As a seller (demo), I want to simulate an incoming buyer question, so that the messaging flow is demonstrable without real buyer traffic.
 33. As a seller, I want one default-off preference that automatically answers only exact safe facts from my current approved listing, so routine questions are handled without giving up control.
 
@@ -136,7 +136,8 @@ on eBay. Buyers never see SnapList.
   price_override, review_revision, review_content_revision, created_at), `listings` (item_id,
   platform, generated copy, status, source_review_revision), `messages` (item_id/listing_id,
   direction, body, draft_reply, marketplace, exact external identities, delivery state), per-seller
-  messaging sync/reconciliation state, `embeddings`/corpus (vector, source ref, metadata),
+  `message_attachments` (tenant/message/request identity, private object path, hosted-provider
+  reference, delivery state), messaging sync/reconciliation state, `embeddings`/corpus (vector, source ref, metadata),
   `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Models & LLM access
@@ -209,7 +210,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### eBay adapters (real, built behind interfaces)
 - **Posting:** eBay Sell API publish (sandbox first → production).
-- **Messaging:** the shared foreground/background sync service calls `GetMemberMessages` for unanswered active-listing questions, resolves the Commerce Message API conversation, writes through tenant-scoped RLS persistence, and lets **Supabase Realtime** update the frontend. Each import is decided at most once per policy version: auto-send an exact current approved fact, draft for approval, or escalate. Negotiation, discounts, shipping/return promises, buyer premises/instructions, raw vision guesses, and missing/stale/conflicting facts cannot authorize an automatic send. Both authorized automatic replies and seller-approved replies use the same durable `AddMemberMessageRTQ` transport; later seller-authored text uses Commerce `sendMessage`. Delivery failures and ambiguity remain visible/retryable, overlapping windows are deduplicated, and the normal ingestion target is no more than five minutes.
+- **Messaging:** the shared foreground/background sync service calls `GetMemberMessages` for unanswered active-listing questions, resolves the Commerce Message API conversation, imports supported buyer photos, writes through tenant-scoped RLS persistence, and lets **Supabase Realtime** update the frontend. Each import is decided at most once per policy version: auto-send an exact current approved fact, draft for approval, or escalate. Negotiation, discounts, shipping/return promises, buyer premises/instructions, raw vision guesses, and missing/stale/conflicting facts cannot authorize an automatic send. Both authorized automatic replies and seller-approved replies use the same durable `AddMemberMessageRTQ` transport; later seller-authored follow-ups use Commerce `sendMessage`. Seller-approved replies and follow-ups deliver approved text and any selected supported hosted photos as one attempt; automatic replies remain text-only. Delivery failures and ambiguity remain visible/retryable, overlapping windows are deduplicated, and the normal ingestion target is no more than five minutes.
 - **Demo messaging:** seeded/simulated buyer messages remain available for a credential-free demonstration and use an explicitly simulated adapter; they never masquerade as an eBay delivery.
 - **Account-deletion notification endpoint:** verifies signed notices, then atomically erases matching seller credentials, buyer-message trees, notifications, sync/reconciliation state, and private identity provenance. Production subscription remains an owner-controlled go-live step.
 - **Secrets:** transactional calls use **per-user encrypted OAuth tokens**. One explicitly configured operator tenant/seller may use app-level credentials only against the exact Sandbox API origin; production never permits that fallback.

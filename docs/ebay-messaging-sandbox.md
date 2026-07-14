@@ -1,6 +1,6 @@
 # eBay pre-sale messaging: Sandbox operator runbook
 
-This runbook verifies issue #133 with two disposable eBay Sandbox users. It is
+This runbook verifies issues #133 and #134 with two disposable eBay Sandbox users. It is
 operator-only: automated tests never call eBay, this procedure never targets
 production, and no token or credential belongs in screenshots, logs, issues, or
 commits.
@@ -29,7 +29,7 @@ adapter:
   with `conversation_type=FROM_MEMBERS` and follows its message pagination so
   an unanswered question need not be the conversation's latest message.
   Commerce Message API [`sendMessage`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/sendMessage)
-  sends later seller-authored text into that existing conversation. SnapList
+  sends later seller-authored follow-ups into that existing conversation. SnapList
   persists this separate conversation ID; it never substitutes the Trading
   question ID.
 
@@ -43,11 +43,13 @@ usage can be checked in eBay's official [API call limits](https://developer.ebay
 page and Developer Analytics API.
 
 OAuth connections request both the traditional base scope and the Message API
-scope:
+scope. Photo uploads also use the existing seller Inventory scope required by
+the Commerce Media API:
 
 ```text
 https://api.ebay.com/oauth/api_scope
 https://api.ebay.com/oauth/api_scope/commerce.message
+https://api.ebay.com/oauth/api_scope/sell.inventory
 ```
 
 See eBay's official [traditional API OAuth guidance](https://developer.ebay.com/develop/guides-v2/authorization#using-oauth-with-the-ebay-traditional-apis).
@@ -58,10 +60,34 @@ Legacy encrypted grants that lack both a verified eBay user ID and username are
 quarantined during migration together with their transactional messaging state.
 The seller must reconnect before messaging can resume.
 
-Attachments are deliberately excluded (#134). The RTQ reference requires an
-image URL to be uploaded to eBay Picture Services by a separate call or web
-flow, while Commerce `sendMessage` has its own hosted-media model. #133 sends
-text only and never silently drops a selected attachment.
+Issue #134 supports a deliberately narrow attachment subset: JPEG, PNG, and
+WebP only, at most five images, at most 12 MB each, always accompanied by
+non-empty plain text. SnapList validates both declared MIME and file signature,
+uploads originals directly from the authenticated browser to the private
+`message-photos` bucket so the 12 MB contract does not cross Vercel's 4.5 MB
+Function payload limit, validates the retained bytes again on the server, then
+uploads them with Commerce Media API
+[`createImageFromFile`](https://developer.ebay.com/api-docs/commerce/media/resources/image/methods/createImageFromFile).
+That call uses multipart key `image`, returns `201`, an image-resource URI in
+`Location`, and EPS `imageUrl`/`expirationDate` metadata. SnapList persists all
+of those provider references. eBay's current
+[image-management guide](https://developer.ebay.com/api-docs/sell/static/inventory/managing-image-media.html)
+documents this flow. The deprecated Trading picture upload is not used.
+
+For the initial answer, the exact-parent `AddMemberMessageRTQ` call receives
+repeatable `MessageMedia` entries (`MediaName`, max 100; EPS `MediaURL`). For a
+later message, Commerce [`SendMessageRequest`](https://developer.ebay.com/api-docs/commerce/message/types/m2m%3ASendMessageRequest)
+receives `messageMedia` in the exact persisted conversation and caps media at
+five. Inbound `GetMemberMessages` image media is imported into tenant-scoped
+metadata and rendered only through an authenticated proxy that rechecks RLS,
+trusted eBay HTTPS hosts, redirects, content length, MIME, and file signature.
+
+The text and complete hosted-media array are one provider delivery attempt. If
+any upload or metadata write fails, SnapList does not call the message endpoint
+and does not report text-only success. Successfully uploaded references are
+retained for the explicit retry. If eBay acknowledges the combined message but
+local finalization fails, the whole attempt remains ambiguous and replay heals
+the attachment-to-message link before presenting it as delivered.
 
 This transport is pre-sale only. It does not handle orders, payment, shipping,
 returns, disputes, post-sale support, or any marketplace other than eBay.
@@ -79,7 +105,7 @@ offline; production activation is still owner-controlled under #17.
    test instructions explicitly require two test users. Sandbox and Production
    have separate keys, tokens, and data; see eBay's [environment guide](https://developer.ebay.com/api-docs/static/gs_understand-the-sandbox-and.html).
 2. `SELLER` is connected in SnapList through the existing per-user OAuth flow
-   with both messaging scopes above. Keep `EBAY_BASE_URL` set to
+   with all scopes above. Keep `EBAY_BASE_URL` set to
    `https://api.sandbox.ebay.com`. For the app-level Sandbox credential fallback,
    set `EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID` to this seller's Clerk user ID
    and `EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID` to that Sandbox seller's
@@ -186,6 +212,33 @@ for a `2xx` response. See the official
    `delivered` only after an acknowledged eBay response.
 6. Send one seller-authored text follow-up. Verify it is appended to the same
    eBay conversation and SnapList stores its returned Commerce message ID.
+
+### Photo checks (owner-gated; not performed by automated delivery)
+
+Official `AddMemberMessageRTQ` documentation explicitly describes Sandbox
+testing. Current Commerce Message and Media documentation describes the API
+contracts and Sandbox data generally, but does not explicitly confirm that the
+specific `sendMessage` plus `createImageFromFile` photo path is enabled for
+Sandbox accounts. GitHub issue
+[#141](https://github.com/azizu06/snaplist/issues/141) owns that provider
+verification. Until it is resolved, keep the following as an owner-run gated
+check; do not present offline contract coverage as a live Sandbox result.
+
+1. Use only disposable Sandbox users/listings and harmless JPEG/PNG/WebP test
+   images. Never use production credentials or personal media.
+2. From the draft reply, choose a library image, remove it, add a camera image,
+   and send text plus one supported photo. Verify one combined buyer-visible
+   message, the exact Trading parent/listing/buyer identity, and delivered
+   attachment metadata after refresh.
+3. Send a text-plus-photo follow-up. Verify the exact Commerce conversation ID,
+   one message ID, and the same combined content after refresh/Realtime.
+4. Send a buyer photo through Sandbox UI. Verify it appears only in the owning
+   SnapList tenant and renders through `/api/inbox/attachments/<id>`.
+5. Offline, verify PDF/SVG/audio/video, MIME-spoofed bytes, a sixth image, and an
+   image over 12 MB are rejected before provider calls. Do not upload invalid
+   samples to eBay merely to reproduce rejection.
+6. Record the Media image ID, EPS URL, attachment delivery state, exact message
+   identity, and timestamps only. Redact tokens, headers, cookies, and user data.
 
 ## Failure and replay checks
 

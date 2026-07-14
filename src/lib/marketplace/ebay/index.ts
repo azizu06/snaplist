@@ -158,6 +158,7 @@ export async function createEbayMessagingAdapterForUser(
       [
         "https://api.ebay.com/oauth/api_scope",
         "https://api.ebay.com/oauth/api_scope/commerce.message",
+        "https://api.ebay.com/oauth/api_scope/sell.inventory",
       ],
     ),
   });

@@ -7,9 +7,10 @@ import {
   hasEbayMessagingSandboxFallback,
 } from "@/lib/marketplace/ebay";
 import { createClient } from "@/lib/supabase/server";
-import { serverErrorJson } from "@/lib/api/errors";
+import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
+import { cleanupOwnExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
 import { SupabaseMessagePolicyRepository } from "@/lib/inbox/policy-repository";
 import { sendCanonicalReply, SupabaseDeliveryRepository } from "@/lib/inbox/transport";
 
@@ -24,13 +25,20 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const limited = await enforceRateLimit(request, userId);
   if (limited) return limited;
+  let tenantServer: Awaited<ReturnType<typeof createTenantServerClient>> | null = null;
+  try {
+    tenantServer = await createTenantServerClient();
+    await cleanupOwnExpiredMessagePhotoUploads(tenantServer);
+  } catch (error) {
+    logServerError("inbox.sync.photo-cleanup", error);
+  }
   const supabase = await createClient();
   try {
     const { connected } = await getEbayConnectionStatus(supabase, userId);
     if (!connected && !hasEbayMessagingSandboxFallback(userId)) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
-    const tenantServer = await createTenantServerClient();
+    tenantServer ??= await createTenantServerClient();
     const adapter = await createEbayMessagingAdapterForUser(supabase, userId, {
       credentialClient: tenantServer,
     });
@@ -58,6 +66,7 @@ export async function POST(request: Request) {
             repository: deliveryRepository,
             adapter,
             messageId,
+            expectedPhotoIds: [],
             deliveryActor: "automatic",
             marketplaceObservedAt: authorization.marketplaceObservedAt,
             questionObservedAt: authorization.questionObservedAt,
