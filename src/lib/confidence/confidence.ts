@@ -1,18 +1,19 @@
 import { z } from "zod";
 
 /**
- * Composite confidence — the signature feature behind confidence-gated autopilot
+ * Composite confidence — the signature feature behind publish eligibility
  * (see PRD "Confidence" and CONTEXT.md "Confidence (composite)").
  *
  * This is a SIGNAL-BASED composite, NEVER raw LLM self-report. It blends three
- * deterministic signals into a single 0–1 score, a band, and the autopilot gate
- * decision. The function is pure: no I/O, no Date.now(), no Math.random() — so it
+ * deterministic signals into a single 0–1 score, a band, and a readiness-gate
+ * decision. The legacy output field is named `autopilotEligible`; it never executes
+ * a publish. The function is pure: no I/O, no Date.now(), no Math.random() — so it
  * is unit-testable directly with crafted signal sets (the most important
  * pure-logic test target per the PRD) and reproducible in the eval harness.
  *
  * Signals (PRD):
- *  1. which pricing **tier** fired (ISBN > tight web comps > wide web comps >
- *     depreciation > LLM-only),
+ *  1. which pricing **trust tier** fired (sold-backed ISBN > sold > strongly
+ *     corroborated web > wide web > depreciation/catalog estimate > LLM-only),
  *  2. **comp agreement** — how tightly the found comps cluster,
  *  3. **identification completeness** — was the item resolved unambiguously?
  */
@@ -22,10 +23,10 @@ import { z } from "zod";
  * the PricingProvider routing pipeline; "which tier fired" is a logged,
  * confidence-bearing fact (CONTEXT.md "Tier").
  *
- * - `isbn`         — true structured ISBN lookup (Open Library / Google Books). Highest.
+ * - `isbn`         — sold-backed exact ISBN result. Highest.
  * - `sold`         — a real COMPLETED-SALE comp cluster (eBay public sold pages, ADR-0001).
  *                    The strongest used-price signal: "sold beats asking", so it ranks
- *                    ABOVE the asking-based web tiers and below only the exact ISBN lookup
+ *                    ABOVE the asking-based web tiers and below only a sold-backed exact ISBN result
  *                    (issue #60). The bridge routes a sold comp here only when its cluster
  *                    is tight; a scattered sold set degrades to `web_wide` upstream.
  * - `web_tight`    — web-search agent found a tight, agreeing comp cluster (asking prices).
@@ -60,11 +61,11 @@ export type ConfidenceTier = (typeof CONFIDENCE_TIERS)[number];
  * from a real lookup/comp (isbn, sold, web_tight) down to an estimate (depreciation,
  * llm_only) is the meaningful cliff, so estimates can never reach the high band.
  *
- * `sold` sits between `isbn` and `web_tight`: a completed-sale comp is real
+ * `sold` sits between sold-backed `isbn` and `web_tight`: a completed-sale comp is real
  * used-market evidence (above any asking-based tier — "sold beats asking",
- * ADR-0001 / issue #60), but a structured ISBN identity match is still firmer.
+ * ADR-0001 / issue #60), but an exact ISBN match with sold grounding is still firmer.
  * The base is high enough that a tight, well-identified sold cluster clears the
- * autopilot gate; the bridge already withholds this tier from a scattered sold
+ * publish-eligibility gate; the bridge already withholds this tier from a scattered sold
  * set (→ `web_wide`), so a wide sale spread cannot ride the label past the gate.
  */
 const TIER_BASE: Record<ConfidenceTier, number> = {
@@ -121,19 +122,19 @@ export interface ConfidenceResult {
   score: number;
   /** Bucketed band derived from `score`. */
   band: ConfidenceBand;
-  /** Autopilot gate: enabled AND score >= threshold. */
+  /** Publish-eligibility gate: preference enabled AND score >= threshold. */
   autopilotEligible: boolean;
 }
 
 export interface ConfidenceOptions {
   /**
-   * Master autopilot switch (User Story 24: "turn autopilot off entirely").
+   * Publish-eligibility switch (persisted under the legacy autopilot name).
    * When false, `autopilotEligible` is always false regardless of score.
    * Defaults to true.
    */
   autopilotEnabled?: boolean;
   /**
-   * Minimum score to be autopilot-eligible. Default 0.75 — it sits at the
+   * Minimum score to be ready-to-publish eligible. Default 0.75 — it sits at the
    * bottom of the `high` band, so the gate means "high confidence" by default
    * while staying independently tunable. Comparison is `>=` (eligible exactly
    * at the boundary).
@@ -142,7 +143,7 @@ export interface ConfidenceOptions {
 }
 
 /**
- * Band cutoffs. `high` begins at the default autopilot threshold so the two
+ * Band cutoffs. `high` begins at the default publish-eligibility threshold so the two
  * concepts line up by default; `medium` is the "review recommended but credible"
  * middle; below `MEDIUM_MIN` is honestly low-confidence (generic / LLM-only).
  */
@@ -150,9 +151,10 @@ const HIGH_MIN = 0.75;
 const MEDIUM_MIN = 0.5;
 
 /**
- * Default autopilot threshold; see ConfidenceOptions.threshold. Exported so
+ * Default publish-eligibility threshold (legacy exported name); see
+ * ConfidenceOptions.threshold. Exported so
  * UI surfaces can explain a persisted disposition from the logged confidence
- * (the run-time gate) instead of re-checking the live autopilot setting.
+ * (the run-time gate) instead of re-checking the live eligibility setting.
  */
 export const DEFAULT_AUTOPILOT_THRESHOLD = HIGH_MIN;
 
@@ -205,7 +207,7 @@ export function parseSignals(raw: unknown): ConfidenceSignals {
 }
 
 /**
- * Compute the composite confidence and the autopilot decision from signals.
+ * Compute the composite confidence and publish-eligibility decision from signals.
  *
  * Pure and synchronous. `score` is a weighted blend of {tier base, comp
  * agreement, identification completeness}; `band` buckets it; `autopilotEligible`
@@ -217,7 +219,7 @@ export function computeConfidence(
 ): ConfidenceResult {
   const { autopilotEnabled = true, threshold = DEFAULT_AUTOPILOT_THRESHOLD } = options;
 
-  // The threshold gates auto-posting, so a malformed value is a safety bug, not a
+  // The threshold gates readiness, so a malformed value is a safety bug, not a
   // stylistic one: a negative threshold would make every result (even llm_only)
   // eligible, and a non-finite / >1 value silently disables the gate. TypeScript's
   // `number` can't catch these at runtime (config, JSON), so fail loud.

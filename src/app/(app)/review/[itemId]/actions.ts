@@ -261,8 +261,8 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
  * Persists like a fresh run: the merged specs onto `items.attributes`, and a NEW
  * `prediction_logs` row (the review page reads the newest), so the suggested price,
  * range, confidence, tier, and sources all update. We deliberately DON'T touch the
- * listing's autopilot status — a manual re-price keeps the human in control rather
- * than silently auto-queueing. All writes go through the user-scoped client (RLS).
+ * listing's readiness status — a manual re-price keeps the human in control rather
+ * than changing eligibility automatically. All writes go through the user-scoped client (RLS).
  */
 export async function sharpenEstimate(formData: FormData) {
   const itemId = formData.get("itemId");
@@ -325,7 +325,7 @@ export async function sharpenEstimate(formData: FormData) {
     backTo(id, "A published listing cannot be changed from review.");
   }
 
-  // The prior run's model + autopilot switch ride forward so the new log stays
+  // The prior run's model + publish-eligibility switch ride forward so the new log stays
   // attributable and the disposition explanation coherent.
   const { data: log } = await supabase
     .from("prediction_logs")

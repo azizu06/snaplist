@@ -3,11 +3,12 @@ import { Reveal } from "@/components/marketing/reveal";
 import { DemoClip } from "@/components/marketing/demo-clip";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
 import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
+import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Snap a photo and SnapList figures out what your item is, what it's worth with cited evidence when available or a clearly labeled, potentially uncited LLM-only estimate, writes the listing, and posts it to eBay. Here's how each step works.",
+    "SnapList identifies your item and prices it with sold comps or cited web and depreciation evidence when available. Its lowest-confidence LLM-only estimate may be uncited; you choose when to publish.",
 };
 
 /**
@@ -54,7 +55,7 @@ const STEPS = [
     mobile: true,
     glyph: "price",
     title: "Price",
-    body: "SnapList prefers relevant recent sold listings, then suggests a price and a realistic range. It shows exact sources for sold, web, or depreciation evidence; the terminal LLM-only estimate is clearly labeled and may be uncited.",
+    body: "SnapList prefers relevant recent sold listings, then suggests a price and a realistic range. Evidence-bearing ISBN, sold-comp, and web tiers show the exact sources behind the suggestion. The terminal LLM-only fallback is clearly labeled, lowest-confidence, and may be uncited.",
     poster: "A defensible number, with its receipts.",
     label: "Demo clip: the Price step of SnapList",
   },
@@ -74,7 +75,7 @@ const STEPS = [
     mobile: true,
     glyph: "publish",
     title: "Publish",
-    body: "Review and edit anything, then publish to eBay under your own connected account. High-confidence items can go out on autopilot; the rest queue for you.",
+    body: `Review and edit anything, then choose Publish to eBay under your own connected account. High-confidence items are marked ready; the rest wait for review. ${MANUAL_PUBLISH_SENTENCE}`,
     poster: "Live on eBay, under your name.",
     label: "Demo clip: the Publish step of SnapList",
   },
@@ -94,24 +95,24 @@ const STEPS = [
  * Seller FAQ — relocated from the retired About page. Replaces the old
  * "Where the price comes from" waterfall section: the six step clips above
  * already walk the pipeline, so this page closes on the questions sellers
- * actually ask (marketplaces, accuracy, privacy, autopilot, cost, eBay).
+ * actually ask (marketplaces, accuracy, privacy, publishing, cost, eBay).
  */
 const FAQ = [
   {
     q: "Which marketplaces does SnapList support?",
-    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape to post; read-only research of public eBay sold pages is used only to inform pricing.",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. SnapList reads public eBay sold and completed pages for price research, but never scrapes to post. Transactional publishing only happens through the eBay adapter after you explicitly choose Publish.",
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest. For identifiable items, relevant sold comps lead when available; if access is blocked or results are too thin, SnapList falls back to cited web sources or a lower-confidence estimate. Every price is yours to edit.",
+    a: "It depends on the item. Books and media with an ISBN are the strongest, relevant sold comps lead when available, and the web tier provides cited fallback research. Those evidence-bearing tiers show their exact sources. If none can price the item, the terminal LLM-only fallback is clearly labeled, lowest-confidence, and may be uncited. Every price is yours to edit.",
   },
   {
     q: "Is my data private?",
     a: "Yes. Your photos are private, and only you can reach them. Your account's data is walled off from everyone else's, and your eBay connection is stored encrypted. If you ask eBay to remove your account, that request is honored end to end.",
   },
   {
-    q: "Does autopilot post things without asking me?",
-    a: "Only if you turn it on, and only for items it's genuinely sure about. That confidence comes from how the price was found, how closely recent sales agree, and how well it pinned down the item, never the AI grading its own work. Everything else waits for your review, and you can keep autopilot off entirely.",
+    q: "Does publish eligibility post things without asking me?",
+    a: `No. The preference only marks high-confidence listings Ready to publish. That confidence comes from how the price was found, how closely recent sales agree, and how well SnapList identified the item, never the AI grading its own work. ${MANUAL_PUBLISH_SENTENCE}`,
   },
   {
     q: "What does it cost?",
@@ -218,7 +219,7 @@ export default function HowItWorks() {
               The questions everyone asks
             </h2>
             <p className="mt-4 max-w-[52ch] text-[16.5px] leading-relaxed text-flash-dim">
-              Marketplaces, accuracy, privacy, and what autopilot will never
+              Marketplaces, accuracy, privacy, and how publishing works
               do without you, answered straight.
             </p>
           </Reveal>

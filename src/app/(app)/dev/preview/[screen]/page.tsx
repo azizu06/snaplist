@@ -166,7 +166,7 @@ const FIXTURE_REVIEW: ReviewData = {
     variant: "warning",
     title: "Waiting for your review",
     detail:
-      "Confidence was below the autopilot threshold when this listing was generated, so it waits for you.",
+      "Confidence was below the eligibility threshold when this listing was generated, so it waits for your review and manual publish.",
   },
   actionError: null,
 };

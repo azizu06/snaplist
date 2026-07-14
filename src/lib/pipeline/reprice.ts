@@ -100,7 +100,7 @@ export interface RepriceInput {
    * identification completeness AND narrowing the search. Optional.
    */
   confirmedIdentity?: ConfirmedIdentity;
-  /** Master autopilot switch the run consumed (forwarded to the gate). */
+  /** Publish-eligibility switch the run consumed (legacy property name). */
   autopilotEnabled?: boolean;
   /**
    * Price an item signal. Injected in tests; defaults to the REAL PriceRouter

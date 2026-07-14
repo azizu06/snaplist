@@ -7,7 +7,7 @@ import { FaqAccordion } from "@/components/marketing/faq-accordion";
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Two plans, no surprises. Free covers 15 items a day; Seller Pro is $10 a month for 200 items a day, autopilot at volume, and priority pricing.",
+    "Two plans, no surprises. Free covers 15 items a day; Seller Pro is $10 a month for 200 items a day, bulk capture, and priority pricing.",
 };
 
 /**
@@ -52,7 +52,7 @@ const FREE_HIGHLIGHTS = [
   "Pricing research with labeled fallbacks",
   "eBay publishing from your own account",
   "Facebook & Mercari export packs",
-  "Confidence-gated autopilot",
+  "High-confidence publish eligibility",
   "Buyer-Q&A inbox with drafted replies",
 ] as const;
 
@@ -97,8 +97,8 @@ const FEATURE_MATRIX: readonly FeatureGroup[] = [
       { label: "Listing copy generated per marketplace", free: true, pro: true },
       { label: "eBay publishing from your own account", free: true, pro: true },
       { label: "Facebook & Mercari export packs", free: true, pro: true },
-      { label: "Confidence-gated autopilot", free: true, pro: true },
-      { label: "Autopilot publishing at volume", free: false, pro: true },
+      { label: "High-confidence publish eligibility", free: true, pro: true },
+      { label: "Manual eBay publish control", free: true, pro: true },
     ],
   },
   {

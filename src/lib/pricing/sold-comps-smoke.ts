@@ -1,4 +1,5 @@
 import {
+  assertSafeEbayUrl,
   EBAY_SOLD_BASE_URL_DEFAULT,
   buildSoldSearchUrl,
   createDefaultFetchPage,
@@ -91,7 +92,16 @@ export async function runSoldCompsSmoke(
   const env = options.env ?? process.env;
   const egress = resolveEbaySoldEgressConfig(env);
   const baseUrl = env.EBAY_SOLD_BASE_URL?.trim() || EBAY_SOLD_BASE_URL_DEFAULT;
-  const targetUrl = buildSoldSearchUrl(options.signal, baseUrl);
+  const builtTargetUrl = buildSoldSearchUrl(options.signal, baseUrl);
+  let targetUrl: string | null = null;
+  let targetRejected = false;
+  if (builtTargetUrl) {
+    try {
+      targetUrl = assertSafeEbayUrl(builtTargetUrl).toString();
+    } catch {
+      targetRejected = true;
+    }
+  }
   const enabled = ebaySoldConfigured(env);
 
   let externalRequests = 0;
@@ -120,6 +130,7 @@ export async function runSoldCompsSmoke(
   };
 
   const provider = createEbaySoldPricingProvider({
+    enabled,
     baseUrl,
     fetchPage: observedFetch,
     emitDiagnostic: () => undefined,
@@ -127,7 +138,8 @@ export async function runSoldCompsSmoke(
   const soldProvider: PricingProvider = {
     tier: provider.tier,
     canHandle: provider.canHandle?.bind(provider),
-    price: enabled ? provider.price.bind(provider) : async () => null,
+    price:
+      enabled && !targetRejected ? provider.price.bind(provider) : async () => null,
   };
   const router = new PriceRouter([
     soldProvider,
@@ -139,6 +151,7 @@ export async function runSoldCompsSmoke(
   let fallbackReason: SoldCompsFallbackReason | undefined;
   if (!success) {
     if (!enabled) fallbackReason = "disabled";
+    else if (targetRejected) fallbackReason = "egress-blocked";
     else if (!targetUrl) fallbackReason = "unidentifiable";
     else if (mode === "dry-run") fallbackReason = "dry-run-no-network";
     else if (requestBlocked) fallbackReason = "egress-blocked";

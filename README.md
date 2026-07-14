@@ -26,8 +26,9 @@ review. Before publishing, the seller can correct the load-bearing identity fact
 re-price and regenerate a coherent draft without losing a saved price override. That override becomes
 the effective outbound price for eBay and both export packs; the AI suggestion remains separate as
 recommendation and eval history. High-confidence
-items can post automatically (a confidence-gated autopilot); low-confidence
-ones queue for review. Listings publish to eBay behind an adapter, with copy-paste export packs for
+items are marked ready to publish by the confidence gate; lower-confidence items are sent to
+review. Nothing posts automatically: the seller explicitly chooses **Publish to eBay**,
+which goes through the adapter. SnapList also provides copy-paste export packs for
 Facebook Marketplace and Mercari, and a buyer-Q&A agent drafts grounded replies the seller approves.
 Clearing a whole haul? **Bulk capture** takes item after item in one session through the same
 pipeline and lands on a live triage list of the batch. SnapList is the seller's **control surface** —
@@ -41,7 +42,7 @@ and the goal is the full stack working end-to-end in a deployed app. The
 One spine, seen three ways: **which pricing tier fired → the confidence composite → eval
 calibration.** A photo becomes Zod-validated attributes; the pricing router walks its tiers in
 priority order and returns the first that handles the item; a signal-based confidence score (never an
-LLM self-report) gates the autopilot; and every run is logged for the eval harness.
+LLM self-report) gates publish eligibility; and every run is logged for the eval harness.
 
 ```mermaid
 flowchart TD
@@ -59,11 +60,13 @@ flowchart TD
         VISION["Vision extraction<br/>1 multimodal generateObject call<br/>Zod attributes · flags ambiguity"]
         ROUTER["PricingProvider router<br/>tries tiers in order, first wins"]
         CONF["Confidence composite<br/>tier fired + comp agreement + ID completeness"]
-        GATE{"Autopilot gate"}
+        GATE{"Publish eligibility gate"}
+        READY["Ready for manual publish"]
         LISTING["Listing generation<br/>per-platform copy · RAG few-shot"]
     end
 
     VISION --> ROUTER
+    VISION --> LISTING
 
     subgraph tiers["Pricing tiers · PRD priority order"]
         T1["1 · ISBN lookup<br/>Open Library + Google Books"]
@@ -78,14 +81,16 @@ flowchart TD
     ROUTER --> T1
     ROUTER -->|"first priced result: suggested, range, confidence, sources"| CONF
     CONF --> GATE
-    GATE -->|high confidence| LISTING
+    GATE -->|high confidence| READY
     GATE -->|low confidence| REVIEW
-    REVIEW --> LISTING
+    READY --> REVIEW
+    LISTING --> REVIEW
     REVIEW -->|fix facts before publish| CORRECT
     CORRECT -->|re-price corrected facts| ROUTER
     CORRECT -->|regenerate grounded copy| LISTING
 
-    LISTING --> EBAY["eBay adapter<br/>Sell API · sandbox → prod flip"]
+    REVIEW --> PUBLISH["Seller chooses Publish to eBay"]
+    PUBLISH --> EBAY["eBay adapter<br/>Sell API · sandbox → prod flip"]
     LISTING --> EXPORT["Export packs<br/>Facebook Marketplace · Mercari"]
     EBAY --> LIVE["Live eBay listing"]
 
@@ -115,9 +120,10 @@ flowchart TD
 `generateObject` call extracts attributes and *flags* anything ambiguous instead of guessing. The
 `PricingProvider` router tries six tiers in priority order and returns the first that handles the
 item, always shaped as `{ suggested, range, confidence, sources[] }`. The confidence composite —
-tier fired + comp agreement + identification completeness — drives the autopilot gate: high
-confidence is eligible to auto-post, everything else queues for review. Approved listings publish to
-eBay through the adapter (sandbox today; a credential flip to production) and render copy-paste export
+tier fired + comp agreement + identification completeness — drives publish eligibility: high
+confidence is marked ready and everything else stays in review. Nothing posts in the background;
+the seller chooses **Publish to eBay**, which invokes the adapter (sandbox today; a credential flip
+to production). Listings also render copy-paste export
 packs for Facebook Marketplace and Mercari. Buyer questions arrive in a Realtime inbox where a
 grounded agent drafts a reply for the seller to approve. Cutting across all of it: a role-keyed LLM
 provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference corpus that grounds
@@ -180,7 +186,7 @@ idea seen three ways. The map from skill to code:
 | Agents + tool calling | `src/lib/pricing/providers` (web-search pricing agent over Tavily/Exa) · `src/lib/inbox` (grounded buyer-Q&A reply agent) |
 | RAG + pgvector | `src/lib/rag` — seeded reference corpus, HNSW + cosine via the `match_reference_corpus` RPC; one retrieval feeds pricing corroboration **and** few-shot listing copy |
 | Pricing as a routing pipeline | `src/lib/pricing/router.ts` — ISBN lookup → eBay sold comps → UPC-aided web → branded web → depreciation → LLM fallback, every result `{ suggested, range, confidence, sources[] }` |
-| Signal-based confidence (never LLM self-report) | `src/lib/confidence` — pure composite of tier fired + comp agreement + ID completeness; gates the autopilot |
+| Signal-based confidence (never LLM self-report) | `src/lib/confidence` — pure composite of tier fired + comp agreement + ID completeness; gates manual-publish eligibility |
 | Structured outputs | Zod everywhere a model speaks: `src/lib/pipeline/types.ts`, `src/lib/listing/schema.ts` — no ad-hoc JSON parsing |
 | Prompt/context engineering | `src/lib/listing` + `src/lib/export` — per-platform copy generation, used-vs-new disambiguation |
 | Coherent human correction loop | `src/lib/pipeline/review-regeneration.ts` + the review RPCs — bounded identity edits, shared pricing/confidence/listing seams, revision guards, atomic RLS persistence, stale export invalidation |
@@ -275,7 +281,8 @@ Being able to state where the system's accuracy tops out is part of the showcase
   corpus-corroboration signal is built on synthetic comps. Treat every price as a *smart
   suggestion*, not an oracle. See the [operator smoke procedure](./docs/sold-comps-egress.md).
 - **The `llm-only` floor tier is a guess.** When no barcode, brand, or retail anchor resolves, the
-  fallback is an LLM estimate — lowest confidence by construction, and surfaced as such.
+  fallback is an LLM estimate — lowest confidence by construction, surfaced as such, and potentially
+  uncited because its `sources[]` may be empty.
 - **The gold set is small and partly synthetic.** ~36 hand-authored hero-domain items whose price
   bands are plausible ranges, not measured sold prices. Offline eval numbers measure pipeline
   consistency against those authored labels — they are **not** a field-accuracy benchmark, and the

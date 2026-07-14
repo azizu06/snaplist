@@ -29,7 +29,7 @@ import type { VisionImageInput } from "./extract";
  * Measurements are a WEAK signal: they live in `items.attributes.measurements`
  * (the established attribute surface, RLS-scoped like every other item field) and
  * are DELIBERATELY excluded from the confidence composite — they never inflate the
- * score or the autopilot gate (that stays signal-based; see `confidence/from-price`).
+ * score or publish-eligibility gate (that stays signal-based; see `confidence/from-price`).
  * The vision call routes through the role-keyed provider registry (`vision` role),
  * exactly like `extract.ts`, and validates its output with Zod + retry.
  */

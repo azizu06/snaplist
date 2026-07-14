@@ -97,11 +97,11 @@ export const identificationSchema = z.object({
 
 export type Identification = z.infer<typeof identificationSchema>;
 
-/** What the pipeline is handed: the stored photo paths + the autopilot toggle. */
+/** What the pipeline is handed: stored photo paths + the publish-eligibility toggle. */
 export interface PipelineInput {
   /** Storage object paths (under the private `photos` bucket), scoped by user_id. */
   photos: string[];
-  /** Master autopilot switch (User Story 24). Forwarded to the confidence gate. */
+  /** Publish-eligibility switch (legacy name). Forwarded to the confidence gate. */
   autopilotEnabled?: boolean;
 }
 
@@ -114,7 +114,7 @@ export interface PipelineInput {
 export const pipelineResultSchema = z.object({
   attributes: extractedAttributesSchema,
   price: priceResultSchema,
-  /** Composite confidence + band + autopilot decision (from computeConfidence). */
+  /** Composite confidence + band + publish-eligibility decision. */
   confidence: z.object({
     score: z.number().min(0).max(1),
     band: z.enum(["high", "medium", "low"]),

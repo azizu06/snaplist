@@ -7,7 +7,7 @@ import { serverErrorJson } from "@/lib/api/errors";
 /**
  * GET /api/batch/status?ids=<uuid,uuid,…> — live per-item status for the batch
  * triage list (issue #100). The triage page polls this so its rows reflect DB
- * truth (e.g. an autopilot-`queued` listing flipping to `published`) instead of
+ * truth (e.g. a ready `queued` listing becoming `published` after seller action) instead of
  * only the orchestrator's last word.
  *
  * Tenancy: the USER-SCOPED server client + RLS do the scoping — asking about

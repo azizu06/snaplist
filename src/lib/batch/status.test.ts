@@ -9,7 +9,7 @@ import {
 /**
  * Triage status derivation (issue #100): persisted listing lifecycle →
  * batch-triage vocabulary. This is the pending → priced → needs-review /
- * autopilot-eligible spine the acceptance criteria name.
+ * ready-to-publish spine the acceptance criteria name.
  */
 
 describe("triageStatusFromListing", () => {
@@ -19,11 +19,11 @@ describe("triageStatusFromListing", () => {
     expect(triageStatusFromListing("new")).toBe("processing");
   });
 
-  it("draft (below the autopilot gate) reads as needs-review", () => {
+  it("draft (below the eligibility gate) reads as needs-review", () => {
     expect(triageStatusFromListing("draft")).toBe("needs-review");
   });
 
-  it("queued (above the autopilot gate) reads as autopilot-eligible", () => {
+  it("queued (above the eligibility gate) uses the legacy autopilot-eligible key", () => {
     expect(triageStatusFromListing("queued")).toBe("autopilot-eligible");
   });
 
@@ -63,6 +63,13 @@ describe("triageLabel", () => {
   it("processing pulses (transient working state), matching the dashboard idiom", () => {
     expect(triageLabel("processing").pulse).toBe(true);
     expect(triageLabel("needs-review").pulse).toBeUndefined();
+  });
+
+  it("renders queued eligibility as ready for a seller-driven publish", () => {
+    expect(triageLabel("autopilot-eligible")).toEqual({
+      label: "Ready to publish",
+      tone: "success",
+    });
   });
 });
 

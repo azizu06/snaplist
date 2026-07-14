@@ -22,7 +22,7 @@ import type { BulkListingUpdate } from "./actions";
 
 // Only seller-organizational statuses are bulk-settable — see BULK_EDITABLE_STATUSES
 // in @/lib/ui/status. "Live" (published) is owned by the eBay publish path and
-// "Scheduled" (queued) by the autopilot gate, so neither is offered here: a bulk
+// "Ready to publish" (queued) by the eligibility gate, so neither is offered here: a bulk
 // metadata edit must never mark an unposted item live or queue it past the gate
 // (Codex P1). A row already in one of those states still renders its real status
 // via the fallback <option> below; it just can't be SET from the grid.

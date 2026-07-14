@@ -50,10 +50,10 @@ sold-comp research is now a first-class tier.
    Runtime diagnostics retain only bounded reasons (`timeout`, `http-NNN`, or `request-failed`),
    never raw upstream text that could contain a proxy URL or credential.
 
-4. **SSRF-hardened.** Every fetched URL is validated: `https` only, no userinfo, host must be
-   `ebay.com` / `*.ebay.com`, and IP literals / internal / loopback / link-local hosts are
-   rejected. The base host is env-configurable but a misconfiguration declines (it can't reach
-   an internal address).
+4. **SSRF-hardened target.** Every eBay target URL is validated before direct or proxy egress:
+   `https` only, no userinfo, host must be `ebay.com` / `*.ebay.com`, and IP literals / internal /
+   loopback / link-local hosts are rejected. The proxy endpoint is trusted operator configuration;
+   the base eBay host remains constrained, so a misconfiguration declines before target egress.
 
 5. **Freshness is live-fetch-first; the vector DB is NEVER the price oracle.** Sold prices drift,
    so the source of truth is a **live fetch at query time**. A TTL **cache-on-miss** + recency /
@@ -63,10 +63,11 @@ sold-comp research is now a first-class tier.
 
 6. **Confidence stays signal-based.** `ebay-sold` is sold-grounded by construction (every source
    is a `sold-comp`), so when its comps cluster tightly it maps to the first-class **`sold`**
-   confidence tier — ranked ABOVE the asking-based web tiers and below only an exact ISBN lookup
+   confidence tier — ranked ABOVE the asking-based web tiers and below only a sold-backed exact
+   ISBN result
    (#60, "sold beats asking") — and to `web_wide` when scattered, since a scattered sold set is real
    evidence of *a* market but not of a defensible tight price and must not ride the sold label past
-   the autopilot gate. Remaining numeric calibration of the sold tier rides with the **gold set** (#61).
+   the publish-eligibility gate. Remaining numeric calibration of the sold tier rides with the **gold set** (#61).
 
 7. **Freshness is live-fetch-first, with a TTL cache + age-decay (#59).** The live sold page is the
    source of truth; a **TTL request cache** keyed by resolved product identity (the search URL)

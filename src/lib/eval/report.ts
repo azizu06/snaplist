@@ -50,7 +50,7 @@ export interface EvalReport {
   pricing: PricingReport;
   calibration: CalibrationReport;
   /**
-   * Evidence-driven autopilot gate recommendation (#4) — vs the hand-set 0.75.
+   * Evidence-driven publish-eligibility gate recommendation (#4) — vs the hand-set 0.75.
    * Absent when no predictions matched the gold set (nothing to recommend from).
    */
   autopilot?: ThresholdRecommendation;
@@ -214,7 +214,7 @@ export function formatReport(report: EvalReport): string {
   lines.push(`  ECE: ${num(report.calibration.ece, 3)}`);
 
   lines.push("");
-  lines.push("Autopilot gate (evidence-driven recommendation)");
+  lines.push("Publish-eligibility gate (evidence-driven recommendation)");
   lines.push("-----------------------------------------------");
   if (report.autopilot) {
     const a = report.autopilot;
@@ -224,11 +224,11 @@ export function formatReport(report: EvalReport): string {
     );
     lines.push(
       `  at that gate: precision ${pct(a.precision)} | recall ${pct(a.recall)}` +
-        ` | F1 ${num(a.f1)} | auto-posts ${a.eligibleCount}/${report.evaluated}`,
+        ` | F1 ${num(a.f1)} | publish-eligible ${a.eligibleCount}/${report.evaluated}`,
     );
     if (!a.targetMet) {
       lines.push(
-        "  ⚠ even the strictest gate misses the precision target — keep autopilot off / fix upstream.",
+        "  ⚠ even the strictest gate misses the precision target — keep eligibility off / fix upstream.",
       );
     }
   } else {

@@ -82,6 +82,8 @@ export interface EbaySoldComp {
 }
 
 export interface EbaySoldPricingProviderOptions {
+  /** Explicit kill-switch state; defaults to `EBAY_SOLD_ENABLED` env config. */
+  enabled?: boolean;
   /** Injected page fetcher; defaults to the SSRF-guarded `fetch` over env config. */
   fetchPage?: FetchPage;
   /** Optional Playwright-style fallback, tried when the primary fetch is blocked/thin. */
@@ -225,7 +227,8 @@ export function isPrivateOrInternalHost(hostname: string): boolean {
 /**
  * Validate a URL is safe to fetch: https, no userinfo, an allowed eBay host,
  * and not an internal/IP address. Throws on any violation; returns the parsed
- * URL otherwise. The default fetcher calls this before EVERY request.
+ * URL otherwise. The provider calls this for every eBay target before direct or
+ * proxy egress; a configured proxy host is trusted operator configuration.
  */
 export function assertSafeEbayUrl(rawUrl: string): URL {
   let u: URL;
@@ -570,7 +573,7 @@ const NEW_CONDITION_RE =
 /**
  * Multi-unit / lot markers: a sold listing for MORE THAN ONE unit (2-pack, set of
  * 2, 4 pcs) whose price is a multiple of the single-item price. Two clustered
- * multi-unit sales would otherwise pass agreement and clear the autopilot gate at
+ * multi-unit sales would otherwise pass agreement and clear the publish-eligibility gate at
  * 2–3× the true price (#56 review). The accessory filter already covers "bundle"
  * and "lot of"; this adds the unambiguous remaining forms. "2x" and "pair of" are
  * deliberately EXCLUDED as ambiguous — "10x zoom" is a feature and a single "pair
@@ -710,7 +713,7 @@ export function isNewConditionComp(
  * Keep only comps that (a) match the item identity, (b) aren't accessories/parts,
  * (c) aren't multi-unit lots, and (d) aren't new/sealed when the seller's item is
  * used (#56 review: accessory, multi-unit, and new sold listings would otherwise
- * skew a used item's median past the autopilot gate).
+ * skew a used item's median past the publish-eligibility gate).
  */
 export function filterRelevantComps(
   comps: readonly EbaySoldComp[],
@@ -735,7 +738,7 @@ export function filterRelevantComps(
  * Base trust for an eBay-sold price. These are VERIFIED completed sales on the
  * marketplace itself — stronger than LLM-extracted open-web comps (web-search's
  * 0.65 sold base) but kept below a structured ISBN lookup. The provisional value
- * is a sane floor; the canonical autopilot-gating confidence is recomputed by
+ * is a sane floor; the canonical publish-eligibility confidence is recomputed by
  * the pipeline composite, and #60 calibrates the sold tier against the gold set.
  */
 export const EBAY_SOLD_BASE_CONFIDENCE = 0.7;
@@ -886,7 +889,7 @@ export function synthesizeSoldResult(
     sources,
     tier: "ebay-sold",
     // The judged tightness rides downstream so a scattered sold set cannot ride
-    // the sold-comp label into the autopilot-grade confidence band.
+    // the sold-comp label into the ready-to-publish confidence band.
     compAgreement: agreement,
   };
 }
@@ -977,6 +980,7 @@ export function createDefaultFetchPage(
 export function createEbaySoldPricingProvider(
   options: EbaySoldPricingProviderOptions = {},
 ): PricingProvider {
+  const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
   const configuredEgress = options.fetchPage
@@ -1054,7 +1058,7 @@ export function createEbaySoldPricingProvider(
     tier: "ebay-sold",
     canHandle: identifiable,
     async price(signal: ItemSignal): Promise<PriceResult | null> {
-      if (!ebaySoldConfigured()) return null; // kill-switch → degrade to web tier
+      if (!enabled) return null; // kill-switch → degrade to web tier
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
 

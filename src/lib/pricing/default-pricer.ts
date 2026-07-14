@@ -26,7 +26,7 @@ import {
 } from "./providers/llm-only";
 
 /**
- * The default real pricer — the PriceRouter composition root over all five PRD
+ * The default real pricer — the PriceRouter composition root over all six PRD
  * tiers. Moved here from `vision/pipeline.ts` so the pricing module owns its own
  * composition and consumers (the vision pipeline, `pipeline/reprice.ts`) import
  * it as peers instead of reaching into the vision module.
@@ -44,9 +44,9 @@ export interface CreateDefaultPricerOptions {
   ebaySold?: EbaySoldPricingProviderOptions;
   /** Web-search agent deps (shared by the UPC-aided and branded tiers). */
   webSearch?: WebSearchPricingProviderOptions;
-  /** Tier-4 depreciation deps (retail search + extraction). */
+  /** Tier-5 depreciation deps (retail search + extraction). */
   depreciation?: DepreciationPricingProviderOptions;
-  /** Tier-5 LLM-only estimator deps. */
+  /** Tier-6 LLM-only estimator deps. */
   llmOnly?: LlmOnlyPricingProviderOptions;
 }
 

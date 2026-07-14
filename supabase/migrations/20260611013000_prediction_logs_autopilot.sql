@@ -1,12 +1,12 @@
--- Persist the per-run autopilot gate decision (PR #34 review, round 7).
+-- Persist the per-run publish-eligibility gate decision under legacy autopilot column names.
 --
 -- The review page must explain a listing's disposition from RUN-TIME facts —
--- "autopilot was off when this ran" is unprovable from the live setting
+-- "publish eligibility was off when this ran" is unprovable from the live setting
 -- (which the seller may have flipped since) or from confidence alone (a
 -- high-confidence draft is exactly the switch-off case). Two nullable
 -- booleans record what the gate actually saw:
 --
---   autopilot_enabled  — the master switch value the run consumed.
+--   autopilot_enabled  — the legacy-named eligibility switch value the run consumed.
 --   autopilot_eligible — the gate's output (enabled AND score >= threshold);
 --                        what routed the listing to queued vs draft.
 --

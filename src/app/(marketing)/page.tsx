@@ -18,6 +18,7 @@ import {
   DEMO_PRODUCTS_BY_SLUG,
   DEMO_SURFACE_ASSIGNMENTS,
 } from "@/lib/demo-products";
+import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 
 /**
  * Landing (v3 pass): the live scanning showcase IS the hero — a scan beam
@@ -129,9 +130,9 @@ const BENTO_CARDS = [
   },
   {
     label: "Confidence gate",
-    title: "Autopilot with a conscience",
+    title: "Know what is ready",
     description:
-      "How sure we are isn't a guess. It comes from where the price was found, how closely recent sales agree, and how much we could pin down about the item. When we're sure, it can post on its own; when we're not, it waits for you. Listings that go stale can auto-reprice on a schedule so nothing sits dead.",
+      `How sure we are isn't a guess. It comes from where the price was found, how closely recent sales agree, and how much we could pin down about the item. High-confidence listings are marked ready; the rest wait for review. ${MANUAL_PUBLISH_SENTENCE} Listings that go stale can still auto-reprice on an opt-in schedule.`,
     icon: <BentoIcon d={[...ICONS.shieldCheck]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",

@@ -7,8 +7,8 @@ requirements live in `PRD.md`; this file is the language layer the engineering s
 A seller photographs a used item; SnapList **identifies** it, **prices** it with a range and a
 **confidence** score, cites the evidence-backed tiers, and clearly labels the terminal uncited
 fallback when necessary. It **generates** platform-specific listing copy and (later) **drafts**
-buyer replies. The seller reviews/approves; high-confidence items may post on **autopilot**.
-Listings post to eBay (behind an **adapter**) and produce **export packs** for other platforms.
+buyer replies. The confidence gate can mark high-confidence items **ready to publish**; the seller still
+chooses every eBay publish through the **adapter**. Other platforms receive **export packs**.
 
 ## Glossary (ubiquitous language)
 
@@ -18,7 +18,8 @@ Listings post to eBay (behind an **adapter**) and produce **export packs** for o
   key specs, and any decoded **barcode**/**ISBN**. Prefer "attributes" over "metadata" or "details".
 - **Condition** — the assessed wear state of a used item (e.g. new/like-new/good/fair). A first-class
   attribute because it drives pricing. Not "quality".
-- **Barcode / ISBN / UPC** — *ISBN* (books/media) resolves to a true structured price lookup. *UPC*
+- **Barcode / ISBN / UPC** — *ISBN* (books/media) resolves to a structured catalog lookup; without
+  sold grounding its pricing trust remains estimate-level. *UPC*
   (general goods) is decoded only as an **identification aid** that sharpens the search, never a price
   source. "Barcode" is the umbrella term.
 - **PricingProvider** — the interface every pricing strategy implements. Returns a **price
@@ -54,13 +55,16 @@ Listings post to eBay (behind an **adapter**) and produce **export packs** for o
   net-profit math: eBay ≈13.25% + $0.30, Facebook Marketplace 5%, Mercari ≈12.9% + $0.50. Always an
   *estimate* (labeled "est."), not an invoice — real fees vary by category, store level, and promos.
 - **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
-  completeness}. Never raw LLM self-report. Drives the **autopilot gate**. The tier-trust ordering
+  completeness}. Never raw LLM self-report. Drives the **publish-eligibility gate**. The tier-trust ordering
   encodes "sold beats asking": a tight **sold**-comp cluster ranks above the asking-based web tiers
-  and below only an exact ISBN lookup (issue #60); a scattered sold set degrades to the wide-comp
-  tier so a noisy sale spread cannot ride the sold label past the gate.
-- **Autopilot** — the confidence-gated posting behavior: high-confidence items are eligible to post
-  automatically; low-confidence items **queue for review**. Toggleable off. A seller-triggered
-  **review correction** always returns to `draft`, regardless of score.
+  and below only a sold-backed exact ISBN result (issue #60); a catalog-only ISBN result stays at
+  estimate-level trust, and a scattered sold set degrades to the wide-comp tier so a noisy sale
+  spread cannot ride the sold label past the gate.
+- **Publish eligibility** (persisted under the legacy `autopilot_*` names) — the confidence-gated
+  readiness preference: high-confidence items are marked **ready to publish**; lower-confidence
+  items stay in review. Toggleable off. Eligibility never calls the eBay **adapter** or publishes in
+  the background; only the seller's explicit **Publish to eBay** action creates a marketplace post.
+  A seller-triggered **review correction** always returns to `draft`, regardless of score.
 - **Bulk / haul capture** — the reseller-native capture flow (issue #100) at `/batch`: photograph
   several items in one session (1–4 photos each), then submit the whole **batch**. Each item runs
   through the *same* single-item pipeline spine (`POST /api/batch/item`) under the same rate-limit and
@@ -70,7 +74,8 @@ Listings post to eBay (behind an **adapter**) and produce **export packs** for o
   showing a **triage status** (processing → needs-review / autopilot-eligible / active, plus failed /
   daily-limit). Triage statuses are a *reading* of the item's persisted **listing** status — no new
   persisted vocabulary — and the list polls `GET /api/batch/status` so rows track DB truth (e.g. a
-  `queued` listing flipping to `published`). Every row links to the item's normal review page.
+  `queued` listing becoming `published` after the seller acts elsewhere). Every row links to the
+  item's normal review page.
 - **Listing** — generated, platform-specific sale copy for an item (title, item specifics,
   description, tags). One **Item** can have multiple listings (one per platform).
 - **Review correction** — the bounded, pre-publish replacement of load-bearing identity facts

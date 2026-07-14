@@ -32,7 +32,7 @@ a shared cache, and metrics." The architecture below is chosen so that story is
 
 ### Moves to the Go worker
 The worker owns **eBay sold-comps research only**: given an item signal, build the
-sold-search URL, fetch the page through the premium proxy, parse it, and
+sold-search URL, fetch the page through the selected direct or proxy egress, parse it, and
 relevance-filter the rows. Its output is **exactly** the `EbaySoldComp[]` that the
 existing TypeScript `synthesizeSoldResult()` already consumes.
 
@@ -107,8 +107,8 @@ synthesizeSoldResult(comps)   ← STAYS in TypeScript, unchanged
 ┌──────────────────────────── EC2 ────────────────────────────┐ │
 │ RabbitMQ  ──▶  Go worker pool (N consumers, prefetch=N)      │ │
 │                 • Upstash comp-cache check (shared w/ app)   │ │
-│                 • ScrapingBee credit guard                   │ │
-│                 • build URL → fetch (proxy) → goquery parse  │ │
+│                 • optional egress-provider budget guard      │ │
+│                 • build URL → fetch (direct/proxy) → parse   │ │
 │                 • relevance filter → EbaySoldComp[]          │ │
 │                 • retries+backoff; exhausted → DLQ           │ │
 │                 • Prometheus /metrics                        │ │
@@ -170,7 +170,7 @@ plus envelope metadata — nothing more.
     { "url": "https://www.ebay.com/itm/...", "price": 168.0,
       "title": "Sony WH-1000XM4 ... Used", "condition": "Pre-Owned" }
   ],
-  "meta": { "fetchedAt": "iso8601", "cached": false, "creditsSpent": 25 }
+  "meta": { "fetchedAt": "iso8601", "cached": false, "providerUnitsSpent": 1 }
 }
 ```
 
@@ -187,16 +187,17 @@ already expects.
 - **Controlled concurrency:** worker pool of `N` consumers with `prefetch=N` so at
   most `N` eBay fetches are ever in flight. This is the core protection: bursts of
   uploads queue and drain at a safe rate instead of firing dozens of simultaneous
-  proxy fetches (→ blocks + blown budget).
-- **Explicit ScrapingBee credit guard:** before each fetch, check/decrement a
-  global credit counter (Upstash, shared). When exhausted, stop scraping and
+  egress requests (→ blocks and, for a metered proxy, blown budget).
+- **Conditional egress-provider budget guard:** when proxy egress is metered,
+  check/decrement a global request/unit counter (Upstash, shared) before each
+  fetch. When exhausted, stop scraping and
   return `status:"blocked"` so the app degrades gracefully (§ below) — never
   silently overspend. This makes the budget a first-class, enforced limit (today
   it remains implicit in this proposed worker design).
 - **Shared comp-cache:** the worker checks the **same** Upstash cache the app uses
-  (`snaplist:cache:...`) before fetching — repeated identities cost 0 credits.
+  (`snaplist:cache:...`) before fetching — repeated identities require no egress.
   Cache stays "never the authority" per the PRD (TTL + age-decay on read).
-- **Retries:** transient failures (timeout, 429, proxy error) retry `K` times with
+- **Retries:** transient failures (timeout, 429, direct/proxy egress error) retry `K` times with
   exponential backoff (requeue with incremented `attempt`).
 - **DLQ + graceful degradation:** after `K` exhausted attempts, route to a
   dead-letter queue **and** return `status:"error"`/`"blocked"` so the app falls
@@ -215,7 +216,7 @@ already expects.
 - `sold_scrapes_total{result="ok|empty|blocked|error"}` (counter)
 - `sold_scrape_queue_depth` (gauge)
 - `sold_scrape_cache_hits_total` / `..._misses_total`
-- `scrapingbee_credits_spent_total` (counter) — the budget you can graph/alert on
+- `sold_egress_provider_units_spent_total` (counter) — zero/unset for direct egress
 - `sold_scrape_retries_total`, `sold_scrape_dlq_total`
 - `sold_scrape_inflight` (gauge — should never exceed `N`)
 
@@ -238,9 +239,9 @@ a **long-running process** — it would not fit the serverless app.)
 - **Local dev:** `docker-compose.yml` with `rabbitmq` + `worker` so the full loop
   runs locally. With `SOLD_COMPS_TRANSPORT=inproc` (default) you need **none** of
   it — the app and tests behave exactly as today.
-- **Secrets (do NOT commit):** worker needs `EBAY_SOLD_PROXY_TEMPLATE`, the Upstash
-  creds, the RabbitMQ URL, and a shared secret for the `/finalize` callback. Record
-  *where* they live, never the values.
+- **Secrets (do NOT commit):** worker needs the Upstash creds, RabbitMQ URL, and a
+  shared secret for the `/finalize` callback; `EBAY_SOLD_PROXY_TEMPLATE` is needed
+  only when proxy egress is selected. Record *where* they live, never the values.
 
 ---
 
@@ -283,10 +284,10 @@ just off the request path with retries and concurrency control.
 
 - [ ] `SoldCompsTransport` interface with `inproc` (default) + `queue` backends;
       existing tests pass untouched with `inproc`.
-- [ ] Go worker: consume `ScrapeJob` → cache check → credit guard → build/fetch/
+- [ ] Go worker: consume `ScrapeJob` → cache check → conditional provider-budget guard → build/fetch/
       parse/filter → return `EbaySoldComp[]`; concurrency-capped; retries + DLQ.
 - [ ] Worker output proven equal to the TS parser on saved fixtures (golden test —
-      the offline HTML fixtures are the shared contract; no live credits spent).
+      the offline HTML fixtures are the shared contract; no live egress performed).
 - [ ] `/api/pricing/finalize` runs the unchanged synthesis + listing and upserts
       write-once by `itemId`; review page updates via Realtime.
 - [ ] Prometheus `/metrics` exposes §8; a Grafana board reads them.
@@ -299,9 +300,9 @@ just off the request path with retries and concurrency control.
 1. `SoldCompsTransport` interface + `inproc` backend (pure refactor, no behavior
    change, tests stay green). **Ship this first — everything else is behind it.**
 2. Go worker that parses **saved fixtures** to `EbaySoldComp[]`; golden test vs. the
-   TS parser. (No broker, no credits.)
+   TS parser. (No broker, no egress.)
 3. RabbitMQ locally (docker-compose) + the `queue` transport + `/finalize`; prove
    the round trip end-to-end with `SOLD_COMPS_TRANSPORT=queue` locally.
-4. Concurrency cap, credit guard, cache reuse, retries/DLQ.
+4. Concurrency cap, conditional provider-budget guard, cache reuse, retries/DLQ.
 5. Prometheus + Grafana.
 6. EC2 deploy + the production flag flip.

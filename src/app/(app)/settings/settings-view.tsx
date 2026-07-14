@@ -5,6 +5,7 @@ import { PendingButton } from "@/components/ui/button";
 import { buttonClasses } from "@/components/ui/button-styles";
 import { AppSignOutButton } from "@/components/sign-out-button";
 import { StatusBadge } from "@/components/ui/badge";
+import { MANUAL_PUBLISH_SENTENCE } from "@/lib/ui/publish-eligibility";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSegmented } from "@/components/theme-toggle";
 import type { ProfileUser } from "@/components/profile-menu";
@@ -329,7 +330,7 @@ export function SettingsView({
       {/* ============================= Selling ============================= */}
       <GroupLabel>Selling</GroupLabel>
 
-      {/* Autopilot — the confidence-gated auto-post toggle. */}
+      {/* Confidence gate — controls readiness eligibility, never execution. */}
       <Card>
           <CardHeader
             title={
@@ -337,7 +338,7 @@ export function SettingsView({
                 <SectionIcon>
                   <SparklesIcon />
                 </SectionIcon>
-                Autopilot
+                Publish eligibility
               </span>
             }
             aside={
@@ -351,7 +352,9 @@ export function SettingsView({
                     checked={autopilotEnabled}
                     name="enabled"
                     aria-label={
-                      autopilotEnabled ? "Turn autopilot off" : "Turn autopilot on"
+                      autopilotEnabled
+                        ? "Turn publish eligibility off"
+                        : "Turn publish eligibility on"
                     }
                   />
                 </form>
@@ -360,18 +363,19 @@ export function SettingsView({
           />
           <CardBody className="flex flex-col gap-3.5">
             <SectionDescription>
-              When autopilot is on, items we identify and price with{" "}
+              When this preference is on, items we identify and price with{" "}
               <strong className="font-medium text-fg-strong">high confidence</strong>{" "}
-              are queued to publish{" "}
+              are marked{" "}
               <strong className="font-medium text-fg-strong">
-                without your per-item approval
+                Ready to publish
               </strong>
-              . Anything below that bar always waits for your review. Turn it off and
-              every listing waits for you, no exceptions.
+              . Anything below that bar waits for review. {MANUAL_PUBLISH_SENTENCE}
             </SectionDescription>
             <CardNote>
-              Changing this affects new uploads; it never rewrites why a past listing
-              was queued or held.
+              Turning it off also disables automatic repricing changes to existing
+              live listings, even when Auto-reprice is separately enabled; repricing
+              suggestions can still be generated. It never rewrites why a past
+              listing was marked ready or held for review.
             </CardNote>
           </CardBody>
       </Card>

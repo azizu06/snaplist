@@ -33,7 +33,7 @@ import { logEvent } from "../observability";
  * layer or callers.
  *
  *   photos[] → (inline bytes) → SINGLE multimodal extraction → attributes + flagged
- *   identification → REAL pricing (PriceRouter: all five PRD tiers) → REAL
+ *   identification → REAL pricing (PriceRouter: all six PRD tiers) → REAL
  *   grounded eBay listing → REAL, #31-calibrated confidence composite → result.
  *
  * Every model/network dependency (extraction, pricing, listing, retrieval) is injectable
@@ -59,7 +59,7 @@ export interface CreateVisionPipelineOptions {
   /** Injected measurement model call forwarded to the default measurement extraction. */
   measureGenerate?: MeasureGenerate;
   /**
-   * Price an item signal. Defaults to the REAL `PriceRouter` over all five PRD
+   * Price an item signal. Defaults to the REAL `PriceRouter` over all six PRD
    * tiers (`createDefaultPricer`). Injected in tests so pricing runs offline.
    */
   priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
@@ -102,7 +102,7 @@ function createDefaultListingGenerator(): (args: {
 
 /**
  * Construct a `Pipeline` whose `run` performs real vision extraction, real pricing
- * (PriceRouter: all five PRD tiers via `createDefaultPricer`), and real grounded
+ * (PriceRouter: all six PRD tiers via `createDefaultPricer`), and real grounded
  * eBay listing generation. `supabase` signs the private photo URLs; all
  * model/network deps are injectable for offline tests, defaulting to the real
  * implementations.

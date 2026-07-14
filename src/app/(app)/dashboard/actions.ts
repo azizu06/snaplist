@@ -143,8 +143,8 @@ export async function unarchiveListings(listingIds: string[]): Promise<void> {
   // come back as `published`. Restoring it to `draft` would show a live listing
   // as a re-publishable draft — corrupting tracking and inviting a redundant
   // publish (Codex). Anything not live returns to the review queue (`draft`); a
-  // pre-archive `queued`/needs-review state collapsing to draft is benign (it
-  // just asks for re-approval, no live-state loss).
+  // pre-archive `queued`/ready-to-publish state collapsing to draft is benign
+  // (it asks for review again, with no live-state loss).
   const { data: rows, error: readErr } = await supabase
     .from("listings")
     .select("id, ebay_listing_id, ebay_status")
@@ -319,8 +319,8 @@ export async function bulkUpdateListings(updates: BulkListingUpdate[]): Promise<
       // Status write boundary (Codex P1): bulk-edit may ONLY set the
       // seller-organizational statuses (draft / archived). `published` is owned by
       // the eBay publish path (it sets ebay_listing_id/ebay_status together) and
-      // `queued` by the autopilot gate; writing either here would mark an unposted
-      // item Live / queue it past the gate without ever touching the adapter. The
+      // `queued` by the eligibility gate; writing either here would mark an unposted
+      // item Live / ready past the gate without ever touching the adapter. The
       // grid already hides those options — this rejects an out-of-vocabulary status
       // from a crafted request that bypassed the UI (defense-in-depth). RLS still
       // scopes the row; this scopes the VALUE. Reported, not silently dropped, so a

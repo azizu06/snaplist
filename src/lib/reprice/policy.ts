@@ -14,7 +14,7 @@
  * exist in exactly one place.
  *
  * Guardrails encoded here:
- *  - AUTO-APPLY fires ONLY when the run is autopilot-eligible per the composite
+ *  - AUTO-APPLY fires ONLY when the run passes publish eligibility per the composite
  *    confidence gate AND the seller's per-user auto-reprice toggle (default
  *    OFF) is on. Everything else stays suggest-only.
  *  - NEVER reprice below the seller's price floor: the target price is clamped
@@ -107,7 +107,7 @@ export interface RepriceDecisionInput {
   suggestedPrice: number;
   /** Seller's minimum acceptable price for this item; null = no floor. */
   priceFloor?: number | null;
-  /** The fresh run's composite-confidence autopilot gate decision. */
+  /** The fresh run's composite-confidence publish-eligibility decision. */
   autopilotEligible: boolean;
   /** The seller's per-user auto-reprice toggle (default OFF). */
   autoRepriceEnabled: boolean;
@@ -139,7 +139,7 @@ export type RepriceDecision =
  *    unpriced "live" listing is an upstream anomaly, not a reprice target.
  *  - Non-positive/non-finite suggestion → none (a $0 reprice is never valid).
  *  - |drift| below threshold → none (immaterial; don't churn the listing).
- *  - Material drift → suggest, UNLESS the run is autopilot-eligible AND the
+ *  - Material drift → suggest, UNLESS the run passes publish eligibility AND the
  *    seller opted into auto-reprice — then auto-apply at the floor-clamped
  *    target. A clamp that lands the target back on the current price (or a
  *    floor above it while the market moved down) cannot auto-apply a no-op:

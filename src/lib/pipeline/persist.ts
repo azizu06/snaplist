@@ -25,7 +25,7 @@ export interface RunAndPersistInput {
   userId: string;
   /** Storage object paths under the private `photos` bucket, scoped by user_id. */
   photos: string[];
-  /** Master autopilot switch (User Story 24). Forwarded to the pipeline. */
+  /** Publish-eligibility switch (legacy name). Forwarded to the pipeline gate. */
   autopilotEnabled?: boolean;
 }
 
@@ -109,17 +109,17 @@ export async function runPipelineAndPersist(
     //    run) BEFORE any listing becomes queued: these two writes are not
     //    transactional, and the failure modes are asymmetric. A log row without
     //    a listing is inert; a QUEUED listing without its mandatory evaluation
-    //    record is a publishable run the upload request reported as failed —
-    //    a queue consumer could post it, and a retried upload could duplicate it.
+    //    record would claim readiness without the evidence that justified it,
+    //    and a retried upload could duplicate it.
     await logPrediction(supabase, input.userId, itemId, result, {
       autopilotEnabled: input.autopilotEnabled,
       runId,
     });
 
     // 5. Persist the generated listing. The initial status is the confidence-gated
-    //    autopilot disposition (issue #12): autopilot-eligible runs (master switch ON
-    //    and high-confidence) are QUEUED for auto-post; everything else (low/medium
-    //    confidence, or autopilot turned off) stays a DRAFT awaiting review.
+    //    eligibility disposition (issue #127): eligible runs (legacy master switch ON
+    //    and high-confidence) are QUEUED as ready for MANUAL publish; everything else
+    //    stays a DRAFT awaiting review. This function never calls the eBay adapter.
     const status = initialListingStatus(result.confidence);
     const { data: listing, error: listingErr } = await supabase
       .from("listings")

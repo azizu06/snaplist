@@ -3,7 +3,7 @@
 -- Four additive, idempotent schema changes:
 --
 -- 1. `user_settings.auto_reprice_enabled` — the per-user auto-reprice opt-in.
---    DEFAULT FALSE (unlike the master autopilot switch): auto-applying a price
+--    DEFAULT FALSE (unlike the publish-eligibility switch): auto-applying a price
 --    change to a LIVE listing is a bigger blast radius than queueing a new
 --    one, so the seller must explicitly opt in. A missing row also means OFF.
 --
