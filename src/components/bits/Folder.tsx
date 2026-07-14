@@ -74,6 +74,9 @@ const Folder: React.FC<FolderProps> = ({
   const [paperOffsets, setPaperOffsets] = useState<{ x: number; y: number }[]>(
     Array.from({ length: maxItems }, () => ({ x: 0, y: 0 }))
   );
+  // A static folder is the finished empty-state illustration: keep its listing
+  // previews visible without offering a click or hover reveal.
+  const isOpen = interactive ? open : true;
 
   const folderBackColor = darkenColor(color, 0.08);
   const paper1 = darkenColor('#ffffff', 0.1);
@@ -164,11 +167,11 @@ const Folder: React.FC<FolderProps> = ({
             let sizeClasses = '';
             // SnapList: opened papers widened vs the registry default so the
             // mini listing-card titles fit without truncating.
-            if (i === 0) sizeClasses = open ? 'w-[86%] h-[80%]' : 'w-[70%] h-[80%]';
-            if (i === 1) sizeClasses = open ? 'w-[88%] h-[80%]' : 'w-[80%] h-[70%]';
-            if (i === 2) sizeClasses = open ? 'w-[90%] h-[80%]' : 'w-[90%] h-[60%]';
+            if (i === 0) sizeClasses = isOpen ? 'w-[86%] h-[80%]' : 'w-[70%] h-[80%]';
+            if (i === 1) sizeClasses = isOpen ? 'w-[88%] h-[80%]' : 'w-[80%] h-[70%]';
+            if (i === 2) sizeClasses = isOpen ? 'w-[90%] h-[80%]' : 'w-[90%] h-[60%]';
 
-            const transformStyle = open
+            const transformStyle = isOpen
               ? `${getOpenTransform(i)} translate(${paperOffsets[i].x}px, ${paperOffsets[i].y}px)`
               : undefined;
 
@@ -178,10 +181,10 @@ const Folder: React.FC<FolderProps> = ({
                 onMouseMove={interactive ? e => handlePaperMouseMove(e, i) : undefined}
                 onMouseLeave={interactive ? () => handlePaperMouseLeave(i) : undefined}
                 className={`absolute z-20 bottom-[10%] left-1/2 transition-all duration-300 ease-in-out ${
-                  !open ? `transform -translate-x-1/2 translate-y-[10%]${interactive ? ' group-hover:translate-y-0' : ''}` : interactive ? 'hover:scale-110' : ''
+                  !isOpen ? `transform -translate-x-1/2 translate-y-[10%]${interactive ? ' group-hover:translate-y-0' : ''}` : interactive ? 'hover:scale-110' : ''
                 } ${sizeClasses}`}
                 style={{
-                  ...(!open ? {} : { transform: transformStyle }),
+                  ...(!isOpen ? {} : { transform: transformStyle }),
                   backgroundColor: i === 0 ? paper1 : i === 1 ? paper2 : paper3,
                   borderRadius: '10px'
                 }}
@@ -192,22 +195,22 @@ const Folder: React.FC<FolderProps> = ({
           })}
           <div
             className={`absolute z-30 w-full h-full origin-bottom transition-all duration-300 ease-in-out ${
-              !open && interactive ? 'group-hover:[transform:skew(15deg)_scaleY(0.6)]' : ''
+              !isOpen && interactive ? 'group-hover:[transform:skew(15deg)_scaleY(0.6)]' : ''
             }`}
             style={{
               backgroundColor: color,
               borderRadius: '5px 10px 10px 10px',
-              ...(open && { transform: 'skew(15deg) scaleY(0.6)' })
+              ...(isOpen && { transform: 'skew(15deg) scaleY(0.6)' })
             }}
           ></div>
           <div
             className={`absolute z-30 w-full h-full origin-bottom transition-all duration-300 ease-in-out ${
-              !open && interactive ? 'group-hover:[transform:skew(-15deg)_scaleY(0.6)]' : ''
+              !isOpen && interactive ? 'group-hover:[transform:skew(-15deg)_scaleY(0.6)]' : ''
             }`}
             style={{
               backgroundColor: color,
               borderRadius: '5px 10px 10px 10px',
-              ...(open && { transform: 'skew(-15deg) scaleY(0.6)' })
+              ...(isOpen && { transform: 'skew(-15deg) scaleY(0.6)' })
             }}
           ></div>
         </div>

@@ -80,6 +80,8 @@ describe("dashboard empty state", () => {
     expect(folder).toHaveLength(1);
     expect(folder.attr("class")).not.toContain("cursor-pointer");
     expect(folder.attr("class")).not.toContain("group-hover");
+    expect(folder.find('[style*="translate(-148%"]')).toHaveLength(1);
+    expect(folder.find('[style*="skew(15deg) scaleY(0.6)"]')).toHaveLength(1);
     expect(emptyState.find('a[href="/upload"]')).toHaveLength(1);
   });
 });
