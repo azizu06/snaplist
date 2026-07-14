@@ -109,6 +109,14 @@ export async function POST(
     }
   }
   try {
+    // Construct the marketplace transport before upload intents become
+    // non-expiring staged rows. A disconnected account must fail while the
+    // approved upload reservation is still safely replaceable/expirable.
+    const transport = await createMessagingTransportForConversation(
+      supabase,
+      userId,
+      message.marketplace,
+    );
     const attachmentClient = await createTenantServerClient();
     const stagedPhotos = await stageOutboundPhotos({
       supabase: attachmentClient,
@@ -118,11 +126,6 @@ export async function POST(
       photos,
       requireExistingIntent: parsed.data.photos.length > 0,
     });
-    const transport = await createMessagingTransportForConversation(
-      supabase,
-      userId,
-      message.marketplace,
-    );
     const outbound = await sendCanonicalReply({
       ...transport,
       messageId: message.id,
