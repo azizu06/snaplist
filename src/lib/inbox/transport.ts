@@ -313,7 +313,6 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     if (this.serverManaged) {
       return applyEbayMessageWrite<boolean>(
         this.serverWriteClient,
-        this.userId,
         "claim_canonical",
         {
           message_id: root.id,
@@ -356,7 +355,6 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     if (this.serverManaged) {
       await applyEbayMessageWrite(
         this.serverWriteClient,
-        this.userId,
         "fail_canonical",
         { message_id: messageId, kind },
       );
@@ -379,7 +377,6 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     if (this.serverManaged) {
       const data = await applyEbayMessageWrite<unknown>(
         this.serverWriteClient,
-        this.userId,
         "complete_canonical",
         {
           message_id: root.id,
@@ -445,7 +442,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       const result = await applyEbayMessageWrite<{
         message: unknown;
         inserted: boolean;
-      }>(this.serverWriteClient, this.userId, "create_followup", {
+      }>(this.serverWriteClient, "create_followup", {
         root_id: root.id,
         body,
         request_id: requestId,
@@ -513,7 +510,6 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     if (this.serverManaged) {
       return applyEbayMessageWrite<boolean>(
         this.serverWriteClient,
-        this.userId,
         "claim_followup",
         {
           message_id: message.id,
@@ -546,7 +542,6 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     if (this.serverManaged) {
       await applyEbayMessageWrite(
         this.serverWriteClient,
-        this.userId,
         "fail_followup",
         { message_id: messageId, kind },
       );
@@ -573,7 +568,6 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     if (this.serverManaged) {
       const data = await applyEbayMessageWrite<unknown>(
         this.serverWriteClient,
-        this.userId,
         "complete_followup",
         {
           message_id: messageId,

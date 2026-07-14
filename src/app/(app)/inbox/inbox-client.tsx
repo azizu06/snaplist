@@ -22,7 +22,7 @@ import {
   useIsDesktopPane,
 } from "./conversation-list";
 import { useListResize } from "./use-list-resize";
-import { requiresDuplicateRiskConfirmation } from "./delivery-recovery";
+import { authorizeDeliveryRetry } from "./delivery-recovery";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -324,14 +324,15 @@ export function InboxClient({
   // (e.g. a concurrent retry won), so it is treated as success: the outbound
   // row arrives over Realtime either way.
   async function retryDelivery(message: MessageRow) {
-    if (
-      requiresDuplicateRiskConfirmation(message.delivery_status) &&
-      !window.confirm(
-        "eBay may already have received this reply. Retrying could send a duplicate. Retry anyway?",
-      )
-    ) {
-      return;
-    }
+    const authorization = authorizeDeliveryRetry(
+      message.delivery_status,
+      message.delivery_attempted_at,
+      () =>
+        window.confirm(
+          "eBay may already have received this reply. Retrying could send a duplicate. Retry anyway?",
+        ),
+    );
+    if (!authorization.proceed) return;
     setBusy(`retry:${message.id}`);
     setError(null);
     try {
@@ -339,10 +340,7 @@ export function InboxClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          confirmDuplicateRisk: requiresDuplicateRiskConfirmation(
-            message.delivery_status,
-            message.delivery_attempted_at,
-          ),
+          confirmDuplicateRisk: authorization.confirmDuplicateRisk,
         }),
       });
       if (!res.ok && res.status !== 409) {
@@ -416,14 +414,15 @@ export function InboxClient({
   }
 
   async function retryFollowUp(message: MessageRow) {
-    if (
-      requiresDuplicateRiskConfirmation(message.delivery_status) &&
-      !window.confirm(
-        "eBay may already have received this message. Retrying could send a duplicate. Retry anyway?",
-      )
-    ) {
-      return;
-    }
+    const authorization = authorizeDeliveryRetry(
+      message.delivery_status,
+      message.delivery_attempted_at,
+      () =>
+        window.confirm(
+          "eBay may already have received this message. Retrying could send a duplicate. Retry anyway?",
+        ),
+    );
+    if (!authorization.proceed) return;
     setBusy(`retry-followup:${message.id}`);
     setError(null);
     try {
@@ -431,10 +430,7 @@ export function InboxClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          confirmDuplicateRisk: requiresDuplicateRiskConfirmation(
-            message.delivery_status,
-            message.delivery_attempted_at,
-          ),
+          confirmDuplicateRisk: authorization.confirmDuplicateRisk,
         }),
       });
       if (!res.ok) {

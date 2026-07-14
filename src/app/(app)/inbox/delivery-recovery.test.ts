@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  authorizeDeliveryRetry,
   canRetryDelivery,
   deliveryRecoveryLabel,
   requiresDuplicateRiskConfirmation,
@@ -34,5 +35,21 @@ describe("follow-up delivery recovery", () => {
         now,
       ),
     ).toBe(false);
+  });
+
+  it("requires explicit consent before authorizing a stale sending retry", () => {
+    const confirm = vi.fn(() => false);
+    const decision = authorizeDeliveryRetry(
+      "sending",
+      "2026-07-13T11:54:00.000Z",
+      confirm,
+      new Date("2026-07-13T12:00:00.000Z"),
+    );
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(decision).toEqual({
+      proceed: false,
+      confirmDuplicateRisk: false,
+    });
   });
 });

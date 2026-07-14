@@ -6,7 +6,10 @@ import type {
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { recordPipelineRunAndMaybeAlert } from "@/lib/abuse";
 import { draftBuyerReply, type DraftBuyerReplyResult } from "./reply";
-import { applyEbayMessageWrite } from "./ebay-server-write";
+import {
+  applyEbayMessageWrite,
+  applyScheduledEbayMessageWrite,
+} from "./ebay-server-write";
 import { messageRowSchema, type MessageRow, type ReplyGrounding } from "./types";
 
 const DRAFT_CLAIM_LEASE_MS = 5 * 60_000;
@@ -182,8 +185,25 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
-    private readonly serverWriteClient: SupabaseClient = supabase,
+    private readonly writeTarget: {
+      client: SupabaseClient;
+      scheduled: boolean;
+    } = { client: supabase, scheduled: false },
   ) {}
+
+  private applyWrite<T>(
+    operation: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<T> {
+    return this.writeTarget.scheduled
+      ? applyScheduledEbayMessageWrite<T>(
+          this.writeTarget.client,
+          this.userId,
+          operation,
+          payload,
+        )
+      : applyEbayMessageWrite<T>(this.writeTarget.client, operation, payload);
+  }
 
   async getCursor(): Promise<Date | null> {
     const { data, error } = await this.supabase
@@ -198,34 +218,19 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async markAttempt(at: Date): Promise<void> {
-    await applyEbayMessageWrite(
-      this.serverWriteClient,
-      this.userId,
-      "sync_mark_attempt",
-      { at: at.toISOString() },
-    );
+    await this.applyWrite("sync_mark_attempt", { at: at.toISOString() });
   }
 
   async markSuccess(cursor: Date): Promise<void> {
-    await applyEbayMessageWrite(
-      this.serverWriteClient,
-      this.userId,
-      "sync_mark_success",
-      { at: cursor.toISOString() },
-    );
+    await this.applyWrite("sync_mark_success", { at: cursor.toISOString() });
   }
 
   async markFailure(at: Date, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : "Inbox sync failed";
-    await applyEbayMessageWrite(
-      this.serverWriteClient,
-      this.userId,
-      "sync_mark_failure",
-      {
-        at: at.toISOString(),
-        error: message.slice(0, 500),
-      },
-    );
+    await this.applyWrite("sync_mark_failure", {
+      at: at.toISOString(),
+      error: message.slice(0, 500),
+    });
   }
 
   async findActiveListing(
@@ -271,10 +276,10 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     question: MarketplaceQuestion,
     listing: SyncListingContext,
   ): Promise<ImportedQuestionResult> {
-    const result = await applyEbayMessageWrite<{
+    const result = await this.applyWrite<{
       message: unknown;
       inserted: boolean;
-    }>(this.serverWriteClient, this.userId, "import_question", {
+    }>("import_question", {
       item_id: listing.itemId,
       listing_id: listing.listingId,
       body: question.body,
@@ -296,12 +301,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     _listing: SyncListingContext,
     message: MessageRow,
   ): Promise<void> {
-    await applyEbayMessageWrite(
-      this.serverWriteClient,
-      this.userId,
-      "ensure_notification",
-      { message_id: message.id },
-    );
+    await this.applyWrite("ensure_notification", { message_id: message.id });
   }
 
   async listDraftCandidates(): Promise<DraftCandidate[]> {
@@ -330,42 +330,27 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async claimDraft(candidate: DraftCandidate, now: Date): Promise<boolean> {
-    return applyEbayMessageWrite<boolean>(
-      this.serverWriteClient,
-      this.userId,
-      "claim_draft",
-      {
-        message_id: candidate.message.id,
-        expected_status: candidate.message.status,
-        expected_updated_at: candidate.message.updated_at,
-        at: now.toISOString(),
-      },
-    );
+    return this.applyWrite<boolean>("claim_draft", {
+      message_id: candidate.message.id,
+      expected_status: candidate.message.status,
+      expected_updated_at: candidate.message.updated_at,
+      at: now.toISOString(),
+    });
   }
 
   async attachDraft(
     messageId: string,
     draft: DraftBuyerReplyResult,
   ): Promise<void> {
-    await applyEbayMessageWrite(
-      this.serverWriteClient,
-      this.userId,
-      "attach_draft",
-      {
-        message_id: messageId,
-        draft_reply: draft.reply,
-        draft_model: draft.usedFallback ? `${draft.model} (fallback)` : draft.model,
-      },
-    );
+    await this.applyWrite("attach_draft", {
+      message_id: messageId,
+      draft_reply: draft.reply,
+      draft_model: draft.usedFallback ? `${draft.model} (fallback)` : draft.model,
+    });
   }
 
   async markDraftFailed(messageId: string): Promise<void> {
-    await applyEbayMessageWrite(
-      this.serverWriteClient,
-      this.userId,
-      "mark_draft_failed",
-      { message_id: messageId },
-    );
+    await this.applyWrite("mark_draft_failed", { message_id: messageId });
   }
 
   private async loadGrounding(

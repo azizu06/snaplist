@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createEbayMessagingAdapterForUser } from "@/lib/marketplace/ebay";
 import type { MarketplaceMessagingAdapter } from "@/lib/marketplace/messaging";
 import { SimulatedMarketplaceMessagingAdapter } from "@/lib/marketplace/simulated-messaging";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 import { SupabaseDeliveryRepository } from "./transport";
 
 /** Compose transport by the persisted conversation source, never by caller input. */
@@ -21,12 +21,14 @@ export async function createMessagingTransportForConversation(
   userId: string,
   marketplace: string | null | undefined,
 ) {
+  const serverWriteClient =
+    marketplace === "ebay" ? await createTenantServerClient() : supabase;
   return {
     repository: new SupabaseDeliveryRepository(
       supabase,
       userId,
       marketplace === "ebay",
-      marketplace === "ebay" ? createAdminClient() : supabase,
+      serverWriteClient,
     ),
     adapter: await createMessagingAdapterForConversation(
       supabase,

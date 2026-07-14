@@ -9,7 +9,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /** Explicit/foreground refresh; the shared service owns all domain behavior. */
 export async function POST(request: Request) {
@@ -25,11 +25,10 @@ export async function POST(request: Request) {
     }
     const summary = await syncInboxForSeller({
       adapter: await createEbayMessagingAdapterForUser(supabase, userId),
-      repository: new SupabaseInboxSyncRepository(
-        supabase,
-        userId,
-        createAdminClient(),
-      ),
+      repository: new SupabaseInboxSyncRepository(supabase, userId, {
+        client: await createTenantServerClient(),
+        scheduled: false,
+      }),
     });
     return NextResponse.json(summary);
   } catch (error) {

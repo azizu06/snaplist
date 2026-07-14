@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEbayMessagingAdapterForUser } from "@/lib/marketplace/ebay";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 import { createMessagingTransportForConversation } from "./adapters";
 import type { MessageRow } from "./types";
 
@@ -13,8 +13,8 @@ vi.mock("@/lib/marketplace/ebay", () => ({
   })),
 }));
 
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(),
+vi.mock("@/lib/supabase/tenant-server", () => ({
+  createTenantServerClient: vi.fn(),
 }));
 
 const root: MessageRow = {
@@ -53,7 +53,7 @@ describe("createMessagingTransportForConversation", () => {
     const rpc = vi.fn(async () => ({ data: true, error: null }));
     const client = {} as SupabaseClient;
     const serverWriteClient = { rpc } as unknown as SupabaseClient;
-    vi.mocked(createAdminClient).mockReturnValue(serverWriteClient);
+    vi.mocked(createTenantServerClient).mockResolvedValue(serverWriteClient);
 
     const transport = await createMessagingTransportForConversation(
       client,
@@ -68,10 +68,9 @@ describe("createMessagingTransportForConversation", () => {
     );
 
     expect(createEbayMessagingAdapterForUser).toHaveBeenCalledWith(client, "user_a");
-    expect(createAdminClient).toHaveBeenCalledOnce();
+    expect(createTenantServerClient).toHaveBeenCalledOnce();
     expect(claimed).toBe(true);
     expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
-      p_user_id: "user_a",
       p_operation: "claim_canonical",
       p_payload: {
         message_id: root.id,

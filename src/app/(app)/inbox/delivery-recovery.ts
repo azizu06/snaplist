@@ -38,3 +38,24 @@ export function requiresDuplicateRiskConfirmation(
     attemptedAt < now.getTime() - DELIVERY_LEASE_MS
   );
 }
+
+export function authorizeDeliveryRetry(
+  deliveryStatus: string | null | undefined,
+  deliveryAttemptedAt: string | null | undefined,
+  confirm: () => boolean,
+  now = new Date(),
+): { proceed: boolean; confirmDuplicateRisk: boolean } {
+  const duplicateRisk = requiresDuplicateRiskConfirmation(
+    deliveryStatus,
+    deliveryAttemptedAt,
+    now,
+  );
+  if (!duplicateRisk) {
+    return { proceed: true, confirmDuplicateRisk: false };
+  }
+  const confirmed = confirm();
+  return {
+    proceed: confirmed,
+    confirmDuplicateRisk: confirmed,
+  };
+}

@@ -233,19 +233,33 @@ describe("syncInboxForSeller", () => {
 });
 
 describe("SupabaseInboxSyncRepository", () => {
-  it("uses the dedicated server-write client for foreground lifecycle mutations", async () => {
-    const readClient = {} as SupabaseClient;
+  it("uses the tenant-derived RPC for foreground lifecycle mutations", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const writeClient = { rpc } as unknown as SupabaseClient;
-    const repository = new SupabaseInboxSyncRepository(
-      readClient,
-      USER_ID,
-      writeClient,
-    );
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
+      client,
+      scheduled: false,
+    });
 
     await repository.markAttempt(new Date("2026-07-13T12:05:00.000Z"));
 
     expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_operation: "sync_mark_attempt",
+      p_payload: { at: "2026-07-13T12:05:00.000Z" },
+    });
+  });
+
+  it("uses the separate scheduler RPC for background lifecycle mutations", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
+      client,
+      scheduled: true,
+    });
+
+    await repository.markAttempt(new Date("2026-07-13T12:05:00.000Z"));
+
+    expect(rpc).toHaveBeenCalledWith("apply_scheduled_ebay_message_write", {
       p_user_id: USER_ID,
       p_operation: "sync_mark_attempt",
       p_payload: { at: "2026-07-13T12:05:00.000Z" },

@@ -46,7 +46,10 @@ async function handle(request: NextRequest) {
     try {
       const summary = await syncInboxForSeller({
         adapter: await createEbayMessagingAdapterForUser(admin, userId),
-        repository: new SupabaseInboxSyncRepository(admin, userId),
+        repository: new SupabaseInboxSyncRepository(admin, userId, {
+          client: admin,
+          scheduled: true,
+        }),
       });
       synced += 1;
       imported += summary.imported;

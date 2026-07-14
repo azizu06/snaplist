@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(23);
+select extensions.plan(25);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -85,6 +85,11 @@ set local role authenticated;
 select set_config(
   'request.jwt.claims',
   '{"sub":"message-tenant-a","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
   true
 );
 
@@ -262,10 +267,9 @@ select extensions.results_eq(
   'tenant A cannot reset a server-managed eBay draft lifecycle'
 );
 
-select extensions.throws_ok(
+select extensions.results_eq(
   $$
     select public.apply_ebay_message_write(
-      'message-tenant-a',
       'claim_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000001',
@@ -275,9 +279,61 @@ select extensions.throws_ok(
       )
     )
   $$,
+  $$values ('true'::jsonb)$$,
+  'the foreground write seam derives tenant A from the Clerk JWT'
+);
+
+select extensions.results_eq(
+  $$
+    select public.apply_ebay_message_write(
+      'claim_canonical',
+      jsonb_build_object(
+        'message_id', '93000000-0000-4000-8000-000000000002',
+        'body', 'Cross-tenant reply',
+        'at', '2026-07-13T12:05:00Z',
+        'retry', false
+      )
+    )
+  $$,
+  $$values ('false'::jsonb)$$,
+  'the foreground write seam cannot claim another Clerk tenant message'
+);
+
+select extensions.throws_ok(
+  $$
+    select private.apply_ebay_message_write_for_tenant(
+      'message-tenant-b',
+      'sync_mark_attempt',
+      '{"at":"2026-07-13T12:05:00Z"}'::jsonb
+    )
+  $$,
   '42501',
   null,
-  'tenant A cannot invoke the server-only write seam directly'
+  'an authenticated tenant cannot invoke the arbitrary-tenant helper'
+);
+
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_publishable_local_test"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'sync_mark_attempt',
+      '{"at":"2026-07-13T12:05:00Z"}'::jsonb
+    )
+  $$,
+  '42501',
+  null,
+  'a browser API key cannot invoke server-owned eBay lifecycle writes'
+);
+
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
 );
 
 select extensions.throws_ok(
@@ -327,10 +383,9 @@ select set_config(
   true
 );
 
-select extensions.results_eq(
+select extensions.throws_ok(
   $$
     select public.apply_ebay_message_write(
-      'message-tenant-a',
       'claim_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000001',
@@ -340,23 +395,14 @@ select extensions.results_eq(
       )
     )
   $$,
-  $$values ('true'::jsonb)$$,
-  'the server can claim a reply through the tenant-bound write seam'
+  '42501',
+  null,
+  'the scheduler cannot invoke the foreground tenant write seam'
 );
 
-select extensions.is(
-  (
-    select delivery_status
-    from public.messages
-    where id = '93000000-0000-4000-8000-000000000001'
-  ),
-  'sending',
-  'the tenant-bound write seam advances only the selected seller lifecycle'
-);
-
-select extensions.results_eq(
+select extensions.throws_ok(
   $$
-    select public.apply_ebay_message_write(
+    select public.apply_scheduled_ebay_message_write(
       'message-tenant-a',
       'claim_canonical',
       jsonb_build_object(
@@ -367,19 +413,20 @@ select extensions.results_eq(
       )
     )
   $$,
-  $$values ('false'::jsonb)$$,
-  'the database rejects a message outside the selected seller tenant'
+  '42501',
+  null,
+  'scheduler authority cannot perform seller delivery operations'
 );
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select public.apply_scheduled_ebay_message_write(
       'message-tenant-b',
       'sync_mark_attempt',
       '{"at":"2026-07-13T12:05:00Z"}'::jsonb
     )
   $$,
-  'the scheduler can use the same database-enforced tenant write seam'
+  'the scheduler can advance a selected seller sync lifecycle'
 );
 
 reset role;

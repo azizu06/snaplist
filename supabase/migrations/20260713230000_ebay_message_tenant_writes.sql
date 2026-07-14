@@ -1,4 +1,7 @@
-create or replace function public.apply_ebay_message_write(
+create schema if not exists private;
+revoke all on schema private from public;
+
+create or replace function private.apply_ebay_message_write_for_tenant(
   p_user_id text,
   p_operation text,
   p_payload jsonb default '{}'::jsonb
@@ -9,7 +12,6 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_role text := coalesce(auth.jwt()->>'role', '');
   v_message public.messages%rowtype;
   v_root public.messages%rowtype;
   v_listing public.listings%rowtype;
@@ -20,10 +22,6 @@ begin
   if p_user_id is null or btrim(p_user_id) = '' then
     raise exception using errcode = '22023', message = 'A seller tenant is required';
   end if;
-  if v_role <> 'service_role' then
-    raise exception using errcode = '42501', message = 'Server authorization is required';
-  end if;
-
   if p_operation = 'sync_mark_attempt' then
     insert into public.ebay_message_sync_state (user_id, last_attempted_at)
     values (p_user_id, (p_payload->>'at')::timestamptz)
@@ -402,6 +400,118 @@ begin
 end;
 $$;
 
-revoke all on function public.apply_ebay_message_write(text, text, jsonb) from public;
-grant execute on function public.apply_ebay_message_write(text, text, jsonb)
+revoke all on function private.apply_ebay_message_write_for_tenant(text, text, jsonb)
+  from public, anon, authenticated, service_role;
+grant usage on schema private to authenticated, service_role;
+
+create or replace function private.apply_authenticated_ebay_message_write(
+  p_operation text,
+  p_payload jsonb default '{}'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = '' then
+    raise exception using errcode = '42501', message = 'Seller authorization is required';
+  end if;
+  if v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server API authorization is required';
+  end if;
+  return private.apply_ebay_message_write_for_tenant(
+    v_user_id,
+    p_operation,
+    p_payload
+  );
+end;
+$$;
+
+revoke all on function private.apply_authenticated_ebay_message_write(text, jsonb)
+  from public, anon, service_role;
+grant execute on function private.apply_authenticated_ebay_message_write(text, jsonb)
+  to authenticated;
+
+create or replace function private.apply_scheduled_ebay_message_write(
+  p_user_id text,
+  p_operation text,
+  p_payload jsonb default '{}'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  if p_operation not in (
+    'sync_mark_attempt',
+    'sync_mark_success',
+    'sync_mark_failure',
+    'import_question',
+    'ensure_notification',
+    'claim_draft',
+    'attach_draft',
+    'mark_draft_failed'
+  ) then
+    raise exception using errcode = '42501', message = 'Scheduler operation is not allowed';
+  end if;
+  return private.apply_ebay_message_write_for_tenant(
+    p_user_id,
+    p_operation,
+    p_payload
+  );
+end;
+$$;
+
+revoke all on function private.apply_scheduled_ebay_message_write(text, text, jsonb)
+  from public, anon, authenticated;
+grant execute on function private.apply_scheduled_ebay_message_write(text, text, jsonb)
+  to service_role;
+
+create or replace function public.apply_ebay_message_write(
+  p_operation text,
+  p_payload jsonb default '{}'::jsonb
+)
+returns jsonb
+language sql
+set search_path = ''
+as $$
+  select private.apply_authenticated_ebay_message_write(p_operation, p_payload)
+$$;
+
+revoke all on function public.apply_ebay_message_write(text, jsonb)
+  from public, anon, service_role;
+grant execute on function public.apply_ebay_message_write(text, jsonb)
+  to authenticated;
+
+create or replace function public.apply_scheduled_ebay_message_write(
+  p_user_id text,
+  p_operation text,
+  p_payload jsonb default '{}'::jsonb
+)
+returns jsonb
+language sql
+set search_path = ''
+as $$
+  select private.apply_scheduled_ebay_message_write(
+    p_user_id,
+    p_operation,
+    p_payload
+  )
+$$;
+
+revoke all on function public.apply_scheduled_ebay_message_write(text, text, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.apply_scheduled_ebay_message_write(text, text, jsonb)
   to service_role;
