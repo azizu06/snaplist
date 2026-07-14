@@ -152,7 +152,7 @@ export async function updateCachedAccessToken(
 /**
  * Erase everything held about an eBay user (Marketplace Account Deletion).
  * Runs on the SERVICE-ROLE client in one database transaction. Returns how
- * many matched tenant connections were erased (0 is an idempotent success).
+ * many tenant data sets matched the deleted identity (0 is idempotent).
  */
 export async function eraseEbayUserData(
   serviceClient: SupabaseClient,

@@ -5,7 +5,10 @@ import type {
   MarketplaceMessagingAdapter,
 } from "@/lib/marketplace/messaging";
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
-import { applyEbayMessageWrite } from "./ebay-server-write";
+import {
+  applyEbayMessageWrite,
+  beginEbayMessageWrite,
+} from "./ebay-server-write";
 import { messageRowSchema, type MessageRow } from "./types";
 
 const PG_UNIQUE_VIOLATION = "23505";
@@ -306,12 +309,31 @@ function canonicalDeliveryMatches(root: MessageRow, reply: MessageRow): boolean 
 
 /** Supabase implementation; every statement is explicitly pinned to userId. */
 export class SupabaseDeliveryRepository implements DeliveryRepository {
+  private writeGeneration: Promise<string> | null = null;
+
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
     private readonly serverManaged = false,
     private readonly serverWriteClient: SupabaseClient = supabase,
   ) {}
+
+  private getWriteGeneration(): Promise<string> {
+    this.writeGeneration ??= beginEbayMessageWrite(this.serverWriteClient);
+    return this.writeGeneration;
+  }
+
+  private async applyServerWrite<T>(
+    operation: string,
+    payload: Record<string, unknown>,
+  ): Promise<T> {
+    return applyEbayMessageWrite<T>(
+      this.serverWriteClient,
+      operation,
+      payload,
+      await this.getWriteGeneration(),
+    );
+  }
 
   async loadConversationRoot(messageId: string): Promise<MessageRow | null> {
     const { data, error } = await this.supabase
@@ -350,16 +372,12 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     retry: boolean,
   ): Promise<boolean> {
     if (this.serverManaged) {
-      return applyEbayMessageWrite<boolean>(
-        this.serverWriteClient,
-        "claim_canonical",
-        {
-          message_id: root.id,
-          body,
-          at: at.toISOString(),
-          retry,
-        },
-      );
+      return this.applyServerWrite<boolean>("claim_canonical", {
+        message_id: root.id,
+        body,
+        at: at.toISOString(),
+        retry,
+      });
     }
     let query = this.supabase
       .from("messages")
@@ -393,15 +411,11 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     attemptedAt: Date,
   ): Promise<void> {
     if (this.serverManaged) {
-      await applyEbayMessageWrite(
-        this.serverWriteClient,
-        "fail_canonical",
-        {
-          message_id: messageId,
-          kind,
-          attempted_at: attemptedAt.toISOString(),
-        },
-      );
+      await this.applyServerWrite("fail_canonical", {
+        message_id: messageId,
+        kind,
+        attempted_at: attemptedAt.toISOString(),
+      });
       return;
     }
     const { error } = await this.supabase
@@ -421,17 +435,13 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     attemptedAt: Date,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
-      const data = await applyEbayMessageWrite<unknown>(
-        this.serverWriteClient,
-        "complete_canonical",
-        {
-          message_id: root.id,
-          body,
-          external_delivery_id: receipt.externalDeliveryId,
-          delivered_at: receipt.deliveredAt,
-          attempted_at: attemptedAt.toISOString(),
-        },
-      );
+      const data = await this.applyServerWrite<unknown>("complete_canonical", {
+        message_id: root.id,
+        body,
+        external_delivery_id: receipt.externalDeliveryId,
+        delivered_at: receipt.deliveredAt,
+        attempted_at: attemptedAt.toISOString(),
+      });
       return messageRowSchema.parse(data);
     }
     const { data, error } = await this.supabase
@@ -488,10 +498,10 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     at: Date,
   ): Promise<{ message: MessageRow; inserted: boolean }> {
     if (this.serverManaged) {
-      const result = await applyEbayMessageWrite<{
+      const result = await this.applyServerWrite<{
         message: unknown;
         inserted: boolean;
-      }>(this.serverWriteClient, "create_followup", {
+      }>("create_followup", {
         root_id: root.id,
         body,
         request_id: requestId,
@@ -557,14 +567,10 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
 
   async claimFollowUp(message: MessageRow, at: Date): Promise<boolean> {
     if (this.serverManaged) {
-      return applyEbayMessageWrite<boolean>(
-        this.serverWriteClient,
-        "claim_followup",
-        {
-          message_id: message.id,
-          at: at.toISOString(),
-        },
-      );
+      return this.applyServerWrite<boolean>("claim_followup", {
+        message_id: message.id,
+        at: at.toISOString(),
+      });
     }
     const stale = new Date(at.getTime() - DELIVERY_LEASE_MS).toISOString();
     const { data, error } = await this.supabase
@@ -590,15 +596,11 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     attemptedAt: Date,
   ): Promise<void> {
     if (this.serverManaged) {
-      await applyEbayMessageWrite(
-        this.serverWriteClient,
-        "fail_followup",
-        {
-          message_id: messageId,
-          kind,
-          attempted_at: attemptedAt.toISOString(),
-        },
-      );
+      await this.applyServerWrite("fail_followup", {
+        message_id: messageId,
+        kind,
+        attempted_at: attemptedAt.toISOString(),
+      });
       return;
     }
     const { error } = await this.supabase
@@ -622,16 +624,12 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     attemptedAt: Date,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
-      const data = await applyEbayMessageWrite<unknown>(
-        this.serverWriteClient,
-        "complete_followup",
-        {
-          message_id: messageId,
-          external_delivery_id: receipt.externalDeliveryId,
-          delivered_at: receipt.deliveredAt,
-          attempted_at: attemptedAt.toISOString(),
-        },
-      );
+      const data = await this.applyServerWrite<unknown>("complete_followup", {
+        message_id: messageId,
+        external_delivery_id: receipt.externalDeliveryId,
+        delivered_at: receipt.deliveredAt,
+        attempted_at: attemptedAt.toISOString(),
+      });
       return messageRowSchema.parse(data);
     }
     const { data, error } = await this.supabase

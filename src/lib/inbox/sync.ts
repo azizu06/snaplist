@@ -11,6 +11,8 @@ import { draftBuyerReply, type DraftBuyerReplyResult } from "./reply";
 import {
   applyEbayMessageWrite,
   applyScheduledEbayMessageWrite,
+  beginEbayMessageWrite,
+  beginScheduledEbayMessageWrite,
 } from "./ebay-server-write";
 import { messageRowSchema, type MessageRow, type ReplyGrounding } from "./types";
 
@@ -343,6 +345,8 @@ interface ListingRow {
 
 /** Supabase implementation; EVERY statement is explicitly pinned to userId. */
 export class SupabaseInboxSyncRepository implements InboxSyncRepository {
+  private writeGeneration: Promise<string> | null = null;
+
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
@@ -352,18 +356,32 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     } = { client: supabase, scheduled: false },
   ) {}
 
-  private applyWrite<T>(
+  private getWriteGeneration(): Promise<string> {
+    this.writeGeneration ??= this.writeTarget.scheduled
+      ? beginScheduledEbayMessageWrite(this.writeTarget.client, this.userId)
+      : beginEbayMessageWrite(this.writeTarget.client);
+    return this.writeGeneration;
+  }
+
+  private async applyWrite<T>(
     operation: string,
     payload: Record<string, unknown> = {},
   ): Promise<T> {
+    const generation = await this.getWriteGeneration();
     return this.writeTarget.scheduled
       ? applyScheduledEbayMessageWrite<T>(
           this.writeTarget.client,
           this.userId,
           operation,
           payload,
+          generation,
         )
-      : applyEbayMessageWrite<T>(this.writeTarget.client, operation, payload);
+      : applyEbayMessageWrite<T>(
+          this.writeTarget.client,
+          operation,
+          payload,
+          generation,
+        );
   }
 
   async getCursor(): Promise<Date | null> {

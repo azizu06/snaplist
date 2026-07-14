@@ -1,7 +1,37 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(69);
+select extensions.plan(83);
+
+create function pg_temp.apply_ebay_message_write(
+  p_operation text,
+  p_payload jsonb
+)
+returns jsonb
+language sql
+as $$
+  select public.apply_ebay_message_write(
+    p_operation,
+    p_payload,
+    public.begin_ebay_message_write()
+  )
+$$;
+
+create function pg_temp.apply_scheduled_ebay_message_write(
+  p_user_id text,
+  p_operation text,
+  p_payload jsonb
+)
+returns jsonb
+language sql
+as $$
+  select public.apply_scheduled_ebay_message_write(
+    p_user_id,
+    p_operation,
+    p_payload,
+    public.begin_scheduled_ebay_message_write(p_user_id)
+  )
+$$;
 
 insert into public.items (id, user_id, attributes)
 values
@@ -145,7 +175,7 @@ select extensions.is(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'import_question',
       jsonb_build_object(
         'item_id', '91000000-0000-4000-8000-000000000001',
@@ -165,7 +195,7 @@ select extensions.lives_ok(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'mark_externally_answered',
       jsonb_build_object(
         'external_message_id', 'externally-answered-question-a'
@@ -185,7 +215,7 @@ select extensions.results_eq(
   'an externally answered question is durable and non-actionable'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -200,7 +230,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_draft',
   jsonb_build_object(
     'message_id', (
@@ -211,7 +241,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'attach_draft',
   jsonb_build_object(
     'message_id', (
@@ -223,7 +253,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'mark_provider_unavailable',
   jsonb_build_object(
     'external_message_id', 'provider-unavailable-question-a',
@@ -241,7 +271,7 @@ select extensions.results_eq(
   'ambiguous provider absence is neutral and preserves seller-visible history'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -266,7 +296,7 @@ select extensions.results_eq(
   'fresh unanswered evidence restores a neutralized draft without regenerating it'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -281,7 +311,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'mark_provider_unavailable',
   jsonb_build_object(
     'external_message_id', 'provider-unavailable-new-question-a',
@@ -289,7 +319,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -314,7 +344,7 @@ select extensions.results_eq(
   'fresh unanswered evidence restores a neutralized undrafted question'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_canonical',
   jsonb_build_object(
     'message_id', (
@@ -327,7 +357,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'fail_canonical',
   jsonb_build_object(
     'message_id', (
@@ -339,7 +369,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'mark_provider_unavailable',
   jsonb_build_object(
     'external_message_id', 'provider-unavailable-question-a',
@@ -347,7 +377,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -379,7 +409,7 @@ select extensions.results_eq(
   'fresh unanswered evidence restores unacknowledged delivery retry state'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_canonical',
   jsonb_build_object(
     'message_id', (
@@ -392,7 +422,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'complete_canonical',
   jsonb_build_object(
     'message_id', (
@@ -406,7 +436,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -440,7 +470,7 @@ select extensions.results_eq(
   'unanswered replay cannot alter an acknowledged delivery'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'upsert_unresolved_question',
   jsonb_build_object(
     'external_message_id', 'partial-question-a',
@@ -477,7 +507,7 @@ select extensions.results_eq(
   'stable partial Trading identity remains durable for later resolution'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'upsert_unresolved_question',
   jsonb_build_object(
     'external_message_id', 'partial-question-a',
@@ -513,7 +543,7 @@ select extensions.results_eq(
   'a replay can safely enrich missing fields on the stable pending identity'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'retire_unresolved_question',
   jsonb_build_object(
     'external_message_id', 'partial-question-a',
@@ -533,7 +563,7 @@ select extensions.results_eq(
   'neutral reconciliation retires pending work without deleting its identity'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -548,7 +578,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_draft',
   jsonb_build_object(
     'message_id', (
@@ -559,7 +589,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'attach_draft',
   jsonb_build_object(
     'message_id', (
@@ -571,7 +601,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_canonical',
   jsonb_build_object(
     'message_id', (
@@ -584,7 +614,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'fail_canonical',
   jsonb_build_object(
     'message_id', (
@@ -596,7 +626,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'mark_externally_answered',
   jsonb_build_object('external_message_id', 'ambiguous-question-a')
 );
@@ -620,7 +650,7 @@ select extensions.results_eq(
 
 select extensions.results_eq(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'claim_canonical',
       jsonb_build_object(
         'message_id', (
@@ -637,7 +667,7 @@ select extensions.results_eq(
   'an externally answered send cannot be retried into a duplicate delivery'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'import_question',
   jsonb_build_object(
     'item_id', '91000000-0000-4000-8000-000000000001',
@@ -652,7 +682,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_draft',
   jsonb_build_object(
     'message_id', (
@@ -663,7 +693,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'attach_draft',
   jsonb_build_object(
     'message_id', (
@@ -675,7 +705,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'claim_canonical',
   jsonb_build_object(
     'message_id', (
@@ -688,7 +718,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'mark_externally_answered',
   jsonb_build_object(
     'external_message_id', 'active-send-question-a',
@@ -713,7 +743,7 @@ select extensions.results_eq(
   'reconciliation cannot retire a fresh active delivery lease'
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'mark_externally_answered',
   jsonb_build_object(
     'external_message_id', 'active-send-question-a',
@@ -721,7 +751,7 @@ select public.apply_ebay_message_write(
   )
 );
 
-select public.apply_ebay_message_write(
+select pg_temp.apply_ebay_message_write(
   'complete_canonical',
   jsonb_build_object(
     'message_id', (
@@ -756,7 +786,7 @@ select extensions.results_eq(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'upsert_unresolved_question',
       jsonb_build_object(
         'external_message_id', 'unresolved-question-a',
@@ -826,7 +856,7 @@ select extensions.throws_ok(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'upsert_unresolved_question',
       jsonb_build_object(
         'external_message_id', 'unresolved-question-a',
@@ -858,7 +888,7 @@ select extensions.results_eq(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'sync_mark_success',
       jsonb_build_object(
         'at', '2026-07-13T12:05:00Z',
@@ -1038,7 +1068,7 @@ select extensions.results_eq(
 
 select extensions.results_eq(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'claim_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000001',
@@ -1054,7 +1084,7 @@ select extensions.results_eq(
 
 select extensions.results_eq(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'claim_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000002',
@@ -1070,7 +1100,7 @@ select extensions.results_eq(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'claim_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000001',
@@ -1086,7 +1116,7 @@ select extensions.lives_ok(
 select extensions.results_eq(
   $$
     with ignored as materialized (
-      select public.apply_ebay_message_write(
+      select pg_temp.apply_ebay_message_write(
         'fail_canonical',
         jsonb_build_object(
           'message_id', '93000000-0000-4000-8000-000000000001',
@@ -1107,7 +1137,7 @@ select extensions.results_eq(
 
 select extensions.throws_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'complete_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000001',
@@ -1155,7 +1185,7 @@ select set_config(
 
 select extensions.throws_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'sync_mark_attempt',
       '{"at":"2026-07-13T12:05:00Z"}'::jsonb
     )
@@ -1220,7 +1250,7 @@ select set_config(
 
 select extensions.throws_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'claim_canonical',
       jsonb_build_object(
         'message_id', '93000000-0000-4000-8000-000000000001',
@@ -1237,7 +1267,7 @@ select extensions.throws_ok(
 
 select extensions.throws_ok(
   $$
-    select public.apply_scheduled_ebay_message_write(
+    select pg_temp.apply_scheduled_ebay_message_write(
       'message-tenant-a',
       'claim_canonical',
       jsonb_build_object(
@@ -1255,7 +1285,7 @@ select extensions.throws_ok(
 
 select extensions.lives_ok(
   $$
-    select public.apply_scheduled_ebay_message_write(
+    select pg_temp.apply_scheduled_ebay_message_write(
       'message-tenant-b',
       'sync_mark_attempt',
       '{"at":"2026-07-13T12:05:00Z"}'::jsonb
@@ -1266,7 +1296,7 @@ select extensions.lives_ok(
 
 select extensions.lives_ok(
   $$
-    select public.apply_scheduled_ebay_message_write(
+    select pg_temp.apply_scheduled_ebay_message_write(
       'message-tenant-b',
       'upsert_unresolved_question',
       jsonb_build_object(
@@ -1321,7 +1351,7 @@ set local role authenticated;
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'create_followup',
       jsonb_build_object(
         'root_id', '93000000-0000-4000-8000-000000000001',
@@ -1336,7 +1366,7 @@ select extensions.lives_ok(
 
 select extensions.lives_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'claim_followup',
       jsonb_build_object(
         'message_id', (
@@ -1353,7 +1383,7 @@ select extensions.lives_ok(
 select extensions.results_eq(
   $$
     with ignored as materialized (
-      select public.apply_ebay_message_write(
+      select pg_temp.apply_ebay_message_write(
         'fail_followup',
         jsonb_build_object(
           'message_id', (
@@ -1377,7 +1407,7 @@ select extensions.results_eq(
 
 select extensions.throws_ok(
   $$
-    select public.apply_ebay_message_write(
+    select pg_temp.apply_ebay_message_write(
       'complete_followup',
       jsonb_build_object(
         'message_id', (
@@ -1422,7 +1452,276 @@ insert into public.ebay_connections (
 )
 values
   ('message-tenant-a', 'deletion-user-a', 'deletion_seller_a', 'v1.test-a'),
-  ('message-tenant-b', 'deletion-user-b', 'deletion_seller_b', 'v1.test-b');
+  ('message-tenant-b', 'buyer-delete-shared', 'deletion_seller_b', 'v1.test-b');
+
+insert into public.messages (
+  id, user_id, item_id, listing_id, direction, body, status, marketplace,
+  external_message_id, external_parent_id, external_conversation_id,
+  external_listing_id, external_buyer_id
+)
+values
+  (
+    '93000000-0000-4000-8000-000000000011',
+    'message-tenant-a',
+    '91000000-0000-4000-8000-000000000001',
+    '92000000-0000-4000-8000-000000000001',
+    'inbound',
+    'Buyer deletion question A',
+    'drafted',
+    'ebay',
+    'buyer-deletion-question-a',
+    'buyer-deletion-question-a',
+    'buyer-deletion-conversation-a',
+    'sandbox-item-a',
+    'buyer-delete-shared'
+  ),
+  (
+    '93000000-0000-4000-8000-000000000012',
+    'message-tenant-a',
+    '91000000-0000-4000-8000-000000000001',
+    '92000000-0000-4000-8000-000000000001',
+    'outbound',
+    'Buyer deletion reply A',
+    'approved',
+    'ebay',
+    null,
+    'buyer-deletion-question-a',
+    'buyer-deletion-conversation-a',
+    'sandbox-item-a',
+    'buyer-delete-shared'
+  ),
+  (
+    '93000000-0000-4000-8000-000000000013',
+    'message-tenant-b',
+    '91000000-0000-4000-8000-000000000002',
+    '92000000-0000-4000-8000-000000000002',
+    'inbound',
+    'Buyer deletion question B',
+    'drafted',
+    'ebay',
+    'buyer-deletion-question-b',
+    'buyer-deletion-question-b',
+    'buyer-deletion-conversation-b',
+    'sandbox-item-b',
+    'buyer-delete-shared'
+  );
+
+update public.messages
+set reply_to = '93000000-0000-4000-8000-000000000011',
+    reply_kind = 'followup',
+    delivery_request_id = 'buyer-deletion-followup-a',
+    delivery_status = 'failed'
+where id = '93000000-0000-4000-8000-000000000012';
+
+insert into public.ebay_unresolved_questions (
+  user_id, external_message_id, external_parent_id, external_listing_id,
+  external_buyer_id, resolution_window_from, observed_cursor_at,
+  last_resolution_attempted_at, last_error
+)
+values
+  (
+    'message-tenant-a', 'buyer-deletion-pending-a',
+    'buyer-deletion-pending-a', 'sandbox-item-a', 'buyer-delete-shared',
+    '2026-07-12T12:00:00Z', '2026-07-13T12:00:00Z',
+    '2026-07-13T12:00:00Z', 'retry later'
+  ),
+  (
+    'message-tenant-b', 'buyer-deletion-pending-b',
+    'buyer-deletion-pending-b', 'sandbox-item-b', 'buyer-delete-shared',
+    '2026-07-12T12:00:00Z', '2026-07-13T12:00:00Z',
+    '2026-07-13T12:00:00Z', 'retry later'
+  );
+
+insert into public.notifications (
+  user_id, kind, title, source_message_id
+)
+values
+  (
+    'message-tenant-a', 'buyer_message', 'Buyer deletion notice A',
+    '93000000-0000-4000-8000-000000000011'
+  ),
+  (
+    'message-tenant-b', 'buyer_message', 'Buyer deletion notice B',
+    '93000000-0000-4000-8000-000000000013'
+  );
+
+create temporary table ebay_generation_fixture (
+  user_id text primary key,
+  generation uuid not null
+) on commit drop;
+grant select, insert on ebay_generation_fixture to service_role;
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+insert into ebay_generation_fixture (user_id, generation)
+select user_id, public.begin_scheduled_ebay_message_write(user_id)
+from (values ('message-tenant-a'), ('message-tenant-b')) tenants(user_id);
+
+select extensions.is(
+  public.erase_ebay_user_data(null, 'buyer-delete-shared'),
+  2,
+  'buyer-only deletion erases every matched tenant without a seller connection match'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where id in (
+      '93000000-0000-4000-8000-000000000011',
+      '93000000-0000-4000-8000-000000000012',
+      '93000000-0000-4000-8000-000000000013'
+    )
+  ),
+  0,
+  'buyer-only deletion removes matched threads and outbound descendants'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_unresolved_questions
+    where external_buyer_id = 'buyer-delete-shared'
+  ),
+  0,
+  'buyer-only deletion removes matched unresolved questions'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.notifications
+    where source_message_id in (
+      '93000000-0000-4000-8000-000000000011',
+      '93000000-0000-4000-8000-000000000013'
+    )
+  ),
+  0,
+  'buyer-only deletion removes notifications for matched threads'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_message_sync_state
+    where user_id in ('message-tenant-a', 'message-tenant-b')
+  ),
+  0,
+  'buyer-only deletion clears affected seller sync state'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where id in (
+      '93000000-0000-4000-8000-000000000001',
+      '93000000-0000-4000-8000-000000000002'
+    )
+  ),
+  2,
+  'buyer-only deletion preserves unrelated eBay threads in affected tenants'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_connections),
+  2,
+  'buyer username deletion preserves a seller whose user ID has the same value'
+);
+
+reset role;
+
+select extensions.ok(
+  not exists (
+    select 1
+    from private.ebay_erased_identity_tombstones tombstone
+    where to_jsonb(tombstone)::text ilike '%buyer-delete-shared%'
+  ),
+  'buyer tombstones retain no raw deleted identity'
+);
+
+select extensions.ok(
+  not exists (
+    select 1
+    from private.ebay_erased_identity_tombstones tombstone
+    where tombstone.identity_hash = encode(
+      extensions.digest('sender_id:buyer-delete-shared', 'sha256'),
+      'hex'
+    )
+  ),
+  'buyer tombstones use keyed hashes rather than dictionary-checkable digests'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.throws_ok(
+  $$
+    select public.apply_scheduled_ebay_message_write(
+      'message-tenant-a',
+      'sync_mark_attempt',
+      jsonb_build_object('at', '2026-07-13T12:10:00Z'),
+      (
+        select generation from ebay_generation_fixture
+        where user_id = 'message-tenant-a'
+      )
+    )
+  $$,
+  '40001',
+  'eBay messaging account generation expired',
+  'a write generation acquired before erasure cannot recreate sync state'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.apply_scheduled_ebay_message_write(
+      'message-tenant-a',
+      'upsert_unresolved_question',
+      jsonb_build_object(
+        'external_message_id', 'buyer-deletion-replay',
+        'external_parent_id', 'buyer-deletion-replay',
+        'external_listing_id', 'sandbox-item-a',
+        'external_buyer_id', 'buyer-delete-shared',
+        'resolution_window_from', '2026-07-12T12:00:00Z',
+        'observed_cursor_at', '2026-07-13T12:10:00Z',
+        'attempted_at', '2026-07-13T12:10:00Z'
+      ),
+      public.begin_scheduled_ebay_message_write('message-tenant-a')
+    )
+  $$,
+  '42501',
+  'eBay identity has been erased',
+  'a fresh sync cannot recreate a tombstoned buyer identity'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_scheduled_ebay_message_write(
+      'message-tenant-a',
+      'upsert_unresolved_question',
+      jsonb_build_object(
+        'external_message_id', 'unrelated-buyer-after-deletion',
+        'external_parent_id', 'unrelated-buyer-after-deletion',
+        'external_listing_id', 'sandbox-item-a',
+        'external_buyer_id', 'unrelated-buyer',
+        'resolution_window_from', '2026-07-12T12:00:00Z',
+        'observed_cursor_at', '2026-07-13T12:10:00Z',
+        'attempted_at', '2026-07-13T12:10:00Z'
+      ),
+      public.begin_scheduled_ebay_message_write('message-tenant-a')
+    )
+  $$,
+  'fresh generations preserve unrelated buyer synchronization'
+);
+
+select extensions.is(
+  public.erase_ebay_user_data(null, 'buyer-delete-shared'),
+  0,
+  'buyer-only deletion is idempotent after matched data is erased'
+);
+
+reset role;
 
 insert into public.ebay_unresolved_questions (
   user_id, external_message_id, external_parent_id, external_listing_id,
@@ -1519,6 +1818,15 @@ select extensions.is(
   (select count(*)::integer from public.ebay_connections where user_id = 'message-tenant-b'),
   1,
   'account deletion preserves another tenant connection'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.begin_scheduled_ebay_message_write('message-tenant-a')
+  $$,
+  '42501',
+  'eBay seller account has been erased',
+  'a deleted seller tenant cannot restart messaging through fallback credentials'
 );
 
 select extensions.is(

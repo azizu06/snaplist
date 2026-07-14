@@ -932,7 +932,13 @@ describe("syncInboxForSeller", () => {
 
 describe("SupabaseInboxSyncRepository", () => {
   it("uses the tenant-derived RPC for foreground lifecycle mutations", async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const rpc = vi.fn(async (name: string) => ({
+      data:
+        name === "begin_ebay_message_write"
+          ? "11111111-1111-4111-8111-111111111111"
+          : null,
+      error: null,
+    }));
     const client = { rpc } as unknown as SupabaseClient;
     const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
       client,
@@ -941,14 +947,22 @@ describe("SupabaseInboxSyncRepository", () => {
 
     await repository.markAttempt(new Date("2026-07-13T12:05:00.000Z"));
 
+    expect(rpc).toHaveBeenCalledWith("begin_ebay_message_write");
     expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
       p_operation: "sync_mark_attempt",
       p_payload: { at: "2026-07-13T12:05:00.000Z" },
+      p_generation: "11111111-1111-4111-8111-111111111111",
     });
   });
 
   it("uses the separate scheduler RPC for background lifecycle mutations", async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const rpc = vi.fn(async (name: string) => ({
+      data:
+        name === "begin_scheduled_ebay_message_write"
+          ? "22222222-2222-4222-8222-222222222222"
+          : null,
+      error: null,
+    }));
     const client = { rpc } as unknown as SupabaseClient;
     const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
       client,
@@ -957,15 +971,55 @@ describe("SupabaseInboxSyncRepository", () => {
 
     await repository.markAttempt(new Date("2026-07-13T12:05:00.000Z"));
 
+    expect(rpc).toHaveBeenCalledWith("begin_scheduled_ebay_message_write", {
+      p_user_id: USER_ID,
+    });
     expect(rpc).toHaveBeenCalledWith("apply_scheduled_ebay_message_write", {
       p_user_id: USER_ID,
       p_operation: "sync_mark_attempt",
       p_payload: { at: "2026-07-13T12:05:00.000Z" },
+      p_generation: "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
+  it("pins every write in one sync repository to one account generation", async () => {
+    const generation = "33333333-3333-4333-8333-333333333333";
+    const rpc = vi.fn(async (name: string) => ({
+      data: name === "begin_ebay_message_write" ? generation : null,
+      error: null,
+    }));
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
+      client,
+      scheduled: false,
+    });
+
+    await repository.markAttempt(new Date("2026-07-13T12:05:00.000Z"));
+    await repository.markSuccess(
+      new Date("2026-07-13T12:06:00.000Z"),
+      0,
+    );
+
+    expect(rpc.mock.calls.filter(([name]) => name === "begin_ebay_message_write"))
+      .toHaveLength(1);
+    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_operation: "sync_mark_success",
+      p_payload: {
+        at: "2026-07-13T12:06:00.000Z",
+        pending_resolution_count: 0,
+      },
+      p_generation: generation,
     });
   });
 
   it("writes unresolved identity through the tenant-derived foreground seam", async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const rpc = vi.fn(async (name: string) => ({
+      data:
+        name === "begin_ebay_message_write"
+          ? "11111111-1111-4111-8111-111111111111"
+          : null,
+      error: null,
+    }));
     const client = { rpc } as unknown as SupabaseClient;
     const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
       client,
@@ -1004,11 +1058,18 @@ describe("SupabaseInboxSyncRepository", () => {
         attempted_at: "2026-07-13T12:05:00.000Z",
         error: "Commerce lookup unavailable",
       },
+      p_generation: "11111111-1111-4111-8111-111111111111",
     });
   });
 
   it("passes the reconciliation time through the tenant write seam", async () => {
-    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const rpc = vi.fn(async (name: string) => ({
+      data:
+        name === "begin_ebay_message_write"
+          ? "11111111-1111-4111-8111-111111111111"
+          : null,
+      error: null,
+    }));
     const client = { rpc } as unknown as SupabaseClient;
     const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
       client,
@@ -1026,6 +1087,7 @@ describe("SupabaseInboxSyncRepository", () => {
         external_message_id: "question-pending",
         at: "2026-07-13T12:05:00.000Z",
       },
+      p_generation: "11111111-1111-4111-8111-111111111111",
     });
   });
 });

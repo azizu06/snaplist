@@ -50,7 +50,11 @@ describe("createMessagingTransportForConversation", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("keeps foreground eBay transport on the caller client and tenant write RPC", async () => {
-    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const generation = "11111111-1111-4111-8111-111111111111";
+    const rpc = vi.fn(async (name: string) => ({
+      data: name === "begin_ebay_message_write" ? generation : true,
+      error: null,
+    }));
     const client = {} as SupabaseClient;
     const serverWriteClient = { rpc } as unknown as SupabaseClient;
     vi.mocked(createTenantServerClient).mockResolvedValue(serverWriteClient);
@@ -66,10 +70,17 @@ describe("createMessagingTransportForConversation", () => {
       new Date("2026-07-13T12:01:00.000Z"),
       false,
     );
+    await transport.repository.failCanonical(
+      root.id,
+      "ambiguous",
+      new Date("2026-07-13T12:01:00.000Z"),
+    );
 
     expect(createEbayMessagingAdapterForUser).toHaveBeenCalledWith(client, "user_a");
     expect(createTenantServerClient).toHaveBeenCalledOnce();
     expect(claimed).toBe(true);
+    expect(rpc.mock.calls.filter(([name]) => name === "begin_ebay_message_write"))
+      .toHaveLength(1);
     expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
       p_operation: "claim_canonical",
       p_payload: {
@@ -78,6 +89,16 @@ describe("createMessagingTransportForConversation", () => {
         at: "2026-07-13T12:01:00.000Z",
         retry: false,
       },
+      p_generation: generation,
+    });
+    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_operation: "fail_canonical",
+      p_payload: {
+        message_id: root.id,
+        kind: "ambiguous",
+        attempted_at: "2026-07-13T12:01:00.000Z",
+      },
+      p_generation: generation,
     });
   });
 });
