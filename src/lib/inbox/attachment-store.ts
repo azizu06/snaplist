@@ -179,6 +179,10 @@ export async function createOutboundPhotoUploadIntents(input: {
       throw new MessagePhotoConflictError();
     }
     if (existing.some((row) => row.delivery_status === "uploading")) {
+      // Canonical retries must keep the original expiry. The question may
+      // already have been claimed by another tab/automatic reply, and only the
+      // transactional staging guard can authoritatively revalidate it.
+      if (input.deliveryRequestId === input.conversationRootId) return existing;
       const uploadExpiresAt = new Date((input.now?.() ?? Date.now()) + 15 * 60_000).toISOString();
       const { error } = await input.supabase
         .from("message_attachments")

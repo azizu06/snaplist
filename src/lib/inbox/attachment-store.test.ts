@@ -255,6 +255,36 @@ describe("outbound photo idempotency", () => {
     })).rejects.toBeInstanceOf(MessagePhotoConflictError);
   });
 
+  it("does not renew an existing canonical upload reservation", async () => {
+    const uploading = row({
+      delivery_request_id: ROOT,
+      delivery_status: "uploading",
+      upload_expires_at: "2026-07-14T12:15:00.000Z",
+    });
+    const query = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      order: vi.fn(async () => ({ data: [uploading], error: null })),
+      update: vi.fn(() => query),
+    };
+    const client = { from: vi.fn(() => query) } as unknown as SupabaseClient;
+
+    await expect(createOutboundPhotoUploadIntents({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: ROOT,
+      photos: [{
+        name: "condition.jpg",
+        mediaType: "image/jpeg",
+        byteSize: JPEG.length,
+        contentSha256: createHash("sha256").update(JPEG).digest("hex"),
+      }],
+      now: () => Date.parse("2026-07-14T12:14:00.000Z"),
+    })).resolves.toEqual([uploading]);
+    expect(query.update).not.toHaveBeenCalled();
+  });
+
   it("cleans a multipart upload when its delivery identity was already claimed", async () => {
     const attachmentQuery = {
       select: vi.fn(() => attachmentQuery),
