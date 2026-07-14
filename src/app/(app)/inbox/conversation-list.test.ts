@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { MessageRow } from "@/lib/inbox";
-import { deriveConversationState } from "./conversation-list";
+import {
+  canonicalReplyFailureLabel,
+  deriveConversationState,
+  messagePolicyEvidenceLabel,
+} from "./conversation-list";
 
 function message(overrides: Partial<MessageRow> = {}): MessageRow {
   return {
@@ -61,6 +65,92 @@ describe("deriveConversationState", () => {
 
     expect(delivered.delivered).toBe(true);
     expect(delivered.sending).toBe(false);
+  });
+
+  it("labels an automatic reply with its authoritative grounding source", () => {
+    const root = message({
+      policy_version: "grounded-pre-sale-v3",
+      policy_outcome: "auto_send",
+      policy_delivery_actor: "automatic",
+      delivery_status: "delivered",
+      policy_reason_codes: ["exact_authoritative_fact"],
+      policy_grounding_references: [
+        {
+          key: "asking price",
+          value: "180.00",
+          source: "current_asking_price",
+          reference: "listing:1:current-asking-price",
+        },
+      ],
+    });
+    const outbound = message({
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound",
+      reply_to: root.id,
+      reply_kind: "reply",
+      delivery_status: "delivered",
+    });
+    expect(deriveConversationState(root, new Map([[root.id, outbound]]), null))
+      .toMatchObject({ statusLabel: "Automatically sent", unread: false });
+    expect(messagePolicyEvidenceLabel(root)).toBe(
+      "Automatically sent · current asking price",
+    );
+  });
+
+  it("labels manual delivery by its actual seller actor", () => {
+    const root = message({
+      policy_version: "grounded-pre-sale-v3",
+      policy_outcome: "auto_send",
+      policy_delivery_actor: "seller",
+      delivery_status: "delivered",
+    });
+    const outbound = message({
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound",
+      reply_to: root.id,
+      reply_kind: "reply",
+      delivery_status: "delivered",
+    });
+
+    expect(deriveConversationState(root, new Map([[root.id, outbound]]), null))
+      .toMatchObject({ statusLabel: "Replied", unread: false });
+    expect(messagePolicyEvidenceLabel(root)).toBe("Seller-approved reply sent");
+  });
+
+  it("keeps non-authorized outcomes visibly seller-gated", () => {
+    expect(
+      messagePolicyEvidenceLabel(message({ policy_outcome: "draft_for_approval" })),
+    ).toBe("Needs your approval");
+    expect(
+      messagePolicyEvidenceLabel(message({ policy_outcome: "escalate" })),
+    ).toBe("Needs seller check");
+  });
+
+  it("shows queued and blocked automatic delivery truth", () => {
+    expect(
+      messagePolicyEvidenceLabel(
+        message({
+          policy_outcome: "auto_send",
+          policy_delivery_status: "not_attempted",
+        }),
+      ),
+    ).toBe("Automatic reply queued");
+    expect(
+      messagePolicyEvidenceLabel(
+        message({
+          policy_outcome: "auto_send",
+          policy_delivery_status: "blocked",
+        }),
+      ),
+    ).toBe("Automatic send blocked · Needs your approval");
+  });
+
+  it("uses the actual delivery actor for failure history", () => {
+    expect(
+      canonicalReplyFailureLabel(
+        message({ policy_outcome: "auto_send", policy_delivery_actor: "seller" }),
+      ),
+    ).toBe("Reply not delivered. Delivery failed after your approval.");
   });
 
   it("marks a question answered on eBay as resolved and non-actionable", () => {

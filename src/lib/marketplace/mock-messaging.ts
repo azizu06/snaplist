@@ -3,6 +3,7 @@ import type {
   MarketplaceDeliveryInput,
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
+  MarketplaceListingSnapshot,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
   MarketplaceQuestionResolutionFailure,
@@ -22,6 +23,7 @@ export class MockMarketplaceMessagingAdapter
   readonly followUps: MarketplaceDeliveryInput[] = [];
   replyFailure?: Error;
   followUpFailure?: Error;
+  listingSnapshots = new Map<string, MarketplaceListingSnapshot>();
 
   async fetchUnansweredQuestions(
     input: FetchQuestionsInput,
@@ -52,6 +54,14 @@ export class MockMarketplaceMessagingAdapter
     );
     if (!resolved) throw new Error("Mock question resolution failed");
     return resolved;
+  }
+
+  async fetchListingSnapshot(
+    externalListingId: string,
+  ): Promise<MarketplaceListingSnapshot> {
+    const snapshot = this.listingSnapshots.get(externalListingId);
+    if (!snapshot) throw new Error("Mock listing snapshot was not configured");
+    return snapshot;
   }
 
   async replyToQuestion(

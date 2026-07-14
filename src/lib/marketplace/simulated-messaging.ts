@@ -2,6 +2,7 @@ import type {
   MarketplaceDeliveryInput,
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
+  MarketplaceListingSnapshot,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
 } from "./messaging";
@@ -20,6 +21,10 @@ export class SimulatedMarketplaceMessagingAdapter
 
   async resolveQuestion(): Promise<MarketplaceQuestion> {
     throw new Error("Simulated messages have no external question resolution");
+  }
+
+  async fetchListingSnapshot(): Promise<MarketplaceListingSnapshot> {
+    throw new Error("Simulated listings have no marketplace snapshot");
   }
 
   async replyToQuestion(

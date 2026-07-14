@@ -73,6 +73,7 @@ describe("publish eligibility settings copy", () => {
           data={{
             user: { name: "Seller", email: "seller@example.com", imageUrl: null },
             autopilotEnabled: true,
+            autoReplyEnabled: false,
             ebay: { connected: false, ebayUsername: null },
             billing: {
               tier: "free",
@@ -84,6 +85,7 @@ describe("publish eligibility settings copy", () => {
             ebayBanner: null,
           }}
           autopilotAction={async () => undefined}
+          autoReplyAction={async () => undefined}
           disconnectEbayAction={async () => undefined}
         />,
       ),
@@ -96,5 +98,39 @@ describe("publish eligibility settings copy", () => {
     expect(publishEligibilityCard).toMatch(/turning it off.*automatic repricing/i);
     expect(publishEligibilityCard).toMatch(/existing live listings/i);
     expect(publishEligibilityCard).toMatch(/auto-reprice.*enabled/i);
+  });
+
+  it("presents one narrow default-off safe-answer preference", () => {
+    const $ = load(
+      renderToStaticMarkup(
+        <SettingsView
+          data={{
+            user: { name: "Seller", email: "seller@example.com", imageUrl: null },
+            autopilotEnabled: true,
+            autoReplyEnabled: false,
+            ebay: { connected: true, ebayUsername: "seller" },
+            billing: {
+              tier: "free",
+              itemsPerDay: 15,
+              proItemsPerDay: 200,
+              billingEnabled: false,
+            },
+            error: null,
+            ebayBanner: null,
+          }}
+          autopilotAction={async () => undefined}
+          autoReplyAction={async () => undefined}
+          disconnectEbayAction={async () => undefined}
+        />,
+      ),
+    );
+    const card = $("h2")
+      .filter((_, heading) => $(heading).text().includes("Safe buyer auto-replies"))
+      .closest("section");
+    expect(card.text()).toMatch(/automatically answer safe factual questions/i);
+    expect(card.text()).toMatch(/off by default/i);
+    expect(card.text()).toMatch(/offers.*shipping.*returns/i);
+    expect(card.find('[role="switch"]').attr("aria-checked")).toBe("false");
+    expect(card.text()).not.toMatch(/category rules|custom prompt|personality/i);
   });
 });

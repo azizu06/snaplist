@@ -107,17 +107,26 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **eBay account generation** — the tenant-bound version of a connected or operator-fallback seller
   identity. Sync, messages, token refresh, and provider dispatch are pinned to it so disconnect,
   reconnect, replacement, or erasure cannot let stale work cross account boundaries.
-- **Delivery truth** — the external state of an approved reply/follow-up: `sending`, `delivered`,
+- **Delivery truth** — the external state of an authorized automatic reply or seller-approved reply/follow-up: `sending`, `delivered`,
   `rejected`, `failed`, or `ambiguous`. `sent_at` and an external delivery ID exist only after an
   acknowledgement; ambiguous delivery remains visibly retryable with an explicit duplicate-risk
   confirmation.
 - **Inbox sync** — the shared foreground/cron service that reads overlapping eBay windows, stores
   unresolved conversation matches for later reconciliation, deduplicates external identity,
-  generates one grounded draft/notification, and retires questions eBay reports as answered or no
+  routes each question once per **message policy version**, and retires questions eBay reports as answered or no
   longer available. Normal ingestion targets the next five-minute boundary or sooner.
+- **Safe buyer auto-reply** — one tenant-scoped, default-off seller preference. A deterministic
+  **message policy** may send only an exact restatement of a current authoritative listing fact
+  (including the asking price or seller-confirmed measurement). Negotiation, commitments,
+  post-sale support, untrusted buyer instructions/premises, raw vision guesses, and
+  missing/stale/conflicting facts remain seller-gated.
+- **Message policy decision** — the versioned, once-per-question audit outcome: **auto-send**,
+  **draft for approval**, or **escalate**, with structured reasons, grounding references, safety
+  signals, and canonical delivery truth. Model confidence never authorizes a send.
 - **Buyer-Q&A agent** — the **agent** that drafts replies to buyer questions, grounded in an item's
   attributes/listing. It runs for simulated demo questions and tenant-scoped eBay Sandbox imports;
-  sellers still approve or edit every reply before authenticated delivery.
+  it never authorizes an automatic send. The deterministic **message policy** does; all non-safe-fact
+  outcomes still require seller approval or review before authenticated delivery.
 - **Inbox** — the seller's live view of simulated or imported buyer **messages**, fed
   DB→Supabase Realtime after **inbox sync**. The seller is the only SnapList user; buyers stay on eBay.
 - **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to

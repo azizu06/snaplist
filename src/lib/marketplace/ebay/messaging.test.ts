@@ -14,6 +14,46 @@ function xmlResponse(body: string, status = 200): Response {
 }
 
 describe("HttpEbayMessagingAdapter", () => {
+  it("reads authoritative current listing state from eBay", async () => {
+    const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect((init?.headers as Record<string, string>)["x-ebay-api-call-name"]).toBe(
+        "GetItem",
+      );
+      expect(String(init?.body)).toContain("<ItemID>110011001100</ItemID>");
+      return xmlResponse(`
+        <GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <Item>
+            <ItemID>110011001100</ItemID>
+            <ConditionDisplayName>Used - Excellent</ConditionDisplayName>
+            <SellingStatus>
+              <ListingStatus>Active</ListingStatus>
+              <CurrentPrice currencyID="USD">180.00</CurrentPrice>
+            </SellingStatus>
+            <ItemSpecifics>
+              <NameValueList><Name>Brand</Name><Value>Sony</Value></NameValueList>
+              <NameValueList><Name>Includes</Name><Value>Case</Value><Value>Cable</Value></NameValueList>
+            </ItemSpecifics>
+          </Item>
+        </GetItemResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(adapter.fetchListingSnapshot("110011001100")).resolves.toMatchObject({
+      externalListingId: "110011001100",
+      active: true,
+      price: 180,
+      currency: "USD",
+      condition: "Used - Excellent",
+      itemSpecifics: { Brand: "Sony", Includes: "Case, Cable" },
+      observedAt: expect.any(String),
+    });
+  });
+
   it("imports unanswered active-listing questions with exact Trading message identity", async () => {
     const tradingBodies: string[] = [];
     const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {

@@ -178,6 +178,7 @@ const FIXTURE_SETTINGS: SettingsData = {
     imageUrl: null,
   },
   autopilotEnabled: true,
+  autoReplyEnabled: false,
   ebay: { connected: true, ebayUsername: "aziz_resells" },
   billing: { tier: "free", itemsPerDay: 15, proItemsPerDay: 200, billingEnabled: true },
   error: null,
@@ -281,6 +282,7 @@ export default async function PreviewPage({
         <SettingsView
           data={FIXTURE_SETTINGS}
           autopilotAction={noopAction}
+          autoReplyAction={noopAction}
           disconnectEbayAction={noopAction}
         />
       );
@@ -290,9 +292,11 @@ export default async function PreviewPage({
           data={{
             ...FIXTURE_SETTINGS,
             autopilotEnabled: false,
+            autoReplyEnabled: false,
             ebay: { connected: false, ebayUsername: null },
           }}
           autopilotAction={noopAction}
+          autoReplyAction={noopAction}
           disconnectEbayAction={noopAction}
         />
       );
