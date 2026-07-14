@@ -936,53 +936,51 @@ export const DEMO_PRODUCTS_BY_SLUG: Record<string, DemoProduct> =
 /** Which catalog products define each high-salience marketing surface. */
 export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
   // --- Real dev-preview capture suite (see remotion/INTEGRATION.md) ---
-  // The current review and publish fixtures follow Sony headphones through the
-  // shipped app UI; the inbox fixtures add reseller-dense buyer conversations.
-  "hero-video": ["polaroid", "gameboy", "gshock"], // public/hero-demo.mp4 — vision-showcase acts 1–3
-  "step-snap": ["headphones"],
-  "step-identify": ["headphones"],
-  "step-price": ["headphones"],
-  "step-write": ["headphones"],
-  "step-publish": ["headphones"],
-  "buyer-qa": ["headphones", "jacket", "book"],
-  "inbox-qa": ["headphones", "jacket", "book"],
+  // One real Acer Predator listing anchors the complete story so the six clips
+  // read as one reseller workflow, not six unrelated stock-photo examples.
+  "step-snap": ["acer-predator"],
+  "step-identify": ["acer-predator"],
+  "step-price": ["acer-predator"],
+  "step-write": ["acer-predator"],
+  "step-publish": ["acer-predator"],
+  "buyer-qa": ["acer-predator", "a-xbox360", "a-macbookair"],
+  "inbox-qa": ["acer-predator", "a-xbox360", "a-macbookair"],
   // --- Static page surfaces ---
-  // #95: the highest-salience examples now describe a reseller's comp-dense
-  // inventory. The broader catalog still supports generic household items; it
-  // simply does not let furniture and local-only goods define the landing page.
+  // #136: a deliberate tech / gaming / streetwear haul. The broader catalog
+  // still supports generic household items, but none define a primary surface.
   "landing-carousel": [
-    "camera",
-    "sneakers",
-    "book",
-    "vinyl",
-    "gameboy",
-    "gshock",
-    "console",
-    "drill",
-    "mixer",
-    "espresso",
-  ],
-  // The home "One photo, three storefronts" section — one item rendered three
-  // platform-fluent ways (the Xbox 360 Kinect bundle, exclusive to this surface).
-  "landing-storefronts": ["a-xbox360"],
-  // The home "From shelf to sold in three moves" prelude — one recognizable,
-  // shippable item shown captured → priced → listed.
-  "landing-three-moves": ["console"],
-  // Hero ScanShowcase — eight recognizable, searchable resale items. Repetition
-  // with the carousel is intentional when it strengthens the reseller story.
-  "landing-hero-scan": [
+    "acer-predator",
     "a-macbookair",
     "a-cyberpc",
-    "a-monitors",
     "a-xbox360",
+    "console",
     "camera",
-    "sneakers",
+    "gameboy",
     "gshock",
-    "mixer",
+    "sneakers",
+    "book",
+  ],
+  // The anchor Acer listing rendered three platform-fluent ways.
+  "landing-storefronts": ["acer-predator"],
+  // The home "From shelf to sold in three moves" prelude — one recognizable,
+  // shippable item shown captured → priced → listed.
+  "landing-three-moves": ["acer-predator"],
+  // Hero ScanShowcase — the same coherent haul, with the Acer anchor first.
+  // Repetition across primary surfaces is intentional: this is one seller's
+  // inventory, not a grab bag assembled independently per component.
+  "landing-hero-scan": [
+    "acer-predator",
+    "a-xbox360",
+    "console",
+    "camera",
+    "gameboy",
+    "gshock",
+    "sneakers",
+    "book",
   ],
   // The pricing waterfall on /how-it-works (last section before the CTA).
-  "hiw-waterfall": ["a-crib"],
-  "how-it-works": ["a-stroller"], // + embeds the step-* clips above
+  "hiw-waterfall": ["acer-predator"],
+  "how-it-works": ["acer-predator"], // + embeds the step-* clips above
   // Three items exclusive to the logged-in dashboard folder (ordered
   // shortest→longest name for the folder's narrow→wide papers).
   "dashboard-folder": ["a-litterbox", "a-bowls", "a-chest"],

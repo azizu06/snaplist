@@ -3,8 +3,11 @@
 import { useLayoutEffect } from "react";
 
 const FOCUS_SELECTORS: Record<string, string> = {
-  price: "#review-price",
+  upload: "#upload-photos",
+  identify: "#review-identification",
+  price: "#review-price-card",
   write: "#review-title",
+  publish: "#publish-action",
 };
 
 function clickButton(label: string) {
@@ -19,10 +22,10 @@ function clickButton(label: string) {
 /**
  * Query controls consumed only by remotion/scripts/capture-real-ui.mjs:
  *   ?theme=dark       align the real app theme before capture
- *   ?focus=price      center the real review price card
- *   ?focus=write      center the real listing editor
+ *   ?focus=...        center the real action/card named above
  *   ?capture=list     show the mobile inbox conversation list
- *   ?capture=sent     show a completed Patagonia buyer thread
+ *   ?capture=filled   add the Acer photo through the real file input
+ *   ?capture=sent     show a completed MacBook buyer thread
  */
 export function PreviewCaptureController() {
   useLayoutEffect(() => {
@@ -39,8 +42,32 @@ export function PreviewCaptureController() {
       window.localStorage.setItem("theme", theme);
     }
 
-    let nestedTimer: number | undefined;
-    const timer = window.setTimeout(() => {
+    const timers = new Set<number>();
+    let cancelled = false;
+    const later = (callback: () => void, ms: number) => {
+      const id = window.setTimeout(() => {
+        timers.delete(id);
+        callback();
+      }, ms);
+      timers.add(id);
+    };
+    const markReady = () => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!cancelled) document.documentElement.dataset.demoCaptureReady = "true";
+        });
+      });
+    };
+
+    const prepare = () => {
+      if (
+        capture === "filled" &&
+        document.documentElement.dataset.demoInteractionReady !== "true"
+      ) {
+        later(prepare, 50);
+        return;
+      }
+
       if (focus && FOCUS_SELECTORS[focus]) {
         document
           .querySelector(FOCUS_SELECTORS[focus])
@@ -49,22 +76,24 @@ export function PreviewCaptureController() {
 
       if (capture === "list") {
         clickButton("Back to conversations");
+        later(markReady, 320);
+        return;
       }
 
       if (capture === "sent") {
         clickButton("Back to conversations");
-        nestedTimer = window.setTimeout(
-          () => clickButton("Patagonia Better Sweater"),
-          120,
-        );
+        later(() => clickButton("Apple MacBook Air"), 120);
+        later(markReady, 480);
+        return;
       }
 
-      document.documentElement.dataset.demoCaptureReady = "true";
-    }, 500);
+      markReady();
+    };
+    later(prepare, 500);
 
     return () => {
-      window.clearTimeout(timer);
-      if (nestedTimer !== undefined) window.clearTimeout(nestedTimer);
+      cancelled = true;
+      for (const timer of timers) window.clearTimeout(timer);
       delete document.documentElement.dataset.demoCaptureReady;
       delete document.documentElement.dataset.demoCaptureActive;
     };

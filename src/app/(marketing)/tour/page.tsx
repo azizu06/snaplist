@@ -19,7 +19,8 @@ export const metadata: Metadata = {
  * clip takes ~3/4 of each row; buyer Q&A joined the same section as step 6
  * ("After it's live") in the identical alternating text/video format. Section
  * order: hero (headline only) → step-intro header → SIX step clips
- * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4, 1920×1080 loops via DemoClip,
+ * (/demo/steps/*.mp4 + /demo/buyer-qa.mp4 via DemoClip: 16:9 desktop context
+ * and 6:5 action-focused mobile crops,
  * alternating sides) → seller FAQ LAST → CTA. The FAQ (#faq anchor) was
  * relocated here when the About page was retired. The step clips embed their
  * own assigned items (see DEMO_SURFACE_ASSIGNMENTS). The live scanning
@@ -152,7 +153,7 @@ export default function HowItWorks() {
           column (max-w-[1720px]) and gives the clip ~3/4 of the row so the
           in-video UI is readable without squinting. */}
       <section className="mx-auto w-full max-w-[1720px] px-5 pb-24 pt-6 sm:px-8 sm:pb-28 sm:pt-10">
-        <div className="space-y-24 sm:space-y-32">
+        <div className="space-y-16 sm:space-y-24 lg:space-y-32">
           {STEPS.map((step, i) => {
             const { n, src, glyph, title, body, poster, label } = step;
             // Only steps with a portrait render set `mobile`; under 768px the
@@ -165,7 +166,7 @@ export default function HowItWorks() {
             <Reveal key={n} delay={0.05}>
               <div
                 id={`step-${glyph === "chat" ? "qa" : glyph}`}
-                className={`grid scroll-mt-24 items-center gap-9 lg:gap-12 ${
+                className={`grid scroll-mt-24 items-center gap-5 sm:gap-8 lg:gap-12 ${
                   i % 2 === 0
                     ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)] xl:grid-cols-[minmax(0,1fr)_minmax(0,2.9fr)]"
                     : "lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,2.9fr)_minmax(0,1fr)]"
@@ -179,13 +180,14 @@ export default function HowItWorks() {
                   <h2 className="font-display text-[clamp(23px,3.4vw,40px)] font-bold tracking-tight text-flash">
                     {title}
                   </h2>
-                  <p className="mt-3 max-w-[48ch] text-[15px] leading-relaxed text-flash-dim sm:mt-4 sm:text-[16px]">
+                  <p className="mt-3 hidden max-w-[48ch] text-[15px] leading-relaxed text-flash-dim sm:mt-4 sm:text-[16px] lg:block">
                     {body}
                   </p>
                 </div>
-                {/* Mobile: the clip frame goes full-bleed edge-to-edge
+                {/* Mobile: the clip follows the step title immediately and goes
+                    full-bleed edge-to-edge
                     (escaping the section's px-5). Under 768px it swaps to the
-                    portrait 4:5 `-mobile` render — a phone-native SnapList
+                    action-cropped 6:5 `-mobile` render — a legible SnapList
                     screen with large, legible in-frame UI — so the step reads
                     clearly instead of squinting at a shrunk desktop window.
                     Desktop keeps the framed 16:9 rounded panel. */}
@@ -203,6 +205,9 @@ export default function HowItWorks() {
                     className="!rounded-none border-x-0 sm:!rounded-3xl sm:border-x"
                   />
                 </div>
+                <p className="max-w-[48ch] text-[15px] leading-relaxed text-flash-dim sm:text-[16px] lg:hidden">
+                  {body}
+                </p>
               </div>
             </Reveal>
             );

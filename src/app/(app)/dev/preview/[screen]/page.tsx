@@ -4,7 +4,6 @@ import {
   type DashboardRow,
 } from "@/app/(app)/dashboard/dashboard-view";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
-import { UploadView } from "@/app/(app)/upload/upload-form";
 import { BatchCaptureView } from "@/app/(app)/batch/batch-capture";
 import {
   PublishView,
@@ -17,6 +16,7 @@ import {
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 import { InboxThreadPreview } from "../inbox-thread-preview";
 import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-view";
+import { UploadPreview } from "../upload-preview";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -29,13 +29,13 @@ const FIXTURE_ROWS: DashboardRow[] = [
   {
     itemId: "fx-1",
     listingId: "l-1",
-    title: "Sony WH-1000XM4",
+    title: "Acer Predator Helios 300",
     status: "draft",
     createdAt: "2026-06-11T15:00:00Z",
-    price: 178,
-    costBasis: 60,
-    thumbUrl: "/demo/headphones.jpg",
-    category: "Electronics",
+    price: 550,
+    costBasis: 310,
+    thumbUrl: "/demo/authentic/acer-predator-a1-open.jpg",
+    category: "Computers",
     condition: "Good",
   },
   {
@@ -104,71 +104,75 @@ const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
   reviewRevision: "00000000-0000-4000-8000-000000000001",
   reviewBlocked: false,
-  photoUrls: ["/demo/headphones.jpg", "/demo/boombox.jpg"],
+  photoUrls: [
+    "/demo/authentic/acer-predator-a1-open.jpg",
+    "/demo/authentic/acer-predator-a2-night.jpg",
+    "/demo/authentic/acer-predator-a3-closed.jpg",
+    "/demo/authentic/acer-predator-a4-boot.jpg",
+  ],
   identification: {
-    label: "Sony WH-1000XM4 Wireless Headphones",
+    label: "Acer Predator Helios 300 Gaming Laptop",
     confident: true,
     reason: null,
     candidates: [],
     evidence: 0.85,
   },
   attrs: [
-    { key: "brand", value: "Sony" },
-    { key: "model", value: "WH-1000XM4" },
-    { key: "category", value: "Consumer electronics" },
+    { key: "brand", value: "Acer" },
+    { key: "model", value: "Predator Helios 300" },
+    { key: "category", value: "Computers & laptops" },
     { key: "condition", value: "Good" },
-    { key: "upc", value: "027242919623" },
+    { key: "upc", value: null },
     { key: "isbn", value: null },
   ],
-  specs: ["wireless", "noise-cancelling", "over-ear"],
+  specs: ["Intel Core i7", "GeForce RTX graphics", "144Hz display", "RGB keyboard"],
   listing: {
     id: "l-1",
     platform: "ebay",
-    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
+    title: "Acer Predator Helios 300 Gaming Laptop Core i7 RTX 144Hz, Tested",
     description:
-      "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+      "Acer Predator Helios 300 gaming laptop in good working condition. The visible badges identify an Intel Core i7 configuration with GeForce RTX graphics and a 144Hz display.\n\nRGB keyboard, screen, ports, and boot state are pictured. Includes the original charger. Light cosmetic wear from normal use; tested and fully functional.",
     status: "draft",
   },
-  suggested: 178,
+  suggested: 550,
   override: null,
-  displayPrice: 178,
-  costBasis: 60,
+  displayPrice: 550,
+  costBasis: 310,
   measurements: null,
-  range: { low: 155, high: 205 },
-  confidence: 0.82,
-  tier: "web_tight",
+  range: { low: 495, high: 625 },
+  confidence: 0.88,
+  tier: "ebay-sold",
   sources: [
     {
-      url: "https://www.ebay.com/itm/demo-1",
-      title: "Sony WH-1000XM4 Black — sold listing",
+      url: "https://www.ebay.com/itm/demo-sold-1",
+      title: "Acer Predator Helios 300 RTX gaming laptop — sold",
       kind: "sold-comp",
     },
     {
-      url: "https://www.mercari.com/us/item/demo-2",
-      title: "Sony WH1000XM4 headphones (used)",
-      kind: "asking-comp",
+      url: "https://www.ebay.com/itm/demo-sold-2",
+      title: "Predator Helios 300 Core i7 144Hz — sold",
+      kind: "sold-comp",
     },
-    { url: "https://www.swappa.com/listing/demo-3", title: null, kind: "asking-comp" },
+    {
+      url: "https://www.ebay.com/itm/demo-sold-3",
+      title: "Acer Helios gaming notebook with charger — sold",
+      kind: "sold-comp",
+    },
   ],
   strategies: [
-    { key: "quick", label: "Quick sell", price: 167, blurb: "Priced to move — toward the lower end of real listed prices." },
-    { key: "balanced", label: "Balanced", price: 178, blurb: "The typical listed price — a safe bet." },
-    { key: "maximize", label: "Maximize", price: 194, blurb: "Top of what comparable items list for — expect a longer wait." },
+    { key: "quick", label: "Quick sell", price: 515, blurb: "Priced to move — toward the lower end of recent sold prices." },
+    { key: "balanced", label: "Balanced", price: 550, blurb: "Centered on the recent sold-price cluster." },
+    { key: "maximize", label: "Maximize", price: 595, blurb: "Near the top of comparable sold configurations." },
   ],
   clarifyOptions: [
-    { label: "Original carry case included", spec: "with carry case" },
-    { label: "Ear pads in good condition", spec: "ear pads good condition" },
-    { label: "Battery holds a full charge", spec: "battery holds full charge" },
-    { label: "All buttons fully functional", spec: "all buttons functional" },
-    { label: "Pairs reliably over Bluetooth", spec: "bluetooth pairs reliably" },
-    { label: "Original box and USB-C cable", spec: "original box and cable" },
+    { label: "Original charger included", spec: "original charger included" },
+    { label: "Battery holds a charge", spec: "battery holds a charge" },
+    { label: "144Hz display works", spec: "144Hz display tested" },
+    { label: "RGB keyboard works", spec: "RGB keyboard tested" },
+    { label: "All ports tested", spec: "all ports tested" },
+    { label: "Fresh Windows install", spec: "fresh Windows install" },
   ],
-  banner: {
-    variant: "warning",
-    title: "Waiting for your review",
-    detail:
-      "Confidence was below the eligibility threshold when this listing was generated, so it waits for your review and manual publish.",
-  },
+  banner: null,
   actionError: null,
 };
 
@@ -189,41 +193,41 @@ const FIXTURE_PUBLISH: PublishData = {
   listingId: "l-1",
   itemId: "fx-1",
   platform: "ebay",
-  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
+  title: "Acer Predator Helios 300 Gaming Laptop Core i7 RTX 144Hz, Tested",
   description:
-    "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+    "Acer Predator Helios 300 gaming laptop in good working condition. Intel Core i7, GeForce RTX graphics, 144Hz display, and RGB keyboard are shown in the photos. Includes original charger. Light cosmetic wear; tested and fully functional.",
   status: "draft",
   published: false,
   failed: false,
   ebayListingId: null,
-  photoUrl: "/demo/headphones.jpg",
+  photoUrl: "/demo/authentic/acer-predator-a1-open.jpg",
   actionError: null,
 };
 
 const FIXTURE_EXPORT: ExportData = {
   itemId: "fx-1",
-  itemName: "Sony WH-1000XM4",
-  itemThumb: "/demo/headphones.jpg",
+  itemName: "Acer Predator Helios 300",
+  itemThumb: "/demo/authentic/acer-predator-a1-open.jpg",
   condition: "Good",
-  price: 178,
+  price: 550,
   packs: {
     facebook: {
-      title: "Sony WH-1000XM4 Wireless Headphones",
+      title: "Acer Predator Helios 300 Gaming Laptop",
       description:
-        "For sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.",
+        "Acer Predator Helios 300 gaming laptop in good condition. Core i7, GeForce RTX graphics, 144Hz display, and RGB keyboard. Original charger included.",
       hashtags: [],
-      price: 178,
+      price: 550,
       copyBlock:
-        "Sony WH-1000XM4 Wireless Headphones\n\nFor sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.\n\nCondition: Good\nAsking $178\nLocal pickup, message me if interested!",
+        "Acer Predator Helios 300 Gaming Laptop\n\nCore i7, GeForce RTX graphics, 144Hz display, and RGB keyboard. Original charger included.\n\nCondition: Good\nAsking $550\nLocal pickup, message me if interested!",
     },
     mercari: {
-      title: "Sony WH-1000XM4 Noise Cancelling Headphones",
+      title: "Acer Predator Helios 300 Gaming Laptop",
       description:
-        "For sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.",
-      hashtags: ["#sony", "#wh1000xm4", "#headphones"],
-      price: 178,
+        "Acer Predator Helios 300 in good condition with Core i7, GeForce RTX graphics, a 144Hz display, and RGB keyboard. Charger included. Shipping available.",
+      hashtags: ["#acerpredator", "#gaminglaptop", "#pcgaming"],
+      price: 550,
       copyBlock:
-        "Sony WH-1000XM4 Noise Cancelling Headphones\n\nFor sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.\n\n#sony #wh1000xm4 #headphones",
+        "Acer Predator Helios 300 Gaming Laptop\n\nCore i7, GeForce RTX graphics, 144Hz display, and RGB keyboard. Original charger included. Shipping available.\n\n#acerpredator #gaminglaptop #pcgaming",
     },
     cached: true,
     model: "gemini-2.5-flash",
@@ -324,7 +328,7 @@ export default async function PreviewPage({
         </main>
       );
     case "upload":
-      return <UploadView action={noopAction} actionError={null} />;
+      return <UploadPreview action={noopAction} />;
     case "batch":
       return <BatchCaptureView />;
     case "publish":

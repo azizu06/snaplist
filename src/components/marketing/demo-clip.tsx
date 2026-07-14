@@ -14,7 +14,7 @@ import { SeamlessThemeVideo } from "@/components/seamless-theme-video";
 import { RealUiCapturePoster } from "@/components/real-ui-capture-poster";
 
 const POSTER_SHOTS: Record<string, string> = {
-  snap: "upload",
+  snap: "upload-filled",
   identify: "review-identify",
   price: "review-price",
   write: "review-write",
@@ -24,7 +24,7 @@ const POSTER_SHOTS: Record<string, string> = {
 
 function posterShot(src: string): string {
   const id = src.split("/").at(-1)?.replace(/\.mp4$/, "") ?? "";
-  return POSTER_SHOTS[id] ?? "upload";
+  return POSTER_SHOTS[id] ?? "upload-filled";
 }
 
 export function DemoClip({
@@ -34,9 +34,8 @@ export function DemoClip({
   className,
 }: {
   src: string;
-  /** Optional portrait render shown under 768px (with its `-dark` sibling).
-   *  When set, the frame switches to a 4:5 box on mobile so the portrait clip
-   *  fills it without cropping; desktop keeps the 16:9 panel. */
+  /** Optional action crop shown under 768px (with its `-dark` sibling).
+   *  Mobile uses a legible 6:5 focus window; desktop keeps 16:9 context. */
   mobileSrc?: string;
   /** Accessible description of the clip's content. */
   label: string;
@@ -57,7 +56,7 @@ export function DemoClip({
         mobileSrc={mobileSrc}
         label={label}
         lazy
-        className={mobileSrc ? "aspect-[4/5] md:aspect-video" : "aspect-video"}
+        className={mobileSrc ? "aspect-[6/5] md:aspect-video" : "aspect-video"}
       >
         <RealUiCapturePoster shot={posterShot(src)} label={`${label} (still)`} />
       </SeamlessThemeVideo>

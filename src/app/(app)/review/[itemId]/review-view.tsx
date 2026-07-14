@@ -123,15 +123,17 @@ const APP_CARD_CHROME = "rounded-xl border border-border bg-surface shadow-xs";
  * reading and typing, not browsing marketing). Same chrome, no hover effect.
  */
 function Card({
+  id,
   chromeClassName = APP_CARD_CHROME,
   className,
   children,
 }: {
+  id?: string;
   chromeClassName?: string;
   className?: string;
   children: React.ReactNode;
 }) {
-  return <div className={`${chromeClassName} ${className ?? ""}`}>{children}</div>;
+  return <div id={id} className={`${chromeClassName} ${className ?? ""}`}>{children}</div>;
 }
 
 // Fields read as a recessed well: filled with the PAGE colour (`bg-bg`), one
@@ -1209,6 +1211,7 @@ function ReviewViewState({
           {/* Price & confidence — HERO. Stronger border + soft elevation set it
               apart from the calm meta card; the green dash eyebrow leads the eye. */}
           <Card
+            id="review-price-card"
             chromeClassName="rounded-xl border border-border-strong bg-surface shadow-sm"            className="p-4 sm:p-5"
           >
             <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
@@ -1341,6 +1344,7 @@ function ReviewViewState({
               (Shopify "Organization"). Corrections live in the bounded identity
               editor below; detected attributes sit here beneath a divider. */}
           <Card
+            id="review-identification"
             chromeClassName={APP_CARD_CHROME}            className="p-4 sm:p-5"
           >
             <CardTitle>Item details</CardTitle>

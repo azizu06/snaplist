@@ -35,16 +35,16 @@ import type { MessageRow } from "@/lib/inbox";
 
 // Distinct item ids per conversation so each row names a different listing,
 // matching how the live inbox maps message.item_id → the item's label.
-const ITEM_XM4 = "00000000-0000-0000-0000-0000000000a1";
-const ITEM_LEGO = "00000000-0000-0000-0000-0000000000a2";
-const ITEM_PATAGONIA = "00000000-0000-0000-0000-0000000000a3";
-const ITEM_KINDLE = "00000000-0000-0000-0000-0000000000a4";
+const ITEM_ACER = "00000000-0000-0000-0000-0000000000a1";
+const ITEM_XBOX = "00000000-0000-0000-0000-0000000000a2";
+const ITEM_MACBOOK = "00000000-0000-0000-0000-0000000000a3";
+const ITEM_SWITCH = "00000000-0000-0000-0000-0000000000a4";
 
 const FIXTURE_ITEMS: ItemOption[] = [
-  { id: ITEM_XM4, label: "Sony WH-1000XM4 Headphones" },
-  { id: ITEM_LEGO, label: "LEGO Millennium Falcon 75257" },
-  { id: ITEM_PATAGONIA, label: "Patagonia Better Sweater (M)" },
-  { id: ITEM_KINDLE, label: "Kindle Paperwhite 11th Gen" },
+  { id: ITEM_ACER, label: "Acer Predator Helios 300" },
+  { id: ITEM_XBOX, label: "Xbox 360 Kinect Bundle" },
+  { id: ITEM_MACBOOK, label: "Apple MacBook Air (M1)" },
+  { id: ITEM_SWITCH, label: "Nintendo Switch Console" },
 ];
 
 // Fixed base (not Date.now()) so the <time dateTime> ISO strings are identical
@@ -115,40 +115,40 @@ const Q_UNDELIVERED = "00000000-0000-0000-0000-0000000000d4";
 const FIXTURE_INBOUND: MessageRow[] = [
   inbound(
     Q_DRAFTED,
-    ITEM_XM4,
-    "Hi! Does it come with the original box and both charging cables?",
+    ITEM_ACER,
+    "Hi! Does the original charger come with the laptop?",
     "drafted",
     3,
     {
       draft_reply:
-        "Yes — it ships in the original box with both the USB-C and 3.5mm cables included. Everything is pictured in the listing.",
+        "Yes — the original Acer charger is included. The laptop, charger, RGB keyboard, and working boot screen are all shown in the listing photos.",
       draft_model: "gpt-4o-mini",
     },
   ),
   inbound(
     Q_DRAFTING,
-    ITEM_LEGO,
-    "Is the build complete with all minifigures and the instruction booklet?",
+    ITEM_XBOX,
+    "Does the bundle include both controllers, the Kinect sensor, and the game shown?",
     "new",
     1,
   ),
   inbound(
     Q_SENT,
-    ITEM_PATAGONIA,
-    "Is this still available? Any pilling or stains on the sweater?",
+    ITEM_MACBOOK,
+    "Is this still available? Any dents or screen damage on the MacBook?",
     "sent",
     22,
     { sent_at: minsAgo(18) },
   ),
   inbound(
     Q_UNDELIVERED,
-    ITEM_KINDLE,
-    "Can you do $75 if I pick it up locally this week?",
+    ITEM_SWITCH,
+    "Can you do $150 if I pick up the Switch locally this week?",
     "sent",
     48,
     {
       draft_reply:
-        "I can meet at $85 for a local pickup this week — that already reflects a fair discount off the listed price.",
+        "I can meet at $165 for a local pickup this week — that already reflects a fair discount off the listed price.",
     },
   ),
 ];
@@ -158,9 +158,9 @@ const FIXTURE_REPLIES = new Map<string, MessageRow>([
     Q_SENT,
     outbound(
       "00000000-0000-0000-0000-0000000000e2",
-      ITEM_PATAGONIA,
+      ITEM_MACBOOK,
       Q_SENT,
-      "Yes, it's still available. No stains and only very light pilling under the arms — the photos show every angle in natural light.",
+      "Yes, it's still available. There are no screen cracks or visible dents; the photos show the light desk wear from every listed angle.",
       18,
     ),
   ],
@@ -174,17 +174,17 @@ const FIXTURE_FOLLOWUPS = new Map<string, MessageRow[]>([
     [
       outbound(
         "00000000-0000-0000-0000-0000000000f1",
-        ITEM_PATAGONIA,
+        ITEM_MACBOOK,
         Q_SENT,
-        "Actually — hold on, let me double-check the exact measurements for you.",
+        "Actually — hold on, let me double-check the charger before you make the drive.",
         12,
         "followup",
       ),
       outbound(
         "00000000-0000-0000-0000-0000000000f2",
-        ITEM_PATAGONIA,
+        ITEM_MACBOOK,
         Q_SENT,
-        "Pit-to-pit is 21\" and length is 27\". Happy to grab any other measurement.",
+        "Confirmed: the USB-C charger is included and works. Happy to show the boot screen at pickup too.",
         10,
         "followup",
       ),

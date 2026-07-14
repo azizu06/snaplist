@@ -4,7 +4,13 @@ import {
   DEMO_SURFACE_ASSIGNMENTS,
 } from "./demo-products";
 
-const HOUSEHOLD_DEFINING_SLUGS = new Set([
+const RETIRED_PRIMARY_SLUGS = new Set([
+  "mixer",
+  "espresso",
+  "drill",
+  "headphones",
+  "jacket",
+  "vinyl",
   "a-bedframe",
   "a-carseat",
   "a-crib",
@@ -17,6 +23,22 @@ const HOUSEHOLD_DEFINING_SLUGS = new Set([
   "a-wardrobe",
 ]);
 
+const PRIMARY_SURFACES = [
+  "landing-carousel",
+  "landing-storefronts",
+  "landing-three-moves",
+  "landing-hero-scan",
+  "step-snap",
+  "step-identify",
+  "step-price",
+  "step-write",
+  "step-publish",
+  "buyer-qa",
+  "inbox-qa",
+  "hiw-waterfall",
+  "how-it-works",
+] as const;
+
 describe("reseller-facing demo curation", () => {
   it("keeps the landing carousel to 8-10 comp-dense reseller examples", () => {
     const slugs = DEMO_SURFACE_ASSIGNMENTS["landing-carousel"];
@@ -24,7 +46,7 @@ describe("reseller-facing demo curation", () => {
     expect(slugs).toHaveLength(10);
     expect(new Set(slugs).size).toBe(slugs.length);
     expect(slugs.every((slug) => DEMO_PRODUCTS_BY_SLUG[slug])).toBe(true);
-    expect(slugs.some((slug) => HOUSEHOLD_DEFINING_SLUGS.has(slug))).toBe(false);
+    expect(slugs.some((slug) => RETIRED_PRIMARY_SLUGS.has(slug))).toBe(false);
 
     const categories = slugs.map(
       (slug) => DEMO_PRODUCTS_BY_SLUG[slug].category.toLowerCase(),
@@ -32,15 +54,27 @@ describe("reseller-facing demo curation", () => {
     expect(categories.some((category) => /electronic|computer|camera/.test(category))).toBe(true);
     expect(categories.some((category) => /game|music|book/.test(category))).toBe(true);
     expect(categories.some((category) => /clothing|shoe|watch/.test(category))).toBe(true);
-    expect(categories.some((category) => /home|kitchen/.test(category))).toBe(true);
+    expect(categories.some((category) => /computer|game/.test(category))).toBe(true);
   });
 
-  it("keeps the hero scan and three-move story out of bulky household inventory", () => {
-    const definingSlugs = [
-      ...DEMO_SURFACE_ASSIGNMENTS["landing-hero-scan"],
-      ...DEMO_SURFACE_ASSIGNMENTS["landing-three-moves"],
+  it("retires garage-sale and superseded first-pass assets from every primary assignment", () => {
+    const definingSlugs = PRIMARY_SURFACES.flatMap(
+      (surface) => DEMO_SURFACE_ASSIGNMENTS[surface],
+    );
+
+    expect(definingSlugs.some((slug) => RETIRED_PRIMARY_SLUGS.has(slug))).toBe(false);
+  });
+
+  it("uses one truthful Acer Predator story through all six guide steps", () => {
+    const guideSlugs = [
+      ...DEMO_SURFACE_ASSIGNMENTS["step-snap"],
+      ...DEMO_SURFACE_ASSIGNMENTS["step-identify"],
+      ...DEMO_SURFACE_ASSIGNMENTS["step-price"],
+      ...DEMO_SURFACE_ASSIGNMENTS["step-write"],
+      ...DEMO_SURFACE_ASSIGNMENTS["step-publish"],
+      DEMO_SURFACE_ASSIGNMENTS["buyer-qa"][0],
     ];
 
-    expect(definingSlugs.some((slug) => HOUSEHOLD_DEFINING_SLUGS.has(slug))).toBe(false);
+    expect(new Set(guideSlugs)).toEqual(new Set(["acer-predator"]));
   });
 });

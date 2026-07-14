@@ -26,7 +26,9 @@ export type RealUiCaptureProps = {
 };
 
 const SHOTS: Record<RealUiSurface, string[]> = {
-  snap: ["upload"],
+  // The photo is added through UploadView's real file input between these two
+  // states; Remotion only crossfades the genuine browser captures.
+  snap: ["upload-empty", "upload-filled"],
   identify: ["review-identify"],
   price: ["review-price"],
   write: ["review-write"],
@@ -48,6 +50,15 @@ function CaptureFrame({
   opacity: number;
   scale: number;
 }) {
+  const mobileObjectPosition: Record<string, string> = {
+    // The inbox is a full-height application surface. Aim each 6:5 crop at the
+    // real interaction instead of letting a generic center crop land on the
+    // intentionally quiet space between the thread and its composer.
+    "inbox-list": "50% 24%",
+    "inbox-draft": "50% 88%",
+    "inbox-sent": "50% 52%",
+  };
+
   return (
     <Img
       src={staticFile(`demo/captures/${formFactor}/${theme}/${shot}.png`)}
@@ -57,6 +68,8 @@ function CaptureFrame({
         width: "100%",
         height: "100%",
         objectFit: "cover",
+        objectPosition:
+          formFactor === "mobile" ? (mobileObjectPosition[shot] ?? "50% 50%") : "50% 50%",
         opacity,
         transform: `scale(${scale})`,
         transformOrigin: "50% 50%",
@@ -70,6 +83,8 @@ function CaptureFrame({
  * underlying pixels come from `/dev/preview/*`, which mounts the shipped views
  * and components with deterministic fixtures. Multi-state stories crossfade
  * between real screens; single-state stories use a gentle loop-safe push-in.
+ * Mobile compositions crop the full 390×844 browser capture around the
+ * focused action instead of shrinking a dense phone screen into the slot.
  */
 export const RealUiCapture: React.FC<RealUiCaptureProps> = ({
   surface,

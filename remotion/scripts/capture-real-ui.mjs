@@ -9,6 +9,7 @@
  *   DEMO_CAPTURE_BASE_URL=http://localhost:3211 pnpm demo:capture-ui
  */
 import { spawn } from "node:child_process";
+import { accessSync, constants } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,29 +21,61 @@ const OUTPUT_ROOT = path.join(REPO, "public", "demo", "captures");
 const PORT = Number(process.env.DEMO_CAPTURE_PORT ?? 3217);
 const OWN_SERVER = !process.env.DEMO_CAPTURE_BASE_URL;
 const BASE_URL = process.env.DEMO_CAPTURE_BASE_URL ?? `http://localhost:${PORT}`;
-const CHROME =
-  process.env.CHROME_PATH ??
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const CAPTURE_ONLY = process.env.DEMO_CAPTURE_ONLY;
 
 const SHOTS = [
-  ["upload", "/dev/preview/upload"],
-  ["review-identify", "/dev/preview/review"],
-  ["review-price", "/dev/preview/review-sharpen?focus=price"],
-  ["review-write", "/dev/preview/review?focus=write"],
-  ["publish-draft", "/dev/preview/publish"],
-  ["publish-live", "/dev/preview/publish-live"],
-  ["inbox-list", "/dev/preview/inbox-live?capture=list"],
-  ["inbox-draft", "/dev/preview/inbox-live"],
-  ["inbox-sent", "/dev/preview/inbox-live?capture=sent"],
+  { name: "upload-empty", route: "/dev/preview/upload?capture=empty&focus=upload", focusSelector: "#upload-photos" },
+  { name: "upload-filled", route: "/dev/preview/upload?capture=filled&focus=upload", focusSelector: "#upload-photos" },
+  { name: "review-identify", route: "/dev/preview/review?focus=identify", focusSelector: "#review-identification" },
+  { name: "review-price", route: "/dev/preview/review?focus=price", focusSelector: "#review-price-card" },
+  { name: "review-write", route: "/dev/preview/review?focus=write", focusSelector: "#review-title" },
+  { name: "publish-draft", route: "/dev/preview/publish?focus=publish", focusSelector: "#publish-action" },
+  { name: "publish-live", route: "/dev/preview/publish-live?focus=publish", focusSelector: "#publish-action" },
+  { name: "inbox-list", route: "/dev/preview/inbox-live?capture=list" },
+  { name: "inbox-draft", route: "/dev/preview/inbox-live" },
+  { name: "inbox-sent", route: "/dev/preview/inbox-live?capture=sent" },
 ];
 
 const VIEWPORTS = {
-  desktop: { width: 1920, height: 1080, scale: 1 },
-  // 432×540 CSS px at 2.5×: trips the real mobile breakpoints while producing
-  // the existing tour slot's exact 1080×1350 (4:5) media dimensions.
-  mobile: { width: 432, height: 540, scale: 2.5 },
+  // These are the exact human-review viewport classes from #136. Device scale
+  // only increases source density; layout remains 1440×900 / 390×844 CSS px.
+  desktop: { width: 1440, height: 900, scale: 1.5 },
+  mobile: { width: 390, height: 844, scale: 3 },
 };
+
+function resolveChromeExecutable() {
+  const fromPath = (name) =>
+    (process.env.PATH ?? "")
+      .split(path.delimiter)
+      .filter(Boolean)
+      .map((dir) => path.join(dir, name));
+  const candidates = [
+    process.env.CHROME_PATH,
+    ...(process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+      : []),
+    ...fromPath("google-chrome"),
+    ...fromPath("chromium"),
+    ...fromPath("chromium-browser"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Try the next platform/PATH candidate.
+    }
+  }
+  throw new Error(
+    "Could not find Chrome/Chromium. Set CHROME_PATH to an executable browser before running demo:capture-ui.",
+  );
+}
+
+const CHROME = resolveChromeExecutable();
 
 function connectCdp(url) {
   const socket = new WebSocket(url);
@@ -139,6 +172,60 @@ const MOBILE_LAYOUT_METRICS = `(() => {
   };
 })()`;
 
+function captureLayoutMetricsExpression(focusSelector) {
+  return `(() => {
+    const rectFor = (element) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+        width: rect.width, height: rect.height,
+      };
+    };
+    return {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      scrollWidth: document.documentElement.scrollWidth,
+      scrollHeight: document.documentElement.scrollHeight,
+      activeTheme: document.documentElement.classList.contains("dark") ? "dark" : "light",
+      target: ${focusSelector ? `rectFor(document.querySelector(${JSON.stringify(focusSelector)}))` : "null"},
+      offenders: Array.from(document.querySelectorAll("*"))
+        .map((element) => ({
+          tag: element.tagName,
+          id: element.id,
+          className: typeof element.className === "string" ? element.className.slice(0, 140) : "",
+          rect: rectFor(element),
+        }))
+        .filter(({ rect }) => rect && (rect.left < -0.5 || rect.right > window.innerWidth + 0.5))
+        .slice(0, 12),
+    };
+  })()`;
+}
+
+export function assertCaptureLayout(metrics, label, requiresTarget = false, expectedTheme) {
+  const tolerance = 0.5;
+  if (metrics.scrollWidth > metrics.viewportWidth + tolerance) {
+    throw new Error(
+      `${label}: document overflow (${metrics.scrollWidth} > ${metrics.viewportWidth}); offenders=${JSON.stringify(metrics.offenders ?? [])}`,
+    );
+  }
+  if (metrics.scrollHeight <= 0 || metrics.viewportHeight <= 0) {
+    throw new Error(`${label}: capture has no usable height`);
+  }
+  if (expectedTheme && metrics.activeTheme !== expectedTheme) {
+    throw new Error(`${label}: theme mismatch (${metrics.activeTheme} !== ${expectedTheme})`);
+  }
+  if (!requiresTarget) return;
+  const target = metrics.target;
+  if (!target) throw new Error(`${label}: focused real-app target is missing`);
+  if (target.width < 44 || target.height < 32) {
+    throw new Error(`${label}: focused target is collapsed: ${JSON.stringify(target)}`);
+  }
+  if (target.bottom <= 0 || target.top >= metrics.viewportHeight) {
+    throw new Error(`${label}: focused target is outside the viewport: ${JSON.stringify(target)}`);
+  }
+}
+
 export function assertMobileInboxLayout(metrics, label) {
   const tolerance = 0.5;
   if (metrics.scrollWidth > metrics.viewportWidth + tolerance) {
@@ -163,7 +250,7 @@ export function assertMobileInboxLayout(metrics, label) {
   }
 }
 
-async function captureWithCdp({ url, viewport, output, assertMobileInbox }) {
+async function captureWithCdp({ url, viewport, output, theme, focusSelector, assertMobileInbox }) {
   const profile = await mkdtemp(path.join(os.tmpdir(), "snaplist-capture-"));
   const child = spawn(
     CHROME,
@@ -205,6 +292,17 @@ async function captureWithCdp({ url, viewport, output, assertMobileInbox }) {
     });
     await cdp.send("Page.navigate", { url });
     await waitForCaptureReady(cdp);
+    // next-themes can finish mounting after the preview controller's layout
+    // effect. Re-assert the requested capture theme at the browser boundary so
+    // a dark job can never silently encode a light screenshot (or vice versa).
+    await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        document.documentElement.classList.toggle("dark", ${theme === "dark"});
+        document.documentElement.classList.toggle("light", ${theme === "light"});
+        document.documentElement.style.colorScheme = ${JSON.stringify(theme)};
+        localStorage.setItem("theme", ${JSON.stringify(theme)});
+      })()`,
+    });
     await cdp.send("Runtime.evaluate", {
       expression: `(async () => {
         await document.fonts.ready;
@@ -218,6 +316,12 @@ async function captureWithCdp({ url, viewport, output, assertMobileInbox }) {
       awaitPromise: true,
     });
     await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+    const layoutResult = await cdp.send("Runtime.evaluate", {
+      expression: captureLayoutMetricsExpression(focusSelector),
+      returnByValue: true,
+    });
+    assertCaptureLayout(layoutResult.result.value, output, Boolean(focusSelector), theme);
 
     if (assertMobileInbox) {
       const result = await cdp.send("Runtime.evaluate", {
@@ -273,7 +377,7 @@ function withTheme(route, theme) {
   return url.toString();
 }
 
-async function capture({ name, route, formFactor, theme }) {
+async function capture({ name, route, focusSelector, formFactor, theme }) {
   const viewport = VIEWPORTS[formFactor];
   const outputDir = path.join(OUTPUT_ROOT, formFactor, theme);
   const output = path.join(outputDir, `${name}.png`);
@@ -284,6 +388,8 @@ async function capture({ name, route, formFactor, theme }) {
     url: withTheme(route, theme),
     viewport,
     output,
+    theme,
+    focusSelector,
     assertMobileInbox: formFactor === "mobile" && name === "inbox-list",
   });
   process.stdout.write(`  capture ✓ ${formFactor}/${theme}/${name}.png\n`);
@@ -324,7 +430,7 @@ async function main() {
     await waitForServer(BASE_URL);
     const jobs = Object.keys(VIEWPORTS).flatMap((formFactor) =>
       ["light", "dark"].flatMap((theme) =>
-        SHOTS.map(([name, route]) => ({ name, route, formFactor, theme })),
+        SHOTS.map(({ name, route, focusSelector }) => ({ name, route, focusSelector, formFactor, theme })),
       ),
     ).filter(({ name, formFactor, theme }) =>
       CAPTURE_ONLY ? `${formFactor}/${theme}/${name}` === CAPTURE_ONLY : true,
