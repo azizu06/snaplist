@@ -47,16 +47,26 @@ describe("message photo deletion queue", () => {
       }
       return { data: 1, error: null };
     });
-    const remove = vi.fn(async (paths: string[]) => {
+    const tenantRemove = vi.fn(async (paths: string[]) => {
+      void paths;
+      return { error: { message: "delete is not allowed for tenant clients" } };
+    });
+    const adminRemove = vi.fn(async (paths: string[]) => {
       void paths;
       return { error: null };
     });
-    const client = {
+    const tenantClient = {
       rpc,
-      storage: { from: vi.fn(() => ({ remove })) },
+      storage: { from: vi.fn(() => ({ remove: tenantRemove })) },
+    } as unknown as SupabaseClient;
+    const storageAdminClient = {
+      storage: { from: vi.fn(() => ({ remove: adminRemove })) },
     } as unknown as SupabaseClient;
 
-    await expect(cleanupOwnExpiredMessagePhotoUploads(client)).resolves.toBe(1);
+    await expect(cleanupOwnExpiredMessagePhotoUploads(
+      tenantClient,
+      storageAdminClient,
+    )).resolves.toBe(1);
 
     expect(rpc.mock.calls.map(([name]) => name)).toEqual([
       "delete_own_expired_message_photo_upload_intents",
@@ -64,6 +74,7 @@ describe("message photo deletion queue", () => {
       "complete_own_message_photo_object_deletions",
       "list_own_message_photo_object_deletions",
     ]);
-    expect(remove).toHaveBeenCalledWith([path]);
+    expect(tenantRemove).not.toHaveBeenCalled();
+    expect(adminRemove).toHaveBeenCalledWith([path]);
   });
 });

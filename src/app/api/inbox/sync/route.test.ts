@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   cleanupOwnExpiredMessagePhotoUploads,
+  createAdminClient,
   createClient,
   createTenantServerClient,
   getEbayConnectionStatus,
   logServerError,
 } = vi.hoisted(() => ({
   cleanupOwnExpiredMessagePhotoUploads: vi.fn(),
+  createAdminClient: vi.fn(() => ({ role: "service-role" })),
   createClient: vi.fn(async () => ({ role: "tenant" })),
   createTenantServerClient: vi.fn(async () => ({ role: "tenant-server" })),
   getEbayConnectionStatus: vi.fn(async () => ({ connected: false })),
@@ -17,6 +19,7 @@ const {
 vi.mock("@/lib/auth", () => ({ getUserId: vi.fn(async () => "user_a") }));
 vi.mock("@/lib/abuse", () => ({ enforceRateLimit: vi.fn(async () => null) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient }));
 vi.mock("@/lib/supabase/tenant-server", () => ({
   createTenantServerClient,
 }));
@@ -49,9 +52,11 @@ describe("foreground inbox maintenance", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ skipped: "ebay_not_connected" });
-    expect(cleanupOwnExpiredMessagePhotoUploads).toHaveBeenCalledWith({
-      role: "tenant-server",
-    });
+    expect(cleanupOwnExpiredMessagePhotoUploads).toHaveBeenCalledWith(
+      { role: "tenant-server" },
+      { role: "service-role" },
+    );
     expect(createTenantServerClient).toHaveBeenCalledOnce();
+    expect(createAdminClient).toHaveBeenCalledOnce();
   });
 });

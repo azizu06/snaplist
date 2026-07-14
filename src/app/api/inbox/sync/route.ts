@@ -7,6 +7,7 @@ import {
   hasEbayMessagingSandboxFallback,
 } from "@/lib/marketplace/ebay";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
@@ -28,7 +29,10 @@ export async function POST(request: Request) {
   let tenantServer: Awaited<ReturnType<typeof createTenantServerClient>> | null = null;
   try {
     tenantServer = await createTenantServerClient();
-    await cleanupOwnExpiredMessagePhotoUploads(tenantServer);
+    await cleanupOwnExpiredMessagePhotoUploads(
+      tenantServer,
+      createAdminClient(),
+    );
   } catch (error) {
     logServerError("inbox.sync.photo-cleanup", error);
   }

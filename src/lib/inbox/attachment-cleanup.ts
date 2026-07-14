@@ -8,6 +8,7 @@ export async function drainMessagePhotoDeletionQueue(
 ): Promise<void> {
   return drainDeletionQueue(
     serviceClient,
+    serviceClient,
     "list_message_photo_object_deletions",
     "complete_message_photo_object_deletions",
   );
@@ -15,21 +16,24 @@ export async function drainMessagePhotoDeletionQueue(
 
 export async function drainOwnMessagePhotoDeletionQueue(
   tenantServerClient: SupabaseClient,
+  storageAdminClient: SupabaseClient,
 ): Promise<void> {
   return drainDeletionQueue(
     tenantServerClient,
+    storageAdminClient,
     "list_own_message_photo_object_deletions",
     "complete_own_message_photo_object_deletions",
   );
 }
 
 async function drainDeletionQueue(
-  client: SupabaseClient,
+  queueClient: SupabaseClient,
+  storageClient: SupabaseClient,
   listRpc: string,
   completeRpc: string,
 ): Promise<void> {
   while (true) {
-    const { data, error } = await client.rpc(
+    const { data, error } = await queueClient.rpc(
       listRpc,
       { p_limit: STORAGE_DELETE_BATCH_SIZE },
     );
@@ -38,11 +42,11 @@ async function drainDeletionQueue(
       ? data.filter((path): path is string => typeof path === "string")
       : [];
     if (!paths.length) return;
-    const removed = await client.storage.from(MESSAGE_PHOTO_BUCKET).remove(paths);
+    const removed = await storageClient.storage.from(MESSAGE_PHOTO_BUCKET).remove(paths);
     if (removed.error) {
       throw new Error(`Deletion photo erase failed: ${removed.error.message}`);
     }
-    const completed = await client.rpc(
+    const completed = await queueClient.rpc(
       completeRpc,
       { p_storage_paths: paths },
     );
@@ -74,6 +78,7 @@ export async function cleanupExpiredMessagePhotoUploads(
 
 export async function cleanupOwnExpiredMessagePhotoUploads(
   tenantServerClient: SupabaseClient,
+  storageAdminClient: SupabaseClient,
 ): Promise<number> {
   let deleted = 0;
   while (true) {
@@ -88,6 +93,9 @@ export async function cleanupOwnExpiredMessagePhotoUploads(
     deleted += data;
     if (data < STORAGE_DELETE_BATCH_SIZE) break;
   }
-  await drainOwnMessagePhotoDeletionQueue(tenantServerClient);
+  await drainOwnMessagePhotoDeletionQueue(
+    tenantServerClient,
+    storageAdminClient,
+  );
   return deleted;
 }
