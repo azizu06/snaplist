@@ -50,4 +50,33 @@ describe("parseEnv", () => {
     expect(env.TAVILY_API_KEY).toBeUndefined();
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
   });
+
+  it("treats a missing or blank sold-comps proxy template as optional", () => {
+    expect(parseEnv(valid).EBAY_SOLD_PROXY_TEMPLATE).toBeUndefined();
+    expect(
+      parseEnv({ ...valid, EBAY_SOLD_PROXY_TEMPLATE: "   " })
+        .EBAY_SOLD_PROXY_TEMPLATE,
+    ).toBeUndefined();
+  });
+
+  it("accepts a valid HTTPS sold-comps proxy template", () => {
+    const env = parseEnv({
+      ...valid,
+      EBAY_SOLD_PROXY_TEMPLATE:
+        "https://proxy.example/fetch?token=deploy-secret&url={url}",
+    });
+
+    expect(env.EBAY_SOLD_PROXY_TEMPLATE).toContain("{url}");
+  });
+
+  it.each([
+    ["missing placeholder", "https://proxy.example/fetch"],
+    ["non-HTTPS transport", "http://proxy.example/fetch?url={url}"],
+    ["embedded credentials", "https://user:pass@proxy.example/fetch?url={url}"],
+    ["unparseable URL", "not-a-url/{url}"],
+  ])("rejects a malformed sold-comps proxy template: %s", (_label, template) => {
+    expect(() =>
+      parseEnv({ ...valid, EBAY_SOLD_PROXY_TEMPLATE: template }),
+    ).toThrowError(/EBAY_SOLD_PROXY_TEMPLATE/);
+  });
 });

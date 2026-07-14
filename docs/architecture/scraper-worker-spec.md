@@ -4,16 +4,19 @@
 > decisions (marked **DECIDE**) need Aziz's sign-off before building.
 > **This is an architecture/build spec, not an ADR.** When a decision here is
 > ratified, fold the durable ones into `docs/adr/`.
+> The current app is vendor-neutral and direct-fetches by default; ScrapingBee
+> below is a proposed worker choice, not a deployed requirement.
 
 ---
 
 ## 1. Why this exists (the one-paragraph version)
 
 Today the whole pipeline runs **synchronously** inside the upload server action,
-and the slowest, flakiest, most expensive part of it is the **eBay sold-comps
-scrape** (network fetch through a paid premium proxy + HTML parse). That single
-step is the one piece that genuinely wants: controlled concurrency (to protect
-the ScrapingBee budget and avoid eBay blocks), retries with backoff, and
+and the slowest, flakiest part of it is the **eBay sold-comps scrape** (network
+fetch through direct or optional hosted egress + HTML parse). When a paid proxy
+is selected, that step also has a request budget. It is the one piece that
+genuinely wants: controlled concurrency (to protect the selected egress budget
+and avoid eBay blocks), retries with backoff, and
 non-blocking async UX. So we extract **only** that step into a standalone **Go
 worker** behind a **RabbitMQ** work queue, deployed on **EC2**, with **Prometheus**
 metrics. Everything else stays exactly where it is.
@@ -73,15 +76,16 @@ synthesizeSoldResult(comps)   ← STAYS in TypeScript, unchanged
   auth → daily-item quota (`checkDailyItemQuota`) → store photos → `recordPipelineRunAndMaybeAlert`
   → `createVisionPipeline({ supabase })` → `runPipelineAndPersist(...)` → `redirect("/review/:id")`.
   **The user waits for the entire run, scrape included, before the redirect.**
-- **Scraper:** `createDefaultFetchPage()` in `ebay-sold.ts`, fetching via
-  `EBAY_SOLD_PROXY_TEMPLATE` (premium/residential proxy required for eBay/Akamai).
-  Parser: `parseSoldComps` (cheerio) → `filterRelevantComps`.
+- **Scraper:** `createDefaultFetchPage()` in `ebay-sold.ts` direct-fetches by
+  default. Optional `EBAY_SOLD_PROXY_TEMPLATE` routes the validated eBay target
+  through operator-selected hosted egress; malformed templates fail before any
+  request. Parser: `parseSoldComps` (cheerio) → `filterRelevantComps`.
 - **Cache:** `src/lib/pricing/comp-cache.ts` — a dual-backend TTL cache
   (`createInMemoryTtlCache` default / `createUpstashTtlCache` when `UPSTASH_REDIS_REST_*`
   is set). **This dual-backend pattern is the template for the transport** (see §5).
 - **Budget/abuse:** `src/lib/abuse` — per-user daily item quota + global OpenAI
-  call budget. The ScrapingBee credit budget is currently implicit; the worker
-  makes it an explicit, enforced gate (§7).
+  call budget. If ScrapingBee is selected for the proposed worker, its credit
+  budget is implicit until the worker makes it an explicit, enforced gate (§7).
 - **Realtime:** Supabase Realtime is already in the stack (PRD: buyer-message
   inbox). We reuse it to push the async price result to the review page (§6).
 
@@ -188,7 +192,7 @@ already expects.
   global credit counter (Upstash, shared). When exhausted, stop scraping and
   return `status:"blocked"` so the app degrades gracefully (§ below) — never
   silently overspend. This makes the budget a first-class, enforced limit (today
-  it's implicit).
+  it remains implicit in this proposed worker design).
 - **Shared comp-cache:** the worker checks the **same** Upstash cache the app uses
   (`snaplist:cache:...`) before fetching — repeated identities cost 0 credits.
   Cache stays "never the authority" per the PRD (TTL + age-decay on read).

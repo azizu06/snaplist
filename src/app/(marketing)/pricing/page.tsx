@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 const PRICING_FAQ = [
   {
     q: "What's the difference between Free and Seller Pro?",
-    a: "Both plans get the full pipeline: identification, cited pricing, listing generation, eBay publishing, export packs, and the buyer-Q&A inbox. Seller Pro raises the daily limit from 15 items to 200, adds bulk photo uploads, a priority research queue, listing and pricing analytics, and priority support. It's built for flippers and steady resellers.",
+    a: "Both plans get the full pipeline: identification, source-backed pricing when available with clearly labeled estimates otherwise, listing generation, eBay publishing, export packs, and the buyer-Q&A inbox. Seller Pro raises the daily limit from 15 items to 200, adds bulk photo uploads, a priority research queue, listing and pricing analytics, and priority support. It's built for flippers and steady resellers.",
   },
   {
     q: "What does Seller Pro cost?",
@@ -49,7 +49,7 @@ const PRICING_FAQ = [
 
 /** Per-plan card summary. Limits use tabular-nums; CTAs bottom-align. */
 const FREE_HIGHLIGHTS = [
-  "AI pricing with cited sources",
+  "Pricing research with labeled fallbacks",
   "eBay publishing from your own account",
   "Facebook & Mercari export packs",
   "Confidence-gated autopilot",
@@ -86,7 +86,7 @@ const FEATURE_MATRIX: readonly FeatureGroup[] = [
     group: "Pricing & identification",
     rows: [
       { label: "Photo identification & attribute extraction", free: true, pro: true },
-      { label: "Cited price range with sources", free: true, pro: true },
+      { label: "Source-backed price range when available", free: true, pro: true },
       { label: "ISBN & barcode lookup", free: true, pro: true },
       { label: "Priority pricing-model quality", free: false, pro: true },
     ],

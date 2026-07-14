@@ -1,5 +1,25 @@
 import { z } from "zod";
 import { resolveApiKey, resolveProvider } from "./llm/registry";
+import { validateEbaySoldProxyTemplate } from "./pricing/ebay-sold-egress";
+
+const optionalProxyTemplateSchema = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? undefined : value,
+  z
+    .string()
+    .transform((value, ctx) => {
+      try {
+        return validateEbaySoldProxyTemplate(value);
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          message: error instanceof Error ? error.message : "Invalid proxy template",
+        });
+        return z.NEVER;
+      }
+    })
+    .optional(),
+);
 
 /**
  * Environment schema. Everything is env-configurable so that sandbox -> production
@@ -56,11 +76,16 @@ const envSchema = z.object({
   // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
   // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier
   // (it then declines and the router degrades to the web-search tier). The base
-  // host and outbound User-Agent are overridable for testing; the provider's SSRF
-  // guard restricts every fetch to https *.ebay.com regardless.
+  // host and outbound User-Agent are overridable for testing; the optional proxy
+  // template is validated separately below. The provider's SSRF guard restricts
+  // every target fetch to https *.ebay.com regardless.
   EBAY_SOLD_ENABLED: z.string().min(1).optional(),
   EBAY_SOLD_BASE_URL: z.string().min(1).optional(),
   EBAY_SOLD_USER_AGENT: z.string().min(1).optional(),
+  // Optional vendor-agnostic egress seam for hosted environments where direct
+  // server fetches are blocked. Missing/blank preserves direct fetch; a present
+  // template is validated at config startup and must contain one `{url}` target.
+  EBAY_SOLD_PROXY_TEMPLATE: optionalProxyTemplateSchema,
   // Pricing freshness (#59). All OPTIONAL with sane defaults (parsed in
   // src/lib/pricing/providers/ebay-sold.ts + freshness.ts). The TTL cache of
   // sold-comp scrapes reuses a pull for a few days (cuts scrape footprint; the

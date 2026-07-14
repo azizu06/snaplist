@@ -7,7 +7,7 @@ import { HIW_GLYPHS } from "@/components/marketing/hiw-glyphs";
 export const metadata: Metadata = {
   title: "How it works",
   description:
-    "Snap a photo and SnapList figures out what your item is, what it's worth with real sources, writes the listing, and posts it to eBay. Here's how each step works.",
+    "Snap a photo and SnapList figures out what your item is, what it's worth with cited evidence when available or a clearly labeled, potentially uncited LLM-only estimate, writes the listing, and posts it to eBay. Here's how each step works.",
 };
 
 /**
@@ -54,7 +54,7 @@ const STEPS = [
     mobile: true,
     glyph: "price",
     title: "Price",
-    body: "SnapList researches what similar items recently sold for, then suggests a price, a realistic range, and the exact sources behind it. Real sale prices, not wishful asking prices.",
+    body: "SnapList prefers relevant recent sold listings, then suggests a price and a realistic range. It shows exact sources for sold, web, or depreciation evidence; the terminal LLM-only estimate is clearly labeled and may be uncited.",
     poster: "A defensible number, with its receipts.",
     label: "Demo clip: the Price step of SnapList",
   },
@@ -99,11 +99,11 @@ const STEPS = [
 const FAQ = [
   {
     q: "Which marketplaces does SnapList support?",
-    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape anything.",
+    a: "eBay is fully connected, so listings publish straight to your own eBay account. Facebook Marketplace and Mercari don't allow direct posting, so for those you get clean copy-paste packs. We never scrape to post; read-only research of public eBay sold pages is used only to inform pricing.",
   },
   {
     q: "How accurate is the pricing?",
-    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest, an exact lookup with no guessing. Branded items are priced from what similar ones recently sold for, which is solid. Everyday items get a rougher estimate marked down from the new price, and we label it as less certain. Every price is yours to edit.",
+    a: "It depends on the item, and we always show you where the price came from. Books and media with an ISBN are the strongest. For identifiable items, relevant sold comps lead when available; if access is blocked or results are too thin, SnapList falls back to cited web sources or a lower-confidence estimate. Every price is yours to edit.",
   },
   {
     q: "Is my data private?",

@@ -261,7 +261,7 @@ export function ScanShowcase() {
 
             <div className="mt-auto space-y-2.5 border-t border-line pt-5">
               <CheckRow>Identified from the photo: brand, model, condition</CheckRow>
-              <CheckRow>Priced from recent sale prices, sources cited</CheckRow>
+              <CheckRow>Sold comps used when available; fallbacks labeled</CheckRow>
               <CheckRow>Copy drafted for eBay, Facebook &amp; Mercari</CheckRow>
             </div>
           </div>

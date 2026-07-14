@@ -21,9 +21,9 @@ Benchmark against _hiring an assistant to run my resale_, not against other list
 
 ## What to lean into (our two most ownable strengths)
 
-1. **Pricing confidence** — sold-comps + a confidence score. The pitch is "price it
-   _right_," not just "price it fast." This is where free/in-platform tools are
-   weakest.
+1. **Pricing confidence** — sold comps when available, honest labeled fallbacks,
+   and a confidence score. The pitch is "price it _defensibly_," not just "price
+   it fast." This is where free/in-platform tools are weakest.
 2. **Buyer-conversation automation** — drafting and handling buyer Q&A through to
    close. The least-contested part of the loop; promote it from a feature to a
    headline differentiator.

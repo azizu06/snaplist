@@ -104,9 +104,9 @@ const ICONS = {
 const BENTO_CARDS = [
   {
     label: "Pricing engine",
-    title: "Priced on real sold comps",
+    title: "Sold comps first, honest fallbacks",
     description:
-      "Every price comes from what the same item actually sold for, not retail and not wishful asking prices. You get a suggested number, a range, and the sold listings behind it, plus Quick, Balanced, and Maximize points so you can price to move or hold for margin.",
+      "When relevant sold listings are available, they lead the price. If they are blocked or too thin, SnapList uses cited web sources or a clearly labeled estimate instead. You still get a suggested number, a range, confidence, and Quick, Balanced, and Maximize points when the evidence supports them.",
     icon: <BentoIcon d={[...ICONS.tag]} />,
     tint: "violet" as const,
     className: "lg:col-span-2",
@@ -545,9 +545,9 @@ export default function Landing() {
               </GradientText>
             </h2>
             <p className="mx-auto mt-5 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
-              Photograph the haul once. SnapList researches the sold price,
-              writes every listing, and posts to eBay. You keep control, and
-              you keep the margin.
+              Photograph the haul once. SnapList researches available sold
+              comps, labels fallback estimates, writes every listing, and
+              posts to eBay. You keep control, and you keep the margin.
             </p>
             {/* Magnet removed here too, to match the hero CTA (owner: the
                 magnetic pull was distracting). The mt-9 it carried moves onto

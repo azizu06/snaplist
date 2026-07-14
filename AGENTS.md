@@ -23,7 +23,10 @@ adapter and is **not on the Phase 1 critical path**.
   `{ suggested, range, confidence, sources[] }` and is user-editable. Never collapse this to a single
   source. The eBay-sold scraper is **read-only price research** — distinct from the transactional eBay
   **adapter**, which remains the only path for posting/messaging. Sold prices are **live-fetched**
-  (cache-on-miss + age-decay, #59); the pgvector corpus is never the price oracle.
+  (cache-on-miss + age-decay, #59); the pgvector corpus is never the price oracle. Sold-comps egress
+  is best-effort: direct fetch is the default, an optional proxy template is validated before use,
+  and blocked/thin results fall through. Every evidence-backed tier cites sources; only the clearly
+  labeled terminal `llm-only` estimate may return an empty `sources[]`.
 - **Confidence is a signal-based composite** (tier fired + comp agreement + ID completeness), **never**
   raw LLM self-report. The autopilot gate is a threshold on it.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
