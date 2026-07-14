@@ -103,6 +103,9 @@ describe("createMessagingTransportForConversation", () => {
         body: "Yes, it does.",
         at: "2026-07-13T12:01:00.000Z",
         retry: false,
+        delivery_actor: "seller",
+        marketplace_observed_at: undefined,
+        question_observed_at: undefined,
       },
       p_generation: generation,
     });
