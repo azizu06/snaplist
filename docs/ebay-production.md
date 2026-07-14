@@ -104,9 +104,10 @@ Verify the live offer uses the override rather than the logged suggestion and th
 log remains unchanged. Then end the listing from Seller Hub if it was only a smoke test.
 
 Production messaging remains owner-controlled under #17. Enable the five-minute
-inbox cron and run a real two-user message only after the production keyset,
-deletion subscription, scopes, policies, and owner approval are all confirmed;
-until then use the Sandbox messaging runbook.
+Supabase inbox cron from the Sandbox messaging runbook and run a real two-user
+message only after the production keyset, deletion subscription, scopes,
+policies, and owner approval are all confirmed; until then use the Sandbox
+messaging runbook.
 
 ## Known constraint: single production seller
 

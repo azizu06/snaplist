@@ -85,10 +85,11 @@ returns, disputes, post-sale support, or any marketplace other than eBay.
 3. `SELLER` has an active Sandbox listing that was published through SnapList,
    so its eBay ItemID is mapped to the same tenant's `listings` row.
 4. `CRON_SECRET` is set only if the background entry point is being exercised.
-   `vercel.json` schedules `/api/cron/inbox-sync` every five minutes. Opening
-   the inbox requests the same shared sync service once Realtime subscribes.
-   Sync defaults to a 24-hour initial lookback and a minimum 24-hour overlap;
-   `.env.example` documents the optional tuning variables.
+   Configure the five-minute Supabase Cron below; Vercel Hobby rejects schedules
+   that run more than once per day. Opening the inbox requests the same shared
+   sync service once Realtime subscribes. Sync defaults to a 24-hour initial
+   lookback and a minimum 24-hour overlap; `.env.example` documents the optional
+   tuning variables.
 
 Do not change provider settings, deploy production credentials, or use a real
 listing as part of this check. Production activation remains owner-controlled
@@ -109,6 +110,53 @@ under #17.
 Both routes call `syncInboxForSeller`; neither owns separate persistence,
 drafting, notification, cursor, or retry behavior. Never paste the bearer or a
 seller cookie into committed commands or captured evidence.
+
+### Five-minute scheduler
+
+Vercel Hobby cron expressions may run only once per day, so `vercel.json` keeps
+the existing daily repricing job and leaves inbox frequency to Supabase Cron.
+The authenticated route remains hosting-independent. Supabase documents
+`pg_cron` + `pg_net` scheduled HTTP calls and recommends Vault for their bearer
+secrets. In the Supabase SQL editor, enable Cron, store the deployed app origin
+(without a trailing slash) and the same `CRON_SECRET` from Vercel in Vault, then
+schedule the request:
+
+```sql
+select vault.create_secret('<DEPLOYED_APP_ORIGIN>', 'snaplist_app_origin');
+select vault.create_secret('<CRON_SECRET>', 'snaplist_cron_secret');
+
+select cron.schedule(
+  'snaplist-inbox-sync',
+  '*/5 * * * *',
+  $$
+  select net.http_post(
+    url := (
+      select decrypted_secret
+      from vault.decrypted_secrets
+      where name = 'snaplist_app_origin'
+    ) || '/api/cron/inbox-sync',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (
+        select decrypted_secret
+        from vault.decrypted_secrets
+        where name = 'snaplist_cron_secret'
+      )
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 300000
+  ) as request_id;
+  $$
+);
+```
+
+Replace the angle-bracket placeholders only in the private SQL editor; never
+commit their values. Verify `cron.job` contains `snaplist-inbox-sync` with the
+five-minute expression and inspect `cron.job_run_details` plus `net._http_response`
+for a `2xx` response. See the official
+[Supabase scheduling guide](https://supabase.com/docs/guides/functions/schedule-functions),
+[Supabase Cron guide](https://supabase.com/docs/guides/cron), and
+[Vercel cron limits](https://vercel.com/docs/cron-jobs/usage-and-pricing).
 
 ## Round trip
 
