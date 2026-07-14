@@ -38,8 +38,10 @@ adapter and is **not on the Phase 1 critical path**.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
   search agent, not a price source.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.
-- **eBay only ever touched through its adapter interface.** In v1 it's sandbox/stubbed; messaging is
-  simulated. Keep the pipeline testable offline against a mock adapter.
+- **eBay marketplace mutations and messaging only ever go through the adapter interface.** The one
+  non-transactional exception is read-only public sold-page research through `ebay-sold`; it cannot
+  post or message. In v1 the adapter is sandbox/stubbed and messaging is simulated. Keep the pipeline
+  testable offline against a mock adapter.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
 - **Review correction stays coherent and pre-publish.** Bounded identity edits must rerun the shared

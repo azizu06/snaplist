@@ -66,6 +66,7 @@ flowchart TD
     end
 
     VISION --> ROUTER
+    VISION --> LISTING
 
     subgraph tiers["Pricing tiers · PRD priority order"]
         T1["1 · ISBN lookup<br/>Open Library + Google Books"]
@@ -83,12 +84,12 @@ flowchart TD
     GATE -->|high confidence| READY
     GATE -->|low confidence| REVIEW
     READY --> REVIEW
-    REVIEW --> LISTING
+    LISTING --> REVIEW
     REVIEW -->|fix facts before publish| CORRECT
     CORRECT -->|re-price corrected facts| ROUTER
     CORRECT -->|regenerate grounded copy| LISTING
 
-    LISTING --> PUBLISH["Seller chooses Publish to eBay"]
+    REVIEW --> PUBLISH["Seller chooses Publish to eBay"]
     PUBLISH --> EBAY["eBay adapter<br/>Sell API · sandbox → prod flip"]
     LISTING --> EXPORT["Export packs<br/>Facebook Marketplace · Mercari"]
     EBAY --> LIVE["Live eBay listing"]

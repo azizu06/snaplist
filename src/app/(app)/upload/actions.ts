@@ -113,9 +113,9 @@ export async function uploadAndProcess(formData: FormData) {
 
   let itemId: string;
   try {
-    // The user's MASTER autopilot switch (issue #12): forwarded into the pipeline's
-    // confidence gate, so when it is off NOTHING is autopilot-eligible and every
-    // listing queues as a draft for review.
+    // The user's publish-eligibility switch (legacy identifier, issue #12):
+    // forwarded into the confidence gate, so when it is off nothing is eligible and every
+    // listing stays a draft for review.
     const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
 
     // Spend guardrail (#58): count this model-backed run toward the global daily

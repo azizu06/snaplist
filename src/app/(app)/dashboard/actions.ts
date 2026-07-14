@@ -143,8 +143,8 @@ export async function unarchiveListings(listingIds: string[]): Promise<void> {
   // come back as `published`. Restoring it to `draft` would show a live listing
   // as a re-publishable draft — corrupting tracking and inviting a redundant
   // publish (Codex). Anything not live returns to the review queue (`draft`); a
-  // pre-archive `queued`/needs-review state collapsing to draft is benign (it
-  // just asks for re-approval, no live-state loss).
+  // pre-archive `queued`/ready-to-publish state collapsing to draft is benign
+  // (it asks for review again, with no live-state loss).
   const { data: rows, error: readErr } = await supabase
     .from("listings")
     .select("id, ebay_listing_id, ebay_status")

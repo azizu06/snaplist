@@ -15,7 +15,8 @@ import { z } from "zod";
  * in the routing pipeline; "which tier fired" is a confidence-bearing fact that
  * the (separately built) confidence composite consumes.
  *
- *  1. isbn-lookup   — books/media via ISBN → true structured lookup. Highest confidence.
+ *  1. isbn-lookup   — books/media via ISBN → structured catalog lookup. Highest
+ *                     identification confidence; estimate-level pricing trust unless sold-backed.
  *  2. ebay-sold     — recognizable/identifiable item priced from eBay PUBLIC sold comps
  *                     (the strongest used signal: real completed sales). Slots above the
  *                     web-search tiers — sold beats asking (ADR-0001, issue #56).
@@ -114,7 +115,7 @@ export const priceResultSchema = z
     }),
     /**
      * Composite-ready confidence in [0, 1]. A provider may emit a provisional
-     * value; the canonical autopilot gate recomputes it from signals later.
+     * value; the canonical publish-eligibility gate recomputes it from signals later.
      */
     confidence: z.number().min(0).max(1),
     /** Cited comps / lookup records. May be empty for the LLM-only fallback. */
@@ -133,7 +134,7 @@ export const priceResultSchema = z
      * Judged comp agreement in [0, 1] (1 = comps in lockstep), reported by
      * comp-based tiers from their measured relative spread. The pipeline's
      * confidence composite consumes this so a SCATTERED sold set cannot ride
-     * the sold-comp label into the tight (autopilot-grade) confidence tier.
+     * the sold-comp label into the tight (ready-to-publish) confidence tier.
      * Tiers with no comp set leave it unset.
      */
     compAgreement: z.number().min(0).max(1).optional(),

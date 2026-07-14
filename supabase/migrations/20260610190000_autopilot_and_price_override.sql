@@ -1,9 +1,9 @@
--- SnapList — confidence-gated autopilot + seller price override (issue #12).
+-- SnapList — publish eligibility + seller price override (legacy autopilot names; issue #12).
 --
 -- Two additive, idempotent schema changes:
 --
--- 1. `user_settings` — per-user preferences, starting with the master autopilot
---    switch (User Story 24: "autopilot can be turned off entirely"). One row per
+-- 1. `user_settings` — per-user preferences, starting with the publish-eligibility
+--    switch. One row per
 --    user, keyed by the auth user id. `autopilot_enabled` defaults TRUE and a
 --    MISSING row also means enabled (the app treats the table as an override
 --    store), so existing users need no backfill. RLS mirrors the per-user
@@ -22,15 +22,15 @@
 -- ---------------------------------------------------------------------
 create table if not exists public.user_settings (
   user_id           uuid primary key references auth.users (id) on delete cascade,
-  -- Master autopilot switch. TRUE = high-confidence items may auto-post;
-  -- FALSE = everything queues for manual review regardless of confidence.
+  -- Publish-eligibility switch (legacy column name). TRUE = high-confidence
+  -- items may be marked ready to publish; FALSE = everything stays in review.
   autopilot_enabled boolean not null default true,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
 
 comment on table public.user_settings is
-  'Per-user preferences. autopilot_enabled is the master switch for confidence-gated auto-posting (issue #12); a missing row means autopilot is enabled (the default).';
+  'Per-user preferences. autopilot_enabled is the legacy-named switch for confidence-gated publish eligibility (issue #12); it never publishes a listing, and a missing row means eligibility is enabled by default.';
 
 -- keep updated_at honest on mutation (reuses the shared trigger function from
 -- the init migration; drop/create keeps this re-runnable).

@@ -1,10 +1,10 @@
 # Sold-comps egress and operator smoke
 
 SnapList's in-process TypeScript `ebay-sold` PricingProvider reads eBay's public
-sold/completed result pages for read-only price research. Direct server fetches
-can be blocked by the host environment. When that happens, the provider declines
-and the pricing router continues to its cited web-search, depreciation, or
-LLM-only fallback tiers; it does not fail the listing pipeline.
+sold/completed result pages for read-only price research. The selected direct or
+proxy egress path can be blocked or return too few usable comps. When that happens,
+the provider declines and the pricing router continues to its cited web-search,
+depreciation, or LLM-only fallback tiers; it does not fail the listing pipeline.
 
 This seam is unrelated to the transactional eBay adapter. It cannot create a
 listing, send a message, or use seller OAuth.
@@ -58,7 +58,7 @@ and records the expected deterministic fallback:
 The fallback tier in this smoke is a no-network sentinel. It proves that a sold
 tier decline reaches the next legal router tier; it does **not** claim that a live
 web-search price was fetched. Automated tests use checked-in HTML fixtures and
-injected blocked/no-results responses, so they cannot spend proxy credits or call
+injected blocked/no-results responses, so they cannot spend egress-provider units or call
 production services.
 
 ## Operator-controlled live smoke
@@ -79,6 +79,7 @@ pnpm smoke:sold-comps -- --live --confirm-one-request Sony WH-1000XM4 electronic
 The script never calls the web-search or LLM fallbacks. Its JSON report is safe to
 attach to an operator record and contains:
 
+- `mode`: `dry-run` or `live`
 - `status`: `success` or `fallback`
 - `mode`: `live` (or `dry-run` for the inert default)
 - `targetUrl`: the SSRF-validated eBay sold/completed query, or `null` when the
@@ -86,7 +87,7 @@ attach to an operator record and contains:
 - `selectedTier`: `ebay-sold` on usable comps; otherwise the deterministic next-tier sentinel
 - `sourceUrls`: sold-listing citations on success
 - `fallbackReason`: `disabled`, `unidentifiable`, `egress-blocked`, or
-  `no-usable-sold-comps`
+  `no-usable-sold-comps` (`dry-run-no-network` appears only in dry-run mode)
 - `egressMode`: `direct` or `proxy`
 - `externalRequests`: `0` or `1`
 - `fallbackSimulated`: `true` when any deterministic fallback sentinel wins;

@@ -59,7 +59,7 @@ on eBay. Buyers never see SnapList.
 **Pricing**
 7. As a seller, I want a suggested price for the item, so that I don't have to research it myself.
 8. As a seller, I want a price *range* and a *confidence* level, not just a single number, so that I understand how reliable the suggestion is.
-9. As a seller, I want to see the *sources* behind the price, so that I can verify and trust it.
+9. As a seller, I want to see the *sources* behind evidence-backed prices and an honest uncited label on the terminal LLM-only estimate, so that I can verify what is verifiable without being misled.
 10. As a seller, I want pricing to reflect *used/resale* value rather than retail, so that my listing is realistic.
 11. As a seller, I want books/media priced from an exact ISBN lookup, so that those listings are highly accurate.
 12. As a seller, I want branded/recognizable items priced from real web comps, so that valuable items are priced well.
@@ -110,7 +110,7 @@ on eBay. Buyers never see SnapList.
 
 **Bulk / haul capture (reseller volume)**
 42. As a reseller, I want to capture many items in one photo session (a "haul") instead of starting a fresh flow per item, so that listing a batch of pickups is one pass, not one-item-at-a-time.
-43. As a reseller, I want each captured item in the haul to run the same identify → price → generate pipeline and land as its own reviewable draft, so that bulk capture never trades away per-item accuracy or my final say.
+43. As a reseller, I want each captured item in the haul to run the same identify → price → generate pipeline and land as its own reviewable listing, so that bulk capture never trades away per-item accuracy or my final say.
 
 ## Implementation Decisions
 
@@ -143,7 +143,7 @@ on eBay. Buyers never see SnapList.
 
 ### Pricing pipeline (behind a `PricingProvider` interface; routing pipeline, not one source)
 Routing by item signal, each result always `{ suggested, range, confidence, sources[] }`, always user-editable:
-1. **ISBN present** → true structured lookup (Open Library + Google Books, free). Highest confidence.
+1. **ISBN present** → true structured catalog lookup (Open Library + Google Books, free). Highest identification confidence; pricing trust remains estimate-level unless the result is also sold-backed.
 2. **Identifiable item → eBay public sold comps** → scrape eBay's PUBLIC sold/completed results pages (`LH_Sold=1&LH_Complete=1`) for real **completed-sale** comps — the strongest used signal, no API/login needed. Slots **above** the web-search tiers (sold beats asking). Read-only price research, never a posting mechanism. See **ADR-0001**.
 3. **UPC present** → decode as a strong **identification/query aid** (not a price oracle — no reliable free UPC price API). Feed decoded code + resolved product name into the web-search agent; price comes from comps.
 4. **Recognizable branded item** → **bounded tool-calling web-search pricing agent** (see below).
@@ -168,7 +168,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Confidence (signature feature: confidence-gated publish eligibility)
 - **Signal-based composite, NOT LLM self-report.** Inputs:
-  - which pricing tier fired (ISBN > tight web comps > wide web comps > depreciation > LLM-only),
+  - which evidence/trust tier fired (sold-backed ISBN > tight sold comps > strongly corroborated web comps > wide web comps > depreciation/catalog estimate > LLM-only),
   - **comp agreement** (variance/dispersion of found prices — tight cluster = confident),
   - **identification completeness** (brand + model resolved? barcode decoded cleanly? category unambiguous?).
 - Publish eligibility gate = threshold on the composite. High → marked ready to publish; low → review. The preference is toggleable off. Eligibility never invokes the eBay adapter; the seller explicitly chooses **Publish to eBay**. The signals are surfaced for transparency.
@@ -181,8 +181,8 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Bulk / haul capture (reseller volume)
 - **Batch capture is a first-class flow, not a bolt-on.** A reseller can stage many items in one session — photograph item, "next item", repeat — then process the whole haul at once. This is the volume path the reseller ICP needs; single-item capture remains the simple default.
-- **Same pipeline per item, no accuracy shortcut.** Each staged item runs the *identical* identify → price (sold-comps routing) → generate pipeline and lands as its own reviewable draft with its own confidence. Bulk is a capture/queueing convenience; it never fans out to a cheaper or shared prediction. Confidence-gated publish eligibility still applies per item; publishing remains manual.
-- Complements the reseller-facing surfaces already shipped: **cost-basis → net-profit** tracking per item and scheduled **stale-inventory auto-repricing** (both env-configurable, both opt-in where they touch money or posting).
+- **Same pipeline per item, no accuracy shortcut.** Each staged item runs the *identical* identify → price (sold-comps routing) → generate pipeline and lands as its own reviewable listing with its own confidence. Bulk is a capture/queueing convenience; it never fans out to a cheaper or shared prediction. Confidence-gated publish eligibility still applies per item; publishing remains manual.
+- Complements the reseller-facing surfaces already shipped: **cost-basis → net-profit** tracking per item and scheduled **stale-inventory auto-repricing**. Auto-repricing requires its own explicit opt-in plus the publish-eligibility setting; it only applies a high-confidence price change to an existing live listing and never publishes a new listing.
 
 ### Listing generation (per-platform)
 - **One Zod-validated attribute core → many surface renderings** via per-platform prompt + template.
@@ -236,7 +236,7 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - **Vision extraction boundary** — given image input(s), output **must validate** against the Zod
   attribute schema (contract test); quality measured by eval harness, not unit assertions.
 - **Confidence function** — pure, deterministic given its signal inputs. **Unit-tested directly**
-  with crafted signal sets (tight comps → high, wide comps → low, ISBN → high, etc.). This is the
+  with crafted signal sets (tight sold comps → high, wide comps → low, catalog-only ISBN → estimate-level, etc.). This is the
   most important pure-logic test target.
 - **Listing generators** — per-platform output validated against platform constraints (e.g. eBay
   title length, required fields present, no attributes hallucinated beyond the validated core).

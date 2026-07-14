@@ -12,7 +12,7 @@ import { SettingsView, type SettingsData } from "./settings-view";
 
 /**
  * Settings — data assembly only (UI pass). Resolves the Clerk profile (the
- * same fields the topbar ProfileMenu gets), the autopilot switch state, and
+ * same fields the topbar ProfileMenu gets), the publish-eligibility switch state, and
  * the eBay connection, then hands plain serializable props to SettingsView so
  * the dev preview harness can render the identical screen from fixtures.
  */

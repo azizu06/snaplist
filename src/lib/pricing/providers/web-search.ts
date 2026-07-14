@@ -9,7 +9,7 @@ import type {
 import { resolveLanguageModel, resolveModelId } from "../../llm";
 
 /**
- * Tiers 2 + 3 — the web-search pricing agent (`upc-aided-web` / `branded-web`),
+ * Tiers 3 + 4 — the web-search pricing agent (`upc-aided-web` / `branded-web`),
  * issue #10.
  *
  * PRD §"Pricing pipeline": a recognizable branded item is priced from REAL web
@@ -33,7 +33,7 @@ import { resolveLanguageModel, resolveModelId } from "../../llm";
  * grounded in SOLD comps cites `kind: "sold-comp"` sources; an asking-only
  * result cites `kind: "asking-comp"` and reports lower provisional confidence,
  * so the pipeline's tier→confidence mapping (`branded-web` → `web_tight` ONLY
- * with a sold comp, else `web_wide`) down-weights it for autopilot gating.
+ * with a sold comp, else `web_wide`) down-weights it for publish eligibility.
  *
  * Every network/model dependency is INJECTED (same DI style as
  * `providers/isbn.ts` and `listing/generate.ts`): `SearchClient` for the web
@@ -455,7 +455,7 @@ function synthesize(
     // synthesized price is actually sold-grounded (j.soldBasis — and then the
     // basis is sold comps only). A lone sold entry inside a mixed asking-basis
     // set must NOT leak "sold-comp", or the pipeline's web_tight mapping would
-    // grant autopilot-grade confidence to an asking-priced result.
+    // grant ready-to-publish confidence to an asking-priced result.
     kind: j.soldBasis ? "sold-comp" : "asking-comp",
   }));
 
@@ -578,7 +578,7 @@ async function priceViaWebAgent(
 }
 
 /**
- * Tier 2 — `upc-aided-web`: a decoded UPC feeds the web-search agent as an
+ * Tier 3 — `upc-aided-web`: a decoded UPC feeds the web-search agent as an
  * identification/query aid. Requires a UPC on the signal.
  */
 export function createUpcWebPricingProvider(
@@ -598,7 +598,7 @@ export function createUpcWebPricingProvider(
 }
 
 /**
- * Tier 3 — `branded-web`: a recognizable branded item priced from real web
+ * Tier 4 — `branded-web`: a recognizable branded item priced from real web
  * comps. Requires a brand AND a model or resolved product name — a bare brand
  * ("Sony" alone) does not identify a product, and its hopelessly broad queries
  * ("Sony used sold price") can surface two arbitrary same-brand comps that

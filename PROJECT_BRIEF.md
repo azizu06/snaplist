@@ -29,7 +29,7 @@ end-to-end in a polished, deployed app.
 | Skill (cert) | Where it shows up |
 |---|---|
 | Multimodal AI / vision (AI Eng) | Photo → item identification + condition/attribute extraction + barcode/label reading |
-| Agents + tool calling (AI Eng) | Pricing **research agent** (web search), buyer-Q&A agent, autopilot |
+| Agents + tool calling (AI Eng) | Pricing **research agent** (web search), buyer-Q&A agent, publish-eligibility gate |
 | RAG / synthesis (AI Eng) | Reconcile multiple web sources into a cited price range; retrieve similar past items |
 | Structured outputs, Zod-validated (AI Eng + Security) | Attribute schema, listing schema, price-recommendation schema |
 | Prompt / context engineering (AI Eng) | Per-platform listing generation; used-vs-new price disambiguation |
@@ -37,30 +37,34 @@ end-to-end in a polished, deployed app.
 | Security (Cybersecurity cert) | eBay OAuth, secret handling, input validation, account-deletion endpoint |
 | Docker / CI / observability / deploy (Boot.dev, later) | Phase 4, as those courses complete |
 
-## Core flow ( [auto] = agent, [tap] = user )
+## Core flow ( [auto] = agent-generated work, [tap] = seller action )
 1. [tap] Snap photo(s) of the item — the only required input.
 2. [auto] Vision → brand, model, category, condition, key specs, any barcode/ISBN (structured output).
 3. [auto] **Pricing research agent** → suggested price + range + confidence + sources (see strategy below).
 4. [auto] Listing generator → title, item specifics, description, tags (per-platform).
 5. [tap] Review & approve (or edit price/fields).
-6. [auto] Post to eBay (Sell API); generate copy-paste **export packs** for other platforms.
+6. [tap] Publish to eBay (Sell API); [auto] generate copy-paste **export packs** for other platforms.
 7. [auto] Buyer message → agent drafts reply; [tap] approve send.
 
-**Signature feature — confidence-gated autopilot:** the agent scores its own identification/pricing
-confidence. High-confidence items post automatically; low-confidence ones queue for review.
+**Signature feature — confidence-gated publish eligibility:** deterministic signals combine the
+pricing tier, comp agreement, and identification completeness. High-confidence items are marked
+ready to publish; low-confidence ones stay in review. The seller explicitly publishes every item.
 
 ## Pricing strategy (the hard part — broad + "good enough" accurate)
 Pricing is a **routing pipeline behind a `PricingProvider` interface**, not a single source:
-1. **Barcode / ISBN present** (books, media, packaged goods) → structured lookup (most accurate).
-2. **Recognizable branded item** → **web-search pricing agent** (Tavily / Exa / Perplexity Sonar):
+1. **ISBN present** (books/media) → structured catalog lookup, supplemented by sold comps when available.
+2. **Identifiable item** → read eBay's public sold/completed pages for recent sold comps.
+3. **Recognizable branded item / UPC-aided identity** → **web-search pricing agent** (Tavily / Exa / Perplexity Sonar):
    formulate queries → search the open web for *used/sold/resale* prices → synthesize a cited range.
-3. **Generic item, only retail found** → retail price × **condition-based depreciation factor**
+4. **Generic item, only retail found** → retail price × **condition-based depreciation factor**
    (labeled as an estimate, low confidence).
-4. **Ultimate fallback** → LLM-only estimate.
+5. **Ultimate fallback** → clearly labeled, lowest-confidence LLM-only estimate.
 
-Every result carries **suggested + range + confidence + sources**, and is **user-editable**.
+Every result carries **suggested + range + confidence + sources[]**, and is **user-editable**;
+`sources[]` may be empty only for the terminal LLM-only estimate.
 - eBay **Browse** API is **dropped** (only gives asking prices, needs uncertain Buy-API approval).
-- eBay **Marketplace Insights** (true *sold* prices) is **gated/unavailable** to solo devs — not used.
+- eBay **Marketplace Insights** (true *sold* prices) is **gated/unavailable** to solo devs — not used
+  as an API; public sold/completed result pages provide the read-only sold-comp tier.
 - Accuracy concentrates where it matters: valuable/branded items have rich web comps; cheap generic
   items get rough estimates (low stakes). Honest ceiling: this is a *smart suggestion*, not an oracle.
 
@@ -97,7 +101,7 @@ eBay; only the seller (user) lives in SnapList.
   provider, web-search API key, eBay **sandbox** dev keys.
 - **Phase 1 — core demo (centerpiece):** photo → vision identify + attributes → pricing agent →
   generated listing → review/edit UI → persist. (eBay posting against sandbox.)
-- **Phase 2 — agentic:** buyer-Q&A agent + cron poller + Realtime inbox; confidence-gated autopilot.
+- **Phase 2 — agentic:** buyer-Q&A agent + cron poller + Realtime inbox; confidence-gated publish eligibility.
 - **Phase 3 — posting + export:** eBay Sell API publish (sandbox); export packs for other platforms.
 - **Phase 4 — go real + polish:** production checklist (below), pgvector similar-item RAG, eval suite
   (ID accuracy + pricing sanity), Docker/CI/observability (as Boot.dev lands), deploy, README.
@@ -113,7 +117,7 @@ Build **env-configurable** so production is a credential flip, not a rewrite. To
 ## Explicit non-goals
 - Auto-posting to Poshmark/Mercari/Facebook/OfferUp (no public APIs → **export packs**, never scraping).
 - Cross-platform inbox/tracking (no APIs → eBay-only).
-- True sold-price data (gated API) and eBay Browse (dropped).
+- Sold-price APIs (gated) and eBay Browse (dropped). Read-only public sold-page research remains in scope.
 - Real users / growth / marketing as a success metric (it's a showcase first).
 
 ## Tech stack

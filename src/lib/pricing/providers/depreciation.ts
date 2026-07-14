@@ -21,7 +21,7 @@ import {
 import { resolveLanguageModel } from "../../llm";
 
 /**
- * Tier 4 — the depreciation `PricingProvider` (`depreciation`), issue #11.
+ * Tier 5 — the depreciation `PricingProvider` (`depreciation`), issue #11.
  *
  * PRD §"Pricing pipeline": a generic item where only a RETAIL price can be
  * found → retail × condition-based depreciation factor. Low confidence.
@@ -98,7 +98,7 @@ const BAND_SPREAD = 0.3;
 /**
  * Provisional confidence — honestly LOW. The canonical composite recomputes
  * downstream from the tier signal (`depreciation` base 0.4), whose composite
- * maximum 0.6·0.4 + 0.25·1 + 0.15·1 = 0.64 sits below the 0.75 autopilot gate
+ * maximum 0.6·0.4 + 0.25·1 + 0.15·1 = 0.64 sits below the 0.75 publish-eligibility gate
  * BY CONSTRUCTION (asserted in tests): a depreciation estimate can never
  * be marked ready no matter how well the item was identified.
  */
@@ -272,7 +272,7 @@ function synthesize(
     title: f.title,
     // Distinct from the comp vocabulary on purpose: a retail price is NOT a
     // resale comp, and must never read as "sold-comp" downstream (the
-    // confidence mapping treats sold-comp as autopilot-grade evidence).
+    // confidence mapping treats sold-comp as ready-to-publish evidence).
     kind: "retail-price",
   }));
 

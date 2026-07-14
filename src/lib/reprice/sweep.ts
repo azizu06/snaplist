@@ -30,7 +30,7 @@ import {
  *      (PRD non-negotiable — this feeds the eval harness),
  *   3. on material drift persists a `reprice_suggestions` row + a bell
  *      notification with the evidence (fresh comps, drift %, confidence),
- *   4. AUTO-APPLIES only when the run is autopilot-eligible per the composite
+ *   4. AUTO-APPLIES only when the run passes publish eligibility per the composite
  *      confidence gate AND the seller's auto-reprice toggle (default OFF) is
  *      on — revising the live listing through the eBay adapter (mockable) and
  *      recording the change; never below the seller's price floor.

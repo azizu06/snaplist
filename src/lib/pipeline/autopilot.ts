@@ -1,15 +1,18 @@
 import type { ConfidenceResult } from "../confidence/confidence";
 
 /**
- * Confidence-gated autopilot disposition + seller price override (issue #12).
+ * Confidence-gated publish-eligibility disposition + seller price override.
+ * `autopilot*` identifiers are legacy persistence/API names; this module never
+ * publishes or schedules marketplace work (issue #127).
  *
  * Two pure decisions live here so they are unit-testable with fake data and
  * shared by every consumer (persistence, review UI, eBay publish, and export):
  *
  *  1. WHERE does a freshly generated listing go? `autopilotEligible` (computed by
  *     the confidence composite: master switch AND score >= threshold) maps onto
- *     the `listings.status` lifecycle — eligible runs are QUEUED for auto-post,
- *     everything else stays a DRAFT awaiting human review. The mapping consumes
+ *     the `listings.status` lifecycle — eligible runs are QUEUED as ready for a
+ *     seller-triggered publish, while everything else stays a DRAFT awaiting
+ *     human review. The mapping consumes
  *     the already-decided gate rather than re-deriving it from score/threshold,
  *     so there is exactly ONE place (computeConfidence) that owns the gate rule.
  *
@@ -23,8 +26,8 @@ export type ListingDisposition = "queued" | "draft";
 
 /**
  * Map the confidence gate decision to the listing's initial status.
- * - eligible (autopilot ON and high confidence) → "queued" (auto-post pipeline)
- * - not eligible (autopilot OFF, or score below threshold) → "draft" (review queue)
+ * - eligible (legacy switch ON and high confidence) → "queued" (ready to publish)
+ * - not eligible (switch OFF, or score below threshold) → "draft" (review flow)
  */
 export function initialListingStatus(
   confidence: Pick<ConfidenceResult, "autopilotEligible">,
@@ -39,7 +42,7 @@ export function initialListingStatus(
  * The write and read paths share the same cent-safe normalization contract.
  * `numeric` comes back through drivers/JSON as number OR string, and legacy
  * rows could carry junk — a bad override must degrade to the suggestion, never
- * to NaN on a listing or a $0 auto-post.
+ * to NaN on a listing or a $0 marketplace publish.
  */
 export function effectivePrice(
   suggested: number | string | null | undefined,

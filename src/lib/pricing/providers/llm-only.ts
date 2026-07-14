@@ -4,7 +4,7 @@ import { resolvePricingModel } from "./web-search";
 import { resolveLanguageModel } from "../../llm";
 
 /**
- * Tier 5 — the LLM-only `PricingProvider` (`llm-only`), issue #11.
+ * Tier 6 — the LLM-only `PricingProvider` (`llm-only`), issue #11.
  *
  * PRD §"Pricing pipeline": the ultimate fallback — a pure LLM price estimate,
  * lowest confidence. This tier is the routing FLOOR: it fires only when every
@@ -20,7 +20,7 @@ import { resolveLanguageModel } from "../../llm";
  *    no checkable evidence behind the number and the result never claims any.
  *  - Provisional confidence is the floor (`LLM_ONLY_CONFIDENCE`, 0.2). The
  *    canonical composite's `llm_only` base (0.2) caps the composite at
- *    0.6·0.2 + 0.25·1 + 0.15·1 = 0.52, below the 0.75 autopilot gate BY
+ *    0.6·0.2 + 0.25·1 + 0.15·1 = 0.52, below the 0.75 publish-eligibility gate BY
  *    CONSTRUCTION (asserted in tests) — an LLM guess can never be marked ready.
  *  - The estimating model is stamped on the result for provenance: this tier
  *    ALWAYS runs a model, but only a KNOWN id is claimed (the default

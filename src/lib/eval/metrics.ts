@@ -168,7 +168,8 @@ export function pricingAccuracy(pairs: readonly EvalPair[]): PricingReport {
  * The per-item correctness bit that calibration measures confidence AGAINST:
  * the suggested price landed in the gold band AND the identity fields the gold
  * set defines (brand/model) were recovered. That is exactly what the composite
- * confidence claims to predict — "this run is right enough to autopilot" — so a
+ * confidence claims to predict — "this run is reliable enough to mark ready for
+ * manual publish" — so a
  * well-calibrated 0.8 bucket should be observed-correct ~80% of the time.
  */
 export function observedCorrect(pair: EvalPair): boolean {
@@ -306,7 +307,8 @@ export interface RecommendThresholdOptions {
 
 /**
  * Recommend the eligibility threshold that best matches REALITY, replacing the
- * hand-set `DEFAULT_AUTOPILOT_THRESHOLD` with an evidence-driven value (#4). Pure
+ * hand-set `DEFAULT_AUTOPILOT_THRESHOLD` (legacy name) with an evidence-driven
+ * publish-eligibility value (#4). Pure
  * and deterministic — unit-testable with crafted pairs, reproducible in the harness.
  *
  * Rule: among candidate gates that hit `targetPrecision` AND mark something eligible,

@@ -25,7 +25,7 @@ export interface RunAndPersistInput {
   userId: string;
   /** Storage object paths under the private `photos` bucket, scoped by user_id. */
   photos: string[];
-  /** Master autopilot switch (User Story 24). Forwarded to the pipeline. */
+  /** Publish-eligibility switch (legacy name). Forwarded to the pipeline gate. */
   autopilotEnabled?: boolean;
 }
 

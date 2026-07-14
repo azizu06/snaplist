@@ -75,7 +75,7 @@ const PRICE_FMT_CENTS = new Intl.NumberFormat("en-US", {
 const fmtPrice = (n: number) =>
   (Number.isInteger(n) ? PRICE_FMT_WHOLE : PRICE_FMT_CENTS).format(n);
 
-/** Default ("smart") order: errors → drafts → automatic states → live →
+/** Default ("smart") order: errors → drafts → pipeline/readiness states → live →
  *  archived. Unknown keys sort with drafts. */
 const STATUS_RANK: Record<string, number> = {
   failed: 0,

@@ -18,7 +18,8 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   key specs, and any decoded **barcode**/**ISBN**. Prefer "attributes" over "metadata" or "details".
 - **Condition** — the assessed wear state of a used item (e.g. new/like-new/good/fair). A first-class
   attribute because it drives pricing. Not "quality".
-- **Barcode / ISBN / UPC** — *ISBN* (books/media) resolves to a true structured price lookup. *UPC*
+- **Barcode / ISBN / UPC** — *ISBN* (books/media) resolves to a structured catalog lookup; without
+  sold grounding its pricing trust remains estimate-level. *UPC*
   (general goods) is decoded only as an **identification aid** that sharpens the search, never a price
   source. "Barcode" is the umbrella term.
 - **PricingProvider** — the interface every pricing strategy implements. Returns a **price
@@ -56,8 +57,9 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
   completeness}. Never raw LLM self-report. Drives the **publish-eligibility gate**. The tier-trust ordering
   encodes "sold beats asking": a tight **sold**-comp cluster ranks above the asking-based web tiers
-  and below only an exact ISBN lookup (issue #60); a scattered sold set degrades to the wide-comp
-  tier so a noisy sale spread cannot ride the sold label past the gate.
+  and below only a sold-backed exact ISBN result (issue #60); a catalog-only ISBN result stays at
+  estimate-level trust, and a scattered sold set degrades to the wide-comp tier so a noisy sale
+  spread cannot ride the sold label past the gate.
 - **Publish eligibility** (persisted under the legacy `autopilot_*` names) — the confidence-gated
   readiness preference: high-confidence items are marked **ready to publish**; lower-confidence
   items stay in review. Toggleable off. Eligibility never calls the eBay **adapter** or publishes in

@@ -54,9 +54,12 @@ Poster extraction example:
   verified tab clicks to Facebook Marketplace (casual/local, copy-paste note)
   and Mercari (short title, hashtag chips, shipping line). Ends
   “3 marketplaces ready”.
-- **step-publish** — review screen: checklist ticks, amber publish-eligibility gate
-  (“only 74% sure, so it waits for your OK”), explicit verified Publish click →
-  posting state → green “Live on eBay” + confirmation card with listing id.
+- **step-publish** — the current render source still contains legacy autopilot copy
+  that suggests automatic posting before the verified Publish click. That wording is
+  not the product contract: publish eligibility only marks readiness, and every eBay
+  publish is seller-triggered through the adapter. Replace and re-render this clip
+  before using it as current product media; the click → posting state → green “Live
+  on eBay” + confirmation card remains the intended manual-publish sequence.
 - **buyer-qa** — trust story (badged STEP 6 · ANSWER BUYERS — it is the sixth
   step of the how-it-works pipeline): buyer question lands in the inbox
   (verified row click), a reply drafts itself from the item's real details

@@ -68,9 +68,9 @@ export interface PredictionLogRow {
   /** Cited comps / lookup records behind the price (may be empty for llm-only). */
   sources: PriceSource[];
   /**
-   * The master autopilot switch value THIS run consumed — the review page's
-   * evidence for "autopilot was off when this ran" (the live setting may have
-   * been flipped since). Null on legacy rows that predate the setting.
+   * The publish-eligibility switch value THIS run consumed (legacy column name) —
+   * evidence for "eligibility was off when this ran" even if the live setting
+   * has since changed. Null on rows that predate the setting.
    */
   autopilot_enabled: boolean | null;
   /** The gate's output for this run (enabled AND score >= threshold). */
@@ -87,10 +87,10 @@ export interface PredictionLogRow {
 /**
  * Run-scoped context that rides alongside the PipelineResult into the log row:
  * facts the RUN consumed/produced that aren't part of the model's output —
- * the autopilot switch value and the listing-pairing run id.
+ * the publish-eligibility switch value and the listing-pairing run id.
  */
 export interface PredictionLogContext {
-  /** The master autopilot switch value this run consumed. */
+  /** The publish-eligibility switch value this run consumed (legacy property name). */
   autopilotEnabled?: boolean;
   /** The run id stamped on both the listing and this log row. */
   runId?: string;

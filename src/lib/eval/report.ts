@@ -50,7 +50,7 @@ export interface EvalReport {
   pricing: PricingReport;
   calibration: CalibrationReport;
   /**
-   * Evidence-driven autopilot gate recommendation (#4) — vs the hand-set 0.75.
+   * Evidence-driven publish-eligibility gate recommendation (#4) — vs the hand-set 0.75.
    * Absent when no predictions matched the gold set (nothing to recommend from).
    */
   autopilot?: ThresholdRecommendation;
