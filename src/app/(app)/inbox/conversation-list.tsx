@@ -182,6 +182,7 @@ export interface ConversationState {
   delivered: boolean;
   sending: boolean;
   undelivered: boolean;
+  canRetryFollowUps: boolean;
   statusTone: StatusTone;
   statusLabel: string;
   /** Unread = a buyer question still waiting on you (not yet replied/sent ok). */
@@ -199,6 +200,7 @@ export function deriveConversationState(
   const delivered = sentReply?.delivery_status === "delivered";
   const externallyAnswered = message.status === "externally_answered";
   const providerUnavailable = message.status === "provider_unavailable";
+  const canRetryFollowUps = !externallyAnswered && !providerUnavailable;
   // Claimed-but-undelivered (PR #35 review): the inbound row is `sent` but no
   // outbound row references it — delivery failed (or the process crashed) after
   // the CAS claim, before the outbound insert. While OUR send request is in
@@ -251,6 +253,7 @@ export function deriveConversationState(
     delivered,
     sending,
     undelivered,
+    canRetryFollowUps,
     statusTone,
     statusLabel,
     unread,
@@ -730,7 +733,14 @@ export function ConversationThread({
   onSendFollowUp,
   onBack,
 }: ConversationThreadProps) {
-  const { message, sentReply, delivered, sending, undelivered } = state;
+  const {
+    message,
+    sentReply,
+    delivered,
+    sending,
+    undelivered,
+    canRetryFollowUps,
+  } = state;
   const draftValue = edits[message.id] ?? message.draft_reply ?? "";
 
   return (
@@ -835,14 +845,16 @@ export function ConversationThread({
                     m.delivery_status,
                     m.delivery_attempted_at,
                   )}
-                  <button
-                    type="button"
-                    onClick={() => onRetryFollowUp(m)}
-                    disabled={!canRetryDelivery(m.delivery_status, retrying)}
-                    className="font-semibold underline underline-offset-2 disabled:no-underline disabled:opacity-60"
-                  >
-                    {retrying ? "Retrying…" : "Retry"}
-                  </button>
+                  {canRetryFollowUps ? (
+                    <button
+                      type="button"
+                      onClick={() => onRetryFollowUp(m)}
+                      disabled={!canRetryDelivery(m.delivery_status, retrying)}
+                      className="font-semibold underline underline-offset-2 disabled:no-underline disabled:opacity-60"
+                    >
+                      {retrying ? "Retrying…" : "Retry"}
+                    </button>
+                  ) : null}
                 </span>
               )}
             </div>

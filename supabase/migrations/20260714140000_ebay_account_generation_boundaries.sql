@@ -570,7 +570,18 @@ begin
 
   if v_generation is distinct from v_account.generation then
     delete from public.ebay_message_sync_state sync_state
-    where sync_state.user_id = p_user_id;
+    where sync_state.user_id = p_user_id
+      and sync_state.ebay_account_generation = v_account.generation;
+    update public.messages message
+    set status = 'provider_unavailable'
+    where message.user_id = p_user_id
+      and message.marketplace = 'ebay'
+      and message.direction = 'inbound'
+      and message.ebay_account_generation = v_account.generation
+      and message.status <> 'externally_answered';
+    delete from public.ebay_unresolved_questions pending
+    where pending.user_id = p_user_id
+      and pending.ebay_account_generation = v_account.generation;
     update private.ebay_messaging_account_generations account
     set generation = v_generation,
         seller_erased = false,
@@ -1617,6 +1628,7 @@ declare
   v_seller_user_ids text[];
   v_buyer_user_ids text[];
   v_user_ids text[];
+  v_erased_user_ids text[];
   v_lock_key text;
   v_user_id text;
   v_account private.ebay_messaging_account_generations%rowtype;
@@ -1724,7 +1736,47 @@ begin
     'identity_hash', matched.identity_hash
   )), '[]'::jsonb)
   into v_buyer_identities
-  from private.resolve_ebay_buyer_identities(v_global_buyer_hashes) matched;
+  from (
+    select resolved.user_id,
+           resolved.account_generation,
+           resolved.identity_hash
+    from private.resolve_ebay_buyer_identities(v_global_buyer_hashes) resolved
+    union
+    select observation.user_id,
+           observation.account_generation,
+           observation.identity_hash
+    from private.ebay_buyer_identity_observations observation
+    where v_user_id_hash is not null
+      and exists (
+        select 1
+        from public.ebay_unresolved_questions pending
+        where pending.user_id = observation.user_id
+          and pending.ebay_account_generation = observation.account_generation
+          and private.hash_ebay_identity(
+            'sender_id', pending.external_buyer_id
+          ) = observation.identity_hash
+      )
+      and not exists (
+        select 1
+        from private.ebay_buyer_identity_provenance provenance
+        where provenance.user_id = observation.user_id
+          and provenance.account_generation = observation.account_generation
+          and observation.identity_hash in (
+            provenance.trading_identity_hash,
+            provenance.username_identity_hash
+          )
+      )
+      and not exists (
+        select 1
+        from public.messages message
+        where message.user_id = observation.user_id
+          and message.ebay_account_generation = observation.account_generation
+          and message.marketplace = 'ebay'
+          and private.hash_ebay_identity(
+            'sender_id', message.external_buyer_id
+          ) = observation.identity_hash
+      )
+  ) matched;
 
   select coalesce(jsonb_agg(jsonb_build_object(
     'user_id', matched.user_id,
@@ -1751,7 +1803,16 @@ begin
   into v_user_ids
   from unnest(v_seller_user_ids || v_buyer_user_ids) matched(user_id);
 
-  v_erased := cardinality(v_user_ids);
+  select coalesce(array_agg(distinct matched.user_id), '{}'::text[])
+  into v_erased_user_ids
+  from (
+    select unnest(v_seller_user_ids) as user_id
+    union
+    select resolved.user_id
+    from private.resolve_ebay_buyer_identities(v_global_buyer_hashes) resolved
+  ) matched;
+
+  v_erased := cardinality(v_erased_user_ids);
 
   foreach v_user_id in array (
     select coalesce(array_agg(user_id order by user_id), '{}'::text[])

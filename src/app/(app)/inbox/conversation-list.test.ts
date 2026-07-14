@@ -92,6 +92,7 @@ describe("deriveConversationState", () => {
       statusTone: "neutral",
       statusLabel: "No longer active on eBay",
       unread: false,
+      canRetryFollowUps: false,
       snippet: "The charger is included.",
     });
   });

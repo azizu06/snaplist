@@ -18,6 +18,7 @@ vi.mock("./user-token-provider", () => ({
 }));
 
 import {
+  createEbayAdapter,
   createEbayAdapterForUser,
   createEbayMessagingAdapterForUser,
   ebayMessagingSyncUserIds,
@@ -38,6 +39,12 @@ describe("eBay messaging composition", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("requires an account-bound provider at the low-level composition root", () => {
+    expect(() => createEbayAdapter(undefined as never)).toThrow(
+      "An account-bound eBay token provider is required.",
+    );
   });
 
   it("uses the tenant server client for connected seller credential writes", async () => {
@@ -64,19 +71,45 @@ describe("eBay messaging composition", () => {
     });
   });
 
-  it("does not require the tenant server client for app-level fallback", async () => {
+  it("rejects app-level credentials for an unconnected non-operator", async () => {
     getEbayConnectionStatus.mockResolvedValue({
       connected: false,
       ebayUsername: null,
     });
     const credentialClient = vi.fn();
 
-    await createEbayAdapterForUser({} as SupabaseClient, "user_a", {
-      credentialClient,
-    });
+    await expect(
+      createEbayAdapterForUser({} as SupabaseClient, "user_a", {
+        credentialClient,
+      }),
+    ).rejects.toThrow(
+      "App-level eBay Sandbox credentials are restricted to the configured operator tenant.",
+    );
 
     expect(credentialClient).not.toHaveBeenCalled();
     expect(userTokenProvider).not.toHaveBeenCalled();
+  });
+
+  it("keeps foreground Sandbox publishing on the operator's bound generation", async () => {
+    getEbayConnectionStatus.mockResolvedValue({
+      connected: false,
+      ebayUsername: null,
+    });
+    for (const [key, value] of Object.entries(operatorEnv)) {
+      vi.stubEnv(key, value);
+    }
+    const credentialClient = { rpc: vi.fn() } as unknown as SupabaseClient;
+
+    await expect(
+      createEbayAdapterForUser({} as SupabaseClient, "user_operator", {
+        credentialClient,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(userTokenProvider).toHaveBeenCalledWith(credentialClient, {
+      userId: "user_operator",
+      scheduled: false,
+    });
   });
 
   it("keeps scheduled Sandbox auto-repricing on the operator's bound generation", async () => {

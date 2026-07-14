@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(155);
+select extensions.plan(160);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -2263,7 +2263,7 @@ where user_id = 'generation-tenant';
 insert into public.messages (
   id, user_id, item_id, listing_id, direction, body, status, marketplace,
   external_message_id, external_parent_id, external_listing_id,
-  external_created_at
+  external_created_at, draft_reply
 ) values (
   '99000000-0000-4000-8000-000000000001',
   'generation-tenant',
@@ -2276,7 +2276,46 @@ insert into public.messages (
   'generation-question-a',
   'generation-question-a',
   'generation-listing',
-  '2026-07-14T14:00:00Z'
+  '2026-07-14T14:00:00Z',
+  'Account A approved draft'
+);
+
+insert into public.messages (
+  id, user_id, item_id, listing_id, direction, body, status, marketplace,
+  reply_to, reply_kind, external_parent_id, external_listing_id,
+  delivery_status, delivery_attempted_at
+) values (
+  '99000000-0000-4000-8000-000000000005',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000001',
+  '98000000-0000-4000-8000-000000000001',
+  'outbound',
+  'Account A failed follow-up',
+  'sent',
+  'ebay',
+  '99000000-0000-4000-8000-000000000001',
+  'followup',
+  'generation-question-a',
+  'generation-listing',
+  'failed',
+  '2026-07-14T14:30:00Z'
+);
+
+insert into public.ebay_unresolved_questions (
+  user_id, external_message_id, external_parent_id, external_listing_id,
+  external_buyer_id, body, resolution_window_from, observed_cursor_at,
+  last_resolution_attempted_at, last_error
+) values (
+  'generation-tenant',
+  'generation-pending-a',
+  'generation-pending-a',
+  'generation-listing',
+  'generation-buyer-a',
+  'Account A unresolved question',
+  '2026-07-13T14:00:00Z',
+  '2026-07-14T14:00:00Z',
+  '2026-07-14T14:00:00Z',
+  'retry later'
 );
 
 set local role authenticated;
@@ -2311,6 +2350,37 @@ select extensions.isnt(
   (select account_generation from ebay_account_generation_fixture where account_name = 'account-a'),
   (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
   'reconnecting a replacement seller account creates a distinct account generation'
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply
+    from public.messages
+    where id = '99000000-0000-4000-8000-000000000001'
+  $$,
+  $$values ('provider_unavailable'::text, 'Account A approved draft'::text)$$,
+  'seller replacement preserves the old draft while retiring its thread'
+);
+
+select extensions.results_eq(
+  $$
+    select body, delivery_status
+    from public.messages
+    where id = '99000000-0000-4000-8000-000000000005'
+  $$,
+  $$values ('Account A failed follow-up'::text, 'failed'::text)$$,
+  'seller replacement preserves failed follow-up history'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_unresolved_questions
+    where user_id = 'generation-tenant'
+      and external_message_id = 'generation-pending-a'
+  ),
+  0,
+  'seller replacement removes unresolved work from the retired generation'
 );
 
 set local role service_role;
@@ -3040,6 +3110,7 @@ select extensions.is(
   1,
   'unresolved questions persist partial generation-bound buyer provenance'
 );
+
 update public.messages
 set external_buyer_id = 'reused_buyer_username'
 where user_id = 'buyer-link-tenant'
@@ -3152,6 +3223,29 @@ select extensions.is(
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
+select public.apply_scheduled_ebay_message_write(
+  'buyer-link-tenant',
+  'upsert_unresolved_question',
+  jsonb_build_object(
+    'external_message_id', 'buyer-provenance-unlinked-partial',
+    'external_parent_id', 'buyer-provenance-unlinked-partial',
+    'external_listing_id', 'buyer-provenance-listing',
+    'external_buyer_id', 'legacy-only-unresolved-buyer',
+    'body', 'Unlinked unresolved buyer question',
+    'external_created_at', '2026-07-14T18:40:00Z',
+    'resolution_window_from', '2026-07-13T18:40:00Z',
+    'observed_cursor_at', '2026-07-14T18:45:00Z',
+    'attempted_at', '2026-07-14T18:45:00Z',
+    'error', 'Immutable identity unavailable'
+  ),
+  public.begin_scheduled_ebay_message_write('buyer-link-tenant')
+);
+
+reset role;
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
 select extensions.is(
   public.erase_ebay_user_data(
     'pending-stable-buyer-id',
@@ -3205,6 +3299,28 @@ select extensions.is(
   ),
   0,
   'stable-only buyer deletion erases partial unresolved provenance records'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_unresolved_questions
+    where external_message_id = 'buyer-provenance-unlinked-partial'
+  ),
+  0,
+  'immutable-id deletion removes unlinked partial unresolved observations'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_buyer_identity_observations observation
+    where observation.identity_hash = private.hash_ebay_identity(
+      'sender_id', 'legacy-only-unresolved-buyer'
+    )
+  ),
+  0,
+  'immutable-id deletion removes the quarantined partial identity observation'
 );
 
 select extensions.is(
