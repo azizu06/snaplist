@@ -110,7 +110,7 @@ export async function POST(
   }
   try {
     const attachmentClient = await createTenantServerClient();
-    await stageOutboundPhotos({
+    const stagedPhotos = await stageOutboundPhotos({
       supabase: attachmentClient,
       userId,
       conversationRootId: message.id,
@@ -127,6 +127,7 @@ export async function POST(
       ...transport,
       messageId: message.id,
       body: parsed.data.reply,
+      expectedPhotoIds: stagedPhotos.map((photo) => photo.id),
     });
     return NextResponse.json({ outboundId: outbound.id, status: "sent" });
   } catch (err) {

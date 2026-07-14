@@ -345,6 +345,104 @@ revoke all on function public.stage_message_photo_upload_intents(text, uuid[])
 grant execute on function public.stage_message_photo_upload_intents(text, uuid[])
   to authenticated;
 
+create or replace function public.claim_ebay_message_write_with_photos(
+  p_operation text,
+  p_payload jsonb,
+  p_generation uuid,
+  p_delivery_request_id text,
+  p_attachment_ids uuid[]
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+  v_root_id uuid;
+  v_expected integer;
+  v_total integer;
+  v_matched integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+  if coalesce(p_delivery_request_id, '') = '' then
+    raise exception using errcode = '23514', message = 'Delivery request identity is required';
+  end if;
+  if p_operation = 'claim_canonical' then
+    v_root_id := nullif(p_payload->>'message_id', '')::uuid;
+    if p_delivery_request_id is distinct from v_root_id::text then
+      raise exception using errcode = '23514', message = 'Canonical delivery identity does not match';
+    end if;
+  elsif p_operation = 'create_followup' then
+    v_root_id := nullif(p_payload->>'root_id', '')::uuid;
+    if p_delivery_request_id is distinct from nullif(p_payload->>'request_id', '') then
+      raise exception using errcode = '23514', message = 'Follow-up delivery identity does not match';
+    end if;
+  else
+    raise exception using errcode = '42501', message = 'Photo claim operation is not allowed';
+  end if;
+  if p_attachment_ids is null then
+    raise exception using errcode = '23514', message = 'Approved photo set is required';
+  end if;
+  v_expected := cardinality(p_attachment_ids);
+  if v_expected > 5 then
+    raise exception using errcode = '23514', message = 'Approved photo set is too large';
+  end if;
+
+  perform 1
+  from public.messages root
+  where root.id = v_root_id
+    and root.user_id = v_user_id
+    and root.marketplace = 'ebay'
+    and root.direction = 'inbound'
+  for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Delivered conversation not found';
+  end if;
+
+  select count(*)
+  into v_total
+  from public.message_attachments attachment
+  where attachment.user_id = v_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.direction = 'outbound';
+  select count(*)
+  into v_matched
+  from public.message_attachments attachment
+  where attachment.user_id = v_user_id
+    and attachment.conversation_root_id = v_root_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.direction = 'outbound'
+    and attachment.message_id is null
+    and attachment.delivery_status <> 'uploading'
+    and attachment.id = any(p_attachment_ids);
+  if v_total <> v_expected or v_matched <> v_expected then
+    raise exception using errcode = '23514', message = 'Approved photo set changed before delivery claim';
+  end if;
+
+  return private.apply_authenticated_ebay_message_write(
+    p_operation,
+    p_payload,
+    p_generation
+  );
+end;
+$$;
+
+revoke all on function public.claim_ebay_message_write_with_photos(
+  text, jsonb, uuid, text, uuid[]
+) from public, anon, service_role;
+grant execute on function public.claim_ebay_message_write_with_photos(
+  text, jsonb, uuid, text, uuid[]
+) to authenticated;
+
 -- Complete the already-acknowledged provider write and expose its attachments
 -- in one transaction. This delegates the message lifecycle to #140's exact
 -- generation/attempt checks, then links every staged provider reference before

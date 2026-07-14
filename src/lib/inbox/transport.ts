@@ -10,6 +10,7 @@ import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import {
   applyEbayMessageWrite,
   beginEbayMessageWrite,
+  claimEbayMessageWriteWithPhotos,
   completeEbayMessageWriteWithPhotos,
 } from "./ebay-server-write";
 import { MESSAGE_PHOTO_BUCKET, validateMessagePhoto } from "./attachments";
@@ -50,6 +51,7 @@ export interface DeliveryRepository {
     body: string,
     at: Date,
     retry: boolean,
+    expectedPhotoIds: readonly string[],
   ): Promise<boolean>;
   beginProviderDispatch(
     messageId: string,
@@ -72,6 +74,7 @@ export interface DeliveryRepository {
     body: string,
     requestId: string,
     at: Date,
+    expectedPhotoIds: readonly string[],
   ): Promise<{ message: MessageRow; inserted: boolean }>;
   loadFollowUp(messageId: string): Promise<MessageRow | null>;
   claimFollowUp(message: MessageRow, at: Date): Promise<boolean>;
@@ -102,15 +105,19 @@ export interface DeliveryRepository {
   ): Promise<void>;
 }
 
-export interface SendCanonicalInput {
+interface SendCanonicalBaseInput {
   repository: DeliveryRepository;
   adapter: MarketplaceMessagingAdapter;
   messageId: string;
   body?: string;
-  retry?: boolean;
   confirmDuplicateRisk?: boolean;
   now?: () => Date;
 }
+
+export type SendCanonicalInput = SendCanonicalBaseInput & (
+  | { retry: true; expectedPhotoIds?: readonly string[] }
+  | { retry?: false; expectedPhotoIds: readonly string[] }
+);
 
 export async function sendCanonicalReply(
   input: SendCanonicalInput,
@@ -140,12 +147,19 @@ export async function sendCanonicalReply(
   }
   const body = (input.body ?? root.draft_reply ?? "").trim();
   if (!body) throw new Error("A non-empty approved reply is required");
+  if (input.retry !== true && input.expectedPhotoIds === undefined) {
+    throw new Error("The approved photo set is required");
+  }
+  const expectedPhotoIds = input.expectedPhotoIds ?? (
+    await input.repository.listDeliveryPhotos?.(root.id) ?? []
+  ).map((photo) => photo.id);
 
   const claimed = await input.repository.claimCanonical(
     root,
     body,
     at,
     input.retry === true,
+    expectedPhotoIds,
   );
   if (!claimed) throw new MessageDeliveryConflictError();
 
@@ -203,6 +217,7 @@ export interface SendFollowUpInput {
   conversationId: string;
   body: string;
   requestId: string;
+  expectedPhotoIds: readonly string[];
   now?: () => Date;
 }
 
@@ -226,6 +241,7 @@ export async function sendSellerFollowUp(
     body,
     input.requestId,
     at,
+    input.expectedPhotoIds,
   );
   // An HTTP/client replay of the same request key returns the durable intent
   // without dispatching another external side effect. Explicit retry uses the
@@ -615,14 +631,22 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     body: string,
     at: Date,
     retry: boolean,
+    expectedPhotoIds: readonly string[],
   ): Promise<boolean> {
     if (this.serverManaged) {
-      return this.applyServerWrite<boolean>("claim_canonical", {
-        message_id: root.id,
-        body,
-        at: at.toISOString(),
-        retry,
-      });
+      return claimEbayMessageWriteWithPhotos<boolean>(
+        this.serverWriteClient,
+        "claim_canonical",
+        {
+          message_id: root.id,
+          body,
+          at: at.toISOString(),
+          retry,
+        },
+        await this.getWriteGeneration(),
+        root.id,
+        expectedPhotoIds,
+      );
     }
     let query = this.supabase
       .from("messages")
@@ -747,17 +771,25 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     body: string,
     requestId: string,
     at: Date,
+    expectedPhotoIds: readonly string[],
   ): Promise<{ message: MessageRow; inserted: boolean }> {
     if (this.serverManaged) {
-      const result = await this.applyServerWrite<{
+      const result = await claimEbayMessageWriteWithPhotos<{
         message: unknown;
         inserted: boolean;
-      }>("create_followup", {
-        root_id: root.id,
-        body,
-        request_id: requestId,
-        at: at.toISOString(),
-      });
+      }>(
+        this.serverWriteClient,
+        "create_followup",
+        {
+          root_id: root.id,
+          body,
+          request_id: requestId,
+          at: at.toISOString(),
+        },
+        await this.getWriteGeneration(),
+        requestId,
+        expectedPhotoIds,
+      );
       return {
         message: messageRowSchema.parse(result.message),
         inserted: result.inserted,

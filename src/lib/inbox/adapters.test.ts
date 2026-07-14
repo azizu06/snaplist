@@ -74,6 +74,7 @@ describe("createMessagingTransportForConversation", () => {
       "Yes, it does.",
       new Date("2026-07-13T12:01:00.000Z"),
       false,
+      [],
     );
     await expect(
       transport.repository.beginProviderDispatch(
@@ -96,7 +97,7 @@ describe("createMessagingTransportForConversation", () => {
     expect(claimed).toBe(true);
     expect(rpc.mock.calls.filter(([name]) => name === "begin_ebay_message_write"))
       .toHaveLength(1);
-    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+    expect(rpc).toHaveBeenCalledWith("claim_ebay_message_write_with_photos", {
       p_operation: "claim_canonical",
       p_payload: {
         message_id: root.id,
@@ -105,6 +106,8 @@ describe("createMessagingTransportForConversation", () => {
         retry: false,
       },
       p_generation: generation,
+      p_delivery_request_id: root.id,
+      p_attachment_ids: [],
     });
     expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
       p_operation: "begin_provider_dispatch",

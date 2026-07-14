@@ -5,15 +5,39 @@ import type { MessageAttachmentRow, MessageRow } from "./types";
 import {
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
-  sendCanonicalReply,
-  sendSellerFollowUp,
+  sendCanonicalReply as sendCanonicalReplyTransport,
+  sendSellerFollowUp as sendSellerFollowUpTransport,
   retryFollowUpDelivery,
   type DeliveryRepository,
+  type SendCanonicalInput,
+  type SendFollowUpInput,
 } from "./transport";
 
 const ROOT_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
 const LISTING_ID = "33333333-3333-4333-8333-333333333333";
+
+function sendCanonicalReply(
+  input: Omit<SendCanonicalInput, "expectedPhotoIds"> & {
+    expectedPhotoIds?: readonly string[];
+  },
+) {
+  return sendCanonicalReplyTransport({
+    ...input,
+    expectedPhotoIds: input.expectedPhotoIds ?? [],
+  } as SendCanonicalInput);
+}
+
+function sendSellerFollowUp(
+  input: Omit<SendFollowUpInput, "expectedPhotoIds"> & {
+    expectedPhotoIds?: readonly string[];
+  },
+) {
+  return sendSellerFollowUpTransport({
+    ...input,
+    expectedPhotoIds: input.expectedPhotoIds ?? [],
+  });
+}
 
 function message(overrides: Partial<MessageRow> = {}): MessageRow {
   return {
@@ -58,6 +82,8 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   followUps = new Map<string, MessageRow>();
   followUpsByRequest = new Map<string, MessageRow>();
   failures: Array<{ id: string; kind: string }> = [];
+  canonicalClaimPhotoIds: string[][] = [];
+  followUpClaimPhotoIds: string[][] = [];
   sequence = 0;
 
   async loadConversationRoot(id: string) {
@@ -66,7 +92,14 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   async canonicalDelivered(root: MessageRow) {
     return root.id === this.root.id ? this.canonical : null;
   }
-  async claimCanonical(_root: MessageRow, body: string, at: Date, retry: boolean) {
+  async claimCanonical(
+    _root: MessageRow,
+    body: string,
+    at: Date,
+    retry: boolean,
+    expectedPhotoIds: readonly string[],
+  ) {
+    this.canonicalClaimPhotoIds.push([...expectedPhotoIds]);
     if (!retry && this.root.status !== "drafted") return false;
     const staleSending =
       this.root.delivery_status === "sending" &&
@@ -140,7 +173,9 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     body: string,
     requestId: string,
     at: Date,
+    expectedPhotoIds: readonly string[],
   ) {
+    this.followUpClaimPhotoIds.push([...expectedPhotoIds]);
     const existing = this.followUpsByRequest.get(requestId);
     if (existing) return { message: existing, inserted: false };
     const id = `55555555-5555-4555-8555-${String(++this.sequence).padStart(12, "0")}`;
@@ -243,6 +278,7 @@ describe("message delivery transport", () => {
       idempotencyKey: ROOT_ID,
     });
     expect(repository.dispatches).toHaveLength(1);
+    expect(repository.canonicalClaimPhotoIds).toEqual([[]]);
     expect(adapter.replies[0]?.externalParentId).not.toBe(
       repository.root.external_message_id,
     );
@@ -426,6 +462,7 @@ describe("message delivery transport", () => {
     expect(first.external_delivery_id).toBe(
       "mock-followup-client-followup-request-7",
     );
+    expect(repository.followUpClaimPhotoIds).toEqual([[], []]);
   });
 
   it("rejects reusing a follow-up request id for different text", async () => {
@@ -701,6 +738,7 @@ describe("message delivery transport", () => {
       repository,
       adapter,
       messageId: ROOT_ID,
+      expectedPhotoIds: [photo.id],
     });
 
     expect(adapter.uploads).toHaveLength(1);
@@ -712,6 +750,7 @@ describe("message delivery transport", () => {
       }),
     ]);
     expect(linked).toEqual([{ requestId: ROOT_ID, messageId: delivered.id }]);
+    expect(repository.canonicalClaimPhotoIds).toEqual([[photo.id]]);
   });
 
   it("rejects new photos on a replay of an already delivered reply", async () => {

@@ -14,6 +14,7 @@ let reachable = false;
 let admin: SupabaseClient;
 let a: ClerkTestUser;
 let b: ClerkTestUser;
+let aServer: SupabaseClient;
 let bServer: SupabaseClient;
 let bStoragePath: string | null = null;
 
@@ -29,7 +30,14 @@ beforeAll(async () => {
     provisionClerkTestUser(URL, ANON, "attachment_a"),
     provisionClerkTestUser(URL, ANON, "attachment_b"),
   ]);
-  const bJwt = await mintUserJwt(b.id);
+  const [aJwt, bJwt] = await Promise.all([
+    mintUserJwt(a.id),
+    mintUserJwt(b.id),
+  ]);
+  aServer = createClient(URL, SERVICE!, {
+    accessToken: async () => aJwt,
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   bServer = createClient(URL, SERVICE!, {
     accessToken: async () => bJwt,
     auth: { persistSession: false, autoRefreshToken: false },
@@ -158,5 +166,110 @@ describe("message attachment RLS (DB-gated)", () => {
     expect((await b.client.storage.from("message-photos").remove([
       uploadIntent.storage_path,
     ])).error).toBeNull();
+  });
+
+  it("isolates tenant upload expiry and object-deletion acknowledgements", async () => {
+    if (!reachable) return;
+    const [{ data: rootA, error: rootAError }, { data: rootB, error: rootBError }] = await Promise.all([
+      a.client.from("messages").insert({
+        user_id: a.id,
+        direction: "inbound",
+        body: "Tenant A cleanup root",
+      }).select("id").single(),
+      b.client.from("messages").insert({
+        user_id: b.id,
+        direction: "inbound",
+        body: "Tenant B cleanup root",
+      }).select("id").single(),
+    ]);
+    expect(rootAError).toBeNull();
+    expect(rootBError).toBeNull();
+
+    const expiredAt = new Date(Date.now() - 60_000).toISOString();
+    const pathA = `${a.id}/${rootA!.id}/pending/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jpg`;
+    const pathB = `${b.id}/${rootB!.id}/pending/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jpg`;
+    const intent = (
+      user: ClerkTestUser,
+      rootId: string,
+      requestId: string,
+      storagePath: string,
+      hash: string,
+    ) => ({
+      user_id: user.id,
+      conversation_root_id: rootId,
+      delivery_request_id: requestId,
+      position: 0,
+      direction: "outbound",
+      media_type: "image/jpeg",
+      byte_size: 4,
+      original_name: "expired.jpg",
+      content_sha256: hash.repeat(64),
+      storage_path: storagePath,
+      delivery_status: "uploading",
+      upload_expires_at: expiredAt,
+    });
+
+    expect((await bServer.from("message_attachments").insert(
+      intent(b, rootB!.id, "cleanup:b", pathB, "b"),
+    )).error).toBeNull();
+    const aCannotExpireB = await aServer.rpc(
+      "delete_own_expired_message_photo_upload_intents",
+      { p_limit: 1000 },
+    );
+    expect(aCannotExpireB.error).toBeNull();
+    expect(aCannotExpireB.data).toBe(0);
+    expect((await admin.from("message_attachments").select("id").eq("storage_path", pathB)).data)
+      .toHaveLength(1);
+
+    expect((await aServer.from("message_attachments").insert(
+      intent(a, rootA!.id, "cleanup:a", pathA, "a"),
+    )).error).toBeNull();
+    const bExpiry = await bServer.rpc(
+      "delete_own_expired_message_photo_upload_intents",
+      { p_limit: 1000 },
+    );
+    expect(bExpiry.error).toBeNull();
+    expect(bExpiry.data).toBe(1);
+    expect((await admin.from("message_attachments").select("id").eq("storage_path", pathA)).data)
+      .toHaveLength(1);
+
+    const aQueue = await aServer.rpc("list_own_message_photo_object_deletions", {
+      p_limit: 1000,
+    });
+    expect(aQueue.error).toBeNull();
+    expect(aQueue.data).not.toContain(pathB);
+    const aCannotCompleteB = await aServer.rpc(
+      "complete_own_message_photo_object_deletions",
+      { p_storage_paths: [pathB] },
+    );
+    expect(aCannotCompleteB.error).toBeNull();
+    expect(aCannotCompleteB.data).toBe(0);
+    const bQueue = await bServer.rpc("list_own_message_photo_object_deletions", {
+      p_limit: 1000,
+    });
+    expect(bQueue.error).toBeNull();
+    expect(bQueue.data).toContain(pathB);
+    expect((await bServer.rpc("complete_own_message_photo_object_deletions", {
+      p_storage_paths: [pathB],
+    })).data).toBe(1);
+
+    expect((await aServer.rpc("delete_own_expired_message_photo_upload_intents", {
+      p_limit: 1000,
+    })).data).toBe(1);
+    const bCannotCompleteA = await bServer.rpc(
+      "complete_own_message_photo_object_deletions",
+      { p_storage_paths: [pathA] },
+    );
+    expect(bCannotCompleteA.error).toBeNull();
+    expect(bCannotCompleteA.data).toBe(0);
+    expect((await bServer.rpc("list_own_message_photo_object_deletions", {
+      p_limit: 1000,
+    })).data).not.toContain(pathA);
+    expect((await aServer.rpc("list_own_message_photo_object_deletions", {
+      p_limit: 1000,
+    })).data).toContain(pathA);
+    expect((await aServer.rpc("complete_own_message_photo_object_deletions", {
+      p_storage_paths: [pathA],
+    })).data).toBe(1);
   });
 });
