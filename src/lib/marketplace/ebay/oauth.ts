@@ -151,9 +151,8 @@ export interface EbayIdentity {
 }
 
 /**
- * Resolve who the connected eBay account is. Best-effort: a null return means
- * "connected but identity unknown" — the connection still works for publishing;
- * only deletion-notice mapping degrades (handled there by username fallback).
+ * Resolve who the connected eBay account is. A null return means identity
+ * verification was unavailable; callers must not persist an unmappable grant.
  */
 export async function fetchEbayIdentity(
   accessToken: string,

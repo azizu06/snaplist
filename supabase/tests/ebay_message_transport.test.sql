@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(83);
+select extensions.plan(90);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -1447,12 +1447,85 @@ select extensions.throws_ok(
 
 reset role;
 
-insert into public.ebay_connections (
-  user_id, ebay_user_id, ebay_username, refresh_token_enc
-)
-values
-  ('message-tenant-a', 'deletion-user-a', 'deletion_seller_a', 'v1.test-a'),
-  ('message-tenant-b', 'buyer-delete-shared', 'deletion_seller_b', 'v1.test-b');
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-a","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select extensions.lives_ok(
+  $$
+    select public.save_ebay_connection(
+      'deletion-user-a',
+      'deletion_seller_a',
+      'v1.test-a',
+      'v1.access-a',
+      '2026-07-14T12:00:00Z',
+      array['scope-a']::text[]
+    )
+  $$,
+  'a valid tenant-bound OAuth callback persists seller credentials'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-b","role":"authenticated"}',
+  true
+);
+
+select extensions.lives_ok(
+  $$
+    select public.save_ebay_connection(
+      'buyer-delete-shared',
+      'deletion_seller_b',
+      'v1.test-b',
+      'v1.access-b',
+      '2026-07-14T12:00:00Z',
+      array['scope-b']::text[]
+    )
+  $$,
+  'another tenant can persist its own non-erased OAuth grant'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-without-identity","role":"authenticated"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    select public.save_ebay_connection(
+      null,
+      null,
+      'v1.unmappable-refresh',
+      'v1.unmappable-access',
+      '2026-07-14T12:00:00Z',
+      array['scope-a']::text[]
+    )
+  $$,
+  '22023',
+  'An eBay seller identity is required',
+  'an unmappable OAuth grant cannot persist account-linked data'
+);
+
+reset role;
+
+select extensions.ok(
+  not exists (
+    select 1
+    from private.ebay_seller_identity_tenants seller_identity
+    where to_jsonb(seller_identity)::text ilike '%deletion-user-a%'
+       or to_jsonb(seller_identity)::text ilike '%deletion_seller_a%'
+  ),
+  'seller deletion mappings retain no raw provider identity'
+);
 
 insert into public.messages (
   id, user_id, item_id, listing_id, direction, body, status, marketplace,
@@ -1759,6 +1832,15 @@ select extensions.throws_ok(
   'an authenticated tenant cannot invoke account-deletion erasure'
 );
 
+delete from public.ebay_connections
+where user_id = 'message-tenant-a';
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_connections where user_id = 'message-tenant-a'),
+  0,
+  'disconnect removes live seller identity while preserving deletion discovery'
+);
+
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
@@ -1828,6 +1910,57 @@ select extensions.throws_ok(
   'eBay seller account has been erased',
   'a deleted seller tenant cannot restart messaging through fallback credentials'
 );
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-a","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    select public.save_ebay_connection(
+      'deletion-user-a',
+      'deletion_seller_a',
+      'v1.stale-refresh',
+      'v1.stale-access',
+      '2026-07-14T13:00:00Z',
+      array['scope-a']::text[]
+    )
+  $$,
+  '42501',
+  'eBay seller account has been erased',
+  'an OAuth grant acquired before erasure cannot recreate deleted credentials'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-b","role":"authenticated"}',
+  true
+);
+
+select extensions.lives_ok(
+  $$
+    select public.save_ebay_connection(
+      'buyer-delete-shared',
+      'deletion_seller_b',
+      'v1.updated-b',
+      'v1.updated-access-b',
+      '2026-07-14T13:00:00Z',
+      array['scope-b']::text[]
+    )
+  $$,
+  'erasure serialization preserves valid callbacks for another tenant'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 select extensions.is(
   public.erase_ebay_user_data('deletion-user-a', 'deletion_seller_a'),

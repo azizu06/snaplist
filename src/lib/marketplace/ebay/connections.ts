@@ -12,10 +12,10 @@ import type { EbayIdentity, EbayTokenGrant } from "./oauth";
  * that touches the ciphertext columns, so the encrypt/decrypt seam stays in
  * one file.
  *
- * Tenancy: callers pass the request's USER-SCOPED client for the seller's own
- * connection (RLS pins the row), and the SERVICE-ROLE client only from the
- * account-deletion endpoint (which must erase by eBay identity, not by the
- * requesting user — there is no requesting user).
+ * Tenancy: connection persistence uses a server-authorized client carrying the
+ * seller's Clerk JWT; the database derives the tenant. The SERVICE-ROLE client
+ * is used only by the account-deletion endpoint, where there is no requesting
+ * seller.
  */
 
 export interface EbayConnectionStatus {
@@ -51,23 +51,23 @@ export async function getEbayConnectionStatus(
     : { connected: false, ebayUsername: null };
 }
 
-/** Persist a fresh grant (encrypting both tokens). Upsert: reconnecting replaces. */
+/** Persist a fresh grant through the tenant-derived database seam. */
 export async function saveEbayConnection(
   supabase: SupabaseClient,
-  userId: string,
   grant: EbayTokenGrant,
   identity: EbayIdentity | null,
   env: Env = process.env,
 ): Promise<void> {
   const key = parseEncryptionKey(env.EBAY_TOKEN_ENCRYPTION_KEY);
-  const { error } = await supabase.from("ebay_connections").upsert({
-    user_id: userId,
-    ebay_user_id: identity?.userId ?? null,
-    ebay_username: identity?.username ?? null,
-    refresh_token_enc: encryptSecret(grant.refreshToken, key),
-    access_token_enc: encryptSecret(grant.accessToken, key),
-    access_token_expires_at: new Date(grant.accessTokenExpiresAt).toISOString(),
-    scopes: grant.scopes,
+  const { error } = await supabase.rpc("save_ebay_connection", {
+    p_ebay_user_id: identity?.userId ?? null,
+    p_ebay_username: identity?.username ?? null,
+    p_refresh_token_enc: encryptSecret(grant.refreshToken, key),
+    p_access_token_enc: encryptSecret(grant.accessToken, key),
+    p_access_token_expires_at: new Date(
+      grant.accessTokenExpiresAt,
+    ).toISOString(),
+    p_scopes: grant.scopes,
   });
   if (error) throw new Error(`Failed to save eBay connection: ${error.message}`);
 }

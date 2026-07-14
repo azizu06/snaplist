@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getUserId } from "@/lib/auth";
 import { logEvent } from "@/lib/observability";
 import { reportServerError } from "@/lib/sentry";
-import { createClient } from "@/lib/supabase/server";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 import {
   exchangeAuthorizationCode,
   fetchEbayIdentity,
@@ -21,9 +21,8 @@ import { STATE_COOKIE } from "../connect/route";
  * Branching (eBay error → CSRF state → code) lives in the pure, contract-
  * tested `classifyCallback`; the state comparison happens BEFORE the code is
  * ever used, so a forged callback (CSRF) can't bind an attacker's eBay account
- * to a victim's SnapList session. The connection row is written with the
- * request's USER-SCOPED client — RLS, not route logic, pins it to the
- * signed-in seller.
+ * to a victim's SnapList session. The connection is persisted through a
+ * server-authorized, Clerk-tenant-derived database transaction.
  *
  * Every exit emits one structured `ebay.callback` line (no tokens, no state
  * values, no codes) so a production failure is diagnosable from logs alone.
@@ -60,8 +59,8 @@ export async function GET(request: NextRequest) {
   try {
     const grant = await exchangeAuthorizationCode(outcome.code, process.env);
     const identity = await fetchEbayIdentity(grant.accessToken, process.env);
-    const supabase = await createClient();
-    await saveEbayConnection(supabase, userId, grant, identity);
+    const supabase = await createTenantServerClient();
+    await saveEbayConnection(supabase, grant, identity);
     logEvent("ebay.callback", {
       ok: true,
       reason: "connected",
