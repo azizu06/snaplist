@@ -237,18 +237,27 @@ export interface SendFollowUpInput {
   now?: () => Date;
 }
 
-export async function sendSellerFollowUp(
-  input: SendFollowUpInput,
+export async function assertSellerFollowUpEligible(
+  repository: DeliveryRepository,
+  conversationId: string,
 ): Promise<MessageRow> {
-  const root = await input.repository.loadConversationRoot(input.conversationId);
-  const delivered = root
-    ? await input.repository.canonicalDelivered(root)
-    : null;
+  const root = await repository.loadConversationRoot(conversationId);
+  const delivered = root ? await repository.canonicalDelivered(root) : null;
   if (!root || !delivered || !canonicalDeliveryMatches(root, delivered)) {
     throw new MessageDeliveryConflictError(
       "Reply to this question before sending a follow-up",
     );
   }
+  return root;
+}
+
+export async function sendSellerFollowUp(
+  input: SendFollowUpInput,
+): Promise<MessageRow> {
+  const root = await assertSellerFollowUpEligible(
+    input.repository,
+    input.conversationId,
+  );
   const body = input.body.trim();
   if (!body) throw new Error("A non-empty follow-up is required");
   const at = input.now?.() ?? new Date();

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import {
+  assertSellerFollowUpEligible,
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
   sendSellerFollowUp,
@@ -111,6 +112,14 @@ export async function POST(
     }
   }
   try {
+    const transport = await createMessagingTransportForConversation(
+      supabase,
+      userId,
+      message.marketplace,
+    );
+    // Eligibility must be proven before upload intents become non-expiring
+    // staged rows. Delivery rechecks the same durable invariant below.
+    await assertSellerFollowUpEligible(transport.repository, message.id);
     const attachmentClient = await createTenantServerClient();
     const stagedPhotos = await stageOutboundPhotos({
       supabase: attachmentClient,
@@ -120,11 +129,6 @@ export async function POST(
       photos,
       requireExistingIntent: parsed.data.photos.length > 0,
     });
-    const transport = await createMessagingTransportForConversation(
-      supabase,
-      userId,
-      message.marketplace,
-    );
     const outbound = await sendSellerFollowUp({
       ...transport,
       conversationId: message.id,
