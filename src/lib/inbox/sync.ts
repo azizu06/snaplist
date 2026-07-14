@@ -172,6 +172,15 @@ export async function syncInboxForSeller(
     ]);
     for (const pending of pendingBeforeFetch) {
       if (observedIds.has(pending.externalMessageId)) continue;
+      const pendingCreatedAt = Date.parse(pending.createdAt);
+      if (
+        Number.isFinite(pendingCreatedAt) &&
+        pendingCreatedAt >= from.getTime() &&
+        pendingCreatedAt <= now.getTime()
+      ) {
+        await input.repository.removePendingQuestion(pending.externalMessageId);
+        continue;
+      }
       try {
         await processQuestion(await input.adapter.resolveQuestion(pending));
       } catch (error) {

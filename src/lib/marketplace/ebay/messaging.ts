@@ -33,7 +33,6 @@ type XmlRecord = Record<string, unknown>;
 type ConversationMatchInput = {
   externalMessageId: string;
   externalListingId: string;
-  externalBuyerId: string;
   body: string;
   createdAt: string;
   from: Date;
@@ -164,7 +163,6 @@ export class HttpEbayMessagingAdapter
     const externalConversationId = await this.resolveConversationId({
       externalMessageId: question.externalMessageId,
       externalListingId: question.externalListingId,
-      externalBuyerId: question.externalBuyerId,
       body: question.body,
       createdAt: question.createdAt,
       from: new Date(question.resolutionWindowFrom),
@@ -264,7 +262,6 @@ export class HttpEbayMessagingAdapter
     url.searchParams.set("conversation_status", "ACTIVE");
     url.searchParams.set("reference_type", "LISTING");
     url.searchParams.set("reference_id", input.externalListingId);
-    url.searchParams.set("other_party_username", input.externalBuyerId);
     url.searchParams.set("start_time", input.from.toISOString());
     url.searchParams.set("end_time", input.to.toISOString());
     url.searchParams.set("limit", String(CONVERSATIONS_PER_PAGE));
@@ -553,13 +550,10 @@ function messageMatches(
 ): boolean {
   if (!message) return false;
   const messageId = asString(message.messageId);
-  const sender = asString(message.senderUsername);
   const messageBody = asString(message.messageBody);
   const created = asIsoString(message.createdDate);
   return (
     messageId === input.externalMessageId ||
-    (sender === input.externalBuyerId &&
-      messageBody === input.body &&
-      created === input.createdAt)
+    (messageBody === input.body && created === input.createdAt)
   );
 }

@@ -274,6 +274,57 @@ describe("syncInboxForSeller", () => {
     expect(repository.pendingResolutionCounts).toEqual([0]);
   });
 
+  it("retires a pending question absent from a complete unanswered window", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [question];
+    const repository = new MemorySyncRepository();
+    const answeredElsewhere: PendingMarketplaceQuestion = {
+      marketplace: "ebay",
+      externalMessageId: "ebay-question-answered-elsewhere",
+      externalParentId: "ebay-question-answered-elsewhere",
+      externalListingId: question.externalListingId,
+      externalBuyerId: "buyer-answered-elsewhere",
+      body: "Can you ship tomorrow?",
+      subject: null,
+      createdAt: "2026-07-13T12:03:00.000Z",
+      resolutionWindowFrom: "2026-07-12T12:05:00.000Z",
+      observedCursorAt: "2026-07-13T12:05:00.000Z",
+    };
+    repository.pending.set(answeredElsewhere.externalMessageId, {
+      question: answeredElsewhere,
+      error: "Commerce lookup unavailable",
+      attempts: 2,
+    });
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      draft: async () => ({
+        reply: "Yes, the charger is included.",
+        model: "test-reply",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+    });
+
+    expect(summary).toMatchObject({
+      fetched: 1,
+      imported: 1,
+      drafted: 1,
+      pendingResolution: 0,
+    });
+    expect(repository.pending.has(answeredElsewhere.externalMessageId)).toBe(
+      false,
+    );
+    expect(repository.imported.has(answeredElsewhere.externalMessageId)).toBe(
+      false,
+    );
+    expect(repository.imported.has(question.externalMessageId)).toBe(true);
+    expect(repository.notifications).toEqual(new Set([MESSAGE_ID]));
+  });
+
   it("keeps persistent resolution failures queued and visible after cursor advancement", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     const repository = new MemorySyncRepository();

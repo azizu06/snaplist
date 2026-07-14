@@ -19,7 +19,6 @@ describe("HttpEbayMessagingAdapter", () => {
       if (String(url).includes("/commerce/message/v1/conversation")) {
         expect(String(url)).toContain("reference_id=110011001100");
         expect(String(url)).toContain("conversation_type=FROM_MEMBERS");
-        expect(String(url)).toContain("other_party_username=buyer-public-id");
         return Response.json({
           conversations: [
             {
@@ -85,6 +84,62 @@ describe("HttpEbayMessagingAdapter", () => {
       unresolved: [],
     });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves by listing and exact message identity without a buyer username filter", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        const parsed = new URL(String(url));
+        expect(parsed.searchParams.get("reference_id")).toBe(
+          "listing-public-id",
+        );
+        expect(parsed.searchParams.has("other_party_username")).toBe(false);
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-public-id",
+              latestMessage: {
+                messageId: "question-public-id",
+                senderUsername: "legacy-buyer-username",
+                messageBody: "Is the box included?",
+                createdDate: "2026-07-13T14:03:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-public-id</ItemID></Item>
+            <Question><SenderID>immutable-public-user-id</SenderID><Body>Is the box included?</Body><MessageID>question-public-id</MessageID></Question>
+            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      questions: [
+        {
+          externalMessageId: "question-public-id",
+          externalConversationId: "conversation-public-id",
+          externalBuyerId: "immutable-public-user-id",
+        },
+      ],
+      unresolved: [],
+    });
   });
 
   it("imports every exchange when Trading returns multiple questions", async () => {
