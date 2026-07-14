@@ -120,6 +120,30 @@ export async function completeEbayMessageWriteWithPhotos<T>(
   return data as T;
 }
 
+export async function completeScheduledEbayMessageWriteWithPhotos<T>(
+  supabase: SupabaseClient,
+  userId: string,
+  operation: "complete_canonical",
+  payload: Record<string, unknown>,
+  generation: string,
+  deliveryRequestId: string,
+): Promise<T> {
+  const { data, error } = await supabase.rpc(
+    "complete_scheduled_ebay_message_write_with_photos",
+    {
+      p_user_id: userId,
+      p_operation: operation,
+      p_payload: payload,
+      p_generation: generation,
+      p_delivery_request_id: deliveryRequestId,
+    },
+  );
+  if (error) {
+    throw new Error(`Failed to complete scheduled eBay message with photos: ${error.message}`);
+  }
+  return data as T;
+}
+
 export async function applyScheduledEbayMessageWrite<T>(
   supabase: SupabaseClient,
   userId: string,
