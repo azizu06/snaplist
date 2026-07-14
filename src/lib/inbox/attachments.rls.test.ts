@@ -283,4 +283,64 @@ describe("message attachment RLS (DB-gated)", () => {
       p_storage_paths: [pathA],
     })).data).toBe(1);
   });
+
+  it("keeps a stale canonical photo intent expiring instead of staging it", async () => {
+    if (!reachable) return;
+    const { data: root, error: rootError } = await admin
+      .from("messages")
+      .insert({
+        user_id: b.id,
+        direction: "inbound",
+        body: "Stale canonical photo root",
+        marketplace: "ebay",
+        status: "drafted",
+      })
+      .select("id")
+      .single();
+    expect(rootError).toBeNull();
+
+    const attachmentId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const uploadExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    const { error: intentError } = await bServer
+      .from("message_attachments")
+      .insert({
+        id: attachmentId,
+        user_id: b.id,
+        conversation_root_id: root!.id,
+        delivery_request_id: root!.id,
+        position: 0,
+        direction: "outbound",
+        media_type: "image/jpeg",
+        byte_size: 4,
+        original_name: "stale.jpg",
+        content_sha256: "c".repeat(64),
+        storage_path: `${b.id}/${root!.id}/pending/${attachmentId}.jpg`,
+        delivery_status: "uploading",
+        upload_expires_at: uploadExpiresAt,
+      });
+    expect(intentError).toBeNull();
+    expect((await admin
+      .from("messages")
+      .update({ status: "sent", delivery_status: "ambiguous" })
+      .eq("id", root!.id)).error).toBeNull();
+
+    const staged = await bServer.rpc("stage_message_photo_upload_intents", {
+      p_delivery_request_id: root!.id,
+      p_attachment_ids: [attachmentId],
+    });
+    expect(staged.error?.code).toBe("23514");
+    expect(staged.error?.message).toMatch(/no longer draft-sendable/i);
+
+    const { data: retained, error: retainedError } = await admin
+      .from("message_attachments")
+      .select("delivery_status, upload_expires_at, message_id")
+      .eq("id", attachmentId)
+      .single();
+    expect(retainedError).toBeNull();
+    expect(retained).toMatchObject({
+      delivery_status: "uploading",
+      message_id: null,
+    });
+    expect(retained?.upload_expires_at).not.toBeNull();
+  });
 });

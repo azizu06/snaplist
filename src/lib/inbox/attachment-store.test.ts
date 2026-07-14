@@ -176,6 +176,49 @@ describe("outbound photo idempotency", () => {
     });
   });
 
+  it("keeps a stale canonical upload intent retryable when staging is rejected", async () => {
+    const uploading = row({
+      delivery_request_id: ROOT,
+      delivery_status: "uploading",
+      upload_expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+    });
+    const query = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      order: vi.fn(async () => ({ data: [uploading], error: null })),
+    };
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { code: "23514", message: "Canonical reply is no longer draft-sendable" },
+    }));
+    const client = {
+      from: vi.fn(() => query),
+      rpc,
+      storage: { from: vi.fn() },
+    } as unknown as SupabaseClient;
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: ROOT,
+      requireExistingIntent: true,
+      photos: [{
+        name: "condition.jpg",
+        type: "image/jpeg",
+        size: JPEG.length,
+        bytes: JPEG,
+        mediaType: "image/jpeg",
+        extension: "jpg",
+        storagePath: PATH,
+      }],
+    })).rejects.toBeInstanceOf(MessagePhotoConflictError);
+    expect(rpc).toHaveBeenCalledWith("stage_message_photo_upload_intents", {
+      p_delivery_request_id: ROOT,
+      p_attachment_ids: [uploading.id],
+    });
+  });
+
   it("reports a delivery-identity guard rejection as an idempotency conflict", async () => {
     const attachmentQuery = {
       select: vi.fn(() => attachmentQuery),

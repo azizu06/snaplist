@@ -64,6 +64,8 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/follow-up delivery already has an intent/i);
     expect(migration).toMatch(/serialize_ebay_followup_identity[\s\S]*for update/i);
     expect(migration).toMatch(/stage_message_photo_upload_intents[\s\S]*v_total <> v_expected or v_locked <> v_expected/i);
+    expect(migration).toMatch(/stage_message_photo_upload_intents[\s\S]*conversation_root_id[\s\S]*root\.status = 'drafted'[\s\S]*for update[\s\S]*set delivery_status = 'staged'/i);
+    expect(migration).toMatch(/canonical reply is no longer draft-sendable/i);
     expect(migration).toMatch(/claim_ebay_message_write_with_photos[\s\S]*for update/i);
     expect(migration).toMatch(/v_total <> v_expected or v_matched <> v_expected/i);
     expect(migration).toMatch(/claim_ebay_message_write_with_photos[\s\S]*private\.apply_authenticated_ebay_message_write/i);

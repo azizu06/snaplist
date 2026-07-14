@@ -63,6 +63,7 @@ export async function stageOutboundPhotos(input: {
           p_attachment_ids: existing.map((row) => row.id),
         },
       );
+      if (error?.code === "23514") throw new MessagePhotoConflictError();
       if (error) throw new Error(`Failed to finalize photos: ${error.message}`);
       const staged: MessageAttachmentRow[] = (data ?? []).map((row: unknown) =>
         messageAttachmentRowSchema.parse(row),

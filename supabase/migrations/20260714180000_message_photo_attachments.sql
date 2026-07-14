@@ -281,6 +281,7 @@ declare
   v_expected integer := cardinality(p_attachment_ids);
   v_locked integer;
   v_total integer;
+  v_root_id uuid;
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
     or v_user_id = ''
@@ -289,6 +290,30 @@ begin
   end if;
   if v_expected is null or v_expected < 1 then
     raise exception using errcode = '23514', message = 'Photo intent set is required';
+  end if;
+  select attachment.conversation_root_id
+  into v_root_id
+  from public.message_attachments attachment
+  where attachment.user_id = v_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.direction = 'outbound'
+    and attachment.id = any(p_attachment_ids)
+  order by attachment.position
+  limit 1;
+  if p_delivery_request_id = v_root_id::text then
+    perform 1
+    from public.messages root
+    where root.id = v_root_id
+      and root.user_id = v_user_id
+      and root.marketplace = 'ebay'
+      and root.direction = 'inbound'
+      and root.status = 'drafted'
+    for update;
+    if not found then
+      raise exception using
+        errcode = '23514',
+        message = 'Canonical reply is no longer draft-sendable';
+    end if;
   end if;
   select count(*)
   into v_total
