@@ -28,6 +28,7 @@ const activeSubscription = (overrides: Partial<StripeSubscription> = {}): Stripe
 function fakeLifecycle(opts: {
   customerOwners?: Record<string, string>;
   subscription?: StripeSubscription;
+  blockingSubscription?: StripeSubscription | null;
   retrieveThrows?: Error;
   upsertThrows?: Error;
 } = {}) {
@@ -64,6 +65,13 @@ function fakeLifecycle(opts: {
     processed,
     upserts,
     adapter: {
+      async findBlockingSubscription(customerId: string) {
+        const subscription = opts.blockingSubscription ?? null;
+        if (subscription && subscription.customerId !== customerId) {
+          throw new Error("unexpected Customer id");
+        }
+        return subscription;
+      },
       async retrieveSubscription(subscriptionId: string) {
         if (opts.retrieveThrows) throw opts.retrieveThrows;
         const subscription = opts.subscription ?? activeSubscription({ id: subscriptionId });
@@ -177,6 +185,18 @@ describe("handleStripeEvent (#152 — idempotent lifecycle convergence)", () => 
     expect(processed.has("evt_unknown")).toBe(true);
   });
 
+  it("keeps an unmapped pre-migration Checkout completion retryable instead of dropping it", async () => {
+    const { store, processed, adapter } = fakeLifecycle({ subscription: activeSubscription() });
+    const event = evt(
+      "checkout.session.completed",
+      { id: "cs_legacy", customer: "cus_legacy", subscription: "sub_1" },
+      "evt_legacy_checkout",
+    );
+
+    await expect(handleStripeEvent(event, store, adapter)).rejects.toThrow(/Customer mapping is missing/i);
+    expect(processed.has(event.id)).toBe(false);
+  });
+
   it("dedupes an exact replay without a second entitlement write", async () => {
     const { store, upserts, adapter } = fakeLifecycle({ customerOwners: { cus_1: "u1" } });
     const event = evt("customer.subscription.updated", { customer: "cus_1", id: "sub_1" });
@@ -222,10 +242,35 @@ describe("handleStripeEvent (#152 — idempotent lifecycle convergence)", () => 
     ]);
   });
 
+  it("does not let a late terminal event for an old subscription replace a newer active one", async () => {
+    const { store, upserts, adapter } = fakeLifecycle({
+      customerOwners: { cus_1: "u1" },
+      subscription: activeSubscription({ id: "sub_old", status: "canceled" }),
+      blockingSubscription: activeSubscription({ id: "sub_new", status: "active" }),
+    });
+
+    await handleStripeEvent(
+      evt("customer.subscription.deleted", { customer: "cus_1", id: "sub_old" }, "evt_old_deleted"),
+      store,
+      adapter,
+    );
+
+    expect(upserts).toEqual([
+      expect.objectContaining({
+        stripeSubscriptionId: "sub_new",
+        status: "active",
+        tier: "paid",
+      }),
+    ]);
+  });
+
   it("timestamps the observation before a slow Stripe retrieval can become stale", async () => {
     let phase: "before" | "after" = "before";
     const { store, upserts } = fakeLifecycle({ customerOwners: { cus_1: "u1" } });
     const adapter = {
+      async findBlockingSubscription() {
+        return null;
+      },
       async retrieveSubscription() {
         phase = "after";
         return activeSubscription();

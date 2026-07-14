@@ -7,7 +7,9 @@ import { entitlementTierFromStatus, type Tier } from "./config";
  * Stripe does not guarantee event ordering. Rather than accepting an old event's
  * payload, every handled event retrieves the Subscription's current state from
  * Stripe and maps its Customer through the durable server-owned customer map.
- * That makes old delivery converge on the latest authoritative subscription state.
+ * It also reconciles the Customer's current non-terminal Subscription before
+ * writing, so a late terminal event for an old Subscription cannot erase a
+ * newer paid Subscription for the same seller.
  */
 
 /** The normalized entitlement state mirrored into `subscriptions`. */
@@ -135,7 +137,7 @@ export interface HandleResult {
 export async function handleStripeEvent(
   event: StripeWebhookEvent,
   store: EntitlementStore,
-  adapter: Pick<StripeBillingAdapter, "retrieveSubscription">,
+  adapter: Pick<StripeBillingAdapter, "findBlockingSubscription" | "retrieveSubscription">,
   now: () => Date = () => new Date(),
 ): Promise<HandleResult> {
   const claim = await store.claimEvent(event.id, event.type);
@@ -156,6 +158,13 @@ export async function handleStripeEvent(
 
     const userId = await store.userIdForStripeCustomer(reference.customerId);
     if (!userId) {
+      if (reference.checkoutSessionId) {
+        // Checkouts created before the durable Customer-map migration have no
+        // safe tenant authority to recover from. Do not trust historical
+        // client_reference_id or metadata; release this event claim and return
+        // 500 so Stripe retains the signed completion for manual reconciliation.
+        throw new Error("Stripe Customer mapping is missing for a completed Checkout.");
+      }
       // A signed event without a server-owned mapping is never allowed to pick a
       // tenant from metadata. Ignore it safely rather than risking cross-tenant access.
       await store.completeEventClaim(event.id, claimToken);
@@ -171,7 +180,18 @@ export async function handleStripeEvent(
       throw new Error("Stripe Subscription does not match its verified webhook reference.");
     }
 
-    await store.upsertSubscription(subscriptionFromStripe(userId, subscription, observedAt));
+    // Resubscription gives one Customer a new Subscription id. Reconcile its
+    // latest non-terminal subscription at the Customer level before writing so
+    // a delayed terminal event for the old id cannot replace a newer active
+    // entitlement merely because it was observed later.
+    const currentSubscription = await adapter.findBlockingSubscription(reference.customerId);
+    if (currentSubscription && currentSubscription.customerId !== reference.customerId) {
+      throw new Error("Stripe Customer reconciliation returned a different Customer.");
+    }
+
+    await store.upsertSubscription(
+      subscriptionFromStripe(userId, currentSubscription ?? subscription, observedAt),
+    );
     if (reference.checkoutSessionId) {
       await store.clearCheckoutReservation({
         userId,

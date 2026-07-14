@@ -57,8 +57,12 @@ abandoned Checkout session and one test-mode subscription for a single test user
 - The Customer map is server-only (`billing_customers`); a signed-in browser
   cannot read or write it.
 - `checkout.session.completed` is never enough by itself to grant Seller Pro. The
-  webhook retrieves the current Subscription, so an incomplete Subscription stays
-  Free and delayed events converge on current state.
+  webhook retrieves the current Subscription and reconciles a current non-terminal
+  Subscription for the Customer, so an incomplete Subscription stays Free, a late
+  terminal event cannot displace a newer active subscription, and delayed events
+  converge on current state.
+- A historical completed Checkout that has no durable Customer map remains retryable
+  for manual reconciliation. Never assign it from `client_reference_id` or metadata.
 - Stop the local listener and app when finished. The canceled test Customer stays
   mapped intentionally: a later test-mode retry demonstrates the stable-Customer
   contract. No live customer, payment, dashboard configuration, or buyer flow is

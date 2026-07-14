@@ -44,9 +44,11 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
    routes a Customer with a non-terminal Subscription to Portal; `POST /api/billing/portal` uses that
    same map; `POST /api/webhooks/stripe` is signature-verified, raw-body, and Node runtime. Webhooks
    atomically claim `event.id` (`stripe_events`), map the signed event's Customer through the durable
-   server map, retrieve the current Subscription from Stripe, and use a monotonic observed-at upsert
-   before completing the claim. That makes retries safe and prevents a late handler from restoring stale
-   entitlement state. Status contract: 400 bad signature, 503 unconfigured, 500 transient (Stripe
+   server map, retrieve the current Subscription from Stripe, reconcile a current non-terminal
+   Subscription for that Customer, and use a monotonic observed-at upsert before completing the claim.
+   That makes retries safe, prevents a late terminal event for an old subscription from restoring stale
+   entitlement state, and keeps an unmapped legacy Checkout completion retryable rather than assigning
+   it from metadata. Status contract: 400 bad signature, 503 unconfigured, 500 transient (Stripe
    retries), 200 processed/duplicate/ignored.
 
 5. **Test mode, env-gated.** `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_PRO` are

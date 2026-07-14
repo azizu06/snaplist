@@ -92,9 +92,12 @@ All under the app's existing route conventions; validate payloads with **Zod**; 
 Webhooks are at-least-once. Make handlers idempotent:
 - Atomically claim `event.id` in `stripe_events` (a concurrent in-progress delivery stays retryable), **and**
 - Resolve the signed event's Stripe Customer through `billing_customers`, retrieve the current
-  Subscription from Stripe, then state-upsert it keyed by `user_id` only if its observation is at least
-  as new as the stored one. This makes replayed and out-of-order events converge without trusting
-  session or invoice metadata.
+  Subscription from Stripe, reconcile a current non-terminal Subscription for that Customer, then
+  state-upsert it keyed by `user_id` only if its observation is at least as new as the stored one. This
+  makes replayed and out-of-order events converge without trusting session or invoice metadata; a
+  late terminal event for an old subscription cannot displace a newer active one. A signed legacy
+  Checkout completion with no Customer map stays retryable for safe manual reconciliation rather than
+  being assigned from client metadata.
 
 ## Env (test mode)
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO` (the Pro price id), and an app base
