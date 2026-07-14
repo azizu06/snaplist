@@ -832,6 +832,33 @@ describe("HttpEbayMessagingAdapter", () => {
     expect((error as MarketplaceDeliveryError).kind).toBe("ambiguous");
   });
 
+  it("classifies a successful Trading response without its acknowledgement root as ambiguous", async () => {
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: vi.fn(async () =>
+        xmlResponse(`
+          <UnexpectedResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+            <Ack>Success</Ack>
+          </UnexpectedResponse>`),
+      ) as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    const error = await adapter
+      .replyToQuestion({
+        externalParentId: "parent",
+        externalConversationId: "conversation",
+        externalListingId: "listing",
+        externalBuyerId: "buyer",
+        body: "Reply",
+        idempotencyKey: "key",
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MarketplaceDeliveryError);
+    expect((error as MarketplaceDeliveryError).kind).toBe("ambiguous");
+  });
+
   it("treats a Trading RequestError as a definitive rejection", async () => {
     const adapter = new HttpEbayMessagingAdapter({
       fetch: vi.fn(async () =>

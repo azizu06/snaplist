@@ -492,8 +492,10 @@ export class HttpEbayMessagingAdapter
     const root = asRecord(parsed[rootName]);
     if (!response.ok || !root) {
       if (isWrite) {
+        const kind =
+          response.ok || response.status >= 500 ? "ambiguous" : "rejected";
         throw new MarketplaceDeliveryError(
-          response.status >= 500 ? "ambiguous" : "rejected",
+          kind,
           `eBay ${callName} failed (HTTP ${response.status})`,
         );
       }

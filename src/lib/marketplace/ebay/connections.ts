@@ -151,34 +151,21 @@ export async function updateCachedAccessToken(
 
 /**
  * Erase everything held about an eBay user (Marketplace Account Deletion).
- * Runs on the SERVICE-ROLE client — deletion notices arrive with no user
- * session. Matches by eBay userId first, username as fallback. Returns how
- * many connections were erased (0 is fine — notices arrive for any eBay user
- * who ever authorized the app, connected or not; the endpoint must still 200).
+ * Runs on the SERVICE-ROLE client in one database transaction. Returns how
+ * many matched tenant connections were erased (0 is an idempotent success).
  */
 export async function eraseEbayUserData(
   serviceClient: SupabaseClient,
   ebayUserId: string | undefined,
   ebayUsername: string | undefined,
 ): Promise<number> {
-  let erased = 0;
-  if (ebayUserId) {
-    const { data, error } = await serviceClient
-      .from("ebay_connections")
-      .delete()
-      .eq("ebay_user_id", ebayUserId)
-      .select("user_id");
-    if (error) throw new Error(`Deletion erase failed: ${error.message}`);
-    erased += data?.length ?? 0;
+  const { data, error } = await serviceClient.rpc("erase_ebay_user_data", {
+    p_ebay_user_id: ebayUserId ?? null,
+    p_ebay_username: ebayUsername ?? null,
+  });
+  if (error) throw new Error(`Deletion erase failed: ${error.message}`);
+  if (typeof data !== "number") {
+    throw new Error("Deletion erase failed: database returned an invalid result");
   }
-  if (ebayUsername) {
-    const { data, error } = await serviceClient
-      .from("ebay_connections")
-      .delete()
-      .eq("ebay_username", ebayUsername)
-      .select("user_id");
-    if (error) throw new Error(`Deletion erase failed: ${error.message}`);
-    erased += data?.length ?? 0;
-  }
-  return erased;
+  return data;
 }

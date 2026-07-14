@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(58);
+select extensions.plan(69);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -1413,6 +1413,118 @@ select extensions.throws_ok(
   '23505',
   null,
   'a replayed delivery request cannot create a second outbound intent'
+);
+
+reset role;
+
+insert into public.ebay_connections (
+  user_id, ebay_user_id, ebay_username, refresh_token_enc
+)
+values
+  ('message-tenant-a', 'deletion-user-a', 'deletion_seller_a', 'v1.test-a'),
+  ('message-tenant-b', 'deletion-user-b', 'deletion_seller_b', 'v1.test-b');
+
+insert into public.ebay_unresolved_questions (
+  user_id, external_message_id, external_parent_id, external_listing_id,
+  resolution_window_from, observed_cursor_at, last_resolution_attempted_at,
+  last_error
+)
+values (
+  'message-tenant-a', 'deletion-pending-a', 'deletion-pending-a',
+  'sandbox-item-a', '2026-07-12T12:00:00Z', '2026-07-13T12:00:00Z',
+  '2026-07-13T12:00:00Z', 'retry later'
+);
+
+insert into public.notifications (
+  user_id, kind, title, source_message_id
+)
+values (
+  'message-tenant-a', 'buyer_message', 'Deletion notice question',
+  '93000000-0000-4000-8000-000000000001'
+)
+on conflict (user_id, source_message_id) do update set title = excluded.title;
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-a","role":"authenticated"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    select public.erase_ebay_user_data('deletion-user-b', 'deletion_seller_b')
+  $$,
+  '42501',
+  null,
+  'an authenticated tenant cannot invoke account-deletion erasure'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.is(
+  public.erase_ebay_user_data('deletion-user-a', 'deletion_seller_a'),
+  1,
+  'service-only account deletion erases one matched connection transactionally'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_connections where user_id = 'message-tenant-a'),
+  0,
+  'account deletion removes the matched connection and encrypted tokens'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.messages where user_id = 'message-tenant-a' and marketplace = 'ebay'),
+  0,
+  'account deletion removes the tenant eBay message tree'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_unresolved_questions where user_id = 'message-tenant-a'),
+  0,
+  'account deletion removes unresolved eBay questions'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_message_sync_state where user_id = 'message-tenant-a'),
+  0,
+  'account deletion removes eBay seller sync state'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.notifications where user_id = 'message-tenant-a' and source_message_id is not null),
+  0,
+  'account deletion removes notifications sourced from eBay messages'
+);
+
+select extensions.ok(
+  exists (
+    select 1 from public.messages
+    where user_id = 'message-tenant-a' and marketplace = 'simulated'
+  ),
+  'account deletion preserves unrelated simulated messages'
+);
+
+select extensions.ok(
+  exists (
+    select 1 from public.messages
+    where user_id = 'message-tenant-b' and marketplace = 'ebay'
+  ),
+  'account deletion preserves another tenant eBay messages'
+);
+
+select extensions.is(
+  (select count(*)::integer from public.ebay_connections where user_id = 'message-tenant-b'),
+  1,
+  'account deletion preserves another tenant connection'
+);
+
+select extensions.is(
+  public.erase_ebay_user_data('deletion-user-a', 'deletion_seller_a'),
+  0,
+  'account deletion is idempotent after all matched data is erased'
 );
 
 select * from extensions.finish();
