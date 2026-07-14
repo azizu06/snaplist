@@ -545,9 +545,9 @@ export default function Landing() {
               </GradientText>
             </h2>
             <p className="mx-auto mt-5 max-w-[44ch] text-[16px] leading-relaxed text-flash-dim">
-              Photograph the haul once. SnapList researches the sold price,
-              writes every listing, and posts to eBay. You keep control, and
-              you keep the margin.
+              Photograph the haul once. SnapList researches available sold
+              comps, labels fallback estimates, writes every listing, and
+              posts to eBay. You keep control, and you keep the margin.
             </p>
             {/* Magnet removed here too, to match the hero CTA (owner: the
                 magnetic pull was distracting). The mt-9 it carried moves onto
