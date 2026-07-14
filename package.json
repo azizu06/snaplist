@@ -10,6 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "audit:migrations": "tsx scripts/audit-migration-versions.ts",
     "test:watch": "vitest",
     "demo:capture-ui": "node remotion/scripts/capture-real-ui.mjs",
     "demo:render-real-ui": "node remotion/scripts/render-real-ui.mjs",
