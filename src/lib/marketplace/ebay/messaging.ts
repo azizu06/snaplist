@@ -14,7 +14,7 @@ const XML_NAMESPACE = "urn:ebay:apis:eBLBaseComponents";
 const DEFAULT_COMPATIBILITY_LEVEL = "1455";
 const MAX_MESSAGE_BODY = 2_000;
 const ENTRIES_PER_PAGE = 200;
-const CONVERSATIONS_PER_PAGE = 50;
+const CONVERSATIONS_PER_PAGE = 10;
 const MESSAGES_PER_PAGE = 50;
 const MESSAGE_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
@@ -126,15 +126,20 @@ export class HttpEbayMessagingAdapter
         ) {
           continue;
         }
-        const externalConversationId = await this.resolveConversationId({
-          externalMessageId,
-          externalListingId,
-          externalBuyerId,
-          body,
-          createdAt,
-          from: input.from,
-          to: input.to,
-        });
+        let externalConversationId: string;
+        try {
+          externalConversationId = await this.resolveConversationId({
+            externalMessageId,
+            externalListingId,
+            externalBuyerId,
+            body,
+            createdAt,
+            from: input.from,
+            to: input.to,
+          });
+        } catch {
+          continue;
+        }
         questions.push({
           marketplace: "ebay",
           externalMessageId,

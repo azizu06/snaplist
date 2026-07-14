@@ -139,6 +139,61 @@ describe("HttpEbayMessagingAdapter", () => {
     ]);
   });
 
+  it("imports resolvable questions when another Commerce lookup fails", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        const listingId = new URL(String(url)).searchParams.get("reference_id");
+        if (listingId === "listing-unresolved") {
+          return Response.json({ error: "temporarily unavailable" }, { status: 503 });
+        }
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-valid",
+              latestMessage: {
+                messageId: "question-valid",
+                senderUsername: "buyer-valid",
+                messageBody: "Does it power on?",
+                createdDate: "2026-07-13T14:02:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage>
+            <MemberMessageExchange>
+              <Item><ItemID>listing-unresolved</ItemID></Item>
+              <Question><SenderID>buyer-unresolved</SenderID><Body>Is this complete?</Body><MessageID>question-unresolved</MessageID></Question>
+              <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+            </MemberMessageExchange>
+            <MemberMessageExchange>
+              <Item><ItemID>listing-valid</ItemID></Item>
+              <Question><SenderID>buyer-valid</SenderID><Body>Does it power on?</Body><MessageID>question-valid</MessageID></Question>
+              <CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
+            </MemberMessageExchange>
+          </MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    const questions = await adapter.fetchUnansweredQuestions({
+      from: new Date("2026-07-12T14:05:00.000Z"),
+      to: new Date("2026-07-13T14:05:00.000Z"),
+    });
+
+    expect(questions.map((question) => question.externalMessageId)).toEqual([
+      "question-valid",
+    ]);
+  });
+
   it("preserves digit-only provider identifiers as exact strings", async () => {
     const listingId = "000123";
     const questionId = "000987";
@@ -264,6 +319,65 @@ describe("HttpEbayMessagingAdapter", () => {
       },
     ]);
     expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("paginates Commerce conversation candidates ten at a time", async () => {
+    const conversationUrls: URL[] = [];
+    const fetchSpy = vi.fn(async (url: string) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/commerce/message/v1/conversation")) {
+        conversationUrls.push(parsed);
+        if (parsed.searchParams.get("offset") === "10") {
+          return Response.json({
+            conversations: [
+              {
+                conversationId: "conversation-second-page",
+                latestMessage: {
+                  messageId: "question-second-page",
+                  senderUsername: "buyer-second-page",
+                  messageBody: "Can you combine shipping?",
+                  createdDate: "2026-07-13T14:03:00.000Z",
+                },
+              },
+            ],
+          });
+        }
+        return Response.json({
+          conversations: [],
+          next: "/commerce/message/v1/conversation?limit=10&offset=10",
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-second-page</ItemID></Item>
+            <Question><SenderID>buyer-second-page</SenderID><Body>Can you combine shipping?</Body><MessageID>question-second-page</MessageID></Question>
+            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject([
+      {
+        externalMessageId: "question-second-page",
+        externalConversationId: "conversation-second-page",
+      },
+    ]);
+    expect(conversationUrls).toHaveLength(2);
+    expect(conversationUrls[0].searchParams.get("limit")).toBe("10");
+    expect(conversationUrls[1].searchParams.get("offset")).toBe("10");
   });
 
   it("uses the exact question MessageID as ParentMessageID for replies", async () => {
