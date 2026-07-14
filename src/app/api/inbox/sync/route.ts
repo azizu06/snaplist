@@ -23,10 +23,13 @@ export async function POST(request: Request) {
     if (!connected && !hasEbayMessagingSandboxFallback(userId)) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
-    const admin = createAdminClient();
     const summary = await syncInboxForSeller({
-      adapter: await createEbayMessagingAdapterForUser(admin, userId),
-      repository: new SupabaseInboxSyncRepository(admin, userId),
+      adapter: await createEbayMessagingAdapterForUser(supabase, userId),
+      repository: new SupabaseInboxSyncRepository(
+        supabase,
+        userId,
+        createAdminClient(),
+      ),
     });
     return NextResponse.json(summary);
   } catch (error) {

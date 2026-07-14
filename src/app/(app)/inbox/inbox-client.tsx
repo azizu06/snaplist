@@ -341,6 +341,7 @@ export function InboxClient({
         body: JSON.stringify({
           confirmDuplicateRisk: requiresDuplicateRiskConfirmation(
             message.delivery_status,
+            message.delivery_attempted_at,
           ),
         }),
       });
@@ -432,6 +433,7 @@ export function InboxClient({
         body: JSON.stringify({
           confirmDuplicateRisk: requiresDuplicateRiskConfirmation(
             message.delivery_status,
+            message.delivery_attempted_at,
           ),
         }),
       });

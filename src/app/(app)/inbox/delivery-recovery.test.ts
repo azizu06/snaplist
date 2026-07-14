@@ -16,4 +16,23 @@ describe("follow-up delivery recovery", () => {
     expect(requiresDuplicateRiskConfirmation("ambiguous")).toBe(true);
     expect(requiresDuplicateRiskConfirmation("failed")).toBe(false);
   });
+
+  it("treats an expired sending lease as delivery-unconfirmed", () => {
+    const now = new Date("2026-07-13T12:00:00.000Z");
+    const attemptedAt = "2026-07-13T11:54:00.000Z";
+
+    expect(deliveryRecoveryLabel("sending", attemptedAt, now)).toBe(
+      "Delivery unconfirmed",
+    );
+    expect(
+      requiresDuplicateRiskConfirmation("sending", attemptedAt, now),
+    ).toBe(true);
+    expect(
+      requiresDuplicateRiskConfirmation(
+        "sending",
+        "2026-07-13T11:56:00.000Z",
+        now,
+      ),
+    ).toBe(false);
+  });
 });

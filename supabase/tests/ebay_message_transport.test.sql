@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(18);
+select extensions.plan(23);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -264,6 +264,24 @@ select extensions.results_eq(
 
 select extensions.throws_ok(
   $$
+    select public.apply_ebay_message_write(
+      'message-tenant-a',
+      'claim_canonical',
+      jsonb_build_object(
+        'message_id', '93000000-0000-4000-8000-000000000001',
+        'body', 'Direct client reply',
+        'at', '2026-07-13T12:05:00Z',
+        'retry', false
+      )
+    )
+  $$,
+  '42501',
+  null,
+  'tenant A cannot invoke the server-only write seam directly'
+);
+
+select extensions.throws_ok(
+  $$
     insert into public.messages (
       user_id, item_id, listing_id, direction, body, status, marketplace,
       external_message_id
@@ -301,6 +319,75 @@ select extensions.lives_ok(
 );
 
 reset role;
+
+set local role service_role;
+select set_config(
+  'request.jwt.claims',
+  '{"role":"service_role"}',
+  true
+);
+
+select extensions.results_eq(
+  $$
+    select public.apply_ebay_message_write(
+      'message-tenant-a',
+      'claim_canonical',
+      jsonb_build_object(
+        'message_id', '93000000-0000-4000-8000-000000000001',
+        'body', 'Tenant A approved reply',
+        'at', '2026-07-13T12:05:00Z',
+        'retry', false
+      )
+    )
+  $$,
+  $$values ('true'::jsonb)$$,
+  'the server can claim a reply through the tenant-bound write seam'
+);
+
+select extensions.is(
+  (
+    select delivery_status
+    from public.messages
+    where id = '93000000-0000-4000-8000-000000000001'
+  ),
+  'sending',
+  'the tenant-bound write seam advances only the selected seller lifecycle'
+);
+
+select extensions.results_eq(
+  $$
+    select public.apply_ebay_message_write(
+      'message-tenant-a',
+      'claim_canonical',
+      jsonb_build_object(
+        'message_id', '93000000-0000-4000-8000-000000000002',
+        'body', 'Cross-tenant reply',
+        'at', '2026-07-13T12:05:00Z',
+        'retry', false
+      )
+    )
+  $$,
+  $$values ('false'::jsonb)$$,
+  'the database rejects a message outside the selected seller tenant'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'message-tenant-b',
+      'sync_mark_attempt',
+      '{"at":"2026-07-13T12:05:00Z"}'::jsonb
+    )
+  $$,
+  'the scheduler can use the same database-enforced tenant write seam'
+);
+
+reset role;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-a","role":"authenticated"}',
+  true
+);
 
 select extensions.lives_ok(
   $$

@@ -63,11 +63,14 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   }
   async claimCanonical(_root: MessageRow, body: string, at: Date, retry: boolean) {
     if (!retry && this.root.status !== "drafted") return false;
+    const staleSending =
+      this.root.delivery_status === "sending" &&
+      typeof this.root.delivery_attempted_at === "string" &&
+      Date.parse(this.root.delivery_attempted_at) < at.getTime() - 5 * 60_000;
     if (
       retry &&
-      !["rejected", "failed", "ambiguous"].includes(
-        this.root.delivery_status ?? "",
-      )
+      !staleSending &&
+      !["rejected", "failed", "ambiguous"].includes(this.root.delivery_status ?? "")
     ) {
       return false;
     }
@@ -130,7 +133,14 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     return this.followUps.get(id) ?? null;
   }
   async claimFollowUp(row: MessageRow, at: Date) {
-    if (!["rejected", "failed", "ambiguous"].includes(row.delivery_status ?? "")) {
+    const staleSending =
+      row.delivery_status === "sending" &&
+      typeof row.delivery_attempted_at === "string" &&
+      Date.parse(row.delivery_attempted_at) < at.getTime() - 5 * 60_000;
+    if (
+      !staleSending &&
+      !["rejected", "failed", "ambiguous"].includes(row.delivery_status ?? "")
+    ) {
       return false;
     }
     row.delivery_status = "sending";
@@ -228,6 +238,38 @@ describe("message delivery transport", () => {
     });
     expect(delivered.delivery_status).toBe("delivered");
     expect(adapter.replies).toHaveLength(2);
+  });
+
+  it("requires duplicate-risk confirmation before reclaiming a stale canonical send", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemoryDeliveryRepository();
+    repository.root = message({
+      status: "sent",
+      delivery_status: "sending",
+      delivery_attempted_at: "2026-07-13T11:54:00.000Z",
+    });
+    const now = () => new Date("2026-07-13T12:00:00.000Z");
+
+    await expect(
+      sendCanonicalReply({
+        repository,
+        adapter,
+        messageId: ROOT_ID,
+        retry: true,
+        now,
+      }),
+    ).rejects.toThrow("Confirm the duplicate-delivery risk");
+    expect(adapter.replies).toHaveLength(0);
+
+    await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      retry: true,
+      confirmDuplicateRisk: true,
+      now,
+    });
+    expect(adapter.replies).toHaveLength(1);
   });
 
   it("deduplicates a seller-authored follow-up request and preserves delivery identity", async () => {
@@ -347,5 +389,43 @@ describe("message delivery transport", () => {
     });
     expect(delivered.delivery_status).toBe("delivered");
     expect(adapter.followUps).toHaveLength(2);
+  });
+
+  it("requires duplicate-risk confirmation before reclaiming a stale follow-up send", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemoryDeliveryRepository();
+    await sendCanonicalReply({ repository, adapter, messageId: ROOT_ID });
+    const stale = message({
+      id: "55555555-5555-4555-8555-000000000099",
+      direction: "outbound",
+      body: "One more detail.",
+      status: "approved",
+      reply_to: ROOT_ID,
+      reply_kind: "followup",
+      delivery_request_id: "request-stale",
+      delivery_status: "sending",
+      delivery_attempted_at: "2026-07-13T11:54:00.000Z",
+    });
+    repository.followUps.set(stale.id, stale);
+    const now = () => new Date("2026-07-13T12:00:00.000Z");
+
+    await expect(
+      retryFollowUpDelivery({
+        repository,
+        adapter,
+        messageId: stale.id,
+        now,
+      }),
+    ).rejects.toThrow("Confirm the duplicate-delivery risk");
+    expect(adapter.followUps).toHaveLength(0);
+
+    await retryFollowUpDelivery({
+      repository,
+      adapter,
+      messageId: stale.id,
+      confirmDuplicateRisk: true,
+      now,
+    });
+    expect(adapter.followUps).toHaveLength(1);
   });
 });

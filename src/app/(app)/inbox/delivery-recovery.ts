@@ -1,3 +1,5 @@
+const DELIVERY_LEASE_MS = 5 * 60_000;
+
 export function canRetryDelivery(
   deliveryStatus: string | null | undefined,
   retrying: boolean,
@@ -7,14 +9,32 @@ export function canRetryDelivery(
 
 export function deliveryRecoveryLabel(
   deliveryStatus: string | null | undefined,
+  deliveryAttemptedAt?: string | null,
+  now = new Date(),
 ): string {
-  if (deliveryStatus === "ambiguous") return "Delivery unconfirmed";
+  if (
+    requiresDuplicateRiskConfirmation(
+      deliveryStatus,
+      deliveryAttemptedAt,
+      now,
+    )
+  ) {
+    return "Delivery unconfirmed";
+  }
   if (deliveryStatus === "sending") return "Delivery pending";
   return "Not delivered";
 }
 
 export function requiresDuplicateRiskConfirmation(
   deliveryStatus: string | null | undefined,
+  deliveryAttemptedAt?: string | null,
+  now = new Date(),
 ): boolean {
-  return deliveryStatus === "ambiguous";
+  if (deliveryStatus === "ambiguous") return true;
+  if (deliveryStatus !== "sending" || !deliveryAttemptedAt) return false;
+  const attemptedAt = Date.parse(deliveryAttemptedAt);
+  return (
+    Number.isFinite(attemptedAt) &&
+    attemptedAt < now.getTime() - DELIVERY_LEASE_MS
+  );
 }

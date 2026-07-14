@@ -21,12 +21,15 @@ export async function createMessagingTransportForConversation(
   userId: string,
   marketplace: string | null | undefined,
 ) {
-  const persistenceClient =
-    marketplace === "ebay" ? createAdminClient() : supabase;
   return {
-    repository: new SupabaseDeliveryRepository(persistenceClient, userId),
+    repository: new SupabaseDeliveryRepository(
+      supabase,
+      userId,
+      marketplace === "ebay",
+      marketplace === "ebay" ? createAdminClient() : supabase,
+    ),
     adapter: await createMessagingAdapterForConversation(
-      persistenceClient,
+      supabase,
       userId,
       marketplace,
     ),

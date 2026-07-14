@@ -1,9 +1,11 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import { MockMarketplaceMessagingAdapter } from "@/lib/marketplace/mock-messaging";
 import type { MarketplaceQuestion } from "@/lib/marketplace/messaging";
 import type { MessageRow, ReplyGrounding } from "./types";
 import {
   syncInboxForSeller,
+  SupabaseInboxSyncRepository,
   type DraftCandidate,
   type InboxSyncRepository,
   type ImportedQuestionResult,
@@ -227,5 +229,26 @@ describe("syncInboxForSeller", () => {
       drafted: 0,
     });
     expect(repository.imported).toHaveLength(0);
+  });
+});
+
+describe("SupabaseInboxSyncRepository", () => {
+  it("uses the dedicated server-write client for foreground lifecycle mutations", async () => {
+    const readClient = {} as SupabaseClient;
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const writeClient = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(
+      readClient,
+      USER_ID,
+      writeClient,
+    );
+
+    await repository.markAttempt(new Date("2026-07-13T12:05:00.000Z"));
+
+    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_user_id: USER_ID,
+      p_operation: "sync_mark_attempt",
+      p_payload: { at: "2026-07-13T12:05:00.000Z" },
+    });
   });
 });

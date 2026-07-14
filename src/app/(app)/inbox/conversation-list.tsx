@@ -7,6 +7,7 @@ import type { MessageRow } from "@/lib/inbox";
 import {
   canRetryDelivery,
   deliveryRecoveryLabel,
+  requiresDuplicateRiskConfirmation,
 } from "./delivery-recovery";
 
 /**
@@ -209,7 +210,10 @@ export function deriveConversationState(
         ? "success-solid"
         : "neutral";
   const statusLabel = undelivered
-    ? deliveryRecoveryLabel(message.delivery_status)
+    ? deliveryRecoveryLabel(
+        message.delivery_status,
+        message.delivery_attempted_at,
+      )
     : message.status === "sent"
       ? sending
         ? "Sending…"
@@ -816,7 +820,10 @@ export function ConversationThread({
                 </span>
               ) : (
                 <span className="flex items-center gap-2 px-1 text-[11px] text-danger-soft-fg">
-                  {deliveryRecoveryLabel(m.delivery_status)}
+                  {deliveryRecoveryLabel(
+                    m.delivery_status,
+                    m.delivery_attempted_at,
+                  )}
                   <button
                     type="button"
                     onClick={() => onRetryFollowUp(m)}
@@ -838,7 +845,10 @@ export function ConversationThread({
         {undelivered ? (
           <div className="flex flex-col gap-2 rounded-lg border border-danger-border bg-danger-soft px-3.5 py-3">
             <p className="text-[12.5px] font-semibold text-danger-soft-fg">
-              {message.delivery_status === "ambiguous"
+              {requiresDuplicateRiskConfirmation(
+                message.delivery_status,
+                message.delivery_attempted_at,
+              )
                 ? "Delivery unconfirmed. eBay may already have received this reply."
                 : message.delivery_status === "sending"
                   ? "Delivery pending. Retry is available if the send lease expired."

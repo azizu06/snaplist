@@ -6,9 +6,9 @@ import type {
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { recordPipelineRunAndMaybeAlert } from "@/lib/abuse";
 import { draftBuyerReply, type DraftBuyerReplyResult } from "./reply";
+import { applyEbayMessageWrite } from "./ebay-server-write";
 import { messageRowSchema, type MessageRow, type ReplyGrounding } from "./types";
 
-const PG_UNIQUE_VIOLATION = "23505";
 const DRAFT_CLAIM_LEASE_MS = 5 * 60_000;
 
 function configuredMinutes(name: string, fallback: number): number {
@@ -182,6 +182,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly userId: string,
+    private readonly serverWriteClient: SupabaseClient = supabase,
   ) {}
 
   async getCursor(): Promise<Date | null> {
@@ -197,40 +198,34 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async markAttempt(at: Date): Promise<void> {
-    const { error } = await this.supabase.from("ebay_message_sync_state").upsert(
-      {
-        user_id: this.userId,
-        last_attempted_at: at.toISOString(),
-      },
-      { onConflict: "user_id" },
+    await applyEbayMessageWrite(
+      this.serverWriteClient,
+      this.userId,
+      "sync_mark_attempt",
+      { at: at.toISOString() },
     );
-    if (error) throw new Error(`Failed to mark inbox sync attempt: ${error.message}`);
   }
 
   async markSuccess(cursor: Date): Promise<void> {
-    const { error } = await this.supabase
-      .from("ebay_message_sync_state")
-      .update({
-        cursor_at: cursor.toISOString(),
-        last_succeeded_at: cursor.toISOString(),
-        last_error: null,
-      })
-      .eq("user_id", this.userId);
-    if (error) throw new Error(`Failed to advance inbox sync cursor: ${error.message}`);
+    await applyEbayMessageWrite(
+      this.serverWriteClient,
+      this.userId,
+      "sync_mark_success",
+      { at: cursor.toISOString() },
+    );
   }
 
   async markFailure(at: Date, error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : "Inbox sync failed";
-    const { error: writeError } = await this.supabase
-      .from("ebay_message_sync_state")
-      .update({
-        last_attempted_at: at.toISOString(),
-        last_error: message.slice(0, 500),
-      })
-      .eq("user_id", this.userId);
-    if (writeError) {
-      throw new Error(`Failed to persist inbox sync failure: ${writeError.message}`);
-    }
+    await applyEbayMessageWrite(
+      this.serverWriteClient,
+      this.userId,
+      "sync_mark_failure",
+      {
+        at: at.toISOString(),
+        error: message.slice(0, 500),
+      },
+    );
   }
 
   async findActiveListing(
@@ -276,70 +271,37 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     question: MarketplaceQuestion,
     listing: SyncListingContext,
   ): Promise<ImportedQuestionResult> {
-    const { data, error } = await this.supabase
-      .from("messages")
-      .insert({
-        user_id: this.userId,
-        item_id: listing.itemId,
-        listing_id: listing.listingId,
-        direction: "inbound",
-        body: question.body,
-        status: "new",
-        marketplace: question.marketplace,
-        external_message_id: question.externalMessageId,
-        external_parent_id: question.externalParentId,
-        external_conversation_id: question.externalConversationId,
-        external_listing_id: question.externalListingId,
-        external_buyer_id: question.externalBuyerId,
-        external_created_at: question.createdAt,
-      })
-      .select("*")
-      .maybeSingle();
-    if (!error && data) {
-      return { message: messageRowSchema.parse(data), inserted: true };
-    }
-    if (error?.code !== PG_UNIQUE_VIOLATION) {
-      throw new Error(
-        `Failed to import eBay question: ${error?.message ?? "no row returned"}`,
-      );
-    }
-
-    const { data: existing, error: readError } = await this.supabase
-      .from("messages")
-      .select("*")
-      .eq("user_id", this.userId)
-      .eq("marketplace", question.marketplace)
-      .eq("external_message_id", question.externalMessageId)
-      .eq("direction", "inbound")
-      .maybeSingle();
-    if (readError || !existing) {
-      throw new Error(
-        `Failed to recover imported eBay question: ${readError?.message ?? "no row returned"}`,
-      );
-    }
-    return { message: messageRowSchema.parse(existing), inserted: false };
+    const result = await applyEbayMessageWrite<{
+      message: unknown;
+      inserted: boolean;
+    }>(this.serverWriteClient, this.userId, "import_question", {
+      item_id: listing.itemId,
+      listing_id: listing.listingId,
+      body: question.body,
+      external_message_id: question.externalMessageId,
+      external_parent_id: question.externalParentId,
+      external_conversation_id: question.externalConversationId,
+      external_listing_id: question.externalListingId,
+      external_buyer_id: question.externalBuyerId,
+      external_created_at: question.createdAt,
+    });
+    return {
+      message: messageRowSchema.parse(result.message),
+      inserted: result.inserted,
+    };
   }
 
   async ensureNotification(
-    question: MarketplaceQuestion,
-    listing: SyncListingContext,
+    _question: MarketplaceQuestion,
+    _listing: SyncListingContext,
     message: MessageRow,
   ): Promise<void> {
-    const { error } = await this.supabase.from("notifications").insert({
-      user_id: this.userId,
-      kind: "buyer_message",
-      title: listing.title
-        ? `New question on “${listing.title}”`
-        : "New buyer question",
-      body: question.body,
-      href: `/inbox?c=${message.id}`,
-      item_id: listing.itemId,
-      listing_id: listing.listingId,
-      source_message_id: message.id,
-    });
-    if (error && error.code !== PG_UNIQUE_VIOLATION) {
-      throw new Error(`Failed to create buyer-message notification: ${error.message}`);
-    }
+    await applyEbayMessageWrite(
+      this.serverWriteClient,
+      this.userId,
+      "ensure_notification",
+      { message_id: message.id },
+    );
   }
 
   async listDraftCandidates(): Promise<DraftCandidate[]> {
@@ -368,52 +330,42 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async claimDraft(candidate: DraftCandidate, now: Date): Promise<boolean> {
-    let query = this.supabase
-      .from("messages")
-      .update({ status: "drafting", updated_at: now.toISOString() })
-      .eq("user_id", this.userId)
-      .eq("id", candidate.message.id);
-    if (candidate.message.status === "drafting") {
-      query = query.eq("status", "drafting").eq(
-        "updated_at",
-        candidate.message.updated_at,
-      );
-    } else {
-      query = query.in("status", ["new", "draft_failed"]);
-    }
-    const { data, error } = await query.select("id");
-    if (error) throw new Error(`Failed to claim reply draft: ${error.message}`);
-    return (data?.length ?? 0) === 1;
+    return applyEbayMessageWrite<boolean>(
+      this.serverWriteClient,
+      this.userId,
+      "claim_draft",
+      {
+        message_id: candidate.message.id,
+        expected_status: candidate.message.status,
+        expected_updated_at: candidate.message.updated_at,
+        at: now.toISOString(),
+      },
+    );
   }
 
   async attachDraft(
     messageId: string,
     draft: DraftBuyerReplyResult,
   ): Promise<void> {
-    const { data, error } = await this.supabase
-      .from("messages")
-      .update({
+    await applyEbayMessageWrite(
+      this.serverWriteClient,
+      this.userId,
+      "attach_draft",
+      {
+        message_id: messageId,
         draft_reply: draft.reply,
         draft_model: draft.usedFallback ? `${draft.model} (fallback)` : draft.model,
-        status: "drafted",
-      })
-      .eq("user_id", this.userId)
-      .eq("id", messageId)
-      .eq("status", "drafting")
-      .select("id");
-    if (error || data?.length !== 1) {
-      throw new Error(`Failed to attach imported reply draft: ${error?.message ?? "claim lost"}`);
-    }
+      },
+    );
   }
 
   async markDraftFailed(messageId: string): Promise<void> {
-    const { error } = await this.supabase
-      .from("messages")
-      .update({ status: "draft_failed" })
-      .eq("user_id", this.userId)
-      .eq("id", messageId)
-      .eq("status", "drafting");
-    if (error) throw new Error(`Failed to mark imported draft failed: ${error.message}`);
+    await applyEbayMessageWrite(
+      this.serverWriteClient,
+      this.userId,
+      "mark_draft_failed",
+      { message_id: messageId },
+    );
   }
 
   private async loadGrounding(
