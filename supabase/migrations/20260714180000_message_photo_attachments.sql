@@ -179,13 +179,8 @@ create policy "message_photos_insert_own"
   );
 -- Client uploads are immutable. The browser uses insert-only object creation
 -- against a live upload-intent row; retries verify the retained hash instead
--- of overwriting an object after validation or provider delivery.
-create policy "message_photos_delete_own"
-  on storage.objects for delete
-  using (
-    bucket_id = 'message-photos'
-    and (storage.foldername(name))[1] = public.clerk_user_id()
-  );
+-- of overwriting or deleting an object after validation. Expiry, failed-stage,
+-- and account-erasure cleanup all run through server-authorized RPC/admin paths.
 
 alter publication supabase_realtime add table public.message_attachments;
 
