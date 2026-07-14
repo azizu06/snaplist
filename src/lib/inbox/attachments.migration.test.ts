@@ -13,6 +13,7 @@ describe("message photo attachment migration", () => {
     expect(migration).toContain("'image/jpeg', 'image/png', 'image/webp'");
     expect(migration).toMatch(/message_photos_select_own[\s\S]*clerk_user_id\(\)/i);
     expect(migration).not.toMatch(/create policy "message_photos_update_own"/i);
+    expect(migration).not.toMatch(/create policy "message_photos_delete_own"/i);
   });
 
   it("pins both message relationships to the same tenant and enables RLS plus Realtime", () => {

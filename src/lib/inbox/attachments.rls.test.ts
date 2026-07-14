@@ -168,7 +168,13 @@ describe("message attachment RLS (DB-gated)", () => {
       jpeg,
       { contentType: "image/jpeg" },
     )).error).not.toBeNull();
-    expect((await b.client.storage.from("message-photos").remove([
+    await b.client.storage.from("message-photos").remove([
+      uploadIntent.storage_path,
+    ]);
+    expect((await admin.storage.from("message-photos").download(
+      uploadIntent.storage_path,
+    )).error).toBeNull();
+    expect((await admin.storage.from("message-photos").remove([
       uploadIntent.storage_path,
     ])).error).toBeNull();
   });
