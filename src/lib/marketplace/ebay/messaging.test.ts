@@ -727,6 +727,7 @@ describe("HttpEbayMessagingAdapter", () => {
 
     await expect(
       adapter.replyToQuestion({
+        accountGeneration: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         externalParentId: "question-parent-42",
         externalConversationId: "question-parent-42",
         externalListingId: "110011001100",
@@ -739,6 +740,9 @@ describe("HttpEbayMessagingAdapter", () => {
       deliveredAt: "2026-07-13T14:04:00.000Z",
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.getAccessToken).toHaveBeenLastCalledWith(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    );
   });
 
   it("uses Commerce sendMessage with the preserved conversation id for text follow-ups", async () => {
@@ -768,6 +772,7 @@ describe("HttpEbayMessagingAdapter", () => {
     });
 
     const result = await adapter.sendFollowUp({
+      accountGeneration: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       externalParentId: "question-parent-42",
       externalConversationId: "commerce-conversation-9",
       externalListingId: "110011001100",
@@ -779,6 +784,9 @@ describe("HttpEbayMessagingAdapter", () => {
       externalDeliveryId: "commerce-followup-77",
       deliveredAt: "2026-07-13T14:08:00.000Z",
     });
+    expect(tokenProvider.getAccessToken).toHaveBeenLastCalledWith(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
   });
 
   it("classifies an HTTP/network write without an acknowledgement as ambiguous", async () => {

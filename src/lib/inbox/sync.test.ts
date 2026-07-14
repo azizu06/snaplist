@@ -1022,6 +1022,10 @@ describe("SupabaseInboxSyncRepository", () => {
     await expect(repository.listPendingQuestions()).resolves.toEqual([]);
 
     expect(from).not.toHaveBeenCalled();
+    expect(rpc.mock.calls.slice(0, 2).map(([name]) => name)).toEqual([
+      "begin_scheduled_ebay_message_write",
+      "read_scheduled_ebay_inbox",
+    ]);
     expect(rpc).toHaveBeenCalledWith("read_scheduled_ebay_inbox", {
       p_user_id: USER_ID,
       p_operation: "cursor",

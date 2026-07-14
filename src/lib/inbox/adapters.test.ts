@@ -51,8 +51,13 @@ describe("createMessagingTransportForConversation", () => {
 
   it("keeps foreground eBay transport on the caller client and tenant write RPC", async () => {
     const generation = "11111111-1111-4111-8111-111111111111";
-    const rpc = vi.fn(async (name: string) => ({
-      data: name === "begin_ebay_message_write" ? generation : true,
+    const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => ({
+      data:
+        name === "begin_ebay_message_write"
+          ? generation
+          : args?.p_operation === "begin_provider_dispatch"
+            ? { account_generation: generation }
+            : true,
       error: null,
     }));
     const client = {} as SupabaseClient;
@@ -70,6 +75,12 @@ describe("createMessagingTransportForConversation", () => {
       new Date("2026-07-13T12:01:00.000Z"),
       false,
     );
+    await expect(
+      transport.repository.beginProviderDispatch(
+        root.id,
+        new Date("2026-07-13T12:01:00.000Z"),
+      ),
+    ).resolves.toEqual({ accountGeneration: generation });
     await transport.repository.failCanonical(
       root.id,
       "ambiguous",
@@ -88,6 +99,14 @@ describe("createMessagingTransportForConversation", () => {
         body: "Yes, it does.",
         at: "2026-07-13T12:01:00.000Z",
         retry: false,
+      },
+      p_generation: generation,
+    });
+    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_operation: "begin_provider_dispatch",
+      p_payload: {
+        message_id: root.id,
+        attempted_at: "2026-07-13T12:01:00.000Z",
       },
       p_generation: generation,
     });

@@ -78,6 +78,7 @@ export const messageRowSchema = z.object({
   external_delivery_id: z.string().nullable().optional(),
   delivery_attempted_at: z.string().nullable().optional(),
   delivery_error: z.string().nullable().optional(),
+  ebay_account_generation: z.string().uuid().nullable().optional(),
 });
 
 export type MessageRow = z.infer<typeof messageRowSchema>;

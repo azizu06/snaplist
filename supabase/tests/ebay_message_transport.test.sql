@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(112);
+select extensions.plan(122);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -2041,6 +2041,11 @@ select set_config(
 select extensions.lives_ok(
   $$
     select public.update_ebay_access_token_cache(
+      (
+        select account_generation
+        from public.ebay_connections
+        where user_id = 'message-tenant-b'
+      ),
       'v1.rpc-cached-access',
       '2026-07-14T15:00:00Z'
     )
@@ -2225,6 +2230,8 @@ create temporary table ebay_account_generation_fixture (
   account_generation uuid not null
 ) on commit drop;
 
+grant select on ebay_account_generation_fixture to service_role;
+
 insert into ebay_account_generation_fixture
 select 'account-a', account_generation
 from public.ebay_connections
@@ -2283,6 +2290,46 @@ select extensions.isnt(
   'reconnecting a replacement seller account creates a distinct account generation'
 );
 
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.throws_ok(
+  format(
+    $$select public.update_scheduled_ebay_access_token_cache(
+      'generation-tenant', %L::uuid, 'v1.stale-account-a-access',
+      '2026-07-14T17:00:00Z'
+    )$$,
+    (select account_generation::text
+     from ebay_account_generation_fixture
+     where account_name = 'account-a')
+  ),
+  '40001',
+  'eBay connection generation expired',
+  'an account A refresh cannot overwrite the replacement account B cache'
+);
+
+select extensions.lives_ok(
+  format(
+    $$select public.update_scheduled_ebay_access_token_cache(
+      'generation-tenant', %L::uuid, 'v1.current-account-b-access',
+      '2026-07-14T17:00:00Z'
+    )$$,
+    (select account_generation::text
+     from ebay_account_generation_fixture
+     where account_name = 'account-b')
+  ),
+  'the current account generation can cache a refreshed access token'
+);
+
+reset role;
+
+select extensions.is(
+  (select access_token_enc from public.ebay_connections
+   where user_id = 'generation-tenant'),
+  'v1.current-account-b-access',
+  'only the current account token reaches the connection row'
+);
+
 insert into public.messages (
   id, user_id, item_id, listing_id, direction, body, status, marketplace,
   external_message_id, external_parent_id, external_listing_id,
@@ -2301,6 +2348,15 @@ insert into public.messages (
   'generation-listing',
   '2026-07-14T15:00:00Z'
 );
+
+delete from private.ebay_seller_identity_tenants seller_identity
+where seller_identity.user_id = 'generation-tenant'
+  and seller_identity.account_generation = (
+    select account_generation
+    from ebay_account_generation_fixture
+    where account_name = 'account-a'
+  )
+  and seller_identity.identity_kind = 'user_id';
 
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
@@ -2345,6 +2401,34 @@ select extensions.results_eq(
   $$values ('generation-account-b'::text, false)$$,
   'historical account deletion preserves account B credentials and current generation'
 );
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select extensions.lives_ok(
+  $$
+    select public.save_ebay_connection(
+      'generation-account-b',
+      'generation_seller_a',
+      'v1.generation-b-refresh-2',
+      'v1.generation-b-access-2',
+      '2026-07-14T18:00:00Z',
+      array['scope-b']::text[]
+    )
+  $$,
+  'deleting stable account A does not tombstone replacement B shared username'
+);
+
+reset role;
 
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
@@ -2414,6 +2498,21 @@ select extensions.is(
   'scheduler draft reads join only the selected tenant messages items and listings'
 );
 
+select extensions.ok(
+  public.begin_scheduled_ebay_message_write('fresh-operator-tenant') is not null,
+  'the scheduler initializes a fresh operator messaging generation before reads'
+);
+
+select extensions.is(
+  public.read_scheduled_ebay_inbox(
+    'fresh-operator-tenant',
+    'cursor',
+    '{}'::jsonb
+  ),
+  null::jsonb,
+  'a fresh operator generation can perform its first scheduled cursor read'
+);
+
 set local role authenticated;
 select set_config(
   'request.jwt.claims',
@@ -2432,6 +2531,174 @@ select extensions.throws_ok(
   '42501',
   'permission denied for function read_scheduled_ebay_inbox',
   'an authenticated tenant cannot invoke scheduler read authority'
+);
+
+reset role;
+
+update public.messages
+set status = 'drafted',
+    draft_reply = 'Canonical dispatch in flight'
+where id = '99000000-0000-4000-8000-000000000002';
+
+insert into public.messages (
+  id, user_id, item_id, listing_id, direction, body, status, marketplace,
+  external_message_id, external_parent_id, external_conversation_id,
+  external_listing_id, external_buyer_id, external_created_at
+) values (
+  '99000000-0000-4000-8000-000000000003',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000001',
+  '98000000-0000-4000-8000-000000000001',
+  'inbound',
+  'Follow-up root',
+  'sent',
+  'ebay',
+  'generation-question-followup',
+  'generation-question-followup',
+  'generation-conversation-followup',
+  'generation-listing',
+  'generation-buyer',
+  '2026-07-14T15:30:00Z'
+);
+
+insert into public.messages (
+  id, user_id, item_id, listing_id, direction, body, status, sent_at,
+  reply_to, reply_kind, marketplace, external_parent_id,
+  external_conversation_id, external_listing_id, external_buyer_id,
+  delivery_status, external_delivery_id, delivery_attempted_at
+) values (
+  '99000000-0000-4000-8000-000000000004',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000001',
+  '98000000-0000-4000-8000-000000000001',
+  'outbound',
+  'Delivered root reply',
+  'sent',
+  '2026-07-14T15:35:00Z',
+  '99000000-0000-4000-8000-000000000003',
+  'reply',
+  'ebay',
+  'generation-question-followup',
+  'generation-conversation-followup',
+  'generation-listing',
+  'generation-buyer',
+  'delivered',
+  'generation-delivery-root',
+  '2026-07-14T15:35:00Z'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select pg_temp.apply_ebay_message_write(
+  'claim_canonical',
+  '{"message_id":"99000000-0000-4000-8000-000000000002","body":"Canonical dispatch in flight","at":"2026-07-14T16:10:00Z","retry":false}'::jsonb
+);
+
+select pg_temp.apply_ebay_message_write(
+  'begin_provider_dispatch',
+  '{"message_id":"99000000-0000-4000-8000-000000000002","attempted_at":"2026-07-14T16:10:00Z"}'::jsonb
+);
+
+create temporary table ebay_followup_dispatch_fixture on commit drop as
+select (pg_temp.apply_ebay_message_write(
+  'create_followup',
+  '{"root_id":"99000000-0000-4000-8000-000000000003","body":"Follow-up dispatch in flight","request_id":"generation-followup-dispatch","at":"2026-07-14T16:10:00Z"}'::jsonb
+)->'message'->>'id')::uuid as message_id;
+
+select pg_temp.apply_ebay_message_write(
+  'begin_provider_dispatch',
+  jsonb_build_object(
+    'message_id', (select message_id from ebay_followup_dispatch_fixture),
+    'attempted_at', '2026-07-14T16:10:00Z'
+  )
+);
+
+reset role;
+
+select extensions.is(
+  (select count(*)::integer from private.ebay_provider_dispatch_leases
+   where user_id = 'generation-tenant'),
+  2,
+  'canonical and follow-up provider writes hold generation-bound dispatch leases'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.throws_ok(
+  $$select public.erase_ebay_user_data(
+    'generation-account-b', 'generation_seller_a'
+  )$$,
+  '40001',
+  'eBay provider dispatch is active',
+  'account erasure cannot acknowledge while provider dispatch is active'
+);
+
+reset role;
+
+update private.ebay_provider_dispatch_leases
+set expires_at = statement_timestamp() - interval '1 second'
+where user_id = 'generation-tenant';
+select private.expire_ebay_provider_dispatch_leases('generation-tenant');
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where user_id = 'generation-tenant'
+      and delivery_status = 'ambiguous'
+      and id in (
+        '99000000-0000-4000-8000-000000000002',
+        (select message_id from ebay_followup_dispatch_fixture)
+      )
+  ),
+  2,
+  'expired canonical and follow-up dispatches become delivery unconfirmed'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select pg_temp.apply_ebay_message_write(
+  'fail_canonical',
+  '{"message_id":"99000000-0000-4000-8000-000000000002","kind":"ambiguous","attempted_at":"2026-07-14T16:10:00Z"}'::jsonb
+);
+select pg_temp.apply_ebay_message_write(
+  'fail_followup',
+  jsonb_build_object(
+    'message_id', (select message_id from ebay_followup_dispatch_fixture),
+    'kind', 'ambiguous',
+    'attempted_at', '2026-07-14T16:10:00Z'
+  )
+);
+
+reset role;
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.is(
+  public.erase_ebay_user_data('generation-account-b', 'generation_seller_a'),
+  1,
+  'erasure succeeds after both dispatches settle as delivery unconfirmed'
 );
 
 select * from extensions.finish();

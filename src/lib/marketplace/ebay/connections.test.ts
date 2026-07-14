@@ -5,6 +5,8 @@ import {
   saveEbayConnection,
   updateCachedAccessToken,
 } from "./connections";
+import { encryptSecret } from "../../crypto/secretbox";
+import { UserTokenProvider } from "./user-token-provider";
 
 const ENCRYPTION_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -45,12 +47,14 @@ describe("saveEbayConnection", () => {
     await updateCachedAccessToken(
       client,
       "ignored-application-tenant",
+      "11111111-1111-4111-8111-111111111111",
       "refreshed-access-token",
       Date.parse("2026-07-14T14:00:00Z"),
       ENCRYPTION_ENV,
     );
 
     expect(rpc).toHaveBeenCalledWith("update_ebay_access_token_cache", {
+      p_account_generation: "11111111-1111-4111-8111-111111111111",
       p_access_token_enc: expect.stringMatching(/^v1\./),
       p_access_token_expires_at: "2026-07-14T14:00:00.000Z",
     });
@@ -63,6 +67,7 @@ describe("saveEbayConnection", () => {
     await updateCachedAccessToken(
       client,
       "scheduled-tenant",
+      "22222222-2222-4222-8222-222222222222",
       "refreshed-access-token",
       Date.parse("2026-07-14T14:00:00Z"),
       ENCRYPTION_ENV,
@@ -73,6 +78,7 @@ describe("saveEbayConnection", () => {
       "update_scheduled_ebay_access_token_cache",
       {
         p_user_id: "scheduled-tenant",
+        p_account_generation: "22222222-2222-4222-8222-222222222222",
         p_access_token_enc: expect.stringMatching(/^v1\./),
         p_access_token_expires_at: "2026-07-14T14:00:00.000Z",
       },
@@ -108,5 +114,94 @@ describe("eraseEbayUserData", () => {
       p_ebay_user_id: "ebay-user-1",
       p_ebay_username: null,
     });
+  });
+});
+
+describe("UserTokenProvider", () => {
+  it("binds refresh reads and cache writes to the source account generation", async () => {
+    const accountGeneration = "33333333-3333-4333-8333-333333333333";
+    const encryptionKey = Buffer.from(
+      ENCRYPTION_ENV.EBAY_TOKEN_ENCRYPTION_KEY,
+      "base64",
+    );
+    const rpc = vi.fn(async (name: string) => {
+      if (name === "read_scheduled_ebay_connection") {
+        return {
+          data: {
+            user_id: "scheduled-tenant",
+            account_generation: accountGeneration,
+            ebay_user_id: "seller-id",
+            ebay_username: "seller-name",
+            refresh_token_enc: encryptSecret("refresh-token", encryptionKey),
+            access_token_enc: null,
+            access_token_expires_at: null,
+            scopes: ["scope-a"],
+          },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    });
+    const fetch = vi.fn(async () =>
+      Response.json({ access_token: "fresh-token", expires_in: 3600 }),
+    );
+    const provider = new UserTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      {
+        scheduled: true,
+        userId: "scheduled-tenant",
+        fetch,
+        env: () => ({
+          ...ENCRYPTION_ENV,
+          EBAY_CLIENT_ID: "client-id",
+          EBAY_CLIENT_SECRET: "client-secret",
+        }),
+        now: () => Date.parse("2026-07-14T12:00:00Z"),
+      },
+    );
+
+    await expect(provider.getAccessToken(accountGeneration)).resolves.toBe(
+      "fresh-token",
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "update_scheduled_ebay_access_token_cache",
+      expect.objectContaining({
+        p_user_id: "scheduled-tenant",
+        p_account_generation: accountGeneration,
+      }),
+    );
+  });
+
+  it("rejects a credential generation that differs from the delivery claim", async () => {
+    const encryptionKey = Buffer.from(
+      ENCRYPTION_ENV.EBAY_TOKEN_ENCRYPTION_KEY,
+      "base64",
+    );
+    const rpc = vi.fn(async () => ({
+      data: {
+        user_id: "scheduled-tenant",
+        account_generation: "44444444-4444-4444-8444-444444444444",
+        refresh_token_enc: encryptSecret("refresh-token", encryptionKey),
+        access_token_enc: encryptSecret("access-token", encryptionKey),
+        access_token_expires_at: "2026-07-14T14:00:00Z",
+        scopes: [],
+      },
+      error: null,
+    }));
+    const fetch = vi.fn();
+    const provider = new UserTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      {
+        scheduled: true,
+        userId: "scheduled-tenant",
+        fetch,
+        env: () => ENCRYPTION_ENV,
+      },
+    );
+
+    await expect(
+      provider.getAccessToken("55555555-5555-4555-8555-555555555555"),
+    ).rejects.toThrow("account generation changed");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

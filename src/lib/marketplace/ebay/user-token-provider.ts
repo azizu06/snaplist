@@ -53,7 +53,7 @@ export class UserTokenProvider implements EbayTokenProvider {
     this.scheduled = options.scheduled ?? false;
   }
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(expectedAccountGeneration?: string): Promise<string> {
     const env = this.readEnv();
     const connection = await getDecryptedConnection(
       this.supabase,
@@ -65,6 +65,12 @@ export class UserTokenProvider implements EbayTokenProvider {
       throw new Error(
         "No eBay account is connected. Connect one in Settings before publishing.",
       );
+    }
+    if (
+      expectedAccountGeneration &&
+      connection.accountGeneration !== expectedAccountGeneration
+    ) {
+      throw new Error("eBay account generation changed before provider dispatch");
     }
 
     if (
@@ -131,6 +137,7 @@ export class UserTokenProvider implements EbayTokenProvider {
     await updateCachedAccessToken(
       this.supabase,
       connection.userId,
+      connection.accountGeneration,
       token,
       expiresAt,
       env,

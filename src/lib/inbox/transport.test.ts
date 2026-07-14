@@ -43,12 +43,15 @@ function message(overrides: Partial<MessageRow> = {}): MessageRow {
     external_delivery_id: null,
     delivery_attempted_at: null,
     delivery_error: null,
+    ebay_account_generation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     ...overrides,
   };
 }
 
 class MemoryDeliveryRepository implements DeliveryRepository {
   root = message();
+  dispatchGeneration = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  dispatches: Array<{ id: string; attemptedAt: string }> = [];
   canonical: MessageRow | null = null;
   followUps = new Map<string, MessageRow>();
   followUpsByRequest = new Map<string, MessageRow>();
@@ -80,6 +83,10 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     this.root.delivery_status = "sending";
     this.root.delivery_attempted_at = at.toISOString();
     return true;
+  }
+  async beginProviderDispatch(id: string, attemptedAt: Date) {
+    this.dispatches.push({ id, attemptedAt: attemptedAt.toISOString() });
+    return { accountGeneration: this.dispatchGeneration };
   }
   async failCanonical(
     id: string,
@@ -204,6 +211,8 @@ describe("message delivery transport", () => {
   it("delivers an approved reply once using the exact external parent identifier", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     const repository = new MemoryDeliveryRepository();
+    repository.root.ebay_account_generation =
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
     const first = await sendCanonicalReply({
       repository,
@@ -221,11 +230,13 @@ describe("message delivery transport", () => {
     expect(first.id).toBe(replay.id);
     expect(adapter.replies).toHaveLength(1);
     expect(adapter.replies[0]).toMatchObject({
+      accountGeneration: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       externalParentId: "exact-question-parent-42",
       externalListingId: "110011001100",
       externalBuyerId: "buyer-public-id",
       idempotencyKey: ROOT_ID,
     });
+    expect(repository.dispatches).toHaveLength(1);
     expect(adapter.replies[0]?.externalParentId).not.toBe(
       repository.root.external_message_id,
     );

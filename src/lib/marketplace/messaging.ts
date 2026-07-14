@@ -53,6 +53,7 @@ export interface FetchQuestionsInput {
 }
 
 export interface MarketplaceDeliveryInput {
+  accountGeneration?: string;
   externalParentId: string;
   externalConversationId: string;
   externalListingId: string;

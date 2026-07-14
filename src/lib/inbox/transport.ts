@@ -41,6 +41,10 @@ export interface DeliveryRepository {
     at: Date,
     retry: boolean,
   ): Promise<boolean>;
+  beginProviderDispatch(
+    messageId: string,
+    attemptedAt: Date,
+  ): Promise<{ accountGeneration: string }>;
   failCanonical(
     messageId: string,
     kind: MarketplaceDeliveryFailureKind,
@@ -116,8 +120,9 @@ export async function sendCanonicalReply(
 
   let receipt: MarketplaceDeliveryReceipt;
   try {
+    const dispatch = await input.repository.beginProviderDispatch(root.id, at);
     receipt = await input.adapter.replyToQuestion(
-      deliveryInput(root, body, root.id),
+      deliveryInput(root, body, root.id, dispatch.accountGeneration),
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
@@ -233,8 +238,17 @@ async function deliverFollowUp(
 ): Promise<MessageRow> {
   let receipt: MarketplaceDeliveryReceipt;
   try {
+    const dispatch = await repository.beginProviderDispatch(
+      message.id,
+      attemptedAt,
+    );
     receipt = await adapter.sendFollowUp(
-      deliveryInput(root, message.body, message.delivery_request_id ?? message.id),
+      deliveryInput(
+        root,
+        message.body,
+        message.delivery_request_id ?? message.id,
+        dispatch.accountGeneration,
+      ),
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
@@ -253,7 +267,12 @@ async function deliverFollowUp(
   }
 }
 
-function deliveryInput(root: MessageRow, body: string, idempotencyKey: string) {
+function deliveryInput(
+  root: MessageRow,
+  body: string,
+  idempotencyKey: string,
+  accountGeneration: string,
+) {
   const isSimulated = (root.marketplace ?? "simulated") === "simulated";
   const parent = root.external_parent_id ?? (isSimulated ? root.id : null);
   const conversation =
@@ -268,6 +287,7 @@ function deliveryInput(root: MessageRow, body: string, idempotencyKey: string) {
     );
   }
   return {
+    accountGeneration,
     externalParentId: parent,
     externalConversationId: conversation,
     externalListingId: listing,
@@ -345,6 +365,25 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       .maybeSingle();
     if (error) throw new Error(`Failed to load buyer question: ${error.message}`);
     return data ? messageRowSchema.parse(data) : null;
+  }
+
+  async beginProviderDispatch(
+    messageId: string,
+    attemptedAt: Date,
+  ): Promise<{ accountGeneration: string }> {
+    if (!this.serverManaged) {
+      return { accountGeneration: "simulated" };
+    }
+    const data = await this.applyServerWrite<{
+      account_generation?: unknown;
+    }>("begin_provider_dispatch", {
+      message_id: messageId,
+      attempted_at: attemptedAt.toISOString(),
+    });
+    if (typeof data.account_generation !== "string") {
+      throw new Error("Failed to bind eBay provider dispatch to an account");
+    }
+    return { accountGeneration: data.account_generation };
   }
 
   async canonicalDelivered(root: MessageRow): Promise<MessageRow | null> {

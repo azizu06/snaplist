@@ -106,7 +106,7 @@ export interface EbayAdapter {
  * (issue #17). That swap is the entire production OAuth story.
  */
 export interface EbayTokenProvider {
-  getAccessToken(): Promise<string>;
+  getAccessToken(expectedAccountGeneration?: string): Promise<string>;
 }
 
 /** Typed failure for any non-2xx Sell API response, with eBay's error payload. */

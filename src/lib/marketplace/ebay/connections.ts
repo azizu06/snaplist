@@ -25,6 +25,7 @@ export interface EbayConnectionStatus {
 
 interface ConnectionRow {
   user_id: string;
+  account_generation: string;
   ebay_user_id: string | null;
   ebay_username: string | null;
   refresh_token_enc: string;
@@ -102,6 +103,7 @@ export async function deleteEbayConnection(
  */
 export interface DecryptedConnection {
   userId: string;
+  accountGeneration: string;
   refreshToken: string;
   accessToken: string | null;
   /** Epoch ms, null when no cached access token. */
@@ -128,7 +130,7 @@ export async function getDecryptedConnection(
     let query = supabase
       .from("ebay_connections")
       .select(
-        "user_id, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
+        "user_id, account_generation, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
       );
     if (userId) query = query.eq("user_id", userId);
     const result = await query.maybeSingle<ConnectionRow>();
@@ -141,6 +143,7 @@ export async function getDecryptedConnection(
   const key = parseEncryptionKey(env.EBAY_TOKEN_ENCRYPTION_KEY);
   return {
     userId: data.user_id,
+    accountGeneration: data.account_generation,
     refreshToken: decryptSecret(data.refresh_token_enc, key),
     accessToken: data.access_token_enc
       ? decryptSecret(data.access_token_enc, key)
@@ -156,6 +159,7 @@ export async function getDecryptedConnection(
 export async function updateCachedAccessToken(
   supabase: SupabaseClient,
   userId: string,
+  accountGeneration: string,
   accessToken: string,
   expiresAt: number,
   env: Env = process.env,
@@ -163,6 +167,7 @@ export async function updateCachedAccessToken(
 ): Promise<void> {
   const key = parseEncryptionKey(env.EBAY_TOKEN_ENCRYPTION_KEY);
   const payload = {
+    p_account_generation: accountGeneration,
     p_access_token_enc: encryptSecret(accessToken, key),
     p_access_token_expires_at: new Date(expiresAt).toISOString(),
   };

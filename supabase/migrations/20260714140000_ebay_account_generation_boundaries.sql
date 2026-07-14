@@ -37,6 +37,49 @@ select account.user_id,
 from private.ebay_messaging_account_generations account
 on conflict (user_id, account_generation) do nothing;
 
+create table if not exists private.ebay_provider_dispatch_leases (
+  user_id text not null,
+  message_id uuid not null,
+  account_generation uuid not null,
+  attempted_at timestamptz not null,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default statement_timestamp(),
+  primary key (user_id, message_id)
+);
+
+revoke all on table private.ebay_provider_dispatch_leases
+  from public, anon, authenticated, service_role;
+
+create or replace function private.expire_ebay_provider_dispatch_leases(
+  p_user_id text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.messages message
+  set delivery_status = 'ambiguous',
+      delivery_error = 'ambiguous'
+  from private.ebay_provider_dispatch_leases lease
+  where lease.user_id = p_user_id
+    and lease.expires_at <= statement_timestamp()
+    and message.user_id = lease.user_id
+    and message.id = lease.message_id
+    and message.ebay_account_generation = lease.account_generation
+    and message.delivery_status = 'sending'
+    and message.delivery_attempted_at = lease.attempted_at;
+
+  delete from private.ebay_provider_dispatch_leases lease
+  where lease.user_id = p_user_id
+    and lease.expires_at <= statement_timestamp();
+end;
+$$;
+
+revoke all on function private.expire_ebay_provider_dispatch_leases(text)
+  from public, anon, authenticated, service_role;
+
 create table if not exists private.ebay_unmappable_connection_quarantines (
   user_id text primary key,
   quarantined_at timestamptz not null default statement_timestamp(),
@@ -364,6 +407,16 @@ begin
   end loop;
 
   v_account := private.lock_ebay_messaging_account(p_user_id);
+  perform private.expire_ebay_provider_dispatch_leases(p_user_id);
+  if exists (
+    select 1
+    from private.ebay_provider_dispatch_leases lease
+    where lease.user_id = p_user_id
+      and lease.account_generation = v_account.generation
+      and lease.expires_at > statement_timestamp()
+  ) then
+    raise exception using errcode = '40001', message = 'eBay provider dispatch is active';
+  end if;
   if v_account.seller_erased then
     raise exception using errcode = '42501', message = 'eBay seller account has been erased';
   end if;
@@ -523,8 +576,17 @@ revoke all on function private.save_ebay_connection_for_tenant(
   text, text, text, text, text, timestamptz, text[]
 ) from public, anon, authenticated, service_role;
 
-create or replace function private.update_ebay_access_token_cache_for_tenant(
+drop function if exists public.update_ebay_access_token_cache(text, timestamptz);
+drop function if exists public.update_scheduled_ebay_access_token_cache(
+  text, text, timestamptz
+);
+drop function if exists private.update_ebay_access_token_cache_for_tenant(
+  text, text, timestamptz
+);
+
+create function private.update_ebay_access_token_cache_for_tenant(
   p_user_id text,
+  p_account_generation uuid,
   p_access_token_enc text,
   p_access_token_expires_at timestamptz
 )
@@ -540,6 +602,9 @@ begin
     raise exception using errcode = '22023', message = 'An encrypted access token is required';
   end if;
   v_account := private.lock_ebay_messaging_account(p_user_id);
+  if v_account.generation is distinct from p_account_generation then
+    raise exception using errcode = '40001', message = 'eBay connection generation expired';
+  end if;
   if v_account.seller_erased then
     raise exception using errcode = '42501', message = 'eBay seller account has been erased';
   end if;
@@ -555,10 +620,11 @@ end;
 $$;
 
 revoke all on function private.update_ebay_access_token_cache_for_tenant(
-  text, text, timestamptz
+  text, uuid, text, timestamptz
 ) from public, anon, authenticated, service_role;
 
-create or replace function public.update_ebay_access_token_cache(
+create function public.update_ebay_access_token_cache(
+  p_account_generation uuid,
   p_access_token_enc text,
   p_access_token_expires_at timestamptz
 )
@@ -583,19 +649,21 @@ begin
   end if;
   perform private.update_ebay_access_token_cache_for_tenant(
     v_user_id,
+    p_account_generation,
     p_access_token_enc,
     p_access_token_expires_at
   );
 end;
 $$;
 
-revoke all on function public.update_ebay_access_token_cache(text, timestamptz)
+revoke all on function public.update_ebay_access_token_cache(uuid, text, timestamptz)
   from public, anon, service_role;
-grant execute on function public.update_ebay_access_token_cache(text, timestamptz)
+grant execute on function public.update_ebay_access_token_cache(uuid, text, timestamptz)
   to authenticated;
 
-create or replace function public.update_scheduled_ebay_access_token_cache(
+create function public.update_scheduled_ebay_access_token_cache(
   p_user_id text,
+  p_account_generation uuid,
   p_access_token_enc text,
   p_access_token_expires_at timestamptz
 )
@@ -610,6 +678,7 @@ begin
   end if;
   perform private.update_ebay_access_token_cache_for_tenant(
     p_user_id,
+    p_account_generation,
     p_access_token_enc,
     p_access_token_expires_at
   );
@@ -617,10 +686,10 @@ end;
 $$;
 
 revoke all on function public.update_scheduled_ebay_access_token_cache(
-  text, text, timestamptz
+  text, uuid, text, timestamptz
 ) from public, anon, authenticated;
 grant execute on function public.update_scheduled_ebay_access_token_cache(
-  text, text, timestamptz
+  text, uuid, text, timestamptz
 ) to service_role;
 
 create or replace function private.apply_serialized_ebay_message_write_for_tenant(
@@ -638,6 +707,8 @@ declare
   v_account private.ebay_messaging_account_generations%rowtype;
   v_buyer_hash text;
   v_result jsonb;
+  v_count integer;
+  v_attempted_at timestamptz;
 begin
   if p_operation in ('upsert_unresolved_question', 'import_question') then
     v_buyer_hash := private.hash_ebay_identity(
@@ -670,6 +741,42 @@ begin
     raise exception using errcode = '42501', message = 'eBay identity has been erased';
   end if;
 
+  if p_operation = 'begin_provider_dispatch' then
+    v_attempted_at := (p_payload->>'attempted_at')::timestamptz;
+    perform private.expire_ebay_provider_dispatch_leases(p_user_id);
+    perform 1
+    from public.messages message
+    where message.user_id = p_user_id
+      and message.id = (p_payload->>'message_id')::uuid
+      and message.marketplace = 'ebay'
+      and message.ebay_account_generation = p_generation
+      and message.delivery_status = 'sending'
+      and message.delivery_attempted_at = v_attempted_at;
+    if not found then
+      raise exception using errcode = 'P0002', message = 'Provider dispatch claim was lost';
+    end if;
+
+    insert into private.ebay_provider_dispatch_leases (
+      user_id,
+      message_id,
+      account_generation,
+      attempted_at,
+      expires_at
+    ) values (
+      p_user_id,
+      (p_payload->>'message_id')::uuid,
+      p_generation,
+      v_attempted_at,
+      greatest(v_attempted_at, statement_timestamp()) + interval '5 minutes'
+    )
+    on conflict (user_id, message_id) do nothing;
+    get diagnostics v_count = row_count;
+    if v_count <> 1 then
+      raise exception using errcode = '40001', message = 'Provider dispatch is already active';
+    end if;
+    return jsonb_build_object('account_generation', p_generation);
+  end if;
+
   perform set_config(
     'app.ebay_account_generation',
     p_generation::text,
@@ -686,6 +793,18 @@ begin
     raise;
   end;
   perform set_config('app.ebay_account_generation', '', true);
+  if p_operation in (
+    'fail_canonical',
+    'complete_canonical',
+    'fail_followup',
+    'complete_followup'
+  ) then
+    delete from private.ebay_provider_dispatch_leases lease
+    where lease.user_id = p_user_id
+      and lease.message_id = (p_payload->>'message_id')::uuid
+      and lease.account_generation = p_generation
+      and lease.attempted_at = (p_payload->>'attempted_at')::timestamptz;
+  end if;
   return v_result;
 end;
 $$;
@@ -733,7 +852,7 @@ begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
     raise exception using errcode = '42501', message = 'Scheduler authorization is required';
   end if;
-  select to_jsonb(connection) - 'account_generation'
+  select to_jsonb(connection)
   into v_result
   from public.ebay_connections connection
   join private.ebay_messaging_account_generations account
@@ -992,9 +1111,18 @@ begin
         (v_user_id_hash is not null
           and seller_identity.identity_kind = 'user_id'
           and seller_identity.identity_hash = v_user_id_hash)
-        or (v_user_id_hash is null
+        or (v_username_hash is not null
           and seller_identity.identity_kind = 'username'
-          and seller_identity.identity_hash = v_username_hash)
+          and seller_identity.identity_hash = v_username_hash
+          and not exists (
+            select 1
+            from private.ebay_seller_identity_tenants stable_identity
+            where stable_identity.user_id = seller_identity.user_id
+              and stable_identity.account_generation = seller_identity.account_generation
+              and stable_identity.hash_version = 1
+              and stable_identity.identity_kind = 'user_id'
+              and stable_identity.identity_hash is distinct from v_user_id_hash
+          ))
       )
   ) matched;
 
@@ -1035,6 +1163,15 @@ begin
     from unnest(v_user_ids) matched(user_id)
   ) loop
     perform private.lock_ebay_messaging_account(v_user_id);
+    perform private.expire_ebay_provider_dispatch_leases(v_user_id);
+    if exists (
+      select 1
+      from private.ebay_provider_dispatch_leases lease
+      where lease.user_id = v_user_id
+        and lease.expires_at > statement_timestamp()
+    ) then
+      raise exception using errcode = '40001', message = 'eBay provider dispatch is active';
+    end if;
   end loop;
 
   insert into private.ebay_erased_identity_tombstones (
@@ -1047,7 +1184,10 @@ begin
   from (
     values
       ('user_id'::text, v_user_id_hash),
-      ('username'::text, v_username_hash)
+      ('username'::text, case
+        when v_user_id_hash is null then v_username_hash
+        else null
+      end)
     union all
     select 'sender_id'::text, identity_hash
     from unnest(v_buyer_hashes) buyer(identity_hash)

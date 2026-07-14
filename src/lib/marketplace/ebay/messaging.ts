@@ -220,7 +220,9 @@ export class HttpEbayMessagingAdapter
 
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
-    const token = await this.tokenProvider.getAccessToken();
+    const token = await this.tokenProvider.getAccessToken(
+      input.accountGeneration,
+    );
     let response: Response;
     try {
       response = await this.fetchImpl(
@@ -411,6 +413,7 @@ export class HttpEbayMessagingAdapter
         },
       },
       true,
+      input.accountGeneration,
     );
 
     return {
@@ -425,11 +428,14 @@ export class HttpEbayMessagingAdapter
     callName: "GetMemberMessages" | "AddMemberMessageRTQ",
     request: XmlRecord,
     isWrite: boolean,
+    expectedAccountGeneration?: string,
   ): Promise<XmlRecord> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const endpoint = `${baseUrl.replace(/\/$/, "")}/ws/api.dll`;
-    const token = await this.tokenProvider.getAccessToken();
+    const token = await this.tokenProvider.getAccessToken(
+      expectedAccountGeneration,
+    );
     const xml = `<?xml version="1.0" encoding="utf-8"?>${builder.build(request)}`;
 
     let response: Response;

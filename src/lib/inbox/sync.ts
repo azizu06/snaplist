@@ -411,6 +411,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
 
   async getCursor(): Promise<Date | null> {
     if (this.writeTarget.scheduled) {
+      await this.getWriteGeneration();
       const data = await this.readScheduled<{ cursor_at: string | null } | null>(
         "cursor",
       );
