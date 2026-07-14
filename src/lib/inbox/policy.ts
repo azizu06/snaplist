@@ -113,6 +113,14 @@ function normalized(value: string): string {
     .trim();
 }
 
+function includesTokenPhrase(corpus: string, phrase: string): boolean {
+  const corpusTokens = normalized(corpus).split(" ");
+  const phraseTokens = normalized(phrase).split(" ");
+  return corpusTokens.some((_, start) =>
+    phraseTokens.every((token, offset) => corpusTokens[start + offset] === token),
+  );
+}
+
 function signals(
   enabled: boolean,
   grounding: AuthoritativeMessageGrounding,
@@ -218,7 +226,7 @@ function exactFactAnswer(
   const measurement = input.grounding.facts.find(
     (fact) =>
       fact.source === "seller_confirmed_measurement" &&
-      q.includes(normalized(fact.key)) &&
+      includesTokenPhrase(q, fact.key) &&
       /\b(measure|measurement|wide|long|length|tall|height)\b/.test(q),
   );
   if (measurement) {

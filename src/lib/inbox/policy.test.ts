@@ -200,4 +200,29 @@ describe("decideMessagePolicy", () => {
     expect(result.outcome).toBe("escalate");
     expect(result.reasonCodes).toContain("authoritative_fact_missing");
   });
+
+  it("matches measurement names only at exact token boundaries", () => {
+    const widthGrounding: Partial<AuthoritativeMessageGrounding> = {
+      facts: [
+        {
+          key: "width",
+          value: "18 in",
+          source: "seller_confirmed_measurement",
+          reference:
+            "item:11111111-1111-4111-8111-111111111111:measurement:width",
+        },
+      ],
+    };
+
+    expect(decide("What is the width measurement?", widthGrounding)).toMatchObject({
+      outcome: "auto_send",
+      groundingReferences: [expect.objectContaining({ key: "width" })],
+    });
+    expect(decide("What is the bandwidth measurement?", widthGrounding)).toMatchObject({
+      outcome: "escalate",
+      reasonCodes: ["authoritative_fact_missing"],
+      groundingReferences: [],
+      proposedReply: null,
+    });
+  });
 });

@@ -66,4 +66,20 @@ describe("grounded message autoreply migration", () => {
     expect(migration).toMatch(/delivery_status\s*=\s*'blocked'/i);
     expect(migration).toMatch(/policy_delivery_status\s*=\s*'blocked'/i);
   });
+
+  it("atomically retires a question that eBay explicitly confirms was answered", () => {
+    const blockFunction = migration.match(
+      /create or replace function private\.block_ebay_message_policy_delivery_for_tenant[\s\S]*?\n\$\$;/i,
+    )?.[0];
+    expect(blockFunction).toMatch(/p_reason\s*=\s*'question_answered'/i);
+    expect(blockFunction).toMatch(
+      /status\s*=\s*case[\s\S]*p_reason\s*=\s*'question_answered'[\s\S]*then\s*'externally_answered'/i,
+    );
+    expect(blockFunction).toMatch(
+      /draft_reply\s*=\s*case[\s\S]*p_reason\s*=\s*'question_answered'[\s\S]*then\s*null/i,
+    );
+    expect(blockFunction).toMatch(
+      /draft_model\s*=\s*case[\s\S]*p_reason\s*=\s*'question_answered'[\s\S]*then\s*null/i,
+    );
+  });
 });

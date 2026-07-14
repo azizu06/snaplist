@@ -317,10 +317,16 @@ class MemoryMessagePolicyRepository implements MessagePolicyRepository {
   async revalidatePendingAutoSend(messageId: string) {
     return this.enabled && this.pending.has(messageId)
       ? {
+          authorized: true as const,
           marketplaceObservedAt:
             authoritativeGrounding.authorization.marketplaceObservedAt,
+          questionObservedAt: "2026-07-13T12:05:00.000Z",
         }
-      : null;
+      : { authorized: false as const, reason: "authorization_changed" as const };
+  }
+
+  async blockPendingAutoSend(messageId: string) {
+    this.pending.delete(messageId);
   }
 
   markDelivered(messageId: string) {

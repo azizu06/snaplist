@@ -238,4 +238,51 @@ describe("message policy audit RLS", () => {
       delivery_attempted_at: "2026-07-14T12:05:00+00:00",
     });
   });
+
+  it("retires an explicitly answered eBay question so the seller cannot send its draft", async () => {
+    if (!reachable) return;
+    const { data: message, error: messageError } = await admin
+      .from("messages")
+      .select("id, ebay_account_generation")
+      .eq("user_id", userB.id)
+      .eq("external_message_id", "rls-question-1")
+      .single();
+    expect(messageError).toBeNull();
+
+    const { data: blocked, error: blockError } = await admin.rpc(
+      "block_scheduled_ebay_message_policy_delivery",
+      {
+        p_user_id: userB.id,
+        p_message_id: message!.id,
+        p_reason: "question_answered",
+        p_generation: message!.ebay_account_generation,
+      },
+    );
+    expect(blockError).toBeNull();
+    expect(blocked).toBe(true);
+
+    const [{ data: retired }, { data: decision }] = await Promise.all([
+      userB.client
+        .from("messages")
+        .select("status, draft_reply, draft_model, policy_delivery_status, policy_delivery_error")
+        .eq("id", message!.id)
+        .single(),
+      userB.client
+        .from("message_policy_decisions")
+        .select("delivery_status, delivery_error")
+        .eq("message_id", message!.id)
+        .single(),
+    ]);
+    expect(retired).toMatchObject({
+      status: "externally_answered",
+      draft_reply: null,
+      draft_model: null,
+      policy_delivery_status: "blocked",
+      policy_delivery_error: "question_answered",
+    });
+    expect(decision).toMatchObject({
+      delivery_status: "blocked",
+      delivery_error: "question_answered",
+    });
+  });
 });

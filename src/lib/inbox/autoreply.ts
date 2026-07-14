@@ -41,6 +41,7 @@ export interface MessagePolicyRepository {
 
 export type AutoSendBlockReason =
   | "authorization_changed"
+  | "question_answered"
   | "question_not_unanswered"
   | "revalidation_failed";
 

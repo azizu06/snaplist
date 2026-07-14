@@ -317,9 +317,11 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
     if (
       questionStatus.answeredExternalMessageIds.includes(
         message.external_message_id,
-      ) ||
-      !stillUnanswered
+      )
     ) {
+      return { authorized: false, reason: "question_answered" };
+    }
+    if (!stillUnanswered) {
       return { authorized: false, reason: "question_not_unanswered" };
     }
     return {

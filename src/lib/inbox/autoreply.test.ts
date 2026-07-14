@@ -74,6 +74,7 @@ class MemoryPolicyRepository implements MessagePolicyRepository {
   blocked = new Map<string, string>();
   marketplaceCurrent = true;
   questionUnanswered = true;
+  questionAnswered = false;
   revalidationFailure = false;
 
   async getEnabled() {
@@ -112,6 +113,9 @@ class MemoryPolicyRepository implements MessagePolicyRepository {
 
   async revalidatePendingAutoSend(messageId: string) {
     if (this.revalidationFailure) throw new Error("eBay unavailable");
+    if (this.questionAnswered) {
+      return { authorized: false as const, reason: "question_answered" as const };
+    }
     if (!this.questionUnanswered) {
       return { authorized: false as const, reason: "question_not_unanswered" as const };
     }
@@ -271,7 +275,7 @@ describe("message policy orchestration", () => {
       draft: vi.fn(),
       meterDraft: vi.fn(),
     });
-    repository.questionUnanswered = false;
+    repository.questionAnswered = true;
     const send = vi.fn();
 
     expect(await sendPendingAutomaticReplies({ repository, send })).toEqual({
@@ -279,6 +283,21 @@ describe("message policy orchestration", () => {
       failed: 0,
     });
     expect(send).not.toHaveBeenCalled();
+    expect(repository.blocked.get(message.id)).toBe("question_answered");
+  });
+
+  it("keeps ambiguous provider absence distinct from an answered question", async () => {
+    const repository = new MemoryPolicyRepository();
+    await processMessagePolicyCandidate({
+      repository,
+      candidate: { message, grounding: draftGrounding },
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+    repository.questionUnanswered = false;
+
+    await sendPendingAutomaticReplies({ repository, send: vi.fn() });
+
     expect(repository.blocked.get(message.id)).toBe("question_not_unanswered");
   });
 

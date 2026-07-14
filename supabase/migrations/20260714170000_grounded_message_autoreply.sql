@@ -314,7 +314,8 @@ declare
   v_blocked boolean;
 begin
   if p_reason not in (
-    'authorization_changed', 'question_not_unanswered', 'revalidation_failed'
+    'authorization_changed', 'question_answered', 'question_not_unanswered',
+    'revalidation_failed'
   ) then
     raise exception using errcode = '22023', message = 'Invalid automatic reply block reason';
   end if;
@@ -334,7 +335,19 @@ begin
   returning true into v_blocked;
   if coalesce(v_blocked, false) then
     update public.messages message
-    set policy_delivery_status = 'blocked',
+    set status = case
+          when p_reason = 'question_answered' then 'externally_answered'
+          else message.status
+        end,
+        draft_reply = case
+          when p_reason = 'question_answered' then null
+          else message.draft_reply
+        end,
+        draft_model = case
+          when p_reason = 'question_answered' then null
+          else message.draft_model
+        end,
+        policy_delivery_status = 'blocked',
         policy_delivery_error = p_reason
     where message.id = p_message_id
       and message.user_id = p_user_id

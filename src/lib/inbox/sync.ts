@@ -118,7 +118,13 @@ export interface SyncInboxInput {
   meterDraft?: () => Promise<void>;
   policy?: {
     repository: MessagePolicyRepository;
-    send: (messageId: string) => Promise<unknown>;
+    send: (
+      messageId: string,
+      authorization: {
+        marketplaceObservedAt: string;
+        questionObservedAt: string;
+      },
+    ) => Promise<unknown>;
   };
 }
 
