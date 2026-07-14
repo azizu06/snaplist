@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(48);
+select extensions.plan(50);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -255,13 +255,14 @@ select public.apply_ebay_message_write(
 
 select extensions.results_eq(
   $$
-    select status, delivery_status, delivery_attempted_at
+    select status, draft_reply, delivery_status, delivery_attempted_at
     from public.messages
     where external_message_id = 'ambiguous-question-a'
   $$,
   $$
     values (
       'externally_answered'::text,
+      'The charger is included.'::text,
       'ambiguous'::text,
       '2026-07-13T12:06:00Z'::timestamptz
     )
@@ -286,6 +287,123 @@ select extensions.results_eq(
   $$,
   $$values ('false'::jsonb)$$,
   'an externally answered send cannot be retried into a duplicate delivery'
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Is the active send still unanswered?',
+    'external_message_id', 'active-send-question-a',
+    'external_parent_id', 'active-send-question-a',
+    'external_conversation_id', 'conversation-active-send-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-active-send-a',
+    'external_created_at', '2026-07-13T12:07:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'claim_draft',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'active-send-question-a'
+    ),
+    'expected_status', 'new'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'attach_draft',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'active-send-question-a'
+    ),
+    'draft_reply', 'The active send reply.',
+    'draft_model', 'test-reply'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'claim_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'active-send-question-a'
+    ),
+    'body', 'The active send reply.',
+    'at', '2026-07-13T12:08:00Z',
+    'retry', false
+  )
+);
+
+select public.apply_ebay_message_write(
+  'mark_externally_answered',
+  jsonb_build_object(
+    'external_message_id', 'active-send-question-a',
+    'at', '2026-07-13T12:10:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply, delivery_status, delivery_attempted_at
+    from public.messages
+    where external_message_id = 'active-send-question-a'
+  $$,
+  $$
+    values (
+      'sent'::text,
+      'The active send reply.'::text,
+      'sending'::text,
+      '2026-07-13T12:08:00Z'::timestamptz
+    )
+  $$,
+  'reconciliation cannot retire a fresh active delivery lease'
+);
+
+select public.apply_ebay_message_write(
+  'mark_externally_answered',
+  jsonb_build_object(
+    'external_message_id', 'active-send-question-a',
+    'at', '2026-07-13T12:14:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'complete_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'active-send-question-a'
+    ),
+    'body', 'The active send reply.',
+    'external_delivery_id', 'late-active-send-acknowledgement',
+    'delivered_at', '2026-07-13T12:15:00Z',
+    'attempted_at', '2026-07-13T12:08:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select root.status, root.delivery_status, reply.external_delivery_id
+    from public.messages root
+    join public.messages reply on reply.reply_to = root.id
+    where root.external_message_id = 'active-send-question-a'
+      and reply.direction = 'outbound'
+      and reply.reply_kind = 'reply'
+  $$,
+  $$
+    values (
+      'sent'::text,
+      'delivered'::text,
+      'late-active-send-acknowledgement'::text
+    )
+  $$,
+  'a valid late acknowledgement restores coherent delivered state'
 );
 
 select extensions.lives_ok(

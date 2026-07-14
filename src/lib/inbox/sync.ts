@@ -65,7 +65,7 @@ export interface InboxSyncRepository {
   removePendingQuestion(externalMessageId: string): Promise<void>;
   countPendingQuestions(): Promise<number>;
   listActionableQuestions(): Promise<ActionableQuestionIdentity[]>;
-  markExternallyAnswered(externalMessageId: string): Promise<void>;
+  markExternallyAnswered(externalMessageId: string, at: Date): Promise<void>;
   findActiveListing(externalListingId: string): Promise<SyncListingContext | null>;
   importQuestion(
     question: MarketplaceQuestion,
@@ -147,21 +147,32 @@ export async function syncInboxForSeller(
       const createdAt = Date.parse(actionable.createdAt);
       return Number.isFinite(createdAt) && createdAt <= now.getTime();
     });
+    const pendingOutsideFetch = pendingBeforeFetch.filter((pending) => {
+      const createdAt = Date.parse(pending.createdAt);
+      return Number.isFinite(createdAt) && createdAt < from.getTime();
+    });
     const actionableIds = new Set(
       reconcilableBeforeFetch.map(({ externalMessageId }) => externalMessageId),
     );
-    const oldestActionableAt = reconcilableBeforeFetch.reduce<number | null>(
-      (oldest, actionable) => {
-        const createdAt = Date.parse(actionable.createdAt);
+    const pendingIds = new Set(
+      pendingBeforeFetch.map(({ externalMessageId }) => externalMessageId),
+    );
+    const historicalTrackedIds = new Set([...actionableIds, ...pendingIds]);
+    const oldestReconciliationAt = [
+      ...reconcilableBeforeFetch,
+      ...pendingOutsideFetch,
+    ].reduce<number | null>(
+      (oldest, candidate) => {
+        const createdAt = Date.parse(candidate.createdAt);
         if (!Number.isFinite(createdAt)) return oldest;
         return oldest === null ? createdAt : Math.min(oldest, createdAt);
       },
       null,
     );
     const reconciliationFetched =
-      oldestActionableAt !== null && oldestActionableAt < from.getTime()
+      oldestReconciliationAt !== null && oldestReconciliationAt < from.getTime()
         ? await input.adapter.fetchUnansweredQuestions({
-            from: new Date(oldestActionableAt),
+            from: new Date(oldestReconciliationAt),
             to: from,
           })
         : null;
@@ -192,31 +203,46 @@ export async function syncInboxForSeller(
     for (const failure of fetched.unresolved) {
       await input.repository.upsertPendingQuestion(failure, now);
     }
+    for (const failure of reconciliationFetched?.unresolved ?? []) {
+      if (pendingIds.has(failure.question.externalMessageId)) {
+        await input.repository.upsertPendingQuestion(failure, now);
+      }
+    }
     for (const question of fetched.questions) {
       await processQuestion(question);
     }
 
+    const historicalResolved = new Map(
+      (reconciliationFetched?.questions ?? [])
+        .filter((candidate) => pendingIds.has(candidate.externalMessageId))
+        .map((candidate) => [candidate.externalMessageId, candidate]),
+    );
     const observedIds = new Set([
       ...fetched.questions.map((question) => question.externalMessageId),
       ...fetched.unresolved.map(({ question }) => question.externalMessageId),
       ...(reconciliationFetched?.questions ?? [])
         .map((candidate) => candidate.externalMessageId)
-        .filter((externalMessageId) => actionableIds.has(externalMessageId)),
+        .filter((externalMessageId) => historicalTrackedIds.has(externalMessageId)),
       ...(reconciliationFetched?.unresolved ?? [])
         .map(({ question: candidate }) => candidate.externalMessageId)
-        .filter((externalMessageId) => actionableIds.has(externalMessageId)),
+        .filter((externalMessageId) => historicalTrackedIds.has(externalMessageId)),
     ]);
     for (const { externalMessageId } of reconcilableBeforeFetch) {
       if (!observedIds.has(externalMessageId)) {
-        await input.repository.markExternallyAnswered(externalMessageId);
+        await input.repository.markExternallyAnswered(externalMessageId, now);
       }
     }
     for (const pending of pendingBeforeFetch) {
+      const resolved = historicalResolved.get(pending.externalMessageId);
+      if (resolved) {
+        await processQuestion(resolved);
+        continue;
+      }
       if (observedIds.has(pending.externalMessageId)) continue;
       const pendingCreatedAt = Date.parse(pending.createdAt);
       if (
         Number.isFinite(pendingCreatedAt) &&
-        pendingCreatedAt >= from.getTime() &&
+        pendingCreatedAt >= (oldestReconciliationAt ?? from.getTime()) &&
         pendingCreatedAt <= now.getTime()
       ) {
         await input.repository.removePendingQuestion(pending.externalMessageId);
@@ -468,9 +494,13 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     });
   }
 
-  async markExternallyAnswered(externalMessageId: string): Promise<void> {
+  async markExternallyAnswered(
+    externalMessageId: string,
+    at: Date,
+  ): Promise<void> {
     await this.applyWrite("mark_externally_answered", {
       external_message_id: externalMessageId,
+      at: at.toISOString(),
     });
   }
 

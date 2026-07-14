@@ -120,15 +120,29 @@ begin
       and pending.external_message_id = p_payload->>'external_message_id';
     return 'null'::jsonb;
   elsif p_operation = 'mark_externally_answered' then
+    v_at := coalesce(
+      (p_payload->>'at')::timestamptz,
+      statement_timestamp()
+    );
     update public.messages message
     set status = 'externally_answered',
-        draft_reply = null,
-        draft_model = null
+        draft_reply = case
+          when message.status = 'sent' then message.draft_reply
+          else null
+        end,
+        draft_model = case
+          when message.status = 'sent' then message.draft_model
+          else null
+        end
     where message.user_id = p_user_id
       and message.marketplace = 'ebay'
       and message.direction = 'inbound'
       and message.external_message_id = p_payload->>'external_message_id'
       and message.status in ('new', 'drafting', 'drafted', 'draft_failed', 'sent')
+      and (
+        message.delivery_status is distinct from 'sending'
+        or message.delivery_attempted_at < v_at - interval '5 minutes'
+      )
       and not exists (
         select 1
         from public.messages reply
@@ -374,7 +388,8 @@ begin
       end if;
     end;
     update public.messages message
-    set delivery_status = 'delivered',
+    set status = 'sent',
+        delivery_status = 'delivered',
         delivery_error = null,
         sent_at = (p_payload->>'delivered_at')::timestamptz
     where message.id = v_root.id

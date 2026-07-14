@@ -124,7 +124,7 @@ class MemorySyncRepository implements InboxSyncRepository {
         createdAt: message.external_created_at!,
       }));
   }
-  async markExternallyAnswered(externalMessageId: string) {
+  async markExternallyAnswered(externalMessageId: string, at: Date) {
     const message = this.imported.get(externalMessageId);
     if (
       !message ||
@@ -135,9 +135,19 @@ class MemorySyncRepository implements InboxSyncRepository {
     ) {
       return;
     }
+    if (
+      message.delivery_status === "sending" &&
+      message.delivery_attempted_at &&
+      Date.parse(message.delivery_attempted_at) >= at.getTime() - 5 * 60_000
+    ) {
+      return;
+    }
+    const preserveAttemptedReply = message.status === "sent";
     message.status = "externally_answered";
-    message.draft_reply = null;
-    message.draft_model = null;
+    if (!preserveAttemptedReply) {
+      message.draft_reply = null;
+      message.draft_model = null;
+    }
   }
   async importQuestion(
     external: MarketplaceQuestion,
@@ -306,6 +316,67 @@ describe("syncInboxForSeller", () => {
     expect(repository.pendingResolutionCounts).toEqual([0]);
   });
 
+  it("retires an old pending question absent from a covering unanswered window", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const currentPeer = {
+      ...question,
+      externalMessageId: "ebay-question-current-peer",
+      externalParentId: "ebay-question-current-peer",
+      createdAt: "2026-07-15T12:02:00.000Z",
+    };
+    adapter.questions = [currentPeer];
+    const repository = new MemorySyncRepository();
+    repository.cursor = new Date("2026-07-15T12:00:00.000Z");
+    repository.pending.set(question.externalMessageId, {
+      question: {
+        marketplace: "ebay",
+        externalMessageId: question.externalMessageId,
+        externalParentId: question.externalParentId,
+        externalListingId: question.externalListingId,
+        externalBuyerId: question.externalBuyerId,
+        body: question.body,
+        subject: question.subject,
+        createdAt: question.createdAt,
+        resolutionWindowFrom: "2026-07-12T12:05:00.000Z",
+        observedCursorAt: "2026-07-13T12:05:00.000Z",
+      },
+      error: "Commerce conversation lookup unavailable",
+      attempts: 3,
+    });
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-15T12:05:00.000Z"),
+      draft: async () => ({
+        reply: "Yes, the charger is included.",
+        model: "test-reply",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+    });
+
+    expect(summary).toMatchObject({
+      fetched: 1,
+      imported: 1,
+      drafted: 1,
+      pendingResolution: 0,
+    });
+    expect(repository.pending.has(question.externalMessageId)).toBe(false);
+    expect(repository.imported.has(question.externalMessageId)).toBe(false);
+    expect(repository.imported.has(currentPeer.externalMessageId)).toBe(true);
+    expect(adapter.fetches).toEqual([
+      {
+        from: new Date("2026-07-14T12:00:00.000Z"),
+        to: new Date("2026-07-15T12:05:00.000Z"),
+      },
+      {
+        from: new Date(question.createdAt),
+        to: new Date("2026-07-14T12:00:00.000Z"),
+      },
+    ]);
+  });
+
   it("retires a pending question absent from a complete unanswered window", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     adapter.questions = [question];
@@ -378,10 +449,12 @@ describe("syncInboxForSeller", () => {
       error: "Commerce lookup unavailable",
       attempts: 3,
     });
-    adapter.resolutionFailures.set(
-      pendingQuestion.externalMessageId,
-      new Error("Commerce authorization unavailable"),
-    );
+    adapter.unresolved = [
+      {
+        question: pendingQuestion,
+        error: "Commerce authorization unavailable",
+      },
+    ];
 
     const summary = await syncInboxForSeller({
       adapter,
@@ -550,6 +623,31 @@ describe("syncInboxForSeller", () => {
     expect(repository.imported.get(question.externalMessageId)).toMatchObject({
       status: "externally_answered",
       delivery_status: "ambiguous",
+      delivery_attempted_at: "2026-07-13T12:06:00.000Z",
+    });
+  });
+
+  it("does not retire a fresh active delivery lease", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    const imported = await repository.importQuestion(question, listing);
+    imported.message.status = "sent";
+    imported.message.draft_reply = "Yes, the charger is included.";
+    imported.message.delivery_status = "sending";
+    imported.message.delivery_attempted_at = "2026-07-13T12:06:00.000Z";
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:10:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(question.externalMessageId)).toMatchObject({
+      status: "sent",
+      draft_reply: "Yes, the charger is included.",
+      delivery_status: "sending",
       delivery_attempted_at: "2026-07-13T12:06:00.000Z",
     });
   });
@@ -795,6 +893,28 @@ describe("SupabaseInboxSyncRepository", () => {
         observed_cursor_at: "2026-07-13T12:05:00.000Z",
         attempted_at: "2026-07-13T12:05:00.000Z",
         error: "Commerce lookup unavailable",
+      },
+    });
+  });
+
+  it("passes the reconciliation time through the tenant write seam", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
+      client,
+      scheduled: false,
+    });
+
+    await repository.markExternallyAnswered(
+      "question-pending",
+      new Date("2026-07-13T12:05:00.000Z"),
+    );
+
+    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_operation: "mark_externally_answered",
+      p_payload: {
+        external_message_id: "question-pending",
+        at: "2026-07-13T12:05:00.000Z",
       },
     });
   });
