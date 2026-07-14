@@ -17,7 +17,11 @@ import {
   triageStatusFromListing,
   type TriageStatusKey,
 } from "@/lib/batch/status";
-import { ACCEPT, MAX_PHOTOS } from "../upload/upload-draft-context";
+import {
+  appendAcceptedPhotos,
+  MAX_PHOTOS,
+} from "../upload/upload-draft-context";
+import { PhotoInputActions } from "../upload/photo-input-actions";
 
 /**
  * Bulk / haul capture (issue #100) — the reseller-native flow: photograph item
@@ -54,7 +58,6 @@ interface CapturedItem {
   polledTitle?: string | null;
 }
 
-const ACCEPTED_TYPES = ACCEPT.split(",");
 const POLL_MS = 5000;
 // Keep in sync with the status route's MAX_IDS cap: a haul can hold more done
 // items than one request accepts, so the poll fans out in bounded chunks.
@@ -165,22 +168,22 @@ export function BatchCaptureView() {
 
   const addStagedFiles = useCallback((incoming: FileList | File[]) => {
     setNotice(null);
-    const accepted = Array.from(incoming).filter((f) =>
-      ACCEPTED_TYPES.includes(f.type),
-    );
-    if (accepted.length < Array.from(incoming).length) {
-      setNotice("Some files were skipped — use PNG, JPEG, or WEBP.");
-    }
+    // A file input's live FileList is cleared when the shared picker resets its
+    // value. Snapshot it before the queued state updater runs so successive
+    // camera captures cannot turn into empty selections.
+    const selected = Array.from(incoming);
     setStaged((prev) => {
-      const room = MAX_PHOTOS - prev.files.length;
-      const take = accepted.slice(0, Math.max(0, room));
-      if (accepted.length > room) {
+      const result = appendAcceptedPhotos(prev.files, selected);
+      if (result.rejectedCount > 0) {
+        setNotice("Some files were skipped — use PNG, JPEG, or WEBP.");
+      }
+      if (result.overflowCount > 0) {
         setNotice(`Up to ${MAX_PHOTOS} photos per item — extra photos were skipped.`);
       }
-      const urls = take.map((f) => URL.createObjectURL(f));
+      const urls = result.added.map((f) => URL.createObjectURL(f));
       allPreviewsRef.current.push(...urls);
       return {
-        files: [...prev.files, ...take],
+        files: result.files,
         previews: [...prev.previews, ...urls],
       };
     });
@@ -426,22 +429,9 @@ function CapturePhase({
           </span>
         </div>
 
-        <input
-          id="batch-photo-picker"
-          type="file"
-          accept={ACCEPT}
-          multiple
-          className="sr-only"
-          onChange={(e) => {
-            if (e.target.files) onAddStaged(e.target.files);
-            e.target.value = "";
-          }}
-        />
-
         {stagedCount === 0 ? (
-          <label
-            htmlFor="batch-photo-picker"
-            className="group flex aspect-[4/3] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface-2/50 px-6 text-center transition-colors hover:border-accent hover:bg-accent-soft/25"
+          <div
+            className="group flex aspect-[4/3] w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface-2/50 px-6 text-center transition-colors hover:border-accent hover:bg-accent-soft/25"
           >
             <span
               aria-hidden
@@ -449,56 +439,50 @@ function CapturePhase({
             >
               <CameraIcon className="size-5" />
             </span>
-            <span className="flex flex-col items-center gap-1">
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3.5 py-1.5 text-[14px] font-semibold text-fg shadow-xs transition-colors group-hover:bg-surface-2">
-                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                Add photos
-              </span>
-              <span className="text-[13px] text-muted">
-                1–4 per item. First photo is the cover.
-              </span>
+            <PhotoInputActions
+              idPrefix="batch-item"
+              disabled={atMax}
+              onSelect={onAddStaged}
+              className="w-full max-w-sm"
+            />
+            <span className="text-[13px] text-muted">
+              1–4 per item. First photo is the cover.
             </span>
-          </label>
-        ) : (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            {staged.previews.map((src, i) => (
-              <div key={src} className="relative shrink-0">
-                <div className="relative size-20 overflow-hidden rounded-lg border border-border">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
-                  <img src={src} alt={`Photo ${i + 1}`} className="size-full object-cover" />
-                  {i === 0 ? (
-                    <span className="absolute bottom-1 left-1 rounded bg-fg-strong/70 px-1 py-0.5 text-[9px] font-semibold text-surface">
-                      Cover
-                    </span>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onRemoveStaged(i)}
-                  aria-label={`Remove photo ${i + 1}`}
-                  className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-fg-strong text-surface shadow-sm transition-colors hover:bg-danger"
-                >
-                  <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-            {!atMax ? (
-              <label
-                htmlFor="batch-photo-picker"
-                aria-label="Add photo"
-                className="flex size-20 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-border-strong bg-surface-2/50 text-muted transition-colors hover:border-accent hover:bg-accent-soft/25 hover:text-accent"
-              >
-                <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                <span className="text-[11px] font-medium">Add</span>
-              </label>
-            ) : null}
           </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              {staged.previews.map((src, i) => (
+                <div key={src} className="relative shrink-0">
+                  <div className="relative size-20 overflow-hidden rounded-lg border border-border">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
+                    <img src={src} alt={`Photo ${i + 1}`} className="size-full object-cover" />
+                    {i === 0 ? (
+                      <span className="absolute bottom-1 left-1 rounded bg-fg-strong/70 px-1 py-0.5 text-[9px] font-semibold text-surface">
+                        Cover
+                      </span>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveStaged(i)}
+                    aria-label={`Remove photo ${i + 1}`}
+                    className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-fg-strong text-surface shadow-sm transition-colors hover:bg-danger"
+                  >
+                    <svg viewBox="0 0 24 24" className="size-3" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+            <PhotoInputActions
+              idPrefix="batch-item"
+              disabled={atMax}
+              onSelect={onAddStaged}
+              className="mt-3"
+            />
+          </>
         )}
       </section>
 

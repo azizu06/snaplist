@@ -5,6 +5,7 @@ import {
 } from "@/app/(app)/dashboard/dashboard-view";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
 import { UploadView } from "@/app/(app)/upload/upload-form";
+import { BatchCaptureView } from "@/app/(app)/batch/batch-capture";
 import {
   PublishView,
   type PublishData,
@@ -324,6 +325,8 @@ export default async function PreviewPage({
       );
     case "upload":
       return <UploadView action={noopAction} actionError={null} />;
+    case "batch":
+      return <BatchCaptureView />;
     case "publish":
       return <PublishView data={FIXTURE_PUBLISH} publishAction={noopAction} />;
     case "publish-live":

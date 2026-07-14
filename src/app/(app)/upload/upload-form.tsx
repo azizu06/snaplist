@@ -9,6 +9,7 @@ import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { Spinner } from "@/components/ui/spinner";
 import { ACCEPT, MAX_PHOTOS, useUploadDraft } from "./upload-draft-context";
 import { CostBasisCard } from "./cost-basis-card";
+import { PhotoInputActions } from "./photo-input-actions";
 
 /**
  * Upload sell sheet — redesigned on Shopify's create/media pattern (Shopify web
@@ -29,12 +30,12 @@ import { CostBasisCard } from "./cost-basis-card";
  *   "Cover" badge), drag-and-drop onto the whole card;
  * - the "Autofill by SnapList" card listing the fields the pipeline fills.
  *
- * Mechanism: a single hidden <input type="file" name="photo" multiple> is kept
- * in sync (via the DataTransfer API) with the `files` array the carousel
- * manages, so the server action still reads formData.getAll("photo") unchanged.
- * Capped at MAX_PHOTOS — every photo is fed into ONE vision call, so each one
- * adds cost/latency (PRD). The PROCESSING view paces the live pipeline stages
- * while the single server action runs.
+ * Mechanism: dedicated camera and library inputs both append through the same
+ * draft handler. One hidden submit input is kept in sync (via DataTransfer)
+ * with that shared `files` array, so the server action still reads
+ * formData.getAll("photo") unchanged. Capped at MAX_PHOTOS — every photo is fed
+ * into ONE vision call, so each one adds cost/latency (PRD). The PROCESSING
+ * view paces the live pipeline stages while the single server action runs.
  */
 
 /** Read the live brand-accent token for the canvas-drawn ClickSpark burst.
@@ -399,29 +400,13 @@ function FormBody({
           </span>
         </div>
 
-        {/* Shared, hidden picker (no `name` → never submitted). Both the empty
-            drop zone and the "Add photo" button trigger it via htmlFor; on
-            change it appends and resets so the same file can be re-picked. */}
-        <input
-          id="photo-picker"
-          type="file"
-          accept={ACCEPT}
-          multiple
-          className="sr-only"
-          onChange={(e) => {
-            if (e.target.files) onAdd(e.target.files);
-            e.target.value = "";
-          }}
-        />
-
         {count === 0 ? (
           /* Empty drop zone — Shopify's quiet media card: neutral dashed tile,
              a muted icon, an explicit "Add photos" action that reads as a real
              button, and a "or drag and drop" subline. The accent only joins in
              on the drag-over ring above; at rest this is all neutral. */
-          <label
-            htmlFor="photo-picker"
-            className="group relative flex aspect-square w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface-2/50 px-6 text-center transition-colors hover:border-accent hover:bg-accent-soft/25 sm:aspect-[4/3]"
+          <div
+            className="group relative flex aspect-square w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface-2/50 px-6 text-center transition-colors hover:border-accent hover:bg-accent-soft/25 sm:aspect-[4/3]"
           >
             <span
               aria-hidden
@@ -432,22 +417,20 @@ function FormBody({
                 <circle cx="12" cy="13" r="3" />
               </svg>
             </span>
-            <span className="flex flex-col items-center gap-1">
-              <span className="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3.5 py-1.5 text-[14px] font-semibold text-fg shadow-xs transition-colors group-hover:bg-surface-2">
-                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                Add photos
-              </span>
-              <span className="text-[13px] text-muted">or drag and drop here</span>
-            </span>
+            <PhotoInputActions
+              idPrefix="single-item"
+              disabled={atMax}
+              onSelect={onAdd}
+              className="w-full max-w-sm"
+            />
+            <span className="text-[13px] text-muted">or drag and drop here</span>
             <span className="mt-1 max-w-[34ch] text-[12.5px] leading-relaxed text-muted">
               PNG, JPG, or WEBP. The first one you add becomes the cover photo.
               Good light helps, and a clear shot of any label or barcode helps
               even more. For clothing, lay it flat and set a tape measure across it
               so we can size it.
             </span>
-          </label>
+          </div>
         ) : (
           <>
             <PhotoCarousel
@@ -482,19 +465,13 @@ function FormBody({
                   <img src={src} alt="" className="size-full object-cover" />
                 </button>
               ))}
-              {!atMax ? (
-                <label
-                  htmlFor="photo-picker"
-                  aria-label="Add photo"
-                  className="flex size-16 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-border-strong bg-surface-2/50 text-muted transition-colors hover:border-accent hover:bg-accent-soft/25 hover:text-accent"
-                >
-                  <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                  <span className="text-[11px] font-medium">Add</span>
-                </label>
-              ) : null}
             </div>
+            <PhotoInputActions
+              idPrefix="single-item"
+              disabled={atMax}
+              onSelect={onAdd}
+              className="mt-3"
+            />
             {atMax ? (
               <p className="mt-2 text-[12.5px] text-faint">
                 All {MAX_PHOTOS} photos added — more angles mean a better read.
@@ -550,7 +527,7 @@ function FormBody({
             starts the whole pipeline. Spark color is read from the live
             --color-accent token (not hardcoded) so it tracks the palette. */}
         <ClickSpark
-          className="block w-full"
+          className="block w-full overflow-x-clip"
           sparkColor={sparkColor}
           sparkSize={8}
           sparkRadius={20}
