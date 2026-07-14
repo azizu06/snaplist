@@ -8,6 +8,7 @@ const operatorEnv = {
   EBAY_BASE_URL: "https://api.sandbox.ebay.com",
   EBAY_OAUTH_TOKEN: "sandbox-token",
   EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID: "user_operator",
+  EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID: "sandbox-seller-id",
 };
 
 describe("eBay messaging composition", () => {

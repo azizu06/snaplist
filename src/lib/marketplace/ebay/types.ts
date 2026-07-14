@@ -110,6 +110,16 @@ export interface EbayTokenProvider {
     expectedAccountGeneration?: string,
     signal?: AbortSignal,
   ): Promise<string>;
+  beginProviderDispatch?(
+    resourceId: string,
+    operation: "publish" | "reprice",
+  ): Promise<EbayProviderDispatchLease>;
+}
+
+export interface EbayProviderDispatchLease {
+  accountGeneration: string;
+  signal: AbortSignal;
+  release(): Promise<void>;
 }
 
 /** Typed failure for any non-2xx Sell API response, with eBay's error payload. */
@@ -123,5 +133,14 @@ export class EbayApiError extends Error {
   ) {
     super(message);
     this.name = "EbayApiError";
+  }
+}
+
+export class EbayWriteAmbiguousError extends EbayApiError {
+  readonly kind = "ambiguous";
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message, status, body);
+    this.name = "EbayWriteAmbiguousError";
   }
 }

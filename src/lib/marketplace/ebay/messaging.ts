@@ -197,6 +197,7 @@ export class HttpEbayMessagingAdapter
     });
     const externalBuyerId =
       question.externalBuyerId ?? asString(match.message.senderUsername);
+    const externalBuyerUsername = asString(match.message.senderUsername) ?? null;
     const body = question.body ?? asString(match.message.messageBody);
     const createdAt = question.createdAt ?? asIsoString(match.message.createdDate);
     if (!externalBuyerId || !body || !createdAt) {
@@ -211,6 +212,7 @@ export class HttpEbayMessagingAdapter
       externalConversationId: match.conversationId,
       externalListingId: question.externalListingId,
       externalBuyerId,
+      externalBuyerUsername,
       body,
       subject: question.subject,
       createdAt,

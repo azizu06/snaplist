@@ -87,7 +87,11 @@ describe("createMessagingTransportForConversation", () => {
       new Date("2026-07-13T12:01:00.000Z"),
     );
 
-    expect(createEbayMessagingAdapterForUser).toHaveBeenCalledWith(client, "user_a");
+    expect(createEbayMessagingAdapterForUser).toHaveBeenCalledWith(
+      client,
+      "user_a",
+      { credentialClient: serverWriteClient },
+    );
     expect(createTenantServerClient).toHaveBeenCalledOnce();
     expect(claimed).toBe(true);
     expect(rpc.mock.calls.filter(([name]) => name === "begin_ebay_message_write"))

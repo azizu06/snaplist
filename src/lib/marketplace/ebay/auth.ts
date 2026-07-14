@@ -1,5 +1,7 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayTokenProvider } from "./types";
 import { EbayApiError } from "./types";
+import { bindEbaySandboxFallback } from "./connections";
 
 /**
  * App-level (env-credential) token provider for the eBay Sell API — the sandbox
@@ -135,5 +137,41 @@ export class EnvTokenProvider implements EbayTokenProvider {
       expiresAt: this.now() + (expiresIn ?? 0) * 1000,
     };
     return token;
+  }
+}
+
+export class OperatorSandboxTokenProvider implements EbayTokenProvider {
+  private readonly envProvider: EnvTokenProvider;
+
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly userId: string,
+    private readonly sellerId: string,
+    private readonly scheduled: boolean,
+    options: EnvTokenProviderOptions = {},
+  ) {
+    this.envProvider = new EnvTokenProvider({
+      ...options,
+      scopes: options.scopes ?? [SELL_INVENTORY_SCOPE],
+    });
+  }
+
+  async getAccessToken(
+    expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<string> {
+    const boundGeneration = await bindEbaySandboxFallback(
+      this.supabase,
+      this.userId,
+      this.sellerId,
+      this.scheduled,
+    );
+    if (
+      expectedAccountGeneration &&
+      expectedAccountGeneration !== boundGeneration
+    ) {
+      throw new Error("eBay Sandbox fallback account generation changed");
+    }
+    return this.envProvider.getAccessToken(boundGeneration, parentSignal);
   }
 }

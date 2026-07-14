@@ -16,6 +16,7 @@ export interface MarketplaceQuestion {
   externalConversationId: string;
   externalListingId: string;
   externalBuyerId: string;
+  externalBuyerUsername?: string | null;
   body: string;
   subject: string | null;
   createdAt: string;

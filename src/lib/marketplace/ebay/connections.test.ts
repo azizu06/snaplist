@@ -118,6 +118,32 @@ describe("eraseEbayUserData", () => {
 });
 
 describe("UserTokenProvider", () => {
+  it("acquires and releases a transactional provider lease for the current generation", async () => {
+    const generation = "22222222-2222-4222-8222-222222222222";
+    const rpc = vi.fn(async (name: string) => {
+      if (name === "begin_ebay_transactional_dispatch") {
+        return { data: { account_generation: generation }, error: null };
+      }
+      return { data: null, error: null };
+    });
+    const provider = new UserTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      { env: () => ENCRYPTION_ENV },
+    );
+
+    const lease = await provider.beginProviderDispatch(
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "publish",
+    );
+    expect(lease.accountGeneration).toBe(generation);
+    await lease.release();
+    expect(rpc).toHaveBeenCalledWith("end_ebay_transactional_dispatch", {
+      p_resource_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      p_operation: "publish",
+      p_account_generation: generation,
+    });
+  });
+
   it("binds refresh reads and cache writes to the source account generation", async () => {
     const accountGeneration = "33333333-3333-4333-8333-333333333333";
     const encryptionKey = Buffer.from(

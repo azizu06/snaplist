@@ -15,11 +15,11 @@ export type {
   EbayTokenProvider,
   EbayCondition,
 } from "./types";
-export { EbayApiError } from "./types";
+export { EbayApiError, EbayWriteAmbiguousError } from "./types";
 export { HttpEbayAdapter } from "./http";
 export { HttpEbayMessagingAdapter } from "./messaging";
 export { MockEbayAdapter } from "./mock";
-export { EnvTokenProvider } from "./auth";
+export { EnvTokenProvider, OperatorSandboxTokenProvider } from "./auth";
 export {
   toEbayPublishRequest,
   toEbayCondition,
@@ -62,6 +62,7 @@ import { UserTokenProvider } from "./user-token-provider";
 import { getEbayConnectionStatus } from "./connections";
 import { HttpEbayMessagingAdapter } from "./messaging";
 import type { MarketplaceMessagingAdapter } from "../messaging";
+import { OperatorSandboxTokenProvider } from "./auth";
 
 /**
  * The real adapter, wired for the current environment. Sandbox by default
@@ -101,7 +102,7 @@ export async function createEbayAdapterForUser(
 export async function createEbayMessagingAdapterForUser(
   supabase: SupabaseClient,
   userId?: string,
-  options: { scheduled?: boolean } = {},
+  options: { scheduled?: boolean; credentialClient?: SupabaseClient } = {},
 ): Promise<MarketplaceMessagingAdapter> {
   const { connected } = await getEbayConnectionStatus(
     supabase,
@@ -127,7 +128,24 @@ export async function createEbayMessagingAdapterForUser(
       "App-level eBay Sandbox messaging is restricted to the configured operator tenant.",
     );
   }
-  return new HttpEbayMessagingAdapter();
+  const sellerId = process.env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID;
+  if (!userId || !sellerId) {
+    throw new Error("App-level eBay Sandbox messaging identity is not configured.");
+  }
+  return new HttpEbayMessagingAdapter({
+    tokenProvider: new OperatorSandboxTokenProvider(
+      options.credentialClient ?? supabase,
+      userId,
+      sellerId,
+      options.scheduled ?? false,
+      {
+        scopes: [
+          "https://api.ebay.com/oauth/api_scope",
+          "https://api.ebay.com/oauth/api_scope/commerce.message",
+        ],
+      },
+    ),
+  });
 }
 
 /** Whether this tenant may use the app-level Sandbox seller credentials. */
@@ -140,6 +158,7 @@ export function hasEbayMessagingSandboxFallback(
   if (
     !userId ||
     !env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID ||
+    !env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID ||
     userId !== env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID
   ) {
     return false;

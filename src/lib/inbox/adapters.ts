@@ -10,9 +10,10 @@ export async function createMessagingAdapterForConversation(
   supabase: SupabaseClient,
   userId: string,
   marketplace: string | null | undefined,
+  credentialClient: SupabaseClient = supabase,
 ): Promise<MarketplaceMessagingAdapter> {
   return marketplace === "ebay"
-    ? createEbayMessagingAdapterForUser(supabase, userId)
+    ? createEbayMessagingAdapterForUser(supabase, userId, { credentialClient })
     : new SimulatedMarketplaceMessagingAdapter();
 }
 
@@ -34,6 +35,7 @@ export async function createMessagingTransportForConversation(
       supabase,
       userId,
       marketplace,
+      serverWriteClient,
     ),
   };
 }

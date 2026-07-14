@@ -69,7 +69,9 @@ text only and never silently drops a selected attachment.
 2. `SELLER` is connected in SnapList through the existing per-user OAuth flow
    with both messaging scopes above. Keep `EBAY_BASE_URL` set to
    `https://api.sandbox.ebay.com`. For the app-level Sandbox credential fallback,
-   set `EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID` to this seller's Clerk user ID;
+   set `EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID` to this seller's Clerk user ID
+   and `EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID` to that Sandbox seller's
+   stable eBay user ID; the database binds both to one account generation;
    every other tenant is denied that shared credential, and production never
    permits the fallback. Connected sellers continue to use their own token provider.
 3. `SELLER` has an active Sandbox listing that was published through SnapList,

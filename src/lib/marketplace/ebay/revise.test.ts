@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HttpEbayAdapter } from "./http";
 import { MockEbayAdapter } from "./mock";
 import { EbayApiError, type EbayReviseRequest } from "./types";
@@ -41,6 +41,42 @@ function json(status: number, body: unknown): Response {
 }
 
 describe("HttpEbayAdapter.revisePrice", () => {
+  it("holds a generation-bound dispatch lease through repricing", async () => {
+    const release = vi.fn(async () => undefined);
+    const getAccessToken = vi.fn(async () => "generation-token");
+    const leasedProvider = {
+      getAccessToken,
+      beginProviderDispatch: vi.fn(async () => ({
+        accountGeneration: "22222222-2222-4222-8222-222222222222",
+        signal: new AbortController().signal,
+        release,
+      })),
+    };
+    const { fetch } = fakeFetch(() =>
+      json(200, {
+        responses: [
+          { statusCode: 200, offers: [{ offerId: "offer-9", statusCode: 200 }] },
+        ],
+      }),
+    );
+
+    await new HttpEbayAdapter({
+      fetch,
+      tokenProvider: leasedProvider,
+      env: () => env,
+    }).revisePrice(request);
+
+    expect(leasedProvider.beginProviderDispatch).toHaveBeenCalledWith(
+      request.sku,
+      "reprice",
+    );
+    expect(getAccessToken).toHaveBeenCalledWith(
+      "22222222-2222-4222-8222-222222222222",
+      expect.any(AbortSignal),
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it("POSTs the documented bulk price update and returns revised", async () => {
     const { fetch, calls } = fakeFetch((url) => {
       if (url.endsWith("/sell/inventory/v1/bulk_update_price_quantity")) {

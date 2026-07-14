@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { EnvTokenProvider } from "./auth";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { EnvTokenProvider, OperatorSandboxTokenProvider } from "./auth";
 import { EbayApiError } from "./types";
 
 /**
@@ -133,5 +134,48 @@ describe("EnvTokenProvider", () => {
     expect(err).toBeInstanceOf(EbayApiError);
     expect((err as EbayApiError).status).toBe(400);
     expect((err as EbayApiError).body).toEqual({ error: "invalid_grant" });
+  });
+});
+
+describe("OperatorSandboxTokenProvider", () => {
+  it("requires the database-bound fallback generation before returning credentials", async () => {
+    const rpc = vi.fn(async () => ({
+      data: "33333333-3333-4333-8333-333333333333",
+      error: null,
+    }));
+    const provider = new OperatorSandboxTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      "operator-tenant",
+      "sandbox-seller-id",
+      true,
+      { env: () => ({ EBAY_OAUTH_TOKEN: "sandbox-token" }) },
+    );
+
+    await expect(
+      provider.getAccessToken("33333333-3333-4333-8333-333333333333"),
+    ).resolves.toBe("sandbox-token");
+    expect(rpc).toHaveBeenCalledWith("bind_scheduled_ebay_sandbox_fallback", {
+      p_user_id: "operator-tenant",
+      p_seller_id: "sandbox-seller-id",
+    });
+  });
+
+  it("rejects historical message generations before exposing fallback credentials", async () => {
+    const provider = new OperatorSandboxTokenProvider(
+      {
+        rpc: vi.fn(async () => ({
+          data: "44444444-4444-4444-8444-444444444444",
+          error: null,
+        })),
+      } as unknown as SupabaseClient,
+      "operator-tenant",
+      "sandbox-seller-id",
+      false,
+      { env: () => ({ EBAY_OAUTH_TOKEN: "sandbox-token" }) },
+    );
+
+    await expect(
+      provider.getAccessToken("55555555-5555-4555-8555-555555555555"),
+    ).rejects.toThrow("account generation changed");
   });
 });

@@ -23,10 +23,13 @@ export async function POST(request: Request) {
     if (!connected && !hasEbayMessagingSandboxFallback(userId)) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
+    const tenantServer = await createTenantServerClient();
     const summary = await syncInboxForSeller({
-      adapter: await createEbayMessagingAdapterForUser(supabase, userId),
+      adapter: await createEbayMessagingAdapterForUser(supabase, userId, {
+        credentialClient: tenantServer,
+      }),
       repository: new SupabaseInboxSyncRepository(supabase, userId, {
-        client: await createTenantServerClient(),
+        client: tenantServer,
         scheduled: false,
       }),
     });

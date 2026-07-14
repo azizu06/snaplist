@@ -3,7 +3,10 @@ import type { EbayTokenProvider } from "./types";
 import { EbayApiError } from "./types";
 import { ebayApiBaseUrl } from "./oauth";
 import {
+  beginEbayProviderDispatch,
+  endEbayProviderDispatch,
   getDecryptedConnection,
+  renewEbayProviderDispatch,
   updateCachedAccessToken,
 } from "./connections";
 
@@ -26,6 +29,7 @@ const SELL_INVENTORY_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.inventor
 const EXPIRY_SLACK_MS = 60_000;
 const DEFAULT_TOKEN_REFRESH_TIMEOUT_MS = 30_000;
 const MAX_TOKEN_REFRESH_TIMEOUT_MS = 2 * 60_000;
+const PROVIDER_DISPATCH_RENEW_MS = 60_000;
 
 export interface UserTokenProviderOptions {
   fetch?: typeof fetch;
@@ -53,6 +57,50 @@ export class UserTokenProvider implements EbayTokenProvider {
     this.now = options.now ?? Date.now;
     this.userId = options.userId;
     this.scheduled = options.scheduled ?? false;
+  }
+
+  async beginProviderDispatch(
+    resourceId: string,
+    operation: "publish" | "reprice",
+  ) {
+    const accountGeneration = await beginEbayProviderDispatch(
+      this.supabase,
+      resourceId,
+      operation,
+    );
+    const controller = new AbortController();
+    let renewing = false;
+    const timer = setInterval(() => {
+      if (renewing || controller.signal.aborted) return;
+      renewing = true;
+      void renewEbayProviderDispatch(
+        this.supabase,
+        resourceId,
+        operation,
+        accountGeneration,
+      )
+        .catch((error) => {
+          controller.abort(error);
+        })
+        .finally(() => {
+          renewing = false;
+        });
+    }, PROVIDER_DISPATCH_RENEW_MS);
+    timer.unref?.();
+
+    return {
+      accountGeneration,
+      signal: controller.signal,
+      release: async () => {
+        clearInterval(timer);
+        await endEbayProviderDispatch(
+          this.supabase,
+          resourceId,
+          operation,
+          accountGeneration,
+        ).catch(() => undefined);
+      },
+    };
   }
 
   async getAccessToken(

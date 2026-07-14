@@ -182,6 +182,73 @@ export async function updateCachedAccessToken(
   }
 }
 
+export async function beginEbayProviderDispatch(
+  supabase: SupabaseClient,
+  resourceId: string,
+  operation: "publish" | "reprice",
+): Promise<string> {
+  const { data, error } = await supabase.rpc("begin_ebay_transactional_dispatch", {
+    p_resource_id: resourceId,
+    p_operation: operation,
+  });
+  if (error) throw new Error(`Failed to begin eBay provider dispatch: ${error.message}`);
+  const generation = (data as { account_generation?: unknown } | null)
+    ?.account_generation;
+  if (typeof generation !== "string") {
+    throw new Error("Failed to begin eBay provider dispatch: invalid generation");
+  }
+  return generation;
+}
+
+export async function renewEbayProviderDispatch(
+  supabase: SupabaseClient,
+  resourceId: string,
+  operation: "publish" | "reprice",
+  accountGeneration: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("renew_ebay_transactional_dispatch", {
+    p_resource_id: resourceId,
+    p_operation: operation,
+    p_account_generation: accountGeneration,
+  });
+  if (error) throw new Error(`Failed to renew eBay provider dispatch: ${error.message}`);
+}
+
+export async function endEbayProviderDispatch(
+  supabase: SupabaseClient,
+  resourceId: string,
+  operation: "publish" | "reprice",
+  accountGeneration: string,
+): Promise<void> {
+  const { error } = await supabase.rpc("end_ebay_transactional_dispatch", {
+    p_resource_id: resourceId,
+    p_operation: operation,
+    p_account_generation: accountGeneration,
+  });
+  if (error) throw new Error(`Failed to end eBay provider dispatch: ${error.message}`);
+}
+
+export async function bindEbaySandboxFallback(
+  supabase: SupabaseClient,
+  userId: string,
+  sellerId: string,
+  scheduled: boolean,
+): Promise<string> {
+  const { data, error } = scheduled
+    ? await supabase.rpc("bind_scheduled_ebay_sandbox_fallback", {
+        p_user_id: userId,
+        p_seller_id: sellerId,
+      })
+    : await supabase.rpc("bind_ebay_sandbox_fallback", {
+        p_seller_id: sellerId,
+      });
+  if (error) throw new Error(`Failed to bind eBay Sandbox fallback: ${error.message}`);
+  if (typeof data !== "string") {
+    throw new Error("Failed to bind eBay Sandbox fallback: invalid generation");
+  }
+  return data;
+}
+
 export async function listScheduledEbayConnectionUserIds(
   supabase: SupabaseClient,
 ): Promise<string[]> {

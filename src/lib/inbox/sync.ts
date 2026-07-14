@@ -722,6 +722,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       external_conversation_id: question.externalConversationId,
       external_listing_id: question.externalListingId,
       external_buyer_id: question.externalBuyerId,
+      external_buyer_username: question.externalBuyerUsername,
       external_created_at: question.createdAt,
     });
     return {

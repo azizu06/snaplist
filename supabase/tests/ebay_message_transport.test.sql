@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(123);
+select extensions.plan(135);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -2230,7 +2230,7 @@ create temporary table ebay_account_generation_fixture (
   account_generation uuid not null
 ) on commit drop;
 
-grant select on ebay_account_generation_fixture to service_role;
+grant select on ebay_account_generation_fixture to service_role, authenticated;
 
 insert into ebay_account_generation_fixture
 select 'account-a', account_generation
@@ -2535,6 +2535,318 @@ select extensions.throws_ok(
 );
 
 reset role;
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+
+create temporary table ebay_transactional_dispatch_fixture on commit drop as
+select public.begin_ebay_transactional_dispatch(
+  '98000000-0000-4000-8000-000000000001',
+  'publish'
+) as lease;
+
+select extensions.is(
+  (select lease->>'account_generation' from ebay_transactional_dispatch_fixture),
+  (select account_generation::text from ebay_account_generation_fixture where account_name = 'account-b'),
+  'publish dispatch acquires the current connected seller generation'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_provider_dispatch_leases
+    where user_id = 'generation-tenant'
+      and message_id = '98000000-0000-4000-8000-000000000001'
+      and dispatch_kind = 'publish'
+  ),
+  1,
+  'transactional publish holds a durable provider dispatch lease'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    select public.save_ebay_connection(
+      'generation-account-c',
+      'generation_seller_c',
+      'v1.generation-c-refresh',
+      'v1.generation-c-access',
+      '2026-07-14T19:00:00Z',
+      array['scope-c']::text[]
+    )
+  $$,
+  '40001',
+  'eBay provider dispatch is active',
+  'seller reconnect cannot replace credentials during publish dispatch'
+);
+
+select extensions.throws_ok(
+  $$select public.begin_ebay_transactional_dispatch(
+    '92000000-0000-4000-8000-000000000002',
+    'reprice'
+  )$$,
+  '42501',
+  'The eBay dispatch resource is unavailable',
+  'transactional dispatch cannot lease another tenant listing'
+);
+
+select public.end_ebay_transactional_dispatch(
+  '98000000-0000-4000-8000-000000000001',
+  'publish',
+  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b')
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_provider_dispatch_leases
+    where user_id = 'generation-tenant'
+      and dispatch_kind = 'publish'
+  ),
+  0,
+  'transactional dispatch release removes the exact lease'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+create temporary table ebay_fallback_generation_fixture on commit drop as
+select public.bind_scheduled_ebay_sandbox_fallback(
+  'fresh-operator-tenant',
+  'sandbox-operator-seller-id'
+) as account_generation;
+
+select extensions.ok(
+  (select account_generation is not null from ebay_fallback_generation_fixture),
+  'operator Sandbox fallback binds a database account generation'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select account_generation
+    from private.ebay_sandbox_fallback_bindings
+    where user_id = 'fresh-operator-tenant'
+  ),
+  (select account_generation from ebay_fallback_generation_fixture),
+  'operator Sandbox fallback persists its exact seller identity generation'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"fresh-operator-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select public.save_ebay_connection(
+  'replacement-connected-seller',
+  'replacement_connected_seller',
+  'v1.replacement-refresh',
+  'v1.replacement-access',
+  '2026-07-14T19:00:00Z',
+  array['scope-connected']::text[]
+);
+
+reset role;
+delete from public.ebay_connections where user_id = 'fresh-operator-tenant';
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.throws_ok(
+  $$select public.bind_scheduled_ebay_sandbox_fallback(
+    'fresh-operator-tenant',
+    'sandbox-operator-seller-id'
+  )$$,
+  '42501',
+  'Sandbox fallback identity generation changed',
+  'a connected seller replacement permanently invalidates the old fallback generation'
+);
+
+reset role;
+
+insert into public.items (id, user_id, attributes)
+values ('9a000000-0000-4000-8000-000000000001', 'buyer-link-tenant', '{}');
+
+insert into public.listings (
+  id, user_id, item_id, platform, title, status, ebay_listing_id, ebay_status
+) values (
+  '9b000000-0000-4000-8000-000000000001',
+  'buyer-link-tenant',
+  '9a000000-0000-4000-8000-000000000001',
+  'ebay',
+  'Buyer provenance listing',
+  'published',
+  'buyer-provenance-listing',
+  'published'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"buyer-link-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select public.save_ebay_connection(
+  'provenance-seller-a',
+  'provenance_seller_a',
+  'v1.provenance-a-refresh',
+  'v1.provenance-a-access',
+  '2026-07-14T19:00:00Z',
+  array['scope-a']::text[]
+);
+
+reset role;
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select public.apply_scheduled_ebay_message_write(
+  'buyer-link-tenant',
+  'import_question',
+  jsonb_build_object(
+    'item_id', '9a000000-0000-4000-8000-000000000001',
+    'listing_id', '9b000000-0000-4000-8000-000000000001',
+    'body', 'Legacy username question A',
+    'external_message_id', 'buyer-provenance-question-a',
+    'external_parent_id', 'buyer-provenance-question-a',
+    'external_conversation_id', 'buyer-provenance-conversation-a',
+    'external_listing_id', 'buyer-provenance-listing',
+    'external_buyer_id', 'buyer-stable-id-a',
+    'external_buyer_username', 'reused_buyer_username',
+    'external_created_at', '2026-07-14T17:00:00Z'
+  ),
+  public.begin_scheduled_ebay_message_write('buyer-link-tenant')
+);
+
+reset role;
+update public.messages
+set external_buyer_id = 'reused_buyer_username'
+where user_id = 'buyer-link-tenant'
+  and external_message_id = 'buyer-provenance-question-a';
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"buyer-link-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select public.save_ebay_connection(
+  'provenance-seller-b',
+  'provenance_seller_b',
+  'v1.provenance-b-refresh',
+  'v1.provenance-b-access',
+  '2026-07-14T20:00:00Z',
+  array['scope-b']::text[]
+);
+
+reset role;
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select public.apply_scheduled_ebay_message_write(
+  'buyer-link-tenant',
+  'import_question',
+  jsonb_build_object(
+    'item_id', '9a000000-0000-4000-8000-000000000001',
+    'listing_id', '9b000000-0000-4000-8000-000000000001',
+    'body', 'Reused username question B',
+    'external_message_id', 'buyer-provenance-question-b',
+    'external_parent_id', 'buyer-provenance-question-b',
+    'external_conversation_id', 'buyer-provenance-conversation-b',
+    'external_listing_id', 'buyer-provenance-listing',
+    'external_buyer_id', 'buyer-stable-id-b',
+    'external_buyer_username', 'reused_buyer_username',
+    'external_created_at', '2026-07-14T18:00:00Z'
+  ),
+  public.begin_scheduled_ebay_message_write('buyer-link-tenant')
+);
+
+reset role;
+update public.messages
+set external_buyer_id = 'reused_buyer_username'
+where user_id = 'buyer-link-tenant'
+  and external_message_id = 'buyer-provenance-question-b';
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.ebay_buyer_identity_provenance
+    where user_id = 'buyer-link-tenant'
+  ),
+  2,
+  'imports persist stable-id and legacy-username provenance per account generation'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.is(
+  public.erase_ebay_user_data('buyer-stable-id-a', 'reused_buyer_username'),
+  1,
+  'buyer deletion resolves the target legacy username through stable generation provenance'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where user_id = 'buyer-link-tenant'
+      and external_message_id = 'buyer-provenance-question-a'
+  ),
+  0,
+  'buyer deletion erases the target generation legacy-username question'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where user_id = 'buyer-link-tenant'
+      and external_message_id = 'buyer-provenance-question-b'
+  ),
+  1,
+  'buyer deletion preserves a reused username linked to another generation'
+);
 
 update public.messages
 set status = 'drafted',
