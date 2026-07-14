@@ -188,7 +188,10 @@ function expandExponent(text: string): string {
   if (!Number.isInteger(exp) || Math.abs(exp) > 320) return text;
   let digits = m[1] + (m[2] ?? "");
   let point = m[1].length + exp; // index of the decimal point within digits
-  if (point <= 0) digits = "0".repeat(1 - point) + digits, (point = 1);
+  if (point <= 0) {
+    digits = "0".repeat(1 - point) + digits;
+    point = 1;
+  }
   if (point >= digits.length) digits = digits.padEnd(point, "0");
   return `${digits.slice(0, point)}.${digits.slice(point)}`;
 }
