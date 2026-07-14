@@ -18,6 +18,38 @@ export const ACCEPT = "image/png,image/jpeg,image/webp";
 export const MAX_PHOTOS = 4;
 const ACCEPTED_TYPES = ACCEPT.split(",");
 
+export interface AppendAcceptedPhotosResult {
+  files: File[];
+  added: File[];
+  rejectedCount: number;
+  overflowCount: number;
+}
+
+/**
+ * Apply the one accepted-type + four-photo contract used by every client-side
+ * capture entry point. Camera and library pickers both call their surface's
+ * existing add handler; this helper keeps append/cap behavior identical and
+ * makes an empty (canceled) selection an explicit no-op.
+ */
+export function appendAcceptedPhotos(
+  existing: readonly File[],
+  incoming: FileList | readonly File[],
+): AppendAcceptedPhotosResult {
+  const candidates = Array.from(incoming);
+  const accepted = candidates.filter((file) =>
+    ACCEPTED_TYPES.includes(file.type),
+  );
+  const room = Math.max(0, MAX_PHOTOS - existing.length);
+  const added = accepted.slice(0, room);
+
+  return {
+    files: [...existing, ...added],
+    added,
+    rejectedCount: candidates.length - accepted.length,
+    overflowCount: Math.max(0, accepted.length - room),
+  };
+}
+
 export interface UploadDraft {
   files: File[];
   previews: string[];
@@ -57,14 +89,11 @@ export function UploadDraftProvider({
   }, [previews]);
 
   const addFiles = useCallback((incoming: FileList | File[]) => {
-    const room = MAX_PHOTOS - filesRef.current.length;
-    if (room <= 0) return;
-    const accepted = Array.from(incoming)
-      .filter((f) => ACCEPTED_TYPES.includes(f.type))
-      .slice(0, room);
-    if (accepted.length === 0) return;
-    const urls = accepted.map((f) => URL.createObjectURL(f));
-    setFiles((prev) => [...prev, ...accepted].slice(0, MAX_PHOTOS));
+    const result = appendAcceptedPhotos(filesRef.current, incoming);
+    if (result.added.length === 0) return;
+    const urls = result.added.map((f) => URL.createObjectURL(f));
+    filesRef.current = result.files;
+    setFiles(result.files);
     setPreviews((prev) => [...prev, ...urls].slice(0, MAX_PHOTOS));
   }, []);
 
