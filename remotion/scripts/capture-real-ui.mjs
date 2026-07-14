@@ -22,6 +22,11 @@ const PORT = Number(process.env.DEMO_CAPTURE_PORT ?? 3217);
 const OWN_SERVER = !process.env.DEMO_CAPTURE_BASE_URL;
 const BASE_URL = process.env.DEMO_CAPTURE_BASE_URL ?? `http://localhost:${PORT}`;
 const CAPTURE_ONLY = process.env.DEMO_CAPTURE_ONLY;
+// Keep capture serial by default. Concurrent keyless dev-preview navigations
+// can race Next/Clerk's development-only bootstrap redirect and leave one page
+// without the capture controller even though the route returned 200. The
+// production app is never involved; determinism matters more than throughput.
+const CAPTURE_CONCURRENCY = Number(process.env.DEMO_CAPTURE_CONCURRENCY ?? 1);
 
 const SHOTS = [
   { name: "upload-empty", route: "/dev/preview/upload?capture=empty&focus=upload", focusSelector: "#upload-photos" },
@@ -435,7 +440,7 @@ async function main() {
     ).filter(({ name, formFactor, theme }) =>
       CAPTURE_ONLY ? `${formFactor}/${theme}/${name}` === CAPTURE_ONLY : true,
     );
-    await mapLimit(jobs, 2, capture);
+    await mapLimit(jobs, CAPTURE_CONCURRENCY, capture);
     process.stdout.write(`[capture-real-ui] ${jobs.length} real-UI captures written to ${OUTPUT_ROOT}\n`);
   } catch (error) {
     if (serverLog) process.stderr.write(serverLog.slice(-6000));

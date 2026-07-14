@@ -8,7 +8,9 @@ theme, focus, and mobile-state controls for the media pipeline.
 ## Pipeline
 
 1. `pnpm demo:capture-ui` starts the local app and captures 40 PNGs under
-   `public/demo/captures/{desktop,mobile}/{light,dark}`.
+   `public/demo/captures/{desktop,mobile}/{light,dark}`. Jobs run serially by
+   default so development-only keyless bootstrap redirects cannot race; set
+   `DEMO_CAPTURE_CONCURRENCY` only for an already-stable external preview host.
 2. The capture harness resolves Chrome/Chromium from `CHROME_PATH`, standard
    macOS application paths, or `PATH`, then uses exact 1440×900 desktop and
    390×844 mobile CSS viewports. Captures fail on horizontal overflow, missing
@@ -28,7 +30,7 @@ dev-preview fixtures if the real auth stack is unavailable.
 | Capture | Real view/state |
 | --- | --- |
 | `upload-empty` | Current empty upload view |
-| `upload-filled` | Current upload view after a local Acer photo is assigned to the real file input and its change event is handled |
+| `upload-filled` | Current upload view after the licensed local PlayStation 5 photo is assigned to the real file input and its change event is handled |
 | `review-identify` | Current listing review and item identification |
 | `review-price` | Current price and confidence card with cited sources |
 | `review-write` | Current editable title and description fields |
@@ -42,6 +44,10 @@ Each state is captured in desktop/mobile and light/dark variants. The Remotion
 layer in `remotion/real-ui/RealUiCapture.tsx` only applies a subtle loop-safe
 push-in and crossfades between real states; it does not redraw controls or add
 fabricated product behavior.
+
+The PlayStation 5 anchor and the supporting reseller catalog are locally hosted.
+Their source, author, license, and crop records are in
+[`docs/demo-asset-provenance.md`](../docs/demo-asset-provenance.md).
 
 ## Outputs
 
@@ -79,4 +85,6 @@ pnpm vitest run src/lib/demo-capture-qa.test.ts \
 
 For a single capture while debugging, set
 `DEMO_CAPTURE_ONLY=mobile/dark/inbox-list`. A full capture run is still required
-before final rendering.
+before final rendering. When a composition-only change follows a verified full
+render, `DEMO_RENDER_ONLY=buyer-qa,buyer-qa-mobile pnpm demo:render-real-ui`
+regenerates just those light/dark outputs.

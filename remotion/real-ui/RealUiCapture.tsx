@@ -33,7 +33,11 @@ const SHOTS: Record<RealUiSurface, string[]> = {
   price: ["review-price"],
   write: ["review-write"],
   publish: ["publish-draft", "publish-live"],
-  "buyer-qa": ["inbox-list", "inbox-draft", "inbox-sent"],
+  // The Guide's Answer step starts on the drafted response itself. The real
+  // desktop list state contains an intentionally quiet empty thread pane that
+  // reads as blank when the whole Guide is reviewed at page scale. The in-app
+  // inbox teaser below still preserves the broader list → draft → sent story.
+  "buyer-qa": ["inbox-draft", "inbox-sent"],
   "inbox-qa": ["inbox-list", "inbox-draft", "inbox-sent"],
 };
 

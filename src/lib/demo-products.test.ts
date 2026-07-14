@@ -5,6 +5,16 @@ import {
 } from "./demo-products";
 
 const RETIRED_PRIMARY_SLUGS = new Set([
+  "acer-predator",
+  "a-macbookair",
+  "a-cyberpc",
+  "a-xbox360",
+  "console",
+  "camera",
+  "gameboy",
+  "gshock",
+  "sneakers",
+  "book",
   "mixer",
   "espresso",
   "drill",
@@ -21,6 +31,19 @@ const RETIRED_PRIMARY_SLUGS = new Set([
   "a-patioset",
   "a-stroller",
   "a-wardrobe",
+]);
+
+const SELECTED_RESELLER_SLUGS = new Set([
+  "reseller-ps5",
+  "reseller-iphone-15",
+  "reseller-sony-camera",
+  "reseller-switch-2",
+  "reseller-dualsense",
+  "reseller-charizard",
+  "reseller-air-jordan-pair",
+  "reseller-keychron",
+  "reseller-airpods-max",
+  "reseller-galaxy-watch",
 ]);
 
 const PRIMARY_SURFACES = [
@@ -45,7 +68,13 @@ describe("reseller-facing demo curation", () => {
 
     expect(slugs).toHaveLength(10);
     expect(new Set(slugs).size).toBe(slugs.length);
+    expect(new Set(slugs)).toEqual(SELECTED_RESELLER_SLUGS);
     expect(slugs.every((slug) => DEMO_PRODUCTS_BY_SLUG[slug])).toBe(true);
+    expect(
+      slugs.every((slug) =>
+        DEMO_PRODUCTS_BY_SLUG[slug].image.startsWith("/demo/reseller/"),
+      ),
+    ).toBe(true);
     expect(slugs.some((slug) => RETIRED_PRIMARY_SLUGS.has(slug))).toBe(false);
 
     const categories = slugs.map(
@@ -65,7 +94,7 @@ describe("reseller-facing demo curation", () => {
     expect(definingSlugs.some((slug) => RETIRED_PRIMARY_SLUGS.has(slug))).toBe(false);
   });
 
-  it("uses one truthful Acer Predator story through all six guide steps", () => {
+  it("uses one truthful PlayStation 5 story through all six guide steps", () => {
     const guideSlugs = [
       ...DEMO_SURFACE_ASSIGNMENTS["step-snap"],
       ...DEMO_SURFACE_ASSIGNMENTS["step-identify"],
@@ -75,6 +104,6 @@ describe("reseller-facing demo curation", () => {
       DEMO_SURFACE_ASSIGNMENTS["buyer-qa"][0],
     ];
 
-    expect(new Set(guideSlugs)).toEqual(new Set(["acer-predator"]));
+    expect(new Set(guideSlugs)).toEqual(new Set(["reseller-ps5"]));
   });
 });

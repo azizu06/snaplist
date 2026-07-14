@@ -24,8 +24,8 @@ function clickButton(label: string) {
  *   ?theme=dark       align the real app theme before capture
  *   ?focus=...        center the real action/card named above
  *   ?capture=list     show the mobile inbox conversation list
- *   ?capture=filled   add the Acer photo through the real file input
- *   ?capture=sent     show a completed MacBook buyer thread
+ *   ?capture=filled   add the PlayStation 5 photo through the real file input
+ *   ?capture=sent     show a completed Sony camera buyer thread
  */
 export function PreviewCaptureController() {
   useLayoutEffect(() => {
@@ -82,7 +82,7 @@ export function PreviewCaptureController() {
 
       if (capture === "sent") {
         clickButton("Back to conversations");
-        later(() => clickButton("Apple MacBook Air"), 120);
+        later(() => clickButton("Sony mirrorless camera kit"), 120);
         later(markReady, 480);
         return;
       }

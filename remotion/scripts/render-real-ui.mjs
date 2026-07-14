@@ -15,6 +15,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "..", "..");
 const ENTRY = path.join(REPO, "remotion", "index.ts");
 const PUBLIC = path.join(REPO, "public");
+const RENDER_ONLY = new Set(
+  (process.env.DEMO_RENDER_ONLY ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
 
 const DESKTOP = [
   ["step-snap", "demo/steps/snap.mp4"],
@@ -42,10 +48,12 @@ async function main() {
   const mode = process.argv.includes("stills") ? "stills" : "media";
   process.stdout.write(`[render-real-ui] ${mode}: bundling once…\n`);
   const serveUrl = await bundle({ entryPoint: ENTRY, publicDir: PUBLIC });
-  const jobs = [...DESKTOP, ...MOBILE].flatMap(([id, output]) => [
-    { id, output, theme: "light" },
-    { id, output: darkPath(output), theme: "dark" },
-  ]);
+  const jobs = [...DESKTOP, ...MOBILE]
+    .filter(([id]) => RENDER_ONLY.size === 0 || RENDER_ONLY.has(id))
+    .flatMap(([id, output]) => [
+      { id, output, theme: "light" },
+      { id, output: darkPath(output), theme: "dark" },
+    ]);
 
   if (mode === "stills") {
     const stillRoot = path.join(REPO, ".review-shots", "real-ui-media");

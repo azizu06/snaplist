@@ -157,7 +157,7 @@ const BENTO_CARDS = [
 
 /* ---------------------------------------------------------------------------
  * "One photo, three storefronts" — the single instance of the motif on the
- * whole site. The verified Acer Predator anchor listing is rendered three
+ * whole site. The licensed PlayStation 5 anchor listing is rendered three
  * platform-fluent
  * ways. Round 5 (owner): the photo goes full-width at its natural wide
  * aspect so the WHOLE item is visible (the old 400px column cropped it
@@ -421,7 +421,7 @@ export default function Landing() {
             </p>
           </Reveal>
           <Reveal delay={0.1} className="relative mt-12">
-            {/* the one photo — a centered square matching the authentic Acer
+            {/* the one photo — a centered square matching the licensed PS5
                 master. Capped width keeps it tidy on desktop, full-width on
                 mobile. Hover still
                 zooms the IMAGE inside its clipped frame (never the caption). */}
@@ -453,18 +453,18 @@ export default function Landing() {
               <StorefrontListing
                 platform="eBay"
                 delivery="Publishes directly"
-                title="Acer Predator Helios 300 Gaming Laptop Core i7 RTX 144Hz"
+                title="Sony PlayStation 5 Console with DualSense Controller — White"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $550.00
+                      $379.00
                     </span>
                     <span className="rounded-md border border-line bg-night-2 px-2.5 py-1 text-[13.5px] font-medium text-flash-dim">
                       Pre-owned · Good
                     </span>
                   </>
                 }
-                detail="Insured shipping · 30-day returns"
+                detail="Calculated shipping · 30-day returns"
                 footer={
                   <span className="rounded-full bg-[#3665f3] px-5 py-2 text-[14px] font-semibold text-white">
                     Buy It Now
@@ -477,18 +477,18 @@ export default function Landing() {
               <StorefrontListing
                 platform="Facebook"
                 delivery="Copy-paste pack"
-                title="Acer Predator Helios 300 gaming laptop"
+                title="PlayStation 5 console + DualSense controller"
                 price={
                   <>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $550
+                      $379
                     </span>
                     <span className="text-[14px] font-medium text-flash-dim">
                       Good condition
                     </span>
                   </>
                 }
-                detail="Listed today · Charger included · Orlando, FL"
+                detail="Listed today · Controller shown · Orlando, FL"
                 footer={
                   <div className="flex w-full items-center justify-between gap-3 rounded-xl bg-night-2 px-3.5 py-2.5">
                     <span className="truncate text-[14px] font-medium text-flash-dim">
@@ -505,21 +505,21 @@ export default function Landing() {
               <StorefrontListing
                 platform="Mercari"
                 delivery="Copy-paste pack"
-                title="Acer Predator Helios 300 i7 RTX laptop"
+                title="Sony PS5 console with DualSense controller"
                 price={
                   <>
                     <span className="nums text-[15px] font-medium text-flash-faint line-through">
-                      $585
+                      $409
                     </span>
                     <span className="nums text-[20px] font-bold leading-none text-flash">
-                      $550
+                      $379
                     </span>
                   </>
                 }
-                detail="Smart pricing keeps it competitive, never below your $500 floor"
+                detail="Smart pricing keeps it competitive, never below your $350 floor"
                 footer={
                   <p className="text-[14px] font-medium text-iris">
-                    #acerpredator&ensp;#gaminglaptop&ensp;#pcgaming
+                    #playstation5&ensp;#ps5&ensp;#gamingconsole
                   </p>
                 }
               />

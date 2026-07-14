@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { UploadView } from "@/app/(app)/upload/upload-form";
 
-const PHOTO = "/demo/authentic/acer-predator-a1-open.jpg";
+const PHOTO = "/demo/reseller/ps5.webp";
 
 /**
  * Dev-only real upload interaction. The `filled` capture fetches a local photo,
@@ -31,10 +31,13 @@ export function UploadPreview({
       const blob = await response.blob();
       if (cancelled) return;
 
-      const input = document.querySelector<HTMLInputElement>("#photo-picker");
+      // Exercise #137's real multi-select library input. The separate camera
+      // input keeps capture="environment" untouched; both flow through the
+      // shared PhotoInputActions validation/append path.
+      const input = document.querySelector<HTMLInputElement>("#single-item-library-input");
       if (!input) throw new Error("Real upload picker was not mounted");
       const transfer = new DataTransfer();
-      transfer.items.add(new File([blob], "acer-predator-helios-300.jpg", { type: blob.type }));
+      transfer.items.add(new File([blob], "sony-playstation-5.webp", { type: blob.type }));
       input.files = transfer.files;
       input.dispatchEvent(new Event("change", { bubbles: true }));
 

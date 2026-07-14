@@ -35,16 +35,16 @@ import type { MessageRow } from "@/lib/inbox";
 
 // Distinct item ids per conversation so each row names a different listing,
 // matching how the live inbox maps message.item_id → the item's label.
-const ITEM_ACER = "00000000-0000-0000-0000-0000000000a1";
-const ITEM_XBOX = "00000000-0000-0000-0000-0000000000a2";
-const ITEM_MACBOOK = "00000000-0000-0000-0000-0000000000a3";
-const ITEM_SWITCH = "00000000-0000-0000-0000-0000000000a4";
+const ITEM_PS5 = "00000000-0000-0000-0000-0000000000a1";
+const ITEM_SWITCH = "00000000-0000-0000-0000-0000000000a2";
+const ITEM_CAMERA = "00000000-0000-0000-0000-0000000000a3";
+const ITEM_IPHONE = "00000000-0000-0000-0000-0000000000a4";
 
 const FIXTURE_ITEMS: ItemOption[] = [
-  { id: ITEM_ACER, label: "Acer Predator Helios 300" },
-  { id: ITEM_XBOX, label: "Xbox 360 Kinect Bundle" },
-  { id: ITEM_MACBOOK, label: "Apple MacBook Air (M1)" },
-  { id: ITEM_SWITCH, label: "Nintendo Switch Console" },
+  { id: ITEM_PS5, label: "Sony PlayStation 5 bundle" },
+  { id: ITEM_SWITCH, label: "Nintendo Switch 2" },
+  { id: ITEM_CAMERA, label: "Sony mirrorless camera kit" },
+  { id: ITEM_IPHONE, label: "Apple iPhone 15" },
 ];
 
 // Fixed base (not Date.now()) so the <time dateTime> ISO strings are identical
@@ -115,40 +115,40 @@ const Q_UNDELIVERED = "00000000-0000-0000-0000-0000000000d4";
 const FIXTURE_INBOUND: MessageRow[] = [
   inbound(
     Q_DRAFTED,
-    ITEM_ACER,
-    "Hi! Does the original charger come with the laptop?",
+    ITEM_PS5,
+    "Hi! Does the DualSense controller pictured come with the console?",
     "drafted",
     3,
     {
       draft_reply:
-        "Yes — the original Acer charger is included. The laptop, charger, RGB keyboard, and working boot screen are all shown in the listing photos.",
+        "Yes — the white DualSense controller shown in the photo is included with the PlayStation 5 console.",
       draft_model: "gpt-4o-mini",
     },
   ),
   inbound(
     Q_DRAFTING,
-    ITEM_XBOX,
-    "Does the bundle include both controllers, the Kinect sensor, and the game shown?",
+    ITEM_SWITCH,
+    "Are the Joy-Con controllers shown attached to the Switch 2 included?",
     "new",
     1,
   ),
   inbound(
     Q_SENT,
-    ITEM_MACBOOK,
-    "Is this still available? Any dents or screen damage on the MacBook?",
+    ITEM_CAMERA,
+    "Are all three lenses shown included with the Sony camera body?",
     "sent",
     22,
     { sent_at: minsAgo(18) },
   ),
   inbound(
     Q_UNDELIVERED,
-    ITEM_SWITCH,
-    "Can you do $150 if I pick up the Switch locally this week?",
+    ITEM_IPHONE,
+    "Can you do $440 if I pick up the iPhone locally this week?",
     "sent",
     48,
     {
       draft_reply:
-        "I can meet at $165 for a local pickup this week — that already reflects a fair discount off the listed price.",
+        "I can meet at $465 for a local pickup this week — that already reflects a fair discount off the listed price.",
     },
   ),
 ];
@@ -158,9 +158,9 @@ const FIXTURE_REPLIES = new Map<string, MessageRow>([
     Q_SENT,
     outbound(
       "00000000-0000-0000-0000-0000000000e2",
-      ITEM_MACBOOK,
+      ITEM_CAMERA,
       Q_SENT,
-      "Yes, it's still available. There are no screen cracks or visible dents; the photos show the light desk wear from every listed angle.",
+      "Yes — the Sony camera body and all three lenses shown in the listing photo are included as one kit.",
       18,
     ),
   ],
@@ -174,17 +174,17 @@ const FIXTURE_FOLLOWUPS = new Map<string, MessageRow[]>([
     [
       outbound(
         "00000000-0000-0000-0000-0000000000f1",
-        ITEM_MACBOOK,
+        ITEM_CAMERA,
         Q_SENT,
-        "Actually — hold on, let me double-check the charger before you make the drive.",
+        "I can also send close-ups of each lens mount before you decide.",
         12,
         "followup",
       ),
       outbound(
         "00000000-0000-0000-0000-0000000000f2",
-        ITEM_MACBOOK,
+        ITEM_CAMERA,
         Q_SENT,
-        "Confirmed: the USB-C charger is included and works. Happy to show the boot screen at pickup too.",
+        "The listing photo shows the exact camera body and three lenses included in this kit.",
         10,
         "followup",
       ),
