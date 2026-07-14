@@ -19,7 +19,10 @@ adapter:
   It is not the mailbox/display `GetMyMessages.MessageID`; eBay documents that
   distinction on [`MyMessagesMessageType`](https://developer.ebay.com/devzone/xml/docs/Reference/eBay/types/MyMessagesMessageType.html).
 - Commerce Message API [`getConversations`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/getConversations)
-  resolves the provider conversation associated with the listing/question.
+  finds candidate conversations for the listing and buyer. SnapList then uses
+  [`getConversation`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/getConversation)
+  with `conversation_type=FROM_MEMBERS` and follows its message pagination so
+  an unanswered question need not be the conversation's latest message.
   Commerce Message API [`sendMessage`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/sendMessage)
   sends later seller-authored text into that existing conversation. SnapList
   persists this separate conversation ID; it never substitutes the Trading
@@ -58,7 +61,10 @@ text only and never silently drops a selected attachment.
    have separate keys, tokens, and data; see eBay's [environment guide](https://developer.ebay.com/api-docs/static/gs_understand-the-sandbox-and.html).
 2. `SELLER` is connected in SnapList through the existing per-user OAuth flow
    with both messaging scopes above. Keep `EBAY_BASE_URL` set to
-   `https://api.sandbox.ebay.com`.
+   `https://api.sandbox.ebay.com`. For the app-level Sandbox credential fallback,
+   set `EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID` to this seller's Clerk user ID;
+   every other tenant is denied that shared credential, and production never
+   permits the fallback. Connected sellers continue to use their own token provider.
 3. `SELLER` has an active Sandbox listing that was published through SnapList,
    so its eBay ItemID is mapped to the same tenant's `listings` row.
 4. `CRON_SECRET` is set only if the background entry point is being exercised.
@@ -97,8 +103,10 @@ under #17.
   question, local draft, notification, and external sends must remain singular.
 - To exercise a deterministic local failure, use the offline mock tests. Do not
   sever a live request mid-flight merely to manufacture ambiguity.
-- A rejected, failed, or acknowledgement-less write remains visible as **Not
-  delivered**, keeps `sent_at` empty, and offers an explicit retry. Replaying
+- A rejected or failed write remains visible as **Not delivered**. An
+  acknowledgement-less write is labeled **Delivery unconfirmed** and requires
+  explicit duplicate-risk confirmation before retry. Both keep `sent_at` empty.
+  Replaying
   the original browser request key does not dispatch again. An operator-driven
   retry is a new external attempt; an ambiguous prior attempt can never be
   claimed as certainly absent from eBay.

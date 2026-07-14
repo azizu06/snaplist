@@ -147,7 +147,18 @@ export async function sendSellerFollowUp(
   // An HTTP/client replay of the same request key returns the durable intent
   // without dispatching another external side effect. Explicit retry uses the
   // persisted local message id through retryFollowUpDelivery below.
-  if (!intent.inserted) return intent.message;
+  if (!intent.inserted) {
+    if (
+      intent.message.reply_kind !== "followup" ||
+      intent.message.reply_to !== root.id ||
+      intent.message.body !== body
+    ) {
+      throw new MessageDeliveryConflictError(
+        "This follow-up request id belongs to different content",
+      );
+    }
+    return intent.message;
+  }
   return deliverFollowUp(input.repository, input.adapter, root, intent.message);
 }
 

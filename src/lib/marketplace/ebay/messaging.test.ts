@@ -84,6 +84,188 @@ describe("HttpEbayMessagingAdapter", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("imports every exchange when Trading returns multiple questions", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        const parsed = new URL(String(url));
+        const listingId = parsed.searchParams.get("reference_id");
+        const suffix = listingId === "listing-a" ? "a" : "b";
+        return Response.json({
+          conversations: [
+            {
+              conversationId: `conversation-${suffix}`,
+              latestMessage: {
+                messageId: `question-${suffix}`,
+                senderUsername: `buyer-${suffix}`,
+                messageBody: `Question ${suffix}`,
+                createdDate: `2026-07-13T14:0${suffix === "a" ? "1" : "2"}:00.000Z`,
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage>
+            <MemberMessageExchange>
+              <Item><ItemID>listing-a</ItemID></Item>
+              <Question><SenderID>buyer-a</SenderID><Body>Question a</Body><MessageID>question-a</MessageID></Question>
+              <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+            </MemberMessageExchange>
+            <MemberMessageExchange>
+              <Item><ItemID>listing-b</ItemID></Item>
+              <Question><SenderID>buyer-b</SenderID><Body>Question b</Body><MessageID>question-b</MessageID></Question>
+              <CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
+            </MemberMessageExchange>
+          </MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    const questions = await adapter.fetchUnansweredQuestions({
+      from: new Date("2026-07-13T14:00:00.000Z"),
+      to: new Date("2026-07-13T14:05:00.000Z"),
+    });
+
+    expect(questions.map((question) => question.externalMessageId)).toEqual([
+      "question-a",
+      "question-b",
+    ]);
+  });
+
+  it("preserves digit-only provider identifiers as exact strings", async () => {
+    const listingId = "000123";
+    const questionId = "000987";
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        expect(new URL(String(url)).searchParams.get("reference_id")).toBe(listingId);
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-long-id",
+              latestMessage: {
+                messageId: questionId,
+                senderUsername: "buyer-long-id",
+                messageBody: "Is this still available?",
+                createdDate: "2026-07-13T14:03:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>${listingId}</ItemID></Item>
+            <Question><SenderID>buyer-long-id</SenderID><Body>Is this still available?</Body><MessageID>${questionId}</MessageID></Question>
+            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    const questions = await adapter.fetchUnansweredQuestions({
+      from: new Date("2026-07-13T14:00:00.000Z"),
+      to: new Date("2026-07-13T14:05:00.000Z"),
+    });
+
+    expect(questions[0]).toMatchObject({
+      externalMessageId: questionId,
+      externalParentId: questionId,
+      externalListingId: listingId,
+    });
+  });
+
+  it("resolves an older unanswered question from the full Commerce conversation", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      const text = String(url);
+      const parsed = new URL(text);
+      if (parsed.pathname.endsWith("/conversation/conversation-shared")) {
+        expect(parsed.searchParams.get("conversation_type")).toBe("FROM_MEMBERS");
+        if (parsed.searchParams.get("offset") === "50") {
+          return Response.json({
+            messages: [
+              {
+                messageId: "question-older",
+                senderUsername: "buyer-shared",
+                messageBody: "Is the manual included?",
+                createdDate: "2026-07-13T14:01:00.000Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          conversationId: "conversation-shared",
+          messages: [
+            {
+              messageId: "question-latest",
+              senderUsername: "buyer-shared",
+              messageBody: "Any scratches?",
+              createdDate: "2026-07-13T14:02:00.000Z",
+            },
+          ],
+          next:
+            "/commerce/message/v1/conversation/conversation-shared?conversation_type=FROM_MEMBERS&limit=50&offset=50",
+        });
+      }
+      if (text.includes("/commerce/message/v1/conversation")) {
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-shared",
+              latestMessage: {
+                messageId: "question-latest",
+                senderUsername: "buyer-shared",
+                messageBody: "Any scratches?",
+                createdDate: "2026-07-13T14:02:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-shared</ItemID></Item>
+            <Question><SenderID>buyer-shared</SenderID><Body>Is the manual included?</Body><MessageID>question-older</MessageID></Question>
+            <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject([
+      {
+        externalMessageId: "question-older",
+        externalConversationId: "conversation-shared",
+      },
+    ]);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
   it("uses the exact question MessageID as ParentMessageID for replies", async () => {
     const fetchSpy = vi.fn(async (_url: string, init?: RequestInit) => {
       expect(String(init?.body)).toContain(

@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { StatusTone } from "@/lib/ui/status";
 import type { MessageRow } from "@/lib/inbox";
+import {
+  canRetryDelivery,
+  deliveryRecoveryLabel,
+} from "./delivery-recovery";
 
 /**
  * Buyer inbox — two-pane messaging surface.
@@ -205,7 +209,7 @@ export function deriveConversationState(
         ? "success-solid"
         : "neutral";
   const statusLabel = undelivered
-    ? "Not delivered"
+    ? deliveryRecoveryLabel(message.delivery_status)
     : message.status === "sent"
       ? sending
         ? "Sending…"
@@ -812,11 +816,11 @@ export function ConversationThread({
                 </span>
               ) : (
                 <span className="flex items-center gap-2 px-1 text-[11px] text-danger-soft-fg">
-                  Not delivered
+                  {deliveryRecoveryLabel(m.delivery_status)}
                   <button
                     type="button"
                     onClick={() => onRetryFollowUp(m)}
-                    disabled={retrying || m.delivery_status === "sending"}
+                    disabled={!canRetryDelivery(m.delivery_status, retrying)}
                     className="font-semibold underline underline-offset-2 disabled:no-underline disabled:opacity-60"
                   >
                     {retrying ? "Retrying…" : "Retry"}
@@ -834,7 +838,11 @@ export function ConversationThread({
         {undelivered ? (
           <div className="flex flex-col gap-2 rounded-lg border border-danger-border bg-danger-soft px-3.5 py-3">
             <p className="text-[12.5px] font-semibold text-danger-soft-fg">
-              Reply not delivered. Delivery failed after your approval.
+              {message.delivery_status === "ambiguous"
+                ? "Delivery unconfirmed. eBay may already have received this reply."
+                : message.delivery_status === "sending"
+                  ? "Delivery pending. Retry is available if the send lease expired."
+                  : "Reply not delivered. Delivery failed after your approval."}
             </p>
             {message.draft_reply ? (
               <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-fg">

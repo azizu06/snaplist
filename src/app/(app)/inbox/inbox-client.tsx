@@ -22,6 +22,7 @@ import {
   useIsDesktopPane,
 } from "./conversation-list";
 import { useListResize } from "./use-list-resize";
+import { requiresDuplicateRiskConfirmation } from "./delivery-recovery";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -323,6 +324,14 @@ export function InboxClient({
   // (e.g. a concurrent retry won), so it is treated as success: the outbound
   // row arrives over Realtime either way.
   async function retryDelivery(message: MessageRow) {
+    if (
+      requiresDuplicateRiskConfirmation(message.delivery_status) &&
+      !window.confirm(
+        "eBay may already have received this reply. Retrying could send a duplicate. Retry anyway?",
+      )
+    ) {
+      return;
+    }
     setBusy(`retry:${message.id}`);
     setError(null);
     try {
@@ -400,6 +409,14 @@ export function InboxClient({
   }
 
   async function retryFollowUp(message: MessageRow) {
+    if (
+      requiresDuplicateRiskConfirmation(message.delivery_status) &&
+      !window.confirm(
+        "eBay may already have received this message. Retrying could send a duplicate. Retry anyway?",
+      )
+    ) {
+      return;
+    }
     setBusy(`retry-followup:${message.id}`);
     setError(null);
     try {
@@ -411,6 +428,14 @@ export function InboxClient({
           error?: string;
         } | null;
         throw new Error(body?.error ?? `Retry failed (${res.status})`);
+      }
+      const conversationId = message.reply_to;
+      if (conversationId) {
+        setFollowUpRequestIds((prev) => {
+          const next = { ...prev };
+          delete next[conversationId];
+          return next;
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");

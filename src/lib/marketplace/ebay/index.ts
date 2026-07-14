@@ -96,10 +96,7 @@ export async function createEbayAdapterForUser(
     : new HttpEbayAdapter();
 }
 
-/**
- * Messaging composition mirrors publishing: connected seller token first,
- * otherwise the already-supported app-level Sandbox credentials.
- */
+/** Messaging composition uses connected seller tokens or one operator fallback. */
 export async function createEbayMessagingAdapterForUser(
   supabase: SupabaseClient,
   userId?: string,
@@ -110,23 +107,52 @@ export async function createEbayMessagingAdapterForUser(
       tokenProvider: new UserTokenProvider(supabase, { userId }),
     });
   }
-  const baseUrl = process.env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
-  if (!baseUrl.includes("api.sandbox.ebay.com")) {
+  if (!hasEbayMessagingSandboxFallback(userId)) {
+    const baseUrl = process.env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+    if (!isExactEbaySandboxApiBase(baseUrl)) {
+      throw new Error(
+        "Production eBay messaging requires the seller's connected account.",
+      );
+    }
     throw new Error(
-      "Production eBay messaging requires the seller's connected account.",
+      "App-level eBay Sandbox messaging is restricted to the configured operator tenant.",
     );
   }
   return new HttpEbayMessagingAdapter();
 }
 
-/** Whether the already-supported app-level Sandbox user-token loop can run. */
+/** Whether this tenant may use the app-level Sandbox seller credentials. */
 export function hasEbayMessagingSandboxFallback(
+  userId?: string,
   env: Record<string, string | undefined> = process.env,
 ): boolean {
   const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
-  if (!baseUrl.includes("api.sandbox.ebay.com")) return false;
+  if (!isExactEbaySandboxApiBase(baseUrl)) return false;
+  if (
+    !userId ||
+    !env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID ||
+    userId !== env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID
+  ) {
+    return false;
+  }
   return !!(
     env.EBAY_OAUTH_TOKEN ||
     (env.EBAY_REFRESH_TOKEN && env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET)
   );
+}
+
+function isExactEbaySandboxApiBase(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.origin === "https://api.sandbox.ebay.com" &&
+      (url.pathname === "" || url.pathname === "/") &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
 }

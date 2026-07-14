@@ -16,7 +16,7 @@ export async function POST() {
   const supabase = await createClient();
   try {
     const { connected } = await getEbayConnectionStatus(supabase, userId);
-    if (!connected && !hasEbayMessagingSandboxFallback()) {
+    if (!connected && !hasEbayMessagingSandboxFallback(userId)) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
     const summary = await syncInboxForSeller({

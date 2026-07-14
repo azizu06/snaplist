@@ -4,6 +4,7 @@ import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import type { MessageRow } from "./types";
 import {
   MessageDeliveryAttemptError,
+  MessageDeliveryConflictError,
   sendCanonicalReply,
   sendSellerFollowUp,
   retryFollowUpDelivery,
@@ -249,6 +250,31 @@ describe("message delivery transport", () => {
     expect(first.external_delivery_id).toBe(
       "mock-followup-client-followup-request-7",
     );
+  });
+
+  it("rejects reusing a follow-up request id for different text", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemoryDeliveryRepository();
+    await sendCanonicalReply({ repository, adapter, messageId: ROOT_ID });
+
+    await sendSellerFollowUp({
+      repository,
+      adapter,
+      conversationId: ROOT_ID,
+      body: "I also found the carrying case.",
+      requestId: "client-followup-request-7",
+    });
+
+    await expect(
+      sendSellerFollowUp({
+        repository,
+        adapter,
+        conversationId: ROOT_ID,
+        body: "The case has a small scratch.",
+        requestId: "client-followup-request-7",
+      }),
+    ).rejects.toBeInstanceOf(MessageDeliveryConflictError);
+    expect(adapter.followUps).toHaveLength(1);
   });
 
   it("retries a failed follow-up by its persisted local identity", async () => {
