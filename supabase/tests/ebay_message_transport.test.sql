@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(33);
+select extensions.plan(41);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -109,6 +109,132 @@ select extensions.is(
   (select count(*)::integer from public.ebay_message_sync_state),
   1,
   'tenant A sees only its own sync cursor'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'upsert_unresolved_question',
+      jsonb_build_object(
+        'external_message_id', 'unresolved-question-a',
+        'external_parent_id', 'unresolved-question-a',
+        'external_listing_id', 'sandbox-item-a',
+        'external_buyer_id', 'buyer-unresolved-a',
+        'body', 'Does this include the case?',
+        'subject', 'Case question',
+        'external_created_at', '2026-07-13T11:59:00Z',
+        'resolution_window_from', '2026-07-12T12:00:00Z',
+        'observed_cursor_at', '2026-07-13T12:00:00Z',
+        'attempted_at', '2026-07-13T12:00:00Z',
+        'error', 'Commerce lookup unavailable'
+      )
+    )
+  $$,
+  'the tenant-derived write seam persists an unresolved question'
+);
+
+select extensions.results_eq(
+  $$
+    select jsonb_build_object(
+      'user_id', pending.user_id,
+      'message_id', pending.external_message_id,
+      'parent_id', pending.external_parent_id,
+      'listing_id', pending.external_listing_id,
+      'buyer_id', pending.external_buyer_id,
+      'body', pending.body,
+      'window_from', pending.resolution_window_from,
+      'cursor_at', pending.observed_cursor_at
+    )
+    from public.ebay_unresolved_questions pending
+    where pending.external_message_id = 'unresolved-question-a'
+  $$,
+  $$
+    values (jsonb_build_object(
+      'user_id', 'message-tenant-a',
+      'message_id', 'unresolved-question-a',
+      'parent_id', 'unresolved-question-a',
+      'listing_id', 'sandbox-item-a',
+      'buyer_id', 'buyer-unresolved-a',
+      'body', 'Does this include the case?',
+      'window_from', '2026-07-12T12:00:00Z'::timestamptz,
+      'cursor_at', '2026-07-13T12:00:00Z'::timestamptz
+    ))
+  $$,
+  'the unresolved queue preserves exact Trading identity and cursor data'
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.ebay_unresolved_questions (
+      user_id, external_message_id, external_parent_id, external_listing_id,
+      external_buyer_id, body, external_created_at, resolution_window_from,
+      observed_cursor_at, last_resolution_attempted_at, last_error
+    ) values (
+      'message-tenant-b', 'spoofed-question', 'spoofed-question',
+      'sandbox-item-b', 'buyer-b', 'Spoofed', '2026-07-13T12:00:00Z',
+      '2026-07-12T12:00:00Z', '2026-07-13T12:00:00Z',
+      '2026-07-13T12:00:00Z', 'spoofed'
+    )
+  $$,
+  '42501',
+  null,
+  'tenant A cannot persist an unresolved question for tenant B'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'upsert_unresolved_question',
+      jsonb_build_object(
+        'external_message_id', 'unresolved-question-a',
+        'external_parent_id', 'unresolved-question-a',
+        'external_listing_id', 'sandbox-item-a',
+        'external_buyer_id', 'buyer-unresolved-a',
+        'body', 'Does this include the case?',
+        'subject', 'Case question',
+        'external_created_at', '2026-07-13T11:59:00Z',
+        'resolution_window_from', '2026-07-12T12:00:00Z',
+        'observed_cursor_at', '2026-07-13T12:00:00Z',
+        'attempted_at', '2026-07-13T12:05:00Z',
+        'error', 'Commerce lookup still unavailable'
+      )
+    )
+  $$,
+  'reconciliation replay updates the pending identity'
+);
+
+select extensions.results_eq(
+  $$
+    select count(*)::integer, max(resolution_attempts)::integer
+    from public.ebay_unresolved_questions
+    where external_message_id = 'unresolved-question-a'
+  $$,
+  $$values (1, 2)$$,
+  'reconciliation replay updates one idempotent pending identity'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'sync_mark_success',
+      jsonb_build_object(
+        'at', '2026-07-13T12:05:00Z',
+        'pending_resolution_count', 1
+      )
+    )
+  $$,
+  'cursor advancement records partial sync state'
+);
+
+select extensions.results_eq(
+  $$
+    select state.cursor_at = '2026-07-13T12:05:00Z'::timestamptz,
+           state.last_error
+    from public.ebay_message_sync_state state
+    where state.user_id = 'message-tenant-a'
+  $$,
+  $$values (true, '1 eBay question awaiting conversation resolution'::text)$$,
+  'cursor advancement keeps truthful pending-resolution sync state'
 );
 
 select extensions.throws_ok(
@@ -493,6 +619,28 @@ select extensions.lives_ok(
     )
   $$,
   'the scheduler can advance a selected seller sync lifecycle'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_scheduled_ebay_message_write(
+      'message-tenant-b',
+      'upsert_unresolved_question',
+      jsonb_build_object(
+        'external_message_id', 'unresolved-question-b',
+        'external_parent_id', 'unresolved-question-b',
+        'external_listing_id', 'sandbox-item-b',
+        'external_buyer_id', 'buyer-unresolved-b',
+        'body', 'Is pickup available?',
+        'external_created_at', '2026-07-13T12:01:00Z',
+        'resolution_window_from', '2026-07-12T12:05:00Z',
+        'observed_cursor_at', '2026-07-13T12:05:00Z',
+        'attempted_at', '2026-07-13T12:05:00Z',
+        'error', 'Commerce lookup unavailable'
+      )
+    )
+  $$,
+  'the constrained scheduler seam can queue one selected seller question'
 );
 
 reset role;

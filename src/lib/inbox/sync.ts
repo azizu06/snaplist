@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   MarketplaceMessagingAdapter,
   MarketplaceQuestion,
+  MarketplaceQuestionResolutionFailure,
+  PendingMarketplaceQuestion,
 } from "@/lib/marketplace/messaging";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { recordPipelineRunAndMaybeAlert } from "@/lib/abuse";
@@ -43,8 +45,20 @@ export interface ImportedQuestionResult {
 export interface InboxSyncRepository {
   getCursor(): Promise<Date | null>;
   markAttempt(at: Date): Promise<void>;
-  markSuccess(cursor: Date): Promise<void>;
+  markSuccess(cursor: Date, pendingResolutionCount: number): Promise<void>;
   markFailure(at: Date, error: unknown): Promise<void>;
+  listPendingQuestions(): Promise<PendingMarketplaceQuestion[]>;
+  upsertPendingQuestion(
+    failure: MarketplaceQuestionResolutionFailure,
+    attemptedAt: Date,
+  ): Promise<void>;
+  markPendingResolutionFailed(
+    externalMessageId: string,
+    attemptedAt: Date,
+    error: unknown,
+  ): Promise<void>;
+  removePendingQuestion(externalMessageId: string): Promise<void>;
+  countPendingQuestions(): Promise<number>;
   findActiveListing(externalListingId: string): Promise<SyncListingContext | null>;
   importQuestion(
     question: MarketplaceQuestion,
@@ -82,6 +96,7 @@ export interface InboxSyncSummary {
   skippedUnknownListing: number;
   drafted: number;
   draftFailed: number;
+  pendingResolution: number;
 }
 
 /**
@@ -115,20 +130,22 @@ export async function syncInboxForSeller(
 
   await input.repository.markAttempt(now);
   try {
-    const questions = await input.adapter.fetchUnansweredQuestions({
+    const pendingBeforeFetch = await input.repository.listPendingQuestions();
+    const fetched = await input.adapter.fetchUnansweredQuestions({
       from,
       to: now,
     });
     let imported = 0;
     let skippedUnknownListing = 0;
 
-    for (const question of questions) {
+    const processQuestion = async (question: MarketplaceQuestion) => {
       const listing = await input.repository.findActiveListing(
         question.externalListingId,
       );
       if (!listing) {
         skippedUnknownListing += 1;
-        continue;
+        await input.repository.removePendingQuestion(question.externalMessageId);
+        return;
       }
       const result = await input.repository.importQuestion(question, listing);
       if (result.inserted) imported += 1;
@@ -139,6 +156,31 @@ export async function syncInboxForSeller(
         listing,
         result.message,
       );
+      await input.repository.removePendingQuestion(question.externalMessageId);
+    };
+
+    for (const failure of fetched.unresolved) {
+      await input.repository.upsertPendingQuestion(failure, now);
+    }
+    for (const question of fetched.questions) {
+      await processQuestion(question);
+    }
+
+    const observedIds = new Set([
+      ...fetched.questions.map((question) => question.externalMessageId),
+      ...fetched.unresolved.map(({ question }) => question.externalMessageId),
+    ]);
+    for (const pending of pendingBeforeFetch) {
+      if (observedIds.has(pending.externalMessageId)) continue;
+      try {
+        await processQuestion(await input.adapter.resolveQuestion(pending));
+      } catch (error) {
+        await input.repository.markPendingResolutionFailed(
+          pending.externalMessageId,
+          now,
+          error,
+        );
+      }
     }
 
     let drafted = 0;
@@ -161,15 +203,17 @@ export async function syncInboxForSeller(
       }
     }
 
-    await input.repository.markSuccess(now);
+    const pendingResolution = await input.repository.countPendingQuestions();
+    await input.repository.markSuccess(now, pendingResolution);
     return {
       windowFrom: from.toISOString(),
       windowTo: now.toISOString(),
-      fetched: questions.length,
+      fetched: fetched.questions.length + fetched.unresolved.length,
       imported,
       skippedUnknownListing,
       drafted,
       draftFailed,
+      pendingResolution,
     };
   } catch (error) {
     await input.repository.markFailure(now, error).catch(() => undefined);
@@ -225,8 +269,14 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     await this.applyWrite("sync_mark_attempt", { at: at.toISOString() });
   }
 
-  async markSuccess(cursor: Date): Promise<void> {
-    await this.applyWrite("sync_mark_success", { at: cursor.toISOString() });
+  async markSuccess(
+    cursor: Date,
+    pendingResolutionCount: number,
+  ): Promise<void> {
+    await this.applyWrite("sync_mark_success", {
+      at: cursor.toISOString(),
+      pending_resolution_count: pendingResolutionCount,
+    });
   }
 
   async markFailure(at: Date, error: unknown): Promise<void> {
@@ -235,6 +285,85 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       at: at.toISOString(),
       error: message.slice(0, 500),
     });
+  }
+
+  async listPendingQuestions(): Promise<PendingMarketplaceQuestion[]> {
+    const { data, error } = await this.supabase
+      .from("ebay_unresolved_questions")
+      .select(
+        "external_message_id, external_parent_id, external_listing_id, external_buyer_id, body, subject, external_created_at, resolution_window_from, observed_cursor_at",
+      )
+      .eq("user_id", this.userId)
+      .order("last_resolution_attempted_at", { ascending: true })
+      .order("external_created_at", { ascending: true })
+      .limit(50);
+    if (error) {
+      throw new Error(`Failed to list unresolved eBay questions: ${error.message}`);
+    }
+    return (data ?? []).map((row) => ({
+      marketplace: "ebay" as const,
+      externalMessageId: row.external_message_id as string,
+      externalParentId: row.external_parent_id as string,
+      externalListingId: row.external_listing_id as string,
+      externalBuyerId: row.external_buyer_id as string,
+      body: row.body as string,
+      subject: (row.subject as string | null) ?? null,
+      createdAt: new Date(row.external_created_at as string).toISOString(),
+      resolutionWindowFrom: new Date(
+        row.resolution_window_from as string,
+      ).toISOString(),
+      observedCursorAt: new Date(row.observed_cursor_at as string).toISOString(),
+    }));
+  }
+
+  async upsertPendingQuestion(
+    failure: MarketplaceQuestionResolutionFailure,
+    attemptedAt: Date,
+  ): Promise<void> {
+    await this.applyWrite("upsert_unresolved_question", {
+      external_message_id: failure.question.externalMessageId,
+      external_parent_id: failure.question.externalParentId,
+      external_listing_id: failure.question.externalListingId,
+      external_buyer_id: failure.question.externalBuyerId,
+      body: failure.question.body,
+      subject: failure.question.subject,
+      external_created_at: failure.question.createdAt,
+      resolution_window_from: failure.question.resolutionWindowFrom,
+      observed_cursor_at: failure.question.observedCursorAt,
+      attempted_at: attemptedAt.toISOString(),
+      error: failure.error.slice(0, 500),
+    });
+  }
+
+  async markPendingResolutionFailed(
+    externalMessageId: string,
+    attemptedAt: Date,
+    error: unknown,
+  ): Promise<void> {
+    const message =
+      error instanceof Error ? error.message : "Conversation resolution failed";
+    await this.applyWrite("mark_unresolved_question_failed", {
+      external_message_id: externalMessageId,
+      attempted_at: attemptedAt.toISOString(),
+      error: message.slice(0, 500),
+    });
+  }
+
+  async removePendingQuestion(externalMessageId: string): Promise<void> {
+    await this.applyWrite("remove_unresolved_question", {
+      external_message_id: externalMessageId,
+    });
+  }
+
+  async countPendingQuestions(): Promise<number> {
+    const { count, error } = await this.supabase
+      .from("ebay_unresolved_questions")
+      .select("external_message_id", { count: "exact", head: true })
+      .eq("user_id", this.userId);
+    if (error) {
+      throw new Error(`Failed to count unresolved eBay questions: ${error.message}`);
+    }
+    return count ?? 0;
   }
 
   async findActiveListing(

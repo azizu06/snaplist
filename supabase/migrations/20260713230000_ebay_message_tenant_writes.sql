@@ -16,6 +16,7 @@ declare
   v_root public.messages%rowtype;
   v_listing public.listings%rowtype;
   v_count integer := 0;
+  v_pending_count integer := 0;
   v_inserted boolean := false;
   v_at timestamptz;
 begin
@@ -30,13 +31,29 @@ begin
     return 'null'::jsonb;
   elsif p_operation = 'sync_mark_success' then
     v_at := (p_payload->>'at')::timestamptz;
+    v_pending_count := greatest(
+      coalesce((p_payload->>'pending_resolution_count')::integer, 0),
+      0
+    );
     insert into public.ebay_message_sync_state (
       user_id, cursor_at, last_succeeded_at, last_error
-    ) values (p_user_id, v_at, v_at, null)
+    ) values (
+      p_user_id,
+      v_at,
+      v_at,
+      case
+        when v_pending_count = 0 then null
+        else format(
+          '%s eBay question%s awaiting conversation resolution',
+          v_pending_count,
+          case when v_pending_count = 1 then '' else 's' end
+        )
+      end
+    )
     on conflict (user_id) do update
       set cursor_at = excluded.cursor_at,
           last_succeeded_at = excluded.last_succeeded_at,
-          last_error = null;
+          last_error = excluded.last_error;
     return 'null'::jsonb;
   elsif p_operation = 'sync_mark_failure' then
     insert into public.ebay_message_sync_state (
@@ -49,6 +66,58 @@ begin
     on conflict (user_id) do update
       set last_attempted_at = excluded.last_attempted_at,
           last_error = excluded.last_error;
+    return 'null'::jsonb;
+  elsif p_operation = 'upsert_unresolved_question' then
+    insert into public.ebay_unresolved_questions as pending (
+      user_id, external_message_id, external_parent_id, external_listing_id,
+      external_buyer_id, body, subject, external_created_at,
+      resolution_window_from, observed_cursor_at,
+      last_resolution_attempted_at, resolution_attempts, last_error
+    ) values (
+      p_user_id,
+      p_payload->>'external_message_id',
+      p_payload->>'external_parent_id',
+      p_payload->>'external_listing_id',
+      p_payload->>'external_buyer_id',
+      p_payload->>'body',
+      p_payload->>'subject',
+      (p_payload->>'external_created_at')::timestamptz,
+      (p_payload->>'resolution_window_from')::timestamptz,
+      (p_payload->>'observed_cursor_at')::timestamptz,
+      (p_payload->>'attempted_at')::timestamptz,
+      1,
+      left(coalesce(p_payload->>'error', 'Conversation resolution failed'), 500)
+    )
+    on conflict (user_id, external_message_id) do update
+      set last_resolution_attempted_at = excluded.last_resolution_attempted_at,
+          resolution_attempts = pending.resolution_attempts + 1,
+          last_error = excluded.last_error
+      where pending.external_parent_id = excluded.external_parent_id
+        and pending.external_listing_id = excluded.external_listing_id
+        and pending.external_buyer_id = excluded.external_buyer_id
+        and pending.body = excluded.body
+        and pending.subject is not distinct from excluded.subject
+        and pending.external_created_at = excluded.external_created_at;
+    get diagnostics v_count = row_count;
+    if v_count <> 1 then
+      raise exception using errcode = '23505', message = 'Conflicting eBay question identity';
+    end if;
+    return 'null'::jsonb;
+  elsif p_operation = 'mark_unresolved_question_failed' then
+    update public.ebay_unresolved_questions pending
+    set last_resolution_attempted_at = (p_payload->>'attempted_at')::timestamptz,
+        resolution_attempts = pending.resolution_attempts + 1,
+        last_error = left(
+          coalesce(p_payload->>'error', 'Conversation resolution failed'),
+          500
+        )
+    where pending.user_id = p_user_id
+      and pending.external_message_id = p_payload->>'external_message_id';
+    return 'null'::jsonb;
+  elsif p_operation = 'remove_unresolved_question' then
+    delete from public.ebay_unresolved_questions pending
+    where pending.user_id = p_user_id
+      and pending.external_message_id = p_payload->>'external_message_id';
     return 'null'::jsonb;
   elsif p_operation = 'import_question' then
     select listing.*
@@ -466,6 +535,9 @@ begin
     'sync_mark_attempt',
     'sync_mark_success',
     'sync_mark_failure',
+    'upsert_unresolved_question',
+    'mark_unresolved_question_failed',
+    'remove_unresolved_question',
     'import_question',
     'ensure_notification',
     'claim_draft',

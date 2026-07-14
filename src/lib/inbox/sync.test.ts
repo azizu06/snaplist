@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import { MockMarketplaceMessagingAdapter } from "@/lib/marketplace/mock-messaging";
-import type { MarketplaceQuestion } from "@/lib/marketplace/messaging";
+import type {
+  MarketplaceQuestion,
+  MarketplaceQuestionResolutionFailure,
+  PendingMarketplaceQuestion,
+} from "@/lib/marketplace/messaging";
 import type { MessageRow, ReplyGrounding } from "./types";
 import {
   syncInboxForSeller,
@@ -46,6 +50,11 @@ class MemorySyncRepository implements InboxSyncRepository {
   attempts: string[] = [];
   successes: string[] = [];
   failures: string[] = [];
+  pendingResolutionCounts: number[] = [];
+  pending = new Map<
+    string,
+    { question: PendingMarketplaceQuestion; error: string; attempts: number }
+  >();
   imported = new Map<string, MessageRow>();
   notifications = new Set<string>();
   draftClaims = 0;
@@ -58,15 +67,45 @@ class MemorySyncRepository implements InboxSyncRepository {
   async markAttempt(at: Date) {
     this.attempts.push(at.toISOString());
   }
-  async markSuccess(cursor: Date) {
+  async markSuccess(cursor: Date, pendingResolutionCount = 0) {
     this.cursor = cursor;
     this.successes.push(cursor.toISOString());
+    this.pendingResolutionCounts.push(pendingResolutionCount);
   }
   async markFailure(_at: Date, error: unknown) {
     this.failures.push(error instanceof Error ? error.message : "failed");
   }
   async findActiveListing(externalListingId: string) {
     return externalListingId === question.externalListingId ? listing : null;
+  }
+  async listPendingQuestions() {
+    return [...this.pending.values()].map(({ question }) => question);
+  }
+  async upsertPendingQuestion(
+    failure: MarketplaceQuestionResolutionFailure,
+  ) {
+    const existing = this.pending.get(failure.question.externalMessageId);
+    this.pending.set(failure.question.externalMessageId, {
+      question: existing?.question ?? failure.question,
+      error: failure.error,
+      attempts: (existing?.attempts ?? 0) + 1,
+    });
+  }
+  async markPendingResolutionFailed(
+    externalMessageId: string,
+    _at: Date,
+    error: unknown,
+  ) {
+    const pending = this.pending.get(externalMessageId);
+    if (!pending) return;
+    pending.error = error instanceof Error ? error.message : "failed";
+    pending.attempts += 1;
+  }
+  async removePendingQuestion(externalMessageId: string) {
+    this.pending.delete(externalMessageId);
+  }
+  async countPendingQuestions() {
+    return this.pending.size;
   }
   async importQuestion(
     external: MarketplaceQuestion,
@@ -140,6 +179,149 @@ class MemorySyncRepository implements InboxSyncRepository {
 }
 
 describe("syncInboxForSeller", () => {
+  it("durably queues unresolved questions while importing valid peers", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const unresolvedQuestion: PendingMarketplaceQuestion = {
+      marketplace: "ebay",
+      externalMessageId: "ebay-question-unresolved",
+      externalParentId: "ebay-question-unresolved",
+      externalListingId: "110011001101",
+      externalBuyerId: "buyer-unresolved",
+      body: "Is the case included?",
+      subject: null,
+      createdAt: "2026-07-13T12:03:00.000Z",
+      resolutionWindowFrom: "2026-07-12T12:05:00.000Z",
+      observedCursorAt: "2026-07-13T12:05:00.000Z",
+    };
+    adapter.questions = [question];
+    adapter.unresolved = [
+      {
+        question: unresolvedQuestion,
+        error: "Commerce conversation lookup unavailable",
+      },
+    ];
+    const repository = new MemorySyncRepository();
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      draft: async () => ({
+        reply: "Yes, the charger is included.",
+        model: "test-reply",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+    });
+
+    expect(summary).toMatchObject({
+      fetched: 2,
+      imported: 1,
+      pendingResolution: 1,
+    });
+    expect(repository.cursor?.toISOString()).toBe("2026-07-13T12:05:00.000Z");
+    expect(repository.pending.get(unresolvedQuestion.externalMessageId)).toEqual({
+      question: unresolvedQuestion,
+      error: "Commerce conversation lookup unavailable",
+      attempts: 1,
+    });
+    expect(repository.pendingResolutionCounts).toEqual([1]);
+  });
+
+  it("retries a durable unresolved question after it leaves the fetch window", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [question];
+    const repository = new MemorySyncRepository();
+    repository.cursor = new Date("2026-07-15T12:00:00.000Z");
+    repository.pending.set(question.externalMessageId, {
+      question: {
+        marketplace: "ebay",
+        externalMessageId: question.externalMessageId,
+        externalParentId: question.externalParentId,
+        externalListingId: question.externalListingId,
+        externalBuyerId: question.externalBuyerId,
+        body: question.body,
+        subject: question.subject,
+        createdAt: question.createdAt,
+        resolutionWindowFrom: "2026-07-12T12:05:00.000Z",
+        observedCursorAt: "2026-07-13T12:05:00.000Z",
+      },
+      error: "Commerce conversation lookup unavailable",
+      attempts: 3,
+    });
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-15T12:05:00.000Z"),
+      draft: async () => ({
+        reply: "Yes, the charger is included.",
+        model: "test-reply",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+    });
+
+    expect(summary).toMatchObject({
+      fetched: 0,
+      imported: 1,
+      drafted: 1,
+      pendingResolution: 0,
+    });
+    expect(repository.pending).toHaveLength(0);
+    expect(repository.notifications).toEqual(new Set([MESSAGE_ID]));
+    expect(repository.pendingResolutionCounts).toEqual([0]);
+  });
+
+  it("keeps persistent resolution failures queued and visible after cursor advancement", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    const pendingQuestion: PendingMarketplaceQuestion = {
+      marketplace: "ebay",
+      externalMessageId: "ebay-question-persistent",
+      externalParentId: "ebay-question-persistent",
+      externalListingId: question.externalListingId,
+      externalBuyerId: "buyer-persistent",
+      body: "Can you ship tomorrow?",
+      subject: null,
+      createdAt: "2026-07-11T12:03:00.000Z",
+      resolutionWindowFrom: "2026-07-10T12:05:00.000Z",
+      observedCursorAt: "2026-07-11T12:05:00.000Z",
+    };
+    repository.cursor = new Date("2026-07-15T12:00:00.000Z");
+    repository.pending.set(pendingQuestion.externalMessageId, {
+      question: pendingQuestion,
+      error: "Commerce lookup unavailable",
+      attempts: 3,
+    });
+    adapter.resolutionFailures.set(
+      pendingQuestion.externalMessageId,
+      new Error("Commerce authorization unavailable"),
+    );
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-15T12:05:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(summary).toMatchObject({
+      fetched: 0,
+      imported: 0,
+      pendingResolution: 1,
+    });
+    expect(repository.pending.get(pendingQuestion.externalMessageId)).toEqual({
+      question: pendingQuestion,
+      error: "Commerce authorization unavailable",
+      attempts: 4,
+    });
+    expect(repository.cursor?.toISOString()).toBe("2026-07-15T12:05:00.000Z");
+    expect(repository.pendingResolutionCounts).toEqual([1]);
+  });
+
   it("reconciles at least 24 hours behind the cursor on every sync", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     const repository = new MemorySyncRepository();
@@ -289,6 +471,49 @@ describe("SupabaseInboxSyncRepository", () => {
       p_user_id: USER_ID,
       p_operation: "sync_mark_attempt",
       p_payload: { at: "2026-07-13T12:05:00.000Z" },
+    });
+  });
+
+  it("writes unresolved identity through the tenant-derived foreground seam", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const client = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
+      client,
+      scheduled: false,
+    });
+    const pendingQuestion: PendingMarketplaceQuestion = {
+      marketplace: "ebay",
+      externalMessageId: "question-pending",
+      externalParentId: "question-pending",
+      externalListingId: "listing-pending",
+      externalBuyerId: "buyer-pending",
+      body: "Is the case included?",
+      subject: null,
+      createdAt: "2026-07-13T12:01:00.000Z",
+      resolutionWindowFrom: "2026-07-12T12:05:00.000Z",
+      observedCursorAt: "2026-07-13T12:05:00.000Z",
+    };
+
+    await repository.upsertPendingQuestion(
+      { question: pendingQuestion, error: "Commerce lookup unavailable" },
+      new Date("2026-07-13T12:05:00.000Z"),
+    );
+
+    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+      p_operation: "upsert_unresolved_question",
+      p_payload: {
+        external_message_id: "question-pending",
+        external_parent_id: "question-pending",
+        external_listing_id: "listing-pending",
+        external_buyer_id: "buyer-pending",
+        body: "Is the case included?",
+        subject: null,
+        external_created_at: "2026-07-13T12:01:00.000Z",
+        resolution_window_from: "2026-07-12T12:05:00.000Z",
+        observed_cursor_at: "2026-07-13T12:05:00.000Z",
+        attempted_at: "2026-07-13T12:05:00.000Z",
+        error: "Commerce lookup unavailable",
+      },
     });
   });
 });

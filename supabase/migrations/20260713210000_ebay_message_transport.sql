@@ -217,3 +217,31 @@ create policy ebay_message_sync_state_update_own
 create policy ebay_message_sync_state_delete_own
   on public.ebay_message_sync_state for delete to authenticated
   using (public.clerk_user_id() = user_id);
+
+create table if not exists public.ebay_unresolved_questions (
+  user_id text not null,
+  external_message_id text not null,
+  external_parent_id text not null,
+  external_listing_id text not null,
+  external_buyer_id text not null,
+  body text not null,
+  subject text,
+  external_created_at timestamptz not null,
+  resolution_window_from timestamptz not null,
+  observed_cursor_at timestamptz not null,
+  last_resolution_attempted_at timestamptz not null,
+  resolution_attempts integer not null default 1 check (resolution_attempts > 0),
+  last_error text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, external_message_id)
+);
+
+create trigger ebay_unresolved_questions_set_updated_at
+  before update on public.ebay_unresolved_questions
+  for each row execute function public.set_updated_at();
+
+alter table public.ebay_unresolved_questions enable row level security;
+create policy ebay_unresolved_questions_select_own
+  on public.ebay_unresolved_questions for select to authenticated
+  using (public.clerk_user_id() = user_id);

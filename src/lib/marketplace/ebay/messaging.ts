@@ -5,6 +5,8 @@ import type {
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
   MarketplaceQuestion,
+  MarketplaceQuestionFetchResult,
+  PendingMarketplaceQuestion,
 } from "../messaging";
 import { MarketplaceDeliveryError } from "../messaging";
 import { EnvTokenProvider } from "./auth";
@@ -78,12 +80,13 @@ export class HttpEbayMessagingAdapter
 
   async fetchUnansweredQuestions(
     input: FetchQuestionsInput,
-  ): Promise<MarketplaceQuestion[]> {
+  ): Promise<MarketplaceQuestionFetchResult> {
     if (input.from.getTime() > input.to.getTime()) {
       throw new Error("Question fetch window starts after it ends");
     }
 
     const questions: MarketplaceQuestion[] = [];
+    const unresolved: MarketplaceQuestionFetchResult["unresolved"] = [];
     let page = 1;
     let hasMore = false;
     do {
@@ -126,39 +129,58 @@ export class HttpEbayMessagingAdapter
         ) {
           continue;
         }
-        let externalConversationId: string;
-        try {
-          externalConversationId = await this.resolveConversationId({
-            externalMessageId,
-            externalListingId,
-            externalBuyerId,
-            body,
-            createdAt,
-            from: input.from,
-            to: input.to,
-          });
-        } catch {
-          continue;
-        }
-        questions.push({
+        const pendingQuestion: PendingMarketplaceQuestion = {
           marketplace: "ebay",
           externalMessageId,
-          // Trading's question MessageID is both the imported identity and the
-          // root/parent the exact-question reply operation requires.
           externalParentId: externalMessageId,
-          externalConversationId,
           externalListingId,
           externalBuyerId,
           body,
           subject: asString(question?.Subject) ?? null,
           createdAt,
-        });
+          resolutionWindowFrom: input.from.toISOString(),
+          observedCursorAt: input.to.toISOString(),
+        };
+        try {
+          questions.push(await this.resolveQuestion(pendingQuestion));
+        } catch (error) {
+          unresolved.push({
+            question: pendingQuestion,
+            error: errorMessage(error),
+          });
+          continue;
+        }
       }
       hasMore = response.HasMoreItems === true || response.HasMoreItems === "true";
       page += 1;
     } while (hasMore);
 
-    return questions;
+    return { questions, unresolved };
+  }
+
+  async resolveQuestion(
+    question: PendingMarketplaceQuestion,
+  ): Promise<MarketplaceQuestion> {
+    const externalConversationId = await this.resolveConversationId({
+      externalMessageId: question.externalMessageId,
+      externalListingId: question.externalListingId,
+      externalBuyerId: question.externalBuyerId,
+      body: question.body,
+      createdAt: question.createdAt,
+      from: new Date(question.resolutionWindowFrom),
+      to: new Date(question.observedCursorAt),
+    });
+    return {
+      marketplace: question.marketplace,
+      externalMessageId: question.externalMessageId,
+      externalParentId: question.externalParentId,
+      externalConversationId,
+      externalListingId: question.externalListingId,
+      externalBuyerId: question.externalBuyerId,
+      body: question.body,
+      subject: question.subject,
+      createdAt: question.createdAt,
+    };
   }
 
   async replyToQuestion(
@@ -519,6 +541,10 @@ function asIsoString(value: unknown): string | undefined {
   if (!text) return undefined;
   const time = Date.parse(text);
   return Number.isNaN(time) ? undefined : new Date(time).toISOString();
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Conversation resolution failed";
 }
 
 function messageMatches(

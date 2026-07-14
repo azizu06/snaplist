@@ -4,6 +4,9 @@ import type {
   MarketplaceDeliveryReceipt,
   MarketplaceMessagingAdapter,
   MarketplaceQuestion,
+  MarketplaceQuestionFetchResult,
+  MarketplaceQuestionResolutionFailure,
+  PendingMarketplaceQuestion,
 } from "./messaging";
 
 /** Offline, deterministic marketplace messaging adapter used by all tests. */
@@ -11,6 +14,8 @@ export class MockMarketplaceMessagingAdapter
   implements MarketplaceMessagingAdapter
 {
   questions: MarketplaceQuestion[] = [];
+  unresolved: MarketplaceQuestionResolutionFailure[] = [];
+  resolutionFailures = new Map<string, Error>();
   readonly fetches: FetchQuestionsInput[] = [];
   readonly replies: MarketplaceDeliveryInput[] = [];
   readonly followUps: MarketplaceDeliveryInput[] = [];
@@ -19,12 +24,30 @@ export class MockMarketplaceMessagingAdapter
 
   async fetchUnansweredQuestions(
     input: FetchQuestionsInput,
-  ): Promise<MarketplaceQuestion[]> {
+  ): Promise<MarketplaceQuestionFetchResult> {
     this.fetches.push(input);
-    return this.questions.filter((question) => {
-      const created = Date.parse(question.createdAt);
-      return created >= input.from.getTime() && created <= input.to.getTime();
-    });
+    return {
+      questions: this.questions.filter((question) => {
+        const created = Date.parse(question.createdAt);
+        return created >= input.from.getTime() && created <= input.to.getTime();
+      }),
+      unresolved: this.unresolved.filter(({ question }) => {
+        const created = Date.parse(question.createdAt);
+        return created >= input.from.getTime() && created <= input.to.getTime();
+      }),
+    };
+  }
+
+  async resolveQuestion(
+    question: PendingMarketplaceQuestion,
+  ): Promise<MarketplaceQuestion> {
+    const failure = this.resolutionFailures.get(question.externalMessageId);
+    if (failure) throw failure;
+    const resolved = this.questions.find(
+      (candidate) => candidate.externalMessageId === question.externalMessageId,
+    );
+    if (!resolved) throw new Error("Mock question resolution failed");
+    return resolved;
   }
 
   async replyToQuestion(

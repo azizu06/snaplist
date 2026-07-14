@@ -21,6 +21,29 @@ export interface MarketplaceQuestion {
   createdAt: string;
 }
 
+export interface PendingMarketplaceQuestion {
+  marketplace: "ebay";
+  externalMessageId: string;
+  externalParentId: string;
+  externalListingId: string;
+  externalBuyerId: string;
+  body: string;
+  subject: string | null;
+  createdAt: string;
+  resolutionWindowFrom: string;
+  observedCursorAt: string;
+}
+
+export interface MarketplaceQuestionResolutionFailure {
+  question: PendingMarketplaceQuestion;
+  error: string;
+}
+
+export interface MarketplaceQuestionFetchResult {
+  questions: MarketplaceQuestion[];
+  unresolved: MarketplaceQuestionResolutionFailure[];
+}
+
 export interface FetchQuestionsInput {
   /** Inclusive lower bound. Callers deliberately overlap windows. */
   from: Date;
@@ -47,7 +70,10 @@ export interface MarketplaceDeliveryReceipt {
 export interface MarketplaceMessagingAdapter {
   fetchUnansweredQuestions(
     input: FetchQuestionsInput,
-  ): Promise<MarketplaceQuestion[]>;
+  ): Promise<MarketplaceQuestionFetchResult>;
+  resolveQuestion(
+    question: PendingMarketplaceQuestion,
+  ): Promise<MarketplaceQuestion>;
   replyToQuestion(
     input: MarketplaceDeliveryInput,
   ): Promise<MarketplaceDeliveryReceipt>;

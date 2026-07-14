@@ -68,19 +68,22 @@ describe("HttpEbayMessagingAdapter", () => {
         from: new Date("2026-07-13T14:00:00.000Z"),
         to: new Date("2026-07-13T14:05:00.000Z"),
       }),
-    ).resolves.toEqual([
-      {
-        marketplace: "ebay",
-        externalMessageId: "question-parent-42",
-        externalParentId: "question-parent-42",
-        externalConversationId: "commerce-conversation-9",
-        externalListingId: "110011001100",
-        externalBuyerId: "buyer-public-id",
-        body: "Does it include the charger?",
-        subject: "Question about item",
-        createdAt: "2026-07-13T14:03:00.000Z",
-      },
-    ]);
+    ).resolves.toEqual({
+      questions: [
+        {
+          marketplace: "ebay",
+          externalMessageId: "question-parent-42",
+          externalParentId: "question-parent-42",
+          externalConversationId: "commerce-conversation-9",
+          externalListingId: "110011001100",
+          externalBuyerId: "buyer-public-id",
+          body: "Does it include the charger?",
+          subject: "Question about item",
+          createdAt: "2026-07-13T14:03:00.000Z",
+        },
+      ],
+      unresolved: [],
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -128,18 +131,18 @@ describe("HttpEbayMessagingAdapter", () => {
       env: () => ({ EBAY_BASE_URL: BASE }),
     });
 
-    const questions = await adapter.fetchUnansweredQuestions({
+    const result = await adapter.fetchUnansweredQuestions({
       from: new Date("2026-07-13T14:00:00.000Z"),
       to: new Date("2026-07-13T14:05:00.000Z"),
     });
 
-    expect(questions.map((question) => question.externalMessageId)).toEqual([
+    expect(result.questions.map((question) => question.externalMessageId)).toEqual([
       "question-a",
       "question-b",
     ]);
   });
 
-  it("imports resolvable questions when another Commerce lookup fails", async () => {
+  it("returns unresolved Trading identities beside resolvable questions", async () => {
     const fetchSpy = vi.fn(async (url: string) => {
       if (String(url).includes("/commerce/message/v1/conversation")) {
         const listingId = new URL(String(url)).searchParams.get("reference_id");
@@ -184,14 +187,35 @@ describe("HttpEbayMessagingAdapter", () => {
       env: () => ({ EBAY_BASE_URL: BASE }),
     });
 
-    const questions = await adapter.fetchUnansweredQuestions({
+    const result = await adapter.fetchUnansweredQuestions({
       from: new Date("2026-07-12T14:05:00.000Z"),
       to: new Date("2026-07-13T14:05:00.000Z"),
     });
 
-    expect(questions.map((question) => question.externalMessageId)).toEqual([
-      "question-valid",
-    ]);
+    expect(result).toMatchObject({
+      questions: [
+        {
+          externalMessageId: "question-valid",
+          externalConversationId: "conversation-valid",
+        },
+      ],
+      unresolved: [
+        {
+          question: {
+            externalMessageId: "question-unresolved",
+            externalParentId: "question-unresolved",
+            externalListingId: "listing-unresolved",
+            externalBuyerId: "buyer-unresolved",
+            body: "Is this complete?",
+            subject: null,
+            createdAt: "2026-07-13T14:01:00.000Z",
+            resolutionWindowFrom: "2026-07-12T14:05:00.000Z",
+            observedCursorAt: "2026-07-13T14:05:00.000Z",
+          },
+          error: "Failed to resolve eBay Message API conversation (HTTP 503)",
+        },
+      ],
+    });
   });
 
   it("preserves digit-only provider identifiers as exact strings", async () => {
@@ -231,12 +255,12 @@ describe("HttpEbayMessagingAdapter", () => {
       env: () => ({ EBAY_BASE_URL: BASE }),
     });
 
-    const questions = await adapter.fetchUnansweredQuestions({
+    const result = await adapter.fetchUnansweredQuestions({
       from: new Date("2026-07-13T14:00:00.000Z"),
       to: new Date("2026-07-13T14:05:00.000Z"),
     });
 
-    expect(questions[0]).toMatchObject({
+    expect(result.questions[0]).toMatchObject({
       externalMessageId: questionId,
       externalParentId: questionId,
       externalListingId: listingId,
@@ -312,12 +336,15 @@ describe("HttpEbayMessagingAdapter", () => {
         from: new Date("2026-07-13T14:00:00.000Z"),
         to: new Date("2026-07-13T14:05:00.000Z"),
       }),
-    ).resolves.toMatchObject([
-      {
-        externalMessageId: "question-older",
-        externalConversationId: "conversation-shared",
-      },
-    ]);
+    ).resolves.toMatchObject({
+      questions: [
+        {
+          externalMessageId: "question-older",
+          externalConversationId: "conversation-shared",
+        },
+      ],
+      unresolved: [],
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
@@ -369,12 +396,15 @@ describe("HttpEbayMessagingAdapter", () => {
         from: new Date("2026-07-13T14:00:00.000Z"),
         to: new Date("2026-07-13T14:05:00.000Z"),
       }),
-    ).resolves.toMatchObject([
-      {
-        externalMessageId: "question-second-page",
-        externalConversationId: "conversation-second-page",
-      },
-    ]);
+    ).resolves.toMatchObject({
+      questions: [
+        {
+          externalMessageId: "question-second-page",
+          externalConversationId: "conversation-second-page",
+        },
+      ],
+      unresolved: [],
+    });
     expect(conversationUrls).toHaveLength(2);
     expect(conversationUrls[0].searchParams.get("limit")).toBe("10");
     expect(conversationUrls[1].searchParams.get("offset")).toBe("10");
