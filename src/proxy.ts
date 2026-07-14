@@ -22,6 +22,7 @@ const isPublic = createRouteMatcher([
   "/signup(.*)",
   "/api/health",
   "/api/ebay/account-deletion",
+  "/api/cron/inbox-sync",
   "/dev(.*)",
 ]);
 
