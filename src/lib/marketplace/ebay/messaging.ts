@@ -279,7 +279,7 @@ export class HttpEbayMessagingAdapter
       `${baseUrl.replace(/\/$/, "")}/commerce/message/v1/conversation`,
     );
     url.searchParams.set("conversation_type", "FROM_MEMBERS");
-    url.searchParams.set("conversationStatus", "ACTIVE");
+    url.searchParams.set("conversation_status", "ACTIVE");
     url.searchParams.set("reference_type", "LISTING");
     url.searchParams.set("reference_id", input.externalListingId);
     url.searchParams.set("start_time", input.from.toISOString());

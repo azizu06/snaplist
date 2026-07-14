@@ -20,8 +20,8 @@ describe("HttpEbayMessagingAdapter", () => {
         const parsed = new URL(String(url));
         expect(parsed.searchParams.get("reference_id")).toBe("110011001100");
         expect(parsed.searchParams.get("conversation_type")).toBe("FROM_MEMBERS");
-        expect(parsed.searchParams.get("conversationStatus")).toBe("ACTIVE");
-        expect(parsed.searchParams.has("conversation_status")).toBe(false);
+        expect(parsed.searchParams.get("conversation_status")).toBe("ACTIVE");
+        expect(parsed.searchParams.has("conversationStatus")).toBe(false);
         return Response.json({
           conversations: [
             {
