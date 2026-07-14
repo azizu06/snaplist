@@ -31,6 +31,7 @@ export interface UserTokenProviderOptions {
   now?: () => number;
   /** Required when the caller uses a service-role client (background sync). */
   userId?: string;
+  scheduled?: boolean;
 }
 
 export class UserTokenProvider implements EbayTokenProvider {
@@ -38,6 +39,7 @@ export class UserTokenProvider implements EbayTokenProvider {
   private readonly readEnv: () => Record<string, string | undefined>;
   private readonly now: () => number;
   private readonly userId?: string;
+  private readonly scheduled: boolean;
 
   constructor(
     /** The request's USER-SCOPED client — RLS pins the connection row. */
@@ -48,6 +50,7 @@ export class UserTokenProvider implements EbayTokenProvider {
     this.readEnv = options.env ?? (() => process.env);
     this.now = options.now ?? Date.now;
     this.userId = options.userId;
+    this.scheduled = options.scheduled ?? false;
   }
 
   async getAccessToken(): Promise<string> {
@@ -56,6 +59,7 @@ export class UserTokenProvider implements EbayTokenProvider {
       this.supabase,
       env,
       this.userId,
+      this.scheduled,
     );
     if (!connection) {
       throw new Error(
@@ -130,6 +134,7 @@ export class UserTokenProvider implements EbayTokenProvider {
       token,
       expiresAt,
       env,
+      this.scheduled,
     );
     return token;
   }

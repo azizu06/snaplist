@@ -39,7 +39,19 @@ type Env = Record<string, string | undefined>;
 export async function getEbayConnectionStatus(
   supabase: SupabaseClient,
   userId?: string,
+  scheduled = false,
 ): Promise<EbayConnectionStatus> {
+  if (scheduled) {
+    if (!userId) throw new Error("A scheduled eBay connection read needs a tenant");
+    const { data, error } = await supabase.rpc("read_scheduled_ebay_connection", {
+      p_user_id: userId,
+    });
+    if (error) throw new Error(`Failed to read eBay connection: ${error.message}`);
+    const row = data as Pick<ConnectionRow, "ebay_username"> | null;
+    return row
+      ? { connected: true, ebayUsername: row.ebay_username ?? null }
+      : { connected: false, ebayUsername: null };
+  }
   let query = supabase
     .from("ebay_connections")
     .select("ebay_username");
@@ -101,14 +113,28 @@ export async function getDecryptedConnection(
   supabase: SupabaseClient,
   env: Env = process.env,
   userId?: string,
+  scheduled = false,
 ): Promise<DecryptedConnection | null> {
-  let query = supabase
-    .from("ebay_connections")
-    .select(
-      "user_id, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
-    );
-  if (userId) query = query.eq("user_id", userId);
-  const { data, error } = await query.maybeSingle<ConnectionRow>();
+  let data: ConnectionRow | null;
+  let error: { message: string } | null;
+  if (scheduled) {
+    if (!userId) throw new Error("A scheduled eBay connection read needs a tenant");
+    const result = await supabase.rpc("read_scheduled_ebay_connection", {
+      p_user_id: userId,
+    });
+    data = result.data as ConnectionRow | null;
+    error = result.error;
+  } else {
+    let query = supabase
+      .from("ebay_connections")
+      .select(
+        "user_id, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
+      );
+    if (userId) query = query.eq("user_id", userId);
+    const result = await query.maybeSingle<ConnectionRow>();
+    data = result.data;
+    error = result.error;
+  }
   if (error) throw new Error(`Failed to read eBay connection: ${error.message}`);
   if (!data) return null;
 
@@ -133,20 +159,46 @@ export async function updateCachedAccessToken(
   accessToken: string,
   expiresAt: number,
   env: Env = process.env,
+  scheduled = false,
 ): Promise<void> {
   const key = parseEncryptionKey(env.EBAY_TOKEN_ENCRYPTION_KEY);
-  const { error } = await supabase
-    .from("ebay_connections")
-    .update({
-      access_token_enc: encryptSecret(accessToken, key),
-      access_token_expires_at: new Date(expiresAt).toISOString(),
-    })
-    .eq("user_id", userId);
+  const payload = {
+    p_access_token_enc: encryptSecret(accessToken, key),
+    p_access_token_expires_at: new Date(expiresAt).toISOString(),
+  };
+  const { error } = scheduled
+    ? await supabase.rpc("update_scheduled_ebay_access_token_cache", {
+        p_user_id: userId,
+        ...payload,
+      })
+    : await supabase.rpc("update_ebay_access_token_cache", payload);
   if (error) {
     // Cache write failure is non-fatal — the caller already holds a valid
     // access token; the next call just refreshes again.
     console.warn(`[ebay] failed to cache refreshed access token: ${error.message}`);
   }
+}
+
+export async function listScheduledEbayConnectionUserIds(
+  supabase: SupabaseClient,
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc(
+    "list_scheduled_ebay_connection_user_ids",
+  );
+  if (error) {
+    throw new Error(`Failed to list eBay connections: ${error.message}`);
+  }
+  return (data ?? []).flatMap((row: unknown) => {
+    if (typeof row === "string") return [row];
+    if (
+      row &&
+      typeof row === "object" &&
+      typeof (row as { user_id?: unknown }).user_id === "string"
+    ) {
+      return [(row as { user_id: string }).user_id];
+    }
+    return [];
+  });
 }
 
 /**

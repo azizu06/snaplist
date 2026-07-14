@@ -982,6 +982,58 @@ describe("SupabaseInboxSyncRepository", () => {
     });
   });
 
+  it("uses scheduler read RPCs instead of service-role table reads", async () => {
+    const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
+      if (name === "begin_scheduled_ebay_message_write") {
+        return {
+          data: "22222222-2222-4222-8222-222222222222",
+          error: null,
+        };
+      }
+      if (
+        name === "read_scheduled_ebay_inbox" &&
+        args?.p_operation === "cursor"
+      ) {
+        return {
+          data: { cursor_at: "2026-07-13T12:00:00.000Z" },
+          error: null,
+        };
+      }
+      if (
+        name === "read_scheduled_ebay_inbox" &&
+        args?.p_operation === "pending_questions"
+      ) {
+        return { data: [], error: null };
+      }
+      return { data: null, error: null };
+    });
+    const from = vi.fn(() => {
+      throw new Error("scheduled reads must not access tables directly");
+    });
+    const client = { rpc, from } as unknown as SupabaseClient;
+    const repository = new SupabaseInboxSyncRepository(client, USER_ID, {
+      client,
+      scheduled: true,
+    });
+
+    await expect(repository.getCursor()).resolves.toEqual(
+      new Date("2026-07-13T12:00:00.000Z"),
+    );
+    await expect(repository.listPendingQuestions()).resolves.toEqual([]);
+
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith("read_scheduled_ebay_inbox", {
+      p_user_id: USER_ID,
+      p_operation: "cursor",
+      p_payload: {},
+    });
+    expect(rpc).toHaveBeenCalledWith("read_scheduled_ebay_inbox", {
+      p_user_id: USER_ID,
+      p_operation: "pending_questions",
+      p_payload: {},
+    });
+  });
+
   it("pins every write in one sync repository to one account generation", async () => {
     const generation = "33333333-3333-4333-8333-333333333333";
     const rpc = vi.fn(async (name: string) => ({

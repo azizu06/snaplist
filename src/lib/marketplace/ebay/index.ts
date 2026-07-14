@@ -43,6 +43,7 @@ export {
   saveEbayConnection,
   deleteEbayConnection,
   eraseEbayUserData,
+  listScheduledEbayConnectionUserIds,
   type EbayConnectionStatus,
 } from "./connections";
 export {
@@ -100,11 +101,19 @@ export async function createEbayAdapterForUser(
 export async function createEbayMessagingAdapterForUser(
   supabase: SupabaseClient,
   userId?: string,
+  options: { scheduled?: boolean } = {},
 ): Promise<MarketplaceMessagingAdapter> {
-  const { connected } = await getEbayConnectionStatus(supabase, userId);
+  const { connected } = await getEbayConnectionStatus(
+    supabase,
+    userId,
+    options.scheduled,
+  );
   if (connected) {
     return new HttpEbayMessagingAdapter({
-      tokenProvider: new UserTokenProvider(supabase, { userId }),
+      tokenProvider: new UserTokenProvider(supabase, {
+        userId,
+        scheduled: options.scheduled,
+      }),
     });
   }
   if (!hasEbayMessagingSandboxFallback(userId)) {

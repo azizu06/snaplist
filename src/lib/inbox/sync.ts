@@ -13,6 +13,7 @@ import {
   applyScheduledEbayMessageWrite,
   beginEbayMessageWrite,
   beginScheduledEbayMessageWrite,
+  readScheduledEbayInbox,
 } from "./ebay-server-write";
 import { messageRowSchema, type MessageRow, type ReplyGrounding } from "./types";
 
@@ -343,6 +344,18 @@ interface ListingRow {
   description: string | null;
 }
 
+interface PendingQuestionRow {
+  external_message_id: string;
+  external_parent_id: string;
+  external_listing_id: string;
+  external_buyer_id: string | null;
+  body: string | null;
+  subject: string | null;
+  external_created_at: string | null;
+  resolution_window_from: string;
+  observed_cursor_at: string;
+}
+
 /** Supabase implementation; EVERY statement is explicitly pinned to userId. */
 export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   private writeGeneration: Promise<string> | null = null;
@@ -384,11 +397,33 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
         );
   }
 
+  private async readScheduled<T>(
+    operation: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<T> {
+    return readScheduledEbayInbox<T>(
+      this.writeTarget.client,
+      this.userId,
+      operation,
+      payload,
+    );
+  }
+
   async getCursor(): Promise<Date | null> {
+    if (this.writeTarget.scheduled) {
+      const data = await this.readScheduled<{ cursor_at: string | null } | null>(
+        "cursor",
+      );
+      if (!data?.cursor_at) return null;
+      const cursor = new Date(data.cursor_at);
+      return Number.isNaN(cursor.getTime()) ? null : cursor;
+    }
+    const generation = await this.getWriteGeneration();
     const { data, error } = await this.supabase
       .from("ebay_message_sync_state")
       .select("cursor_at")
       .eq("user_id", this.userId)
+      .eq("ebay_account_generation", generation)
       .maybeSingle();
     if (error) throw new Error(`Failed to read inbox sync cursor: ${error.message}`);
     if (!data?.cursor_at) return null;
@@ -419,20 +454,25 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async listPendingQuestions(): Promise<PendingMarketplaceQuestion[]> {
-    const { data, error } = await this.supabase
-      .from("ebay_unresolved_questions")
-      .select(
-        "external_message_id, external_parent_id, external_listing_id, external_buyer_id, body, subject, external_created_at, resolution_window_from, observed_cursor_at",
-      )
-      .eq("user_id", this.userId)
-      .eq("resolution_status", "pending")
-      .order("last_resolution_attempted_at", { ascending: true })
-      .order("external_created_at", { ascending: true })
-      .limit(50);
+    const generation = await this.getWriteGeneration();
+    const result = this.writeTarget.scheduled
+      ? { data: await this.readScheduled<unknown[]>("pending_questions"), error: null }
+      : await this.supabase
+          .from("ebay_unresolved_questions")
+          .select(
+            "external_message_id, external_parent_id, external_listing_id, external_buyer_id, body, subject, external_created_at, resolution_window_from, observed_cursor_at",
+          )
+          .eq("user_id", this.userId)
+          .eq("ebay_account_generation", generation)
+          .eq("resolution_status", "pending")
+          .order("last_resolution_attempted_at", { ascending: true })
+          .order("external_created_at", { ascending: true })
+          .limit(50);
+    const { data, error } = result;
     if (error) {
       throw new Error(`Failed to list unresolved eBay questions: ${error.message}`);
     }
-    return (data ?? []).map((row) => ({
+    return ((data ?? []) as PendingQuestionRow[]).map((row) => ({
       marketplace: "ebay" as const,
       externalMessageId: row.external_message_id as string,
       externalParentId: row.external_parent_id as string,
@@ -503,10 +543,15 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async countPendingQuestions(): Promise<number> {
+    if (this.writeTarget.scheduled) {
+      return this.readScheduled<number>("pending_count");
+    }
+    const generation = await this.getWriteGeneration();
     const { count, error } = await this.supabase
       .from("ebay_unresolved_questions")
       .select("external_message_id", { count: "exact", head: true })
       .eq("user_id", this.userId)
+      .eq("ebay_account_generation", generation)
       .eq("resolution_status", "pending");
     if (error) {
       throw new Error(`Failed to count unresolved eBay questions: ${error.message}`);
@@ -515,10 +560,17 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   }
 
   async listActionableQuestions(): Promise<ActionableQuestionIdentity[]> {
+    if (this.writeTarget.scheduled) {
+      return this.readScheduled<ActionableQuestionIdentity[]>(
+        "actionable_questions",
+      );
+    }
+    const generation = await this.getWriteGeneration();
     const { data, error } = await this.supabase
       .from("messages")
       .select("id, external_message_id, external_created_at")
       .eq("user_id", this.userId)
+      .eq("ebay_account_generation", generation)
       .eq("marketplace", "ebay")
       .eq("direction", "inbound")
       .in("status", ["new", "drafting", "drafted", "draft_failed", "sent"])
@@ -533,6 +585,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       .from("messages")
       .select("reply_to")
       .eq("user_id", this.userId)
+      .eq("ebay_account_generation", generation)
       .eq("marketplace", "ebay")
       .eq("direction", "outbound")
       .eq("delivery_status", "delivered")
@@ -589,6 +642,33 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
   async findActiveListing(
     externalListingId: string,
   ): Promise<SyncListingContext | null> {
+    if (this.writeTarget.scheduled) {
+      const data = await this.readScheduled<{
+        item_id: string;
+        listing_id: string;
+        title: string | null;
+        description: string | null;
+        attributes: unknown;
+        condition: string | null;
+      } | null>("active_listing", { external_listing_id: externalListingId });
+      if (!data) return null;
+      const parsed = extractedAttributesSchema.safeParse(data.attributes ?? {});
+      const attributes = parsed.success ? parsed.data : {};
+      if (!attributes.condition && data.condition) {
+        attributes.condition = data.condition;
+      }
+      return {
+        itemId: data.item_id,
+        listingId: data.listing_id,
+        title: data.title,
+        grounding: {
+          attributes,
+          listing: data.title
+            ? { title: data.title, description: data.description ?? "" }
+            : null,
+        },
+      };
+    }
     const { data: listing, error } = await this.supabase
       .from("listings")
       .select("id, item_id, title, description")
@@ -659,10 +739,43 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
 
   async listDraftCandidates(): Promise<DraftCandidate[]> {
     const staleBefore = new Date(Date.now() - DRAFT_CLAIM_LEASE_MS).toISOString();
+    if (this.writeTarget.scheduled) {
+      const data = await this.readScheduled<
+        Array<{
+          message: unknown;
+          attributes: unknown;
+          condition: string | null;
+          listing_title: string | null;
+          listing_description: string | null;
+        }>
+      >("draft_candidates", { stale_before: staleBefore });
+      return data.map((row) => {
+        const message = messageRowSchema.parse(row.message);
+        const parsed = extractedAttributesSchema.safeParse(row.attributes ?? {});
+        const attributes = parsed.success ? parsed.data : {};
+        if (!attributes.condition && row.condition) {
+          attributes.condition = row.condition;
+        }
+        return {
+          message,
+          grounding: {
+            attributes,
+            listing: row.listing_title
+              ? {
+                  title: row.listing_title,
+                  description: row.listing_description ?? "",
+                }
+              : null,
+          },
+        };
+      });
+    }
+    const generation = await this.getWriteGeneration();
     const { data, error } = await this.supabase
       .from("messages")
       .select("*")
       .eq("user_id", this.userId)
+      .eq("ebay_account_generation", generation)
       .eq("marketplace", "ebay")
       .eq("direction", "inbound")
       .or(

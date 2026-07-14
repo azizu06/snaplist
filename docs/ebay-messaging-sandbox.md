@@ -49,6 +49,10 @@ See eBay's official [traditional API OAuth guidance](https://developer.ebay.com/
 An older connection that predates the Message API scope must reconnect before
 this runbook.
 
+Legacy encrypted grants that lack both a verified eBay user ID and username are
+quarantined during migration together with their transactional messaging state.
+The seller must reconnect before messaging can resume.
+
 Attachments are deliberately excluded (#134). The RTQ reference requires an
 image URL to be uploaded to eBay Picture Services by a separate call or web
 flow, while Commerce `sendMessage` has its own hosted-media model. #133 sends

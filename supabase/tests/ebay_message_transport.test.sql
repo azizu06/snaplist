@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(90);
+select extensions.plan(112);
 
 create function pg_temp.apply_ebay_message_write(
   p_operation text,
@@ -1966,6 +1966,472 @@ select extensions.is(
   public.erase_ebay_user_data('deletion-user-a', 'deletion_seller_a'),
   0,
   'account deletion is idempotent after all matched data is erased'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'ebay_connections'
+      and cmd in ('INSERT', 'UPDATE')
+  ),
+  0,
+  'authenticated clients have no direct connection insert or update policy'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"direct-policy-tenant","role":"authenticated"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.ebay_connections (
+      user_id, refresh_token_enc, account_generation
+    ) values (
+      'direct-policy-tenant',
+      'v1.copied-ciphertext',
+      gen_random_uuid()
+    )
+  $$,
+  '42501',
+  null,
+  'an authenticated browser cannot directly create its own connection row'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-b","role":"authenticated"}',
+  true
+);
+
+update public.ebay_connections
+set scopes = array['forged-browser-scope']::text[]
+where user_id = 'message-tenant-b';
+
+reset role;
+
+select extensions.is(
+  (
+    select scopes
+    from public.ebay_connections
+    where user_id = 'message-tenant-b'
+  ),
+  array['scope-b']::text[],
+  'an authenticated browser cannot directly mutate its connection row'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"message-tenant-b","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select extensions.lives_ok(
+  $$
+    select public.update_ebay_access_token_cache(
+      'v1.rpc-cached-access',
+      '2026-07-14T15:00:00Z'
+    )
+  $$,
+  'the tenant-derived RPC can update only the current access-token cache'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select access_token_enc
+    from public.ebay_connections
+    where user_id = 'message-tenant-b'
+  ),
+  'v1.rpc-cached-access',
+  'the constrained cache RPC persists the refreshed ciphertext'
+);
+
+select private.lock_ebay_messaging_account('unmappable-legacy-tenant');
+
+insert into public.ebay_connections (
+  user_id,
+  refresh_token_enc,
+  access_token_enc,
+  account_generation
+)
+select 'unmappable-legacy-tenant',
+       'v1.legacy-refresh',
+       'v1.legacy-access',
+       account.generation
+from private.ebay_messaging_account_generations account
+where account.user_id = 'unmappable-legacy-tenant';
+
+insert into public.messages (
+  id, user_id, direction, body, status, marketplace,
+  external_message_id, external_parent_id
+) values (
+  '96000000-0000-4000-8000-000000000001',
+  'unmappable-legacy-tenant',
+  'inbound',
+  'Legacy undeletable question',
+  'drafted',
+  'ebay',
+  'legacy-unmappable-question',
+  'legacy-unmappable-question'
+), (
+  '96000000-0000-4000-8000-000000000002',
+  'unmappable-legacy-tenant',
+  'inbound',
+  'Unrelated simulated message',
+  'new',
+  'simulated',
+  null,
+  null
+);
+
+insert into public.ebay_unresolved_questions (
+  user_id, external_message_id, external_parent_id, external_listing_id,
+  resolution_window_from, observed_cursor_at, last_resolution_attempted_at,
+  last_error
+) values (
+  'unmappable-legacy-tenant',
+  'legacy-unresolved',
+  'legacy-unresolved',
+  'legacy-listing',
+  '2026-07-13T12:00:00Z',
+  '2026-07-14T12:00:00Z',
+  '2026-07-14T12:00:00Z',
+  'legacy identity unavailable'
+);
+
+insert into public.ebay_message_sync_state (user_id, cursor_at)
+values ('unmappable-legacy-tenant', '2026-07-14T12:00:00Z');
+
+insert into public.notifications (
+  user_id, kind, title, source_message_id
+) values (
+  'unmappable-legacy-tenant',
+  'buyer_message',
+  'Legacy question',
+  '96000000-0000-4000-8000-000000000001'
+);
+
+select extensions.is(
+  private.quarantine_unmappable_ebay_connections(),
+  1,
+  'legacy grants without a verified seller identity are quarantined'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.ebay_connections
+    where user_id = 'unmappable-legacy-tenant'
+  ),
+  0,
+  'quarantine removes unmappable encrypted credentials'
+);
+
+select extensions.is(
+  (
+    select
+      (select count(*) from public.messages
+       where user_id = 'unmappable-legacy-tenant' and marketplace = 'ebay')
+      + (select count(*) from public.ebay_unresolved_questions
+         where user_id = 'unmappable-legacy-tenant')
+      + (select count(*) from public.ebay_message_sync_state
+         where user_id = 'unmappable-legacy-tenant')
+  )::integer,
+  0,
+  'quarantine removes transactional eBay messaging state'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.notifications
+    where user_id = 'unmappable-legacy-tenant'
+      and source_message_id = '96000000-0000-4000-8000-000000000001'
+  ),
+  0,
+  'quarantine removes notifications sourced from eBay messages'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where id = '96000000-0000-4000-8000-000000000002'
+      and marketplace = 'simulated'
+  ),
+  1,
+  'quarantine preserves unrelated simulated messages'
+);
+
+insert into public.items (id, user_id, attributes)
+values (
+  '97000000-0000-4000-8000-000000000001',
+  'generation-tenant',
+  '{}'
+);
+
+insert into public.listings (
+  id, user_id, item_id, platform, title, status, ebay_listing_id, ebay_status
+) values (
+  '98000000-0000-4000-8000-000000000001',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000001',
+  'ebay',
+  'Generation-bound listing',
+  'published',
+  'generation-listing',
+  'published'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select public.save_ebay_connection(
+  'generation-account-a',
+  'generation_seller_a',
+  'v1.generation-a-refresh',
+  'v1.generation-a-access',
+  '2026-07-14T15:00:00Z',
+  array['scope-a']::text[]
+);
+
+reset role;
+
+create temporary table ebay_account_generation_fixture (
+  account_name text primary key,
+  account_generation uuid not null
+) on commit drop;
+
+insert into ebay_account_generation_fixture
+select 'account-a', account_generation
+from public.ebay_connections
+where user_id = 'generation-tenant';
+
+insert into public.messages (
+  id, user_id, item_id, listing_id, direction, body, status, marketplace,
+  external_message_id, external_parent_id, external_listing_id,
+  external_created_at
+) values (
+  '99000000-0000-4000-8000-000000000001',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000001',
+  '98000000-0000-4000-8000-000000000001',
+  'inbound',
+  'Account A question',
+  'drafted',
+  'ebay',
+  'generation-question-a',
+  'generation-question-a',
+  'generation-listing',
+  '2026-07-14T14:00:00Z'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+select set_config(
+  'request.headers',
+  '{"apikey":"sb_secret_local_test"}',
+  true
+);
+
+select public.save_ebay_connection(
+  'generation-account-b',
+  'generation_seller_a',
+  'v1.generation-b-refresh',
+  'v1.generation-b-access',
+  '2026-07-14T16:00:00Z',
+  array['scope-b']::text[]
+);
+
+reset role;
+
+insert into ebay_account_generation_fixture
+select 'account-b', account_generation
+from public.ebay_connections
+where user_id = 'generation-tenant';
+
+select extensions.isnt(
+  (select account_generation from ebay_account_generation_fixture where account_name = 'account-a'),
+  (select account_generation from ebay_account_generation_fixture where account_name = 'account-b'),
+  'reconnecting a replacement seller account creates a distinct account generation'
+);
+
+insert into public.messages (
+  id, user_id, item_id, listing_id, direction, body, status, marketplace,
+  external_message_id, external_parent_id, external_listing_id,
+  external_created_at
+) values (
+  '99000000-0000-4000-8000-000000000002',
+  'generation-tenant',
+  '97000000-0000-4000-8000-000000000001',
+  '98000000-0000-4000-8000-000000000001',
+  'inbound',
+  'Account B question',
+  'new',
+  'ebay',
+  'generation-question-b',
+  'generation-question-b',
+  'generation-listing',
+  '2026-07-14T15:00:00Z'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.is(
+  public.erase_ebay_user_data('generation-account-a', 'generation_seller_a'),
+  1,
+  'a historical seller deletion targets its matched account generation'
+);
+
+reset role;
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where id = '99000000-0000-4000-8000-000000000001'
+  ),
+  0,
+  'historical account deletion removes only account A messaging state'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where id = '99000000-0000-4000-8000-000000000002'
+  ),
+  1,
+  'historical account deletion preserves replacement account B messages'
+);
+
+select extensions.results_eq(
+  $$
+    select connection.ebay_user_id, account.seller_erased
+    from public.ebay_connections connection
+    join private.ebay_messaging_account_generations account
+      on account.user_id = connection.user_id
+      and account.generation = connection.account_generation
+    where connection.user_id = 'generation-tenant'
+  $$,
+  $$values ('generation-account-b'::text, false)$$,
+  'historical account deletion preserves account B credentials and current generation'
+);
+
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select extensions.is(
+  public.read_scheduled_ebay_inbox(
+    'generation-tenant',
+    'active_listing',
+    '{"external_listing_id":"sandbox-item-b","user_id":"message-tenant-b"}'
+  ),
+  null::jsonb,
+  'scheduler listing reads cannot be redirected to another tenant by payload filters'
+);
+
+select extensions.ok(
+  exists (
+    select 1
+    from public.list_scheduled_ebay_connection_user_ids()
+    where user_id = 'generation-tenant'
+  ),
+  'the scheduler connection-list RPC returns the current connected tenant'
+);
+
+select extensions.is(
+  public.read_scheduled_ebay_connection('generation-tenant')->>'ebay_user_id',
+  'generation-account-b',
+  'the scheduler connection RPC returns only the selected current account'
+);
+
+select public.apply_scheduled_ebay_message_write(
+  'generation-tenant',
+  'sync_mark_success',
+  jsonb_build_object(
+    'at', '2026-07-14T16:05:00Z',
+    'pending_resolution_count', 0
+  ),
+  public.begin_scheduled_ebay_message_write('generation-tenant')
+);
+
+select extensions.is(
+  public.read_scheduled_ebay_inbox(
+    'generation-tenant',
+    'cursor',
+    '{"user_id":"message-tenant-b"}'::jsonb
+  )->>'cursor_at',
+  '2026-07-14T16:05:00+00:00',
+  'scheduler cursor reads stay pinned to the selected account generation'
+);
+
+select extensions.is(
+  jsonb_array_length(public.read_scheduled_ebay_inbox(
+    'generation-tenant',
+    'actionable_questions',
+    '{"user_id":"message-tenant-b"}'::jsonb
+  )),
+  1,
+  'scheduler message reads expose only current-generation actionable questions'
+);
+
+select extensions.is(
+  jsonb_array_length(public.read_scheduled_ebay_inbox(
+    'generation-tenant',
+    'draft_candidates',
+    '{"stale_before":"2026-07-14T16:05:00Z","user_id":"message-tenant-b"}'::jsonb
+  )),
+  1,
+  'scheduler draft reads join only the selected tenant messages items and listings'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"generation-tenant","role":"authenticated"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$
+    select public.read_scheduled_ebay_inbox(
+      'generation-tenant',
+      'cursor',
+      '{}'::jsonb
+    )
+  $$,
+  '42501',
+  'permission denied for function read_scheduled_ebay_inbox',
+  'an authenticated tenant cannot invoke scheduler read authority'
 );
 
 select * from extensions.finish();

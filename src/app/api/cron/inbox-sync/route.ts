@@ -4,6 +4,7 @@ import { syncInboxForSeller, SupabaseInboxSyncRepository } from "@/lib/inbox/syn
 import {
   createEbayMessagingAdapterForUser,
   ebayMessagingSyncUserIds,
+  listScheduledEbayConnectionUserIds,
 } from "@/lib/marketplace/ebay";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -26,26 +27,24 @@ async function handle(request: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const { data: connections, error } = await admin
-    .from("ebay_connections")
-    .select("user_id")
-    .order("user_id")
-    .limit(50);
-  if (error) {
+  let connectedUserIds: string[];
+  try {
+    connectedUserIds = await listScheduledEbayConnectionUserIds(admin);
+  } catch (error) {
     logServerError("cron.inbox-sync.connections", error);
     return NextResponse.json({ error: "Inbox sync failed." }, { status: 500 });
   }
 
-  const userIds = ebayMessagingSyncUserIds(
-    (connections ?? []).map((connection) => connection.user_id as string),
-  );
+  const userIds = ebayMessagingSyncUserIds(connectedUserIds);
   let synced = 0;
   let failed = 0;
   let imported = 0;
   for (const userId of userIds) {
     try {
       const summary = await syncInboxForSeller({
-        adapter: await createEbayMessagingAdapterForUser(admin, userId),
+        adapter: await createEbayMessagingAdapterForUser(admin, userId, {
+          scheduled: true,
+        }),
         repository: new SupabaseInboxSyncRepository(admin, userId, {
           client: admin,
           scheduled: true,

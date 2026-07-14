@@ -69,3 +69,20 @@ export async function applyScheduledEbayMessageWrite<T>(
   }
   return data as T;
 }
+
+export async function readScheduledEbayInbox<T>(
+  supabase: SupabaseClient,
+  userId: string,
+  operation: string,
+  payload: Record<string, unknown> = {},
+): Promise<T> {
+  const { data, error } = await supabase.rpc("read_scheduled_ebay_inbox", {
+    p_user_id: userId,
+    p_operation: operation,
+    p_payload: payload,
+  });
+  if (error) {
+    throw new Error(`Failed to read scheduled eBay inbox: ${error.message}`);
+  }
+  return data as T;
+}

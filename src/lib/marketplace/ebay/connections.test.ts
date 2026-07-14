@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { eraseEbayUserData, saveEbayConnection } from "./connections";
+import {
+  eraseEbayUserData,
+  saveEbayConnection,
+  updateCachedAccessToken,
+} from "./connections";
 
 const ENCRYPTION_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
@@ -32,6 +36,47 @@ describe("saveEbayConnection", () => {
       p_access_token_expires_at: "2026-07-14T12:00:00.000Z",
       p_scopes: ["scope-a", "scope-b"],
     });
+  });
+
+  it("caches foreground access tokens through the tenant-derived RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const client = { rpc } as unknown as SupabaseClient;
+
+    await updateCachedAccessToken(
+      client,
+      "ignored-application-tenant",
+      "refreshed-access-token",
+      Date.parse("2026-07-14T14:00:00Z"),
+      ENCRYPTION_ENV,
+    );
+
+    expect(rpc).toHaveBeenCalledWith("update_ebay_access_token_cache", {
+      p_access_token_enc: expect.stringMatching(/^v1\./),
+      p_access_token_expires_at: "2026-07-14T14:00:00.000Z",
+    });
+  });
+
+  it("caches scheduled access tokens through the constrained scheduler RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const client = { rpc } as unknown as SupabaseClient;
+
+    await updateCachedAccessToken(
+      client,
+      "scheduled-tenant",
+      "refreshed-access-token",
+      Date.parse("2026-07-14T14:00:00Z"),
+      ENCRYPTION_ENV,
+      true,
+    );
+
+    expect(rpc).toHaveBeenCalledWith(
+      "update_scheduled_ebay_access_token_cache",
+      {
+        p_user_id: "scheduled-tenant",
+        p_access_token_enc: expect.stringMatching(/^v1\./),
+        p_access_token_expires_at: "2026-07-14T14:00:00.000Z",
+      },
+    );
   });
 });
 
