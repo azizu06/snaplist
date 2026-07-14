@@ -120,15 +120,18 @@ export async function POST(
     // Eligibility must be proven before upload intents become non-expiring
     // staged rows. Delivery rechecks the same durable invariant below.
     await assertSellerFollowUpEligible(transport.repository, message.id);
-    const attachmentClient = await createTenantServerClient();
-    const stagedPhotos = await stageOutboundPhotos({
-      supabase: attachmentClient,
-      userId,
-      conversationRootId: message.id,
-      deliveryRequestId: parsed.data.requestId,
-      photos,
-      requireExistingIntent: parsed.data.photos.length > 0,
-    });
+    // Preserve eBay's complete-set replay guard, including the empty set,
+    // without making text-only simulator follow-ups depend on attachment RPCs.
+    const stagedPhotos = message.marketplace === "ebay"
+      ? await stageOutboundPhotos({
+          supabase: await createTenantServerClient(),
+          userId,
+          conversationRootId: message.id,
+          deliveryRequestId: parsed.data.requestId,
+          photos,
+          requireExistingIntent: parsed.data.photos.length > 0,
+        })
+      : [];
     const outbound = await sendSellerFollowUp({
       ...transport,
       conversationId: message.id,

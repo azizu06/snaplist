@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { MessageAttachmentRow } from "@/lib/inbox";
 import { reconcileAttachments } from "./reconcile";
 
-function attachment(updatedAt: string, status: MessageAttachmentRow["delivery_status"]): MessageAttachmentRow {
+function attachment(
+  updatedAt: string,
+  status: MessageAttachmentRow["delivery_status"],
+  id = "11111111-1111-4111-8111-111111111111",
+): MessageAttachmentRow {
   return {
-    id: "11111111-1111-4111-8111-111111111111",
+    id,
     user_id: "user_a",
     conversation_root_id: "22222222-2222-4222-8222-222222222222",
     message_id: null,
@@ -33,5 +37,23 @@ describe("attachment state reconciliation", () => {
     const staleSnapshot = attachment("2026-07-14T12:01:00.000Z", "staged");
 
     expect(reconcileAttachments([completed], [staleSnapshot])).toEqual([completed]);
+  });
+
+  it("drops an attachment deleted from a complete refetch snapshot", () => {
+    const expired = attachment("2026-07-14T12:02:00.000Z", "uploading");
+
+    expect(reconcileAttachments([expired], [])).toEqual([]);
+  });
+
+  it("keeps unrelated attachments when merging one Realtime upsert", () => {
+    const existing = attachment(
+      "2026-07-14T12:01:00.000Z",
+      "delivered",
+      "44444444-4444-4444-8444-444444444444",
+    );
+    const inserted = attachment("2026-07-14T12:02:00.000Z", "staged");
+
+    expect(reconcileAttachments([existing], [inserted], "upsert"))
+      .toEqual([inserted, existing]);
   });
 });

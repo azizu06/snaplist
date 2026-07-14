@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  messageMarketplace: "ebay" as "ebay" | "simulated",
   createMessagingTransportForConversation: vi.fn(),
   createTenantServerClient: vi.fn(),
   stageOutboundPhotos: vi.fn(),
@@ -16,7 +17,7 @@ vi.mock("@/lib/supabase/server", () => ({
       maybeSingle: vi.fn(async () => ({
         data: {
           id: "11111111-1111-4111-8111-111111111111",
-          marketplace: "ebay",
+          marketplace: mocks.messageMarketplace,
         },
       })),
     };
@@ -61,6 +62,7 @@ import { POST } from "./route";
 describe("POST /api/inbox/[messageId]/send", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.messageMarketplace = "ebay";
     mocks.createMessagingTransportForConversation.mockRejectedValue(
       new Error("eBay account is disconnected"),
     );
@@ -97,5 +99,69 @@ describe("POST /api/inbox/[messageId]/send", () => {
     expect(mocks.createTenantServerClient).not.toHaveBeenCalled();
     expect(mocks.stageOutboundPhotos).not.toHaveBeenCalled();
     expect(mocks.sendCanonicalReply).not.toHaveBeenCalled();
+  });
+
+  it("keeps a text-only simulated reply independent of attachment infrastructure", async () => {
+    mocks.messageMarketplace = "simulated";
+    mocks.validateFormPhotos.mockResolvedValue([]);
+    mocks.createMessagingTransportForConversation.mockResolvedValue({
+      repository: {},
+      adapter: {},
+    });
+    mocks.sendCanonicalReply.mockResolvedValue({
+      id: "44444444-4444-4444-8444-444444444444",
+    });
+    const form = new FormData();
+    form.set("reply", "Yes, it includes the charger.");
+
+    const response = await POST(
+      new Request("http://localhost/api/inbox/message/send", {
+        method: "POST",
+        body: form,
+      }),
+      {
+        params: Promise.resolve({
+          messageId: "11111111-1111-4111-8111-111111111111",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createTenantServerClient).not.toHaveBeenCalled();
+    expect(mocks.stageOutboundPhotos).not.toHaveBeenCalled();
+    expect(mocks.sendCanonicalReply).toHaveBeenCalledWith(expect.objectContaining({
+      expectedPhotoIds: [],
+    }));
+  });
+
+  it("still binds an empty approved photo set for an eBay reply", async () => {
+    mocks.validateFormPhotos.mockResolvedValue([]);
+    mocks.createMessagingTransportForConversation.mockResolvedValue({
+      repository: {},
+      adapter: {},
+    });
+    mocks.sendCanonicalReply.mockResolvedValue({
+      id: "44444444-4444-4444-8444-444444444444",
+    });
+    const form = new FormData();
+    form.set("reply", "Yes, it includes the charger.");
+
+    const response = await POST(
+      new Request("http://localhost/api/inbox/message/send", {
+        method: "POST",
+        body: form,
+      }),
+      {
+        params: Promise.resolve({
+          messageId: "11111111-1111-4111-8111-111111111111",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createTenantServerClient).toHaveBeenCalledOnce();
+    expect(mocks.stageOutboundPhotos).toHaveBeenCalledWith(expect.objectContaining({
+      photos: [],
+    }));
   });
 });

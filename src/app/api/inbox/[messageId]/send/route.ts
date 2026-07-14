@@ -117,15 +117,19 @@ export async function POST(
       userId,
       message.marketplace,
     );
-    const attachmentClient = await createTenantServerClient();
-    const stagedPhotos = await stageOutboundPhotos({
-      supabase: attachmentClient,
-      userId,
-      conversationRootId: message.id,
-      deliveryRequestId: message.id,
-      photos,
-      requireExistingIntent: parsed.data.photos.length > 0,
-    });
+    // eBay must bind even an empty approved set to prevent a photo retry from
+    // downgrading to text-only. The simulator has no attachment lifecycle and
+    // must remain usable without tenant-server attachment infrastructure.
+    const stagedPhotos = message.marketplace === "ebay"
+      ? await stageOutboundPhotos({
+          supabase: await createTenantServerClient(),
+          userId,
+          conversationRootId: message.id,
+          deliveryRequestId: message.id,
+          photos,
+          requireExistingIntent: parsed.data.photos.length > 0,
+        })
+      : [];
     const outbound = await sendCanonicalReply({
       ...transport,
       messageId: message.id,

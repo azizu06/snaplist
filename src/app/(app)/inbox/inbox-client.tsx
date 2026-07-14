@@ -179,7 +179,7 @@ export function InboxClient({
     const upsertAttachment = (raw: unknown) => {
       const parsed = messageAttachmentRowSchema.safeParse(raw);
       if (!parsed.success) return;
-      setAttachments((prev) => reconcileAttachments(prev, [parsed.data]));
+      setAttachments((prev) => reconcileAttachments(prev, [parsed.data], "upsert"));
     };
 
     const channel = supabase
