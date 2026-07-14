@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { MessagePhotoConflictError, stageOutboundPhotos } from "./attachment-store";
+import {
+  createOutboundPhotoUploadIntents,
+  MessagePhotoConflictError,
+  stageOutboundPhotos,
+} from "./attachment-store";
 import type { MessageAttachmentRow } from "./types";
 
 const ROOT = "11111111-1111-4111-8111-111111111111";
@@ -131,5 +135,80 @@ describe("outbound photo idempotency", () => {
     })).resolves.toEqual([row()]);
     expect(upload).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the database cannot stage the complete reserved photo set", async () => {
+    const uploading = row({
+      delivery_status: "uploading",
+      upload_expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+    });
+    const query = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      order: vi.fn(async () => ({ data: [uploading], error: null })),
+    };
+    const rpc = vi.fn(async () => ({ data: [], error: null }));
+    const client = {
+      from: vi.fn(() => query),
+      rpc,
+      storage: { from: vi.fn() },
+    } as unknown as SupabaseClient;
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: REQUEST,
+      requireExistingIntent: true,
+      photos: [{
+        name: "condition.jpg",
+        type: "image/jpeg",
+        size: JPEG.length,
+        bytes: JPEG,
+        mediaType: "image/jpeg",
+        extension: "jpg",
+        storagePath: PATH,
+      }],
+    })).rejects.toThrow("complete photo set");
+    expect(rpc).toHaveBeenCalledWith("stage_message_photo_upload_intents", {
+      p_delivery_request_id: REQUEST,
+      p_attachment_ids: [uploading.id],
+    });
+  });
+
+  it("reports a delivery-identity guard rejection as an idempotency conflict", async () => {
+    const attachmentQuery = {
+      select: vi.fn(() => attachmentQuery),
+      eq: vi.fn(() => attachmentQuery),
+      order: vi.fn(async () => ({ data: [], error: null })),
+      insert: vi.fn(() => ({
+        select: vi.fn(async () => ({
+          data: null,
+          error: { code: "23514", message: "delivery already has an intent" },
+        })),
+      })),
+    };
+    const messageQuery = {
+      select: vi.fn(() => messageQuery),
+      eq: vi.fn(() => messageQuery),
+      or: vi.fn(() => messageQuery),
+      maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+    };
+    const client = {
+      from: vi.fn((table: string) => table === "messages" ? messageQuery : attachmentQuery),
+    } as unknown as SupabaseClient;
+
+    await expect(createOutboundPhotoUploadIntents({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: REQUEST,
+      photos: [{
+        name: "condition.jpg",
+        mediaType: "image/jpeg",
+        byteSize: JPEG.length,
+        contentSha256: createHash("sha256").update(JPEG).digest("hex"),
+      }],
+    })).rejects.toBeInstanceOf(MessagePhotoConflictError);
   });
 });

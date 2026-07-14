@@ -199,6 +199,151 @@ create trigger message_attachments_updated_at
   before update on public.message_attachments
   for each row execute function public.set_updated_at();
 
+create or replace function private.guard_message_photo_upload_intent()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_root_status text;
+begin
+  if new.direction <> 'outbound' or new.delivery_status <> 'uploading' then
+    return new;
+  end if;
+  select message.status
+  into v_root_status
+  from public.messages message
+  where message.id = new.conversation_root_id
+    and message.user_id = new.user_id
+    and message.direction = 'inbound'
+  for update;
+  if not found then
+    raise exception using errcode = '23514', message = 'Conversation root is unavailable';
+  end if;
+  if new.delivery_request_id = new.conversation_root_id::text then
+    if v_root_status <> 'drafted' then
+      raise exception using errcode = '23514', message = 'Canonical delivery already has an intent';
+    end if;
+  elsif exists (
+    select 1
+    from public.messages message
+    where message.user_id = new.user_id
+      and message.delivery_request_id = new.delivery_request_id
+  ) then
+    raise exception using errcode = '23514', message = 'Follow-up delivery already has an intent';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.guard_message_photo_upload_intent()
+  from public, anon, authenticated, service_role;
+
+create trigger message_attachments_guard_upload_intent
+  before insert on public.message_attachments
+  for each row execute function private.guard_message_photo_upload_intent();
+
+create or replace function private.serialize_ebay_followup_identity()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.marketplace = 'ebay'
+    and new.direction = 'outbound'
+    and new.reply_kind = 'followup'
+    and new.delivery_request_id is not null then
+    perform 1
+    from public.messages root
+    where root.id = new.reply_to
+      and root.user_id = new.user_id
+      and root.direction = 'inbound'
+    for update;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.serialize_ebay_followup_identity()
+  from public, anon, authenticated, service_role;
+
+create trigger messages_serialize_ebay_followup_identity
+  before insert on public.messages
+  for each row execute function private.serialize_ebay_followup_identity();
+
+create or replace function public.stage_message_photo_upload_intents(
+  p_delivery_request_id text,
+  p_attachment_ids uuid[]
+)
+returns setof public.message_attachments
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+  v_expected integer := cardinality(p_attachment_ids);
+  v_locked integer;
+  v_total integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+  if v_expected is null or v_expected < 1 then
+    raise exception using errcode = '23514', message = 'Photo intent set is required';
+  end if;
+  select count(*)
+  into v_total
+  from public.message_attachments attachment
+  where attachment.user_id = v_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.direction = 'outbound';
+  select count(*)
+  into v_locked
+  from (
+    select attachment.id
+    from public.message_attachments attachment
+    where attachment.user_id = v_user_id
+      and attachment.delivery_request_id = p_delivery_request_id
+      and attachment.direction = 'outbound'
+      and attachment.id = any(p_attachment_ids)
+      and attachment.delivery_status in ('uploading', 'staged')
+    for update
+  ) locked;
+  if v_total <> v_expected or v_locked <> v_expected then
+    raise exception using errcode = '23514', message = 'Complete photo intent set is unavailable';
+  end if;
+  update public.message_attachments attachment
+  set delivery_status = 'staged',
+      upload_expires_at = null
+  where attachment.user_id = v_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.id = any(p_attachment_ids)
+    and attachment.delivery_status = 'uploading';
+  return query
+  select attachment.*
+  from public.message_attachments attachment
+  where attachment.user_id = v_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.id = any(p_attachment_ids)
+    and attachment.delivery_status = 'staged'
+  order by attachment.position;
+end;
+$$;
+
+revoke all on function public.stage_message_photo_upload_intents(text, uuid[])
+  from public, anon, service_role;
+grant execute on function public.stage_message_photo_upload_intents(text, uuid[])
+  to authenticated;
+
 -- Complete the already-acknowledged provider write and expose its attachments
 -- in one transaction. This delegates the message lifecycle to #140's exact
 -- generation/attempt checks, then links every staged provider reference before

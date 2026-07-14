@@ -7,9 +7,11 @@ import {
   hasEbayMessagingSandboxFallback,
 } from "@/lib/marketplace/ebay";
 import { createClient } from "@/lib/supabase/server";
-import { serverErrorJson } from "@/lib/api/errors";
+import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { cleanupExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
 
 /**
  * Cookie-authenticated, rate-limited foreground refresh. Disconnected sellers
@@ -22,6 +24,11 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const limited = await enforceRateLimit(request, userId);
   if (limited) return limited;
+  try {
+    await cleanupExpiredMessagePhotoUploads(createAdminClient());
+  } catch (error) {
+    logServerError("inbox.sync.photo-cleanup", error);
+  }
   const supabase = await createClient();
   try {
     const { connected } = await getEbayConnectionStatus(supabase, userId);

@@ -56,14 +56,23 @@ export async function stageOutboundPhotos(input: {
       throw new MessagePhotoConflictError();
     }
     if (existing.some((row) => row.delivery_status === "uploading")) {
-      const { error } = await input.supabase
-        .from("message_attachments")
-        .update({ delivery_status: "staged", upload_expires_at: null })
-        .eq("user_id", input.userId)
-        .eq("delivery_request_id", input.deliveryRequestId)
-        .eq("delivery_status", "uploading");
+      const { data, error } = await input.supabase.rpc(
+        "stage_message_photo_upload_intents",
+        {
+          p_delivery_request_id: input.deliveryRequestId,
+          p_attachment_ids: existing.map((row) => row.id),
+        },
+      );
       if (error) throw new Error(`Failed to finalize photos: ${error.message}`);
-      return listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
+      const staged = (data ?? []).map((row: unknown) => messageAttachmentRowSchema.parse(row));
+      if (
+        staged.length !== existing.length ||
+        staged.some((row) => row.delivery_status !== "staged") ||
+        !deliveryPhotosMatch(staged, input.photos, input.conversationRootId)
+      ) {
+        throw new Error("Failed to finalize the complete photo set");
+      }
+      return staged;
     }
     return existing;
   }
@@ -210,6 +219,7 @@ export async function createOutboundPhotoUploadIntents(input: {
     .insert(rows)
     .select("*");
   if (!error) return (data ?? []).map((row) => messageAttachmentRowSchema.parse(row));
+  if (error.code === "23514") throw new MessagePhotoConflictError();
   if (error.code !== "23505") throw new Error(`Failed to create photo upload: ${error.message}`);
   const raced = await listDeliveryPhotos(input.supabase, input.userId, input.deliveryRequestId);
   if (!uploadIntentsMatch(raced, input.photos, input.conversationRootId)) {

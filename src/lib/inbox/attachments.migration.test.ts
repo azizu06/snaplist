@@ -52,4 +52,12 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/delivery_status = 'uploading'[\s\S]*upload_expires_at is not null/i);
     expect(migration).toMatch(/message_photos_insert_own[\s\S]*storage_path = name[\s\S]*delivery_status = 'uploading'/i);
   });
+
+  it("serializes photo reservations with delivery claims and stages them atomically", () => {
+    expect(migration).toMatch(/guard_message_photo_upload_intent[\s\S]*for update/i);
+    expect(migration).toMatch(/canonical delivery already has an intent/i);
+    expect(migration).toMatch(/follow-up delivery already has an intent/i);
+    expect(migration).toMatch(/serialize_ebay_followup_identity[\s\S]*for update/i);
+    expect(migration).toMatch(/stage_message_photo_upload_intents[\s\S]*v_total <> v_expected or v_locked <> v_expected/i);
+  });
 });

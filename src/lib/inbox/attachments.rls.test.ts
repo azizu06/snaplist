@@ -143,7 +143,7 @@ describe("message attachment RLS (DB-gated)", () => {
       content_sha256: "b".repeat(64),
       storage_path: `${b.id}/${root!.id}/pending/33333333-3333-4333-8333-333333333333.jpg`,
       delivery_status: "uploading",
-      upload_expires_at: "2026-07-14T13:00:00.000Z",
+      upload_expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
     };
     expect((await b.client.from("message_attachments").insert(uploadIntent)).error).not.toBeNull();
     expect((await bServer.from("message_attachments").insert(uploadIntent)).error).toBeNull();
