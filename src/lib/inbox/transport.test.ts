@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { MockMarketplaceMessagingAdapter } from "@/lib/marketplace/mock-messaging";
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import type { MessageAttachmentRow, MessageRow } from "./types";
@@ -7,6 +8,7 @@ import {
   MessageDeliveryConflictError,
   sendCanonicalReply as sendCanonicalReplyTransport,
   sendSellerFollowUp as sendSellerFollowUpTransport,
+  SupabaseDeliveryRepository,
   retryFollowUpDelivery,
   type DeliveryRepository,
   type SendCanonicalInput,
@@ -894,6 +896,40 @@ describe("message delivery transport", () => {
     expect(adapter.uploads).toHaveLength(1);
     expect(adapter.replies[0]?.media?.[0]?.providerMediaId)
       .not.toBe("expired-eps-photo");
+  });
+
+  it("persists a replacement provider reference for an already uploaded photo", async () => {
+    const query = {
+      update: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      in: vi.fn(() => query),
+      select: vi.fn(async () => ({ data: [{ id: "photo-id" }], error: null })),
+    };
+    const serverWriteClient = {
+      from: vi.fn(() => query),
+    } as unknown as SupabaseClient;
+    const repository = new SupabaseDeliveryRepository(
+      serverWriteClient,
+      "user_a",
+      false,
+      serverWriteClient,
+    );
+
+    await repository.saveHostedPhoto(
+      attachment({ delivery_status: "uploaded" }),
+      {
+        providerMediaId: "fresh-eps-photo",
+        mediaUrl: "https://i.ebayimg.com/fresh/photo.jpg",
+        mediaName: "photo.jpg",
+        mediaType: "IMAGE",
+        expiresAt: "2026-08-14T12:00:00.000Z",
+      },
+    );
+
+    expect(query.in).toHaveBeenCalledWith(
+      "delivery_status",
+      expect.arrayContaining(["uploaded"]),
+    );
   });
 });
 

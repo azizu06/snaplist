@@ -1084,7 +1084,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       })
       .eq("user_id", this.userId)
       .eq("id", photo.id)
-      .in("delivery_status", ["staged", "failed", "rejected", "ambiguous"])
+      .in("delivery_status", ["staged", "uploaded", "failed", "rejected", "ambiguous"])
       .select("id");
     if (error || data?.length !== 1) {
       throw new Error(`Failed to persist hosted photo: ${error?.message ?? "claim lost"}`);
