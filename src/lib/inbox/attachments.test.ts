@@ -112,6 +112,7 @@ describe("message photo policy", () => {
       name: "condition.jpg",
       mediaType: "image/jpeg" as const,
       byteSize: JPEG.length,
+      contentSha256: "a".repeat(64),
       storagePath:
         "user_a/11111111-1111-4111-8111-111111111111/pending/22222222-2222-4222-8222-222222222222.jpg",
     };

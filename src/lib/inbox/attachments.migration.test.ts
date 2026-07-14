@@ -42,5 +42,14 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/after delete on public\.message_attachments/i);
     expect(migration).toMatch(/list_message_photo_object_deletions/i);
     expect(migration).toMatch(/complete_message_photo_object_deletions/i);
+    expect(migration).toMatch(/list_message_photo_object_deletions[\s\S]*limit least[\s\S]*1000/i);
+    expect(migration).toMatch(/delete_expired_message_photo_upload_intents/i);
+  });
+
+  it("persists expiring upload intents before direct storage writes", () => {
+    expect(migration).toMatch(/upload_expires_at timestamptz/i);
+    expect(migration).toMatch(/delivery_status in \('uploading', 'staged'/i);
+    expect(migration).toMatch(/delivery_status = 'uploading'[\s\S]*upload_expires_at is not null/i);
+    expect(migration).toMatch(/message_photos_insert_own[\s\S]*storage_path = name[\s\S]*delivery_status = 'uploading'/i);
   });
 });

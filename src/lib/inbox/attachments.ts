@@ -8,10 +8,15 @@ const supportedTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 export const messagePhotoMediaTypeSchema = z.enum(supportedTypes);
 export type MessagePhotoMediaType = z.infer<typeof messagePhotoMediaTypeSchema>;
 
-export const storedMessagePhotoSchema = z.object({
+export const messagePhotoUploadMetadataSchema = z.object({
   name: z.string().trim().min(1).max(100),
   mediaType: messagePhotoMediaTypeSchema,
   byteSize: z.number().int().positive().max(MAX_MESSAGE_PHOTO_BYTES),
+  contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type MessagePhotoUploadMetadata = z.infer<typeof messagePhotoUploadMetadataSchema>;
+
+export const storedMessagePhotoSchema = messagePhotoUploadMetadataSchema.extend({
   storagePath: z.string().min(1).max(500),
 });
 export type StoredMessagePhoto = z.infer<typeof storedMessagePhotoSchema>;

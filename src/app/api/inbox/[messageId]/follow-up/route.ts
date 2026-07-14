@@ -17,6 +17,7 @@ import {
   validateStoredPhotos,
 } from "@/lib/inbox/attachment-store";
 import { storedMessagePhotoSchema } from "@/lib/inbox/attachments";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /**
  * POST /api/inbox/[messageId]/follow-up — the seller sends another message in a
@@ -110,12 +111,14 @@ export async function POST(
     }
   }
   try {
+    const attachmentClient = await createTenantServerClient();
     await stageOutboundPhotos({
-      supabase,
+      supabase: attachmentClient,
       userId,
       conversationRootId: message.id,
       deliveryRequestId: parsed.data.requestId,
       photos,
+      requireExistingIntent: parsed.data.photos.length > 0,
     });
     const transport = await createMessagingTransportForConversation(
       supabase,

@@ -31,8 +31,9 @@ create table public.message_attachments (
   provider_media_id text,
   provider_url text check (provider_url is null or provider_url ~ '^https://'),
   provider_expires_at timestamptz,
+  upload_expires_at timestamptz,
   delivery_status text not null default 'staged'
-    check (delivery_status in ('staged', 'uploaded', 'delivered', 'rejected', 'failed', 'ambiguous')),
+    check (delivery_status in ('uploading', 'staged', 'uploaded', 'delivered', 'rejected', 'failed', 'ambiguous')),
   delivery_error text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -45,6 +46,11 @@ create table public.message_attachments (
     references public.messages (id, user_id) on delete cascade,
   constraint message_attachments_storage_path_shape
     check (storage_path is null or storage_path like user_id || '/%'),
+  constraint message_attachments_upload_expiry_check
+    check (
+      (delivery_status = 'uploading' and upload_expires_at is not null)
+      or (delivery_status <> 'uploading' and upload_expires_at is null)
+    ),
   constraint message_attachments_direction_message_check
     check (
       (direction = 'inbound' and message_id = conversation_root_id)
@@ -79,8 +85,15 @@ create policy "message_attachments_insert_own"
         and provider_media_id is null
         and provider_url is null
         and provider_expires_at is null
-        and delivery_status = 'staged'
+        and delivery_status in ('uploading', 'staged')
         and delivery_error is null
+        and (
+          delivery_status = 'staged'
+          or coalesce(
+            (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+            ''
+          ) like 'sb_secret_%'
+        )
       )
       or (
         direction = 'inbound'
@@ -148,6 +161,20 @@ create policy "message_photos_insert_own"
   with check (
     bucket_id = 'message-photos'
     and (storage.foldername(name))[1] = public.clerk_user_id()
+    and (
+      coalesce(
+        (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+        ''
+      ) like 'sb_secret_%'
+      or exists (
+        select 1
+        from public.message_attachments attachment
+        where attachment.user_id = public.clerk_user_id()
+          and attachment.storage_path = name
+          and attachment.delivery_status = 'uploading'
+          and attachment.upload_expires_at > statement_timestamp()
+      )
+    )
   );
 create policy "message_photos_update_own"
   on storage.objects for update
@@ -231,6 +258,7 @@ begin
   update public.message_attachments attachment
   set message_id = v_message_id,
       delivery_status = 'delivered',
+      upload_expires_at = null,
       delivery_error = null,
       updated_at = statement_timestamp()
   where attachment.user_id = v_user_id
@@ -279,7 +307,9 @@ create trigger message_attachments_queue_object_deletion
   after delete on public.message_attachments
   for each row execute function private.queue_message_photo_object_deletion();
 
-create or replace function public.list_message_photo_object_deletions()
+create or replace function public.list_message_photo_object_deletions(
+  p_limit integer default 1000
+)
 returns text[]
 language plpgsql
 stable
@@ -294,13 +324,48 @@ begin
     select queue.storage_path
     from private.message_photo_object_deletion_queue queue
     order by queue.enqueued_at
+    limit least(greatest(coalesce(p_limit, 1000), 1), 1000)
   );
 end;
 $$;
 
-revoke all on function public.list_message_photo_object_deletions()
+revoke all on function public.list_message_photo_object_deletions(integer)
   from public, anon, authenticated;
-grant execute on function public.list_message_photo_object_deletions()
+grant execute on function public.list_message_photo_object_deletions(integer)
+  to service_role;
+
+create or replace function public.delete_expired_message_photo_upload_intents(
+  p_limit integer default 1000
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_deleted integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Photo cleanup authorization is required';
+  end if;
+  delete from public.message_attachments attachment
+  where attachment.id in (
+    select candidate.id
+    from public.message_attachments candidate
+    where candidate.delivery_status = 'uploading'
+      and candidate.upload_expires_at < statement_timestamp()
+    order by candidate.upload_expires_at
+    for update skip locked
+    limit least(greatest(coalesce(p_limit, 1000), 1), 1000)
+  );
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+revoke all on function public.delete_expired_message_photo_upload_intents(integer)
+  from public, anon, authenticated;
+grant execute on function public.delete_expired_message_photo_upload_intents(integer)
   to service_role;
 
 create or replace function public.complete_message_photo_object_deletions(

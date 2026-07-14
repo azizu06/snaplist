@@ -130,7 +130,9 @@ describe("eraseEbayUserData", () => {
       p_ebay_user_id: "ebay-user-1",
       p_ebay_username: "seller_one",
     });
-    expect(rpc).toHaveBeenCalledWith("list_message_photo_object_deletions");
+    expect(rpc).toHaveBeenCalledWith("list_message_photo_object_deletions", {
+      p_limit: 1000,
+    });
   });
 
   it("fails the notice when transactional erasure fails", async () => {
@@ -152,11 +154,13 @@ describe("eraseEbayUserData", () => {
 
   it("deletes queued photo objects only after transactional erasure succeeds", async () => {
     const path = "user-a/root-a/photo.jpg";
+    let completed = false;
     const rpc = vi.fn(async (name: string) => {
       if (name === "erase_ebay_user_data") return { data: 1, error: null };
       if (name === "list_message_photo_object_deletions") {
-        return { data: [path], error: null };
+        return { data: completed ? [] : [path], error: null };
       }
+      completed = true;
       return { data: 1, error: null };
     });
     const remove = vi.fn(async () => ({ error: null }));
@@ -173,11 +177,12 @@ describe("eraseEbayUserData", () => {
       "erase_ebay_user_data",
       "list_message_photo_object_deletions",
       "complete_message_photo_object_deletions",
+      "list_message_photo_object_deletions",
     ]);
     expect(remove).toHaveBeenCalledWith([path]);
     expect(rpc).toHaveBeenLastCalledWith(
-      "complete_message_photo_object_deletions",
-      { p_storage_paths: [path] },
+      "list_message_photo_object_deletions",
+      { p_limit: 1000 },
     );
   });
 });

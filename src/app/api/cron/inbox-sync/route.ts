@@ -7,6 +7,7 @@ import {
   listScheduledEbayConnectionUserIds,
 } from "@/lib/marketplace/ebay";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { cleanupExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
 
 export const maxDuration = 300;
 
@@ -34,6 +35,7 @@ async function handle(request: NextRequest) {
   const admin = createAdminClient();
   let connectedUserIds: string[];
   try {
+    await cleanupExpiredMessagePhotoUploads(admin);
     connectedUserIds = await listScheduledEbayConnectionUserIds(admin);
   } catch (error) {
     logServerError("cron.inbox-sync.connections", error);

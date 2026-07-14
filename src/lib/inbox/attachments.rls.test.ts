@@ -83,7 +83,7 @@ describe("message attachment RLS (DB-gated)", () => {
 
     bStoragePath = `${b.id}/${root!.id}/buyer.jpg`;
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
-    expect((await b.client.storage.from("message-photos").upload(bStoragePath, jpeg, {
+    expect((await bServer.storage.from("message-photos").upload(bStoragePath, jpeg, {
       contentType: "image/jpeg",
     })).error).toBeNull();
     const { data: staged, error: stagedError } = await b.client
@@ -130,5 +130,33 @@ describe("message attachment RLS (DB-gated)", () => {
       contentType: "image/jpeg",
       upsert: true,
     })).error).not.toBeNull();
+
+    const uploadIntent = {
+      user_id: b.id,
+      conversation_root_id: root!.id,
+      delivery_request_id: "outbound:upload-intent",
+      position: 0,
+      direction: "outbound",
+      media_type: "image/jpeg",
+      byte_size: jpeg.byteLength,
+      original_name: "pending.jpg",
+      content_sha256: "b".repeat(64),
+      storage_path: `${b.id}/${root!.id}/pending/33333333-3333-4333-8333-333333333333.jpg`,
+      delivery_status: "uploading",
+      upload_expires_at: "2026-07-14T13:00:00.000Z",
+    };
+    expect((await b.client.from("message_attachments").insert(uploadIntent)).error).not.toBeNull();
+    expect((await bServer.from("message_attachments").insert(uploadIntent)).error).toBeNull();
+    expect((await b.client.storage.from("message-photos").upload(uploadIntent.storage_path, jpeg, {
+      contentType: "image/jpeg",
+    })).error).toBeNull();
+    expect((await b.client.storage.from("message-photos").upload(
+      `${b.id}/${root!.id}/pending/44444444-4444-4444-8444-444444444444.jpg`,
+      jpeg,
+      { contentType: "image/jpeg" },
+    )).error).not.toBeNull();
+    expect((await b.client.storage.from("message-photos").remove([
+      uploadIntent.storage_path,
+    ])).error).toBeNull();
   });
 });

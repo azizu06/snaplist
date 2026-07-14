@@ -145,6 +145,21 @@ describe("eBay messaging composition", () => {
     expect(hasEbayMessagingSandboxFallback(undefined, operatorEnv)).toBe(false);
   });
 
+  it("requests Commerce Media permission for Sandbox messaging photo uploads", async () => {
+    getEbayConnectionStatus.mockResolvedValue({ connected: false, ebayUsername: null });
+    for (const [key, value] of Object.entries(operatorEnv)) vi.stubEnv(key, value);
+    const adapter = await createEbayMessagingAdapterForUser(
+      {} as SupabaseClient,
+      "user_operator",
+      { credentialClient: {} as SupabaseClient },
+    );
+    const scopes = (adapter as unknown as {
+      tokenProvider: { envProvider: { scopes: string[] } };
+    }).tokenProvider.envProvider.scopes;
+
+    expect(scopes).toContain("https://api.ebay.com/oauth/api_scope/sell.inventory");
+  });
+
   it("never enables the app-level fallback outside the exact Sandbox API origin", () => {
     expect(
       hasEbayMessagingSandboxFallback("user_operator", {

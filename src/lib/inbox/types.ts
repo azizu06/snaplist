@@ -99,7 +99,9 @@ export const messageAttachmentRowSchema = z.object({
   provider_media_id: z.string().nullable(),
   provider_url: z.url().startsWith("https://").nullable(),
   provider_expires_at: z.string().nullable(),
+  upload_expires_at: z.string().nullable().optional(),
   delivery_status: z.enum([
+    "uploading",
     "staged",
     "uploaded",
     "delivered",

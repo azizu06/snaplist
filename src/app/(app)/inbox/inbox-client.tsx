@@ -18,6 +18,7 @@ import {
 } from "@/lib/inbox";
 import {
   MESSAGE_PHOTO_BUCKET,
+  storedMessagePhotoSchema,
   type StoredMessagePhoto,
 } from "@/lib/inbox/attachments";
 import { InboxEmptyState } from "./inbox-empty";
@@ -32,6 +33,7 @@ import {
 } from "./conversation-list";
 import { useListResize } from "./use-list-resize";
 import { authorizeDeliveryRetry } from "./delivery-recovery";
+import { reconcileAttachments } from "./reconcile";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -112,6 +114,9 @@ export function InboxClient({
   const [followUpRequestIds, setFollowUpRequestIds] = useState<
     Record<string, string>
   >({});
+  const [followUpComposerVersions, setFollowUpComposerVersions] = useState<
+    Record<string, number>
+  >({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
   // thread view. null → list view on mobile, calm placeholder on desktop.
@@ -156,10 +161,11 @@ export function InboxClient({
         .filter((p) => p.success)
         .map((p) => p.data);
       setMessages((prev) => reconcileMessages(prev, rows));
-      setAttachments((attachmentData ?? []).flatMap((raw) => {
+      const attachmentRows = (attachmentData ?? []).flatMap((raw) => {
         const parsed = messageAttachmentRowSchema.safeParse(raw);
         return parsed.success ? [parsed.data] : [];
-      }));
+      });
+      setAttachments((prev) => reconcileAttachments(prev, attachmentRows));
     };
 
     const upsert = (raw: unknown) => {
@@ -173,10 +179,7 @@ export function InboxClient({
     const upsertAttachment = (raw: unknown) => {
       const parsed = messageAttachmentRowSchema.safeParse(raw);
       if (!parsed.success) return;
-      setAttachments((prev) => [
-        ...prev.filter((row) => row.id !== parsed.data.id),
-        parsed.data,
-      ]);
+      setAttachments((prev) => reconcileAttachments(prev, [parsed.data]));
     };
 
     const channel = supabase
@@ -344,7 +347,7 @@ export function InboxClient({
     setBusy(`send:${message.id}`);
     setError(null);
     try {
-      const uploadedPhotos = await uploadMessagePhotos(message.id, photos);
+      const uploadedPhotos = await uploadMessagePhotos(message.id, message.id, photos);
       const res = await fetch(`/api/inbox/${message.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -437,7 +440,7 @@ export function InboxClient({
     setBusy(`followup:${message.id}`);
     setError(null);
     try {
-      const uploadedPhotos = await uploadMessagePhotos(message.id, photos);
+      const uploadedPhotos = await uploadMessagePhotos(message.id, requestId, photos);
       const res = await fetch(`/api/inbox/${message.id}/follow-up`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -464,41 +467,45 @@ export function InboxClient({
 
   async function uploadMessagePhotos(
     conversationRootId: string,
+    deliveryRequestId: string,
     photos: File[],
   ): Promise<StoredMessagePhoto[]> {
-    const uploadedPaths: string[] = [];
-    try {
-      const uploaded: StoredMessagePhoto[] = [];
-      for (const photo of photos) {
-        const extension =
-          photo.type === "image/jpeg"
-            ? "jpg"
-            : photo.type === "image/png"
-              ? "png"
-              : "webp";
-        const storagePath = `${userId}/${conversationRootId}/pending/${window.crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage
-          .from(MESSAGE_PHOTO_BUCKET)
-          .upload(storagePath, photo, {
-            contentType: photo.type,
-            upsert: false,
-          });
-        if (uploadError) throw new Error("Photo upload failed before delivery.");
-        uploadedPaths.push(storagePath);
-        uploaded.push({
-          name: photo.name,
-          mediaType: photo.type as StoredMessagePhoto["mediaType"],
-          byteSize: photo.size,
-          storagePath,
-        });
-      }
-      return uploaded;
-    } catch (error) {
-      if (uploadedPaths.length) {
-        await supabase.storage.from(MESSAGE_PHOTO_BUCKET).remove(uploadedPaths);
-      }
-      throw error;
+    if (!photos.length) return [];
+    const metadata = await Promise.all(photos.map(async (photo) => ({
+      name: photo.name,
+      mediaType: photo.type,
+      byteSize: photo.size,
+      contentSha256: await sha256Blob(photo),
+    })));
+    const prepared = await fetch(`/api/inbox/${conversationRootId}/attachments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deliveryRequestId, photos: metadata }),
+    });
+    if (!prepared.ok) {
+      const body = (await prepared.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `Photo upload preparation failed (${prepared.status})`);
     }
+    const response = (await prepared.json()) as { photos?: unknown[] };
+    const intents = (response.photos ?? []).map((photo) => storedMessagePhotoSchema.parse(photo));
+    if (intents.length !== photos.length) throw new Error("Photo upload preparation was incomplete.");
+    for (const [index, intent] of intents.entries()) {
+      const photo = photos[index]!;
+      const { error: uploadError } = await supabase.storage
+        .from(MESSAGE_PHOTO_BUCKET)
+        .upload(intent.storagePath, photo, {
+          contentType: intent.mediaType,
+          upsert: false,
+        });
+      if (!uploadError) continue;
+      const { data: existing } = await supabase.storage
+        .from(MESSAGE_PHOTO_BUCKET)
+        .download(intent.storagePath);
+      if (!existing || await sha256Blob(existing) !== intent.contentSha256) {
+        throw new Error("Photo upload failed before delivery.");
+      }
+    }
+    return intents;
   }
 
   async function retryFollowUp(message: MessageRow) {
@@ -529,11 +536,16 @@ export function InboxClient({
       }
       const conversationId = message.reply_to;
       if (conversationId) {
+        setFollowUpDrafts((prev) => ({ ...prev, [conversationId]: "" }));
         setFollowUpRequestIds((prev) => {
           const next = { ...prev };
           delete next[conversationId];
           return next;
         });
+        setFollowUpComposerVersions((prev) => ({
+          ...prev,
+          [conversationId]: (prev[conversationId] ?? 0) + 1,
+        }));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");
@@ -635,6 +647,7 @@ export function InboxClient({
         (attachment) => attachment.conversation_root_id === selectedMessage.id,
       )}
       followUpValue={followUpDrafts[selectedMessage.id] ?? ""}
+      followUpComposerVersion={followUpComposerVersions[selectedMessage.id] ?? 0}
       onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
       onApproveAndSend={approveAndSend}
       onRetryDelivery={retryDelivery}
@@ -829,6 +842,11 @@ export function InboxClient({
       </motion.div>
     </div>
   );
+}
+
+async function sha256Blob(blob: Blob): Promise<string> {
+  const digest = await window.crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**

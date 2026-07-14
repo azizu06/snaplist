@@ -747,6 +747,7 @@ export interface ConversationThreadProps {
   attachments: MessageAttachmentRow[];
   /** The current follow-up composer text for this conversation. */
   followUpValue: string;
+  followUpComposerVersion: number;
   onEdit: (id: string, value: string) => void;
   onApproveAndSend: (message: MessageRow, photos: File[]) => Promise<boolean>;
   onRetryDelivery: (message: MessageRow) => void;
@@ -767,6 +768,7 @@ export function ConversationThread({
   followUps,
   attachments,
   followUpValue,
+  followUpComposerVersion,
   onEdit,
   onApproveAndSend,
   onRetryDelivery,
@@ -1045,6 +1047,7 @@ export function ConversationThread({
           // mirrors Apple Messages — `+` attach at the left, compact send at the
           // right. (Photo *delivery* is the next backend slice; see FollowUpComposer.)
           <FollowUpComposer
+            key={`${message.id}:${followUpComposerVersion}`}
             message={message}
             value={followUpValue}
             busy={busy}

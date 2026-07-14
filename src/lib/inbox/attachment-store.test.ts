@@ -1,0 +1,135 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import { MessagePhotoConflictError, stageOutboundPhotos } from "./attachment-store";
+import type { MessageAttachmentRow } from "./types";
+
+const ROOT = "11111111-1111-4111-8111-111111111111";
+const REQUEST = "22222222-2222-4222-8222-222222222222";
+const PATH = `user_a/${ROOT}/pending/33333333-3333-4333-8333-333333333333.jpg`;
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
+
+function row(overrides: Partial<MessageAttachmentRow> = {}): MessageAttachmentRow {
+  return {
+    id: "33333333-3333-4333-8333-333333333333",
+    user_id: "user_a",
+    conversation_root_id: ROOT,
+    message_id: null,
+    delivery_request_id: REQUEST,
+    position: 0,
+    direction: "outbound",
+    media_type: "image/jpeg",
+    byte_size: JPEG.length,
+    original_name: "condition.jpg",
+    content_sha256: createHash("sha256").update(JPEG).digest("hex"),
+    storage_path: PATH,
+    provider_media_id: null,
+    provider_url: null,
+    provider_expires_at: null,
+    upload_expires_at: null,
+    delivery_status: "staged",
+    delivery_error: null,
+    created_at: "2026-07-14T12:00:00.000Z",
+    updated_at: "2026-07-14T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function listClient(rows: MessageAttachmentRow[], remove = vi.fn()) {
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    order: vi.fn(async () => ({ data: rows, error: null })),
+  };
+  return {
+    client: {
+      from: vi.fn(() => query),
+      storage: { from: vi.fn(() => ({ remove })) },
+    } as unknown as SupabaseClient,
+    remove,
+  };
+}
+
+describe("outbound photo idempotency", () => {
+  it("rejects a zero-photo replay when the request durably owns photos", async () => {
+    const { client, remove } = listClient([row()]);
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: REQUEST,
+      photos: [],
+    })).rejects.toBeInstanceOf(MessagePhotoConflictError);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("compares provider-visible names as part of the complete photo identity", async () => {
+    const { client, remove } = listClient([row()]);
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: REQUEST,
+      photos: [{
+        name: "different.jpg",
+        type: "image/jpeg",
+        size: JPEG.length,
+        bytes: JPEG,
+        mediaType: "image/jpeg",
+        extension: "jpg",
+        storagePath: PATH,
+      }],
+    })).rejects.toBeInstanceOf(MessagePhotoConflictError);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("never deletes a direct-upload object retained by a recovered insert race", async () => {
+    let listCount = 0;
+    const remove = vi.fn(async () => ({ error: null }));
+    const upload = vi.fn();
+    const attachmentQuery = {
+      select: vi.fn(() => attachmentQuery),
+      eq: vi.fn(() => attachmentQuery),
+      order: vi.fn(async () => ({
+        data: listCount++ === 0 ? [] : [row()],
+        error: null,
+      })),
+      insert: vi.fn(() => ({
+        select: vi.fn(async () => ({
+          data: null,
+          error: { code: "23505", message: "duplicate" },
+        })),
+      })),
+    };
+    const messageQuery = {
+      select: vi.fn(() => messageQuery),
+      eq: vi.fn(() => messageQuery),
+      or: vi.fn(() => messageQuery),
+      maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+    };
+    const client = {
+      from: vi.fn((table: string) => table === "messages" ? messageQuery : attachmentQuery),
+      storage: { from: vi.fn(() => ({ upload, remove })) },
+    } as unknown as SupabaseClient;
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: REQUEST,
+      photos: [{
+        name: "condition.jpg",
+        type: "image/jpeg",
+        size: JPEG.length,
+        bytes: JPEG,
+        mediaType: "image/jpeg",
+        extension: "jpg",
+        storagePath: PATH,
+      }],
+    })).resolves.toEqual([row()]);
+    expect(upload).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+});

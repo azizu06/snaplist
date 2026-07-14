@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { drainMessagePhotoDeletionQueue } from "@/lib/inbox/attachment-cleanup";
 import {
   decryptSecret,
   encryptSecret,
@@ -320,30 +321,6 @@ export async function eraseEbayUserData(
   if (typeof data !== "number") {
     throw new Error("Deletion erase failed: database returned an invalid result");
   }
-  await drainEbayMessagePhotoDeletionQueue(serviceClient);
+  await drainMessagePhotoDeletionQueue(serviceClient);
   return data;
-}
-
-async function drainEbayMessagePhotoDeletionQueue(
-  serviceClient: SupabaseClient,
-): Promise<void> {
-  const { data, error } = await serviceClient.rpc(
-    "list_message_photo_object_deletions",
-  );
-  if (error) throw new Error(`Deletion photo queue failed: ${error.message}`);
-  const paths = Array.isArray(data)
-    ? data.filter((path): path is string => typeof path === "string")
-    : [];
-  if (!paths.length) return;
-  const removed = await serviceClient.storage.from("message-photos").remove(paths);
-  if (removed.error) {
-    throw new Error(`Deletion photo erase failed: ${removed.error.message}`);
-  }
-  const completed = await serviceClient.rpc(
-    "complete_message_photo_object_deletions",
-    { p_storage_paths: paths },
-  );
-  if (completed.error) {
-    throw new Error(`Deletion photo queue completion failed: ${completed.error.message}`);
-  }
 }
