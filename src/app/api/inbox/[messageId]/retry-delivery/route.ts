@@ -5,10 +5,9 @@ import { getUserId } from "@/lib/auth";
 import {
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
-  SupabaseDeliveryRepository,
   sendCanonicalReply,
 } from "@/lib/inbox/transport";
-import { createMessagingAdapterForConversation } from "@/lib/inbox/adapters";
+import { createMessagingTransportForConversation } from "@/lib/inbox/adapters";
 import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 
@@ -25,6 +24,7 @@ import { enforceRateLimit } from "@/lib/abuse";
  */
 
 const paramsSchema = z.object({ messageId: z.uuid() });
+const bodySchema = z.object({ confirmDuplicateRisk: z.boolean() }).strict();
 
 export async function POST(
   request: Request,
@@ -42,6 +42,19 @@ export async function POST(
   if (!params.success) {
     return NextResponse.json({ error: "Invalid message id" }, { status: 400 });
   }
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  const parsed = bodySchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "confirmDuplicateRisk (boolean) is required" },
+      { status: 400 },
+    );
+  }
 
   // RLS-scoped read: only the owner's own INBOUND question is retryable.
   const { data: message } = await supabase
@@ -54,15 +67,16 @@ export async function POST(
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
   try {
+    const transport = await createMessagingTransportForConversation(
+      supabase,
+      userId,
+      message.marketplace,
+    );
     const outbound = await sendCanonicalReply({
-      repository: new SupabaseDeliveryRepository(supabase, userId),
-      adapter: await createMessagingAdapterForConversation(
-        supabase,
-        userId,
-        message.marketplace,
-      ),
+      ...transport,
       messageId: message.id,
       retry: true,
+      confirmDuplicateRisk: parsed.data.confirmDuplicateRisk,
     });
     return NextResponse.json({ outboundId: outbound.id, status: "sent" });
   } catch (err) {

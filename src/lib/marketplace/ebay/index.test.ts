@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { hasEbayMessagingSandboxFallback } from "./index";
+import {
+  ebayMessagingSyncUserIds,
+  hasEbayMessagingSandboxFallback,
+} from "./index";
 
 const operatorEnv = {
   EBAY_BASE_URL: "https://api.sandbox.ebay.com",
@@ -31,5 +34,21 @@ describe("eBay messaging composition", () => {
         EBAY_BASE_URL: "https://api.sandbox.ebay.com.attacker.example",
       }),
     ).toBe(false);
+  });
+
+  it("adds the configured operator to background sync without duplicating a connection", () => {
+    expect(
+      ebayMessagingSyncUserIds(["user_a", "user_operator"], operatorEnv),
+    ).toEqual(["user_a", "user_operator"]);
+    expect(ebayMessagingSyncUserIds(["user_a"], operatorEnv)).toEqual([
+      "user_a",
+      "user_operator",
+    ]);
+    expect(
+      ebayMessagingSyncUserIds(["user_a"], {
+        ...operatorEnv,
+        EBAY_BASE_URL: "https://api.ebay.com",
+      }),
+    ).toEqual(["user_a"]);
   });
 });

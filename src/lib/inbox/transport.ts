@@ -70,6 +70,7 @@ export interface SendCanonicalInput {
   messageId: string;
   body?: string;
   retry?: boolean;
+  confirmDuplicateRisk?: boolean;
   now?: () => Date;
 }
 
@@ -82,6 +83,15 @@ export async function sendCanonicalReply(
   }
   const alreadyDelivered = await input.repository.canonicalDelivered(root.id);
   if (alreadyDelivered) return alreadyDelivered;
+  if (
+    input.retry === true &&
+    root.delivery_status === "ambiguous" &&
+    input.confirmDuplicateRisk !== true
+  ) {
+    throw new MessageDeliveryConflictError(
+      "Confirm the duplicate-delivery risk before retrying an unconfirmed reply",
+    );
+  }
   const body = (input.body ?? root.draft_reply ?? "").trim();
   if (!body) throw new Error("A non-empty approved reply is required");
 
@@ -166,6 +176,7 @@ export async function retryFollowUpDelivery(input: {
   repository: DeliveryRepository;
   adapter: MarketplaceMessagingAdapter;
   messageId: string;
+  confirmDuplicateRisk?: boolean;
   now?: () => Date;
 }): Promise<MessageRow> {
   const message = await input.repository.loadFollowUp(input.messageId);
@@ -173,6 +184,14 @@ export async function retryFollowUpDelivery(input: {
     throw new MessageDeliveryConflictError("Follow-up message not found");
   }
   if (message.delivery_status === "delivered") return message;
+  if (
+    message.delivery_status === "ambiguous" &&
+    input.confirmDuplicateRisk !== true
+  ) {
+    throw new MessageDeliveryConflictError(
+      "Confirm the duplicate-delivery risk before retrying an unconfirmed follow-up",
+    );
+  }
   const root = await input.repository.loadConversationRoot(message.reply_to);
   if (!root) throw new MessageDeliveryConflictError("Conversation not found");
   const claimed = await input.repository.claimFollowUp(

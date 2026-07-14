@@ -8,20 +8,25 @@ import {
 } from "@/lib/marketplace/ebay";
 import { createClient } from "@/lib/supabase/server";
 import { serverErrorJson } from "@/lib/api/errors";
+import { enforceRateLimit } from "@/lib/abuse";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /** Explicit/foreground refresh; the shared service owns all domain behavior. */
-export async function POST() {
+export async function POST(request: Request) {
   const userId = await getUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = await enforceRateLimit(request, userId);
+  if (limited) return limited;
   const supabase = await createClient();
   try {
     const { connected } = await getEbayConnectionStatus(supabase, userId);
     if (!connected && !hasEbayMessagingSandboxFallback(userId)) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
+    const admin = createAdminClient();
     const summary = await syncInboxForSeller({
-      adapter: await createEbayMessagingAdapterForUser(supabase, userId),
-      repository: new SupabaseInboxSyncRepository(supabase, userId),
+      adapter: await createEbayMessagingAdapterForUser(admin, userId),
+      repository: new SupabaseInboxSyncRepository(admin, userId),
     });
     return NextResponse.json(summary);
   } catch (error) {

@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { logServerError } from "@/lib/api/errors";
 import { syncInboxForSeller, SupabaseInboxSyncRepository } from "@/lib/inbox/sync";
-import { createEbayMessagingAdapterForUser } from "@/lib/marketplace/ebay";
+import {
+  createEbayMessagingAdapterForUser,
+  ebayMessagingSyncUserIds,
+} from "@/lib/marketplace/ebay";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 300;
@@ -33,11 +36,13 @@ async function handle(request: NextRequest) {
     return NextResponse.json({ error: "Inbox sync failed." }, { status: 500 });
   }
 
+  const userIds = ebayMessagingSyncUserIds(
+    (connections ?? []).map((connection) => connection.user_id as string),
+  );
   let synced = 0;
   let failed = 0;
   let imported = 0;
-  for (const connection of connections ?? []) {
-    const userId = connection.user_id as string;
+  for (const userId of userIds) {
     try {
       const summary = await syncInboxForSeller({
         adapter: await createEbayMessagingAdapterForUser(admin, userId),
@@ -50,7 +55,7 @@ async function handle(request: NextRequest) {
       logServerError("cron.inbox-sync.seller", syncError);
     }
   }
-  return NextResponse.json({ sellers: connections?.length ?? 0, synced, failed, imported });
+  return NextResponse.json({ sellers: userIds.length, synced, failed, imported });
 }
 
 export async function GET(request: NextRequest) {

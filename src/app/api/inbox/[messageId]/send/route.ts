@@ -5,10 +5,9 @@ import { getUserId } from "@/lib/auth";
 import {
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
-  SupabaseDeliveryRepository,
   sendCanonicalReply,
 } from "@/lib/inbox/transport";
-import { createMessagingAdapterForConversation } from "@/lib/inbox/adapters";
+import { createMessagingTransportForConversation } from "@/lib/inbox/adapters";
 import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 
@@ -68,13 +67,13 @@ export async function POST(
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
   try {
+    const transport = await createMessagingTransportForConversation(
+      supabase,
+      userId,
+      message.marketplace,
+    );
     const outbound = await sendCanonicalReply({
-      repository: new SupabaseDeliveryRepository(supabase, userId),
-      adapter: await createMessagingAdapterForConversation(
-        supabase,
-        userId,
-        message.marketplace,
-      ),
+      ...transport,
       messageId: message.id,
       body: parsed.data.reply,
     });

@@ -4,6 +4,7 @@ import type {
   MarketplaceQuestion,
 } from "@/lib/marketplace/messaging";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
+import { recordPipelineRunAndMaybeAlert } from "@/lib/abuse";
 import { draftBuyerReply, type DraftBuyerReplyResult } from "./reply";
 import { messageRowSchema, type MessageRow, type ReplyGrounding } from "./types";
 
@@ -66,6 +67,7 @@ export interface SyncInboxInput {
   overlapMs?: number;
   initialLookbackMs?: number;
   draft?: typeof draftBuyerReply;
+  meterDraft?: () => Promise<void>;
 }
 
 export interface InboxSyncSummary {
@@ -135,9 +137,11 @@ export async function syncInboxForSeller(
     let drafted = 0;
     let draftFailed = 0;
     const draft = input.draft ?? draftBuyerReply;
+    const meterDraft = input.meterDraft ?? recordPipelineRunAndMaybeAlert;
     for (const candidate of await input.repository.listDraftCandidates()) {
       if (!(await input.repository.claimDraft(candidate, now))) continue;
       try {
+        await meterDraft();
         const result = await draft({
           question: candidate.message.body,
           grounding: candidate.grounding,

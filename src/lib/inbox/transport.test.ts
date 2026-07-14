@@ -209,11 +209,22 @@ describe("message delivery transport", () => {
     expect(adapter.replies).toHaveLength(1);
 
     adapter.replyFailure = undefined;
+    await expect(
+      sendCanonicalReply({
+        repository,
+        adapter,
+        messageId: ROOT_ID,
+        retry: true,
+      }),
+    ).rejects.toThrow("Confirm the duplicate-delivery risk");
+    expect(adapter.replies).toHaveLength(1);
+
     const delivered = await sendCanonicalReply({
       repository,
       adapter,
       messageId: ROOT_ID,
       retry: true,
+      confirmDuplicateRisk: true,
     });
     expect(delivered.delivery_status).toBe("delivered");
     expect(adapter.replies).toHaveLength(2);
@@ -297,6 +308,42 @@ describe("message delivery transport", () => {
       repository,
       adapter,
       messageId: failed.id,
+    });
+    expect(delivered.delivery_status).toBe("delivered");
+    expect(adapter.followUps).toHaveLength(2);
+  });
+
+  it("requires duplicate-risk confirmation before retrying an ambiguous follow-up", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemoryDeliveryRepository();
+    await sendCanonicalReply({ repository, adapter, messageId: ROOT_ID });
+    adapter.followUpFailure = new MarketplaceDeliveryError(
+      "ambiguous",
+      "connection closed",
+    );
+    const ambiguous = await sendSellerFollowUp({
+      repository,
+      adapter,
+      conversationId: ROOT_ID,
+      body: "One more detail.",
+      requestId: "request-ambiguous",
+    }).catch(() => repository.followUpsByRequest.get("request-ambiguous")!);
+
+    adapter.followUpFailure = undefined;
+    await expect(
+      retryFollowUpDelivery({
+        repository,
+        adapter,
+        messageId: ambiguous.id,
+      }),
+    ).rejects.toThrow("Confirm the duplicate-delivery risk");
+    expect(adapter.followUps).toHaveLength(1);
+
+    const delivered = await retryFollowUpDelivery({
+      repository,
+      adapter,
+      messageId: ambiguous.id,
+      confirmDuplicateRisk: true,
     });
     expect(delivered.delivery_status).toBe("delivered");
     expect(adapter.followUps).toHaveLength(2);

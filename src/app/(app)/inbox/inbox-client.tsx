@@ -337,6 +337,12 @@ export function InboxClient({
     try {
       const res = await fetch(`/api/inbox/${message.id}/retry-delivery`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmDuplicateRisk: requiresDuplicateRiskConfirmation(
+            message.delivery_status,
+          ),
+        }),
       });
       if (!res.ok && res.status !== 409) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -422,6 +428,12 @@ export function InboxClient({
     try {
       const res = await fetch(`/api/inbox/outbound/${message.id}/retry`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmDuplicateRisk: requiresDuplicateRiskConfirmation(
+            message.delivery_status,
+          ),
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {

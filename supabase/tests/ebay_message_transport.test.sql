@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(15);
+select extensions.plan(18);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -168,6 +168,8 @@ select extensions.throws_ok(
   'tenant A cannot attach a notification to tenant B message'
 );
 
+reset role;
+
 select extensions.throws_ok(
   $$
     insert into public.messages (
@@ -185,6 +187,8 @@ select extensions.throws_ok(
   null,
   'the same provider question cannot import twice in one tenant'
 );
+
+set local role authenticated;
 
 select extensions.lives_ok(
   $$
@@ -244,6 +248,60 @@ select extensions.results_eq(
   'tenant A cannot advance tenant B sync cursor'
 );
 
+select extensions.results_eq(
+  $$
+    with attempted as (
+      update public.messages
+      set status = 'new', draft_reply = null
+      where id = '93000000-0000-4000-8000-000000000001'
+      returning id
+    )
+    select count(*)::bigint from attempted
+  $$,
+  'values (0::bigint)',
+  'tenant A cannot reset a server-managed eBay draft lifecycle'
+);
+
+select extensions.throws_ok(
+  $$
+    insert into public.messages (
+      user_id, item_id, listing_id, direction, body, status, marketplace,
+      external_message_id
+    ) values (
+      'message-tenant-a',
+      '91000000-0000-4000-8000-000000000001',
+      '92000000-0000-4000-8000-000000000001',
+      'inbound',
+      'fabricated eBay question',
+      'new',
+      'ebay',
+      'fabricated-provider-id'
+    )
+  $$,
+  '42501',
+  null,
+  'tenant A cannot fabricate an eBay draft candidate'
+);
+
+select extensions.lives_ok(
+  $$
+    insert into public.messages (
+      user_id, item_id, listing_id, direction, body, status, marketplace
+    ) values (
+      'message-tenant-a',
+      '91000000-0000-4000-8000-000000000001',
+      '92000000-0000-4000-8000-000000000001',
+      'inbound',
+      'simulated question',
+      'new',
+      'simulated'
+    )
+  $$,
+  'tenant A can still create its own simulated message'
+);
+
+reset role;
+
 select extensions.lives_ok(
   $$
     insert into public.messages (
@@ -263,8 +321,10 @@ select extensions.lives_ok(
       'delivered'
     )
   $$,
-  'tenant A can persist its own delivered reply'
+  'the trusted server can persist a delivered eBay reply'
 );
+
+set local role authenticated;
 
 select extensions.throws_ok(
   $$

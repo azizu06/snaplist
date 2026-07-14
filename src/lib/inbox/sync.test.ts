@@ -147,6 +147,7 @@ describe("syncInboxForSeller", () => {
       model: "test-reply",
       usedFallback: false,
     }));
+    const meterDraft = vi.fn(async () => undefined);
     let now = new Date("2026-07-13T12:05:00.000Z");
 
     const first = await syncInboxForSeller({
@@ -156,6 +157,7 @@ describe("syncInboxForSeller", () => {
       initialLookbackMs: 10 * 60_000,
       overlapMs: 10 * 60_000,
       draft,
+      meterDraft,
     });
     now = new Date("2026-07-13T12:10:00.000Z");
     const second = await syncInboxForSeller({
@@ -165,6 +167,7 @@ describe("syncInboxForSeller", () => {
       initialLookbackMs: 10 * 60_000,
       overlapMs: 10 * 60_000,
       draft,
+      meterDraft,
     });
 
     expect(first).toMatchObject({ fetched: 1, imported: 1, drafted: 1 });
@@ -174,6 +177,7 @@ describe("syncInboxForSeller", () => {
     expect(repository.draftClaims).toBe(1);
     expect(repository.draftWrites).toBe(1);
     expect(draft).toHaveBeenCalledTimes(1);
+    expect(meterDraft).toHaveBeenCalledTimes(1);
     expect(adapter.fetches[1]?.from.toISOString()).toBe(
       "2026-07-13T11:55:00.000Z",
     );

@@ -141,6 +141,18 @@ export function hasEbayMessagingSandboxFallback(
   );
 }
 
+export function ebayMessagingSyncUserIds(
+  connectedUserIds: Iterable<string>,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const userIds = new Set(connectedUserIds);
+  const operatorUserId = env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID;
+  if (operatorUserId && hasEbayMessagingSandboxFallback(operatorUserId, env)) {
+    userIds.add(operatorUserId);
+  }
+  return [...userIds];
+}
+
 function isExactEbaySandboxApiBase(baseUrl: string): boolean {
   try {
     const url = new URL(baseUrl);
