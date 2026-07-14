@@ -71,7 +71,10 @@ class MemoryPolicyRepository implements MessagePolicyRepository {
   enabled = true;
   decisions = new Map<string, MessagePolicyAuditRecord>();
   pending = new Set<string>();
+  blocked = new Map<string, string>();
   marketplaceCurrent = true;
+  questionUnanswered = true;
+  revalidationFailure = false;
 
   async getEnabled() {
     return this.enabled;
@@ -104,14 +107,26 @@ class MemoryPolicyRepository implements MessagePolicyRepository {
   }
 
   async listPendingAutoSend() {
-    if (!this.enabled) return [];
     return [...this.pending].map((messageId) => ({ messageId }));
   }
 
   async revalidatePendingAutoSend(messageId: string) {
+    if (this.revalidationFailure) throw new Error("eBay unavailable");
+    if (!this.questionUnanswered) {
+      return { authorized: false as const, reason: "question_not_unanswered" as const };
+    }
     return this.enabled && this.marketplaceCurrent && this.pending.has(messageId)
-      ? { marketplaceObservedAt: policyGrounding.authorization.marketplaceObservedAt }
-      : null;
+      ? {
+          authorized: true as const,
+          marketplaceObservedAt: policyGrounding.authorization.marketplaceObservedAt,
+          questionObservedAt: "2026-07-14T12:01:30.000Z",
+        }
+      : { authorized: false as const, reason: "authorization_changed" as const };
+  }
+
+  async blockPendingAutoSend(messageId: string, reason: string) {
+    this.pending.delete(messageId);
+    this.blocked.set(messageId, reason);
   }
 }
 
@@ -143,6 +158,7 @@ describe("message policy orchestration", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(message.id, {
       marketplaceObservedAt: policyGrounding.authorization.marketplaceObservedAt,
+      questionObservedAt: "2026-07-14T12:01:30.000Z",
     });
   });
 
@@ -225,6 +241,7 @@ describe("message policy orchestration", () => {
       failed: 0,
     });
     expect(send).not.toHaveBeenCalled();
+    expect(repository.blocked.get(message.id)).toBe("authorization_changed");
   });
 
   it("does not send after marketplace facts change", async () => {
@@ -243,5 +260,41 @@ describe("message policy orchestration", () => {
       failed: 0,
     });
     expect(send).not.toHaveBeenCalled();
+    expect(repository.blocked.get(message.id)).toBe("authorization_changed");
+  });
+
+  it("blocks a queued reply when eBay reports the question answered", async () => {
+    const repository = new MemoryPolicyRepository();
+    await processMessagePolicyCandidate({
+      repository,
+      candidate: { message, grounding: draftGrounding },
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+    repository.questionUnanswered = false;
+    const send = vi.fn();
+
+    expect(await sendPendingAutomaticReplies({ repository, send })).toEqual({
+      sent: 0,
+      failed: 0,
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(repository.blocked.get(message.id)).toBe("question_not_unanswered");
+  });
+
+  it("terminally blocks automatic delivery when revalidation fails", async () => {
+    const repository = new MemoryPolicyRepository();
+    await processMessagePolicyCandidate({
+      repository,
+      candidate: { message, grounding: draftGrounding },
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+    repository.revalidationFailure = true;
+
+    expect(
+      await sendPendingAutomaticReplies({ repository, send: vi.fn() }),
+    ).toEqual({ sent: 0, failed: 1 });
+    expect(repository.blocked.get(message.id)).toBe("revalidation_failed");
   });
 });

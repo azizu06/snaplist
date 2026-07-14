@@ -83,12 +83,56 @@ describe("buildAuthoritativeMessageGrounding", () => {
         expect.objectContaining({
           key: "asking price",
           value: "180.00",
+          currency: "USD",
           source: "current_asking_price",
         }),
         expect.objectContaining({ source: "active_listing_state" }),
       ]),
     );
     expect(JSON.stringify(result)).not.toMatch(/Bluetooth 6|48-hour|length|28/);
+  });
+
+  it("canonicalizes marketplace condition labels without blocking other facts", () => {
+    const result = buildAuthoritativeMessageGrounding({
+      now: new Date("2026-07-14T12:05:00.000Z"),
+      marketplace: {
+        externalListingId: "ebay-listing-1",
+        active: true,
+        price: 180,
+        currency: "GBP",
+        condition: "Used - Good",
+        itemSpecifics: {},
+        observedAt: "2026-07-14T12:05:00.000Z",
+      },
+      listing: {
+        id: listingId,
+        item_id: itemId,
+        status: "published",
+        ebay_status: "published",
+        ebay_listing_id: "ebay-listing-1",
+        copy: {},
+        listed_price: 180,
+        last_priced_at: "2026-07-14T12:00:00.000Z",
+        updated_at: "2026-07-14T12:00:00.000Z",
+      },
+      item: {
+        id: itemId,
+        condition: "good",
+        attributes: {},
+        updated_at: "2026-07-14T12:00:00.000Z",
+      },
+    });
+
+    expect(result.conflicts).not.toContain("condition");
+    expect(result.facts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "Condition", value: "good" }),
+        expect.objectContaining({
+          source: "current_asking_price",
+          currency: "GBP",
+        }),
+      ]),
+    );
   });
 
   it("marks case-insensitive contradictory approved facts as conflicting", () => {

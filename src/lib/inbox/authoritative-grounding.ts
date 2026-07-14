@@ -1,4 +1,5 @@
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
+import { canonicalizeCondition, normalizeConditionAlias } from "@/lib/items/condition";
 import { measurementWords } from "@/lib/vision/measurements";
 import type { MarketplaceListingSnapshot } from "@/lib/marketplace/messaging";
 import {
@@ -40,6 +41,11 @@ function referenceKey(value: string): string {
 
 function comparable(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function comparableCondition(value: string): string {
+  const withoutUsedPrefix = normalizeConditionAlias(value).replace(/^used\s+/, "");
+  return canonicalizeCondition(withoutUsedPrefix);
 }
 
 function formatInches(value: number): string {
@@ -138,7 +144,7 @@ export function buildAuthoritativeMessageGrounding(input: {
     const marketplaceCondition = nonEmpty(input.marketplace?.condition);
     if (
       marketplaceCondition &&
-      comparable(marketplaceCondition) === comparable(condition)
+      comparableCondition(marketplaceCondition) === comparableCondition(condition)
     ) {
       facts.push({
         key: "Condition",
@@ -146,8 +152,6 @@ export function buildAuthoritativeMessageGrounding(input: {
         source: "active_listing_specific",
         reference: `listing:${input.listing.id}:condition`,
       });
-    } else {
-      conflicts.add("condition");
     }
   }
 
@@ -175,11 +179,14 @@ export function buildAuthoritativeMessageGrounding(input: {
     typeof localPrice === "number" &&
     Number.isFinite(localPrice) &&
     localPrice > 0 &&
-    priceMatches
+    priceMatches &&
+    typeof input.marketplace?.currency === "string" &&
+    /^[A-Z]{3}$/.test(input.marketplace.currency.toUpperCase())
   ) {
     facts.push({
       key: "asking price",
       value: localPrice.toFixed(2),
+      currency: input.marketplace.currency.toUpperCase(),
       source: "current_asking_price",
       reference: `listing:${input.listing.id}:current-asking-price`,
     });

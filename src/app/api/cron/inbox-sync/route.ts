@@ -79,6 +79,7 @@ async function handle(request: NextRequest) {
               messageId,
               deliveryActor: "automatic",
               marketplaceObservedAt: authorization.marketplaceObservedAt,
+              questionObservedAt: authorization.questionObservedAt,
             }),
         },
       });

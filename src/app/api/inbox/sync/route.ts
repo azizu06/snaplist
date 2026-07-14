@@ -60,6 +60,7 @@ export async function POST(request: Request) {
             messageId,
             deliveryActor: "automatic",
             marketplaceObservedAt: authorization.marketplaceObservedAt,
+            questionObservedAt: authorization.questionObservedAt,
           }),
       },
     });

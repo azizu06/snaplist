@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Bump only when authorization behavior changes; decisions are unique per version. */
-export const MESSAGE_POLICY_VERSION = "grounded-pre-sale-v2";
+export const MESSAGE_POLICY_VERSION = "grounded-pre-sale-v3";
 
 export const messagePolicyOutcomeSchema = z.enum([
   "auto_send",
@@ -39,6 +39,7 @@ export type AuthoritativeFactSource = z.infer<
 export const authoritativeFactSchema = z.object({
   key: z.string().min(1),
   value: z.string().min(1),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional(),
   source: authoritativeFactSourceSchema,
   reference: z.string().min(1),
 });
@@ -183,9 +184,17 @@ function exactFactAnswer(
   ) {
     const fact = factBySource(input.grounding, "current_asking_price");
     const price = fact ? Number(fact.value) : NaN;
-    return fact && Number.isFinite(price) && price > 0
-      ? { fact, reply: `The current asking price is $${price.toFixed(2)}.` }
-      : null;
+    if (!fact?.currency || !Number.isFinite(price) || price <= 0) return null;
+    try {
+      const formatted = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: fact.currency,
+        currencyDisplay: "symbol",
+      }).format(price);
+      return { fact, reply: `The current asking price is ${formatted}.` };
+    } catch {
+      return null;
+    }
   }
 
   const fieldMatch = q.match(

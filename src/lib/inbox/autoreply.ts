@@ -25,8 +25,24 @@ export interface MessagePolicyRepository {
   ): Promise<Array<{ messageId: string }>>;
   revalidatePendingAutoSend(
     messageId: string,
-  ): Promise<{ marketplaceObservedAt: string } | null>;
+  ): Promise<
+    | {
+        authorized: true;
+        marketplaceObservedAt: string;
+        questionObservedAt: string;
+      }
+    | { authorized: false; reason: AutoSendBlockReason }
+  >;
+  blockPendingAutoSend(
+    messageId: string,
+    reason: AutoSendBlockReason,
+  ): Promise<void>;
 }
+
+export type AutoSendBlockReason =
+  | "authorization_changed"
+  | "question_not_unanswered"
+  | "revalidation_failed";
 
 export async function processMessagePolicyCandidate(input: {
   repository: MessagePolicyRepository;
@@ -66,7 +82,10 @@ export async function sendPendingAutomaticReplies(input: {
   repository: MessagePolicyRepository;
   send: (
     messageId: string,
-    authorization: { marketplaceObservedAt: string },
+    authorization: {
+      marketplaceObservedAt: string;
+      questionObservedAt: string;
+    },
   ) => Promise<unknown>;
 }): Promise<{ sent: number; failed: number }> {
   let sent = 0;
@@ -74,12 +93,32 @@ export async function sendPendingAutomaticReplies(input: {
   for (const candidate of await input.repository.listPendingAutoSend(
     MESSAGE_POLICY_VERSION,
   )) {
+    let authorization: Awaited<
+      ReturnType<MessagePolicyRepository["revalidatePendingAutoSend"]>
+    >;
     try {
-      const authorization = await input.repository.revalidatePendingAutoSend(
+      authorization = await input.repository.revalidatePendingAutoSend(
         candidate.messageId,
       );
-      if (!authorization) continue;
-      await input.send(candidate.messageId, authorization);
+    } catch {
+      await input.repository
+        .blockPendingAutoSend(candidate.messageId, "revalidation_failed")
+        .catch(() => undefined);
+      failed += 1;
+      continue;
+    }
+    if (!authorization.authorized) {
+      await input.repository.blockPendingAutoSend(
+        candidate.messageId,
+        authorization.reason,
+      );
+      continue;
+    }
+    try {
+      await input.send(candidate.messageId, {
+        marketplaceObservedAt: authorization.marketplaceObservedAt,
+        questionObservedAt: authorization.questionObservedAt,
+      });
       sent += 1;
     } catch {
       failed += 1;

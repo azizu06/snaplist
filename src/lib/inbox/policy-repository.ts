@@ -2,7 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MarketplaceMessagingAdapter } from "@/lib/marketplace/messaging";
 import { getAutoReplyEnabled } from "@/lib/settings/user-settings";
 import { buildAuthoritativeMessageGrounding } from "./authoritative-grounding";
-import type { MessagePolicyRepository } from "./autoreply";
+import type {
+  AutoSendBlockReason,
+  MessagePolicyRepository,
+} from "./autoreply";
 import {
   beginEbayMessageWrite,
   beginScheduledEbayMessageWrite,
@@ -199,7 +202,6 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
   }
 
   async listPendingAutoSend(policyVersion: string) {
-    if (!(await this.getEnabled())) return [];
     if (this.writeTarget.scheduled) {
       return readScheduledEbayMessagePolicy<Array<{ messageId: string }>>(
         this.writeTarget.client,
@@ -224,8 +226,10 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
 
   async revalidatePendingAutoSend(
     messageId: string,
-  ): Promise<{ marketplaceObservedAt: string } | null> {
-    if (!(await this.getEnabled())) return null;
+  ): ReturnType<MessagePolicyRepository["revalidatePendingAutoSend"]> {
+    if (!(await this.getEnabled())) {
+      return { authorized: false, reason: "authorization_changed" };
+    }
     let payload: { message: unknown; decision: unknown } | null;
     if (this.writeTarget.scheduled) {
       payload = await readScheduledEbayMessagePolicy<{
@@ -259,7 +263,9 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
       }
       payload = message && decision ? { message, decision } : null;
     }
-    if (!payload) return null;
+    if (!payload) {
+      return { authorized: false, reason: "authorization_changed" };
+    }
     const message = messageRowSchema.parse(payload.message);
     const decision = auditRecord(payload.decision as PolicyDecisionRow);
     if (
@@ -267,7 +273,17 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
       decision.outcome !== "auto_send" ||
       decision.deliveryStatus !== "not_attempted"
     ) {
-      return null;
+      return { authorized: false, reason: "authorization_changed" };
+    }
+    const questionCreatedAt = new Date(
+      message.external_created_at ?? message.created_at,
+    );
+    if (
+      !message.external_message_id ||
+      !message.external_listing_id ||
+      !Number.isFinite(questionCreatedAt.getTime())
+    ) {
+      return { authorized: false, reason: "question_not_unanswered" };
     }
     const grounding = await this.loadGrounding(message);
     const current = decideMessagePolicy({
@@ -286,8 +302,55 @@ export class SupabaseMessagePolicyRepository implements MessagePolicyRepository 
         decision.authorization.itemUpdatedAt &&
       current.authorization.externalListingId ===
         decision.authorization.externalListingId;
-    return authorized
-      ? { marketplaceObservedAt: current.authorization.marketplaceObservedAt }
-      : null;
+    if (!authorized) {
+      return { authorized: false, reason: "authorization_changed" };
+    }
+    const questionStatus = await this.marketplace.fetchUnansweredQuestions({
+      from: questionCreatedAt,
+      to: new Date(),
+    });
+    const stillUnanswered = questionStatus.questions.some(
+      (question) =>
+        question.externalMessageId === message.external_message_id &&
+        question.externalListingId === message.external_listing_id,
+    );
+    if (
+      questionStatus.answeredExternalMessageIds.includes(
+        message.external_message_id,
+      ) ||
+      !stillUnanswered
+    ) {
+      return { authorized: false, reason: "question_not_unanswered" };
+    }
+    return {
+      authorized: true,
+      marketplaceObservedAt: current.authorization.marketplaceObservedAt,
+      questionObservedAt: new Date().toISOString(),
+    };
+  }
+
+  async blockPendingAutoSend(
+    messageId: string,
+    reason: AutoSendBlockReason,
+  ): Promise<void> {
+    const generation = await this.getWriteGeneration();
+    const args = {
+      p_message_id: messageId,
+      p_reason: reason,
+      p_generation: generation,
+    };
+    const call = this.writeTarget.scheduled
+      ? this.writeTarget.client.rpc(
+          "block_scheduled_ebay_message_policy_delivery",
+          { p_user_id: this.userId, ...args },
+        )
+      : this.writeTarget.client.rpc(
+          "block_ebay_message_policy_delivery",
+          args,
+        );
+    const { error } = await call;
+    if (error) {
+      throw new Error(`Failed to block automatic reply: ${error.message}`);
+    }
   }
 }

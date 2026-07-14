@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MessageRow } from "@/lib/inbox";
 import {
+  canonicalReplyFailureLabel,
   deriveConversationState,
   messagePolicyEvidenceLabel,
 } from "./conversation-list";
@@ -68,7 +69,7 @@ describe("deriveConversationState", () => {
 
   it("labels an automatic reply with its authoritative grounding source", () => {
     const root = message({
-      policy_version: "grounded-pre-sale-v2",
+      policy_version: "grounded-pre-sale-v3",
       policy_outcome: "auto_send",
       policy_delivery_actor: "automatic",
       delivery_status: "delivered",
@@ -98,7 +99,7 @@ describe("deriveConversationState", () => {
 
   it("labels manual delivery by its actual seller actor", () => {
     const root = message({
-      policy_version: "grounded-pre-sale-v2",
+      policy_version: "grounded-pre-sale-v3",
       policy_outcome: "auto_send",
       policy_delivery_actor: "seller",
       delivery_status: "delivered",
@@ -123,6 +124,33 @@ describe("deriveConversationState", () => {
     expect(
       messagePolicyEvidenceLabel(message({ policy_outcome: "escalate" })),
     ).toBe("Needs seller check");
+  });
+
+  it("shows queued and blocked automatic delivery truth", () => {
+    expect(
+      messagePolicyEvidenceLabel(
+        message({
+          policy_outcome: "auto_send",
+          policy_delivery_status: "not_attempted",
+        }),
+      ),
+    ).toBe("Automatic reply queued");
+    expect(
+      messagePolicyEvidenceLabel(
+        message({
+          policy_outcome: "auto_send",
+          policy_delivery_status: "blocked",
+        }),
+      ),
+    ).toBe("Automatic send blocked · Needs your approval");
+  });
+
+  it("uses the actual delivery actor for failure history", () => {
+    expect(
+      canonicalReplyFailureLabel(
+        message({ policy_outcome: "auto_send", policy_delivery_actor: "seller" }),
+      ),
+    ).toBe("Reply not delivered. Delivery failed after your approval.");
   });
 
   it("marks a question answered on eBay as resolved and non-actionable", () => {

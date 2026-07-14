@@ -45,6 +45,7 @@ const grounding: AuthoritativeMessageGrounding = {
     {
       key: "asking price",
       value: "180.00",
+      currency: "USD",
       source: "current_asking_price",
       reference: "listing:22222222-2222-4222-8222-222222222222:listed-price",
     },
@@ -170,6 +171,18 @@ describe("decideMessagePolicy", () => {
 
     const exact = decide("What is the asking price?");
     expect(exact.proposedReply).toBe("The current asking price is $180.00.");
+  });
+
+  it("formats the authoritative marketplace currency", () => {
+    const result = decide("What is the asking price?", {
+      facts: grounding.facts.map((fact) =>
+        fact.source === "current_asking_price"
+          ? { ...fact, currency: "GBP" }
+          : fact,
+      ),
+    });
+
+    expect(result.proposedReply).toBe("The current asking price is £180.00.");
   });
 
   it("matches accessory facts by whole tokens", () => {

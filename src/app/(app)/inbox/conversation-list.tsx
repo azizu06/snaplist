@@ -215,9 +215,24 @@ export function messagePolicyEvidenceLabel(message: MessageRow): string | null {
       ? `Automatically sent${source ? ` · ${source}` : ""}`
       : "Seller-approved reply sent";
   }
+  if (message.policy_delivery_status === "blocked") {
+    return "Automatic send blocked · Needs your approval";
+  }
+  if (
+    message.policy_outcome === "auto_send" &&
+    message.policy_delivery_status === "not_attempted"
+  ) {
+    return "Automatic reply queued";
+  }
   if (message.policy_outcome === "escalate") return "Needs seller check";
   if (message.policy_outcome === "draft_for_approval") return "Needs your approval";
   return null;
+}
+
+export function canonicalReplyFailureLabel(message: MessageRow): string {
+  return message.policy_delivery_actor === "automatic"
+    ? "Automatic reply not delivered. The failure is safe to retry."
+    : "Reply not delivered. Delivery failed after your approval.";
 }
 
 export function deriveConversationState(
@@ -924,9 +939,7 @@ export function ConversationThread({
                 ? "Delivery unconfirmed. eBay may already have received this reply."
                 : message.delivery_status === "sending"
                   ? "Delivery pending. Retry is available if the send lease expired."
-                  : message.policy_outcome === "auto_send"
-                    ? "Automatic reply not delivered. The failure is safe to retry."
-                    : "Reply not delivered. Delivery failed after your approval."}
+                  : canonicalReplyFailureLabel(message)}
             </p>
             {message.draft_reply ? (
               <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-fg">
@@ -988,11 +1001,13 @@ export function ConversationThread({
                 className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold text-accent-soft-fg"
               >
                 <SparkleIcon className="size-3 shrink-0" />
-                {message.policy_outcome === "escalate"
+                {message.policy_delivery_status === "blocked"
+                  ? "Automatic send blocked · review before sending"
+                  : message.policy_outcome === "escalate"
                   ? "Needs seller check · review before sending"
                   : message.policy_outcome === "draft_for_approval"
                     ? "Needs your approval · edit before sending"
-                    : "Drafted from your listing · edit before sending"}
+                    : "Automatic reply queued · verifying current eBay state"}
                 {message.draft_model ? (
                   <span className="font-normal text-accent-soft-fg/70">
                     · {message.draft_model}
@@ -1009,7 +1024,10 @@ export function ConversationThread({
             </div>
             <div className="flex items-center justify-end gap-3">
               <span className="hidden text-[13px] text-faint sm:inline">
-                Nothing sends until you approve
+                {message.policy_outcome === "auto_send" &&
+                message.policy_delivery_status === "not_attempted"
+                  ? "Sends automatically after a final safety check"
+                  : "Nothing sends until you approve"}
               </span>
               <button
                 type="button"

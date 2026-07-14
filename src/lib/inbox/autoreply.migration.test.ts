@@ -53,6 +53,8 @@ describe("grounded message autoreply migration", () => {
     expect(migration).toMatch(/listing\.updated_at\s*=\s*decision\.listing_updated_at/i);
     expect(migration).toMatch(/item\.updated_at\s*=\s*decision\.item_updated_at/i);
     expect(migration).toMatch(/dispatch_verified_at[\s\S]*interval '5 minutes'/i);
+    expect(migration).toMatch(/question_verified_at[\s\S]*interval '5 minutes'/i);
+    expect(migration).toMatch(/question_observed_at/i);
   });
 
   it("mirrors real transport truth into the audit record", () => {
@@ -61,5 +63,7 @@ describe("grounded message autoreply migration", () => {
     expect(migration).toMatch(/external_delivery_id/i);
     expect(migration).toMatch(/policy_delivery_actor/i);
     expect(migration).toMatch(/delivery_actor/i);
+    expect(migration).toMatch(/delivery_status\s*=\s*'blocked'/i);
+    expect(migration).toMatch(/policy_delivery_status\s*=\s*'blocked'/i);
   });
 });

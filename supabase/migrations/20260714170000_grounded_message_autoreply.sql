@@ -19,6 +19,12 @@ alter table public.messages
   add column if not exists policy_grounding_references jsonb not null default '[]'::jsonb,
   add column if not exists policy_safety_signals jsonb not null default '{}'::jsonb,
   add column if not exists policy_decided_at timestamptz,
+  add column if not exists policy_delivery_status text
+    check (policy_delivery_status in (
+      'not_attempted', 'not_applicable', 'blocked', 'pending', 'sending',
+      'delivered', 'rejected', 'failed', 'ambiguous'
+    )),
+  add column if not exists policy_delivery_error text,
   add column if not exists policy_delivery_actor text
     check (policy_delivery_actor in ('automatic', 'seller'));
 
@@ -42,11 +48,12 @@ create table public.message_policy_decisions (
   item_updated_at timestamptz not null,
   marketplace_verified_at timestamptz not null,
   dispatch_verified_at timestamptz,
+  question_verified_at timestamptz,
   external_listing_id text not null,
   delivery_actor text check (delivery_actor in ('automatic', 'seller')),
   delivery_status text not null default 'not_attempted'
     check (delivery_status in (
-      'not_attempted', 'not_applicable', 'pending', 'sending',
+      'not_attempted', 'not_applicable', 'blocked', 'pending', 'sending',
       'delivered', 'rejected', 'failed', 'ambiguous'
     )),
   external_delivery_id text,
@@ -113,7 +120,7 @@ begin
   if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
     raise exception using errcode = '22023', message = 'Policy decision payload is required';
   end if;
-  if v_policy_version <> 'grounded-pre-sale-v2' then
+  if v_policy_version <> 'grounded-pre-sale-v3' then
     raise exception using errcode = '22023', message = 'Unsupported message policy version';
   end if;
   if v_outcome not in ('auto_send', 'draft_for_approval', 'escalate') then
@@ -217,7 +224,9 @@ begin
       policy_reason_codes = v_inserted.reason_codes,
       policy_grounding_references = v_inserted.grounding_references,
       policy_safety_signals = v_inserted.safety_signals,
-      policy_decided_at = v_inserted.decided_at
+      policy_decided_at = v_inserted.decided_at,
+      policy_delivery_status = v_inserted.delivery_status,
+      policy_delivery_error = null
   where message.id = p_message_id and message.user_id = p_user_id;
 
   return jsonb_build_object('inserted', true, 'decision', to_jsonb(v_inserted));
@@ -289,6 +298,116 @@ grant execute on function public.record_scheduled_ebay_message_policy_decision(
   text, uuid, jsonb, uuid
 ) to service_role;
 
+create or replace function private.block_ebay_message_policy_delivery_for_tenant(
+  p_user_id text,
+  p_message_id uuid,
+  p_reason text,
+  p_generation uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_account private.ebay_messaging_account_generations%rowtype;
+  v_blocked boolean;
+begin
+  if p_reason not in (
+    'authorization_changed', 'question_not_unanswered', 'revalidation_failed'
+  ) then
+    raise exception using errcode = '22023', message = 'Invalid automatic reply block reason';
+  end if;
+  v_account := private.lock_ebay_messaging_account(p_user_id);
+  if v_account.generation is distinct from p_generation or v_account.seller_erased then
+    raise exception using errcode = '40001', message = 'eBay messaging account generation expired';
+  end if;
+  update public.message_policy_decisions decision
+  set delivery_status = 'blocked',
+      delivery_error = p_reason
+  where decision.user_id = p_user_id
+    and decision.message_id = p_message_id
+    and decision.ebay_account_generation = p_generation
+    and decision.policy_version = 'grounded-pre-sale-v3'
+    and decision.outcome = 'auto_send'
+    and decision.delivery_status = 'not_attempted'
+  returning true into v_blocked;
+  if coalesce(v_blocked, false) then
+    update public.messages message
+    set policy_delivery_status = 'blocked',
+        policy_delivery_error = p_reason
+    where message.id = p_message_id
+      and message.user_id = p_user_id
+      and message.ebay_account_generation = p_generation
+      and message.status = 'drafted';
+  end if;
+  return coalesce(v_blocked, false);
+end;
+$$;
+
+revoke all on function private.block_ebay_message_policy_delivery_for_tenant(
+  text, uuid, text, uuid
+) from public, anon, authenticated, service_role;
+
+create or replace function public.block_ebay_message_policy_delivery(
+  p_message_id uuid,
+  p_reason text,
+  p_generation uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey', ''
+  );
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated' or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Seller authorization is required';
+  end if;
+  return private.block_ebay_message_policy_delivery_for_tenant(
+    v_user_id, p_message_id, p_reason, p_generation
+  );
+end;
+$$;
+
+revoke all on function public.block_ebay_message_policy_delivery(uuid, text, uuid)
+  from public, anon, service_role;
+grant execute on function public.block_ebay_message_policy_delivery(uuid, text, uuid)
+  to authenticated;
+
+create or replace function public.block_scheduled_ebay_message_policy_delivery(
+  p_user_id text,
+  p_message_id uuid,
+  p_reason text,
+  p_generation uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  return private.block_ebay_message_policy_delivery_for_tenant(
+    p_user_id, p_message_id, p_reason, p_generation
+  );
+end;
+$$;
+
+revoke all on function public.block_scheduled_ebay_message_policy_delivery(
+  text, uuid, text, uuid
+) from public, anon, authenticated;
+grant execute on function public.block_scheduled_ebay_message_policy_delivery(
+  text, uuid, text, uuid
+) to service_role;
+
 create or replace function public.read_scheduled_ebay_message_policy(
   p_user_id text,
   p_operation text,
@@ -337,9 +456,6 @@ begin
     from public.message_policy_decisions pending
     join public.messages message
       on message.id = pending.message_id and message.user_id = pending.user_id
-    join public.user_settings settings
-      on settings.user_id = pending.user_id
-      and settings.auto_reply_enabled = true
     where pending.user_id = p_user_id
       and pending.ebay_account_generation = v_account.generation
       and pending.policy_version = p_payload->>'policy_version'
@@ -360,7 +476,7 @@ begin
     where decision.user_id = p_user_id
       and decision.message_id = (p_payload->>'message_id')::uuid
       and decision.ebay_account_generation = v_account.generation
-      and decision.policy_version = 'grounded-pre-sale-v2'
+      and decision.policy_version = 'grounded-pre-sale-v3'
       and decision.outcome = 'auto_send'
       and decision.delivery_status = 'not_attempted'
       and message.status = 'drafted';
@@ -449,7 +565,8 @@ create or replace function private.assert_current_automatic_message_delivery(
   p_generation uuid,
   p_stage text,
   p_body text default null,
-  p_marketplace_observed_at timestamptz default null
+  p_marketplace_observed_at timestamptz default null,
+  p_question_observed_at timestamptz default null
 )
 returns void
 language plpgsql
@@ -464,6 +581,9 @@ begin
     p_marketplace_observed_at is null
     or p_marketplace_observed_at < statement_timestamp() - interval '5 minutes'
     or p_marketplace_observed_at > statement_timestamp() + interval '1 minute'
+    or p_question_observed_at is null
+    or p_question_observed_at < statement_timestamp() - interval '5 minutes'
+    or p_question_observed_at > statement_timestamp() + interval '1 minute'
   ) then
     raise exception using errcode = '42501', message = 'Marketplace listing verification is stale';
   end if;
@@ -483,7 +603,7 @@ begin
     where decision.user_id = p_user_id
       and decision.message_id = p_message_id
       and decision.ebay_account_generation = p_generation
-      and decision.policy_version = 'grounded-pre-sale-v2'
+      and decision.policy_version = 'grounded-pre-sale-v3'
       and decision.outcome = 'auto_send'
       and decision.delivery_status in ('not_attempted', 'sending')
       and message.policy_version = decision.policy_version
@@ -506,7 +626,8 @@ begin
           and message.delivery_status = 'sending'
           and message.policy_delivery_actor = 'automatic'
           and decision.delivery_actor = 'automatic'
-          and decision.dispatch_verified_at >= statement_timestamp() - interval '5 minutes')
+          and decision.dispatch_verified_at >= statement_timestamp() - interval '5 minutes'
+          and decision.question_verified_at >= statement_timestamp() - interval '5 minutes')
       )
     for update of decision, message, listing, item, settings
   ) then
@@ -518,7 +639,7 @@ end;
 $$;
 
 revoke all on function private.assert_current_automatic_message_delivery(
-  text, uuid, uuid, text, text, timestamptz
+  text, uuid, uuid, text, text, timestamptz, timestamptz
 ) from public, anon, authenticated, service_role;
 
 create or replace function private.record_message_delivery_actor(
@@ -526,7 +647,8 @@ create or replace function private.record_message_delivery_actor(
   p_message_id uuid,
   p_generation uuid,
   p_actor text,
-  p_marketplace_observed_at timestamptz default null
+  p_marketplace_observed_at timestamptz default null,
+  p_question_observed_at timestamptz default null
 )
 returns void
 language plpgsql
@@ -547,6 +669,10 @@ begin
       dispatch_verified_at = case
         when p_actor = 'automatic' then p_marketplace_observed_at
         else null
+      end,
+      question_verified_at = case
+        when p_actor = 'automatic' then p_question_observed_at
+        else null
       end
   where decision.message_id = p_message_id
     and decision.user_id = p_user_id
@@ -555,7 +681,7 @@ end;
 $$;
 
 revoke all on function private.record_message_delivery_actor(
-  text, uuid, uuid, text, timestamptz
+  text, uuid, uuid, text, timestamptz, timestamptz
 ) from public, anon, authenticated, service_role;
 
 create or replace function private.apply_authenticated_ebay_message_write(
@@ -589,7 +715,8 @@ begin
       p_generation,
       'claim',
       p_payload->>'body',
-      (p_payload->>'marketplace_observed_at')::timestamptz
+      (p_payload->>'marketplace_observed_at')::timestamptz,
+      (p_payload->>'question_observed_at')::timestamptz
     );
   elsif p_operation = 'begin_provider_dispatch' and exists (
     select 1 from public.messages message
@@ -613,7 +740,8 @@ begin
       (p_payload->>'message_id')::uuid,
       p_generation,
       v_actor,
-      (p_payload->>'marketplace_observed_at')::timestamptz
+      (p_payload->>'marketplace_observed_at')::timestamptz,
+      (p_payload->>'question_observed_at')::timestamptz
     );
   elsif p_operation = 'upsert_unresolved_question' then
     perform private.record_unresolved_ebay_buyer_provenance(
@@ -670,7 +798,8 @@ begin
       p_generation,
       'claim',
       p_payload->>'body',
-      (p_payload->>'marketplace_observed_at')::timestamptz
+      (p_payload->>'marketplace_observed_at')::timestamptz,
+      (p_payload->>'question_observed_at')::timestamptz
     );
   elsif p_operation = 'begin_provider_dispatch' then
     perform private.assert_current_automatic_message_delivery(
@@ -691,7 +820,7 @@ begin
     where decision.user_id = p_user_id
       and decision.message_id = (p_payload->>'message_id')::uuid
       and decision.ebay_account_generation = p_generation
-      and decision.policy_version = 'grounded-pre-sale-v2'
+      and decision.policy_version = 'grounded-pre-sale-v3'
       and decision.outcome = 'auto_send'
       and message.policy_version = decision.policy_version
       and message.policy_outcome = 'auto_send'
@@ -712,7 +841,8 @@ begin
       (p_payload->>'message_id')::uuid,
       p_generation,
       'automatic',
-      (p_payload->>'marketplace_observed_at')::timestamptz
+      (p_payload->>'marketplace_observed_at')::timestamptz,
+      (p_payload->>'question_observed_at')::timestamptz
     );
   elsif p_operation = 'upsert_unresolved_question' then
     perform private.record_unresolved_ebay_buyer_provenance(
