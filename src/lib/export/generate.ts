@@ -39,10 +39,11 @@ import {
  *    WHITELISTED to tokens derivable from the validated core (so a hashtag can
  *    never assert a brand/model/spec the core never established), and the
  *    results are validated against the strict pack schemas;
- *  - the PRICE is never generated. If the caller passes the item's stored price
- *    it is appended deterministically to the Facebook block; the model is told
- *    not to state one. No price → no price line. (The price source of truth
- *    stays whatever the item record carries — this module just renders it.)
+ *  - the PRICE is never generated. If the caller passes the item's effective
+ *    price it is carried separately on BOTH platform packs (for each
+ *    marketplace's price field) and appended deterministically only to the
+ *    Facebook block; the model is told not to state one. No price → no price
+ *    line. (The price source of truth stays upstream — this module renders it.)
  *
  * THE NO-HALLUCINATION GUARANTEE, channel by channel (PRD: "no attributes
  * hallucinated beyond the validated core"):
@@ -76,9 +77,9 @@ export interface GenerateExportPacksInput {
   /** The Zod-validated attribute core. The ONLY source of truth for facts. */
   attributes: ExtractedAttributes;
   /**
-   * The item's STORED price (whatever the item record carries today — e.g. the
-   * latest prediction log's recommendation). Rendered verbatim into the
-   * Facebook block; never invented and never sent to the model.
+   * The item's effective price (seller override, otherwise latest suggestion).
+   * Carried on every platform result and rendered verbatim into the Facebook
+   * block; never invented and never sent to the model.
    */
   price?: number;
   /** Injected model call. Defaults to the real lazy `generateObject` wrapper. */
@@ -93,6 +94,8 @@ export interface GenerateExportPacksInput {
 export interface ExportPackResult<P> {
   /** The validated, platform-shaped pack (passed its strict schema). */
   pack: P;
+  /** Effective price to enter in the platform's separate price field. */
+  price: number | null;
   /** The single clean copy-paste string the user pastes into the platform. */
   copyBlock: string;
   /** The same pack mapped onto the generic, persistable `ListingCopy` seam. */
@@ -211,7 +214,7 @@ export function reconcileHashtags(
 //  (b) a STANDALONE number is grounded only when the same number appears as a
 //      standalone token in a core value — digits mined out of identifiers
 //      ("4" from "WH-1000XM4") never count;
-//  (c) the stored price NEVER grounds free text: prices are appended
+//  (c) the effective price NEVER grounds free text: prices are appended
 //      deterministically by `facebookCopyBlock`, and currency-like spans
 //      ("$50", "50 dollars") are ALWAYS violations.
 // ---------------------------------------------------------------------------
@@ -249,7 +252,7 @@ export interface NumericGrounding {
 /**
  * Build the contextual grounding from the validated core fields (brand, model,
  * category, condition, isbn, upc, specs, title). Deliberately EXCLUDES the
- * stored price: the model is never allowed to write a price, so the price can
+ * effective price: the model is never allowed to write a price, so the price can
  * never ground a number in free text.
  */
 export function buildNumericGrounding(
@@ -470,7 +473,7 @@ export function fallbackMercariTitle(attrs: ExtractedAttributes): string {
   return enforceTitleLength(fallbackTitle(attrs), MERCARI_TITLE_MAX_LENGTH);
 }
 
-/** Render a stored price for the block ("$45" / "$49.99"). */
+/** Render the caller-resolved effective price for the block ("$45" / "$49.99"). */
 export function formatPrice(price: number): string {
   return Number.isInteger(price) ? `$${price}` : `$${price.toFixed(2)}`;
 }
@@ -478,7 +481,7 @@ export function formatPrice(price: number): string {
 /**
  * The Facebook Marketplace copy-paste block: title, blank line, the short
  * casual description, then deterministic meta lines — the core's condition
- * (only if the core established one), the STORED price (only if the caller
+ * (only if the core established one), the effective price (only if the caller
  * passed one), and the constant local-pickup line. Every fact line is
  * assembled here from validated inputs, never model free text.
  */
@@ -511,12 +514,13 @@ export function mercariCopyBlock(pack: MercariPack): string {
 export function facebookPackToListingCopy(
   pack: FacebookPack,
   copyBlock: string,
+  price: number | null = null,
 ): ListingCopy {
   return listingCopySchema.parse({
     platform: FACEBOOK_PLATFORM,
     title: pack.title,
     description: pack.description,
-    fields: { copyBlock },
+    fields: { copyBlock, price },
   });
 }
 
@@ -524,12 +528,13 @@ export function facebookPackToListingCopy(
 export function mercariPackToListingCopy(
   pack: MercariPack,
   copyBlock: string,
+  price: number | null = null,
 ): ListingCopy {
   return listingCopySchema.parse({
     platform: MERCARI_PLATFORM,
     title: pack.title,
     description: pack.description,
-    fields: { hashtags: pack.hashtags, copyBlock },
+    fields: { hashtags: pack.hashtags, copyBlock, price },
   });
 }
 
@@ -592,6 +597,7 @@ function assembleResult(
   input: GenerateExportPacksInput,
   model: string,
 ): GenerateExportPacksResult {
+  const price = input.price ?? null;
   const fbBlock = facebookCopyBlock(packs.facebook, {
     price: input.price,
     condition: input.attributes.condition,
@@ -600,13 +606,15 @@ function assembleResult(
   return {
     facebook: {
       pack: packs.facebook,
+      price,
       copyBlock: fbBlock,
-      copy: facebookPackToListingCopy(packs.facebook, fbBlock),
+      copy: facebookPackToListingCopy(packs.facebook, fbBlock, price),
     },
     mercari: {
       pack: packs.mercari,
+      price,
       copyBlock: mercariBlock,
-      copy: mercariPackToListingCopy(packs.mercari, mercariBlock),
+      copy: mercariPackToListingCopy(packs.mercari, mercariBlock, price),
     },
     model,
   };

@@ -12,8 +12,8 @@ import { loadOrGenerateExportPacks } from "./persist";
  *
  *  - first visit: generates and persists one draft row per platform through the
  *    revision-guarded RPC, then returns the fresh packs;
- *  - later visits at the same review revision reuse persisted model copy with no
- *    model call while deterministic Facebook price/condition lines stay current;
+ *  - later visits at the same content revision reuse persisted model copy with no
+ *    model call while the full review revision keeps the effective price current;
  *  - invalid, partial, or obsolete-revision rows regenerate without duplicating
  *    a valid platform row for the active revision.
  */
@@ -32,11 +32,17 @@ interface StoredRow {
   copy: Record<string, unknown> | null;
 }
 
+interface FakeSupabaseOptions {
+  currentReviewRevision?: () => string;
+  afterPersist?: () => void;
+}
+
 function fakeSupabase(
   rows: StoredRow[],
   inserted: InsertedRow[],
   persistedRevisions: string[] = [],
   persistError: { message: string } | null = null,
+  options: FakeSupabaseOptions = {},
 ): SupabaseClient {
   const filters = {
     eq: () => filters,
@@ -46,15 +52,40 @@ function fakeSupabase(
   };
   return {
     from(table: string) {
-      if (table !== "listings") throw new Error(`unexpected table ${table}`);
-      return {
-        select: () => filters,
-      };
+      if (table === "listings") {
+        return {
+          select: () => filters,
+        };
+      }
+      if (table === "items") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  review_revision:
+                    options.currentReviewRevision?.() ?? REVIEW_REVISION,
+                },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
     },
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name !== "persist_export_packs") throw new Error(`unexpected rpc ${name}`);
+      const currentReviewRevision =
+        options.currentReviewRevision?.() ?? REVIEW_REVISION;
+      if (args.p_expected_review_revision !== currentReviewRevision) {
+        return {
+          error: { message: "Seller price changed. Reload and try again." },
+        };
+      }
       inserted.push(...(args.p_packs as InsertedRow[]));
       persistedRevisions.push(args.p_source_review_revision as string);
+      options.afterPersist?.();
       return { error: persistError };
     },
   } as unknown as SupabaseClient;
@@ -96,6 +127,60 @@ function countingGenerate(): { generate: ExportPackGenerate; calls: () => number
 }
 
 describe("loadOrGenerateExportPacks", () => {
+  it("gives every platform pack the seller override instead of the latest AI suggestion", async () => {
+    const inserted: InsertedRow[] = [];
+    const { generate } = countingGenerate();
+
+    const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
+      userId: "user-1",
+      itemId: "item-1",
+      reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
+      attributes: CORE,
+      suggestedPrice: 44.44,
+      priceOverride: 177.77,
+      generate,
+      model: "test-model",
+    });
+
+    expect(view.facebook.price).toBe(177.77);
+    expect(view.mercari.price).toBe(177.77);
+    expect(view.facebook.copyBlock).toContain("Asking $177.77");
+    expect(inserted).toHaveLength(2);
+    for (const row of inserted) {
+      expect(row.copy["price"]).toBe(177.77);
+    }
+  });
+
+  it.each([
+    { label: "missing", priceOverride: null },
+    { label: "invalid", priceOverride: "not-a-price" },
+  ])(
+    "gives every platform pack the latest AI suggestion for a $label override",
+    async ({ priceOverride }) => {
+      const inserted: InsertedRow[] = [];
+      const { generate } = countingGenerate();
+
+      const view = await loadOrGenerateExportPacks(fakeSupabase([], inserted), {
+        userId: "user-1",
+        itemId: "item-1",
+        reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
+        attributes: CORE,
+        suggestedPrice: 44.44,
+        priceOverride,
+        generate,
+        model: "test-model",
+      });
+
+      expect(view.facebook.price).toBe(44.44);
+      expect(view.mercari.price).toBe(44.44);
+      for (const row of inserted) {
+        expect(row.copy["price"]).toBe(44.44);
+      }
+    },
+  );
+
   it("first visit: generates, persists a draft row per platform, returns fresh packs", async () => {
     const inserted: InsertedRow[] = [];
     const persistedRevisions: string[] = [];
@@ -106,8 +191,9 @@ describe("loadOrGenerateExportPacks", () => {
         userId: "user-1",
         itemId: "item-1",
         reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
         attributes: CORE,
-        price: 120,
+        suggestedPrice: 120,
         generate,
         model: "test-model",
       },
@@ -158,6 +244,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -190,6 +277,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -201,8 +289,9 @@ describe("loadOrGenerateExportPacks", () => {
     expect(inserted).toHaveLength(0);
   });
 
-  it("a cached Facebook block always reflects the CURRENT price, never the persisted snapshot", async () => {
-    // The pack was generated when the price was 100; a new pricing run says 120.
+  it("cached packs use the CURRENT seller override, never the persisted price snapshot", async () => {
+    // The pack was generated at 100; a new AI run says 120, but the seller has
+    // approved 177.77. Both cached platform packs must carry the override.
     const stored: StoredRow[] = [
       {
         platform: FACEBOOK_PLATFORM,
@@ -226,8 +315,10 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
-      price: 120,
+      suggestedPrice: 120,
+      priceOverride: 177.77,
       generate,
     });
 
@@ -235,9 +326,12 @@ describe("loadOrGenerateExportPacks", () => {
     expect(calls()).toBe(0);
     expect(view.cached).toBe(true);
     expect(inserted).toHaveLength(0);
+    expect(view.facebook.price).toBe(177.77);
+    expect(view.mercari.price).toBe(177.77);
     // The FB block is rebuilt deterministically from the CURRENT price.
-    expect(view.facebook.copyBlock).toContain("Asking $120");
+    expect(view.facebook.copyBlock).toContain("Asking $177.77");
     expect(view.facebook.copyBlock).not.toContain("$100");
+    expect(view.facebook.copyBlock).not.toContain("$120");
     expect(view.facebook.copyBlock).toContain("Stored FB title");
     expect(view.facebook.copyBlock).toContain("Stored FB description.");
     expect(view.facebook.copyBlock).toContain("Condition: good");
@@ -269,6 +363,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -294,6 +389,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -322,6 +418,7 @@ describe("loadOrGenerateExportPacks", () => {
       userId: "user-1",
       itemId: "item-1",
       reviewRevision: REVIEW_REVISION,
+      reviewContentRevision: REVIEW_REVISION,
       attributes: CORE,
       generate,
     });
@@ -350,6 +447,7 @@ describe("loadOrGenerateExportPacks", () => {
         userId: "user-1",
         itemId: "item-1",
         reviewRevision: REVIEW_REVISION,
+        reviewContentRevision: REVIEW_REVISION,
         attributes: CORE,
         generate,
       }),
@@ -370,10 +468,103 @@ describe("loadOrGenerateExportPacks", () => {
           userId: "user-1",
           itemId: "item-1",
           reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
           attributes: CORE,
           generate,
         },
       ),
     ).rejects.toThrow(/Failed to persist export packs: Review changed/i);
+  });
+
+  it("does not serve cached packs after the seller price revision changed", async () => {
+    const stored: StoredRow[] = [
+      {
+        platform: FACEBOOK_PLATFORM,
+        title: "Stored FB title",
+        description: "Stored FB description.",
+        copy: { copyBlock: "Stored FB block." },
+      },
+      {
+        platform: MERCARI_PLATFORM,
+        title: "Stored Mercari title",
+        description: "Stored Mercari description.",
+        copy: { copyBlock: "Stored Mercari block.", hashtags: [] },
+      },
+    ];
+    const changedRevision = "00000000-0000-4000-8000-000000000002";
+
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase(stored, [], [], null, {
+          currentReviewRevision: () => changedRevision,
+        }),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
+          attributes: CORE,
+          suggestedPrice: 44.44,
+          priceOverride: 177.77,
+        },
+      ),
+    ).rejects.toThrow(/seller price changed/i);
+  });
+
+  it("does not return generated packs when the seller price changes after persistence", async () => {
+    let currentReviewRevision = REVIEW_REVISION;
+    const changedRevision = "00000000-0000-4000-8000-000000000003";
+    const inserted: InsertedRow[] = [];
+
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase([], inserted, [], null, {
+          currentReviewRevision: () => currentReviewRevision,
+          afterPersist: () => {
+            currentReviewRevision = changedRevision;
+          },
+        }),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
+          attributes: CORE,
+          suggestedPrice: 44.44,
+          priceOverride: 177.77,
+          generate: countingGenerate().generate,
+          model: "test-model",
+        },
+      ),
+    ).rejects.toThrow(/seller price changed/i);
+  });
+
+  it("does not persist generated packs when the seller price changes during generation", async () => {
+    let currentReviewRevision = REVIEW_REVISION;
+    const changedRevision = "00000000-0000-4000-8000-000000000004";
+    const inserted: InsertedRow[] = [];
+
+    await expect(
+      loadOrGenerateExportPacks(
+        fakeSupabase([], inserted, [], null, {
+          currentReviewRevision: () => currentReviewRevision,
+        }),
+        {
+          userId: "user-1",
+          itemId: "item-1",
+          reviewRevision: REVIEW_REVISION,
+          reviewContentRevision: REVIEW_REVISION,
+          attributes: CORE,
+          suggestedPrice: 44.44,
+          priceOverride: 177.77,
+          generate: async () => {
+            currentReviewRevision = changedRevision;
+            return RAW;
+          },
+          model: "test-model",
+        },
+      ),
+    ).rejects.toThrow(/Failed to persist export packs: Seller price changed/i);
+    expect(inserted).toHaveLength(0);
   });
 });

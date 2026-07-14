@@ -2,8 +2,9 @@
  * Export-pack public surface (issue #15). One Zod-validated attribute core →
  * Facebook Marketplace + Mercari copy-paste packs, each following its
  * platform's conventions (FB: casual / short / local pickup; Mercari: ≤ 40-char
- * title, hashtags, shipping-oriented) and each rendered as one clean paste-able
- * block. Constraints are enforced STRUCTURALLY (Zod caps, hashtag bounds, the
+ * title, hashtags, shipping-oriented), each rendered as one clean paste-able
+ * block and carrying the caller-resolved effective price as a separate field.
+ * Constraints are enforced STRUCTURALLY (Zod caps, hashtag bounds, the
  * core-derived hashtag whitelist, token-boundary title grounding) on top of
  * the prompt rules, and the model call is injectable so the contract tests run
  * fully offline. Titles are grounded model output; DESCRIPTIONS are assembled

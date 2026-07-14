@@ -655,6 +655,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const exportAfterClaim = await userA.client.rpc("persist_export_packs", {
       p_item_id: seeded.itemId,
       p_source_review_revision: seeded.reviewRevision,
+      p_expected_review_revision: claim.data.claimId,
       p_packs: [
         {
           platform: "facebook",
@@ -732,6 +733,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const stale = await userA.client.rpc("persist_export_packs", {
       p_item_id: seeded.itemId,
       p_source_review_revision: seeded.reviewRevision,
+      p_expected_review_revision: currentRevision,
       p_packs: packs,
     });
     expect(stale.error?.code).toBe("P0002");
@@ -739,6 +741,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const current = await userA.client.rpc("persist_export_packs", {
       p_item_id: seeded.itemId,
       p_source_review_revision: currentRevision,
+      p_expected_review_revision: currentRevision,
       p_packs: packs,
     });
     expect(current.error).toBeNull();
@@ -769,6 +772,7 @@ describe("review identity regeneration transaction + RLS", () => {
         await userA.client.rpc("persist_export_packs", {
           p_item_id: seeded.itemId,
           p_source_review_revision: seeded.reviewRevision,
+          p_expected_review_revision: seeded.reviewRevision,
           p_packs: invalidPack,
         })
       ).error,
@@ -787,6 +791,7 @@ describe("review identity regeneration transaction + RLS", () => {
         await userA.client.rpc("persist_export_packs", {
           p_item_id: seeded.itemId,
           p_source_review_revision: seeded.reviewRevision,
+          p_expected_review_revision: seeded.reviewRevision,
           p_packs: validPack,
         })
       ).error,
@@ -833,6 +838,7 @@ describe("review identity regeneration transaction + RLS", () => {
         await userA.client.rpc("persist_export_packs", {
           p_item_id: seeded.itemId,
           p_source_review_revision: savedRevision,
+          p_expected_review_revision: savedRevision,
           p_packs: validPack,
         })
       ).error,
@@ -1005,5 +1011,48 @@ describe("review identity regeneration transaction + RLS", () => {
       .single();
     expect(current?.ebay_status).toBe("publishing");
     expect(current?.ebay_publish_claim_id).toBe(recovered.data.claimId);
+  });
+
+  it("claims one seller price snapshot and rejects a concurrent price edit", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "publish-price-snapshot");
+    const edited = await userA.client.rpc("update_dashboard_review", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_set_price_override: true,
+      p_price_override: 199,
+      p_set_cost_basis: false,
+      p_cost_basis: null,
+      p_set_status: false,
+      p_status: null,
+    });
+    expect(edited.error).toBeNull();
+
+    const claim = await userA.client.rpc("begin_ebay_publish", {
+      p_listing_id: seeded.listingId,
+      p_expected_run_id: null,
+      p_expected_review_revision: edited.data,
+    });
+    expect(claim.error).toBeNull();
+    expect(Number(claim.data?.priceOverride)).toBe(199);
+
+    const concurrentEdit = await userA.client.rpc("update_dashboard_review", {
+      p_item_id: seeded.itemId,
+      p_listing_id: seeded.listingId,
+      p_set_price_override: true,
+      p_price_override: 222,
+      p_set_cost_basis: false,
+      p_cost_basis: null,
+      p_set_status: false,
+      p_status: null,
+    });
+    expect(concurrentEdit.error?.code).toBe("P0002");
+
+    const { data: item } = await userA.client
+      .from("items")
+      .select("price_override")
+      .eq("id", seeded.itemId)
+      .single();
+    expect(Number(item?.price_override)).toBe(199);
   });
 });

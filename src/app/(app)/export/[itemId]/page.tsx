@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
+import { effectivePrice } from "@/lib/pipeline";
 import { loadOrGenerateExportPacks } from "@/lib/export";
 import { reportServerError } from "@/lib/sentry";
 import { signPhotoUrlMap } from "@/lib/vision";
@@ -12,7 +13,7 @@ import { ExportView } from "./export-view";
  * + Mercari copy-paste packs for one item. The render now lives in the
  * presentational `ExportView` (preview-harness friendly, like review/publish);
  * this page stays the RLS-scoped data path: load the item + a thumbnail, the
- * latest logged price, and the load-or-generate export packs.
+ * seller override + latest logged suggestion, and the load-or-generate export packs.
  */
 export default async function ExportPage({
   params,
@@ -28,7 +29,9 @@ export default async function ExportPage({
   // RLS scopes this to the owner. A non-owner / missing id returns no row → 404.
   const { data: item } = await supabase
     .from("items")
-    .select("id, attributes, condition, photos, review_content_revision")
+    .select(
+      "id, attributes, condition, photos, price_override, review_revision, review_content_revision",
+    )
     .eq("id", itemId)
     .single();
   if (!item) notFound();
@@ -51,7 +54,8 @@ export default async function ExportPage({
   const signedThumb = await signPhotoUrlMap(supabase, firstPhoto ? [firstPhoto] : []);
   const itemThumb = firstPhoto ? (signedThumb.get(firstPhoto) ?? null) : null;
 
-  // The price the item record carries today: the latest logged recommendation.
+  // One shared precedence contract for every export surface: a valid seller
+  // override wins; otherwise the latest AI suggestion is used.
   const { data: log } = await supabase
     .from("prediction_logs")
     .select("price")
@@ -59,10 +63,7 @@ export default async function ExportPage({
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const price =
-    log?.price != null && Number.isFinite(Number(log.price))
-      ? Number(log.price)
-      : null;
+  const price = effectivePrice(log?.price, item.price_override);
 
   let packs;
   let error: string | null = null;
@@ -70,9 +71,11 @@ export default async function ExportPage({
     packs = await loadOrGenerateExportPacks(supabase, {
       userId: userId,
       itemId,
-      reviewRevision: item.review_content_revision as string,
+      reviewRevision: item.review_revision as string,
+      reviewContentRevision: item.review_content_revision as string,
       attributes,
-      price: price ?? undefined,
+      suggestedPrice: log?.price,
+      priceOverride: item.price_override,
     });
   } catch (err) {
     // Keep the raw Supabase/generation error server-side and show a generic

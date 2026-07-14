@@ -51,7 +51,7 @@ import {
  *    BOUNDARIES against the core (with deterministic fallbacks), DESCRIPTIONS
  *    are assembled deterministically from the core (model description text is
  *    NEVER published — the only sound defense against invented digit-free
- *    claims), and the price line comes ONLY from the caller-passed stored
+ *    claims), and the price line comes ONLY from the caller-resolved effective
  *    price — never from the model;
  *  - each platform's output is ONE clean copy-paste string.
  */
@@ -316,6 +316,20 @@ describe("no hallucinated attributes beyond the validated core", () => {
 });
 
 describe("price grounding: stored price only, never generated", () => {
+  it("carries the caller-provided effective price on every platform pack", async () => {
+    const { generate } = scriptedGenerate([GOOD_RAW]);
+    const res = await generateExportPacks({
+      attributes: CORE,
+      generate,
+      price: 177.77,
+    });
+
+    for (const platform of [res.facebook, res.mercari]) {
+      expect(platform.price).toBe(177.77);
+      expect(platform.copy.fields["price"]).toBe(177.77);
+    }
+  });
+
   it("renders the caller-passed stored price verbatim", async () => {
     const { generate } = scriptedGenerate([GOOD_RAW]);
     const res = await generateExportPacks({ attributes: CORE, generate, price: 49.99 });
@@ -486,7 +500,7 @@ describe("published descriptions are deterministic core-backed assembly", () => 
 
   it("the stored price never grounds free text: '50-hour battery' violates even at price 50", () => {
     const grounding = buildNumericGrounding(CORE);
-    // The price is deliberately ABSENT from the grounding context, so a stored
+    // The price is deliberately ABSENT from the grounding context, so an effective
     // price of 50 cannot license "50-hour battery" (or any other 50-claim).
     expect(findUngroundedNumbers("50-hour battery life.", grounding)).toEqual([
       "50-hour",

@@ -4,7 +4,7 @@ import type { ConfidenceResult } from "../confidence/confidence";
  * Confidence-gated autopilot disposition + seller price override (issue #12).
  *
  * Two pure decisions live here so they are unit-testable with fake data and
- * shared by every consumer (persistence, review UI, future publish):
+ * shared by every consumer (persistence, review UI, eBay publish, and export):
  *
  *  1. WHERE does a freshly generated listing go? `autopilotEligible` (computed by
  *     the confidence composite: master switch AND score >= threshold) maps onto
@@ -36,19 +36,24 @@ export function initialListingStatus(
  * The price every downstream consumer must use: the seller's override when one
  * is set and usable, else the pipeline's suggestion.
  *
- * "Usable" = a finite number > 0. The write path (the review action) validates
- * before persisting, but the read path defends independently: `numeric` comes
- * back through drivers/JSON as number OR string, and legacy rows could carry
- * junk — a bad override must degrade to the suggestion, never to NaN on a
- * listing or a $0 auto-post.
+ * The write and read paths share the same cent-safe normalization contract.
+ * `numeric` comes back through drivers/JSON as number OR string, and legacy
+ * rows could carry junk — a bad override must degrade to the suggestion, never
+ * to NaN on a listing or a $0 auto-post.
  */
 export function effectivePrice(
-  suggested: number,
+  suggested: number | string | null | undefined,
   override: number | string | null | undefined,
-): number {
-  const o = typeof override === "string" ? Number(override) : override;
-  if (typeof o === "number" && Number.isFinite(o) && o > 0) return o;
-  return suggested;
+): number | null {
+  const usable = (candidate: number | string | null | undefined) => {
+    try {
+      return parsePriceOverride(candidate);
+    } catch {
+      return null;
+    }
+  };
+
+  return usable(override) ?? usable(suggested);
 }
 
 /**
@@ -183,7 +188,10 @@ function expandExponent(text: string): string {
   if (!Number.isInteger(exp) || Math.abs(exp) > 320) return text;
   let digits = m[1] + (m[2] ?? "");
   let point = m[1].length + exp; // index of the decimal point within digits
-  if (point <= 0) digits = "0".repeat(1 - point) + digits, (point = 1);
+  if (point <= 0) {
+    digits = "0".repeat(1 - point) + digits;
+    point = 1;
+  }
   if (point >= digits.length) digits = digits.padEnd(point, "0");
   return `${digits.slice(0, point)}.${digits.slice(point)}`;
 }

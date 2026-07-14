@@ -8,6 +8,7 @@ import {
 } from "./errors";
 import { batchSignPhotoUrls } from "../../vision/photos";
 import { createNotification } from "../../notifications";
+import { effectivePrice } from "../../pipeline";
 
 /**
  * Publish ONE persisted SnapList listing to eBay through the adapter seam and
@@ -22,9 +23,11 @@ import { createNotification } from "../../notifications";
  * Idempotent: a listing that already published returns its stored result
  * without another eBay call. Before external work, an atomic revision/run-id
  * claim freezes one coherent review snapshot and excludes concurrent edits or
- * publishes. A FAILED publish persists ebay_status='failed', clears its claim
- * lease, and leaves the local `status` lifecycle (draft/queued) untouched, so
- * review/draft flows keep seeing the listing and a retry stays safe.
+ * publishes. The claimed amount uses a valid seller override first and the latest
+ * prediction only as fallback, without rewriting recommendation history. A
+ * FAILED publish persists ebay_status='failed', clears its claim lease, and
+ * leaves the local `status` lifecycle (draft/queued) untouched, so review/draft
+ * flows keep seeing the listing and a retry stays safe.
  */
 
 export interface PublishOutcome {
@@ -57,6 +60,7 @@ interface PublishClaimSnapshot {
   condition: string | null;
   photos: string[];
   price: number | string | null;
+  priceOverride: number | string | null;
 }
 
 /**
@@ -180,7 +184,9 @@ export async function publishListingToEbay(
     };
   }
 
-  // 3. Pull the current review token used by the atomic publish claim.
+  // 3. Pull the current review token used by the atomic publish claim. The claim
+  // returns the seller override from the same locked review snapshot and rejects
+  // a concurrent review edit before any external work begins.
   const { data: item, error: itemErr } = await supabase
     .from("items")
     .select("review_revision")
@@ -231,8 +237,8 @@ export async function publishListingToEbay(
     throw new Error("Failed to start eBay publish: publish snapshot was not returned.");
   }
   const claimId = claim.claimId;
-  const price = claim.price == null ? NaN : Number(claim.price);
-  if (!Number.isFinite(price) || price <= 0) {
+  const price = effectivePrice(claim.price, claim.priceOverride);
+  if (price == null) {
     await markPublishFailed(supabase, listingId, claimId);
     throw new PublishValidationError(
       `Listing ${listingId} has no usable price. Run the pipeline (or set a price) before publishing.`,
@@ -343,7 +349,11 @@ function parsePublishClaimSnapshot(value: unknown): PublishClaimSnapshot | null 
     Array.isArray(snapshot.copy) ||
     (snapshot.condition !== null && typeof snapshot.condition !== "string") ||
     !Array.isArray(snapshot.photos) ||
-    !snapshot.photos.every((photo) => typeof photo === "string")
+    !snapshot.photos.every((photo) => typeof photo === "string") ||
+    !("priceOverride" in snapshot) ||
+    (snapshot.priceOverride !== null &&
+      typeof snapshot.priceOverride !== "number" &&
+      typeof snapshot.priceOverride !== "string")
   ) {
     return null;
   }

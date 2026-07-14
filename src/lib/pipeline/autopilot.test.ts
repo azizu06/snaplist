@@ -98,6 +98,17 @@ describe("effectivePrice", () => {
     expect(effectivePrice(100, -5)).toBe(100);
     expect(effectivePrice(100, Number.POSITIVE_INFINITY)).toBe(100);
   });
+
+  it("falls back when a persisted override cannot produce a cent-safe price", () => {
+    expect(effectivePrice(100, 0.004)).toBe(100);
+    expect(effectivePrice(100, "99999999999999.99")).toBe(100);
+  });
+
+  it("normalizes database values and returns no price only when neither candidate is usable", () => {
+    expect(effectivePrice(null, "177.77")).toBe(177.77);
+    expect(effectivePrice("44.44", "not-a-price")).toBe(44.44);
+    expect(effectivePrice(undefined, 0)).toBeNull();
+  });
 });
 
 describe("parsePriceOverride", () => {

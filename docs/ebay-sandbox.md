@@ -31,12 +31,19 @@ Both triggers call the shared `publishListingToEbayAndNotify` service, so persis
 and the activity-feed notifications (success and failure) behave identically from either
 entry point; an idempotent retry of an already-published listing does not re-notify.
 
+The amount sent through the adapter is the item's **effective price**: a valid, positive,
+cent-normalized `items.price_override` when the seller set one, otherwise the latest
+`prediction_logs.price` suggestion. Publishing never rewrites the recommendation log; an invalid
+legacy override is ignored and safely falls back to the suggestion.
+
 Before any external call, the publish service atomically claims one coherent review snapshot
 (listing copy, condition, photos, and effective price) using the item's review revision and listing
 run id. Concurrent review edits/regeneration or another active publish make the claim fail closed;
 a 15-minute claim lease permits safe retry after an abandoned attempt. Once authoritative eBay ids
 or publishing/published state exist, review correction, Sharpen, ordinary review edits, and dashboard
-status changes cannot rewrite that listing as a draft.
+status changes cannot rewrite that listing as a draft. Seller-price edits and applied reprices advance
+the same review revision, and the database rejects a price-override change while a publish claim is
+active, so eBay cannot receive a stale or half-updated amount.
 
 ## Tests are offline — always
 
