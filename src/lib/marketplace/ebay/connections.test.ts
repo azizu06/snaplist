@@ -13,10 +13,28 @@ const ENCRYPTION_ENV = {
   EBAY_TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
 };
 
+function deletionClient(rpc: ReturnType<typeof vi.fn>): SupabaseClient {
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    in: vi.fn(() => query),
+    not: vi.fn(() => query),
+    then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+      Promise.resolve(resolve({ data: [], error: null })),
+  };
+  return {
+    rpc,
+    from: vi.fn(() => query),
+    storage: {
+      from: vi.fn(() => ({ remove: vi.fn(async () => ({ error: null })) })),
+    },
+  } as unknown as SupabaseClient;
+}
+
 describe("saveEbayConnection", () => {
   it("disconnects through the tenant-derived serialized RPC", async () => {
     const rpc = vi.fn(async () => ({ data: true, error: null }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await deleteEbayConnection(client);
 
@@ -26,7 +44,7 @@ describe("saveEbayConnection", () => {
 
   it("persists through the tenant-derived erasure boundary", async () => {
     const rpc = vi.fn(async () => ({ data: null, error: null }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await saveEbayConnection(
       client,
@@ -99,8 +117,11 @@ describe("saveEbayConnection", () => {
 
 describe("eraseEbayUserData", () => {
   it("delegates identity-scoped erasure to the transactional database seam", async () => {
-    const rpc = vi.fn(async () => ({ data: 1, error: null }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const rpc = vi.fn(async (name: string) => ({
+      data: name === "erase_ebay_user_data" ? 1 : [],
+      error: null,
+    }));
+    const client = deletionClient(rpc);
 
     await expect(
       eraseEbayUserData(client, "ebay-user-1", "seller_one"),
@@ -109,6 +130,9 @@ describe("eraseEbayUserData", () => {
       p_ebay_user_id: "ebay-user-1",
       p_ebay_username: "seller_one",
     });
+    expect(rpc).toHaveBeenCalledWith("list_message_photo_object_deletions", {
+      p_limit: 1000,
+    });
   });
 
   it("fails the notice when transactional erasure fails", async () => {
@@ -116,7 +140,7 @@ describe("eraseEbayUserData", () => {
       data: null,
       error: { message: "database unavailable" },
     }));
-    const client = { rpc } as unknown as SupabaseClient;
+    const client = deletionClient(rpc);
 
     await expect(
       eraseEbayUserData(client, "ebay-user-1", undefined),
@@ -125,6 +149,41 @@ describe("eraseEbayUserData", () => {
       p_ebay_user_id: "ebay-user-1",
       p_ebay_username: null,
     });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes queued photo objects only after transactional erasure succeeds", async () => {
+    const path = "user-a/root-a/photo.jpg";
+    let completed = false;
+    const rpc = vi.fn(async (name: string) => {
+      if (name === "erase_ebay_user_data") return { data: 1, error: null };
+      if (name === "list_message_photo_object_deletions") {
+        return { data: completed ? [] : [path], error: null };
+      }
+      completed = true;
+      return { data: 1, error: null };
+    });
+    const remove = vi.fn(async () => ({ error: null }));
+    const client = {
+      rpc,
+      storage: { from: vi.fn(() => ({ remove })) },
+    } as unknown as SupabaseClient;
+
+    await expect(
+      eraseEbayUserData(client, "ebay-user-1", "seller_one"),
+    ).resolves.toBe(1);
+
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      "erase_ebay_user_data",
+      "list_message_photo_object_deletions",
+      "complete_message_photo_object_deletions",
+      "list_message_photo_object_deletions",
+    ]);
+    expect(remove).toHaveBeenCalledWith([path]);
+    expect(rpc).toHaveBeenLastCalledWith(
+      "list_message_photo_object_deletions",
+      { p_limit: 1000 },
+    );
   });
 });
 

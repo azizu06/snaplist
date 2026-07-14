@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { StatusTone } from "@/lib/ui/status";
-import type { MessageRow } from "@/lib/inbox";
+import type { MessageAttachmentRow, MessageRow } from "@/lib/inbox";
+import {
+  MAX_MESSAGE_PHOTOS,
+  validateMessagePhotoBatch,
+} from "@/lib/inbox/attachments";
 import {
   canRetryDelivery,
   deliveryRecoveryLabel,
@@ -307,6 +311,21 @@ export function deriveConversationState(
   };
 }
 
+export function attachmentsForMessageDelivery(
+  attachments: MessageAttachmentRow[],
+  message: MessageRow,
+): MessageAttachmentRow[] {
+  const delivered = message.delivery_status === "delivered";
+  return attachments.filter(
+    (photo) =>
+      photo.message_id === message.id ||
+      (!delivered &&
+        photo.message_id === null &&
+        photo.delivery_request_id ===
+          (message.delivery_request_id ?? message.id)),
+  );
+}
+
 /* ────────────────────────────── left pane: list ───────────────────────────── */
 
 export interface ConversationListProps {
@@ -473,6 +492,7 @@ interface PendingAttachment {
   id: string;
   url: string;
   name: string;
+  file: File;
 }
 
 /**
@@ -483,12 +503,9 @@ interface PendingAttachment {
  * once there's something to send. The `+`, the pill, and the send arrow all sit
  * on one vertical center axis.
  *
- * v1 SCOPE (honest): the picker + thumbnail previews are fully functional
- * front-end affordances, but **photos are preview-only** — actually delivering
- * image attachments to the buyer is a backend slice (Storage upload + a
- * message-attachments model + provider-hosted media). Text delivery is real
- * through the marketplace adapter. A faint
- * note appears while photos are attached so the seller is never misled.
+ * Photos are validated before preview and travel in the same durable delivery
+ * request as the required text. The server repeats content validation before
+ * persisting or contacting eBay.
  */
 function FollowUpComposer({
   message,
@@ -501,21 +518,18 @@ function FollowUpComposer({
   value: string;
   busy: string | null;
   onChange: (id: string, value: string) => void;
-  onSend: (message: MessageRow) => void;
+  onSend: (message: MessageRow, photos: File[]) => Promise<boolean>;
 }) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
   const text = value.trim();
   const sending = busy === `followup:${message.id}`;
-  // Send requires TYPED TEXT. Photos are preview-only in this slice (real
-  // attachment delivery arrives with the eBay adapter), and the typed text is the
-  // only thing that actually sends — both the `sendFollowUp` handler and the
-  // follow-up API bail on an empty body. Enabling send on a photo alone would
-  // light up an actionable ↑ arrow that silently does nothing (Codex P2), so gate
-  // it on text; the preview note already tells the seller the typed message sends.
+  // Both supported eBay message operations require typed text. A photo never
+  // turns an empty composer into an actionable send.
   const canSend = text !== "";
 
   // Revoke object URLs on unmount so previews don't leak memory. A ref mirrors
@@ -534,16 +548,39 @@ function FollowUpComposer({
     };
   }, []);
 
-  function addFiles(files: FileList | null) {
+  async function addFiles(files: FileList | null) {
     if (!files) return;
-    const next = Array.from(files)
-      .filter((f) => f.type.startsWith("image/"))
-      .map((f) => ({
+    try {
+      const incoming = Array.from(files);
+      validateMessagePhotoBatch(
+        await Promise.all(
+          [...attachments.map((a) => a.file), ...incoming].map(async (file) => ({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          })),
+        ),
+      );
+      const next = incoming.map((f) => ({
         id: `${f.name}-${f.size}-${f.lastModified}`,
         url: URL.createObjectURL(f),
         name: f.name,
+        file: f,
       }));
-    setAttachments((prev) => [...prev, ...next]);
+      setAttachments((prev) => [...prev, ...next].slice(0, MAX_MESSAGE_PHOTOS));
+      setAttachmentError(null);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : "Photo is not supported.");
+    }
+  }
+
+  async function send() {
+    if (!canSend || sending) return;
+    const succeeded = await onSend(message, attachments.map((a) => a.file));
+    if (!succeeded) return;
+    attachments.forEach((a) => URL.revokeObjectURL(a.url));
+    setAttachments([]);
   }
 
   function removeAttachment(id: string) {
@@ -581,8 +618,7 @@ function FollowUpComposer({
             ))}
           </div>
           <p className="text-[12px] leading-snug text-faint">
-            Photos preview here — sending them to the buyer arrives with the eBay
-            adapter. Your typed message sends now.
+            JPEG, PNG, or WebP · up to 5 photos · 12 MB each
           </p>
         </>
       ) : null}
@@ -591,6 +627,7 @@ function FollowUpComposer({
       <div className="flex items-center gap-2">
         {/* ── + attach button + popover (Apple Messages style) — filled circle
             at rest, not a hover-only background ── */}
+        {message.marketplace === "ebay" ? (
         <div className="relative shrink-0">
           <button
             type="button"
@@ -654,26 +691,27 @@ function FollowUpComposer({
           <input
             ref={libraryRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             multiple
             className="hidden"
             onChange={(e) => {
-              addFiles(e.target.files);
+              void addFiles(e.target.files);
               e.target.value = "";
             }}
           />
           <input
             ref={cameraRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             capture="environment"
             className="hidden"
             onChange={(e) => {
-              addFiles(e.target.files);
+              void addFiles(e.target.files);
               e.target.value = "";
             }}
           />
         </div>
+        ) : null}
 
         {/* ── input pill with the send control tucked inside its right edge.
             `pr-12` keeps text from sliding under the ↑ circle. ── */}
@@ -687,7 +725,7 @@ function FollowUpComposer({
               // Enter sends; Shift+Enter is a newline (chat convention).
               if (e.key === "Enter" && !e.shiftKey && canSend) {
                 e.preventDefault();
-                onSend(message);
+                void send();
               }
             }}
             rows={1}
@@ -702,7 +740,7 @@ function FollowUpComposer({
               <motion.button
                 key="send"
                 type="button"
-                onClick={() => onSend(message)}
+                onClick={() => void send()}
                 disabled={sending}
                 aria-label="Send follow-up"
                 initial={reduceMotion ? false : { opacity: 0, scale: 0.6 }}
@@ -735,6 +773,9 @@ function FollowUpComposer({
           </AnimatePresence>
         </div>
       </div>
+      {attachmentError ? (
+        <p role="alert" className="text-[12px] text-danger-soft-fg">{attachmentError}</p>
+      ) : null}
     </div>
   );
 }
@@ -749,16 +790,18 @@ export interface ConversationThreadProps {
   busy: string | null;
   /** Follow-up outbound messages in this thread, oldest→newest (after the reply). */
   followUps: MessageRow[];
+  attachments: MessageAttachmentRow[];
   /** The current follow-up composer text for this conversation. */
   followUpValue: string;
+  followUpComposerVersion: number;
   onEdit: (id: string, value: string) => void;
-  onApproveAndSend: (message: MessageRow) => void;
+  onApproveAndSend: (message: MessageRow, photos: File[]) => Promise<boolean>;
   onRetryDelivery: (message: MessageRow) => void;
   onRetryFollowUp: (message: MessageRow) => void;
   onRetryDraft: (message: MessageRow) => void;
   /** Composer input change + send for follow-up messages (post-reply). */
   onFollowUpChange: (id: string, value: string) => void;
-  onSendFollowUp: (message: MessageRow) => void;
+  onSendFollowUp: (message: MessageRow, photos: File[]) => Promise<boolean>;
   /** Mobile only — return to the list pane. */
   onBack?: () => void;
 }
@@ -769,7 +812,9 @@ export function ConversationThread({
   edits,
   busy,
   followUps,
+  attachments,
   followUpValue,
+  followUpComposerVersion,
   onEdit,
   onApproveAndSend,
   onRetryDelivery,
@@ -788,6 +833,56 @@ export function ConversationThread({
     canRetryFollowUps,
   } = state;
   const draftValue = edits[message.id] ?? message.draft_reply ?? "";
+  const [replyAttachments, setReplyAttachments] = useState<PendingAttachment[]>([]);
+  const [replyAttachmentError, setReplyAttachmentError] = useState<string | null>(null);
+  const replyLibraryRef = useRef<HTMLInputElement>(null);
+  const replyCameraRef = useRef<HTMLInputElement>(null);
+  const replyAttachmentsRef = useRef<PendingAttachment[]>([]);
+  useEffect(() => {
+    replyAttachmentsRef.current = replyAttachments;
+  }, [replyAttachments]);
+  useEffect(() => () => {
+    replyAttachmentsRef.current.forEach((photo) => URL.revokeObjectURL(photo.url));
+  }, []);
+
+  async function addReplyFiles(files: FileList | null) {
+    if (!files) return;
+    try {
+      const incoming = Array.from(files);
+      await validateMessagePhotoBatch(
+        await Promise.all(
+          [...replyAttachments.map((a) => a.file), ...incoming].map(async (file) => ({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          })),
+        ),
+      );
+      setReplyAttachments((prev) => [
+        ...prev,
+        ...incoming.map((file) => ({
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          name: file.name,
+          file,
+          url: URL.createObjectURL(file),
+        })),
+      ]);
+      setReplyAttachmentError(null);
+    } catch (error) {
+      setReplyAttachmentError(error instanceof Error ? error.message : "Photo is not supported.");
+    }
+  }
+
+  async function approveWithPhotos() {
+    const succeeded = await onApproveAndSend(
+      message,
+      replyAttachments.map((photo) => photo.file),
+    );
+    if (!succeeded) return;
+    replyAttachments.forEach((photo) => URL.revokeObjectURL(photo.url));
+    setReplyAttachments([]);
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -833,6 +928,7 @@ export function ConversationThread({
                 <span className="sr-only">Buyer: </span>
                 {message.body}
               </p>
+              <MessagePhotos photos={attachments.filter((photo) => photo.message_id === message.id)} />
             </div>
             <RelativeTime iso={message.created_at} className="px-1" />
           </div>
@@ -848,6 +944,7 @@ export function ConversationThread({
                   <span className="sr-only">You: </span>
                   {sentReply?.body ?? message.draft_reply}
                 </p>
+                <MessagePhotos photos={attachments.filter((photo) => photo.message_id === sentReply?.id)} />
               </div>
               <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
                 <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -864,6 +961,7 @@ export function ConversationThread({
           {followUps.map((m) => {
             const delivered = m.delivery_status === "delivered";
             const retrying = busy === `retry-followup:${m.id}`;
+            const messagePhotos = attachmentsForMessageDelivery(attachments, m);
             return (
             <div key={m.id} className="flex flex-col items-end gap-1">
               <div
@@ -877,6 +975,7 @@ export function ConversationThread({
                   <span className="sr-only">You: </span>
                   {m.body}
                 </p>
+                <MessagePhotos photos={messagePhotos} />
               </div>
               {delivered ? (
                 <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
@@ -946,6 +1045,13 @@ export function ConversationThread({
                 {message.draft_reply}
               </p>
             ) : null}
+            <MessagePhotos
+              photos={attachments.filter(
+                (photo) =>
+                  photo.message_id === null &&
+                  photo.delivery_request_id === message.id,
+              )}
+            />
             <div className="flex justify-end">
               <button
                 type="button"
@@ -987,6 +1093,7 @@ export function ConversationThread({
           // mirrors Apple Messages — `+` attach at the left, compact send at the
           // right. (Photo *delivery* is the next backend slice; see FollowUpComposer.)
           <FollowUpComposer
+            key={`${message.id}:${followUpComposerVersion}`}
             message={message}
             value={followUpValue}
             busy={busy}
@@ -1021,6 +1128,35 @@ export function ConversationThread({
                 rows={3}
                 className="mt-2 w-full resize-y rounded-md border border-border-strong bg-surface px-3 py-2 text-[15px] leading-relaxed text-fg outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent/30"
               />
+              {replyAttachments.length ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {replyAttachments.map((photo) => (
+                    <div key={photo.id} className="relative size-14 overflow-hidden rounded-lg border border-border">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photo.url} alt={photo.name} className="size-full object-cover" />
+                      <button
+                        type="button"
+                        aria-label={`Remove ${photo.name}`}
+                        onClick={() => setReplyAttachments((prev) => {
+                          URL.revokeObjectURL(photo.url);
+                          return prev.filter((item) => item.id !== photo.id);
+                        })}
+                        className="absolute right-0.5 top-0.5 flex size-5 items-center justify-center rounded-full bg-night/70 text-white"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {message.marketplace === "ebay" ? (
+              <div className="mt-2 flex items-center gap-2 text-[12px] text-muted">
+                <button type="button" onClick={() => replyLibraryRef.current?.click()} className="rounded-md border border-border bg-surface px-2 py-1 hover:bg-surface-2">Add photos</button>
+                <button type="button" onClick={() => replyCameraRef.current?.click()} className="rounded-md border border-border bg-surface px-2 py-1 hover:bg-surface-2">Camera</button>
+                <span>JPEG, PNG, WebP · max 5</span>
+                <input ref={replyLibraryRef} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { void addReplyFiles(event.target.files); event.target.value = ""; }} />
+                <input ref={replyCameraRef} type="file" capture="environment" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { void addReplyFiles(event.target.files); event.target.value = ""; }} />
+              </div>
+              ) : null}
+              {replyAttachmentError ? <p role="alert" className="mt-1 text-[12px] text-danger-soft-fg">{replyAttachmentError}</p> : null}
             </div>
             <div className="flex items-center justify-end gap-3">
               <span className="hidden text-[13px] text-faint sm:inline">
@@ -1031,7 +1167,7 @@ export function ConversationThread({
               </span>
               <button
                 type="button"
-                onClick={() => onApproveAndSend(message)}
+                onClick={() => void approveWithPhotos()}
                 disabled={busy === `send:${message.id}`}
                 className="rounded-lg bg-primary px-4 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60"
               >
@@ -1051,6 +1187,36 @@ export function ConversationThread({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function MessagePhotos({ photos }: { photos: MessageAttachmentRow[] }) {
+  if (!photos.length) return null;
+  return (
+    <div className="mt-2 grid max-w-64 grid-cols-2 gap-1.5">
+      {[...photos].sort((a, b) => a.position - b.position).map((photo) => (
+        <div key={photo.id} className="min-w-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/inbox/attachments/${photo.id}`}
+            alt={photo.original_name}
+            loading="lazy"
+            className="max-h-48 w-full rounded-lg object-cover"
+          />
+          {photo.delivery_status !== "delivered" ? (
+            <span className="mt-0.5 block truncate text-[10px] font-semibold">
+              {photo.delivery_status === "uploaded"
+                ? "Upload ready · retry pending"
+                : photo.delivery_status === "ambiguous"
+                  ? "Delivery unconfirmed"
+                  : photo.delivery_status === "staged"
+                    ? "Ready to retry"
+                    : "Photo not delivered"}
+            </span>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }

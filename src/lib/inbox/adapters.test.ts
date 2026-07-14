@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEbayMessagingAdapterForUser } from "@/lib/marketplace/ebay";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 import { createMessagingTransportForConversation } from "./adapters";
+import { SupabaseDeliveryRepository } from "./transport";
 import type { MessageRow } from "./types";
 
 vi.mock("@/lib/marketplace/ebay", () => ({
@@ -74,6 +75,7 @@ describe("createMessagingTransportForConversation", () => {
       "Yes, it does.",
       new Date("2026-07-13T12:01:00.000Z"),
       false,
+      [],
     );
     await expect(
       transport.repository.beginProviderDispatch(
@@ -96,7 +98,7 @@ describe("createMessagingTransportForConversation", () => {
     expect(claimed).toBe(true);
     expect(rpc.mock.calls.filter(([name]) => name === "begin_ebay_message_write"))
       .toHaveLength(1);
-    expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
+    expect(rpc).toHaveBeenCalledWith("claim_ebay_message_write_with_photos", {
       p_operation: "claim_canonical",
       p_payload: {
         message_id: root.id,
@@ -108,6 +110,8 @@ describe("createMessagingTransportForConversation", () => {
         question_observed_at: undefined,
       },
       p_generation: generation,
+      p_delivery_request_id: root.id,
+      p_attachment_ids: [],
     });
     expect(rpc).toHaveBeenCalledWith("apply_ebay_message_write", {
       p_operation: "begin_provider_dispatch",
@@ -126,5 +130,99 @@ describe("createMessagingTransportForConversation", () => {
       },
       p_generation: generation,
     });
+  });
+
+  it("claims and completes scheduled automatic replies through scheduler photo RPCs", async () => {
+    const generation = "11111111-1111-4111-8111-111111111111";
+    const delivered = {
+      ...root,
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound" as const,
+      body: "Yes, it does.",
+      status: "sent" as const,
+      sent_at: "2026-07-13T12:01:01.000Z",
+      reply_to: root.id,
+      reply_kind: "reply" as const,
+      delivery_status: "delivered" as const,
+      external_delivery_id: "provider-message-1",
+      delivery_attempted_at: "2026-07-13T12:01:00.000Z",
+    };
+    const rpc = vi.fn(async (name: string) => ({
+      data:
+        name === "begin_scheduled_ebay_message_write"
+          ? generation
+          : name === "complete_scheduled_ebay_message_write_with_photos"
+            ? delivered
+            : true,
+      error: null,
+    }));
+    const admin = { rpc } as unknown as SupabaseClient;
+    const repository = new SupabaseDeliveryRepository(
+      admin,
+      "user_a",
+      true,
+      admin,
+      true,
+    );
+
+    await expect(repository.claimCanonical(
+      root,
+      "Yes, it does.",
+      new Date("2026-07-13T12:01:00.000Z"),
+      false,
+      [],
+      "automatic",
+      "2026-07-13T12:00:30.000Z",
+      "2026-07-13T12:00:00.000Z",
+    )).resolves.toBe(true);
+    await expect(repository.completeCanonical(
+      root,
+      "Yes, it does.",
+      {
+        externalDeliveryId: "provider-message-1",
+        deliveredAt: "2026-07-13T12:01:01.000Z",
+      },
+      new Date("2026-07-13T12:01:00.000Z"),
+    )).resolves.toMatchObject({
+      id: delivered.id,
+      delivery_status: "delivered",
+      external_delivery_id: "provider-message-1",
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "claim_scheduled_ebay_message_write_with_photos",
+      {
+        p_user_id: "user_a",
+        p_operation: "claim_canonical",
+        p_payload: {
+          message_id: root.id,
+          body: "Yes, it does.",
+          at: "2026-07-13T12:01:00.000Z",
+          retry: false,
+          delivery_actor: "automatic",
+          marketplace_observed_at: "2026-07-13T12:00:30.000Z",
+          question_observed_at: "2026-07-13T12:00:00.000Z",
+        },
+        p_generation: generation,
+        p_delivery_request_id: root.id,
+        p_attachment_ids: [],
+      },
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_scheduled_ebay_message_write_with_photos",
+      {
+        p_user_id: "user_a",
+        p_operation: "complete_canonical",
+        p_payload: {
+          message_id: root.id,
+          body: "Yes, it does.",
+          external_delivery_id: "provider-message-1",
+          delivered_at: "2026-07-13T12:01:01.000Z",
+          attempted_at: "2026-07-13T12:01:00.000Z",
+        },
+        p_generation: generation,
+        p_delivery_request_id: root.id,
+      },
+    );
   });
 });

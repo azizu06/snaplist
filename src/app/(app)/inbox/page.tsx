@@ -1,7 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { messageRowSchema, type MessageRow } from "@/lib/inbox";
+import {
+  messageAttachmentRowSchema,
+  messageRowSchema,
+  type MessageAttachmentRow,
+  type MessageRow,
+} from "@/lib/inbox";
 import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { InboxClient, type ItemOption } from "./inbox-client";
 
@@ -27,12 +32,17 @@ export default async function InboxPage({
   const { c } = await searchParams;
   const initialConversationId = typeof c === "string" && c !== "" ? c : null;
 
-  const [{ data: messages }, { data: items }] = await Promise.all([
+  const [{ data: messages }, { data: attachments }, { data: items }] = await Promise.all([
     supabase
       .from("messages")
       .select("*")
       .order("created_at", { ascending: false })
       .limit(200),
+    supabase
+      .from("message_attachments")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(500),
     supabase
       .from("items")
       .select("id, attributes, condition, created_at")
@@ -42,6 +52,10 @@ export default async function InboxPage({
 
   const initialMessages: MessageRow[] = (messages ?? []).flatMap((row) => {
     const parsed = messageRowSchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const initialAttachments: MessageAttachmentRow[] = (attachments ?? []).flatMap((row) => {
+    const parsed = messageAttachmentRowSchema.safeParse(row);
     return parsed.success ? [parsed.data] : [];
   });
 
@@ -73,6 +87,7 @@ export default async function InboxPage({
       <InboxClient
         userId={userId}
         initialMessages={initialMessages}
+        initialAttachments={initialAttachments}
         items={itemOptions}
         initialConversationId={initialConversationId}
       />

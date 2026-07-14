@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { drainMessagePhotoDeletionQueue } from "@/lib/inbox/attachment-cleanup";
 import {
   decryptSecret,
   encryptSecret,
@@ -320,5 +321,6 @@ export async function eraseEbayUserData(
   if (typeof data !== "number") {
     throw new Error("Deletion erase failed: database returned an invalid result");
   }
+  await drainMessagePhotoDeletionQueue(serviceClient);
   return data;
 }

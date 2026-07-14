@@ -7,6 +7,7 @@ import {
   listScheduledEbayConnectionUserIds,
 } from "@/lib/marketplace/ebay";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { cleanupExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
 import { SupabaseMessagePolicyRepository } from "@/lib/inbox/policy-repository";
 import { sendCanonicalReply, SupabaseDeliveryRepository } from "@/lib/inbox/transport";
 
@@ -36,6 +37,7 @@ async function handle(request: NextRequest) {
   const admin = createAdminClient();
   let connectedUserIds: string[];
   try {
+    await cleanupExpiredMessagePhotoUploads(admin);
     connectedUserIds = await listScheduledEbayConnectionUserIds(admin);
   } catch (error) {
     logServerError("cron.inbox-sync.connections", error);
@@ -77,6 +79,7 @@ async function handle(request: NextRequest) {
               repository: deliveryRepository,
               adapter,
               messageId,
+              expectedPhotoIds: [],
               deliveryActor: "automatic",
               marketplaceObservedAt: authorization.marketplaceObservedAt,
               questionObservedAt: authorization.questionObservedAt,

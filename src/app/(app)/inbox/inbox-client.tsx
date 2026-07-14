@@ -10,7 +10,17 @@ import {
   REALTIME_JOIN_TIMEOUT_MS,
   type RealtimeConnectionState,
 } from "@/lib/ui/realtime-status";
-import { messageRowSchema, type MessageRow } from "@/lib/inbox";
+import {
+  messageAttachmentRowSchema,
+  messageRowSchema,
+  type MessageAttachmentRow,
+  type MessageRow,
+} from "@/lib/inbox";
+import {
+  MESSAGE_PHOTO_BUCKET,
+  storedMessagePhotoSchema,
+  type StoredMessagePhoto,
+} from "@/lib/inbox/attachments";
 import { InboxEmptyState } from "./inbox-empty";
 import { SimulatorCard } from "./simulator-card";
 import {
@@ -23,6 +33,7 @@ import {
 } from "./conversation-list";
 import { useListResize } from "./use-list-resize";
 import { authorizeDeliveryRetry } from "./delivery-recovery";
+import { reconcileAttachments } from "./reconcile";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
@@ -51,6 +62,7 @@ export interface ItemOption {
 interface InboxClientProps {
   userId: string;
   initialMessages: MessageRow[];
+  initialAttachments: MessageAttachmentRow[];
   items: ItemOption[];
   /** Deep-linked conversation (?c=<id>) resolved by the server page. */
   initialConversationId?: string | null;
@@ -79,6 +91,7 @@ function reconcileMessages(prev: MessageRow[], fetched: MessageRow[]): MessageRo
 export function InboxClient({
   userId,
   initialMessages,
+  initialAttachments,
   items,
   initialConversationId = null,
 }: InboxClientProps) {
@@ -87,6 +100,9 @@ export function InboxClient({
   const supabase = useSupabaseClient();
   const [messages, setMessages] = useState<MessageRow[]>(() =>
     sortNewestFirst(initialMessages),
+  );
+  const [attachments, setAttachments] = useState<MessageAttachmentRow[]>(
+    initialAttachments,
   );
   // Seller edits keyed by message id; absent → show the agent's draft as-is.
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -97,6 +113,9 @@ export function InboxClient({
   // server confirms delivery.
   const [followUpRequestIds, setFollowUpRequestIds] = useState<
     Record<string, string>
+  >({});
+  const [followUpComposerVersions, setFollowUpComposerVersions] = useState<
+    Record<string, number>
   >({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
@@ -132,16 +151,21 @@ export function InboxClient({
     // active (or while the connection was down) is reconciled in here, so a
     // message change can never stay invisible until a page refresh.
     const refetch = async () => {
-      const { data } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("user_id", userId);
-      if (cancelled || !data) return;
-      const rows = data
+      const [{ data }, { data: attachmentData }] = await Promise.all([
+        supabase.from("messages").select("*").eq("user_id", userId),
+        supabase.from("message_attachments").select("*").eq("user_id", userId),
+      ]);
+      if (cancelled) return;
+      const rows = (data ?? [])
         .map((raw) => messageRowSchema.safeParse(raw))
         .filter((p) => p.success)
         .map((p) => p.data);
       setMessages((prev) => reconcileMessages(prev, rows));
+      const attachmentRows = (attachmentData ?? []).flatMap((raw) => {
+        const parsed = messageAttachmentRowSchema.safeParse(raw);
+        return parsed.success ? [parsed.data] : [];
+      });
+      setAttachments((prev) => reconcileAttachments(prev, attachmentRows));
     };
 
     const upsert = (raw: unknown) => {
@@ -151,6 +175,11 @@ export function InboxClient({
       setMessages((prev) =>
         sortNewestFirst([...prev.filter((m) => m.id !== row.id), row]),
       );
+    };
+    const upsertAttachment = (raw: unknown) => {
+      const parsed = messageAttachmentRowSchema.safeParse(raw);
+      if (!parsed.success) return;
+      setAttachments((prev) => reconcileAttachments(prev, [parsed.data], "upsert"));
     };
 
     const channel = supabase
@@ -164,6 +193,23 @@ export function InboxClient({
           filter: `user_id=eq.${userId}`,
         },
         (payload) => upsert(payload.new),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_attachments",
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            const deleted = payload.old as { id?: string };
+            if (deleted.id) setAttachments((prev) => prev.filter((row) => row.id !== deleted.id));
+          } else {
+            upsertAttachment(payload.new);
+          }
+        },
       )
       .on(
         "postgres_changes",
@@ -292,27 +338,30 @@ export function InboxClient({
     }
   }
 
-  async function approveAndSend(message: MessageRow) {
+  async function approveAndSend(message: MessageRow, photos: File[]): Promise<boolean> {
     const reply = (edits[message.id] ?? message.draft_reply ?? "").trim();
     if (reply === "") {
       setError("Reply cannot be empty.");
-      return;
+      return false;
     }
     setBusy(`send:${message.id}`);
     setError(null);
     try {
+      const uploadedPhotos = await uploadMessagePhotos(message.id, message.id, photos);
       const res = await fetch(`/api/inbox/${message.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reply }),
+        body: JSON.stringify({ reply, photos: uploadedPhotos }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? `Send failed (${res.status})`);
       }
       // Status flips + the outbound row arrive over Realtime.
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
+      return false;
     } finally {
       setBusy(null);
     }
@@ -382,19 +431,20 @@ export function InboxClient({
 
   // Send a follow-up message in a conversation already replied to. The outbound
   // row arrives over Realtime (same as a reply), so we only clear the composer.
-  async function sendFollowUp(message: MessageRow) {
+  async function sendFollowUp(message: MessageRow, photos: File[]): Promise<boolean> {
     const body = (followUpDrafts[message.id] ?? "").trim();
-    if (body === "") return;
+    if (body === "") return false;
     const requestId =
       followUpRequestIds[message.id] ?? window.crypto.randomUUID();
     setFollowUpRequestIds((prev) => ({ ...prev, [message.id]: requestId }));
     setBusy(`followup:${message.id}`);
     setError(null);
     try {
+      const uploadedPhotos = await uploadMessagePhotos(message.id, requestId, photos);
       const res = await fetch(`/api/inbox/${message.id}/follow-up`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: body, requestId }),
+        body: JSON.stringify({ message: body, requestId, photos: uploadedPhotos }),
       });
       if (!res.ok) {
         const b = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -406,11 +456,56 @@ export function InboxClient({
         delete next[message.id];
         return next;
       });
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
+      return false;
     } finally {
       setBusy(null);
     }
+  }
+
+  async function uploadMessagePhotos(
+    conversationRootId: string,
+    deliveryRequestId: string,
+    photos: File[],
+  ): Promise<StoredMessagePhoto[]> {
+    if (!photos.length) return [];
+    const metadata = await Promise.all(photos.map(async (photo) => ({
+      name: photo.name,
+      mediaType: photo.type,
+      byteSize: photo.size,
+      contentSha256: await sha256Blob(photo),
+    })));
+    const prepared = await fetch(`/api/inbox/${conversationRootId}/attachments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deliveryRequestId, photos: metadata }),
+    });
+    if (!prepared.ok) {
+      const body = (await prepared.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? `Photo upload preparation failed (${prepared.status})`);
+    }
+    const response = (await prepared.json()) as { photos?: unknown[] };
+    const intents = (response.photos ?? []).map((photo) => storedMessagePhotoSchema.parse(photo));
+    if (intents.length !== photos.length) throw new Error("Photo upload preparation was incomplete.");
+    for (const [index, intent] of intents.entries()) {
+      const photo = photos[index]!;
+      const { error: uploadError } = await supabase.storage
+        .from(MESSAGE_PHOTO_BUCKET)
+        .upload(intent.storagePath, photo, {
+          contentType: intent.mediaType,
+          upsert: false,
+        });
+      if (!uploadError) continue;
+      const { data: existing } = await supabase.storage
+        .from(MESSAGE_PHOTO_BUCKET)
+        .download(intent.storagePath);
+      if (!existing || await sha256Blob(existing) !== intent.contentSha256) {
+        throw new Error("Photo upload failed before delivery.");
+      }
+    }
+    return intents;
   }
 
   async function retryFollowUp(message: MessageRow) {
@@ -441,11 +536,16 @@ export function InboxClient({
       }
       const conversationId = message.reply_to;
       if (conversationId) {
+        setFollowUpDrafts((prev) => ({ ...prev, [conversationId]: "" }));
         setFollowUpRequestIds((prev) => {
           const next = { ...prev };
           delete next[conversationId];
           return next;
         });
+        setFollowUpComposerVersions((prev) => ({
+          ...prev,
+          [conversationId]: (prev[conversationId] ?? 0) + 1,
+        }));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");
@@ -537,12 +637,17 @@ export function InboxClient({
   // is mounted at a time, so the composer's `reply-<id>` input id stays unique.
   const conversationThread = selectedMessage ? (
     <ConversationThread
+      key={selectedMessage.id}
       state={deriveConversationState(selectedMessage, repliesByQuestion, busy)}
       buyerName={buyerLabelFor(selectedMessage)}
       edits={edits}
       busy={busy}
       followUps={followUpsByQuestion.get(selectedMessage.id) ?? []}
+      attachments={attachments.filter(
+        (attachment) => attachment.conversation_root_id === selectedMessage.id,
+      )}
       followUpValue={followUpDrafts[selectedMessage.id] ?? ""}
+      followUpComposerVersion={followUpComposerVersions[selectedMessage.id] ?? 0}
       onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
       onApproveAndSend={approveAndSend}
       onRetryDelivery={retryDelivery}
@@ -737,6 +842,11 @@ export function InboxClient({
       </motion.div>
     </div>
   );
+}
+
+async function sha256Blob(blob: Blob): Promise<string> {
+  const digest = await window.crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**

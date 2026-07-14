@@ -94,6 +94,10 @@ export interface InboxSyncRepository {
     question: MarketplaceQuestion,
     listing: SyncListingContext,
   ): Promise<ImportedQuestionResult>;
+  importQuestionPhotos?(
+    question: MarketplaceQuestion,
+    message: MessageRow,
+  ): Promise<void>;
   ensureNotification(
     question: MarketplaceQuestion,
     listing: SyncListingContext,
@@ -227,6 +231,7 @@ export async function syncInboxForSeller(
       }
       const result = await input.repository.importQuestion(question, listing);
       if (result.inserted) imported += 1;
+      await input.repository.importQuestionPhotos?.(question, result.message);
       // Always ensure the notification on replay: a crash after the message
       // insert but before this write heals without duplicating either row.
       await input.repository.ensureNotification(
@@ -776,6 +781,32 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       message: messageRowSchema.parse(result.message),
       inserted: result.inserted,
     };
+  }
+
+  async importQuestionPhotos(
+    question: MarketplaceQuestion,
+    message: MessageRow,
+  ): Promise<void> {
+    if (!question.media?.length) return;
+    const rows = question.media.map((media, position) => ({
+      user_id: this.userId,
+      conversation_root_id: message.id,
+      message_id: message.id,
+      delivery_request_id: `inbound:${question.externalMessageId}`,
+      position,
+      direction: "inbound",
+      media_type: null,
+      byte_size: null,
+      original_name: media.mediaName.slice(0, 100),
+      content_sha256: null,
+      storage_path: null,
+      provider_url: media.mediaUrl,
+      delivery_status: "delivered",
+    }));
+    const { error } = await this.writeTarget.client
+      .from("message_attachments")
+      .upsert(rows, { onConflict: "user_id,delivery_request_id,position" });
+    if (error) throw new Error(`Failed to import buyer photos: ${error.message}`);
   }
 
   async ensureNotification(

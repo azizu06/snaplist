@@ -1,19 +1,45 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { MockMarketplaceMessagingAdapter } from "@/lib/marketplace/mock-messaging";
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
-import type { MessageRow } from "./types";
+import type { MessageAttachmentRow, MessageRow } from "./types";
 import {
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
-  sendCanonicalReply,
-  sendSellerFollowUp,
+  sendCanonicalReply as sendCanonicalReplyTransport,
+  sendSellerFollowUp as sendSellerFollowUpTransport,
+  SupabaseDeliveryRepository,
   retryFollowUpDelivery,
   type DeliveryRepository,
+  type SendCanonicalInput,
+  type SendFollowUpInput,
 } from "./transport";
 
 const ROOT_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
 const LISTING_ID = "33333333-3333-4333-8333-333333333333";
+
+function sendCanonicalReply(
+  input: Omit<SendCanonicalInput, "expectedPhotoIds"> & {
+    expectedPhotoIds?: readonly string[];
+  },
+) {
+  return sendCanonicalReplyTransport({
+    ...input,
+    expectedPhotoIds: input.expectedPhotoIds ?? [],
+  } as SendCanonicalInput);
+}
+
+function sendSellerFollowUp(
+  input: Omit<SendFollowUpInput, "expectedPhotoIds"> & {
+    expectedPhotoIds?: readonly string[];
+  },
+) {
+  return sendSellerFollowUpTransport({
+    ...input,
+    expectedPhotoIds: input.expectedPhotoIds ?? [],
+  });
+}
 
 function message(overrides: Partial<MessageRow> = {}): MessageRow {
   return {
@@ -58,6 +84,8 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   followUps = new Map<string, MessageRow>();
   followUpsByRequest = new Map<string, MessageRow>();
   failures: Array<{ id: string; kind: string }> = [];
+  canonicalClaimPhotoIds: string[][] = [];
+  followUpClaimPhotoIds: string[][] = [];
   sequence = 0;
 
   async loadConversationRoot(id: string) {
@@ -66,7 +94,14 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   async canonicalDelivered(root: MessageRow) {
     return root.id === this.root.id ? this.canonical : null;
   }
-  async claimCanonical(_root: MessageRow, body: string, at: Date, retry: boolean) {
+  async claimCanonical(
+    _root: MessageRow,
+    body: string,
+    at: Date,
+    retry: boolean,
+    expectedPhotoIds: readonly string[],
+  ) {
+    this.canonicalClaimPhotoIds.push([...expectedPhotoIds]);
     if (!retry && this.root.status !== "drafted") return false;
     const staleSending =
       this.root.delivery_status === "sending" &&
@@ -140,7 +175,9 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     body: string,
     requestId: string,
     at: Date,
+    expectedPhotoIds: readonly string[],
   ) {
+    this.followUpClaimPhotoIds.push([...expectedPhotoIds]);
     const existing = this.followUpsByRequest.get(requestId);
     if (existing) return { message: existing, inserted: false };
     const id = `55555555-5555-4555-8555-${String(++this.sequence).padStart(12, "0")}`;
@@ -243,6 +280,7 @@ describe("message delivery transport", () => {
       idempotencyKey: ROOT_ID,
     });
     expect(repository.dispatches).toHaveLength(1);
+    expect(repository.canonicalClaimPhotoIds).toEqual([[]]);
     expect(adapter.replies[0]?.externalParentId).not.toBe(
       repository.root.external_message_id,
     );
@@ -426,6 +464,7 @@ describe("message delivery transport", () => {
     expect(first.external_delivery_id).toBe(
       "mock-followup-client-followup-request-7",
     );
+    expect(repository.followUpClaimPhotoIds).toEqual([[], []]);
   });
 
   it("rejects reusing a follow-up request id for different text", async () => {
@@ -674,4 +713,247 @@ describe("message delivery transport", () => {
       }
     },
   );
+
+  it("uploads staged photos and includes their provider references in the exact reply", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const photo = attachment();
+    const linked: Array<{ requestId: string; messageId: string }> = [];
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "linkDeliveredPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async (requestId) =>
+      requestId === ROOT_ID ? [photo] : [];
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async (row, hosted) => {
+      row.provider_media_id = hosted.providerMediaId;
+      row.provider_url = hosted.mediaUrl;
+      row.delivery_status = "uploaded";
+    };
+    photoRepository.linkDeliveredPhotos = async (requestId, messageId) => {
+      linked.push({ requestId, messageId });
+    };
+
+    const delivered = await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      expectedPhotoIds: [photo.id],
+    });
+
+    expect(adapter.uploads).toHaveLength(1);
+    expect(adapter.replies[0]?.externalParentId).toBe("exact-question-parent-42");
+    expect(adapter.replies[0]?.media).toEqual([
+      expect.objectContaining({
+        providerMediaId: expect.stringContaining("mock-photo-"),
+        mediaType: "IMAGE",
+      }),
+    ]);
+    expect(linked).toEqual([{ requestId: ROOT_ID, messageId: delivered.id }]);
+    expect(repository.canonicalClaimPhotoIds).toEqual([[photo.id]]);
+  });
+
+  it("rejects new photos on a replay of an already delivered reply", async () => {
+    const repository = new MemoryDeliveryRepository();
+    repository.canonical = message({
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound",
+      reply_to: ROOT_ID,
+      reply_kind: "reply",
+      status: "sent",
+      delivery_status: "delivered",
+      external_delivery_id: "provider-root-reply",
+    });
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => [attachment()];
+    const adapter = new MockMarketplaceMessagingAdapter();
+
+    await expect(sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+    })).rejects.toBeInstanceOf(MessageDeliveryConflictError);
+    expect(adapter.uploads).toHaveLength(0);
+    expect(adapter.replies).toHaveLength(0);
+  });
+
+  it("never downgrades a failed photo upload to text-only success", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.uploadFailure = new MarketplaceDeliveryError("rejected", "bad image");
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "failDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => [attachment()];
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async () => undefined;
+    const photoFailures: string[] = [];
+    photoRepository.failDeliveryPhotos = async (_requestId, kind) => {
+      photoFailures.push(kind);
+    };
+
+    const error = await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(MessageDeliveryAttemptError);
+    expect((error as MessageDeliveryAttemptError).kind).toBe("rejected");
+    expect(adapter.replies).toHaveLength(0);
+    expect(photoFailures).toEqual(["rejected"]);
+  });
+
+  it("reuses acknowledged photo uploads after a later photo fails", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const photos = [
+      attachment(),
+      attachment({
+        id: "88888888-8888-4888-8888-888888888888",
+        position: 1,
+        original_name: "detail.jpg",
+      }),
+    ];
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "failDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => photos;
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async (row, hosted) => {
+      row.provider_media_id = hosted.providerMediaId;
+      row.provider_url = hosted.mediaUrl;
+    };
+    photoRepository.failDeliveryPhotos = async () => undefined;
+    const upload = adapter.uploadPhoto.bind(adapter);
+    let attempts = 0;
+    adapter.uploadPhoto = async (input) => {
+      attempts += 1;
+      if (attempts === 2) {
+        adapter.uploads.push(input);
+        throw new MarketplaceDeliveryError("rejected", "second photo rejected");
+      }
+      return upload(input);
+    };
+
+    await expect(sendCanonicalReply({ repository, adapter, messageId: ROOT_ID }))
+      .rejects.toMatchObject({ kind: "rejected" });
+    expect(adapter.replies).toHaveLength(0);
+    expect(photos[0]?.provider_media_id).toBeTruthy();
+    expect(photos[1]?.provider_media_id).toBeNull();
+
+    const delivered = await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      retry: true,
+    });
+    expect(delivered.delivery_status).toBe("delivered");
+    expect(adapter.uploads).toHaveLength(3);
+    expect(adapter.replies[0]?.media).toHaveLength(2);
+  });
+
+  it("re-uploads an expired provider photo reference from the retained approved bytes", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const photo = attachment({
+      provider_media_id: "expired-eps-photo",
+      provider_url: "https://i.ebayimg.com/expired/photo.jpg",
+      provider_expires_at: "2026-07-14T12:04:00.000Z",
+      delivery_status: "uploaded",
+    });
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "failDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => [photo];
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async (row, hosted) => {
+      row.provider_media_id = hosted.providerMediaId;
+      row.provider_url = hosted.mediaUrl;
+      row.provider_expires_at = hosted.expiresAt;
+    };
+    photoRepository.failDeliveryPhotos = async () => undefined;
+
+    await expect(sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      expectedPhotoIds: [photo.id],
+      now: () => new Date("2026-07-14T12:10:00.000Z"),
+    })).resolves.toMatchObject({ delivery_status: "delivered" });
+
+    expect(adapter.uploads).toHaveLength(1);
+    expect(adapter.replies[0]?.media?.[0]?.providerMediaId)
+      .not.toBe("expired-eps-photo");
+  });
+
+  it("persists a replacement provider reference for an already uploaded photo", async () => {
+    const query = {
+      update: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      in: vi.fn(() => query),
+      select: vi.fn(async () => ({ data: [{ id: "photo-id" }], error: null })),
+    };
+    const serverWriteClient = {
+      from: vi.fn(() => query),
+    } as unknown as SupabaseClient;
+    const repository = new SupabaseDeliveryRepository(
+      serverWriteClient,
+      "user_a",
+      false,
+      serverWriteClient,
+    );
+
+    await repository.saveHostedPhoto(
+      attachment({ delivery_status: "uploaded" }),
+      {
+        providerMediaId: "fresh-eps-photo",
+        mediaUrl: "https://i.ebayimg.com/fresh/photo.jpg",
+        mediaName: "photo.jpg",
+        mediaType: "IMAGE",
+        expiresAt: "2026-08-14T12:00:00.000Z",
+      },
+    );
+
+    expect(query.in).toHaveBeenCalledWith(
+      "delivery_status",
+      expect.arrayContaining(["uploaded"]),
+    );
+  });
 });
+
+function attachment(overrides: Partial<MessageAttachmentRow> = {}): MessageAttachmentRow {
+  return {
+    id: "77777777-7777-4777-8777-777777777777",
+    user_id: "user_a",
+    conversation_root_id: ROOT_ID,
+    message_id: null,
+    delivery_request_id: ROOT_ID,
+    position: 0,
+    direction: "outbound",
+    media_type: "image/jpeg",
+    byte_size: 4,
+    original_name: "photo.jpg",
+    content_sha256: "374ffede23adbc8bc625205f4bf86750807ffb6ce71fc7d10cac8bded0872bf5",
+    storage_path: `user_a/${ROOT_ID}/photo.jpg`,
+    provider_media_id: null,
+    provider_url: null,
+    provider_expires_at: null,
+    delivery_status: "staged",
+    delivery_error: null,
+    created_at: "2026-07-14T12:00:00.000Z",
+    updated_at: "2026-07-14T12:00:00.000Z",
+    ...overrides,
+  };
+}
