@@ -1,124 +1,78 @@
-# Demo-video suite — integration guide
+# Real-UI demo media
 
-Seven Remotion-rendered clips, all **1920x1080 @ 30fps, h264, no audio track,
-seamlessly looping** (the last frame crossfades into a frozen copy of frame 0,
-so `loop` + `autoplay` + `muted` + `playsinline` is all a `<video>` needs).
-Compositions live in `remotion/suite/`; ids match the table below.
+The marketing tour and the in-app inbox teaser use captures of the shipped
+SnapList components, not a separately drawn demo interface. Deterministic
+fixtures live under `src/app/(app)/dev/preview`; the capture boundary only adds
+theme, focus, and mobile-state controls for the media pipeline.
 
-Every product shown is from `src/lib/demo-products.ts` with its exact verified
-title; the per-video allocation is recorded in `DEMO_SURFACE_ASSIGNMENTS`.
-Cursor clicks are programmatically verified — `pnpm exec tsx
-remotion/suite/assert-clicks.ts` asserts the cursor tip equals each click
-target's center at the click frame, with a ≥12-frame dwell.
+## Pipeline
 
-## The clips
+1. `pnpm demo:capture-ui` starts the local app and captures 36 PNGs under
+   `public/demo/captures/{desktop,mobile}/{light,dark}`.
+2. The capture harness uses Chrome device-metric overrides so the mobile CSS
+   viewport is exactly 432×540 while the output is 1080×1350. Mobile inbox
+   captures fail if the document, any conversation row, or the simulator
+   control exceeds the viewport.
+3. `pnpm demo:render-real-ui -- stills` renders review stills into the ignored
+   `.review-shots/real-ui-media` directory.
+4. `pnpm demo:render-real-ui` writes the light/dark MP4 files consumed by the
+   app. All clips are six-second, muted, loop-safe H.264 renders.
 
-| Composition id | File | Duration | Products (exact catalog slugs) | Suggested poster frame |
-| --- | --- | --- | --- | --- |
-| `hero-demo` | `public/hero-demo.mp4` | 49.0s (1470f) | `polaroid`, `gameboy`, `gshock` | **14.3s** (act-1 draft assembled) |
-| `step-snap` | `public/demo/steps/snap.mp4` | 16.0s (480f) | `guitar` | **13.3s** (3 photos · ready) |
-| `step-identify` | `public/demo/steps/identify.mp4` | 15.0s (450f) | `camera` | **14.0s** (details + 94% + plain summary) |
-| `step-price` | `public/demo/steps/price.mp4` | 18.0s (540f) | `sneakers` | **16.6s** (price applied) |
-| `step-write` | `public/demo/steps/write.mp4` | 18.7s (560f) | `mixer` | **9.3s** (eBay rendering complete) |
-| `step-publish` | `public/demo/steps/publish.mp4` | 16.0s (480f) | `keyboard` | **13.3s** (live + confirmation card) |
-| `buyer-qa` | `public/demo/buyer-qa.mp4` | 22.0s (660f) | `chess` | **18.0s** (approved reply sent) |
+No credentials or production APIs are needed. Use the authenticated
+dev-preview fixtures if the real auth stack is unavailable.
 
-Poster extraction example:
-`ffmpeg -ss 14.3 -i public/hero-demo.mp4 -frames:v 1 poster.jpg`
+## Capture states
 
-## What each clip shows
+| Capture | Real view/state |
+| --- | --- |
+| `upload` | Current upload view |
+| `review-identify` | Current listing review and item identification |
+| `review-price` | Current price and confidence card with cited sources |
+| `review-write` | Current editable title and description fields |
+| `publish-draft` | Current publish review before posting |
+| `publish-live` | Current live-on-eBay confirmation state |
+| `inbox-list` | Current buyer conversation list |
+| `inbox-draft` | Current drafted-reply approval state |
+| `inbox-sent` | Current sent buyer thread |
 
-- **hero-demo** — photo-to-listing showcase, three acts. Photo arrives
-  (act 1 is the only cursor act: a verified click on the dropzone), scan sweep
-  + detection boxes land on the *actual printed text* in each photo
-  (“Polaroid / Supercolor 645 CL”, “GAME BOY COLOR / Nintendo”,
-  “CASIO / G-SHOCK”), the extracted details populate with per-field how-sure
-  chips, then they assemble into a listing draft (title types itself, detail
-  chips, streamed description). Pricing appears only as a one-chip coda.
-  Ends on a three-draft end card that crossfades into the loop.
-- **step-snap** — whole photo-adding flow: phone-frame capture (shutter →
-  flash → photo flies into the rail), an OS drag-drop of a Finder-style file
-  card onto the dropzone (press + release cursor-verified), and a “+ Add”
-  click for a third angle. Ends “3 photos · ready to identify”.
-- **step-identify** — photo scan → detection boxes on “Canon” / “EOS 80D” →
-  six extracted details with how-sure chips → “how sure is the match” (94%)
-  with named reasons → a plain-language item summary that types itself and
-  stamps “every detail double-checked”. Cursor-free by design.
-- **step-price** — price research visualized: two searches fire in the live
-  feed, six recent-sale rows land with sources (eBay/Mercari/Poshmark/Depop —
-  the lone *asking* price visibly counts less), dots scatter on a price axis,
-  the $40–$58 band forms around the $48 suggestion, “why trust this price”
-  fills to 84%, then a verified click applies the price.
-- **step-write** — listing copy writes itself per marketplace: eBay
-  (search-friendly title, item-details grid, streamed description), then
-  verified tab clicks to Facebook Marketplace (casual/local, copy-paste note)
-  and Mercari (short title, hashtag chips, shipping line). Ends
-  “3 marketplaces ready”.
-- **step-publish** — the current render source still contains legacy autopilot copy
-  that suggests automatic posting before the verified Publish click. That wording is
-  not the product contract: publish eligibility only marks readiness, and every eBay
-  publish is seller-triggered through the adapter. Replace and re-render this clip
-  before using it as current product media; the click → posting state → green “Live
-  on eBay” + confirmation card remains the intended manual-publish sequence.
-- **buyer-qa** — trust story (badged STEP 6 · ANSWER BUYERS — it is the sixth
-  step of the how-it-works pipeline): buyer question lands in the inbox
-  (verified row click), a reply drafts itself from the item's real details
-  (chips: the item's details / your listing / condition · Fair), seller
-  clicks into the draft (verified) and appends one edit, then a verified
-  “Approve & send” click delivers the reply into the thread (“Sent to the
-  buyer through eBay messages”).
+Each state is captured in desktop/mobile and light/dark variants. The Remotion
+layer in `remotion/real-ui/RealUiCapture.tsx` only applies a subtle loop-safe
+push-in and crossfades between real states; it does not redraw controls or add
+fabricated product behavior.
 
-## Set consistency
+## Outputs
 
-All clips share the same calm shell (white canvas, near-black `#1a1a1a` ink,
-green `#008060` accent, `#f6f6f7` backdrop), the same top bar with a
-step-identity badge (`STEP 1 · SNAP` … `STEP 6 · ANSWER BUYERS`), the same
-live-progress feed, chip, how-sure and cursor primitives — they read as one
-set in a carousel.
+Desktop tour clips:
 
-**Plain-language rule (ui-r6):** every word rendered inside a clip is seller
-language. No tool-call tags, no JSON, no “comps”/“conf”/“schema”/“pipeline”/
-“structured output”, no abbreviations (“6 days ago”, never “6d”). The
-audience is a homeowner, not an engineer.
+- `public/demo/steps/{snap,identify,price,write,publish}.mp4`
+- `public/demo/buyer-qa.mp4`
+- `public/demo/inbox-qa.mp4`
 
-## Re-rendering
+Portrait mobile clips:
+
+- `public/demo/steps/{snap,identify,price,write,publish}-mobile.mp4`
+- `public/demo/buyer-qa-mobile.mp4`
+- `public/demo/inbox-qa-mobile.mp4`
+
+Every path also has a `-dark.mp4` sibling. `SeamlessThemeVideo` swaps the
+correct theme and mobile source. Its loading, failure, and reduced-motion
+fallback is a responsive still from the same capture set, so those paths also
+show the real SnapList UI.
+
+`hero-demo` remains the existing vision showcase and is outside the issue #95
+tour/inbox replacement. Legacy Remotion compositions remain registered for
+reference but are not written by `demo:render-real-ui`.
+
+## Validation
+
+Run the focused capture/catalog tests before rendering:
 
 ```sh
-npx remotion render remotion/index.ts hero-demo      public/hero-demo.mp4           --crf 28 --muted
-npx remotion render remotion/index.ts step-snap      public/demo/steps/snap.mp4     --crf 26 --muted
-npx remotion render remotion/index.ts step-identify  public/demo/steps/identify.mp4 --crf 26 --muted
-npx remotion render remotion/index.ts step-price     public/demo/steps/price.mp4    --crf 26 --muted
-npx remotion render remotion/index.ts step-write     public/demo/steps/write.mp4    --crf 26 --muted
-npx remotion render remotion/index.ts step-publish   public/demo/steps/publish.mp4  --crf 26 --muted
-npx remotion render remotion/index.ts buyer-qa       public/demo/buyer-qa.mp4       --crf 26 --muted
+pnpm vitest run src/lib/demo-capture-qa.test.ts \
+  'src/app/(app)/inbox/conversation-list-layout.test.ts' \
+  src/lib/demo-products.test.ts
 ```
 
-### Dark variants (theme-aware videos)
-
-Every suite clip also ships a dark render so the videos follow the app's
-light/dark toggle (the app swaps `foo.mp4` ↔ `foo-dark.mp4` via
-`useThemedVideoSrc`). The dark palette is injected by the Scene from the
-`theme` input prop — see `suite/theme.ts` (`paletteVars`); light is the var
-fallback, so the light renders above are unchanged. Re-render the dark set
-with `--props '{"theme":"dark"}'` and the `-dark` filenames:
-
-```sh
-npx remotion render remotion/index.ts hero-demo      public/hero-demo-dark.mp4            --crf 28 --muted --props '{"theme":"dark"}'
-npx remotion render remotion/index.ts step-snap      public/demo/steps/snap-dark.mp4     --crf 26 --muted --props '{"theme":"dark"}'
-npx remotion render remotion/index.ts step-identify  public/demo/steps/identify-dark.mp4 --crf 26 --muted --props '{"theme":"dark"}'
-npx remotion render remotion/index.ts step-price     public/demo/steps/price-dark.mp4    --crf 26 --muted --props '{"theme":"dark"}'
-npx remotion render remotion/index.ts step-write     public/demo/steps/write-dark.mp4    --crf 26 --muted --props '{"theme":"dark"}'
-npx remotion render remotion/index.ts step-publish   public/demo/steps/publish-dark.mp4  --crf 26 --muted --props '{"theme":"dark"}'
-npx remotion render remotion/index.ts buyer-qa       public/demo/buyer-qa-dark.mp4       --crf 26 --muted --props '{"theme":"dark"}'
-```
-
-The hero's dark first-frame poster is a still:
-`npx remotion still remotion/index.ts hero-demo public/hero-demo-poster-dark.jpg --frame 0 --props '{"theme":"dark"}'`.
-
-`--muted` matters: the landing `<video>`s are muted anyway and a silent AAC
-track inflates file size. After changing any choreography constants, run
-`pnpm exec tsx remotion/suite/assert-clicks.ts` before re-rendering.
-
-The legacy 1120x840 hero (`hero-demo-v3`) and 800x600 `stage-*` compositions
-are still registered for reference; `public/stage-*.mp4` are superseded by
-`public/demo/steps/*.mp4` once the how-it-works carousel is rewired.
+For a single capture while debugging, set
+`DEMO_CAPTURE_ONLY=mobile/dark/inbox-list`. A full capture run is still required
+before final rendering.

@@ -7,8 +7,9 @@
  * present). Photos are Unsplash-licensed (free commercial use).
  *
  * Rules for consumers:
- * - Pick products via DEMO_SURFACE_ASSIGNMENTS so no two surfaces repeat the
- *   same items. If you add a surface, assign it unused products here.
+ * - Pick products via DEMO_SURFACE_ASSIGNMENTS. Prefer the audience's clearest
+ *   category story over artificial cross-surface uniqueness; a strong reseller
+ *   example may repeat when it is the honest best fit.
  * - Never relabel an image — if you need a different product, add a new
  *   verified photo + entry instead.
  *
@@ -932,71 +933,52 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
 export const DEMO_PRODUCTS_BY_SLUG: Record<string, DemoProduct> =
   Object.fromEntries(DEMO_PRODUCTS.map((p) => [p.slug, p]));
 
-/**
- * Which surface uses which products. Keeps imagery varied across the app —
- * no product should headline more than one surface.
- */
+/** Which catalog products define each high-salience marketing surface. */
 export const DEMO_SURFACE_ASSIGNMENTS: Record<string, string[]> = {
-  // --- Remotion demo-video suite (remotion/suite; see remotion/INTEGRATION.md) ---
-  // The how-it-works pipeline follows ONE item start-to-finish so the narrative
-  // holds — the real Acer Predator Helios 300 (demo/acer-hero.jpg) is snapped,
-  // identified, priced, written, published, then asked about. Every step clip
-  // uses it; the snap step shows three framings of it standing in for angles.
+  // --- Real dev-preview capture suite (see remotion/INTEGRATION.md) ---
+  // The current review and publish fixtures follow Sony headphones through the
+  // shipped app UI; the inbox fixtures add reseller-dense buyer conversations.
   "hero-video": ["polaroid", "gameboy", "gshock"], // public/hero-demo.mp4 — vision-showcase acts 1–3
-  "step-snap": ["acer-predator"], // public/demo/steps/snap.mp4
-  "step-identify": ["acer-predator"], // public/demo/steps/identify.mp4
-  "step-price": ["acer-predator"], // public/demo/steps/price.mp4
-  "step-write": ["acer-predator"], // public/demo/steps/write.mp4
-  "step-publish": ["acer-predator"], // public/demo/steps/publish.mp4
-  "buyer-qa": ["acer-predator"], // public/demo/buyer-qa.mp4 (tour step 6)
-  // r7: the logged-in inbox teaser must show a DIFFERENT item than the tour so
-  // a user who already watched the tour gets a fresh scenario, not déjà vu.
-  // Brass chess set — hero-domain collectible, disjoint from the AE-1 and from
-  // every home surface. Rendered to its own clip (public/demo/inbox-qa.mp4).
-  "inbox-qa": ["chess"], // public/demo/inbox-qa.mp4 (logged-in dashboard inbox)
+  "step-snap": ["headphones"],
+  "step-identify": ["headphones"],
+  "step-price": ["headphones"],
+  "step-write": ["headphones"],
+  "step-publish": ["headphones"],
+  "buyer-qa": ["headphones", "jacket", "book"],
+  "inbox-qa": ["headphones", "jacket", "book"],
   // --- Static page surfaces ---
-  // 2026-06 authentic overhaul: every static surface below now uses the owner's
-  // real FB-Marketplace items (a-* slugs), kept DISJOINT across surfaces so no
-  // photo repeats. The Remotion video surfaces above still follow the AE-1 / chess
-  // until their clips are re-rendered around the Acer Predator hero.
+  // #95: the highest-salience examples now describe a reseller's comp-dense
+  // inventory. The broader catalog still supports generic household items; it
+  // simply does not let furniture and local-only goods define the landing page.
   "landing-carousel": [
-    "a-scooter",
-    "a-yellowbike",
-    "a-xboxpads",
-    "a-speakers",
-    "a-ceilinglight",
-    "a-cooler",
-    "a-microwave",
-    "a-fridge",
-    "a-wardrobe",
-    "a-dresser",
-    "a-nightstand",
-    "a-patioset",
-    "a-diningchairs",
-    "a-campchairs",
-    "a-rug",
-    "a-mattress",
-    "a-plant",
+    "camera",
+    "sneakers",
+    "book",
+    "vinyl",
+    "gameboy",
+    "gshock",
+    "console",
+    "drill",
+    "mixer",
+    "espresso",
   ],
   // The home "One photo, three storefronts" section — one item rendered three
   // platform-fluent ways (the Xbox 360 Kinect bundle, exclusive to this surface).
   "landing-storefronts": ["a-xbox360"],
-  // The home "From shelf to sold in three moves" prelude — one item shown
-  // captured → priced → listed. Owner: the prior $10 hula hoop felt too small
-  // to be a "wow"; swapped to the substantial $200 like-new king bed frame
-  // (a-bedframe, otherwise unused so surfaces stay disjoint).
-  "landing-three-moves": ["a-bedframe"],
-  // Hero ScanShowcase on the landing page — an 8-product scanning montage,
-  // disjoint from the carousel and the step clips.
+  // The home "From shelf to sold in three moves" prelude — one recognizable,
+  // shippable item shown captured → priced → listed.
+  "landing-three-moves": ["console"],
+  // Hero ScanShowcase — eight recognizable, searchable resale items. Repetition
+  // with the carousel is intentional when it strengthens the reseller story.
   "landing-hero-scan": [
     "a-macbookair",
     "a-cyberpc",
     "a-monitors",
-    "a-powerblock",
-    "a-breadmaker",
-    "a-carseat",
-    "a-roadbike",
-    "a-martini",
+    "a-xbox360",
+    "camera",
+    "sneakers",
+    "gshock",
+    "mixer",
   ],
   // The pricing waterfall on /how-it-works (last section before the CTA).
   "hiw-waterfall": ["a-crib"],

@@ -247,7 +247,10 @@ export default function InboxDevPreviewPage() {
     <main className="relative flex h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full flex-col overflow-hidden sm:h-[calc(100dvh-72px)]">
       {/* dev-only view switch — floated over the surface (the shipped /inbox has
           no title strip; this preview matches it). Not part of the screen. */}
-      <div className="absolute right-4 top-3 z-20 hidden overflow-hidden rounded-lg border border-border text-[13px] font-medium shadow-sm sm:flex">
+      <div
+        data-preview-controls
+        className="absolute right-4 top-3 z-20 hidden overflow-hidden rounded-lg border border-border text-[13px] font-medium shadow-sm sm:flex"
+      >
         {(["populated", "empty"] as const).map((v) => (
           <button
             key={v}

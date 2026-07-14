@@ -5,10 +5,10 @@ import { InboxDemoVideo } from "./inbox-demo-video";
  * message cards behind a low-opacity mock thread (buyer bubble + sparkle-drafted
  * reply) under a soft brand-green glow — reading as "this is what it will look
  * like", then one headline, one sentence, a hint about where messages come
- * from, and a lazy "watch how replies work" video teaser (designed CSS poster
- * until the mp4 can play, so it never reads broken).
+ * from, and a lazy "watch how replies work" video teaser (a real inbox capture
+ * remains visible until the mp4 can play, so it never reads broken).
  *
- * The composition itself stays CSS/SVG; only the video teaser is a client
+ * The empty-state illustration stays CSS/SVG; only the video teaser is a client
  * component — the state renders identically from the live inbox and the dev
  * preview harness.
  */
