@@ -4,10 +4,11 @@ The shared vocabulary for this repo. Use these exact terms in code, issues, test
 requirements live in `PRD.md`; this file is the language layer the engineering skills read first.
 
 ## What the product does (one paragraph)
-A seller photographs a used item; SnapList **identifies** it, **prices** it with a cited range and a
-**confidence** score, **generates** platform-specific listing copy, and (later) **drafts** buyer
-replies. The seller reviews/approves; high-confidence items may post on **autopilot**. Listings post
-to eBay (behind an **adapter**) and produce **export packs** for other platforms.
+A seller photographs a used item; SnapList **identifies** it, **prices** it with a range and a
+**confidence** score, cites the evidence-backed tiers, and clearly labels the terminal uncited
+fallback when necessary. It **generates** platform-specific listing copy and (later) **drafts**
+buyer replies. The seller reviews/approves; high-confidence items may post on **autopilot**.
+Listings post to eBay (behind an **adapter**) and produce **export packs** for other platforms.
 
 ## Glossary (ubiquitous language)
 
@@ -27,7 +28,12 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   confidence-bearing fact.
 - **eBay-sold scraper** — the `ebay-sold` tier (ADR-0001): reads eBay's PUBLIC sold/completed pages
   (`LH_Sold=1&LH_Complete=1`) for real **sold comps**. Read-only price research — distinct from the
-  transactional eBay **adapter** (posting/messaging). Never used to post.
+  transactional eBay **adapter** (posting/messaging). Never used to post. Availability is
+  best-effort; blocked or too-thin results decline to the next tier.
+- **Sold-comps egress** — the outbound fetch path for the **eBay-sold scraper**. Direct HTTPS fetch
+  is the default. An operator may configure one validated `EBAY_SOLD_PROXY_TEMPLATE` for hosted
+  environments; malformed templates fail before egress, and credentials/raw upstream errors are
+  redacted from reports and diagnostics. See `docs/sold-comps-egress.md`.
 - **Pricing (research) agent** — the bounded tool-calling **agent** that searches the web for
   used/resale comps and synthesizes a cited range. One of two agents in the system.
 - **Comp** — a comparable price point found for an item. A **sold comp** is a completed sale (eBay
@@ -35,7 +41,8 @@ to eBay (behind an **adapter**) and produce **export packs** for other platforms
   active listing (open-web, the web-search tier) and is down-weighted. **Comp agreement** (tight vs
   scattered) is a confidence signal.
 - **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
-  user-editable. Never a bare number.
+  user-editable. Never a bare number. Evidence-backed tiers require citations; the clearly labeled
+  terminal `llm-only` estimate may have an empty `sources[]`.
 - **Cost basis (COGS)** — what the seller **paid** for the item (cost of goods sold), captured
   optionally at upload or review. Blank means *unknown* (stored `NULL`, never a fake $0); a recorded
   **$0** is a real value (a free find). Persisted as `items.cost_basis`; feeds **net profit**.

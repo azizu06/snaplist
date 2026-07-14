@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (2026-06-14)
 - **Deciders:** Aziz
-- **Implemented by:** issue #56 (this tier) · #59 (freshness) · #60 (confidence wiring) · #61 (gold set)
+- **Implemented by:** issue #56 (this tier) · #59 (freshness) · #60 (confidence wiring) · #61 (gold set) · #125 (egress validation and operator smoke)
 
 ## Context
 
@@ -35,16 +35,20 @@ sold-comp research is now a first-class tier.
    `isbn-lookup → ebay-sold → upc-aided-web → branded-web → depreciation → llm-only`.
 
 2. **Plain `fetch` + `cheerio` by default; a Playwright-style fallback behind an injected
-   seam.** No login ⇒ no account-ban risk; the only failure mode is an IP rate-limit / CAPTCHA.
+   seam.** No login is required. IP rate-limits, CAPTCHAs, markup drift, and other egress failures
+   are expected runtime conditions.
    The concrete headless driver is intentionally **not bundled yet** (heavy dep, unvalidated
    against live blocking) — the `fetchPageFallback` seam and its decline-to-next-tier behavior
    are tested. Hosted environments may route the same in-process fetch through an optional,
    vendor-neutral `EBAY_SOLD_PROXY_TEMPLATE`; missing config preserves direct fetch, malformed
    config fails validation before egress, and the operator-controlled smoke is inert by default.
+   The configured template and credentials are never emitted in its report.
 
 3. **A blocked scrape DECLINES (`null`), never hard-fails.** Being rate-limited is an expected,
    recoverable condition, so the router falls through to the legal web-search tier. The fetch
    `catch` is kept narrow (network only; the cheerio parser is total) so it can't mask real bugs.
+   Runtime diagnostics retain only bounded reasons (`timeout`, `http-NNN`, or `request-failed`),
+   never raw upstream text that could contain a proxy URL or credential.
 
 4. **SSRF-hardened.** Every fetched URL is validated: `https` only, no userinfo, host must be
    `ebay.com` / `*.ebay.com`, and IP literals / internal / loopback / link-local hosts are
@@ -90,13 +94,14 @@ sold-comp research is now a first-class tier.
   pricing → confidence → eval spine gains a genuine ground-truth tier; the system degrades
   gracefully (disabled/blocked → web-search tier) and stays offline-testable (saved HTML fixture).
 - **Negative / risks:** eBay markup can change, breaking selectors — mitigated by the fixture
-  contract test, with **live-page validation + refresh owed to #59**; scraping is best-effort and
-  not contractually stable; currency normalization is out of scope (the `.com` base assumes USD).
+  contract test and the operator-controlled live smoke; scraping is best-effort and not
+  contractually stable; currency normalization is out of scope (the `.com` base assumes USD).
 - **Honesty for the README/interview:** this is a *smart, sold-grounded suggestion*, not an oracle;
   the scraper is read-only price research, never a posting mechanism.
 
-## Docs touched
+## Related docs
 
-`PRD.md` (pricing tier list, freshness note, scope narrowing), `AGENTS.md` (pricing chain
-non-negotiable), `CONTEXT.md` (sold comp / freshness vocabulary). A separate **ADR-0002** will
-record the Gemini-dev / OpenAI-showcase LLM provider split (issue #55).
+`PRD.md` and `AGENTS.md` hold the product/engineering invariants; `CONTEXT.md` defines the sold-comp
+and egress vocabulary; `.env.example`, `README.md`, and `docs/sold-comps-egress.md` document the
+optional proxy seam and safe operator proof. ADR-0002 records the Gemini-dev / OpenAI-showcase LLM
+provider split (issue #55).

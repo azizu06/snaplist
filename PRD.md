@@ -143,6 +143,11 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 5. **Generic, only retail found** → retail × condition-based depreciation factor, labeled low-confidence estimate.
 6. **Ultimate fallback** → LLM-only estimate, lowest confidence.
 - eBay **Browse** API dropped; eBay **Marketplace Insights** (true sold prices) is gated/unavailable to solo devs — not used **as an API**. Instead, eBay's PUBLIC sold-listings *pages* are scraped (ADR-0001) for real sold comps. Open-web comps (web-search tier) remain mostly *asking* prices; the agent seeks resale/sold signals and **down-weights confidence when only asking prices are found**. Honest ceiling: a *smart, sold-grounded suggestion*, not an oracle.
+- **Sold-comps egress is best-effort and configurable.** Direct HTTPS fetch is the default; hosted
+  environments may set one validated, vendor-neutral `EBAY_SOLD_PROXY_TEMPLATE`. Missing/blank
+  preserves direct fetch, malformed configuration fails before any request, and blocked/thin
+  results decline to lower tiers. Proxy credentials and raw upstream errors never enter reports or
+  pricing diagnostics.
 - **Freshness:** sold prices drift, so the source of truth is a **live fetch at query time**; a TTL cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The pgvector **reference corpus** grounds listing copy and *corroborates* pricing — it is **never** the price oracle.
 
 ### Pricing research agent

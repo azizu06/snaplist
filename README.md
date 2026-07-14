@@ -154,7 +154,7 @@ pnpm dev                     # http://localhost:3000
 | `pnpm test:watch` | Vitest watch mode |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint |
-| `pnpm smoke:sold-comps` | Offline sold-comps egress/router smoke (0 requests by default; [operator procedure](./docs/sold-comps-egress.md)) |
+| `pnpm smoke:sold-comps` | Sold-comps egress/router smoke (0 requests by default; doubly confirmed live mode in the [operator procedure](./docs/sold-comps-egress.md)) |
 | `pnpm eval` | Eval harness — offline by default (see below) |
 | `pnpm supabase` | Supabase CLI |
 

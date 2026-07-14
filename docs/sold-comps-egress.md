@@ -24,6 +24,8 @@ Configuration rules:
 - Missing or blank is valid and preserves the direct-fetch path.
 - A configured template must be an absolute HTTPS URL with exactly one `{url}`
   placeholder. SnapList substitutes the encoded eBay target URL there.
+- The placeholder must appear before any URL fragment (`#...`), because fragments
+  are not sent to the proxy server.
 - URL userinfo (`https://user:pass@...`) is rejected. If a provider requires a
   query credential, keep the complete template in the secret manager and never
   commit or print it.
@@ -32,8 +34,10 @@ Configuration rules:
 - The eBay target remains restricted to `https://ebay.com` / `https://*.ebay.com`.
   The proxy endpoint itself is trusted operator configuration.
 
-No proxy provider is required by the application. Whether a provider charges for
-a request is controlled by that provider's account and plan, not by SnapList.
+No proxy provider is required by the application. Missing/blank configuration
+also remains valid for the live smoke, which then reports `egressMode: "direct"`.
+Whether a configured provider charges for a request is controlled by that
+provider's account and plan, not by SnapList.
 
 ## Offline smoke (safe default)
 
@@ -41,10 +45,10 @@ a request is controlled by that provider's account and plan, not by SnapList.
 pnpm smoke:sold-comps
 ```
 
-The default dry run makes **zero external requests**. It constructs the exact
-sold/completed target URL, validates optional egress configuration, exercises the
-real `ebay-sold` provider and `PriceRouter`, and records the expected deterministic
-fallback:
+With the default enabled configuration, the dry run makes **zero external
+requests**. It constructs the exact sold/completed target URL, validates optional
+egress configuration, exercises the real `ebay-sold` provider and `PriceRouter`,
+and records the expected deterministic fallback:
 
 - `status: "fallback"`
 - `selectedTier: "branded-web"` for the default branded item
@@ -59,10 +63,11 @@ production services.
 
 ## Operator-controlled live smoke
 
-Run this only after the operator has reviewed the proxy provider's billing/read
-policy and placed the real template in `.env.local` or the deployment secret
-manager. The command requires both flags and performs at most one sold-page
-request:
+Run this only after the operator has reviewed the applicable access policy and,
+when using proxy egress, the provider's billing/read policy. Put a real proxy
+template in `.env.local` or the deployment secret manager; leave it missing/blank
+to exercise direct fetch. The command requires both flags and performs at most
+one sold-page request:
 
 ```bash
 pnpm smoke:sold-comps -- --live --confirm-one-request
@@ -75,16 +80,29 @@ The script never calls the web-search or LLM fallbacks. Its JSON report is safe 
 attach to an operator record and contains:
 
 - `status`: `success` or `fallback`
+- `mode`: `live` (or `dry-run` for the inert default)
+- `targetUrl`: the SSRF-validated eBay sold/completed query, or `null` when the
+  signal cannot form one
 - `selectedTier`: `ebay-sold` on usable comps; otherwise the deterministic next-tier sentinel
 - `sourceUrls`: sold-listing citations on success
 - `fallbackReason`: `disabled`, `unidentifiable`, `egress-blocked`, or
   `no-usable-sold-comps`
 - `egressMode`: `direct` or `proxy`
 - `externalRequests`: `0` or `1`
+- `fallbackSimulated`: `true` when any deterministic fallback sentinel wins;
+  `false` on real sold-comp success
 
 It never prints the proxy template, provider credential, response HTML, or raw
-upstream error text. A live fallback exits with status 2 so an operator can record
-the failed proof without confusing it with a successful sold-comp retrieval.
+upstream error text. Exit status is `0` for a completed dry run or successful live
+proof, `2` for a live fallback, and `1` for invalid configuration/flag
+confirmation; the last two let an operator record failure without confusing it
+with successful sold-comp retrieval.
+
+The normal provider follows the same redaction boundary. Its structured
+`pricing.ebay_sold.fetch_blocked` and `pricing.ebay_sold.fallback_blocked`
+diagnostics include only a bounded reason (`timeout`, `http-NNN`, or
+`request-failed`) plus non-secret routing flags; raw proxy/upstream error messages
+are discarded.
 
 ## Interpreting the result
 
@@ -92,10 +110,12 @@ the failed proof without confusing it with a successful sold-comp retrieval.
   filter, and provider selection worked for that item at that time.
 - `egress-blocked`: the request failed or timed out. The normal application router
   continues to lower tiers.
-- `no-usable-sold-comps`: a page was fetched, but fewer than the required relevant,
-  fresh sold comps survived parsing/filtering. The router continues rather than
+- `no-usable-sold-comps`: a page was fetched, but fewer than the required relevant
+  sold comps survived parsing/filtering. The router continues rather than
   manufacturing confidence.
 - `disabled`: `EBAY_SOLD_ENABLED=false|0|off`; no request was made.
+- `unidentifiable`: the supplied signal could not form a safe sold-search URL; no
+  request was made.
 
 The smoke does not change production pricing behavior. Normal application pricing
 still wires the existing TTL cache, staleness cutoff, recency/age-decay weighting,

@@ -23,29 +23,32 @@ import {
 /**
  * Tier "ebay-sold" — a scraper over eBay's PUBLIC sold-listings pages (issue #56).
  *
- * Why this exists (ADR-0001): used-item *sold* prices are the ground truth for
- * pricing, but there is no free API for them — eBay's Marketplace Insights is
- * gated, and the open web mostly surfaces *asking* prices. eBay's sold/completed
+ * Why this exists (ADR-0001): used-item *sold* prices are the strongest
+ * available signal for pricing, but there is no free API for them — eBay's
+ * Marketplace Insights is gated, and the open web mostly surfaces *asking*
+ * prices. eBay's sold/completed
  * results pages (`LH_Sold=1&LH_Complete=1`) are, however, publicly visible with
  * no login. This provider reads them as real **sold comps** and slots ABOVE the
  * web-search tiers, so a sold-grounded price wins over open-web asking comps.
  *
  * Honest boundaries:
  *  - READ-ONLY price research. We never scrape to post (export packs stay).
- *  - No login → no account risk; the only failure mode is an IP rate-limit /
- *    CAPTCHA. That is an EXPECTED, recoverable condition, so a blocked scrape
+ *  - No login is required. IP rate-limits, CAPTCHAs, markup drift, and other
+ *    egress failures are EXPECTED, recoverable conditions, so a blocked scrape
  *    DECLINES (returns `null`) and the router falls through to the legal
  *    web-search tier — it never hard-fails the pricing call.
- *  - Cache-on-miss / TTL freshness is a SEPARATE slice (#59); this provider
- *    live-fetches each call.
+ *  - Invalid proxy configuration is different: it fails validation before any
+ *    request. Runtime fetch diagnostics expose only bounded, credential-safe reasons.
+ *  - Cache-on-miss / TTL freshness is opt-in on the raw provider; the production
+ *    composition root wires the shared cache and age-decay layer (#59).
  *
- * Default path is plain `fetch` + `cheerio` parse. A Playwright-style fallback
+ * Default egress is direct `fetch`; an optional validated proxy template supports
+ * hosted environments. HTML is parsed with `cheerio`. A Playwright-style fallback
  * is modeled as an injectable `fetchPageFallback` seam (tried when the primary
  * is blocked); the concrete headless driver is intentionally NOT bundled yet
- * (heavy browser dep, unvalidated against live blocking) — wiring it is a
- * flagged follow-up alongside #59. Every network dependency is INJECTED (same
- * DI style as `providers/web-search.ts`), so the contract test runs fully
- * offline against a saved HTML fixture.
+ * (heavy browser dep, unvalidated against live blocking). Every network
+ * dependency is INJECTED (same DI style as `providers/web-search.ts`), so the
+ * contract test runs fully offline against a saved HTML fixture.
  */
 
 // ---------------------------------------------------------------------------
@@ -905,16 +908,18 @@ export function soldFetchFailureReason(error: unknown): string {
 }
 
 /**
- * The real default fetcher: SSRF-guarded `fetch`, no off-host redirects, and a
- * bounded timeout so a stalled response aborts (→ the provider declines) instead
- * of hanging until the serverless deadline. `fetchImpl` is injectable so the
- * timeout + SSRF behavior are unit-testable without a live network.
+ * The real default fetcher: validates the eBay target, rejects redirects on the
+ * direct path, optionally routes through validated proxy configuration, and
+ * applies a bounded timeout so a stalled response aborts (→ provider decline)
+ * instead of hanging until the serverless deadline. `fetchImpl` is injectable
+ * so timeout, egress, and SSRF behavior are unit-testable without a live network.
  */
 export function createDefaultFetchPage(
   opts: {
     userAgent?: string;
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
+    /** Optional validated HTTPS template; missing/blank preserves direct fetch. */
     proxyTemplate?: string;
   } = {},
 ): FetchPage {
@@ -928,11 +933,10 @@ export function createDefaultFetchPage(
   );
   return async (rawUrl) => {
     const safe = assertSafeEbayUrl(rawUrl); // validate the eBay TARGET before any request
-    // When a scraping-proxy egress is configured, route the request THROUGH it:
-    // eBay 403s direct server fetches, so the proxy (residential IP + real browser
-    // fingerprint) is how the sold page is actually retrieved. The eBay URL is
-    // SSRF-validated above; the proxy endpoint is trusted operator config. Unset →
-    // fetch eBay directly (unchanged behavior).
+    // When proxy egress is configured, route the request through it. Hosted direct
+    // fetches can be blocked; the optional operator-selected provider offers an
+    // alternate path. The eBay URL is SSRF-validated above; the proxy endpoint is
+    // trusted operator config. Unset → fetch eBay directly (unchanged behavior).
     const usingProxy = egress.mode === "proxy";
     const requestUrl: string | URL = usingProxy
       ? buildEbaySoldProxyRequestUrl(egress.template, safe.toString())
@@ -967,7 +971,8 @@ export function createDefaultFetchPage(
  * Tier "ebay-sold": price an identifiable item from real eBay sold comps. Slots
  * ABOVE the web-search tiers in the router (sold beats asking). Declines (null)
  * — never throws — when disabled, unidentifiable, blocked, or too thin, so the
- * router falls through to the web-search / estimate tiers.
+ * router falls through to the web-search / estimate tiers. Invalid operator
+ * proxy configuration instead throws during provider creation, before egress.
  */
 export function createEbaySoldPricingProvider(
   options: EbaySoldPricingProviderOptions = {},
