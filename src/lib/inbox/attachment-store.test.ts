@@ -211,4 +211,47 @@ describe("outbound photo idempotency", () => {
       }],
     })).rejects.toBeInstanceOf(MessagePhotoConflictError);
   });
+
+  it("cleans a multipart upload when its delivery identity was already claimed", async () => {
+    const attachmentQuery = {
+      select: vi.fn(() => attachmentQuery),
+      eq: vi.fn(() => attachmentQuery),
+      order: vi.fn(async () => ({ data: [], error: null })),
+      insert: vi.fn(() => ({
+        select: vi.fn(async () => ({
+          data: null,
+          error: { code: "23514", message: "delivery already has an intent" },
+        })),
+      })),
+    };
+    const messageQuery = {
+      select: vi.fn(() => messageQuery),
+      eq: vi.fn(() => messageQuery),
+      or: vi.fn(() => messageQuery),
+      maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+    };
+    const upload = vi.fn(async () => ({ error: null }));
+    const remove = vi.fn(async () => ({ error: null }));
+    const client = {
+      from: vi.fn((table: string) => table === "messages" ? messageQuery : attachmentQuery),
+      storage: { from: vi.fn(() => ({ upload, remove })) },
+    } as unknown as SupabaseClient;
+
+    await expect(stageOutboundPhotos({
+      supabase: client,
+      userId: "user_a",
+      conversationRootId: ROOT,
+      deliveryRequestId: REQUEST,
+      photos: [{
+        name: "condition.jpg",
+        type: "image/jpeg",
+        size: JPEG.length,
+        bytes: JPEG,
+        mediaType: "image/jpeg",
+        extension: "jpg",
+      }],
+    })).rejects.toBeInstanceOf(MessagePhotoConflictError);
+    expect(upload).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith([expect.stringMatching(/\.jpg$/)]);
+  });
 });

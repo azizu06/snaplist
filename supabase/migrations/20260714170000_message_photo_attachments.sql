@@ -208,7 +208,8 @@ as $$
 declare
   v_root_status text;
 begin
-  if new.direction <> 'outbound' or new.delivery_status <> 'uploading' then
+  if new.direction <> 'outbound'
+    or new.delivery_status not in ('uploading', 'staged') then
     return new;
   end if;
   select message.status
@@ -512,6 +513,118 @@ revoke all on function public.delete_expired_message_photo_upload_intents(intege
   from public, anon, authenticated;
 grant execute on function public.delete_expired_message_photo_upload_intents(integer)
   to service_role;
+
+create or replace function public.delete_own_expired_message_photo_upload_intents(
+  p_limit integer default 1000
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+  v_deleted integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+  delete from public.message_attachments attachment
+  where attachment.id in (
+    select candidate.id
+    from public.message_attachments candidate
+    where candidate.user_id = v_user_id
+      and candidate.delivery_status = 'uploading'
+      and candidate.upload_expires_at < statement_timestamp()
+    order by candidate.upload_expires_at
+    for update skip locked
+    limit least(greatest(coalesce(p_limit, 1000), 1), 1000)
+  );
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+revoke all on function public.delete_own_expired_message_photo_upload_intents(integer)
+  from public, anon, service_role;
+grant execute on function public.delete_own_expired_message_photo_upload_intents(integer)
+  to authenticated;
+
+create or replace function public.list_own_message_photo_object_deletions(
+  p_limit integer default 1000
+)
+returns text[]
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+  return array(
+    select queue.storage_path
+    from private.message_photo_object_deletion_queue queue
+    where split_part(queue.storage_path, '/', 1) = v_user_id
+    order by queue.enqueued_at
+    limit least(greatest(coalesce(p_limit, 1000), 1), 1000)
+  );
+end;
+$$;
+
+revoke all on function public.list_own_message_photo_object_deletions(integer)
+  from public, anon, service_role;
+grant execute on function public.list_own_message_photo_object_deletions(integer)
+  to authenticated;
+
+create or replace function public.complete_own_message_photo_object_deletions(
+  p_storage_paths text[]
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+  v_deleted integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+  delete from private.message_photo_object_deletion_queue queue
+  where queue.storage_path = any(coalesce(p_storage_paths, '{}'::text[]))
+    and split_part(queue.storage_path, '/', 1) = v_user_id;
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+
+revoke all on function public.complete_own_message_photo_object_deletions(text[])
+  from public, anon, service_role;
+grant execute on function public.complete_own_message_photo_object_deletions(text[])
+  to authenticated;
 
 create or replace function public.complete_message_photo_object_deletions(
   p_storage_paths text[]

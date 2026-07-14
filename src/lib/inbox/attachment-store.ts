@@ -127,6 +127,7 @@ export async function stageOutboundPhotos(input: {
       .insert(rows)
       .select("*");
     if (error) {
+      if (error.code === "23514") throw new MessagePhotoConflictError();
       if (error.code === "23505") {
         const raced = await listDeliveryPhotos(
           input.supabase,

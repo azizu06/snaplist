@@ -55,9 +55,16 @@ describe("message photo attachment migration", () => {
 
   it("serializes photo reservations with delivery claims and stages them atomically", () => {
     expect(migration).toMatch(/guard_message_photo_upload_intent[\s\S]*for update/i);
+    expect(migration).toMatch(/delivery_status not in \('uploading', 'staged'\)/i);
     expect(migration).toMatch(/canonical delivery already has an intent/i);
     expect(migration).toMatch(/follow-up delivery already has an intent/i);
     expect(migration).toMatch(/serialize_ebay_followup_identity[\s\S]*for update/i);
     expect(migration).toMatch(/stage_message_photo_upload_intents[\s\S]*v_total <> v_expected or v_locked <> v_expected/i);
+  });
+
+  it("keeps foreground expiry and object draining tenant-derived", () => {
+    expect(migration).toMatch(/delete_own_expired_message_photo_upload_intents[\s\S]*candidate\.user_id = v_user_id/i);
+    expect(migration).toMatch(/list_own_message_photo_object_deletions[\s\S]*split_part\(queue\.storage_path, '\/', 1\) = v_user_id/i);
+    expect(migration).toMatch(/complete_own_message_photo_object_deletions[\s\S]*split_part\(queue\.storage_path, '\/', 1\) = v_user_id/i);
   });
 });

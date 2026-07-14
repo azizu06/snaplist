@@ -10,8 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { cleanupExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
+import { cleanupOwnExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
 
 /**
  * Cookie-authenticated, rate-limited foreground refresh. Disconnected sellers
@@ -24,8 +23,10 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const limited = await enforceRateLimit(request, userId);
   if (limited) return limited;
+  let tenantServer: Awaited<ReturnType<typeof createTenantServerClient>> | null = null;
   try {
-    await cleanupExpiredMessagePhotoUploads(createAdminClient());
+    tenantServer = await createTenantServerClient();
+    await cleanupOwnExpiredMessagePhotoUploads(tenantServer);
   } catch (error) {
     logServerError("inbox.sync.photo-cleanup", error);
   }
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
     if (!connected && !hasEbayMessagingSandboxFallback(userId)) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
-    const tenantServer = await createTenantServerClient();
+    tenantServer ??= await createTenantServerClient();
     const summary = await syncInboxForSeller({
       adapter: await createEbayMessagingAdapterForUser(supabase, userId, {
         credentialClient: tenantServer,
