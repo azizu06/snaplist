@@ -265,6 +265,41 @@ begin
       returning message.* into v_message;
       v_inserted := true;
     exception when unique_violation then
+      update public.messages message
+      set status = case
+        when message.delivery_status in (
+          'rejected',
+          'failed',
+          'ambiguous',
+          'sending'
+        ) then 'sent'
+        when message.draft_reply is not null then 'drafted'
+        else 'new'
+      end
+      where message.user_id = p_user_id
+        and message.marketplace = 'ebay'
+        and message.external_message_id = p_payload->>'external_message_id'
+        and message.direction = 'inbound'
+        and message.status = 'provider_unavailable'
+        and message.delivery_status is distinct from 'delivered'
+        and not exists (
+          select 1
+          from public.messages reply
+          where reply.user_id = message.user_id
+            and reply.reply_to = message.id
+            and reply.marketplace = 'ebay'
+            and reply.direction = 'outbound'
+            and (reply.reply_kind is null or reply.reply_kind = 'reply')
+            and reply.delivery_status = 'delivered'
+            and reply.external_delivery_id is not null
+        )
+      returning message.* into v_message;
+      if found then
+        return jsonb_build_object(
+          'message', to_jsonb(v_message),
+          'inserted', false
+        );
+      end if;
       select message.*
       into v_message
       from public.messages message

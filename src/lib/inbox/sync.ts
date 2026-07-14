@@ -24,6 +24,15 @@ function configuredMinutes(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function pendingReconciliationAt(
+  pending: PendingMarketplaceQuestion,
+): number {
+  const createdAt = pending.createdAt ? Date.parse(pending.createdAt) : NaN;
+  return Number.isFinite(createdAt)
+    ? createdAt
+    : Date.parse(pending.resolutionWindowFrom);
+}
+
 export interface SyncListingContext {
   itemId: string;
   listingId: string;
@@ -154,8 +163,10 @@ export async function syncInboxForSeller(
       return Number.isFinite(createdAt) && createdAt <= now.getTime();
     });
     const pendingOutsideFetch = pendingBeforeFetch.filter((pending) => {
-      const createdAt = pending.createdAt ? Date.parse(pending.createdAt) : NaN;
-      return Number.isFinite(createdAt) && createdAt < from.getTime();
+      const reconciliationAt = pendingReconciliationAt(pending);
+      return (
+        Number.isFinite(reconciliationAt) && reconciliationAt < from.getTime()
+      );
     });
     const actionableIds = new Set(
       reconcilableBeforeFetch.map(({ externalMessageId }) => externalMessageId),
@@ -165,18 +176,14 @@ export async function syncInboxForSeller(
     );
     const historicalTrackedIds = new Set([...actionableIds, ...pendingIds]);
     const oldestReconciliationAt = [
-      ...reconcilableBeforeFetch,
-      ...pendingOutsideFetch,
-    ].reduce<number | null>(
-      (oldest, candidate) => {
-        const createdAt = candidate.createdAt
-          ? Date.parse(candidate.createdAt)
-          : NaN;
-        if (!Number.isFinite(createdAt)) return oldest;
-        return oldest === null ? createdAt : Math.min(oldest, createdAt);
-      },
-      null,
-    );
+      ...reconcilableBeforeFetch.map(({ createdAt }) => Date.parse(createdAt)),
+      ...pendingOutsideFetch.map(pendingReconciliationAt),
+    ].reduce<number | null>((oldest, reconciliationAt) => {
+      if (!Number.isFinite(reconciliationAt)) return oldest;
+      return oldest === null
+        ? reconciliationAt
+        : Math.min(oldest, reconciliationAt);
+    }, null);
     const reconciliationFetched =
       oldestReconciliationAt !== null && oldestReconciliationAt < from.getTime()
         ? await input.adapter.fetchUnansweredQuestions({
@@ -265,9 +272,7 @@ export async function syncInboxForSeller(
         continue;
       }
       if (observedIds.has(pending.externalMessageId)) continue;
-      const pendingCreatedAt = pending.createdAt
-        ? Date.parse(pending.createdAt)
-        : NaN;
+      const pendingCreatedAt = pendingReconciliationAt(pending);
       if (
         Number.isFinite(pendingCreatedAt) &&
         pendingCreatedAt >= (oldestReconciliationAt ?? from.getTime()) &&

@@ -400,6 +400,54 @@ describe("syncInboxForSeller", () => {
     ]);
   });
 
+  it("reconciles a pending question without a provider timestamp from its durable window", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    repository.cursor = new Date("2026-07-15T12:00:00.000Z");
+    const pendingQuestion: PendingMarketplaceQuestion = {
+      marketplace: "ebay",
+      externalMessageId: "ebay-question-missing-created-at",
+      externalParentId: "ebay-question-missing-created-at",
+      externalListingId: question.externalListingId,
+      externalBuyerId: null,
+      body: null,
+      subject: null,
+      createdAt: null,
+      resolutionWindowFrom: "2026-07-12T12:05:00.000Z",
+      observedCursorAt: "2026-07-13T12:05:00.000Z",
+    };
+    repository.pending.set(pendingQuestion.externalMessageId, {
+      question: pendingQuestion,
+      error: "Required Trading fields were missing",
+      attempts: 3,
+    });
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-15T12:05:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(summary).toMatchObject({
+      imported: 0,
+      drafted: 0,
+      pendingResolution: 0,
+    });
+    expect(repository.pending.has(pendingQuestion.externalMessageId)).toBe(false);
+    expect(adapter.fetches).toEqual([
+      {
+        from: new Date("2026-07-14T12:00:00.000Z"),
+        to: new Date("2026-07-15T12:05:00.000Z"),
+      },
+      {
+        from: new Date(pendingQuestion.resolutionWindowFrom),
+        to: new Date("2026-07-14T12:00:00.000Z"),
+      },
+    ]);
+  });
+
   it("retires a pending question absent from a complete unanswered window", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     adapter.questions = [question];

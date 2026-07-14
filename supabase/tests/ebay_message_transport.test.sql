@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(54);
+select extensions.plan(58);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -239,6 +239,205 @@ select extensions.results_eq(
   $$,
   $$values ('provider_unavailable'::text, 'The charger is included.'::text, 'test-reply'::text)$$,
   'ambiguous provider absence is neutral and preserves seller-visible history'
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Did the listing end?',
+    'external_message_id', 'provider-unavailable-question-a',
+    'external_parent_id', 'provider-unavailable-question-a',
+    'external_conversation_id', 'conversation-provider-unavailable-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-provider-unavailable-a',
+    'external_created_at', '2026-07-13T11:59:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply, draft_model
+    from public.messages
+    where external_message_id = 'provider-unavailable-question-a'
+  $$,
+  $$values ('drafted'::text, 'The charger is included.'::text, 'test-reply'::text)$$,
+  'fresh unanswered evidence restores a neutralized draft without regenerating it'
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Is this available again?',
+    'external_message_id', 'provider-unavailable-new-question-a',
+    'external_parent_id', 'provider-unavailable-new-question-a',
+    'external_conversation_id', 'conversation-provider-unavailable-new-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-provider-unavailable-new-a',
+    'external_created_at', '2026-07-13T12:01:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'mark_provider_unavailable',
+  jsonb_build_object(
+    'external_message_id', 'provider-unavailable-new-question-a',
+    'at', '2026-07-13T12:10:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Is this available again?',
+    'external_message_id', 'provider-unavailable-new-question-a',
+    'external_parent_id', 'provider-unavailable-new-question-a',
+    'external_conversation_id', 'conversation-provider-unavailable-new-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-provider-unavailable-new-a',
+    'external_created_at', '2026-07-13T12:01:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply, delivery_status
+    from public.messages
+    where external_message_id = 'provider-unavailable-new-question-a'
+  $$,
+  $$values ('new'::text, null::text, null::text)$$,
+  'fresh unanswered evidence restores a neutralized undrafted question'
+);
+
+select public.apply_ebay_message_write(
+  'claim_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'provider-unavailable-question-a'
+    ),
+    'body', 'The charger is included.',
+    'at', '2026-07-13T12:20:00Z',
+    'retry', false
+  )
+);
+
+select public.apply_ebay_message_write(
+  'fail_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'provider-unavailable-question-a'
+    ),
+    'kind', 'ambiguous',
+    'attempted_at', '2026-07-13T12:20:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'mark_provider_unavailable',
+  jsonb_build_object(
+    'external_message_id', 'provider-unavailable-question-a',
+    'at', '2026-07-13T12:30:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Did the listing end?',
+    'external_message_id', 'provider-unavailable-question-a',
+    'external_parent_id', 'provider-unavailable-question-a',
+    'external_conversation_id', 'conversation-provider-unavailable-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-provider-unavailable-a',
+    'external_created_at', '2026-07-13T11:59:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply, delivery_status, delivery_attempted_at
+    from public.messages
+    where external_message_id = 'provider-unavailable-question-a'
+  $$,
+  $$
+    values (
+      'sent'::text,
+      'The charger is included.'::text,
+      'ambiguous'::text,
+      '2026-07-13T12:20:00Z'::timestamptz
+    )
+  $$,
+  'fresh unanswered evidence restores unacknowledged delivery retry state'
+);
+
+select public.apply_ebay_message_write(
+  'claim_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'provider-unavailable-question-a'
+    ),
+    'body', 'The charger is included.',
+    'at', '2026-07-13T12:31:00Z',
+    'retry', true
+  )
+);
+
+select public.apply_ebay_message_write(
+  'complete_canonical',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'provider-unavailable-question-a'
+    ),
+    'body', 'The charger is included.',
+    'external_delivery_id', 'provider-unavailable-delivery-a',
+    'delivered_at', '2026-07-13T12:32:00Z',
+    'attempted_at', '2026-07-13T12:31:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Did the listing end?',
+    'external_message_id', 'provider-unavailable-question-a',
+    'external_parent_id', 'provider-unavailable-question-a',
+    'external_conversation_id', 'conversation-provider-unavailable-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-provider-unavailable-a',
+    'external_created_at', '2026-07-13T11:59:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select root.status, root.delivery_status, reply.external_delivery_id
+    from public.messages root
+    join public.messages reply on reply.reply_to = root.id
+    where root.external_message_id = 'provider-unavailable-question-a'
+      and reply.direction = 'outbound'
+      and reply.reply_kind = 'reply'
+  $$,
+  $$
+    values (
+      'sent'::text,
+      'delivered'::text,
+      'provider-unavailable-delivery-a'::text
+    )
+  $$,
+  'unanswered replay cannot alter an acknowledged delivery'
 );
 
 select public.apply_ebay_message_write(
