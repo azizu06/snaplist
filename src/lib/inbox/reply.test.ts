@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  BUYER_REPLY_SYSTEM_PROMPT,
   DEFAULT_REPLY_MODEL,
   draftBuyerReply,
   fallbackBuyerReply,
@@ -325,6 +326,40 @@ describe("replyAssertsUngroundedNumbers", () => {
 });
 
 describe("draftBuyerReply", () => {
+  it("accepts a concise, answer-first factual reply without canned assistant language", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "Yes, it has a 30 hour battery and is listed at $180.",
+      answerable: true,
+    });
+
+    const result = await draftBuyerReply({ question, grounding, generate });
+
+    expect(result.usedFallback).toBe(false);
+    expect(result.reply).toMatch(/^yes\b/i);
+    expect(result.reply.split(/[.!?]+/).filter(Boolean)).toHaveLength(1);
+    expect(result.reply).not.toMatch(
+      /based on the information provided|i(?:'d| would) be happy to help|[—–]/i,
+    );
+    expect(result.reply).not.toContain(question);
+  });
+
+  it("accepts a concise grounded numeric reply without turning the price into a sales pitch", async () => {
+    const generate: ReplyGenerate = async () => ({
+      reply: "It's listed at $180.",
+      answerable: true,
+    });
+
+    const result = await draftBuyerReply({
+      question: "How much are you asking?",
+      grounding,
+      generate,
+    });
+
+    expect(result.usedFallback).toBe(false);
+    expect(replyAssertsUngroundedNumbers(result.reply, grounding)).toBe(false);
+    expect(result.reply).not.toMatch(/great deal|don't miss|[—–]/i);
+  });
+
   it("passes the question and the FULL grounding to the injected model call", async () => {
     vi.stubEnv("LLM_PROVIDER", "openai");
     const calls: Parameters<ReplyGenerate>[0][] = [];
@@ -375,8 +410,8 @@ describe("draftBuyerReply", () => {
     expect(result.reply).toBe(fallbackBuyerReply(grounding));
     // The fallback itself only states grounded facts.
     expect(replyAssertsUngroundedNumbers(result.reply, grounding)).toBe(false);
-    expect(result.reply).toContain("Sony WH-1000XM4");
-    expect(result.reply).toContain("good condition");
+    expect(result.reply).toMatch(/don't have that detail confirmed/i);
+    expect(result.reply).toMatch(/check.*get back/i);
   });
 
   it("forces retry → grounded fallback when the model asserts a number taken from the buyer's question", async () => {
@@ -475,9 +510,19 @@ describe("draftBuyerReply", () => {
 });
 
 describe("fallbackBuyerReply", () => {
+  it("briefly defers an unknown answer and asks for the smallest useful next step", () => {
+    const reply = fallbackBuyerReply(grounding);
+
+    expect(reply).toMatch(/don't have that detail confirmed/i);
+    expect(reply).toMatch(/check.*get back/i);
+    expect(reply.split(/[.!?]+/).filter(Boolean)).toHaveLength(2);
+    expect(reply).not.toMatch(/thanks|interest|[—–]/i);
+    expect(replyAssertsUngroundedNumbers(reply, grounding)).toBe(false);
+  });
+
   it("omits the condition line when the grounding has no condition", () => {
     const reply = fallbackBuyerReply({ attributes: { brand: "Acme" }, listing: null });
-    expect(reply).toContain("Acme");
+    expect(reply).not.toContain("Acme");
     expect(reply).not.toContain("condition");
   });
 
@@ -488,13 +533,25 @@ describe("fallbackBuyerReply", () => {
       attributes: { brand: "Acme", condition: "good" },
       listing: null,
     });
-    expect(noListing).toContain("good condition");
+    expect(noListing).not.toContain("good condition");
     expect(noListing).not.toContain("listing");
 
     const withListing = fallbackBuyerReply({
       attributes: { brand: "Acme", condition: "good" },
       listing: { title: "Acme widget", description: "A widget." },
     });
-    expect(withListing).toContain("as described in the listing");
+    expect(withListing).not.toContain("listing");
+  });
+});
+
+describe("buyer reply voice prompt", () => {
+  it("requires a concise answer-first marketplace voice while retaining grounding and unknown-answer rules", () => {
+    expect(BUYER_REPLY_SYSTEM_PROMPT).toMatch(/answer.*question first/i);
+    expect(BUYER_REPLY_SYSTEM_PROMPT).toMatch(/one to three short sentences/i);
+    expect(BUYER_REPLY_SYSTEM_PROMPT).toMatch(/plain marketplace language/i);
+    expect(BUYER_REPLY_SYSTEM_PROMPT).toMatch(/never invent/i);
+    expect(BUYER_REPLY_SYSTEM_PROMPT).toMatch(/answerable to false/i);
+    expect(BUYER_REPLY_SYSTEM_PROMPT).toMatch(/em or en dash/i);
+    expect(BUYER_REPLY_SYSTEM_PROMPT).not.toMatch(/Aziz|Umarov|UCF|Knight Hacks/i);
   });
 });

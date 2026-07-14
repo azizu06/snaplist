@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { ReplyGrounding } from "./types";
 import type { ExtractedAttributes } from "../pipeline/types";
-import { itemLabel } from "./simulate";
 import { resolveLanguageModel, resolveModelId } from "../llm";
 import { confirmedMeasurementPhrases, type MeasurementDraft } from "../vision/measurements";
 
@@ -324,25 +323,15 @@ export function replyAssertsUngroundedNumbers(
 }
 
 /**
- * The deterministic, provably-grounded fallback. EVERY fact in it traces to the
- * grounding object: the item label (brand/model/title) and, when known, the
- * condition. Anything the grounding cannot answer is deferred, never invented —
- * including the EXISTENCE of a listing: "as described in the listing" is only
- * said when `grounding.listing` actually exists (the inbox covers all items,
- * listed or not, and a false listing reference would itself be a hallucination).
+ * The deterministic, provably-grounded fallback. It intentionally adds no item
+ * detail: when the model says a question is not answerable, a short acknowledgement
+ * plus the next useful seller action is safer than unrelated listing facts.
  */
 export function fallbackBuyerReply(grounding: ReplyGrounding): string {
-  const label = itemLabel(grounding);
-  const condition = grounding.attributes.condition;
-  const conditionLine = condition
-    ? grounding.listing
-      ? ` It is in ${condition} condition, as described in the listing.`
-      : ` It is in ${condition} condition.`
-    : "";
-  return (
-    `Thanks for your interest in ${label}!${conditionLine} ` +
-    "Let me double-check the details on your question and get back to you shortly."
-  );
+  // Keep the grounding argument as part of the fallback seam; deliberately use
+  // none of its facts when the question cannot be answered from it.
+  void grounding;
+  return "I don't have that detail confirmed. Let me check and get back to you.";
 }
 
 // ---------------------------------------------------------------------------
@@ -411,15 +400,18 @@ export async function draftBuyerReply(
  * no-invention instruction is the prompt-side complement to the code-side numeric
  * guard + fallback.
  */
-const REPLY_SYSTEM_PROMPT =
+export const BUYER_REPLY_SYSTEM_PROMPT =
   "You draft a seller's reply to a buyer question about a used-item marketplace " +
-  "listing. Use ONLY the supplied item facts and listing copy — NEVER invent a " +
-  "price, shipping time, dimension, accessory, or any spec that is not given. Do " +
-  "not state any number that does not appear in the facts or the listing — a " +
-  "number the buyer used in their question is NOT a verified fact and must not " +
-  "be asserted back. If the supplied facts cannot answer the question, set " +
-  "answerable to false instead of guessing. Keep the reply friendly, concise " +
-  "(under 120 words), and ready to send as-is.";
+  "listing. Answer the buyer's actual question first. Usually use one to three short " +
+  "sentences and plain marketplace language, like a concise human seller. Do not open " +
+  "with generic assistant phrasing such as 'Based on the information provided' or " +
+  "'I'd be happy to help.' Do not restate the buyer's full question, over-explain, " +
+  "use sales pressure, or use an em or en dash. Use ONLY the supplied item facts and " +
+  "listing copy. NEVER invent a price, shipping time, dimension, accessory, discount, " +
+  "availability, or any spec that is not given. Do not state any number that does not " +
+  "appear in the facts or the listing. A number the buyer used in their question is " +
+  "NOT a verified fact and must not be asserted back. If the supplied facts cannot " +
+  "answer the question, set answerable to false instead of guessing.";
 
 /**
  * Build the real generate: a lazy wrapper around the AI SDK's `generateObject`
@@ -450,7 +442,7 @@ export function createOpenAIReplyGenerate(
     const { object } = await generateObject({
       model: llmModel,
       schema: buyerReplyRawSchema,
-      system: REPLY_SYSTEM_PROMPT,
+      system: BUYER_REPLY_SYSTEM_PROMPT,
       prompt: instruction,
     });
     return object;

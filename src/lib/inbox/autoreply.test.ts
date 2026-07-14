@@ -169,7 +169,7 @@ describe("message policy orchestration", () => {
   it("generates a seller-reviewable draft for negotiation and never auto-sends it", async () => {
     const repository = new MemoryPolicyRepository();
     const draft = vi.fn(async (): Promise<DraftBuyerReplyResult> => ({
-      reply: "Thanks for the offer. I will review it.",
+      reply: "I can't confirm a different price. The seller will review your offer.",
       model: "reply-test",
       usedFallback: false,
     }));
@@ -191,6 +191,8 @@ describe("message policy orchestration", () => {
     expect(draft).toHaveBeenCalledOnce();
     expect(meterDraft).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
+    expect(recorded.decision.draftReply).not.toMatch(/thanks|happy to help|[—–]/i);
+    expect(recorded.decision.draftReply.split(/[.!?]+/).filter(Boolean)).toHaveLength(2);
   });
 
   it("persists one audit result per policy version when duplicate workers race", async () => {
