@@ -15,6 +15,7 @@ import {
   claimEbayMessageWriteWithPhotos,
   claimScheduledEbayMessageWriteWithPhotos,
   completeEbayMessageWriteWithPhotos,
+  completeScheduledEbayMessageWriteWithPhotos,
   readScheduledEbayMessagePolicy,
 } from "./ebay-server-write";
 import { MESSAGE_PHOTO_BUCKET, validateMessagePhoto } from "./attachments";
@@ -784,19 +785,30 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     attemptedAt: Date,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
-      const data = await completeEbayMessageWriteWithPhotos<unknown>(
-        this.serverWriteClient,
-        "complete_canonical",
-        {
-          message_id: root.id,
-          body,
-          external_delivery_id: receipt.externalDeliveryId,
-          delivered_at: receipt.deliveredAt,
-          attempted_at: attemptedAt.toISOString(),
-        },
-        await this.getWriteGeneration(),
-        root.id,
-      );
+      const payload = {
+        message_id: root.id,
+        body,
+        external_delivery_id: receipt.externalDeliveryId,
+        delivered_at: receipt.deliveredAt,
+        attempted_at: attemptedAt.toISOString(),
+      };
+      const generation = await this.getWriteGeneration();
+      const data = this.scheduled
+        ? await completeScheduledEbayMessageWriteWithPhotos<unknown>(
+            this.serverWriteClient,
+            this.userId,
+            "complete_canonical",
+            payload,
+            generation,
+            root.id,
+          )
+        : await completeEbayMessageWriteWithPhotos<unknown>(
+            this.serverWriteClient,
+            "complete_canonical",
+            payload,
+            generation,
+            root.id,
+          );
       return messageRowSchema.parse(data);
     }
     const { data, error } = await this.supabase

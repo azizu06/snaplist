@@ -608,6 +608,76 @@ grant execute on function public.complete_ebay_message_write_with_photos(
   text, jsonb, uuid, text
 ) to authenticated;
 
+-- Scheduled automatic replies use the same atomic message-plus-photo
+-- completion, but retain #145's service-role policy/generation authorization.
+create or replace function public.complete_scheduled_ebay_message_write_with_photos(
+  p_user_id text,
+  p_operation text,
+  p_payload jsonb,
+  p_generation uuid,
+  p_delivery_request_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_result jsonb;
+  v_message_id uuid;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  if p_operation <> 'complete_canonical' then
+    raise exception using errcode = '42501', message = 'Scheduler photo completion operation is not allowed';
+  end if;
+  if exists (
+    select 1
+    from public.message_attachments attachment
+    where attachment.user_id = p_user_id
+      and attachment.delivery_request_id = p_delivery_request_id
+      and attachment.direction = 'outbound'
+      and (
+        attachment.provider_media_id is null
+        or attachment.provider_url is null
+      )
+  ) then
+    raise exception using errcode = '23514', message = 'Every photo must be hosted before message completion';
+  end if;
+
+  v_result := private.apply_scheduled_ebay_message_write(
+    p_user_id,
+    p_operation,
+    p_payload,
+    p_generation
+  );
+  v_message_id := nullif(v_result->>'id', '')::uuid;
+  if v_message_id is null then
+    raise exception using errcode = 'P0001', message = 'Message completion returned no message id';
+  end if;
+
+  update public.message_attachments attachment
+  set message_id = v_message_id,
+      delivery_status = 'delivered',
+      upload_expires_at = null,
+      delivery_error = null,
+      updated_at = statement_timestamp()
+  where attachment.user_id = p_user_id
+    and attachment.delivery_request_id = p_delivery_request_id
+    and attachment.direction = 'outbound';
+
+  return v_result;
+end;
+$$;
+
+revoke all on function public.complete_scheduled_ebay_message_write_with_photos(
+  text, text, jsonb, uuid, text
+) from public, anon, authenticated;
+grant execute on function public.complete_scheduled_ebay_message_write_with_photos(
+  text, text, jsonb, uuid, text
+) to service_role;
+
 create table private.message_photo_object_deletion_queue (
   storage_path text primary key,
   enqueued_at timestamptz not null default statement_timestamp()

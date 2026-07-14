@@ -132,10 +132,28 @@ describe("createMessagingTransportForConversation", () => {
     });
   });
 
-  it("claims scheduled automatic replies with an explicit empty photo set", async () => {
+  it("claims and completes scheduled automatic replies through scheduler photo RPCs", async () => {
     const generation = "11111111-1111-4111-8111-111111111111";
+    const delivered = {
+      ...root,
+      id: "44444444-4444-4444-8444-444444444444",
+      direction: "outbound" as const,
+      body: "Yes, it does.",
+      status: "sent" as const,
+      sent_at: "2026-07-13T12:01:01.000Z",
+      reply_to: root.id,
+      reply_kind: "reply" as const,
+      delivery_status: "delivered" as const,
+      external_delivery_id: "provider-message-1",
+      delivery_attempted_at: "2026-07-13T12:01:00.000Z",
+    };
     const rpc = vi.fn(async (name: string) => ({
-      data: name === "begin_scheduled_ebay_message_write" ? generation : true,
+      data:
+        name === "begin_scheduled_ebay_message_write"
+          ? generation
+          : name === "complete_scheduled_ebay_message_write_with_photos"
+            ? delivered
+            : true,
       error: null,
     }));
     const admin = { rpc } as unknown as SupabaseClient;
@@ -157,6 +175,19 @@ describe("createMessagingTransportForConversation", () => {
       "2026-07-13T12:00:30.000Z",
       "2026-07-13T12:00:00.000Z",
     )).resolves.toBe(true);
+    await expect(repository.completeCanonical(
+      root,
+      "Yes, it does.",
+      {
+        externalDeliveryId: "provider-message-1",
+        deliveredAt: "2026-07-13T12:01:01.000Z",
+      },
+      new Date("2026-07-13T12:01:00.000Z"),
+    )).resolves.toMatchObject({
+      id: delivered.id,
+      delivery_status: "delivered",
+      external_delivery_id: "provider-message-1",
+    });
 
     expect(rpc).toHaveBeenCalledWith(
       "claim_scheduled_ebay_message_write_with_photos",
@@ -175,6 +206,22 @@ describe("createMessagingTransportForConversation", () => {
         p_generation: generation,
         p_delivery_request_id: root.id,
         p_attachment_ids: [],
+      },
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_scheduled_ebay_message_write_with_photos",
+      {
+        p_user_id: "user_a",
+        p_operation: "complete_canonical",
+        p_payload: {
+          message_id: root.id,
+          body: "Yes, it does.",
+          external_delivery_id: "provider-message-1",
+          delivered_at: "2026-07-13T12:01:01.000Z",
+          attempted_at: "2026-07-13T12:01:00.000Z",
+        },
+        p_generation: generation,
+        p_delivery_request_id: root.id,
       },
     );
   });

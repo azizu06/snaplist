@@ -35,6 +35,8 @@ describe("message photo attachment migration", () => {
   it("completes the exact message lifecycle and attachment visibility atomically", () => {
     expect(migration).toMatch(/function public\.complete_ebay_message_write_with_photos/i);
     expect(migration).toMatch(/private\.apply_authenticated_ebay_message_write/i);
+    expect(migration).toMatch(/function public\.complete_scheduled_ebay_message_write_with_photos/i);
+    expect(migration).toMatch(/complete_scheduled_ebay_message_write_with_photos[\s\S]*private\.apply_scheduled_ebay_message_write/i);
     expect(migration).toMatch(/provider_media_id is null[\s\S]*provider_url is null/i);
     expect(migration).toMatch(/set message_id = v_message_id,[\s\S]*delivery_status = 'delivered'/i);
   });
