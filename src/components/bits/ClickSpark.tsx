@@ -46,9 +46,16 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
 
     let resizeTimeout: ReturnType<typeof setTimeout>;
 
-    // Size to the canvas's own (over-extended) rect so sparks can fly past the
-    // wrapped element's edge instead of clipping at a small button's bounds.
+    // Size to the canvas's own over-extended rect. Horizontal spark room is
+    // clamped to the viewport so a full-width mobile action never creates a
+    // hidden 24px document overflow; centered buttons still get the full 40px
+    // spark margin on each side.
     const resizeCanvas = () => {
+      const parentRect = parent.getBoundingClientRect();
+      const leftRoom = Math.min(40, Math.max(0, parentRect.left));
+      const rightRoom = Math.min(40, Math.max(0, window.innerWidth - parentRect.right));
+      canvas.style.left = `${-leftRoom}px`;
+      canvas.style.width = `${parentRect.width + leftRoom + rightRoom}px`;
       const { width, height } = canvas.getBoundingClientRect();
       if (canvas.width !== width || canvas.height !== height) {
         canvas.width = width;
@@ -63,11 +70,13 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
 
     const ro = new ResizeObserver(handleResize);
     ro.observe(parent);
+    window.addEventListener('resize', handleResize);
 
     resizeCanvas();
 
     return () => {
       ro.disconnect();
+      window.removeEventListener('resize', handleResize);
       clearTimeout(resizeTimeout);
     };
   }, []);
@@ -165,7 +174,7 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
           plus the 40px spark overflow margin on each side. */}
       <canvas
         ref={canvasRef}
-        className="pointer-events-none absolute -left-10 -top-10 z-10 h-[calc(100%+5rem)] w-[calc(100%+5rem)]"
+        className="pointer-events-none absolute -top-10 z-10 h-[calc(100%+5rem)]"
       />
       {children}
     </div>

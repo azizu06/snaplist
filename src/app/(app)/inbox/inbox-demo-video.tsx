@@ -39,7 +39,7 @@ export function InboxDemoVideo() {
           label="Demo: a buyer question answered with a drafted reply"
           lazy
           rootMargin="160px"
-          className="aspect-[4/5] md:aspect-video"
+          className="aspect-[6/5] md:aspect-video"
         >
           <RealUiCapturePoster
             shot="inbox-draft"

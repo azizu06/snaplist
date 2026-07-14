@@ -356,6 +356,7 @@ function FormBody({
            whole card; while a file is over it, one quiet accent ring + soft
            wash appear (no glow, no motion) — the restrained drop affordance. ---- */}
       <section
+        id="upload-photos"
         onDragEnter={(e) => {
           if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();

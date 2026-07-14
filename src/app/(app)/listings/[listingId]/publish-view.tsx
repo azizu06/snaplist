@@ -169,14 +169,17 @@ function StatusStepper({ active, failed }: { active: number; failed: boolean }) 
 /* ---- right-rail cards ------------------------------------------------------ */
 
 function RailCard({
+  id,
   children,
   tone = "default",
 }: {
+  id?: string;
   children: React.ReactNode;
   tone?: "default" | "success";
 }) {
   return (
     <section
+      id={id}
       className={`rounded-2xl border bg-surface p-4 shadow-xs sm:p-5 ${
         tone === "success" ? "border-success-border" : "border-border"
       }`}
@@ -310,7 +313,7 @@ export function PublishView({
 
         {/* right rail — Publishing card + Listing details */}
         <aside className="flex flex-col gap-4">
-          <RailCard tone={data.published ? "success" : "default"}>
+          <RailCard id="publish-action" tone={data.published ? "success" : "default"}>
             <Eyebrow>Publishing</Eyebrow>
             <div className="mt-4">
               <StatusStepper

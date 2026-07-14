@@ -35,16 +35,16 @@ import type { MessageRow } from "@/lib/inbox";
 
 // Distinct item ids per conversation so each row names a different listing,
 // matching how the live inbox maps message.item_id → the item's label.
-const ITEM_XM4 = "00000000-0000-0000-0000-0000000000a1";
-const ITEM_LEGO = "00000000-0000-0000-0000-0000000000a2";
-const ITEM_PATAGONIA = "00000000-0000-0000-0000-0000000000a3";
-const ITEM_KINDLE = "00000000-0000-0000-0000-0000000000a4";
+const ITEM_PS5 = "00000000-0000-0000-0000-0000000000a1";
+const ITEM_SWITCH = "00000000-0000-0000-0000-0000000000a2";
+const ITEM_CAMERA = "00000000-0000-0000-0000-0000000000a3";
+const ITEM_IPHONE = "00000000-0000-0000-0000-0000000000a4";
 
 const FIXTURE_ITEMS: ItemOption[] = [
-  { id: ITEM_XM4, label: "Sony WH-1000XM4 Headphones" },
-  { id: ITEM_LEGO, label: "LEGO Millennium Falcon 75257" },
-  { id: ITEM_PATAGONIA, label: "Patagonia Better Sweater (M)" },
-  { id: ITEM_KINDLE, label: "Kindle Paperwhite 11th Gen" },
+  { id: ITEM_PS5, label: "Sony PlayStation 5 bundle" },
+  { id: ITEM_SWITCH, label: "Nintendo Switch 2" },
+  { id: ITEM_CAMERA, label: "Sony mirrorless camera kit" },
+  { id: ITEM_IPHONE, label: "Apple iPhone 15" },
 ];
 
 // Fixed base (not Date.now()) so the <time dateTime> ISO strings are identical
@@ -115,40 +115,40 @@ const Q_UNDELIVERED = "00000000-0000-0000-0000-0000000000d4";
 const FIXTURE_INBOUND: MessageRow[] = [
   inbound(
     Q_DRAFTED,
-    ITEM_XM4,
-    "Hi! Does it come with the original box and both charging cables?",
+    ITEM_PS5,
+    "Hi! Does the DualSense controller pictured come with the console?",
     "drafted",
     3,
     {
       draft_reply:
-        "Yes — it ships in the original box with both the USB-C and 3.5mm cables included. Everything is pictured in the listing.",
+        "Yes — the white DualSense controller shown in the photo is included with the PlayStation 5 console.",
       draft_model: "gpt-4o-mini",
     },
   ),
   inbound(
     Q_DRAFTING,
-    ITEM_LEGO,
-    "Is the build complete with all minifigures and the instruction booklet?",
+    ITEM_SWITCH,
+    "Are the Joy-Con controllers shown attached to the Switch 2 included?",
     "new",
     1,
   ),
   inbound(
     Q_SENT,
-    ITEM_PATAGONIA,
-    "Is this still available? Any pilling or stains on the sweater?",
+    ITEM_CAMERA,
+    "Are all three lenses shown included with the Sony camera body?",
     "sent",
     22,
     { sent_at: minsAgo(18) },
   ),
   inbound(
     Q_UNDELIVERED,
-    ITEM_KINDLE,
-    "Can you do $75 if I pick it up locally this week?",
+    ITEM_IPHONE,
+    "Can you do $440 if I pick up the iPhone locally this week?",
     "sent",
     48,
     {
       draft_reply:
-        "I can meet at $85 for a local pickup this week — that already reflects a fair discount off the listed price.",
+        "I can meet at $465 for a local pickup this week — that already reflects a fair discount off the listed price.",
     },
   ),
 ];
@@ -158,9 +158,9 @@ const FIXTURE_REPLIES = new Map<string, MessageRow>([
     Q_SENT,
     outbound(
       "00000000-0000-0000-0000-0000000000e2",
-      ITEM_PATAGONIA,
+      ITEM_CAMERA,
       Q_SENT,
-      "Yes, it's still available. No stains and only very light pilling under the arms — the photos show every angle in natural light.",
+      "Yes — the Sony camera body and all three lenses shown in the listing photo are included as one kit.",
       18,
     ),
   ],
@@ -174,17 +174,17 @@ const FIXTURE_FOLLOWUPS = new Map<string, MessageRow[]>([
     [
       outbound(
         "00000000-0000-0000-0000-0000000000f1",
-        ITEM_PATAGONIA,
+        ITEM_CAMERA,
         Q_SENT,
-        "Actually — hold on, let me double-check the exact measurements for you.",
+        "I can also send close-ups of each lens mount before you decide.",
         12,
         "followup",
       ),
       outbound(
         "00000000-0000-0000-0000-0000000000f2",
-        ITEM_PATAGONIA,
+        ITEM_CAMERA,
         Q_SENT,
-        "Pit-to-pit is 21\" and length is 27\". Happy to grab any other measurement.",
+        "The listing photo shows the exact camera body and three lenses included in this kit.",
         10,
         "followup",
       ),

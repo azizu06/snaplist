@@ -1,14 +1,40 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // The capture harness is intentionally plain Node ESM so it can run without a
 // TypeScript loader. Vitest can import it directly for its deterministic QA seam.
-import { assertMobileInboxLayout } from "../../remotion/scripts/capture-real-ui.mjs";
+const fsMock = vi.hoisted(() => ({
+  accessSync: vi.fn(() => {
+    throw new Error("browser resolution must not run while importing pure capture assertions");
+  }),
+}));
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...actual, accessSync: fsMock.accessSync };
+});
+
+let assertCaptureLayout: typeof import("../../remotion/scripts/capture-real-ui.mjs").assertCaptureLayout;
+let assertMobileInboxLayout: typeof import("../../remotion/scripts/capture-real-ui.mjs").assertMobileInboxLayout;
+
+beforeAll(async () => {
+  ({ assertCaptureLayout, assertMobileInboxLayout } = await import(
+    "../../remotion/scripts/capture-real-ui.mjs"
+  ));
+});
+
+describe("browserless assertion imports", () => {
+  it("does not resolve Chrome while importing the pure QA exports", () => {
+    expect(assertCaptureLayout).toBeTypeOf("function");
+    expect(assertMobileInboxLayout).toBeTypeOf("function");
+    expect(fsMock.accessSync).not.toHaveBeenCalled();
+  });
+});
 
 const validMetrics = {
-  viewportWidth: 432,
-  scrollWidth: 432,
-  rows: [{ left: 0, right: 432, width: 432 }],
-  control: { left: 320, right: 416, width: 96 },
+  viewportWidth: 390,
+  scrollWidth: 390,
+  rows: [{ left: 0, right: 390, width: 390 }],
+  control: { left: 286, right: 374, width: 88 },
 };
 
 describe("assertMobileInboxLayout", () => {
@@ -30,5 +56,37 @@ describe("assertMobileInboxLayout", () => {
     expect(() => assertMobileInboxLayout(metrics, "mobile inbox")).toThrow(
       /overflow|escapes viewport/,
     );
+  });
+});
+
+describe("assertCaptureLayout", () => {
+  const focused = {
+    viewportWidth: 390,
+    viewportHeight: 844,
+    scrollWidth: 390,
+    scrollHeight: 1800,
+    target: { left: 12, right: 378, top: 180, bottom: 620, width: 366, height: 440 },
+    activeTheme: "dark",
+  };
+
+  it("accepts a visible, non-collapsed real-app focus target", () => {
+    expect(() => assertCaptureLayout(focused, "mobile price", true, "dark")).not.toThrow();
+  });
+
+  it.each([
+    ["page overflow", { ...focused, scrollWidth: 420 }],
+    ["collapsed target", { ...focused, target: { ...focused.target, height: 0 } }],
+    ["offscreen target", { ...focused, target: { ...focused.target, top: 900, bottom: 980 } }],
+    ["missing target", { ...focused, target: null }],
+  ])("rejects %s", (_label, metrics) => {
+    expect(() => assertCaptureLayout(metrics, "mobile price", true)).toThrow(
+      /overflow|collapsed|outside|missing/,
+    );
+  });
+
+  it("rejects a capture whose mounted theme drifted", () => {
+    expect(() =>
+      assertCaptureLayout({ ...focused, activeTheme: "light" }, "mobile price", true, "dark"),
+    ).toThrow(/theme mismatch/);
   });
 });

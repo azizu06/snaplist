@@ -14,8 +14,8 @@ import { HERO_VISION_LEN, HeroVision } from "./suite/HeroVision";
 
 const STAGE_SIZE = { fps: 30, width: 800, height: 600 } as const;
 const SUITE_SIZE = { fps: 30, width: 1920, height: 1080 } as const;
-/** Portrait (4:5) renders of the how-it-works steps for phones. */
-const MOBILE_SIZE = { fps: 30, width: 1080, height: 1350 } as const;
+/** Action-focused 6:5 crops from full 390×844 real-app captures for phones. */
+const MOBILE_SIZE = { fps: 30, width: 1080, height: 900 } as const;
 
 const realUiDefaults = (
   surface: RealUiSurface,
@@ -84,8 +84,7 @@ export const RemotionRoot: React.FC = () => {
         {...SUITE_SIZE}
       />
 
-      {/* ---- portrait mobile renders (ui-r7-mobile): /tour swaps to these
-              under 768px so the in-clip UI is legible on phones ---- */}
+      {/* ---- phone-first action crops: /tour swaps to these under 768px. ---- */}
       <Composition
         id="step-snap-mobile"
         component={RealUiCapture}

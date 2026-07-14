@@ -101,15 +101,14 @@ export function MarketplaceBadge({
   );
 }
 
-/** Round-4 sizing: real listing-card proportions — a proper photo on top
- *  (was a 56px thumb nobody could read), 13px+ body text, fewer cards per
- *  view. Round 5: wider card so the confidence chip breathes (real padding,
- *  no cramped leading-none), and the marketplace wordmark reads at a glance
- *  (15px, was 12px). Nothing inside transforms on hover. */
+/** #136: phone widths intentionally show almost two cards at once. The old
+ * fixed 324px card consumed nearly the whole 390px viewport and turned the
+ * inventory stream into a one-card carousel. Desktop keeps the richer scale;
+ * mobile trims type and spacing without losing any listing facts. */
 function ListingCard({ listing }: { listing: LoopListing }) {
   const product = DEMO_PRODUCTS_BY_SLUG[listing.slug];
   return (
-    <article className="w-[324px] overflow-hidden rounded-2xl border border-line bg-panel shadow-card">
+    <article className="w-[184px] overflow-hidden rounded-xl border border-line bg-panel shadow-card sm:w-[244px] sm:rounded-2xl lg:w-[300px]">
       {/* Square frame matches the 1:1 authentic masters, so each item shows
           in full with no over-crop (owner: the old 1.84:1 box cut items off). */}
       <div className="relative aspect-square border-b border-line">
@@ -117,28 +116,28 @@ function ListingCard({ listing }: { listing: LoopListing }) {
           src={product.image}
           alt={product.alt}
           fill
-          sizes="324px"
+          sizes="(max-width: 639px) 184px, (max-width: 1023px) 244px, 300px"
           className="object-cover"
         />
-        <span className="absolute right-2.5 top-2.5 rounded-md bg-night/85 px-2 py-1 text-[11px] font-semibold text-flash backdrop-blur">
+        <span className="absolute right-2 top-2 rounded-md bg-night/85 px-1.5 py-0.5 text-[9.5px] font-semibold text-flash backdrop-blur sm:right-2.5 sm:top-2.5 sm:px-2 sm:py-1 sm:text-[11px]">
           {product.condition}
         </span>
       </div>
-      <div className="p-4">
-        <p className="truncate text-[15px] font-semibold leading-snug text-flash">
+      <div className="p-3 sm:p-4">
+        <p className="truncate text-[12.5px] font-semibold leading-snug text-flash sm:text-[14px] lg:text-[15px]">
           {product.title}
         </p>
-        <div className="mt-2.5 flex items-center gap-2.5">
-          <span className="nums text-[17px] font-bold leading-none text-flash">
+        <div className="mt-2 flex items-center gap-1.5 sm:mt-2.5 sm:gap-2.5">
+          <span className="nums text-[15px] font-bold leading-none text-flash sm:text-[17px]">
             ${product.price}
           </span>
           <span aria-hidden className="text-line-2">
             ·
           </span>
-          <MarketplaceBadge marketplace={listing.marketplace} className="text-[16px]" />
+          <MarketplaceBadge marketplace={listing.marketplace} className="text-[12px] sm:text-[15px]" />
         </div>
         <span
-          className={`mt-3.5 inline-block max-w-full rounded-full px-3.5 py-1.5 text-[13.5px] font-semibold leading-snug ${CHIP_CLASS}`}
+          className={`mt-2.5 inline-block max-w-full rounded-full px-2.5 py-1 text-[10.5px] font-semibold leading-snug sm:mt-3.5 sm:px-3.5 sm:py-1.5 sm:text-[12.5px] ${CHIP_CLASS}`}
         >
           {listing.confidence}
         </span>

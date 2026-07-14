@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type LogoNodeItem = {
   node: React.ReactNode;
@@ -278,6 +278,15 @@ export const LogoLoop = React.memo<LogoLoopProps>(
         setCopyCount(Math.max(ANIMATION_CONFIG.MIN_COPIES, copiesNeeded));
       }
     }, [isVertical]);
+
+    // Measure once after refs and responsive card styles are committed. The
+    // ResizeObserver remains the long-lived source of truth, but on a cold
+    // Next.js hydration it may not emit until a later resize/image event. That
+    // left the initial sequence size at zero and the marquee visually frozen.
+    useLayoutEffect(() => {
+      const frame = requestAnimationFrame(updateDimensions);
+      return () => cancelAnimationFrame(frame);
+    }, [updateDimensions]);
 
     useResizeObserver(updateDimensions, [containerRef, seqRef], [logos, gap, logoHeight, isVertical]);
 

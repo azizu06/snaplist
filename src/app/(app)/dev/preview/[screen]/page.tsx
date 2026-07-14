@@ -4,7 +4,6 @@ import {
   type DashboardRow,
 } from "@/app/(app)/dashboard/dashboard-view";
 import { ReviewView, type ReviewData } from "@/app/(app)/review/[itemId]/review-view";
-import { UploadView } from "@/app/(app)/upload/upload-form";
 import { BatchCaptureView } from "@/app/(app)/batch/batch-capture";
 import {
   PublishView,
@@ -17,6 +16,7 @@ import {
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
 import { InboxThreadPreview } from "../inbox-thread-preview";
 import { ExportView, type ExportData } from "@/app/(app)/export/[itemId]/export-view";
+import { UploadPreview } from "../upload-preview";
 
 /**
  * DEV-ONLY visual preview harness (issue #40 round 2). Renders the
@@ -29,73 +29,73 @@ const FIXTURE_ROWS: DashboardRow[] = [
   {
     itemId: "fx-1",
     listingId: "l-1",
-    title: "Sony WH-1000XM4",
+    title: "Sony PlayStation 5 bundle",
     status: "draft",
     createdAt: "2026-06-11T15:00:00Z",
-    price: 178,
-    costBasis: 60,
-    thumbUrl: "/demo/headphones.jpg",
-    category: "Electronics",
+    price: 379,
+    costBasis: 245,
+    thumbUrl: "/demo/reseller/ps5.webp",
+    category: "Video games",
     condition: "Good",
   },
   {
     itemId: "fx-2",
     listingId: "l-2",
-    title: "Nintendo Game Boy Color",
+    title: "Nintendo Switch 2",
     status: "queued",
     createdAt: "2026-06-11T13:30:00Z",
-    price: 112,
-    costBasis: 25,
-    thumbUrl: "/demo/gameboy.jpg",
+    price: 415,
+    costBasis: 330,
+    thumbUrl: "/demo/reseller/switch-2.webp",
     category: "Video games",
     condition: "Fair",
   },
   {
     itemId: "fx-3",
     listingId: "l-3",
-    title: "Patagonia Better Sweater Fleece",
+    title: "White Air Jordan sneakers",
     status: "published",
     createdAt: "2026-06-10T19:12:00Z",
-    price: 64,
+    price: 110,
     costBasis: null,
-    thumbUrl: "/demo/jacket.jpg",
-    category: "Apparel",
-    condition: "Like new",
+    thumbUrl: "/demo/reseller/air-jordan-pair.webp",
+    category: "Sneakers",
+    condition: "Good",
   },
   {
     itemId: "fx-4",
     listingId: "l-4",
-    title: "Canon EOS 80D",
+    title: "Sony mirrorless camera kit",
     status: "failed",
     createdAt: "2026-06-10T16:40:00Z",
-    price: 429,
-    costBasis: 300,
-    thumbUrl: "/demo/camera.jpg",
+    price: 895,
+    costBasis: 620,
+    thumbUrl: "/demo/reseller/camera.webp",
     category: "Electronics",
     condition: "Good",
   },
   {
     itemId: "fx-5",
     listingId: null,
-    title: "The Pragmatic Programmer",
+    title: "Charizard Pokémon card",
     status: "new",
     createdAt: "2026-06-09T11:05:00Z",
     price: null,
-    costBasis: 4,
-    thumbUrl: null,
-    category: "Books",
-    condition: "Like new",
+    costBasis: 18,
+    thumbUrl: "/demo/reseller/charizard.webp",
+    category: "Collectibles",
+    condition: "Good",
   },
   {
     itemId: "fx-6",
     listingId: "l-6",
-    title: "KitchenAid Artisan Stand Mixer",
+    title: "iPhone 15",
     status: "archived",
     createdAt: "2026-06-08T09:00:00Z",
-    price: 220,
-    costBasis: 90,
-    thumbUrl: null,
-    category: "Home & kitchen",
+    price: 499,
+    costBasis: 355,
+    thumbUrl: "/demo/reseller/iphone-15.webp",
+    category: "Cell phones",
     condition: "Good",
   },
 ];
@@ -104,71 +104,70 @@ const FIXTURE_REVIEW: ReviewData = {
   itemId: "fx-1",
   reviewRevision: "00000000-0000-4000-8000-000000000001",
   reviewBlocked: false,
-  photoUrls: ["/demo/headphones.jpg", "/demo/boombox.jpg"],
+  photoUrls: ["/demo/reseller/ps5.webp"],
   identification: {
-    label: "Sony WH-1000XM4 Wireless Headphones",
+    label: "Sony PlayStation 5 Console with DualSense Controller",
     confident: true,
     reason: null,
     candidates: [],
-    evidence: 0.85,
+    evidence: 0.92,
   },
   attrs: [
     { key: "brand", value: "Sony" },
-    { key: "model", value: "WH-1000XM4" },
-    { key: "category", value: "Consumer electronics" },
+    { key: "model", value: "PlayStation 5" },
+    { key: "category", value: "Video game consoles" },
     { key: "condition", value: "Good" },
-    { key: "upc", value: "027242919623" },
+    { key: "upc", value: null },
     { key: "isbn", value: null },
   ],
-  specs: ["wireless", "noise-cancelling", "over-ear"],
+  specs: ["White-and-black console", "DualSense wireless controller", "Console and controller shown together"],
   listing: {
     id: "l-1",
     platform: "ebay",
-    title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
+    title: "Sony PlayStation 5 Console with DualSense Wireless Controller — White",
     description:
-      "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+      "Sony PlayStation 5 console in good cosmetic condition with the matching white-and-black DualSense wireless controller shown in the photo.\n\nThe console and controller are pictured together. Please review the photo for the exact cosmetic condition and included items.",
     status: "draft",
   },
-  suggested: 178,
+  suggested: 379,
   override: null,
-  displayPrice: 178,
-  costBasis: 60,
+  displayPrice: 379,
+  costBasis: 245,
   measurements: null,
-  range: { low: 155, high: 205 },
-  confidence: 0.82,
-  tier: "web_tight",
+  range: { low: 340, high: 425 },
+  confidence: 0.9,
+  tier: "ebay-sold",
   sources: [
     {
-      url: "https://www.ebay.com/itm/demo-1",
-      title: "Sony WH-1000XM4 Black — sold listing",
+      url: "https://www.ebay.com/itm/demo-sold-1",
+      title: "Sony PlayStation 5 console with DualSense controller — sold",
       kind: "sold-comp",
     },
     {
-      url: "https://www.mercari.com/us/item/demo-2",
-      title: "Sony WH1000XM4 headphones (used)",
-      kind: "asking-comp",
+      url: "https://www.ebay.com/itm/demo-sold-2",
+      title: "PlayStation 5 console and controller bundle — sold",
+      kind: "sold-comp",
     },
-    { url: "https://www.swappa.com/listing/demo-3", title: null, kind: "asking-comp" },
+    {
+      url: "https://www.ebay.com/itm/demo-sold-3",
+      title: "Sony PS5 white console bundle — sold",
+      kind: "sold-comp",
+    },
   ],
   strategies: [
-    { key: "quick", label: "Quick sell", price: 167, blurb: "Priced to move — toward the lower end of real listed prices." },
-    { key: "balanced", label: "Balanced", price: 178, blurb: "The typical listed price — a safe bet." },
-    { key: "maximize", label: "Maximize", price: 194, blurb: "Top of what comparable items list for — expect a longer wait." },
+    { key: "quick", label: "Quick sell", price: 355, blurb: "Priced to move — toward the lower end of recent sold prices." },
+    { key: "balanced", label: "Balanced", price: 379, blurb: "Centered on the recent sold-price cluster." },
+    { key: "maximize", label: "Maximize", price: 409, blurb: "Near the top of comparable sold bundles." },
   ],
   clarifyOptions: [
-    { label: "Original carry case included", spec: "with carry case" },
-    { label: "Ear pads in good condition", spec: "ear pads good condition" },
-    { label: "Battery holds a full charge", spec: "battery holds full charge" },
-    { label: "All buttons fully functional", spec: "all buttons functional" },
-    { label: "Pairs reliably over Bluetooth", spec: "bluetooth pairs reliably" },
-    { label: "Original box and USB-C cable", spec: "original box and cable" },
+    { label: "Power cable included", spec: "power cable included" },
+    { label: "HDMI cable included", spec: "HDMI cable included" },
+    { label: "Controller tested", spec: "DualSense controller tested" },
+    { label: "Console powers on", spec: "console powers on" },
+    { label: "Factory reset", spec: "factory reset completed" },
+    { label: "Wi-Fi tested", spec: "Wi-Fi tested" },
   ],
-  banner: {
-    variant: "warning",
-    title: "Waiting for your review",
-    detail:
-      "Confidence was below the eligibility threshold when this listing was generated, so it waits for your review and manual publish.",
-  },
+  banner: null,
   actionError: null,
 };
 
@@ -189,41 +188,41 @@ const FIXTURE_PUBLISH: PublishData = {
   listingId: "l-1",
   itemId: "fx-1",
   platform: "ebay",
-  title: "Sony WH-1000XM4 Wireless Noise Cancelling Headphones, Black, Tested",
+  title: "Sony PlayStation 5 Console with DualSense Wireless Controller — White",
   description:
-    "Sony's flagship noise-cancelling headphones in good working condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth.\n\nIncludes carry case and USB-C cable. Light wear on the headband padding (pictured). From a smoke-free home, tested and fully functional.",
+    "Sony PlayStation 5 console in good cosmetic condition with the matching white-and-black DualSense wireless controller shown in the photo. Review the photo for the exact cosmetic condition and included items.",
   status: "draft",
   published: false,
   failed: false,
   ebayListingId: null,
-  photoUrl: "/demo/headphones.jpg",
+  photoUrl: "/demo/reseller/ps5.webp",
   actionError: null,
 };
 
 const FIXTURE_EXPORT: ExportData = {
   itemId: "fx-1",
-  itemName: "Sony WH-1000XM4",
-  itemThumb: "/demo/headphones.jpg",
+  itemName: "Sony PlayStation 5 bundle",
+  itemThumb: "/demo/reseller/ps5.webp",
   condition: "Good",
-  price: 178,
+  price: 379,
   packs: {
     facebook: {
-      title: "Sony WH-1000XM4 Wireless Headphones",
+      title: "Sony PlayStation 5 Console with DualSense Controller",
       description:
-        "For sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.",
+        "Sony PlayStation 5 console in good cosmetic condition with the white-and-black DualSense controller shown in the photo.",
       hashtags: [],
-      price: 178,
+      price: 379,
       copyBlock:
-        "Sony WH-1000XM4 Wireless Headphones\n\nFor sale: Sony WH-1000XM4 noise cancelling headphones in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable.\n\nCondition: Good\nAsking $178\nLocal pickup, message me if interested!",
+        "Sony PlayStation 5 Console with DualSense Controller\n\nWhite-and-black PS5 console and matching controller shown together.\n\nCondition: Good\nAsking $379\nLocal pickup, message me if interested!",
     },
     mercari: {
-      title: "Sony WH-1000XM4 Noise Cancelling Headphones",
+      title: "Sony PlayStation 5 Console + DualSense Controller",
       description:
-        "For sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.",
-      hashtags: ["#sony", "#wh1000xm4", "#headphones"],
-      price: 178,
+        "Sony PlayStation 5 console in good cosmetic condition with the matching white-and-black DualSense controller shown in the photo. Shipping available.",
+      hashtags: ["#playstation5", "#ps5", "#gamingconsole"],
+      price: 379,
       copyBlock:
-        "Sony WH-1000XM4 Noise Cancelling Headphones\n\nFor sale: Sony WH-1000XM4 in good condition. Industry-leading ANC, 30-hour battery, multipoint Bluetooth. Includes carry case and USB-C cable. Shipping available.\n\n#sony #wh1000xm4 #headphones",
+        "Sony PlayStation 5 Console + DualSense Controller\n\nWhite-and-black PS5 console and matching controller shown together. Shipping available.\n\n#playstation5 #ps5 #gamingconsole",
     },
     cached: true,
     model: "gemini-2.5-flash",
@@ -324,7 +323,7 @@ export default async function PreviewPage({
         </main>
       );
     case "upload":
-      return <UploadView action={noopAction} actionError={null} />;
+      return <UploadPreview action={noopAction} />;
     case "batch":
       return <BatchCaptureView />;
     case "publish":

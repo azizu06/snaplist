@@ -24,8 +24,8 @@ const INBOUND: MessageRow = {
   item_id: "00000000-0000-4000-8000-0000000000a1",
   listing_id: null,
   direction: "inbound",
-  body: "Hi! Is the Predator Helios 300 still available, and does it ship with the original charger?",
-  draft_reply: "Yes — it's still available and ships with the original charger.",
+  body: "Hi! Does the DualSense controller pictured come with the PlayStation 5?",
+  draft_reply: "Yes — the white DualSense controller shown in the photo is included.",
   status: "sent",
   sent_at: "2026-06-18T03:00:00Z",
   reply_to: null,
@@ -41,7 +41,7 @@ const REPLY: MessageRow = {
   item_id: INBOUND.item_id,
   listing_id: null,
   direction: "outbound",
-  body: "Yes — it's still available and ships with the original charger.",
+  body: "Yes — the white DualSense controller shown in the photo is included.",
   draft_reply: null,
   status: "sent",
   sent_at: "2026-06-18T03:01:00Z",
@@ -66,7 +66,7 @@ export function InboxThreadPreview() {
     <div className="mx-auto flex h-[640px] w-full max-w-[760px] overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
       <ConversationThread
         state={state}
-        buyerName="Predator Helios 300"
+        buyerName="Sony PlayStation 5 bundle"
         edits={{}}
         busy={null}
         followUps={[]}

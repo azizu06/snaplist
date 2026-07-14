@@ -7,12 +7,16 @@ theme, focus, and mobile-state controls for the media pipeline.
 
 ## Pipeline
 
-1. `pnpm demo:capture-ui` starts the local app and captures 36 PNGs under
-   `public/demo/captures/{desktop,mobile}/{light,dark}`.
-2. The capture harness uses Chrome device-metric overrides so the mobile CSS
-   viewport is exactly 432×540 while the output is 1080×1350. Mobile inbox
-   captures fail if the document, any conversation row, or the simulator
-   control exceeds the viewport.
+1. `pnpm demo:capture-ui` starts the local app and captures 40 PNGs under
+   `public/demo/captures/{desktop,mobile}/{light,dark}`. Jobs run serially by
+   default so development-only keyless bootstrap redirects cannot race; set
+   `DEMO_CAPTURE_CONCURRENCY` only for an already-stable external preview host.
+2. The capture harness resolves Chrome/Chromium from `CHROME_PATH`, standard
+   macOS application paths, or `PATH`, then uses exact 1440×900 desktop and
+   390×844 mobile CSS viewports. Captures fail on horizontal overflow, missing
+   or collapsed focus targets, offscreen actions, or a requested theme that did
+   not actually mount. Mobile inbox captures also verify every conversation row
+   and simulator control remains inside the viewport.
 3. `pnpm demo:render-real-ui -- stills` renders review stills into the ignored
    `.review-shots/real-ui-media` directory.
 4. `pnpm demo:render-real-ui` writes the light/dark MP4 files consumed by the
@@ -25,7 +29,8 @@ dev-preview fixtures if the real auth stack is unavailable.
 
 | Capture | Real view/state |
 | --- | --- |
-| `upload` | Current upload view |
+| `upload-empty` | Current empty upload view |
+| `upload-filled` | Current upload view after the licensed local PlayStation 5 photo is assigned to the real file input and its change event is handled |
 | `review-identify` | Current listing review and item identification |
 | `review-price` | Current price and confidence card with cited sources |
 | `review-write` | Current editable title and description fields |
@@ -40,6 +45,10 @@ layer in `remotion/real-ui/RealUiCapture.tsx` only applies a subtle loop-safe
 push-in and crossfades between real states; it does not redraw controls or add
 fabricated product behavior.
 
+The PlayStation 5 anchor and the supporting reseller catalog are locally hosted.
+Their source, author, license, and crop records are in
+[`docs/demo-asset-provenance.md`](../docs/demo-asset-provenance.md).
+
 ## Outputs
 
 Desktop tour clips:
@@ -48,18 +57,19 @@ Desktop tour clips:
 - `public/demo/buyer-qa.mp4`
 - `public/demo/inbox-qa.mp4`
 
-Portrait mobile clips:
+Action-cropped mobile clips (6:5, 1080×900):
 
 - `public/demo/steps/{snap,identify,price,write,publish}-mobile.mp4`
 - `public/demo/buyer-qa-mobile.mp4`
 - `public/demo/inbox-qa-mobile.mp4`
 
-Every path also has a `-dark.mp4` sibling. `SeamlessThemeVideo` swaps the
+Every path also has a `-dark.mp4` sibling. Desktop outputs are 16:9 at
+1920×1080. `SeamlessThemeVideo` swaps the
 correct theme and mobile source. Its loading, failure, and reduced-motion
 fallback is a responsive still from the same capture set, so those paths also
 show the real SnapList UI.
 
-`hero-demo` remains the existing vision showcase and is outside the issue #95
+`hero-demo` remains the existing vision showcase and is outside the issue #136
 tour/inbox replacement. Legacy Remotion compositions remain registered for
 reference but are not written by `demo:render-real-ui`.
 
@@ -75,4 +85,6 @@ pnpm vitest run src/lib/demo-capture-qa.test.ts \
 
 For a single capture while debugging, set
 `DEMO_CAPTURE_ONLY=mobile/dark/inbox-list`. A full capture run is still required
-before final rendering.
+before final rendering. When a composition-only change follows a verified full
+render, `DEMO_RENDER_ONLY=buyer-qa,buyer-qa-mobile pnpm demo:render-real-ui`
+regenerates just those light/dark outputs.
