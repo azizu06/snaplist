@@ -140,6 +140,32 @@ class MemorySyncRepository implements InboxSyncRepository {
 }
 
 describe("syncInboxForSeller", () => {
+  it("reconciles at least 24 hours behind the cursor on every sync", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemorySyncRepository();
+    repository.cursor = new Date("2026-07-13T12:00:00.000Z");
+    const previous = process.env.EBAY_MESSAGE_SYNC_OVERLAP_MINUTES;
+    process.env.EBAY_MESSAGE_SYNC_OVERLAP_MINUTES = "10";
+
+    try {
+      await syncInboxForSeller({
+        adapter,
+        repository,
+        now: () => new Date("2026-07-13T12:05:00.000Z"),
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.EBAY_MESSAGE_SYNC_OVERLAP_MINUTES;
+      } else {
+        process.env.EBAY_MESSAGE_SYNC_OVERLAP_MINUTES = previous;
+      }
+    }
+
+    expect(adapter.fetches[0]?.from.toISOString()).toBe(
+      "2026-07-12T12:00:00.000Z",
+    );
+  });
+
   it("imports, notifies, and drafts one active-listing question exactly once across overlap replay", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     adapter.questions = [question];
@@ -181,7 +207,7 @@ describe("syncInboxForSeller", () => {
     expect(draft).toHaveBeenCalledTimes(1);
     expect(meterDraft).toHaveBeenCalledTimes(1);
     expect(adapter.fetches[1]?.from.toISOString()).toBe(
-      "2026-07-13T11:55:00.000Z",
+      "2026-07-12T12:05:00.000Z",
     );
     expect(repository.imported.get(question.externalMessageId)?.user_id).toBe(
       USER_ID,

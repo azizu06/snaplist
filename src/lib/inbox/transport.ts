@@ -41,11 +41,13 @@ export interface DeliveryRepository {
   failCanonical(
     messageId: string,
     kind: MarketplaceDeliveryFailureKind,
+    attemptedAt: Date,
   ): Promise<void>;
   completeCanonical(
     root: MessageRow,
     body: string,
     receipt: MarketplaceDeliveryReceipt,
+    attemptedAt: Date,
   ): Promise<MessageRow>;
   createFollowUpIntent(
     root: MessageRow,
@@ -58,10 +60,12 @@ export interface DeliveryRepository {
   failFollowUp(
     messageId: string,
     kind: MarketplaceDeliveryFailureKind,
+    attemptedAt: Date,
   ): Promise<void>;
   completeFollowUp(
     messageId: string,
     receipt: MarketplaceDeliveryReceipt,
+    attemptedAt: Date,
   ): Promise<MessageRow>;
 }
 
@@ -112,16 +116,18 @@ export async function sendCanonicalReply(
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
-    await input.repository.failCanonical(root.id, kind);
+    await input.repository.failCanonical(root.id, kind, at);
     throw new MessageDeliveryAttemptError(kind, undefined, { cause: error });
   }
 
   try {
-    return await input.repository.completeCanonical(root, body, receipt);
+    return await input.repository.completeCanonical(root, body, receipt, at);
   } catch (error) {
     // eBay acknowledged delivery but local persistence did not complete. Keep
     // the question visibly ambiguous; a replay first checks for an outbound row.
-    await input.repository.failCanonical(root.id, "ambiguous").catch(() => undefined);
+    await input.repository
+      .failCanonical(root.id, "ambiguous", at)
+      .catch(() => undefined);
     throw new MessageDeliveryAttemptError("ambiguous", undefined, {
       cause: error,
     });
@@ -170,7 +176,13 @@ export async function sendSellerFollowUp(
     }
     return intent.message;
   }
-  return deliverFollowUp(input.repository, input.adapter, root, intent.message);
+  return deliverFollowUp(
+    input.repository,
+    input.adapter,
+    root,
+    intent.message,
+    at,
+  );
 }
 
 export async function retryFollowUpDelivery(input: {
@@ -201,7 +213,7 @@ export async function retryFollowUpDelivery(input: {
     at,
   );
   if (!claimed) throw new MessageDeliveryConflictError();
-  return deliverFollowUp(input.repository, input.adapter, root, message);
+  return deliverFollowUp(input.repository, input.adapter, root, message, at);
 }
 
 async function deliverFollowUp(
@@ -209,6 +221,7 @@ async function deliverFollowUp(
   adapter: MarketplaceMessagingAdapter,
   root: MessageRow,
   message: MessageRow,
+  attemptedAt: Date,
 ): Promise<MessageRow> {
   let receipt: MarketplaceDeliveryReceipt;
   try {
@@ -217,13 +230,15 @@ async function deliverFollowUp(
     );
   } catch (error) {
     const kind = deliveryFailureKind(error);
-    await repository.failFollowUp(message.id, kind);
+    await repository.failFollowUp(message.id, kind, attemptedAt);
     throw new MessageDeliveryAttemptError(kind, undefined, { cause: error });
   }
   try {
-    return await repository.completeFollowUp(message.id, receipt);
+    return await repository.completeFollowUp(message.id, receipt, attemptedAt);
   } catch (error) {
-    await repository.failFollowUp(message.id, "ambiguous").catch(() => undefined);
+    await repository
+      .failFollowUp(message.id, "ambiguous", attemptedAt)
+      .catch(() => undefined);
     throw new MessageDeliveryAttemptError("ambiguous", undefined, {
       cause: error,
     });
@@ -351,12 +366,17 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
   async failCanonical(
     messageId: string,
     kind: MarketplaceDeliveryFailureKind,
+    attemptedAt: Date,
   ): Promise<void> {
     if (this.serverManaged) {
       await applyEbayMessageWrite(
         this.serverWriteClient,
         "fail_canonical",
-        { message_id: messageId, kind },
+        {
+          message_id: messageId,
+          kind,
+          attempted_at: attemptedAt.toISOString(),
+        },
       );
       return;
     }
@@ -365,7 +385,8 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       .update({ delivery_status: kind, delivery_error: kind, sent_at: null })
       .eq("user_id", this.userId)
       .eq("id", messageId)
-      .eq("delivery_status", "sending");
+      .eq("delivery_status", "sending")
+      .eq("delivery_attempted_at", attemptedAt.toISOString());
     if (error) throw new Error(`Failed to persist reply failure: ${error.message}`);
   }
 
@@ -373,6 +394,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     root: MessageRow,
     body: string,
     receipt: MarketplaceDeliveryReceipt,
+    attemptedAt: Date,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
       const data = await applyEbayMessageWrite<unknown>(
@@ -383,6 +405,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
           body,
           external_delivery_id: receipt.externalDeliveryId,
           delivered_at: receipt.deliveredAt,
+          attempted_at: attemptedAt.toISOString(),
         },
       );
       return messageRowSchema.parse(data);
@@ -425,7 +448,9 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
         sent_at: receipt.deliveredAt,
       })
       .eq("user_id", this.userId)
-      .eq("id", root.id);
+      .eq("id", root.id)
+      .eq("delivery_status", "sending")
+      .eq("delivery_attempted_at", attemptedAt.toISOString());
     if (updateError) {
       throw new Error(`Failed to finalize delivered question: ${updateError.message}`);
     }
@@ -538,12 +563,17 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
   async failFollowUp(
     messageId: string,
     kind: MarketplaceDeliveryFailureKind,
+    attemptedAt: Date,
   ): Promise<void> {
     if (this.serverManaged) {
       await applyEbayMessageWrite(
         this.serverWriteClient,
         "fail_followup",
-        { message_id: messageId, kind },
+        {
+          message_id: messageId,
+          kind,
+          attempted_at: attemptedAt.toISOString(),
+        },
       );
       return;
     }
@@ -557,13 +587,15 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       })
       .eq("user_id", this.userId)
       .eq("id", messageId)
-      .eq("delivery_status", "sending");
+      .eq("delivery_status", "sending")
+      .eq("delivery_attempted_at", attemptedAt.toISOString());
     if (error) throw new Error(`Failed to persist follow-up failure: ${error.message}`);
   }
 
   async completeFollowUp(
     messageId: string,
     receipt: MarketplaceDeliveryReceipt,
+    attemptedAt: Date,
   ): Promise<MessageRow> {
     if (this.serverManaged) {
       const data = await applyEbayMessageWrite<unknown>(
@@ -573,6 +605,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
           message_id: messageId,
           external_delivery_id: receipt.externalDeliveryId,
           delivered_at: receipt.deliveredAt,
+          attempted_at: attemptedAt.toISOString(),
         },
       );
       return messageRowSchema.parse(data);
@@ -589,6 +622,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
       .eq("user_id", this.userId)
       .eq("id", messageId)
       .eq("delivery_status", "sending")
+      .eq("delivery_attempted_at", attemptedAt.toISOString())
       .select("*")
       .maybeSingle();
     if (error || !data) {

@@ -179,6 +179,7 @@ function RelativeTime({ iso, className }: { iso: string; className?: string }) {
 export interface ConversationState {
   message: MessageRow;
   sentReply: MessageRow | undefined;
+  delivered: boolean;
   sending: boolean;
   undelivered: boolean;
   statusTone: StatusTone;
@@ -195,18 +196,19 @@ export function deriveConversationState(
   busy: string | null,
 ): ConversationState {
   const sentReply = repliesByQuestion.get(message.id);
+  const delivered = sentReply?.delivery_status === "delivered";
   // Claimed-but-undelivered (PR #35 review): the inbound row is `sent` but no
   // outbound row references it — delivery failed (or the process crashed) after
   // the CAS claim, before the outbound insert. While OUR send request is in
   // flight (busy) the two Realtime events (UPDATE then INSERT) may arrive split,
   // so that window renders as "sending", not as a delivery failure.
   const sending =
-    message.status === "sent" && !sentReply && busy === `send:${message.id}`;
-  const undelivered = message.status === "sent" && !sentReply && !sending;
+    message.status === "sent" && !delivered && busy === `send:${message.id}`;
+  const undelivered = message.status === "sent" && !delivered && !sending;
   const statusTone: StatusTone =
     undelivered || message.status === "draft_failed"
       ? "danger"
-      : message.status === "sent"
+      : delivered
         ? "success-solid"
         : "neutral";
   const statusLabel = undelivered
@@ -214,10 +216,12 @@ export function deriveConversationState(
         message.delivery_status,
         message.delivery_attempted_at,
       )
-    : message.status === "sent"
+    : delivered
+      ? "Replied"
+      : message.status === "sent"
       ? sending
         ? "Sending…"
-        : "Replied"
+        : "Not delivered"
       : message.status === "drafted"
         ? "Draft ready"
         : message.status === "draft_failed"
@@ -225,7 +229,7 @@ export function deriveConversationState(
           : "Drafting…";
 
   // Resolved only once the reply is delivered (sent + outbound row present).
-  const unread = !(message.status === "sent" && !!sentReply);
+  const unread = !delivered;
 
   const snippet = sentReply
     ? `You: ${sentReply.body}`
@@ -236,6 +240,7 @@ export function deriveConversationState(
   return {
     message,
     sentReply,
+    delivered,
     sending,
     undelivered,
     statusTone,
@@ -717,7 +722,7 @@ export function ConversationThread({
   onSendFollowUp,
   onBack,
 }: ConversationThreadProps) {
-  const { message, sentReply, sending, undelivered } = state;
+  const { message, sentReply, delivered, sending, undelivered } = state;
   const draftValue = edits[message.id] ?? message.draft_reply ?? "";
 
   return (
@@ -769,7 +774,7 @@ export function ConversationThread({
           </div>
 
           {/* outbound — your delivered reply: green bubble, tail bottom-right */}
-          {message.status === "sent" && !undelivered ? (
+          {delivered ? (
             <div className="flex flex-col items-end gap-1">
               <div
                 className="msg-bubble msg-out msg-enter max-w-[80%]"
@@ -793,9 +798,7 @@ export function ConversationThread({
               or ambiguous delivery. Unconfirmed attempts stay visible and
               retryable instead of being presented as delivered. */}
           {followUps.map((m) => {
-            const delivered =
-              m.delivery_status === "delivered" ||
-              (m.delivery_status == null && m.status === "sent");
+            const delivered = m.delivery_status === "delivered";
             const retrying = busy === `retry-followup:${m.id}`;
             return (
             <div key={m.id} className="flex flex-col items-end gap-1">

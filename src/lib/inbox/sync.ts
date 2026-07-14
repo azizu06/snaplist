@@ -13,6 +13,7 @@ import {
 import { messageRowSchema, type MessageRow, type ReplyGrounding } from "./types";
 
 const DRAFT_CLAIM_LEASE_MS = 5 * 60_000;
+const MINIMUM_RECONCILIATION_LOOKBACK_MS = 24 * 60 * 60_000;
 
 function configuredMinutes(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -96,9 +97,12 @@ export async function syncInboxForSeller(
 ): Promise<InboxSyncSummary> {
   const now = input.now?.() ?? new Date();
   const cursor = await input.repository.getCursor();
-  const overlapMs =
+  const overlapMs = Math.max(
     input.overlapMs ??
-    configuredMinutes("EBAY_MESSAGE_SYNC_OVERLAP_MINUTES", 10) * 60_000;
+      configuredMinutes("EBAY_MESSAGE_SYNC_OVERLAP_MINUTES", 24 * 60) *
+        60_000,
+    MINIMUM_RECONCILIATION_LOOKBACK_MS,
+  );
   const initialLookbackMs =
     input.initialLookbackMs ??
     configuredMinutes("EBAY_MESSAGE_INITIAL_LOOKBACK_MINUTES", 24 * 60) *

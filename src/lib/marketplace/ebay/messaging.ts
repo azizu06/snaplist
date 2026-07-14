@@ -416,7 +416,21 @@ export class HttpEbayMessagingAdapter
       throw new Error("Failed to fetch eBay member messages", { cause });
     }
 
-    const text = await response.text();
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (cause) {
+      if (isWrite) {
+        throw new MarketplaceDeliveryError(
+          "ambiguous",
+          "eBay delivery returned an unreadable acknowledgement",
+          { cause },
+        );
+      }
+      throw new Error("Failed to read eBay member-message response", {
+        cause,
+      });
+    }
     let parsed: XmlRecord;
     try {
       parsed = asRecord(parser.parse(text)) ?? {};

@@ -365,6 +365,35 @@ describe("HttpEbayMessagingAdapter", () => {
     expect((err as MarketplaceDeliveryError).kind).toBe("ambiguous");
   });
 
+  it("classifies a Trading acknowledgement read failure as ambiguous", async () => {
+    const response = {
+      ok: true,
+      status: 200,
+      text: vi.fn(async () => {
+        throw new TypeError("response stream closed");
+      }),
+    } as unknown as Response;
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: vi.fn(async () => response) as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    const error = await adapter
+      .replyToQuestion({
+        externalParentId: "parent",
+        externalConversationId: "conversation",
+        externalListingId: "listing",
+        externalBuyerId: "buyer",
+        body: "Reply",
+        idempotencyKey: "key",
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MarketplaceDeliveryError);
+    expect((error as MarketplaceDeliveryError).kind).toBe("ambiguous");
+  });
+
   it("treats a Trading RequestError as a definitive rejection", async () => {
     const adapter = new HttpEbayMessagingAdapter({
       fetch: vi.fn(async () =>

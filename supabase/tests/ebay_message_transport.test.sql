@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(25);
+select extensions.plan(33);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -299,6 +299,72 @@ select extensions.results_eq(
   'the foreground write seam cannot claim another Clerk tenant message'
 );
 
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'claim_canonical',
+      jsonb_build_object(
+        'message_id', '93000000-0000-4000-8000-000000000001',
+        'body', 'Direct client reply',
+        'at', '2026-07-13T12:11:00Z',
+        'retry', true
+      )
+    )
+  $$,
+  'a stale canonical delivery lease can be reclaimed'
+);
+
+select extensions.results_eq(
+  $$
+    with ignored as materialized (
+      select public.apply_ebay_message_write(
+        'fail_canonical',
+        jsonb_build_object(
+          'message_id', '93000000-0000-4000-8000-000000000001',
+          'kind', 'ambiguous',
+          'attempted_at', '2026-07-13T12:05:00Z'
+        )
+      )
+    )
+    select message.delivery_status,
+           message.delivery_attempted_at = '2026-07-13T12:11:00Z'::timestamptz
+    from public.messages message
+    cross join ignored
+    where message.id = '93000000-0000-4000-8000-000000000001'
+  $$,
+  $$values ('sending'::text, true)$$,
+  'a late canonical failure cannot overwrite a reclaimed attempt'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'complete_canonical',
+      jsonb_build_object(
+        'message_id', '93000000-0000-4000-8000-000000000001',
+        'body', 'Direct client reply',
+        'external_delivery_id', 'stale-delivery',
+        'delivered_at', '2026-07-13T12:12:00Z',
+        'attempted_at', '2026-07-13T12:05:00Z'
+      )
+    )
+  $$,
+  'P0002',
+  'Reply delivery claim was lost',
+  'a late canonical completion cannot finalize a reclaimed attempt'
+);
+
+select extensions.is(
+  (
+    select count(*)::integer
+    from public.messages
+    where reply_to = '93000000-0000-4000-8000-000000000001'
+      and direction = 'outbound'
+  ),
+  0,
+  'a stale canonical completion creates no outbound delivery row'
+);
+
 select extensions.throws_ok(
   $$
     select private.apply_ebay_message_write_for_tenant(
@@ -459,6 +525,82 @@ select extensions.lives_ok(
 );
 
 set local role authenticated;
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'create_followup',
+      jsonb_build_object(
+        'root_id', '93000000-0000-4000-8000-000000000001',
+        'body', 'One more detail',
+        'request_id', 'followup-race',
+        'at', '2026-07-13T12:00:00Z'
+      )
+    )
+  $$,
+  'a follow-up delivery intent is created for race testing'
+);
+
+select extensions.lives_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'claim_followup',
+      jsonb_build_object(
+        'message_id', (
+          select id from public.messages
+          where delivery_request_id = 'followup-race'
+        ),
+        'at', '2026-07-13T12:06:00Z'
+      )
+    )
+  $$,
+  'a stale follow-up delivery lease can be reclaimed'
+);
+
+select extensions.results_eq(
+  $$
+    with ignored as materialized (
+      select public.apply_ebay_message_write(
+        'fail_followup',
+        jsonb_build_object(
+          'message_id', (
+            select id from public.messages
+            where delivery_request_id = 'followup-race'
+          ),
+          'kind', 'ambiguous',
+          'attempted_at', '2026-07-13T12:00:00Z'
+        )
+      )
+    )
+    select message.delivery_status,
+           message.delivery_attempted_at = '2026-07-13T12:06:00Z'::timestamptz
+    from public.messages message
+    cross join ignored
+    where message.delivery_request_id = 'followup-race'
+  $$,
+  $$values ('sending'::text, true)$$,
+  'a late follow-up failure cannot overwrite a reclaimed attempt'
+);
+
+select extensions.throws_ok(
+  $$
+    select public.apply_ebay_message_write(
+      'complete_followup',
+      jsonb_build_object(
+        'message_id', (
+          select id from public.messages
+          where delivery_request_id = 'followup-race'
+        ),
+        'external_delivery_id', 'stale-followup-delivery',
+        'delivered_at', '2026-07-13T12:07:00Z',
+        'attempted_at', '2026-07-13T12:00:00Z'
+      )
+    )
+  $$,
+  'P0002',
+  'Follow-up delivery claim was lost',
+  'a late follow-up completion cannot finalize a reclaimed attempt'
+);
 
 select extensions.throws_ok(
   $$

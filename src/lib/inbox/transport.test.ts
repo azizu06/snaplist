@@ -81,7 +81,17 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     this.root.delivery_attempted_at = at.toISOString();
     return true;
   }
-  async failCanonical(id: string, kind: "rejected" | "failed" | "ambiguous") {
+  async failCanonical(
+    id: string,
+    kind: "rejected" | "failed" | "ambiguous",
+    attemptedAt: Date,
+  ) {
+    if (
+      this.root.delivery_status !== "sending" ||
+      this.root.delivery_attempted_at !== attemptedAt.toISOString()
+    ) {
+      return;
+    }
     this.root.delivery_status = kind;
     this.failures.push({ id, kind });
   }
@@ -89,7 +99,14 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     root: MessageRow,
     body: string,
     receipt: { externalDeliveryId: string; deliveredAt: string },
+    attemptedAt: Date,
   ) {
+    if (
+      this.root.delivery_status !== "sending" ||
+      this.root.delivery_attempted_at !== attemptedAt.toISOString()
+    ) {
+      throw new Error("Reply delivery claim was lost");
+    }
     this.root.delivery_status = "delivered";
     this.root.sent_at = receipt.deliveredAt;
     this.canonical = message({
@@ -147,8 +164,18 @@ class MemoryDeliveryRepository implements DeliveryRepository {
     row.delivery_attempted_at = at.toISOString();
     return true;
   }
-  async failFollowUp(id: string, kind: "rejected" | "failed" | "ambiguous") {
+  async failFollowUp(
+    id: string,
+    kind: "rejected" | "failed" | "ambiguous",
+    attemptedAt: Date,
+  ) {
     const row = this.followUps.get(id)!;
+    if (
+      row.delivery_status !== "sending" ||
+      row.delivery_attempted_at !== attemptedAt.toISOString()
+    ) {
+      return;
+    }
     row.delivery_status = kind;
     row.status = "approved";
     this.failures.push({ id, kind });
@@ -156,8 +183,15 @@ class MemoryDeliveryRepository implements DeliveryRepository {
   async completeFollowUp(
     id: string,
     receipt: { externalDeliveryId: string; deliveredAt: string },
+    attemptedAt: Date,
   ) {
     const row = this.followUps.get(id)!;
+    if (
+      row.delivery_status !== "sending" ||
+      row.delivery_attempted_at !== attemptedAt.toISOString()
+    ) {
+      throw new Error("Follow-up delivery claim was lost");
+    }
     row.delivery_status = "delivered";
     row.status = "sent";
     row.sent_at = receipt.deliveredAt;
@@ -270,6 +304,53 @@ describe("message delivery transport", () => {
       now,
     });
     expect(adapter.replies).toHaveLength(1);
+  });
+
+  it("ignores a late canonical failure from a reclaimed delivery attempt", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const repository = new MemoryDeliveryRepository();
+    let rejectFirst!: (error: Error) => void;
+    let enteredFirst!: () => void;
+    const firstEntered = new Promise<void>((resolve) => {
+      enteredFirst = resolve;
+    });
+    const firstReceipt = new Promise<never>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    let calls = 0;
+    adapter.replyToQuestion = async () => {
+      calls += 1;
+      if (calls === 1) {
+        enteredFirst();
+        return firstReceipt;
+      }
+      return {
+        externalDeliveryId: "retry-delivered",
+        deliveredAt: "2026-07-13T12:06:00.000Z",
+      };
+    };
+
+    const first = sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      now: () => new Date("2026-07-13T12:00:00.000Z"),
+    }).catch((error: unknown) => error);
+    await firstEntered;
+
+    await sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      retry: true,
+      confirmDuplicateRisk: true,
+      now: () => new Date("2026-07-13T12:06:00.000Z"),
+    });
+    rejectFirst(new MarketplaceDeliveryError("ambiguous", "late failure"));
+    await first;
+
+    expect(repository.root.delivery_status).toBe("delivered");
+    expect(repository.canonical?.external_delivery_id).toBe("retry-delivered");
   });
 
   it("deduplicates a seller-authored follow-up request and preserves delivery identity", async () => {
@@ -427,5 +508,59 @@ describe("message delivery transport", () => {
       now,
     });
     expect(adapter.followUps).toHaveLength(1);
+  });
+
+  it("ignores a late follow-up failure from a reclaimed delivery attempt", async () => {
+    const repository = new MemoryDeliveryRepository();
+    await sendCanonicalReply({
+      repository,
+      adapter: new MockMarketplaceMessagingAdapter(),
+      messageId: ROOT_ID,
+    });
+    const adapter = new MockMarketplaceMessagingAdapter();
+    let rejectFirst!: (error: Error) => void;
+    let enteredFirst!: () => void;
+    const firstEntered = new Promise<void>((resolve) => {
+      enteredFirst = resolve;
+    });
+    const firstReceipt = new Promise<never>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    let calls = 0;
+    adapter.sendFollowUp = async () => {
+      calls += 1;
+      if (calls === 1) {
+        enteredFirst();
+        return firstReceipt;
+      }
+      return {
+        externalDeliveryId: "followup-retry-delivered",
+        deliveredAt: "2026-07-13T12:06:00.000Z",
+      };
+    };
+
+    const first = sendSellerFollowUp({
+      repository,
+      adapter,
+      conversationId: ROOT_ID,
+      body: "One more detail.",
+      requestId: "request-race",
+      now: () => new Date("2026-07-13T12:00:00.000Z"),
+    }).catch((error: unknown) => error);
+    await firstEntered;
+    const pending = repository.followUpsByRequest.get("request-race")!;
+
+    await retryFollowUpDelivery({
+      repository,
+      adapter,
+      messageId: pending.id,
+      confirmDuplicateRisk: true,
+      now: () => new Date("2026-07-13T12:06:00.000Z"),
+    });
+    rejectFirst(new MarketplaceDeliveryError("ambiguous", "late failure"));
+    await first;
+
+    expect(pending.delivery_status).toBe("delivered");
+    expect(pending.external_delivery_id).toBe("followup-retry-delivered");
   });
 });

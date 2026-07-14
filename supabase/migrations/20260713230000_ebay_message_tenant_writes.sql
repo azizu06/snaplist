@@ -224,7 +224,9 @@ begin
       and message.user_id = p_user_id
       and message.marketplace = 'ebay'
       and message.direction = 'inbound'
-      and message.delivery_status = 'sending';
+      and message.delivery_status = 'sending'
+      and message.delivery_attempted_at =
+        (p_payload->>'attempted_at')::timestamptz;
     return 'null'::jsonb;
   elsif p_operation = 'complete_canonical' then
     select message.*
@@ -235,6 +237,8 @@ begin
       and message.marketplace = 'ebay'
       and message.direction = 'inbound'
       and message.delivery_status = 'sending'
+      and message.delivery_attempted_at =
+        (p_payload->>'attempted_at')::timestamptz
     for update;
     if not found then
       raise exception using errcode = 'P0002', message = 'Reply delivery claim was lost';
@@ -374,7 +378,9 @@ begin
       and message.marketplace = 'ebay'
       and message.direction = 'outbound'
       and message.reply_kind = 'followup'
-      and message.delivery_status = 'sending';
+      and message.delivery_status = 'sending'
+      and message.delivery_attempted_at =
+        (p_payload->>'attempted_at')::timestamptz;
     return 'null'::jsonb;
   elsif p_operation = 'complete_followup' then
     update public.messages message
@@ -389,6 +395,8 @@ begin
       and message.direction = 'outbound'
       and message.reply_kind = 'followup'
       and message.delivery_status = 'sending'
+      and message.delivery_attempted_at =
+        (p_payload->>'attempted_at')::timestamptz
     returning message.* into v_message;
     if not found then
       raise exception using errcode = 'P0002', message = 'Follow-up delivery claim was lost';
