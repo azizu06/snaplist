@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(
-  join(process.cwd(), "supabase/migrations/20260714170000_message_photo_attachments.sql"),
+  join(process.cwd(), "supabase/migrations/20260714180000_message_photo_attachments.sql"),
   "utf8",
 );
 
@@ -12,6 +12,7 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/'message-photos'[\s\S]*false[\s\S]*12582912/i);
     expect(migration).toContain("'image/jpeg', 'image/png', 'image/webp'");
     expect(migration).toMatch(/message_photos_select_own[\s\S]*clerk_user_id\(\)/i);
+    expect(migration).not.toMatch(/create policy "message_photos_update_own"/i);
   });
 
   it("pins both message relationships to the same tenant and enables RLS plus Realtime", () => {
@@ -63,6 +64,9 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/claim_ebay_message_write_with_photos[\s\S]*for update/i);
     expect(migration).toMatch(/v_total <> v_expected or v_matched <> v_expected/i);
     expect(migration).toMatch(/claim_ebay_message_write_with_photos[\s\S]*private\.apply_authenticated_ebay_message_write/i);
+    expect(migration).toMatch(/claim_scheduled_ebay_message_write_with_photos[\s\S]*private\.assert_ebay_message_photo_claim/i);
+    expect(migration).toMatch(/claim_scheduled_ebay_message_write_with_photos[\s\S]*private\.apply_scheduled_ebay_message_write/i);
+    expect(migration).toMatch(/scheduler may only claim automatic replies/i);
   });
 
   it("accepts only the matching delivered follow-up photo set on replay", () => {

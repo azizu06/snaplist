@@ -11,6 +11,8 @@ import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 import { cleanupOwnExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
+import { SupabaseMessagePolicyRepository } from "@/lib/inbox/policy-repository";
+import { sendCanonicalReply, SupabaseDeliveryRepository } from "@/lib/inbox/transport";
 
 /**
  * Cookie-authenticated, rate-limited foreground refresh. Disconnected sellers
@@ -37,14 +39,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ skipped: "ebay_not_connected" });
     }
     tenantServer ??= await createTenantServerClient();
+    const adapter = await createEbayMessagingAdapterForUser(supabase, userId, {
+      credentialClient: tenantServer,
+    });
+    const deliveryRepository = new SupabaseDeliveryRepository(
+      supabase,
+      userId,
+      true,
+      tenantServer,
+    );
     const summary = await syncInboxForSeller({
-      adapter: await createEbayMessagingAdapterForUser(supabase, userId, {
-        credentialClient: tenantServer,
-      }),
+      adapter,
       repository: new SupabaseInboxSyncRepository(supabase, userId, {
         client: tenantServer,
         scheduled: false,
       }),
+      policy: {
+        repository: new SupabaseMessagePolicyRepository(
+          supabase,
+          userId,
+          adapter,
+          { client: tenantServer, scheduled: false },
+        ),
+        send: (messageId, authorization) =>
+          sendCanonicalReply({
+            repository: deliveryRepository,
+            adapter,
+            messageId,
+            expectedPhotoIds: [],
+            deliveryActor: "automatic",
+            marketplaceObservedAt: authorization.marketplaceObservedAt,
+            questionObservedAt: authorization.questionObservedAt,
+          }),
+      },
     });
     return NextResponse.json(summary);
   } catch (error) {

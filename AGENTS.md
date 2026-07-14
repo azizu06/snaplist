@@ -43,6 +43,11 @@ adapter and is **not on the Phase 1 critical path**.
   post or message. Publishing and pre-sale text messaging are Sandbox-capable; the simulator remains
   a demo fixture. Keep every path testable offline against mock adapters, and leave production
   activation owner-controlled under #17.
+- **Automatic buyer replies are one narrow, default-off seller preference.** A deterministic,
+  versioned policy may authorize only an exact low-risk restatement of current seller-approved
+  listing facts. Negotiation, commitments, untrusted buyer instructions, missing/stale/conflicting
+  facts, and post-sale support stay seller-gated. Persist the outcome, reasons, grounding, signals,
+  policy version, and canonical delivery truth; never let retries create a second external reply.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
 - **Review correction stays coherent and pre-publish.** Bounded identity edits must rerun the shared

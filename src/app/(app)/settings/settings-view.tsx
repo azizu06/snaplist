@@ -25,6 +25,7 @@ import { BillingCta } from "./billing-cta";
 export interface SettingsData {
   user: ProfileUser;
   autopilotEnabled: boolean;
+  autoReplyEnabled: boolean;
   ebay: { connected: boolean; ebayUsername: string | null };
   /**
    * Plan & billing surface (#64). `tier` is the REAL entitlement from
@@ -123,6 +124,15 @@ function LinkIcon() {
   );
 }
 
+function ShieldCheckIcon() {
+  return (
+    <svg {...ICON_SVG_PROPS}>
+      <path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
 function CreditCardIcon() {
   return (
     <svg {...ICON_SVG_PROPS}>
@@ -180,13 +190,15 @@ function ProfileAvatar({ user }: { user: ProfileUser }) {
 export function SettingsView({
   data,
   autopilotAction,
+  autoReplyAction,
   disconnectEbayAction,
 }: {
   data: SettingsData;
   autopilotAction: (formData: FormData) => Promise<void>;
+  autoReplyAction: (formData: FormData) => Promise<void>;
   disconnectEbayAction: (formData: FormData) => Promise<void>;
 }) {
-  const { user, autopilotEnabled, ebay, billing } = data;
+  const { user, autopilotEnabled, autoReplyEnabled, ebay, billing } = data;
   const isPaid = billing.tier === "paid";
 
   return (
@@ -378,6 +390,50 @@ export function SettingsView({
               listing was marked ready or held for review.
             </CardNote>
           </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title={
+            <span className="flex items-center gap-2">
+              <SectionIcon>
+                <ShieldCheckIcon />
+              </SectionIcon>
+              Safe buyer auto-replies
+            </span>
+          }
+          aside={
+            <>
+              <StatusBadge
+                label={autoReplyEnabled ? "On" : "Off"}
+                tone={autoReplyEnabled ? "success" : "neutral"}
+              />
+              <form action={autoReplyAction} className="flex items-center">
+                <Switch
+                  checked={autoReplyEnabled}
+                  name="enabled"
+                  aria-label={
+                    autoReplyEnabled
+                      ? "Turn safe buyer auto-replies off"
+                      : "Turn safe buyer auto-replies on"
+                  }
+                />
+              </form>
+            </>
+          }
+        />
+        <CardBody className="flex flex-col gap-3.5">
+          <SectionDescription>
+            Automatically answer safe factual questions using only the current,
+            seller-approved eBay listing—such as availability, asking price, exact
+            item specifics, and confirmed measurements.
+          </SectionDescription>
+          <CardNote>
+            Off by default. Offers, discounts, shipping, returns, promises, missing
+            or conflicting facts, and buyer instructions always wait for you. Failed
+            or unconfirmed sends stay visible and retryable.
+          </CardNote>
+        </CardBody>
       </Card>
 
       {/* eBay account — connected (disconnect) vs disconnected (connect) states. */}

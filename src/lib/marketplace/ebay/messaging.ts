@@ -6,6 +6,7 @@ import type {
   MarketplaceHostedPhoto,
   MarketplaceMessagingAdapter,
   MarketplacePhotoUploadInput,
+  MarketplaceListingSnapshot,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
   PendingMarketplaceQuestion,
@@ -321,6 +322,52 @@ export class HttpEbayMessagingAdapter
     };
   }
 
+  async fetchListingSnapshot(
+    externalListingId: string,
+  ): Promise<MarketplaceListingSnapshot> {
+    const response = await this.callTrading(
+      "GetItem",
+      {
+        GetItemRequest: {
+          "@_xmlns": XML_NAMESPACE,
+          ItemID: externalListingId,
+          DetailLevel: "ReturnAll",
+          IncludeItemSpecifics: true,
+        },
+      },
+      false,
+    );
+    const item = asRecord(response.Item);
+    const returnedId = asString(item?.ItemID);
+    if (!item || returnedId !== externalListingId) {
+      throw new Error("eBay listing snapshot did not match the requested listing");
+    }
+    const sellingStatus = asRecord(item.SellingStatus);
+    const price = asRecord(sellingStatus?.CurrentPrice);
+    const numericPrice = Number(asString(price?.["#text"] ?? price));
+    const specifics = asArray(asRecord(item.ItemSpecifics)?.NameValueList)
+      .map(asRecord)
+      .reduce<Record<string, string>>((result, specific) => {
+        const name = asString(specific?.Name);
+        const value = asArray(specific?.Value)
+          .map(asString)
+          .filter(Boolean)
+          .join(", ");
+        if (name && value) result[name] = value;
+        return result;
+      }, {});
+    return {
+      externalListingId: returnedId,
+      active: asString(sellingStatus?.ListingStatus) === "Active",
+      price:
+        Number.isFinite(numericPrice) && numericPrice > 0 ? numericPrice : null,
+      currency: asString(price?.["@_currencyID"]) ?? null,
+      condition: asString(item.ConditionDisplayName) ?? null,
+      itemSpecifics: specifics,
+      observedAt: new Date().toISOString(),
+    };
+  }
+
   async replyToQuestion(
     input: MarketplaceDeliveryInput,
   ): Promise<MarketplaceDeliveryReceipt> {
@@ -569,7 +616,7 @@ export class HttpEbayMessagingAdapter
   }
 
   private async callTrading(
-    callName: "GetMemberMessages" | "AddMemberMessageRTQ",
+    callName: "GetMemberMessages" | "GetItem" | "AddMemberMessageRTQ",
     request: XmlRecord,
     isWrite: boolean,
     expectedAccountGeneration?: string,

@@ -133,6 +133,11 @@ describe("message attachment RLS (DB-gated)", () => {
       .select("id")
       .single();
     expect(serverUpdate.error).toBeNull();
+    expect((await b.client.storage.from("message-photos").upload(
+      bStoragePath,
+      new Uint8Array([0xff, 0xd8, 0xff, 0xe1]),
+      { contentType: "image/jpeg", upsert: true },
+    )).error).not.toBeNull();
     expect((await a.client.storage.from("message-photos").download(bStoragePath)).error).not.toBeNull();
     expect((await a.client.storage.from("message-photos").upload(bStoragePath, jpeg, {
       contentType: "image/jpeg",

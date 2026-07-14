@@ -72,6 +72,32 @@ export async function claimEbayMessageWriteWithPhotos<T>(
   return data as T;
 }
 
+export async function claimScheduledEbayMessageWriteWithPhotos<T>(
+  supabase: SupabaseClient,
+  userId: string,
+  operation: "claim_canonical",
+  payload: Record<string, unknown>,
+  generation: string,
+  deliveryRequestId: string,
+  attachmentIds: readonly string[],
+): Promise<T> {
+  const { data, error } = await supabase.rpc(
+    "claim_scheduled_ebay_message_write_with_photos",
+    {
+      p_user_id: userId,
+      p_operation: operation,
+      p_payload: payload,
+      p_generation: generation,
+      p_delivery_request_id: deliveryRequestId,
+      p_attachment_ids: attachmentIds,
+    },
+  );
+  if (error) {
+    throw new Error(`Failed to claim scheduled eBay message with photos: ${error.message}`);
+  }
+  return data as T;
+}
+
 export async function completeEbayMessageWriteWithPhotos<T>(
   supabase: SupabaseClient,
   operation: "complete_canonical" | "complete_followup",
@@ -129,6 +155,26 @@ export async function readScheduledEbayInbox<T>(
   });
   if (error) {
     throw new Error(`Failed to read scheduled eBay inbox: ${error.message}`);
+  }
+  return data as T;
+}
+
+export async function readScheduledEbayMessagePolicy<T>(
+  supabase: SupabaseClient,
+  userId: string,
+  operation: string,
+  payload: Record<string, unknown> = {},
+): Promise<T> {
+  const { data, error } = await supabase.rpc(
+    "read_scheduled_ebay_message_policy",
+    {
+      p_user_id: userId,
+      p_operation: operation,
+      p_payload: payload,
+    },
+  );
+  if (error) {
+    throw new Error(`Failed to read scheduled eBay message policy: ${error.message}`);
   }
   return data as T;
 }

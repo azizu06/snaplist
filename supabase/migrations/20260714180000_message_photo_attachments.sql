@@ -1,4 +1,5 @@
 -- #134: tenant-owned image attachments for supported eBay pre-sale messages.
+-- Runs after the grounded auto-reply policy migration merged in #145.
 -- Binary objects are private. Rows are tied to the same tenant as both the
 -- conversation root and, once visible, the concrete message they decorate.
 
@@ -176,16 +177,9 @@ create policy "message_photos_insert_own"
       )
     )
   );
-create policy "message_photos_update_own"
-  on storage.objects for update
-  using (
-    bucket_id = 'message-photos'
-    and (storage.foldername(name))[1] = public.clerk_user_id()
-  )
-  with check (
-    bucket_id = 'message-photos'
-    and (storage.foldername(name))[1] = public.clerk_user_id()
-  );
+-- Client uploads are immutable. The browser uses insert-only object creation
+-- against a live upload-intent row; retries verify the retained hash instead
+-- of overwriting an object after validation or provider delivery.
 create policy "message_photos_delete_own"
   on storage.objects for delete
   using (
@@ -345,33 +339,26 @@ revoke all on function public.stage_message_photo_upload_intents(text, uuid[])
 grant execute on function public.stage_message_photo_upload_intents(text, uuid[])
   to authenticated;
 
-create or replace function public.claim_ebay_message_write_with_photos(
+create or replace function private.assert_ebay_message_photo_claim(
+  p_user_id text,
   p_operation text,
   p_payload jsonb,
-  p_generation uuid,
   p_delivery_request_id text,
   p_attachment_ids uuid[]
 )
-returns jsonb
+returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
 declare
-  v_user_id text := public.clerk_user_id();
-  v_api_key text := coalesce(
-    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
-    ''
-  );
   v_root_id uuid;
   v_expected integer;
   v_total integer;
   v_matched integer;
 begin
-  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
-    or v_user_id = ''
-    or v_api_key not like 'sb_secret_%' then
-    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  if coalesce(p_user_id, '') = '' then
+    raise exception using errcode = '42501', message = 'Seller identity is required';
   end if;
   if coalesce(p_delivery_request_id, '') = '' then
     raise exception using errcode = '23514', message = 'Delivery request identity is required';
@@ -400,7 +387,7 @@ begin
   perform 1
   from public.messages root
   where root.id = v_root_id
-    and root.user_id = v_user_id
+    and root.user_id = p_user_id
     and root.marketplace = 'ebay'
     and root.direction = 'inbound'
   for update;
@@ -411,13 +398,13 @@ begin
   select count(*)
   into v_total
   from public.message_attachments attachment
-  where attachment.user_id = v_user_id
+  where attachment.user_id = p_user_id
     and attachment.delivery_request_id = p_delivery_request_id
     and attachment.direction = 'outbound';
   select count(*)
   into v_matched
   from public.message_attachments attachment
-  where attachment.user_id = v_user_id
+  where attachment.user_id = p_user_id
     and attachment.conversation_root_id = v_root_id
     and attachment.delivery_request_id = p_delivery_request_id
     and attachment.direction = 'outbound'
@@ -431,7 +418,7 @@ begin
           select 1
           from public.messages followup
           where followup.id = attachment.message_id
-            and followup.user_id = v_user_id
+            and followup.user_id = p_user_id
             and followup.reply_to = v_root_id
             and followup.reply_kind = 'followup'
             and followup.marketplace = 'ebay'
@@ -447,6 +434,47 @@ begin
     raise exception using errcode = '23514', message = 'Approved photo set changed before delivery claim';
   end if;
 
+  return;
+end;
+$$;
+
+revoke all on function private.assert_ebay_message_photo_claim(
+  text, text, jsonb, text, uuid[]
+) from public, anon, authenticated, service_role;
+
+create or replace function public.claim_ebay_message_write_with_photos(
+  p_operation text,
+  p_payload jsonb,
+  p_generation uuid,
+  p_delivery_request_id text,
+  p_attachment_ids uuid[]
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_api_key text := coalesce(
+    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
+    ''
+  );
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
+    or v_user_id = ''
+    or v_api_key not like 'sb_secret_%' then
+    raise exception using errcode = '42501', message = 'Server seller authorization is required';
+  end if;
+
+  perform private.assert_ebay_message_photo_claim(
+    v_user_id,
+    p_operation,
+    p_payload,
+    p_delivery_request_id,
+    p_attachment_ids
+  );
+
   return private.apply_authenticated_ebay_message_write(
     p_operation,
     p_payload,
@@ -461,6 +489,52 @@ revoke all on function public.claim_ebay_message_write_with_photos(
 grant execute on function public.claim_ebay_message_write_with_photos(
   text, jsonb, uuid, text, uuid[]
 ) to authenticated;
+
+create or replace function public.claim_scheduled_ebay_message_write_with_photos(
+  p_user_id text,
+  p_operation text,
+  p_payload jsonb,
+  p_generation uuid,
+  p_delivery_request_id text,
+  p_attachment_ids uuid[]
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Scheduler authorization is required';
+  end if;
+  if p_operation <> 'claim_canonical'
+    or p_payload->>'delivery_actor' <> 'automatic' then
+    raise exception using errcode = '42501', message = 'Scheduler may only claim automatic replies';
+  end if;
+
+  perform private.assert_ebay_message_photo_claim(
+    p_user_id,
+    p_operation,
+    p_payload,
+    p_delivery_request_id,
+    p_attachment_ids
+  );
+
+  return private.apply_scheduled_ebay_message_write(
+    p_user_id,
+    p_operation,
+    p_payload,
+    p_generation
+  );
+end;
+$$;
+
+revoke all on function public.claim_scheduled_ebay_message_write_with_photos(
+  text, text, jsonb, uuid, text, uuid[]
+) from public, anon, authenticated;
+grant execute on function public.claim_scheduled_ebay_message_write_with_photos(
+  text, text, jsonb, uuid, text, uuid[]
+) to service_role;
 
 -- Complete the already-acknowledged provider write and expose its attachments
 -- in one transaction. This delegates the message lifecycle to #140's exact

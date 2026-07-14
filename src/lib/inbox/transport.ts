@@ -9,9 +9,13 @@ import type {
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import {
   applyEbayMessageWrite,
+  applyScheduledEbayMessageWrite,
   beginEbayMessageWrite,
+  beginScheduledEbayMessageWrite,
   claimEbayMessageWriteWithPhotos,
+  claimScheduledEbayMessageWriteWithPhotos,
   completeEbayMessageWriteWithPhotos,
+  readScheduledEbayMessagePolicy,
 } from "./ebay-server-write";
 import { MESSAGE_PHOTO_BUCKET, validateMessagePhoto } from "./attachments";
 import {
@@ -24,6 +28,7 @@ import {
 const PG_UNIQUE_VIOLATION = "23505";
 const DELIVERY_LEASE_MS = 5 * 60_000;
 const PROVIDER_DISPATCH_HEARTBEAT_MS = 60_000;
+const PROVIDER_PHOTO_EXPIRY_SAFETY_MS = 5 * 60_000;
 
 export class MessageDeliveryConflictError extends Error {
   constructor(message = "This message delivery was already claimed") {
@@ -52,6 +57,9 @@ export interface DeliveryRepository {
     at: Date,
     retry: boolean,
     expectedPhotoIds: readonly string[],
+    deliveryActor?: "automatic" | "seller",
+    marketplaceObservedAt?: string,
+    questionObservedAt?: string,
   ): Promise<boolean>;
   beginProviderDispatch(
     messageId: string,
@@ -111,6 +119,9 @@ interface SendCanonicalBaseInput {
   messageId: string;
   body?: string;
   confirmDuplicateRisk?: boolean;
+  deliveryActor?: "automatic" | "seller";
+  marketplaceObservedAt?: string;
+  questionObservedAt?: string;
   now?: () => Date;
 }
 
@@ -160,6 +171,9 @@ export async function sendCanonicalReply(
     at,
     input.retry === true,
     expectedPhotoIds,
+    input.deliveryActor ?? "seller",
+    input.marketplaceObservedAt,
+    input.questionObservedAt,
   );
   if (!claimed) throw new MessageDeliveryConflictError();
 
@@ -177,6 +191,7 @@ export async function sendCanonicalReply(
           root.id,
           dispatch.accountGeneration,
           signal,
+          at,
         );
         return input.adapter.replyToQuestion(deliveryInput(
           root,
@@ -349,6 +364,7 @@ async function deliverFollowUp(
           requestId,
           dispatch.accountGeneration,
           signal,
+          attemptedAt,
         );
         return adapter.sendFollowUp(deliveryInput(
           root,
@@ -430,12 +446,17 @@ async function prepareDeliveryPhotos(
   deliveryRequestId: string,
   accountGeneration: string,
   signal: AbortSignal,
+  attemptedAt: Date,
 ): Promise<MarketplaceHostedPhoto[]> {
   if (!repository.listDeliveryPhotos) return [];
   const photos = await repository.listDeliveryPhotos(deliveryRequestId);
   const hosted: MarketplaceHostedPhoto[] = [];
   for (const photo of photos) {
-    if (photo.provider_media_id && photo.provider_url) {
+    if (
+      photo.provider_media_id &&
+      photo.provider_url &&
+      providerPhotoReferenceIsReusable(photo.provider_expires_at, attemptedAt)
+    ) {
       hosted.push({
         providerMediaId: photo.provider_media_id,
         mediaName: photo.original_name,
@@ -480,6 +501,16 @@ async function prepareDeliveryPhotos(
     hosted.push(uploaded);
   }
   return hosted;
+}
+
+function providerPhotoReferenceIsReusable(
+  expiresAt: string | null,
+  attemptedAt: Date,
+): boolean {
+  if (!expiresAt) return true;
+  const expiresAtMs = Date.parse(expiresAt);
+  return Number.isFinite(expiresAtMs) &&
+    expiresAtMs > attemptedAt.getTime() + PROVIDER_PHOTO_EXPIRY_SAFETY_MS;
 }
 
 async function withProviderDispatchLease<T>(
@@ -547,10 +578,13 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     private readonly userId: string,
     private readonly serverManaged = false,
     private readonly serverWriteClient: SupabaseClient = supabase,
+    private readonly scheduled = false,
   ) {}
 
   private getWriteGeneration(): Promise<string> {
-    this.writeGeneration ??= beginEbayMessageWrite(this.serverWriteClient);
+    this.writeGeneration ??= this.scheduled
+      ? beginScheduledEbayMessageWrite(this.serverWriteClient, this.userId)
+      : beginEbayMessageWrite(this.serverWriteClient);
     return this.writeGeneration;
   }
 
@@ -558,15 +592,33 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     operation: string,
     payload: Record<string, unknown>,
   ): Promise<T> {
-    return applyEbayMessageWrite<T>(
-      this.serverWriteClient,
-      operation,
-      payload,
-      await this.getWriteGeneration(),
-    );
+    const generation = await this.getWriteGeneration();
+    return this.scheduled
+      ? applyScheduledEbayMessageWrite<T>(
+          this.serverWriteClient,
+          this.userId,
+          operation,
+          payload,
+          generation,
+        )
+      : applyEbayMessageWrite<T>(
+          this.serverWriteClient,
+          operation,
+          payload,
+          generation,
+        );
   }
 
   async loadConversationRoot(messageId: string): Promise<MessageRow | null> {
+    if (this.scheduled) {
+      const data = await readScheduledEbayMessagePolicy<unknown>(
+        this.serverWriteClient,
+        this.userId,
+        "delivery_root",
+        { message_id: messageId },
+      );
+      return data ? messageRowSchema.parse(data) : null;
+    }
     const { data, error } = await this.supabase
       .from("messages")
       .select("*")
@@ -609,6 +661,15 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
   }
 
   async canonicalDelivered(root: MessageRow): Promise<MessageRow | null> {
+    if (this.scheduled) {
+      const data = await readScheduledEbayMessagePolicy<unknown>(
+        this.serverWriteClient,
+        this.userId,
+        "canonical_delivered",
+        { message_id: root.id },
+      );
+      return data ? messageRowSchema.parse(data) : null;
+    }
     let query = this.supabase
       .from("messages")
       .select("*")
@@ -632,21 +693,39 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     at: Date,
     retry: boolean,
     expectedPhotoIds: readonly string[],
+    deliveryActor: "automatic" | "seller" = "seller",
+    marketplaceObservedAt?: string,
+    questionObservedAt?: string,
   ): Promise<boolean> {
     if (this.serverManaged) {
-      return claimEbayMessageWriteWithPhotos<boolean>(
-        this.serverWriteClient,
-        "claim_canonical",
-        {
-          message_id: root.id,
-          body,
-          at: at.toISOString(),
-          retry,
-        },
-        await this.getWriteGeneration(),
-        root.id,
-        expectedPhotoIds,
-      );
+      const payload = {
+        message_id: root.id,
+        body,
+        at: at.toISOString(),
+        retry,
+        delivery_actor: deliveryActor,
+        marketplace_observed_at: marketplaceObservedAt,
+        question_observed_at: questionObservedAt,
+      };
+      const generation = await this.getWriteGeneration();
+      return this.scheduled
+        ? claimScheduledEbayMessageWriteWithPhotos<boolean>(
+            this.serverWriteClient,
+            this.userId,
+            "claim_canonical",
+            payload,
+            generation,
+            root.id,
+            expectedPhotoIds,
+          )
+        : claimEbayMessageWriteWithPhotos<boolean>(
+            this.serverWriteClient,
+            "claim_canonical",
+            payload,
+            generation,
+            root.id,
+            expectedPhotoIds,
+          );
     }
     let query = this.supabase
       .from("messages")
@@ -657,6 +736,7 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
         delivery_status: "sending",
         delivery_attempted_at: at.toISOString(),
         delivery_error: null,
+        policy_delivery_actor: deliveryActor,
       })
       .eq("user_id", this.userId)
       .eq("id", root.id)

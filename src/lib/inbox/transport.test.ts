@@ -859,6 +859,42 @@ describe("message delivery transport", () => {
     expect(adapter.uploads).toHaveLength(3);
     expect(adapter.replies[0]?.media).toHaveLength(2);
   });
+
+  it("re-uploads an expired provider photo reference from the retained approved bytes", async () => {
+    const repository = new MemoryDeliveryRepository();
+    const adapter = new MockMarketplaceMessagingAdapter();
+    const photo = attachment({
+      provider_media_id: "expired-eps-photo",
+      provider_url: "https://i.ebayimg.com/expired/photo.jpg",
+      provider_expires_at: "2026-07-14T12:04:00.000Z",
+      delivery_status: "uploaded",
+    });
+    const photoRepository = repository as MemoryDeliveryRepository & Required<Pick<
+      DeliveryRepository,
+      "listDeliveryPhotos" | "readDeliveryPhoto" | "saveHostedPhoto" | "failDeliveryPhotos"
+    >>;
+    photoRepository.listDeliveryPhotos = async () => [photo];
+    photoRepository.readDeliveryPhoto = async () =>
+      new Uint8Array([0xff, 0xd8, 0xff, 0x00]);
+    photoRepository.saveHostedPhoto = async (row, hosted) => {
+      row.provider_media_id = hosted.providerMediaId;
+      row.provider_url = hosted.mediaUrl;
+      row.provider_expires_at = hosted.expiresAt;
+    };
+    photoRepository.failDeliveryPhotos = async () => undefined;
+
+    await expect(sendCanonicalReply({
+      repository,
+      adapter,
+      messageId: ROOT_ID,
+      expectedPhotoIds: [photo.id],
+      now: () => new Date("2026-07-14T12:10:00.000Z"),
+    })).resolves.toMatchObject({ delivery_status: "delivered" });
+
+    expect(adapter.uploads).toHaveLength(1);
+    expect(adapter.replies[0]?.media?.[0]?.providerMediaId)
+      .not.toBe("expired-eps-photo");
+  });
 });
 
 function attachment(overrides: Partial<MessageAttachmentRow> = {}): MessageAttachmentRow {

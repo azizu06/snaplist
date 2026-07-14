@@ -4,6 +4,7 @@ import type {
   MarketplaceMessagingAdapter,
   MarketplacePhotoUploadInput,
   MarketplaceHostedPhoto,
+  MarketplaceListingSnapshot,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
 } from "./messaging";
@@ -34,6 +35,10 @@ export class SimulatedMarketplaceMessagingAdapter
       mediaUrl: `https://i.ebayimg.com/simulated/${input.idempotencyKey}`,
       expiresAt: null,
     };
+  }
+
+  async fetchListingSnapshot(): Promise<MarketplaceListingSnapshot> {
+    throw new Error("Simulated listings have no marketplace snapshot");
   }
 
   async replyToQuestion(

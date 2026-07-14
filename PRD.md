@@ -41,7 +41,9 @@ in bulk** (many items in one session), tracks **cost basis → net profit** per 
 **auto-reprice** listings that go stale. The confidence gate marks high-confidence items **ready to
 publish** and sends lower-confidence ones to review; every eBay publish remains an explicit seller
 action through the adapter. Listings also generate copy-paste export packs for Facebook Marketplace and Mercari.
-A buyer-Q&A agent drafts grounded replies the seller approves before sending.
+A buyer-Q&A agent drafts grounded replies. A single default-off seller preference may automatically
+send only exact, low-risk facts from the current seller-approved listing; every other question waits
+for seller approval or escalation.
 
 SnapList is a **seller's control surface**, not a marketplace — payment, checkout, and shipping stay
 on eBay. Buyers never see SnapList.
@@ -94,23 +96,24 @@ on eBay. Buyers never see SnapList.
 30. As a seller, I want to approve or edit a drafted reply before it sends, so that I control what the buyer sees.
 31. As a seller, I want approved text and supported photos delivered together into the buyer's eBay inbox, so that the buyer never needs to leave eBay and a failed photo can never masquerade as text-only success.
 32. As a seller (demo), I want to simulate an incoming buyer question, so that the messaging flow is demonstrable without real buyer traffic.
+33. As a seller, I want one default-off preference that automatically answers only exact safe facts from my current approved listing, so routine questions are handled without giving up control.
 
 **Account, trust & security**
-33. As a seller, I want to sign up and sign in, so that my items are private to me.
-34. As a seller, I want my items, listings, and messages isolated from other users' data, so that my data is secure.
-35. As a seller, I want my photos stored privately, so that they aren't exposed to others.
-36. As a seller, I want to connect my own eBay account (production), so that listings post under my identity.
-37. As a seller, I want my credentials/tokens handled securely, so that my account isn't compromised.
+34. As a seller, I want to sign up and sign in, so that my items are private to me.
+35. As a seller, I want my items, listings, and messages isolated from other users' data, so that my data is secure.
+36. As a seller, I want my photos stored privately, so that they aren't exposed to others.
+37. As a seller, I want to connect my own eBay account (production), so that listings post under my identity.
+38. As a seller, I want my credentials/tokens handled securely, so that my account isn't compromised.
 
 **Showcase/operator stories (project-as-portfolio)**
-38. As the builder, I want every pipeline run's predictions (attributes, price, confidence, tier) logged, so that I can evaluate quality later.
-39. As the builder, I want an eval harness over a fixed gold set, so that I can report ID accuracy, pricing sanity, and confidence calibration.
-40. As the builder, I want the pricing source behind a swappable interface, so that I can add/replace pricing strategies without rewrites.
-41. As the builder, I want sandbox→production to be a credential flip, not a rewrite, so that going live is low-risk.
+39. As the builder, I want every pipeline run's predictions (attributes, price, confidence, tier) logged, so that I can evaluate quality later.
+40. As the builder, I want an eval harness over a fixed gold set, so that I can report ID accuracy, pricing sanity, and confidence calibration.
+41. As the builder, I want the pricing source behind a swappable interface, so that I can add/replace pricing strategies without rewrites.
+42. As the builder, I want sandbox→production to be a credential flip, not a rewrite, so that going live is low-risk.
 
 **Bulk / haul capture (reseller volume)**
-42. As a reseller, I want to capture many items in one photo session (a "haul") instead of starting a fresh flow per item, so that listing a batch of pickups is one pass, not one-item-at-a-time.
-43. As a reseller, I want each captured item in the haul to run the same identify → price → generate pipeline and land as its own reviewable listing, so that bulk capture never trades away per-item accuracy or my final say.
+43. As a reseller, I want to capture many items in one photo session (a "haul") instead of starting a fresh flow per item, so that listing a batch of pickups is one pass, not one-item-at-a-time.
+44. As a reseller, I want each captured item in the haul to run the same identify → price → generate pipeline and land as its own reviewable listing, so that bulk capture never trades away per-item accuracy or my final say.
 
 ## Implementation Decisions
 
@@ -207,7 +210,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### eBay adapters (real, built behind interfaces)
 - **Posting:** eBay Sell API publish (sandbox first → production).
-- **Messaging:** the shared foreground/background sync service calls `GetMemberMessages` for unanswered active-listing questions, resolves the Commerce Message API conversation, imports supported buyer photos, writes through tenant-scoped RLS persistence, and lets **Supabase Realtime** update the frontend. Approved exact-question replies use `AddMemberMessageRTQ`; later seller-authored follow-ups use Commerce `sendMessage`. Both paths deliver approved text and any selected supported hosted photos as one attempt. Overlapping windows are deduplicated and the normal ingestion target is no more than five minutes.
+- **Messaging:** the shared foreground/background sync service calls `GetMemberMessages` for unanswered active-listing questions, resolves the Commerce Message API conversation, imports supported buyer photos, writes through tenant-scoped RLS persistence, and lets **Supabase Realtime** update the frontend. Each import is decided at most once per policy version: auto-send an exact current approved fact, draft for approval, or escalate. Negotiation, discounts, shipping/return promises, buyer premises/instructions, raw vision guesses, and missing/stale/conflicting facts cannot authorize an automatic send. Both authorized automatic replies and seller-approved replies use the same durable `AddMemberMessageRTQ` transport; later seller-authored follow-ups use Commerce `sendMessage`. Seller-approved replies and follow-ups deliver approved text and any selected supported hosted photos as one attempt; automatic replies remain text-only. Delivery failures and ambiguity remain visible/retryable, overlapping windows are deduplicated, and the normal ingestion target is no more than five minutes.
 - **Demo messaging:** seeded/simulated buyer messages remain available for a credential-free demonstration and use an explicitly simulated adapter; they never masquerade as an eBay delivery.
 - **Account-deletion notification endpoint:** verifies signed notices, then atomically erases matching seller credentials, buyer-message trees, notifications, sync/reconciliation state, and private identity provenance. Production subscription remains an owner-controlled go-live step.
 - **Secrets:** transactional calls use **per-user encrypted OAuth tokens**. One explicitly configured operator tenant/seller may use app-level credentials only against the exact Sandbox API origin; production never permits that fallback.
@@ -287,6 +290,7 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - **Phase 0 — setup:** repo, Next.js + TS, Clerk, Supabase (Postgres + pgvector + Storage), env-config, secrets, OpenAI + Tavily/Exa keys, eBay sandbox keys.
 - **Phase 1 — core demo (centerpiece):** photo → vision identify + attributes → pricing (start with most-reliable tier, widen) → generated listing → review/edit UI → persist. Behind Auth + RLS, deployed early.
 - **Phase 2 — agentic:** confidence-gated publish eligibility; buyer-Q&A agent over simulated or imported eBay
-  pre-sale questions, shared foreground/cron synchronization, Realtime inbox, and approved text delivery.
+  pre-sale questions, shared foreground/cron synchronization, Realtime inbox, deterministic default-off
+  safe-fact auto-replies, and seller-approved text delivery.
 - **Phase 3 — posting + export:** eBay Sell API publish (sandbox); FB Marketplace + Mercari export packs.
 - **Phase 4 — go real + polish:** production checklist (account-deletion endpoint, per-user OAuth, credential flip), pgvector eval polish, eval harness in CI, Docker/observability (as Boot.dev lands), README.

@@ -5,6 +5,7 @@ import type {
   MarketplaceMessagingAdapter,
   MarketplacePhotoUploadInput,
   MarketplaceHostedPhoto,
+  MarketplaceListingSnapshot,
   MarketplaceQuestion,
   MarketplaceQuestionFetchResult,
   MarketplaceQuestionResolutionFailure,
@@ -26,6 +27,7 @@ export class MockMarketplaceMessagingAdapter
   replyFailure?: Error;
   followUpFailure?: Error;
   uploadFailure?: Error;
+  listingSnapshots = new Map<string, MarketplaceListingSnapshot>();
 
   async fetchUnansweredQuestions(
     input: FetchQuestionsInput,
@@ -70,6 +72,14 @@ export class MockMarketplaceMessagingAdapter
       mediaUrl: `https://i.ebayimg.com/mock/${input.idempotencyKey}`,
       expiresAt: null,
     };
+  }
+
+  async fetchListingSnapshot(
+    externalListingId: string,
+  ): Promise<MarketplaceListingSnapshot> {
+    const snapshot = this.listingSnapshots.get(externalListingId);
+    if (!snapshot) throw new Error("Mock listing snapshot was not configured");
+    return snapshot;
   }
 
   async replyToQuestion(

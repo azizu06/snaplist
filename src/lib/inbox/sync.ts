@@ -9,6 +9,11 @@ import { extractedAttributesSchema } from "@/lib/pipeline/types";
 import { recordPipelineRunAndMaybeAlert } from "@/lib/abuse";
 import { draftBuyerReply, type DraftBuyerReplyResult } from "./reply";
 import {
+  processMessagePolicyCandidate,
+  sendPendingAutomaticReplies,
+  type MessagePolicyRepository,
+} from "./autoreply";
+import {
   applyEbayMessageWrite,
   applyScheduledEbayMessageWrite,
   beginEbayMessageWrite,
@@ -115,6 +120,16 @@ export interface SyncInboxInput {
   initialLookbackMs?: number;
   draft?: typeof draftBuyerReply;
   meterDraft?: () => Promise<void>;
+  policy?: {
+    repository: MessagePolicyRepository;
+    send: (
+      messageId: string,
+      authorization: {
+        marketplaceObservedAt: string;
+        questionObservedAt: string;
+      },
+    ) => Promise<unknown>;
+  };
 }
 
 export interface InboxSyncSummary {
@@ -126,6 +141,10 @@ export interface InboxSyncSummary {
   drafted: number;
   draftFailed: number;
   pendingResolution: number;
+  policyDrafted: number;
+  policyEscalated: number;
+  autoSent: number;
+  autoSendFailed: number;
 }
 
 /**
@@ -306,23 +325,46 @@ export async function syncInboxForSeller(
 
     let drafted = 0;
     let draftFailed = 0;
+    let policyDrafted = 0;
+    let policyEscalated = 0;
     const draft = input.draft ?? draftBuyerReply;
     const meterDraft = input.meterDraft ?? recordPipelineRunAndMaybeAlert;
     for (const candidate of await input.repository.listDraftCandidates()) {
       if (!(await input.repository.claimDraft(candidate, now))) continue;
       try {
-        await meterDraft();
-        const result = await draft({
-          question: candidate.message.body,
-          grounding: candidate.grounding,
-        });
-        await input.repository.attachDraft(candidate.message.id, result);
+        if (input.policy) {
+          const recorded = await processMessagePolicyCandidate({
+            repository: input.policy.repository,
+            candidate,
+            draft,
+            meterDraft,
+          });
+          if (recorded.decision.outcome === "draft_for_approval") {
+            policyDrafted += 1;
+          } else if (recorded.decision.outcome === "escalate") {
+            policyEscalated += 1;
+          }
+        } else {
+          await meterDraft();
+          const result = await draft({
+            question: candidate.message.body,
+            grounding: candidate.grounding,
+          });
+          await input.repository.attachDraft(candidate.message.id, result);
+        }
         drafted += 1;
       } catch {
         await input.repository.markDraftFailed(candidate.message.id);
         draftFailed += 1;
       }
     }
+
+    const automatic = input.policy
+      ? await sendPendingAutomaticReplies({
+          repository: input.policy.repository,
+          send: input.policy.send,
+        })
+      : { sent: 0, failed: 0 };
 
     const pendingResolution = await input.repository.countPendingQuestions();
     await input.repository.markSuccess(now, pendingResolution);
@@ -335,6 +377,10 @@ export async function syncInboxForSeller(
       drafted,
       draftFailed,
       pendingResolution,
+      policyDrafted,
+      policyEscalated,
+      autoSent: automatic.sent,
+      autoSendFailed: automatic.failed,
     };
   } catch (error) {
     await input.repository.markFailure(now, error).catch(() => undefined);

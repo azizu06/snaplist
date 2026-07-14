@@ -8,6 +8,8 @@ import {
 } from "@/lib/marketplace/ebay";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cleanupExpiredMessagePhotoUploads } from "@/lib/inbox/attachment-cleanup";
+import { SupabaseMessagePolicyRepository } from "@/lib/inbox/policy-repository";
+import { sendCanonicalReply, SupabaseDeliveryRepository } from "@/lib/inbox/transport";
 
 export const maxDuration = 300;
 
@@ -48,15 +50,41 @@ async function handle(request: NextRequest) {
   let imported = 0;
   for (const userId of userIds) {
     try {
+      const adapter = await createEbayMessagingAdapterForUser(admin, userId, {
+        scheduled: true,
+        credentialClient: admin,
+      });
+      const deliveryRepository = new SupabaseDeliveryRepository(
+        admin,
+        userId,
+        true,
+        admin,
+        true,
+      );
       const summary = await syncInboxForSeller({
-        adapter: await createEbayMessagingAdapterForUser(admin, userId, {
-          scheduled: true,
-          credentialClient: admin,
-        }),
+        adapter,
         repository: new SupabaseInboxSyncRepository(admin, userId, {
           client: admin,
           scheduled: true,
         }),
+        policy: {
+          repository: new SupabaseMessagePolicyRepository(
+            admin,
+            userId,
+            adapter,
+            { client: admin, scheduled: true },
+          ),
+          send: (messageId, authorization) =>
+            sendCanonicalReply({
+              repository: deliveryRepository,
+              adapter,
+              messageId,
+              expectedPhotoIds: [],
+              deliveryActor: "automatic",
+              marketplaceObservedAt: authorization.marketplaceObservedAt,
+              questionObservedAt: authorization.questionObservedAt,
+            }),
+        },
       });
       synced += 1;
       imported += summary.imported;
