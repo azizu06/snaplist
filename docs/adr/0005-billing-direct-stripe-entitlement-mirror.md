@@ -48,8 +48,9 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
    Subscription for that Customer, and use a monotonic observed-at upsert before completing the claim.
    That makes retries safe, prevents a late terminal event for an old subscription from restoring stale
    entitlement state, and keeps an unmapped legacy Checkout completion retryable rather than assigning
-   it from metadata. Status contract: 400 bad signature, 503 unconfigured, 500 transient (Stripe
-   retries), 200 processed/duplicate/ignored.
+   it from metadata. Failed-invoice handling accepts Stripe's current nested Subscription reference
+   as well as the legacy top-level shape. Status contract: 400 bad signature, 503 unconfigured, 500
+   transient (Stripe retries), 200 processed/duplicate/ignored.
 
 5. **Test mode, env-gated.** `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_PRO` are
    optional; unset → the routes 503 and everyone is `free`. Redirect URLs derive from the request

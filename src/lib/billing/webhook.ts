@@ -57,6 +57,27 @@ function idFrom(value: unknown): string | undefined {
   return undefined;
 }
 
+function propertyFrom(value: unknown, key: string): unknown {
+  if (value != null && typeof value === "object" && key in value) {
+    return (value as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
+/**
+ * Stripe's current Invoice object nests its Subscription under
+ * `parent.subscription_details.subscription`; older payloads exposed it at the
+ * top level. Support both signed shapes without ever consulting metadata.
+ */
+function invoiceSubscriptionId(object: Record<string, unknown>): string | undefined {
+  const parent = propertyFrom(object, "parent");
+  const subscriptionDetails = propertyFrom(parent, "subscription_details");
+  return (
+    idFrom(propertyFrom(subscriptionDetails, "subscription")) ??
+    idFrom(object.subscription)
+  );
+}
+
 /**
  * Extract only Stripe object ids from a verified handled event. This deliberately
  * never reads webhook metadata or client_reference_id to determine tenancy: the
@@ -68,9 +89,11 @@ export function subscriptionReferenceFromEvent(
   if (!isHandledEvent(event.type)) return null;
   const customerId = idFrom(event.object.customer);
   const subscriptionId = idFrom(
-    event.type === "checkout.session.completed" || event.type === "invoice.payment_failed"
+    event.type === "checkout.session.completed"
       ? event.object.subscription
-      : event.object.id,
+      : event.type === "invoice.payment_failed"
+        ? invoiceSubscriptionId(event.object)
+        : event.object.id,
   );
   const checkoutSessionId =
     event.type === "checkout.session.completed" ? idFrom(event.object.id) : undefined;

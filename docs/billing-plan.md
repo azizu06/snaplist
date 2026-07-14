@@ -97,7 +97,8 @@ Webhooks are at-least-once. Make handlers idempotent:
   makes replayed and out-of-order events converge without trusting session or invoice metadata; a
   late terminal event for an old subscription cannot displace a newer active one. A signed legacy
   Checkout completion with no Customer map stays retryable for safe manual reconciliation rather than
-  being assigned from client metadata.
+  being assigned from client metadata. For `invoice.payment_failed`, accept Stripe's current
+  `parent.subscription_details.subscription` reference as well as the older top-level shape.
 
 ## Env (test mode)
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO` (the Pro price id), and an app base

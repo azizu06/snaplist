@@ -107,6 +107,17 @@ describe("subscriptionReferenceFromEvent (#152)", () => {
     ).toEqual({ customerId: "cus_1", subscriptionId: "sub_1" });
   });
 
+  it("reads the Subscription from the current nested Invoice parent shape", () => {
+    expect(
+      subscriptionReferenceFromEvent(
+        evt("invoice.payment_failed", {
+          customer: "cus_1",
+          parent: { subscription_details: { subscription: "sub_nested" } },
+        }),
+      ),
+    ).toEqual({ customerId: "cus_1", subscriptionId: "sub_nested" });
+  });
+
   it("ignores an unhandled event or one without both Stripe ids", () => {
     expect(isHandledEvent("customer.created")).toBe(false);
     expect(subscriptionReferenceFromEvent(evt("customer.created", { id: "cus_1" }))).toBeNull();
