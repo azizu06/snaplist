@@ -15,6 +15,11 @@ function authorized(request: NextRequest): boolean {
   return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
 }
 
+/**
+ * Bearer-authenticated GET/POST scheduler entry point. It discovers connected
+ * sellers plus an optional operator Sandbox seller, isolates each seller's
+ * failure, and returns aggregate `{ sellers, synced, failed, imported }` counts.
+ */
 async function handle(request: NextRequest) {
   if (!process.env.CRON_SECRET) {
     return NextResponse.json(

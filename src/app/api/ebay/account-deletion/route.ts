@@ -12,8 +12,9 @@ import {
 } from "@/lib/marketplace/ebay/deletion";
 
 /**
- * eBay Marketplace Account Deletion / Closure notification endpoint —
- * implemented for real at the production flip (issue #17).
+ * eBay Marketplace Account Deletion / Closure notification endpoint (issue
+ * #17). The route is implemented and remains inactive until its production
+ * verification token, URL, and eBay subscription are configured.
  *
  * --- GET: endpoint verification (challenge-response) ---
  * eBay calls `GET <endpoint>?challenge_code=...`. We must respond with
@@ -29,7 +30,8 @@ import {
  * BEFORE anything is acted on; an unverifiable notice is answered 412 so eBay
  * retries/alerts instead of counting a dropped deletion as delivered. A
  * verified notice erases everything held about that eBay user, including
- * seller credentials and buyer-message records, on the service-role client.
+ * seller credentials and buyer-message records, through the serialized
+ * generation-safe erasure RPC.
  */
 
 const EBAY_VERIFICATION_TOKEN = process.env.EBAY_VERIFICATION_TOKEN;

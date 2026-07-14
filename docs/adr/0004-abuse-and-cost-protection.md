@@ -17,7 +17,8 @@ Two primitives in `src/lib/abuse/`, both offline-safe and tier-aware (everyone `
 - **Rate limiting — `@upstash/ratelimit` sliding window** on the metered entry points (per-minute,
   keyed by Clerk user id, IP fallback where a route provides it), `snaplist:rl` key prefix.
   `enforceRateLimit` returns a `429` with `Retry-After`; server actions redirect with an equivalent
-  retry message. Applied to inbox `simulate` + `send` (model calls), the bulk-capture
+  retry message. Applied to inbox `simulate`, foreground `sync`, approved `send`,
+  follow-up send, and both explicit delivery-retry routes; the bulk-capture
   `POST /api/batch/item` run (one metered pipeline run per haul item, #100), seller-triggered review
   identity regeneration (#126), and eBay `publish` (external write). The ⌘K `search` route is
   **deliberately excluded** — it's a cheap RLS'd

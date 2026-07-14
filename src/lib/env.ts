@@ -97,11 +97,11 @@ const envSchema = z.object({
   EBAY_SOLD_STALE_DAYS: z.string().min(1).optional(),
   EBAY_SOLD_HALFLIFE_DAYS: z.string().min(1).optional(),
 
-  // Stale-inventory repricing cron (issue #102). CRON_SECRET authenticates the
-  // scheduler (Vercel cron sends it as `Authorization: Bearer <CRON_SECRET>`;
+  // Background repricing and inbox sync. CRON_SECRET authenticates both
+  // schedulers (Vercel cron sends it as `Authorization: Bearer <CRON_SECRET>`;
   // a Supabase pg_cron/pg_net job can send the same header). With it UNSET the
-  // cron route refuses to run — the safe default. The numeric knobs are parsed
-  // (with defaults: 14d window, batch 5, 10% drift) in src/lib/reprice/policy.ts.
+  // cron routes refuse to run — the safe default. The numeric knobs below are
+  // repricing policy (defaults: 14d window, batch 5, 10% drift).
   CRON_SECRET: z.string().min(1).optional(),
   REPRICE_STALE_DAYS: z.string().min(1).optional(),
   REPRICE_BATCH_SIZE: z.string().min(1).optional(),
@@ -114,11 +114,10 @@ const envSchema = z.object({
 
   // eBay (adapter; sandbox by default — flip to production via this URL + keys)
   EBAY_BASE_URL: z.string().min(1).default("https://api.sandbox.ebay.com"),
-  // eBay Sell API credentials (issue #14). ALL OPTIONAL: the adapter reads them
-  // lazily at call time and fails with a readable error if publishing is attempted
-  // without them, so the rest of the app (and the offline test suite, which uses
-  // the mock adapter) never needs them. App-level auth for the sandbox; per-user
-  // OAuth replaces the token provider in #17 without touching the adapter.
+  // eBay API credentials. ALL OPTIONAL: adapters read them lazily at call time,
+  // so the app and offline tests do not need them. Connected sellers use their
+  // encrypted per-user grant. Env tokens are a restricted fallback for one
+  // explicitly configured operator user/seller in the exact Sandbox origin.
   EBAY_CLIENT_ID: z.string().min(1).optional(),
   EBAY_CLIENT_SECRET: z.string().min(1).optional(),
   // A user refresh token (minted once via the authorization-code flow) exchanged

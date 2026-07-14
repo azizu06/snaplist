@@ -16,9 +16,8 @@ import { enforceRateLimit } from "@/lib/abuse";
  * conversation they have ALREADY replied to (issue #13, follow-up slice).
  *
  * Unlike /send (which approves the agent's draft for an inbound question), this
- * is plain seller-authored text ("Hold on, let me check…") — eBay member
- * messaging allows many seller messages per thread, so the v1 "nothing further
- * to send" block was our own simplification, not an API limit. The message is
+ * is plain seller-authored text ("Hold on, let me check…"). eBay's Commerce
+ * Message API sends it into the imported conversation. The message is
  * threaded to the conversation root (`reply_to` = this inbound question) and
  * marked `reply_kind = 'followup'`. The question is loaded through the
  * USER-SCOPED client so RLS proves ownership (another user's messageId 404s).

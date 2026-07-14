@@ -1,8 +1,8 @@
 /**
  * Public surface of the eBay marketplace adapter (issue #14).
  *
- * Callers import from here; the adapter seam (`EbayAdapter`) is the only thing
- * the rest of SnapList depends on. Tests construct `MockEbayAdapter` directly.
+ * Callers import from here. Listing writes depend on `EbayAdapter`; pre-sale
+ * messaging depends on the separate provider-neutral messaging adapter.
  */
 export type {
   EbayAdapter,
@@ -81,8 +81,8 @@ export function createEbayAdapter(
 
 /**
  * The adapter for a signed-in seller (issue #17): their own OAuth tokens when
- * an eBay account is connected, the app-level env credentials otherwise (the
- * sandbox loop keeps working with zero per-user setup).
+ * an eBay account is connected. Env credentials are accepted only for the
+ * explicitly configured operator user/seller on the exact Sandbox origin.
  *
  * SINGLE-SELLER CONSTRAINT (deliberate, documented in docs/ebay-production.md):
  * business policies (EBAY_*_POLICY_ID) and the merchant location stay

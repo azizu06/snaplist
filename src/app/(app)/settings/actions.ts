@@ -9,8 +9,9 @@ import { reportServerError } from "@/lib/sentry";
 
 /**
  * Disconnect the seller's eBay account (issue #17): retires the current
- * account generation and removes its encrypted OAuth tokens. Reconnecting
- * later runs the consent flow again.
+ * account generation, removes encrypted OAuth tokens, clears its sync cursor,
+ * and marks generation-bound unresolved delivery unavailable. Reconnecting
+ * starts a fresh generation and consent flow; stale work cannot dispatch.
  */
 export async function disconnectEbay() {
   const userId = await getUserId();

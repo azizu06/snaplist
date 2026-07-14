@@ -51,9 +51,10 @@ active, so eBay cannot receive a stale or half-updated amount.
 
 ## Tests are offline — always
 
-The entire test suite runs against `MockEbayAdapter` (and a fake `fetch` for
-the HTTP adapter's contract tests). No eBay credential is ever needed to run
-`pnpm test`, and no live eBay call is ever made by tests.
+The entire test suite runs against `MockEbayAdapter`,
+`MockMarketplaceMessagingAdapter`, and fake `fetch` implementations for HTTP
+contract tests. No eBay credential is needed for `pnpm test`, and tests never
+call live eBay.
 
 ## Sandbox setup (one-time)
 
@@ -62,15 +63,19 @@ the HTTP adapter's contract tests). No eBay credential is ever needed to run
 2. **Sandbox seller** — create a sandbox test user
    (Developer console → "Sandbox user registration") and complete its seller
    onboarding at <https://sandbox.ebay.com>.
-3. **Auth (pick one):**
-   - *Quick loop:* mint a **user access token** in the developer console
-     ("User Tokens" → Get a Token from eBay via Your Application, sandbox) and
-     set `EBAY_OAUTH_TOKEN`. Tokens live ~2 hours; fine for manual testing.
-   - *Durable:* run the authorization-code flow once for the sandbox seller
-     (scopes `sell.inventory`, the traditional base scope, and
-     `commerce.message`), keep the **refresh token** (valid ~18 months),
-     and set `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `EBAY_REFRESH_TOKEN`. The
-     adapter exchanges it for access tokens automatically and caches them.
+3. **Auth (prefer the connected-seller path):**
+   - Set the Sandbox `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, and `EBAY_RU_NAME`,
+     plus one stable `EBAY_TOKEN_ENCRYPTION_KEY`. In Settings, choose **Connect
+     eBay** and authorize the Sandbox seller. The flow requests inventory,
+     identity/account-read, the traditional base, and `commerce.message` scopes;
+     the encrypted per-user grant is used for publish, reprice, and messaging.
+   - *Operator fallback:* mint a short-lived Sandbox user token and set
+     `EBAY_OAUTH_TOKEN`, or set `EBAY_REFRESH_TOKEN` with the client keypair. Also
+     set `EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID` to the one allowed Clerk
+     tenant and `EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID` to that token's
+     stable eBay seller ID. The fallback works only with the exact
+     `https://api.sandbox.ebay.com` origin, is generation-bound in the database,
+     and is denied to every other tenant and all production origins.
 4. **Business policies + location** — on the sandbox seller account create a
    fulfillment, payment, and return policy (Seller Hub → Business policies, or
    the Account API) and an inventory location (`POST
@@ -81,9 +86,11 @@ the HTTP adapter's contract tests). No eBay credential is ever needed to run
    items (defaults to eBay's generic "Everything Else > Other" until real
    category resolution lands).
 
-All of these go in `.env.local` (see `.env.example`). The adapter reads them
-lazily at publish time and fails with a readable error naming exactly what is
-missing — nothing breaks at import/boot when they're absent.
+All of these go in `.env.local` (see `.env.example`). Use a current
+`sb_secret_...` value for `SUPABASE_SERVICE_ROLE_KEY`; tenant-bound transactional
+writes reject legacy JWT-style service-role keys. The adapters read eBay config
+lazily at provider-call time and fail with a readable error when it is missing —
+nothing breaks at import/boot when credentials are absent.
 
 > **Status note:** provider actions remain operator-only. Publishing and
 > messaging are contract-tested offline; record any owner-run Sandbox result
@@ -95,9 +102,10 @@ missing — nothing breaks at import/boot when they're absent.
 | --- | --- | --- |
 | `EBAY_BASE_URL` | `https://api.sandbox.ebay.com` (default) | `https://api.ebay.com` |
 | `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` | sandbox keyset | production keyset |
-| `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | sandbox seller token | real seller token (per-user in #17) |
+| `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | operator fallback or per-user setup | **unset**; per-user connection only |
+| `EBAY_MESSAGING_SANDBOX_OPERATOR_*` | optional one-tenant fallback binding | **unset** |
 | Policy ids + `EBAY_MERCHANT_LOCATION_KEY` | sandbox seller's | real seller's |
 | `EBAY_VERIFICATION_TOKEN` / `EBAY_DELETION_ENDPOINT_URL` | blank | required (account-deletion endpoint) |
 
-Per-user OAuth (issue #17) swaps the `EbayTokenProvider` implementation handed
-to `HttpEbayAdapter` — the adapter and everything above it are unchanged.
+Per-user OAuth swaps the `EbayTokenProvider` implementation handed to the HTTP
+adapters — the provider and everything above it are unchanged.

@@ -18,7 +18,8 @@ import { createNotification } from "@/lib/notifications";
 
 /**
  * POST /api/inbox/simulate — simulate an incoming buyer question for one of the
- * caller's items (issue #13; v1 has no real buyer traffic).
+ * caller's items (issue #13). This credential-free demo fixture remains
+ * available beside authenticated eBay question import.
  *
  * Flow (each persisted step rides Realtime to the live inbox — no refresh):
  *   1. Load the item + its latest listing through the USER-SCOPED client, so RLS

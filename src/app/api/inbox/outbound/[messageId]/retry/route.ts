@@ -14,6 +14,11 @@ import { createMessagingTransportForConversation } from "@/lib/inbox/adapters";
 const paramsSchema = z.object({ messageId: z.uuid() });
 const bodySchema = z.object({ confirmDuplicateRisk: z.boolean() }).strict();
 
+/**
+ * Retry one seller-owned follow-up. Ambiguous attempts require an explicit
+ * duplicate-risk confirmation; RLS-scoped ownership checks return 404 for
+ * foreign ids and delivery conflicts remain retryable rather than fabricated.
+ */
 export async function POST(
   request: Request,
   context: { params: Promise<{ messageId: string }> },

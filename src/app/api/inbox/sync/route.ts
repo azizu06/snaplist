@@ -11,7 +11,12 @@ import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
-/** Explicit/foreground refresh; the shared service owns all domain behavior. */
+/**
+ * Cookie-authenticated, rate-limited foreground refresh. Disconnected sellers
+ * return `{ skipped: "ebay_not_connected" }`; connected sellers receive the
+ * shared service's sync summary. Existing messages remain unchanged on provider
+ * failure, and the five-minute cron invokes the same domain service.
+ */
 export async function POST(request: Request) {
   const userId = await getUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

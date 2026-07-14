@@ -9,9 +9,9 @@ import { createNotification } from "../notifications";
  * The cron sweep (sweep.ts) writes `reprice_suggestions`; this module is how
  * the seller reads and resolves them: list the pending ones for the dashboard
  * card, one-tap APPLY (revise the live eBay listing through the adapter, then
- * record the change), or DISMISS. Everything here runs on the caller's
- * USER-SCOPED client, so RLS pins tenancy — a foreign suggestion id is simply
- * not found.
+ * record the change), or DISMISS. Seller reads and dispatch claims use the
+ * caller's RLS client; acknowledged completion may use a tenant-bound server
+ * client. A foreign suggestion id is never returned or mutated.
  */
 
 export interface RepriceSuggestionView {

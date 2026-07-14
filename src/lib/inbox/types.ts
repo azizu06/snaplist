@@ -25,9 +25,9 @@ export type MessageDirection = z.infer<typeof messageDirectionSchema>;
  * with no recovery path. `externally_answered` retires a question that eBay
  * explicitly reports as answered. `provider_unavailable` is the neutral
  * non-actionable state when eBay no longer reports it as active.
- * `approved` is reserved for a future split of
- * "approve" from "send" — today the seller's approve action sends
- * immediately, so it is never persisted.
+ * `approved` records a seller-authored follow-up intent before dispatch (and
+ * after retryable failure). Canonical draft approval still dispatches in the
+ * same request, with the durable outbound row carrying delivery truth.
  */
 export const messageStatusSchema = z.enum([
   "new",

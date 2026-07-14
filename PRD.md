@@ -28,7 +28,7 @@ Market saturation is explicitly irrelevant.)
 
 ## Solution
 
-SnapList turns a **photo of a resale item** into a **priced, ready-to-post listing**, and later drafts
+SnapList turns a **photo of a resale item** into a **priced, ready-to-post listing**, and drafts
 buyer-message replies — collapsing the per-item work into a photo plus a couple of approvals so a
 reseller can clear a whole haul in one pass.
 
@@ -88,7 +88,7 @@ on eBay. Buyers never see SnapList.
 26. As a seller, I want my eBay listings persisted in SnapList with their status, so that I can track what I've posted.
 27. As a seller, I want export packs as clean copy-paste blocks, so that pasting into other apps is frictionless.
 
-**Buyer messaging (later phase)**
+**Buyer messaging**
 28. As a seller, I want incoming buyer questions to appear in a live inbox, so that I don't have to refresh.
 29. As a seller, I want the system to draft a reply grounded in the item's attributes/listing, so that I answer accurately and fast.
 30. As a seller, I want to approve or edit a drafted reply before it sends, so that I control what the buyer sees.
@@ -119,7 +119,7 @@ on eBay. Buyers never see SnapList.
 - **Env-configurable throughout.** Sandbox→production is a credential/`EBAY_BASE_URL` flip. No hardcoded providers or endpoints.
 
 ### Tenancy & data
-- **Multi-tenant from day one.** Supabase Auth; every domain table carries `user_id`; **Postgres row-level security** enforces per-user isolation. This is a primary Security-skill surface.
+- **Multi-tenant from day one.** Clerk auth reaches Supabase through third-party JWTs; every domain table carries the text Clerk `user_id`, and **Postgres row-level security** enforces per-user isolation. This is a primary Security-skill surface.
 - **Postgres + pgvector** (Supabase) holds items, listings, messages, embeddings, and prediction logs.
 - **Photos** in Supabase Storage, paths scoped by `user_id`, access governed by RLS/storage policies.
 - **Review writes are coherent and revision-guarded.** Seller edits, identity regeneration, export
@@ -132,7 +132,8 @@ on eBay. Buyers never see SnapList.
 - Schema (conceptual, not final): `items` (user_id, attributes JSON, condition, photos[],
   price_override, review_revision, review_content_revision, created_at), `listings` (item_id,
   platform, generated copy, status, source_review_revision), `messages` (item_id/listing_id,
-  direction, body, draft_reply, status), `embeddings`/corpus (vector, source ref, metadata),
+  direction, body, draft_reply, marketplace, exact external identities, delivery state), per-seller
+  messaging sync/reconciliation state, `embeddings`/corpus (vector, source ref, metadata),
   `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Models & LLM access
@@ -203,12 +204,12 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 ### Item domain
 - **Hero domain + graceful degradation — a positioning choice, not a caveat.** The hero domain *is* reseller inventory: books/media (ISBN), consumer electronics, video games and consoles, board games, LEGO, sneakers, branded clothing/streetwear, and branded gear. These are exactly the categories where eBay public **sold comps** are dense, so the pricing tier is genuinely strong and the suggestion is defensible. We concentrate there on purpose rather than chasing a "price anything" guarantee. Generic household items still flow through the same pipeline but honestly show low confidence. Demo arc: exact barcode → researched sold comps → correctly-flagged generic.
 
-### eBay adapter (real, built behind interface, later phase)
+### eBay adapters (real, built behind interfaces)
 - **Posting:** eBay Sell API publish (sandbox first → production).
 - **Messaging:** the shared foreground/background sync service calls `GetMemberMessages` for unanswered active-listing questions, resolves the Commerce Message API conversation, writes through tenant-scoped RLS persistence, and lets **Supabase Realtime** update the frontend. Approved exact-question replies use `AddMemberMessageRTQ`; later seller-authored text uses Commerce `sendMessage`. Overlapping windows are deduplicated and the normal ingestion target is no more than five minutes.
 - **Demo messaging:** seeded/simulated buyer messages remain available for a credential-free demonstration and use an explicitly simulated adapter; they never masquerade as an eBay delivery.
-- **Account-deletion notification endpoint:** route stubbed from day one; fully implemented only at the production flip (required before first production call since we persist data).
-- **Secrets:** app-level eBay creds in v1 (sandbox); **per-user encrypted OAuth tokens** when the real adapter lands.
+- **Account-deletion notification endpoint:** verifies signed notices, then atomically erases matching seller credentials, buyer-message trees, notifications, sync/reconciliation state, and private identity provenance. Production subscription remains an owner-controlled go-live step.
+- **Secrets:** transactional calls use **per-user encrypted OAuth tokens**. One explicitly configured operator tenant/seller may use app-level credentials only against the exact Sandbox API origin; production never permits that fallback.
 
 ### Eval & observability
 - **Log every run's predictions from day one** (extracted attributes, chosen price, range, confidence, tier fired, model). Prerequisite for evaluation.
@@ -247,8 +248,9 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
   and cross-tenant rollback.
 - **RLS / tenancy** — integration tests asserting a user cannot read/write another user's
   items/listings/messages/photos. Security-critical; tested at the data-access seam.
-- **eBay adapter** — tested against a **stub/mock adapter** (the interface), not live eBay, so the
-  pipeline is testable offline and the sandbox↔production flip is a config concern.
+- **eBay adapters** — publishing/repricing and marketplace messaging are tested against **mock
+  adapters** (plus fake HTTP at the provider contract), never live eBay, so the pipeline stays
+  testable offline and the sandbox↔production flip remains a config concern.
 - **Eval harness** — itself validated: the LLM-judge is checked against a small human-labeled subset
   so we're not trusting an unvalidated judge.
 
@@ -281,8 +283,9 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
   corpus disclosed. Being able to state the system's accuracy ceiling is a differentiator.
 
 ### Phase sequencing (tracer-bullet, not rigid)
-- **Phase 0 — setup:** repo, Next.js + TS, Supabase (Auth + Postgres + pgvector + Storage), env-config, secrets, OpenAI + Tavily/Exa keys, eBay sandbox keys.
+- **Phase 0 — setup:** repo, Next.js + TS, Clerk, Supabase (Postgres + pgvector + Storage), env-config, secrets, OpenAI + Tavily/Exa keys, eBay sandbox keys.
 - **Phase 1 — core demo (centerpiece):** photo → vision identify + attributes → pricing (start with most-reliable tier, widen) → generated listing → review/edit UI → persist. Behind Auth + RLS, deployed early.
-- **Phase 2 — agentic:** confidence-gated publish eligibility; buyer-Q&A agent on simulated messages + Realtime inbox.
+- **Phase 2 — agentic:** confidence-gated publish eligibility; buyer-Q&A agent over simulated or imported eBay
+  pre-sale questions, shared foreground/cron synchronization, Realtime inbox, and approved text delivery.
 - **Phase 3 — posting + export:** eBay Sell API publish (sandbox); FB Marketplace + Mercari export packs.
 - **Phase 4 — go real + polish:** production checklist (account-deletion endpoint, per-user OAuth, credential flip), pgvector eval polish, eval harness in CI, Docker/observability (as Boot.dev lands), README.

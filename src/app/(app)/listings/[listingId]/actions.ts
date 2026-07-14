@@ -43,9 +43,10 @@ export async function publishToEbay(formData: FormData) {
   }
 
   try {
-    // Per-user tokens when the seller connected eBay (issue #17), env sandbox
-    // credentials otherwise. The shared wrapper owns the activity-feed
-    // notifications (success AND failure), so the API route behaves identically.
+    // Per-user tokens when the seller connected eBay (issue #17), or the
+    // restricted one-operator Sandbox fallback. The shared wrapper owns the
+    // activity-feed notifications (success AND failure), so the API route
+    // behaves identically.
     const completionClient = await createTenantServerClient();
     await publishListingToEbayAndNotify(
       supabase,

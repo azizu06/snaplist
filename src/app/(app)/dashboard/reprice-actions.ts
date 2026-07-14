@@ -18,11 +18,10 @@ import { createTenantServerClient } from "@/lib/supabase/tenant-server";
  * dismiss, and the per-user auto-reprice opt-in. Thin server actions in the
  * dashboard/actions.ts mold — auth guard + RLS-scoped work, then revalidate.
  *
- * Tenancy: every read/write runs under the request-authed client, so RLS
- * (`public.clerk_user_id() = user_id`) constrains which rows can be touched —
- * a foreign suggestionId is simply not found. The apply path revises the live
- * eBay listing through the seller's own adapter (per-user OAuth when
- * connected, app-level env credentials otherwise — same as publish).
+ * Tenancy: reads and claims run under the request-authenticated client, so RLS
+ * (`public.clerk_user_id() = user_id`) rejects foreign suggestion ids. Durable
+ * completion uses a tenant-bound server client. The apply path uses the
+ * seller's OAuth grant or the restricted one-operator Sandbox fallback.
  */
 
 export interface RepriceActionResult {

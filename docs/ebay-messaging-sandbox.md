@@ -22,7 +22,9 @@ adapter:
   It is not the mailbox/display `GetMyMessages.MessageID`; eBay documents that
   distinction on [`MyMessagesMessageType`](https://developer.ebay.com/devzone/xml/docs/Reference/eBay/types/MyMessagesMessageType.html).
 - Commerce Message API [`getConversations`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/getConversations)
-  finds candidate conversations for the listing and buyer. SnapList then uses
+  finds active candidate conversations for the listing and time window. SnapList
+  matches the exact message ID, or its body plus creation time when eBay exposes
+  different identifiers across the two APIs, and requires one unique match. It then uses
   [`getConversation`](https://developer.ebay.com/api-docs/commerce/message/resources/conversation/methods/getConversation)
   with `conversation_type=FROM_MEMBERS` and follows its message pagination so
   an unanswered question need not be the conversation's latest message.
@@ -61,6 +63,9 @@ image URL to be uploaded to eBay Picture Services by a separate call or web
 flow, while Commerce `sendMessage` has its own hosted-media model. #133 sends
 text only and never silently drops a selected attachment.
 
+This transport is pre-sale only. It does not handle orders, payment, shipping,
+returns, disputes, post-sale support, or any marketplace other than eBay.
+
 ## Preconditions
 
 1. Use a Sandbox keyset and two Sandbox users: `SELLER` and `BUYER`. eBay's RTQ
@@ -74,15 +79,36 @@ text only and never silently drops a selected attachment.
    stable eBay user ID; the database binds both to one account generation;
    every other tenant is denied that shared credential, and production never
    permits the fallback. Connected sellers continue to use their own token provider.
+   `SUPABASE_SERVICE_ROLE_KEY` must be a current `sb_secret_...` key so the
+   tenant-bound server-write RPCs can validate the server API key while Clerk
+   still supplies the seller identity.
 3. `SELLER` has an active Sandbox listing that was published through SnapList,
    so its eBay ItemID is mapped to the same tenant's `listings` row.
 4. `CRON_SECRET` is set only if the background entry point is being exercised.
    `vercel.json` schedules `/api/cron/inbox-sync` every five minutes. Opening
-   the inbox also requests the same shared sync service immediately.
+   the inbox requests the same shared sync service once Realtime subscribes.
+   Sync defaults to a 24-hour initial lookback and a minimum 24-hour overlap;
+   `.env.example` documents the optional tuning variables.
 
 Do not change provider settings, deploy production credentials, or use a real
 listing as part of this check. Production activation remains owner-controlled
 under #17.
+
+## Sync entry points
+
+- Foreground: cookie-authenticated `POST /api/inbox/sync`. A seller without a
+  connection or the configured Sandbox fallback receives
+  `{ "skipped": "ebay_not_connected" }`; otherwise the response reports the
+  attempted window plus fetched/imported/drafted/reconciliation counts.
+- Background: `GET` or `POST /api/cron/inbox-sync` with
+  `Authorization: Bearer <CRON_SECRET>`. Missing configuration returns `503`, a
+  wrong/missing bearer returns `401`, and success reports seller, sync, failure,
+  and import counts. One seller failure does not prevent the other configured
+  sellers from being attempted.
+
+Both routes call `syncInboxForSeller`; neither owns separate persistence,
+drafting, notification, cursor, or retry behavior. Never paste the bearer or a
+seller cookie into committed commands or captured evidence.
 
 ## Round trip
 
@@ -122,6 +148,11 @@ under #17.
 - A question for an eBay ItemID not mapped to that seller's active SnapList
   listing is skipped. A user from another SnapList tenant must receive no row
   and cannot read or send the first seller's conversation.
+- A question whose Commerce conversation cannot yet be resolved is stored in a
+  generation-bound reconciliation queue rather than dropped. Later overlapping
+  syncs retry it; explicit eBay answered evidence retires it as
+  `externally_answered`, while disappearance from the authoritative window
+  retires it as `provider_unavailable`. Neither state can be sent from SnapList.
 
 ## Evidence to capture
 

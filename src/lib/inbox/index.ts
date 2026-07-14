@@ -1,5 +1,5 @@
 /**
- * Buyer inbox (issue #13): simulated buyer questions → `messages` + Realtime →
+ * Buyer inbox (issue #13): simulated or imported questions → `messages` + Realtime →
  * grounded reply agent → seller approve/edit → marketplace delivery.
  */
 export {

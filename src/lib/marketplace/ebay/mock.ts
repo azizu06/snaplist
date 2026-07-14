@@ -9,8 +9,8 @@ import type {
 } from "./types";
 
 /**
- * Offline eBay adapter — the ONLY adapter the test suite ever touches (issue #14
- * acceptance: "all tests run offline against a mock adapter; no live eBay calls").
+ * Offline publishing/repricing adapter. Marketplace-messaging tests use their
+ * own mock; provider HTTP contracts use fake fetches, so no test calls live eBay.
  *
  * Deterministic: ids derive from the request SKU, so assertions are stable.
  * Records every request so tests can assert exactly what WOULD have been sent

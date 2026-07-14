@@ -17,11 +17,10 @@ import { UserTokenProvider } from "./user-token-provider";
  *     it for short-lived access tokens and caches them until shortly before
  *     expiry.
  *
- * NOTE on grant choice: the Sell Inventory API requires a USER token (it acts
- * on a seller's inventory), so the client-credentials grant is NOT sufficient —
- * hence refresh-token, not client-credentials. Per-user OAuth (issue #17)
- * replaces this provider with one that looks tokens up per SnapList user; the
- * HTTP adapter is unchanged because it only sees `EbayTokenProvider`.
+ * NOTE on grant choice: the Sell Inventory and member-messaging APIs require a
+ * USER token, so the client-credentials grant is NOT sufficient. Connected
+ * sellers use `UserTokenProvider`; this provider composes only the restricted
+ * one-operator Sandbox fallback. HTTP adapters see the same token interface.
  *
  * Credentials are read LAZILY (per call, from the injected env reader), never at
  * module load, so importing the adapter never explodes in environments without

@@ -48,7 +48,7 @@ export class UserTokenProvider implements EbayTokenProvider {
   private readonly scheduled: boolean;
 
   constructor(
-    /** The request's USER-SCOPED client — RLS pins the connection row. */
+    /** RLS client for foreground work, or scheduled server client using pinned RPCs. */
     private readonly supabase: SupabaseClient,
     options: UserTokenProviderOptions = {},
   ) {

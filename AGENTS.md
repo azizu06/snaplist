@@ -6,7 +6,7 @@ where they disagree.
 
 ## What this is
 A production-real AI-engineering showcase: photo of a used item → priced, ready-to-post listing →
-(later) buyer-Q&A. The **AI pipeline is the product**; eBay is a real integration but lives behind an
+buyer-Q&A. The **AI pipeline is the product**; eBay is a real integration but lives behind an
 adapter and is **not on the Phase 1 critical path**.
 
 ## Non-negotiable decisions (don't relitigate without the user)
@@ -69,8 +69,8 @@ shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, 
 
 ## Conventions
 - Confirm current OpenAI model IDs against live docs before hardcoding — they move fast.
-- Secrets via env; never commit keys. v1 eBay creds app-level; per-user **encrypted** OAuth tokens
-  when the real adapter lands.
+- Secrets via env; never commit keys. Transactional eBay calls use per-user **encrypted** OAuth
+  tokens; the app-level Sandbox fallback is restricted to one configured operator tenant/seller.
 - For non-trivial UI work, use the Open Design workflow (see the user's global instructions) rather
   than hand-writing large CSS/JSX blind.
 - **Mutation seams:** views mutate through **server actions**; API routes serve external/programmatic

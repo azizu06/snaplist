@@ -12,11 +12,9 @@ import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 
 /**
- * POST /api/inbox/[messageId]/retry-delivery — recover the send flow's crash
- * gap (issue #13, PR #35 review). The inbound question won the CAS claim
- * (status `sent`) but delivery failed / crashed before the outbound row was
- * inserted, so the inbox shows "not delivered" and the seller explicitly
- * retries.
+ * POST /api/inbox/[messageId]/retry-delivery — retry a canonical reply whose
+ * provider write was rejected, failed, ambiguous, or left stale in flight.
+ * The inbox keeps the delivery state visible and the seller retries explicitly.
  *
  * The transport claims only a failed/rejected/ambiguous (or stale in-flight)
  * attempt. The canonical reply uniqueness constraint and durable delivery

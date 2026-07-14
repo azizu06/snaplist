@@ -12,10 +12,10 @@ import type { EbayIdentity, EbayTokenGrant } from "./oauth";
  * that touches the ciphertext columns, so the encrypt/decrypt seam stays in
  * one file.
  *
- * Tenancy: connection persistence uses a server-authorized client carrying the
- * seller's Clerk JWT; the database derives the tenant. The SERVICE-ROLE client
- * is used only by the account-deletion endpoint, where there is no requesting
- * seller.
+ * Tenancy: foreground persistence uses the seller's Clerk/RLS client, with a
+ * tenant-bound server client only for generation-checked completion. Scheduled
+ * work and account erasure use narrowly scoped RPCs pinned to an explicit
+ * tenant and marketplace identity; service-role callers never query rows raw.
  */
 
 export interface EbayConnectionStatus {

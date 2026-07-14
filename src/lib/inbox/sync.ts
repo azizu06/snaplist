@@ -128,7 +128,7 @@ export interface InboxSyncSummary {
  * Shared inbox synchronization service used by foreground refresh and cron.
  *
  * The cursor advances only after every fetched question has been durably
- * mapped/imported or explicitly skipped as an unknown/non-active local listing.
+ * imported, explicitly skipped, or queued for deterministic reconciliation.
  * Windows overlap by default; external identity, notification source identity,
  * and draft claims make replays harmless.
  */

@@ -26,8 +26,8 @@ import { authorizeDeliveryRetry } from "./delivery-recovery";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
- * the user's `messages` rows, so a simulated buyer question (INSERT), the agent's
- * draft (UPDATE) and the sent reply (INSERT + UPDATE) all appear WITHOUT refresh.
+ * the user's `messages` rows, so simulated/imported questions (INSERT), agent
+ * drafts (UPDATE), and sent replies (INSERT + UPDATE) appear WITHOUT refresh.
  *
  * Security: the browser client carries only the anon key + the user's session;
  * the subscription filter is user_id, and Realtime additionally authorizes every
@@ -130,7 +130,7 @@ export function InboxClient({
 
     // Refetch-on-SUBSCRIBED: anything inserted/updated before the listener was
     // active (or while the connection was down) is reconciled in here, so a
-    // simulated question can never stay invisible until a page refresh.
+    // message change can never stay invisible until a page refresh.
     const refetch = async () => {
       const { data } = await supabase
         .from("messages")

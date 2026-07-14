@@ -6,7 +6,7 @@ requirements live in `PRD.md`; this file is the language layer the engineering s
 ## What the product does (one paragraph)
 A seller photographs a used item; SnapList **identifies** it, **prices** it with a range and a
 **confidence** score, cites the evidence-backed tiers, and clearly labels the terminal uncited
-fallback when necessary. It **generates** platform-specific listing copy and (later) **drafts**
+fallback when necessary. It **generates** platform-specific listing copy and **drafts**
 buyer replies. The confidence gate can mark high-confidence items **ready to publish**; the seller still
 chooses every eBay publish through the **adapter**. Other platforms receive **export packs**.
 
@@ -97,11 +97,29 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **Post / publish** — actually putting a listing live on eBay via the **adapter**.
 - **Adapter** — the isolating interface around eBay (posting + messaging). The pipeline must run and
   be testable against a **mock adapter** with no live eBay. Sandbox→production is a credential flip.
+- **Marketplace messaging adapter** — the provider-neutral seam for fetching unresolved pre-sale
+  questions, resolving their provider conversation, replying to the exact question, and sending a
+  later text follow-up. Distinct from both the transactional publish adapter and the public
+  **eBay-sold scraper**.
+- **External question identity** — the identity bundle kept on an imported eBay question: the exact
+  Trading `Question.MessageID` used as `ParentMessageID`, plus separate Commerce conversation,
+  listing, and buyer identities. These values are not interchangeable.
+- **eBay account generation** — the tenant-bound version of a connected or operator-fallback seller
+  identity. Sync, messages, token refresh, and provider dispatch are pinned to it so disconnect,
+  reconnect, replacement, or erasure cannot let stale work cross account boundaries.
+- **Delivery truth** — the external state of an approved reply/follow-up: `sending`, `delivered`,
+  `rejected`, `failed`, or `ambiguous`. `sent_at` and an external delivery ID exist only after an
+  acknowledgement; ambiguous delivery remains visibly retryable with an explicit duplicate-risk
+  confirmation.
+- **Inbox sync** — the shared foreground/cron service that reads overlapping eBay windows, stores
+  unresolved conversation matches for later reconciliation, deduplicates external identity,
+  generates one grounded draft/notification, and retires questions eBay reports as answered or no
+  longer available. Normal ingestion targets the next five-minute boundary or sooner.
 - **Buyer-Q&A agent** — the **agent** that drafts replies to buyer questions, grounded in an item's
   attributes/listing. It runs for simulated demo questions and tenant-scoped eBay Sandbox imports;
   sellers still approve or edit every reply before authenticated delivery.
-- **Inbox** — the seller's live view of buyer **messages**, fed DB→Supabase Realtime. The seller is
-  the only SnapList user; buyers stay on eBay.
+- **Inbox** — the seller's live view of simulated or imported buyer **messages**, fed
+  DB→Supabase Realtime after **inbox sync**. The seller is the only SnapList user; buyers stay on eBay.
 - **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to
   ground listing generation (few-shot) and to *corroborate* pricing. Never the price oracle.
 - **Freshness** — sold prices drift, so pricing is **live-fetched** at query time; a TTL
