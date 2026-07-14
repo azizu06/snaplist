@@ -12,9 +12,14 @@ export {
   type Tier,
   type StripeConfig,
 } from "./config";
-export { getEntitlement, createSupabaseEntitlementStore } from "./entitlement";
 export {
-  subscriptionFromEvent,
+  getEntitlement,
+  createSupabaseEntitlementStore,
+  type BillingLifecycleStore,
+} from "./entitlement";
+export {
+  subscriptionFromStripe,
+  subscriptionReferenceFromEvent,
   handleStripeEvent,
   isHandledEvent,
   type EntitlementStore,
@@ -22,10 +27,18 @@ export {
   type HandleResult,
 } from "./webhook";
 export {
+  startCheckout,
+  type BillingCustomerStore,
+  type CheckoutLifecycleAdapter,
+  type StartCheckoutInput,
+  type StartCheckoutResult,
+} from "./lifecycle";
+export {
   MockStripeBillingAdapter,
   createStripeBillingAdapter,
   type StripeBillingAdapter,
   type CheckoutParams,
   type PortalParams,
+  type StripeSubscription,
   type StripeWebhookEvent,
 } from "./adapter";

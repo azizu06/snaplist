@@ -50,7 +50,14 @@ The settings page already does `const tier = resolveTier(userId)`; swapping that
 `await getEntitlement(userId)` is the entire frontend change once the backend lands.
 
 ## Data model
-New table `subscriptions` (one row per user; RLS read-own, writes service-role only):
+`billing_customers` is an immutable, server-only Customer map (one row per Clerk user):
+
+| column | type | notes |
+| --- | --- | --- |
+| `user_id` | text (PK) | Clerk id, mapped by an authenticated server route before Checkout |
+| `stripe_customer_id` | text (unique) | one durable Stripe Customer per seller; no client policy/grant |
+
+`subscriptions` is the entitlement mirror (one row per user; RLS read-own, writes service-role only):
 
 | column | type | notes |
 |---|---|---|
@@ -69,12 +76,13 @@ New table `subscriptions` (one row per user; RLS read-own, writes service-role o
 All under the app's existing route conventions; validate payloads with **Zod**; structured-log via
 `src/lib/observability.ts`.
 
-1. **`POST /api/billing/checkout`** — auth required. Get-or-create the Stripe customer for `user_id`,
-   create a Checkout Session (`mode: "subscription"`, line item = `STRIPE_PRICE_PRO`,
-   `success_url`/`cancel_url` back to `/settings`), return `{ url }`. Frontend free-tier CTA can POST
-   here instead of linking to `/pricing` once live.
-2. **`POST /api/billing/portal`** — auth required. Create a Billing Portal session for the user's
-   customer, return `{ url }`. This is the target the settings "Manage billing" button already names.
+1. **`POST /api/billing/checkout`** — auth required. Persist-or-reuse the durable Customer mapping,
+   then query Stripe for a non-terminal Subscription. Route an existing Subscription to Portal;
+   otherwise atomically claim one pending Checkout reservation and create it with the reservation's
+   Stripe idempotency key. Retries return the same unexpired hosted URL rather than creating a second
+   session/subscription.
+2. **`POST /api/billing/portal`** — auth required. Resolve the same Customer map and create a Billing
+   Portal session, returning `{ url }`. This is the target the settings "Manage billing" button names.
 3. **`POST /api/webhooks/stripe`** — **no auth**, **signature-verified** with
    `STRIPE_WEBHOOK_SECRET` (raw body — disable body parsing / use the raw route). Handle:
    `checkout.session.completed`, `customer.subscription.created|updated|deleted`,
@@ -82,9 +90,11 @@ All under the app's existing route conventions; validate payloads with **Zod**; 
 
 ### Idempotency (acceptance calls this out explicitly)
 Webhooks are at-least-once. Make handlers idempotent:
-- Dedupe on `event.id` (insert into `stripe_events`; if it exists, 200 and return early), **and**
-- Make the entitlement write a **state upsert** keyed by `user_id`/`subscription_id` (converging on
-  the object's current state), so a replayed or out-of-order event lands the same final row.
+- Atomically claim `event.id` in `stripe_events` (a concurrent in-progress delivery stays retryable), **and**
+- Resolve the signed event's Stripe Customer through `billing_customers`, retrieve the current
+  Subscription from Stripe, then state-upsert it keyed by `user_id` only if its observation is at least
+  as new as the stored one. This makes replayed and out-of-order events converge without trusting
+  session or invoice metadata.
 
 ## Env (test mode)
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PRO` (the Pro price id), and an app base
@@ -99,7 +109,9 @@ secret-free). Quota numbers stay on the existing `QUOTA_*` / `RATE_LIMIT_*` env 
 - **Entitlement mapping** — `getEntitlement` maps each Stripe status to the right `Tier` (pure,
   table-driven test).
 - **RLS** — a user cannot read another user's `subscriptions` row (mirrors the existing tenancy
-  suite).
+  suite), cannot write either entitlement row, and cannot read the server-only Customer map.
+- **Bounded test-mode E2E** — `docs/billing-test-mode-e2e.md` covers abandoned Checkout → retry →
+  signed webhook → entitlement → Portal → cancellation using one seller and no live charges.
 
 ## Frontend already in place (so the backend is a clean drop-in)
 - Settings **Plan & billing** card: live tier + real allowance, free → `/pricing`, paid →

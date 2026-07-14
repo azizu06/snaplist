@@ -18,6 +18,7 @@ describe("MockStripeBillingAdapter", () => {
       priceId: "price_pro",
       successUrl: "https://app/settings?billing=success",
       cancelUrl: "https://app/settings?billing=cancelled",
+      idempotencyKey: "checkout_key_1",
     });
     expect(url).toContain("u1");
     expect(a.checkoutCalls).toHaveLength(1);

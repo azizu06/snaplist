@@ -24,11 +24,12 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
    interface (mirroring the eBay adapter), lazy-imported so the offline path never loads it; tests use
    `MockStripeBillingAdapter`. Going live is a key swap, no code change.
 
-2. **Supabase is the entitlement source of truth; Stripe is the billing system of record.** A
-   `subscriptions` table mirrors each user's state (`tier`, `status`, customer/subscription ids,
-   `current_period_end`). The app reads tier with a fast, RLS-guarded query and **never calls Stripe
-   on the request path**. RLS is **read-own**; there is **no client write policy** — the webhook
-   writes with the service role, so a user cannot forge `paid`.
+2. **Supabase is the entitlement source of truth; Stripe is the billing system of record.** An immutable,
+   service-role-only `billing_customers` table maps one Clerk user to one Stripe Customer before Checkout
+   opens; `subscriptions` mirrors each user's current Subscription state (`tier`, `status`,
+   customer/subscription ids, `current_period_end`). The app reads tier with a fast, RLS-guarded query
+   and **never calls Stripe on the request path**. Subscription RLS is **read-own**; there is **no
+   client write policy** — a user cannot forge `paid`.
 
 3. **The seam the app flips:** `async getEntitlement(userId)` reads the mirror and maps status → tier
    via the single rule `entitlementTierFromStatus` (`active`/`trialing` → `paid`, else `free`). It is
@@ -38,13 +39,15 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
    entitlement (`checkDailyItemQuota(userId, env, await getEntitlement(userId))`), so Pro actually
    gets the higher cap.
 
-4. **Three endpoints, idempotent webhook.** `POST /api/billing/checkout` (subscription Checkout
-   Session), `POST /api/billing/portal` (Billing Portal), `POST /api/webhooks/stripe`
-   (signature-verified, raw body, Node runtime). Webhooks are **at-least-once**, so handling is
-   idempotent: dedupe on `event.id` (a `stripe_events` ledger) **and** a state-upsert keyed by
-   `user_id` — and the row is upserted **before** the event is marked processed, so a mid-flight
-   failure re-processes (the upsert is idempotent) rather than being dropped. Status contract: 400
-   bad signature, 503 unconfigured, 500 transient (Stripe retries), 200 processed/duplicate/ignored.
+4. **Three endpoints, lifecycle-safe webhook.** `POST /api/billing/checkout` persists or reuses the
+   Customer map, atomically claims one pending hosted Checkout (returning that same URL on retry), and
+   routes a Customer with a non-terminal Subscription to Portal; `POST /api/billing/portal` uses that
+   same map; `POST /api/webhooks/stripe` is signature-verified, raw-body, and Node runtime. Webhooks
+   atomically claim `event.id` (`stripe_events`), map the signed event's Customer through the durable
+   server map, retrieve the current Subscription from Stripe, and use a monotonic observed-at upsert
+   before completing the claim. That makes retries safe and prevents a late handler from restoring stale
+   entitlement state. Status contract: 400 bad signature, 503 unconfigured, 500 transient (Stripe
+   retries), 200 processed/duplicate/ignored.
 
 5. **Test mode, env-gated.** `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_PRO` are
    optional; unset → the routes 503 and everyone is `free`. Redirect URLs derive from the request
@@ -64,10 +67,11 @@ checkout/shipping stay on eBay). Two cross-cutting constraints:
 - **Positive:** real Stripe lifecycle + idempotent webhooks as a portfolio skill; entitlement is
   un-forgeable (service-role writes, RLS read-own); fully offline-testable behind the adapter; flips
   the existing tier seam with no quota re-design.
-- **Negative / risks:** a fresh checkout that never completes can create an unused Stripe customer
-  (test-mode, negligible); the rate limiter stays on the pure `resolveTier` (free limits) to avoid a
-  per-request DB read — paid gating applies to the per-upload quota (the real cost lever), not the
-  per-minute rate limit. Live mode awaits Stripe account verification (a key swap).
+- **Negative / risks:** a failed first Customer-map write prevents Checkout from opening rather than
+  risking a second Customer; ambiguous historical Customer ownership blocks the migration for human
+  repair. The rate limiter stays on the pure `resolveTier` (free limits) to avoid a per-request DB
+  read — paid gating applies to the per-upload quota (the real cost lever), not the per-minute rate
+  limit. Live mode awaits Stripe account verification (a key swap).
 
 ## Docs touched
 

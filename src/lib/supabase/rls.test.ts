@@ -107,6 +107,208 @@ describe("RLS tenancy isolation", () => {
     expect(data?.user_id).toBe(userA.id);
   });
 
+  it("keeps billing entitlement mirrors read-own and Customer maps server-only", async () => {
+    if (!reachable) return;
+
+    const { error: customerError } = await admin.from("billing_customers").insert([
+      { user_id: userA.id, stripe_customer_id: `cus_${userA.id}` },
+      { user_id: userB.id, stripe_customer_id: `cus_${userB.id}` },
+    ]);
+    expect(customerError).toBeNull();
+
+    const { error: subscriptionError } = await admin.from("subscriptions").upsert([
+      {
+        user_id: userA.id,
+        stripe_customer_id: `cus_${userA.id}`,
+        stripe_subscription_id: `sub_${userA.id}`,
+        tier: "free",
+        status: "incomplete",
+      },
+      {
+        user_id: userB.id,
+        stripe_customer_id: `cus_${userB.id}`,
+        stripe_subscription_id: `sub_${userB.id}`,
+        tier: "paid",
+        status: "active",
+      },
+    ]);
+    expect(subscriptionError).toBeNull();
+
+    const { data: aRows, error: aReadError } = await userA.client
+      .from("subscriptions")
+      .select("user_id, tier")
+      .order("user_id");
+    expect(aReadError).toBeNull();
+    expect(aRows).toEqual([{ user_id: userA.id, tier: "free" }]);
+
+    const { data: bAsA, error: crossTenantReadError } = await userA.client
+      .from("subscriptions")
+      .select("user_id")
+      .eq("user_id", userB.id);
+    expect(crossTenantReadError).toBeNull();
+    expect(bAsA ?? []).toHaveLength(0);
+
+    // No Customer-map policy exists for users. An empty result (rather than an
+    // error) is the normal PostgREST/RLS representation of that denial.
+    const { data: customerRows } = await userA.client
+      .from("billing_customers")
+      .select("user_id, stripe_customer_id");
+    expect(customerRows ?? []).toHaveLength(0);
+
+    // Client writes must either be denied or affect zero rows. Confirm through
+    // the service-role fixture that a user cannot forge paid entitlement.
+    const { data: forgedRows } = await userA.client
+      .from("subscriptions")
+      .update({ tier: "paid", status: "active" })
+      .eq("user_id", userA.id)
+      .select("tier");
+    expect(forgedRows ?? []).toHaveLength(0);
+
+    // A delayed handler that observed active state earlier must not overwrite a
+    // newer cancellation already mirrored by another webhook worker.
+    const { data: newerWrite, error: newerWriteError } = await admin.rpc(
+      "upsert_billing_subscription",
+      {
+        p_user_id: userA.id,
+        p_stripe_customer_id: `cus_${userA.id}`,
+        p_stripe_subscription_id: `sub_${userA.id}`,
+        p_status: "canceled",
+        p_current_period_end: null,
+        p_stripe_observed_at: "2030-01-02T00:00:00.000Z",
+      },
+    );
+    expect(newerWriteError).toBeNull();
+    expect(newerWrite).toBe(true);
+
+    const { data: staleWrite, error: staleWriteError } = await admin.rpc(
+      "upsert_billing_subscription",
+      {
+        p_user_id: userA.id,
+        p_stripe_customer_id: `cus_${userA.id}`,
+        p_stripe_subscription_id: `sub_${userA.id}`,
+        p_status: "active",
+        p_current_period_end: null,
+        p_stripe_observed_at: "2030-01-01T00:00:00.000Z",
+      },
+    );
+    expect(staleWriteError).toBeNull();
+    expect(staleWrite).toBe(false);
+
+    const { data: authoritative, error: authoritativeError } = await admin
+      .from("subscriptions")
+      .select("tier, status")
+      .eq("user_id", userA.id)
+      .single();
+    expect(authoritativeError).toBeNull();
+    expect(authoritative).toMatchObject({ tier: "free", status: "canceled" });
+  });
+
+  it("atomically claims Stripe events and permits only the service-role lifecycle path", async () => {
+    if (!reachable) return;
+    const eventId = `evt_claim_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const type = "customer.subscription.updated";
+
+    const [first, second] = await Promise.all([
+      admin.rpc("claim_stripe_event", { p_event_id: eventId, p_type: type }),
+      admin.rpc("claim_stripe_event", { p_event_id: eventId, p_type: type }),
+    ]);
+    expect(first.error).toBeNull();
+    expect(second.error).toBeNull();
+    const responses = [first.data?.[0], second.data?.[0]];
+    const claimed = responses.find((response) => response?.state === "claimed");
+    expect(claimed?.claim_token).toEqual(expect.any(String));
+    expect(responses.map((response) => response?.state).sort()).toEqual(["claimed", "in_progress"]);
+
+    const { data: released, error: releaseError } = await admin.rpc("release_stripe_event_claim", {
+      p_event_id: eventId,
+      p_claim_token: claimed!.claim_token,
+    });
+    expect(releaseError).toBeNull();
+    expect(released).toBe(true);
+
+    const { data: retryRows, error: retryError } = await admin.rpc("claim_stripe_event", {
+      p_event_id: eventId,
+      p_type: type,
+    });
+    expect(retryError).toBeNull();
+    const retry = retryRows?.[0];
+    expect(retry?.state).toBe("claimed");
+
+    const { data: completed, error: completeError } = await admin.rpc("complete_stripe_event_claim", {
+      p_event_id: eventId,
+      p_claim_token: retry!.claim_token,
+    });
+    expect(completeError).toBeNull();
+    expect(completed).toBe(true);
+
+    const { data: duplicateRows, error: duplicateError } = await admin.rpc("claim_stripe_event", {
+      p_event_id: eventId,
+      p_type: type,
+    });
+    expect(duplicateError).toBeNull();
+    expect(duplicateRows?.[0]?.state).toBe("duplicate");
+
+    const { error: clientClaimError } = await userA.client.rpc("claim_stripe_event", {
+      p_event_id: `${eventId}_client`,
+      p_type: type,
+    });
+    expect(clientClaimError).not.toBeNull();
+  });
+
+  it("atomically reserves one hosted Checkout for concurrent first-time starts", async () => {
+    if (!reachable) return;
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const userId = `billing_reservation_${suffix}`;
+    const customerId = `cus_reservation_${suffix}`;
+    const { error: customerError } = await admin
+      .from("billing_customers")
+      .insert({ user_id: userId, stripe_customer_id: customerId });
+    expect(customerError).toBeNull();
+
+    const [first, second] = await Promise.all([
+      admin.rpc("claim_billing_checkout", {
+        p_user_id: userId,
+        p_stripe_customer_id: customerId,
+      }),
+      admin.rpc("claim_billing_checkout", {
+        p_user_id: userId,
+        p_stripe_customer_id: customerId,
+      }),
+    ]);
+    expect(first.error).toBeNull();
+    expect(second.error).toBeNull();
+    const responses = [first.data?.[0], second.data?.[0]];
+    const claimed = responses.find((response) => response?.state === "claim");
+    expect(claimed?.idempotency_key).toEqual(expect.any(String));
+    expect(responses.map((response) => response?.state).sort()).toEqual(["claim", "in_progress"]);
+
+    const { data: completed, error: completeError } = await admin.rpc(
+      "complete_billing_checkout_claim",
+      {
+        p_user_id: userId,
+        p_claim_token: claimed!.claim_token,
+        p_checkout_session_id: `cs_${suffix}`,
+        p_checkout_url: "https://checkout.stripe.test/reused-session",
+        p_expires_at: "2030-01-01T00:00:00.000Z",
+      },
+    );
+    expect(completeError).toBeNull();
+    expect(completed).toBe(true);
+
+    const { data: retryRows, error: retryError } = await admin.rpc("claim_billing_checkout", {
+      p_user_id: userId,
+      p_stripe_customer_id: customerId,
+    });
+    expect(retryError).toBeNull();
+    expect(retryRows?.[0]).toMatchObject({
+      state: "ready",
+      checkout_url: "https://checkout.stripe.test/reused-session",
+    });
+
+    await admin.from("billing_checkout_reservations").delete().eq("user_id", userId);
+    await admin.from("billing_customers").delete().eq("user_id", userId);
+  });
+
   it("a user can insert and read back their OWN item", async () => {
     if (!reachable) return;
     const { data, error } = await userA.client
