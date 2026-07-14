@@ -1,5 +1,8 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EbayTokenProvider } from "./types";
 import { EbayApiError } from "./types";
+import { bindEbaySandboxFallback } from "./connections";
+import { UserTokenProvider } from "./user-token-provider";
 
 /**
  * App-level (env-credential) token provider for the eBay Sell API — the sandbox
@@ -14,11 +17,10 @@ import { EbayApiError } from "./types";
  *     it for short-lived access tokens and caches them until shortly before
  *     expiry.
  *
- * NOTE on grant choice: the Sell Inventory API requires a USER token (it acts
- * on a seller's inventory), so the client-credentials grant is NOT sufficient —
- * hence refresh-token, not client-credentials. Per-user OAuth (issue #17)
- * replaces this provider with one that looks tokens up per SnapList user; the
- * HTTP adapter is unchanged because it only sees `EbayTokenProvider`.
+ * NOTE on grant choice: the Sell Inventory and member-messaging APIs require a
+ * USER token, so the client-credentials grant is NOT sufficient. Connected
+ * sellers use `UserTokenProvider`; this provider composes only the restricted
+ * one-operator Sandbox fallback. HTTP adapters see the same token interface.
  *
  * Credentials are read LAZILY (per call, from the injected env reader), never at
  * module load, so importing the adapter never explodes in environments without
@@ -30,6 +32,8 @@ const SELL_INVENTORY_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.inventor
 
 /** Refresh the cached token this many ms before its actual expiry. */
 const EXPIRY_SLACK_MS = 60_000;
+const DEFAULT_TOKEN_REFRESH_TIMEOUT_MS = 30_000;
+const MAX_TOKEN_REFRESH_TIMEOUT_MS = 2 * 60_000;
 
 export interface EnvTokenProviderOptions {
   /** Injectable for tests; defaults to globalThis.fetch. */
@@ -38,12 +42,15 @@ export interface EnvTokenProviderOptions {
   env?: () => Record<string, string | undefined>;
   /** Injectable clock for cache-expiry tests. */
   now?: () => number;
+  /** Refresh-token scopes for the composing adapter. */
+  scopes?: string[];
 }
 
 export class EnvTokenProvider implements EbayTokenProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly readEnv: () => Record<string, string | undefined>;
   private readonly now: () => number;
+  private readonly scopes: string[];
 
   private cached?: { token: string; expiresAt: number };
 
@@ -51,9 +58,13 @@ export class EnvTokenProvider implements EbayTokenProvider {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.readEnv = options.env ?? (() => process.env);
     this.now = options.now ?? Date.now;
+    this.scopes = options.scopes ?? [SELL_INVENTORY_SCOPE];
   }
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(
+    _expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<string> {
     const env = this.readEnv();
 
     // Mode 1: pre-minted user access token (fast sandbox loop).
@@ -77,6 +88,15 @@ export class EnvTokenProvider implements EbayTokenProvider {
     }
 
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+    const configuredTimeout = Number(env.EBAY_TOKEN_REFRESH_TIMEOUT_MS);
+    const timeoutMs =
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? Math.min(configuredTimeout, MAX_TOKEN_REFRESH_TIMEOUT_MS)
+        : DEFAULT_TOKEN_REFRESH_TIMEOUT_MS;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = parentSignal
+      ? AbortSignal.any([parentSignal, timeoutSignal])
+      : timeoutSignal;
     const res = await this.fetchImpl(`${baseUrl}/identity/v1/oauth2/token`, {
       method: "POST",
       headers: {
@@ -86,8 +106,9 @@ export class EnvTokenProvider implements EbayTokenProvider {
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: refreshToken,
-        scope: SELL_INVENTORY_SCOPE,
+        scope: this.scopes.join(" "),
       }).toString(),
+      signal,
     });
 
     const body: unknown = await res.json().catch(() => undefined);
@@ -116,5 +137,67 @@ export class EnvTokenProvider implements EbayTokenProvider {
       expiresAt: this.now() + (expiresIn ?? 0) * 1000,
     };
     return token;
+  }
+}
+
+export class OperatorSandboxTokenProvider implements EbayTokenProvider {
+  private readonly envProvider: EnvTokenProvider;
+  private readonly dispatchProvider: UserTokenProvider;
+
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly userId: string,
+    private readonly sellerId: string,
+    private readonly scheduled: boolean,
+    options: EnvTokenProviderOptions = {},
+  ) {
+    this.envProvider = new EnvTokenProvider({
+      ...options,
+      scopes: options.scopes ?? [SELL_INVENTORY_SCOPE],
+    });
+    this.dispatchProvider = new UserTokenProvider(supabase, {
+      userId,
+      scheduled,
+    });
+  }
+
+  async beginProviderDispatch(
+    resourceId: string,
+    operation: "publish" | "reprice",
+  ) {
+    const boundGeneration = await bindEbaySandboxFallback(
+      this.supabase,
+      this.userId,
+      this.sellerId,
+      this.scheduled,
+    );
+    const lease = await this.dispatchProvider.beginProviderDispatch(
+      resourceId,
+      operation,
+    );
+    if (lease.accountGeneration !== boundGeneration) {
+      await lease.release();
+      throw new Error("eBay Sandbox fallback account generation changed");
+    }
+    return lease;
+  }
+
+  async getAccessToken(
+    expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<string> {
+    const boundGeneration = await bindEbaySandboxFallback(
+      this.supabase,
+      this.userId,
+      this.sellerId,
+      this.scheduled,
+    );
+    if (
+      expectedAccountGeneration &&
+      expectedAccountGeneration !== boundGeneration
+    ) {
+      throw new Error("eBay Sandbox fallback account generation changed");
+    }
+    return this.envProvider.getAccessToken(boundGeneration, parentSignal);
   }
 }

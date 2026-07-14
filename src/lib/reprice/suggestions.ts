@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { EbayAdapter } from "../marketplace/ebay";
+import type { EbayAdapter, EbayDispatchContext } from "../marketplace/ebay";
 import { marketplaceCurrency } from "../marketplace/ebay/map";
 import { createNotification } from "../notifications";
 
@@ -9,9 +9,9 @@ import { createNotification } from "../notifications";
  * The cron sweep (sweep.ts) writes `reprice_suggestions`; this module is how
  * the seller reads and resolves them: list the pending ones for the dashboard
  * card, one-tap APPLY (revise the live eBay listing through the adapter, then
- * record the change), or DISMISS. Everything here runs on the caller's
- * USER-SCOPED client, so RLS pins tenancy — a foreign suggestion id is simply
- * not found.
+ * record the change), or DISMISS. Seller reads and dispatch claims use the
+ * caller's RLS client; acknowledged completion may use a tenant-bound server
+ * client. A foreign suggestion id is never returned or mutated.
  */
 
 export interface RepriceSuggestionView {
@@ -114,6 +114,7 @@ export interface ApplyRepriceOptions {
   env?: () => Record<string, string | undefined>;
   /** Injectable clock (tests). */
   now?: () => Date;
+  completionClient?: SupabaseClient;
 }
 
 /**
@@ -178,14 +179,64 @@ export async function applyRepriceSuggestion(
     );
   }
 
-  await adapter.revisePrice({
-    sku: row.listing_id,
-    offerId: row.listings.ebay_offer_id,
-    price: { value: applyPrice.toFixed(2), currency },
+  const nowIso = now().toISOString();
+  await adapter.revisePrice(
+    {
+      sku: row.listing_id,
+      offerId: row.listings.ebay_offer_id,
+      price: { value: applyPrice.toFixed(2), currency },
+    },
+    async (_result, context) => {
+      await persistAppliedReprice(
+        options.completionClient ?? supabase,
+        row,
+        suggestionId,
+        applyPrice,
+        nowIso,
+        context,
+      );
+    },
+  );
+
+  await createNotification(supabase, {
+    userId,
+    kind: "system",
+    title: `Repriced “${row.listings.title?.trim() || "your listing"}” to $${applyPrice.toFixed(2)}`,
+    body: "The new price is live on eBay.",
+    href: `/listings/${row.listing_id}`,
+    itemId: row.item_id,
+    listingId: row.listing_id,
   });
 
-  // The revision is LIVE — record it. RLS re-pins every write to the caller.
-  const nowIso = now().toISOString();
+  return { appliedPrice: applyPrice };
+}
+
+async function persistAppliedReprice(
+  supabase: SupabaseClient,
+  row: SuggestionRow,
+  suggestionId: string,
+  applyPrice: number,
+  nowIso: string,
+  context: EbayDispatchContext | null,
+): Promise<void> {
+  if (context) {
+    const { error } = await supabase.rpc("complete_ebay_reprice_dispatch", {
+      p_listing_id: row.listing_id,
+      p_item_id: row.item_id,
+      p_suggestion_id: suggestionId,
+      p_account_generation: context.accountGeneration,
+      p_attempt_token: context.attemptToken,
+      p_applied_price: applyPrice,
+      p_resolved_at: nowIso,
+    });
+    if (error) {
+      throw new Error(
+        `Price revised on eBay but generation-bound persistence failed: ${error.message}`,
+      );
+    }
+    return;
+  }
+
   const [suggestionWrite, itemWrite, listingWrite] = await Promise.all([
     supabase
       .from("reprice_suggestions")
@@ -204,27 +255,10 @@ export async function applyRepriceSuggestion(
       .update({ listed_price: applyPrice, last_priced_at: nowIso })
       .eq("id", row.listing_id),
   ]);
-  const writeError =
-    suggestionWrite.error ?? itemWrite.error ?? listingWrite.error;
-  if (writeError) {
-    // The eBay revision is live; surface loudly so the caller reconciles
-    // instead of silently showing the old price.
-    throw new Error(
-      `Price revised on eBay but recording it failed: ${writeError.message}`,
-    );
+  const error = suggestionWrite.error ?? itemWrite.error ?? listingWrite.error;
+  if (error) {
+    throw new Error(`Price revised on eBay but recording it failed: ${error.message}`);
   }
-
-  await createNotification(supabase, {
-    userId,
-    kind: "system",
-    title: `Repriced “${row.listings.title?.trim() || "your listing"}” to $${applyPrice.toFixed(2)}`,
-    body: "The new price is live on eBay.",
-    href: `/listings/${row.listing_id}`,
-    itemId: row.item_id,
-    listingId: row.listing_id,
-  });
-
-  return { appliedPrice: applyPrice };
 }
 
 /** Dismiss a pending suggestion (RLS-scoped; resolving twice is a no-op). */

@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { ReplySendConflictError, approveAndSendReply } from "@/lib/inbox";
+import {
+  MessageDeliveryAttemptError,
+  MessageDeliveryConflictError,
+  sendCanonicalReply,
+} from "@/lib/inbox/transport";
+import { createMessagingTransportForConversation } from "@/lib/inbox/adapters";
 import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 
@@ -12,12 +17,12 @@ import { enforceRateLimit } from "@/lib/abuse";
  *
  * The reply text in the body is what the seller actually approved — it may differ
  * from the agent's draft (the "edit before sending" acceptance criterion).
- * Delivery is the STUBBED seam (logged no-op); the real eBay send is issue #14.
- * The inbound message is loaded through the USER-SCOPED client so RLS proves
+ * The persisted marketplace chooses the simulated or real eBay adapter. The
+ * inbound message is loaded through the USER-SCOPED client so RLS proves
  * ownership (another user's messageId 404s).
  */
 
-const bodySchema = z.object({ reply: z.string().trim().min(1) });
+const bodySchema = z.object({ reply: z.string().trim().min(1).max(2_000) });
 const paramsSchema = z.object({ messageId: z.uuid() });
 
 export async function POST(
@@ -54,39 +59,37 @@ export async function POST(
   // RLS-scoped read: only the owner's own INBOUND question is sendable.
   const { data: message } = await supabase
     .from("messages")
-    .select("id, item_id, listing_id, direction, status")
+    .select("id, marketplace")
     .eq("id", params.data.messageId)
     .eq("direction", "inbound")
     .maybeSingle();
   if (!message) {
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
-  // Fast-path duplicate check only — the AUTHORITATIVE guard is the
-  // compare-and-set claim inside approveAndSendReply (drafted → sent), which
-  // concurrent requests cannot both win.
-  if (message.status === "sent") {
-    return NextResponse.json(
-      { error: "A reply was already sent for this message" },
-      { status: 409 },
-    );
-  }
-
   try {
-    const { outbound } = await approveAndSendReply(supabase, {
-      userId: userId,
-      message: {
-        id: message.id,
-        item_id: message.item_id,
-        listing_id: message.listing_id,
-      },
-      reply: parsed.data.reply,
-      // deliver defaults to the stub (logged no-op) — issue #14 swaps it.
+    const transport = await createMessagingTransportForConversation(
+      supabase,
+      userId,
+      message.marketplace,
+    );
+    const outbound = await sendCanonicalReply({
+      ...transport,
+      messageId: message.id,
+      body: parsed.data.reply,
     });
     return NextResponse.json({ outboundId: outbound.id, status: "sent" });
   } catch (err) {
-    // Lost the CAS race / duplicate reply row → idempotent conflict, not a 500.
-    if (err instanceof ReplySendConflictError) {
+    if (err instanceof MessageDeliveryConflictError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    if (err instanceof MessageDeliveryAttemptError) {
+      return NextResponse.json(
+        {
+          error: "Reply was not confirmed delivered. It remains available to retry.",
+          deliveryStatus: err.kind,
+        },
+        { status: 502 },
+      );
     }
     // Never leak the raw Supabase/delivery error to the client (CWE-209, #57).
     return serverErrorJson("inbox.send", err, "Failed to send reply.");

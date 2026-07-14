@@ -22,11 +22,12 @@ import {
   useIsDesktopPane,
 } from "./conversation-list";
 import { useListResize } from "./use-list-resize";
+import { authorizeDeliveryRetry } from "./delivery-recovery";
 
 /**
  * Live inbox (issue #13). Subscribes to Supabase Realtime `postgres_changes` on
- * the user's `messages` rows, so a simulated buyer question (INSERT), the agent's
- * draft (UPDATE) and the sent reply (INSERT + UPDATE) all appear WITHOUT refresh.
+ * the user's `messages` rows, so simulated/imported questions (INSERT), agent
+ * drafts (UPDATE), and sent replies (INSERT + UPDATE) appear WITHOUT refresh.
  *
  * Security: the browser client carries only the anon key + the user's session;
  * the subscription filter is user_id, and Realtime additionally authorizes every
@@ -91,6 +92,12 @@ export function InboxClient({
   const [edits, setEdits] = useState<Record<string, string>>({});
   // Follow-up composer text keyed by conversation root (post-reply free text).
   const [followUpDrafts, setFollowUpDrafts] = useState<Record<string, string>>({});
+  // Keep the same idempotency key while a seller retries the same typed
+  // follow-up after an uncertain HTTP response. It is cleared only after the
+  // server confirms delivery.
+  const [followUpRequestIds, setFollowUpRequestIds] = useState<
+    Record<string, string>
+  >({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
   // thread view. null → list view on mobile, calm placeholder on desktop.
@@ -123,7 +130,7 @@ export function InboxClient({
 
     // Refetch-on-SUBSCRIBED: anything inserted/updated before the listener was
     // active (or while the connection was down) is reconciled in here, so a
-    // simulated question can never stay invisible until a page refresh.
+    // message change can never stay invisible until a page refresh.
     const refetch = async () => {
       const { data } = await supabase
         .from("messages")
@@ -174,7 +181,13 @@ export function InboxClient({
           console.error("[realtime] inbox channel", status, err);
         }
         setConnection(connectionFromChannelStatus(status));
-        if (status === "SUBSCRIBED") void refetch();
+        if (status === "SUBSCRIBED") {
+          // Foreground refresh and the cron both enter through the same shared
+          // sync service. The overlapping cursor makes reconnects safe.
+          void fetch("/api/inbox/sync", { method: "POST" })
+            .catch(() => undefined)
+            .finally(refetch);
+        }
       });
 
     // Join watchdog: a channel that never reaches SUBSCRIBED (blocked
@@ -311,11 +324,24 @@ export function InboxClient({
   // (e.g. a concurrent retry won), so it is treated as success: the outbound
   // row arrives over Realtime either way.
   async function retryDelivery(message: MessageRow) {
+    const authorization = authorizeDeliveryRetry(
+      message.delivery_status,
+      message.delivery_attempted_at,
+      () =>
+        window.confirm(
+          "eBay may already have received this reply. Retrying could send a duplicate. Retry anyway?",
+        ),
+    );
+    if (!authorization.proceed) return;
     setBusy(`retry:${message.id}`);
     setError(null);
     try {
       const res = await fetch(`/api/inbox/${message.id}/retry-delivery`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmDuplicateRisk: authorization.confirmDuplicateRisk,
+        }),
       });
       if (!res.ok && res.status !== 409) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -359,21 +385,70 @@ export function InboxClient({
   async function sendFollowUp(message: MessageRow) {
     const body = (followUpDrafts[message.id] ?? "").trim();
     if (body === "") return;
+    const requestId =
+      followUpRequestIds[message.id] ?? window.crypto.randomUUID();
+    setFollowUpRequestIds((prev) => ({ ...prev, [message.id]: requestId }));
     setBusy(`followup:${message.id}`);
     setError(null);
     try {
       const res = await fetch(`/api/inbox/${message.id}/follow-up`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: body }),
+        body: JSON.stringify({ message: body, requestId }),
       });
       if (!res.ok) {
         const b = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(b?.error ?? `Send failed (${res.status})`);
       }
       setFollowUpDrafts((prev) => ({ ...prev, [message.id]: "" }));
+      setFollowUpRequestIds((prev) => {
+        const next = { ...prev };
+        delete next[message.id];
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryFollowUp(message: MessageRow) {
+    const authorization = authorizeDeliveryRetry(
+      message.delivery_status,
+      message.delivery_attempted_at,
+      () =>
+        window.confirm(
+          "eBay may already have received this message. Retrying could send a duplicate. Retry anyway?",
+        ),
+    );
+    if (!authorization.proceed) return;
+    setBusy(`retry-followup:${message.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/inbox/outbound/${message.id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmDuplicateRisk: authorization.confirmDuplicateRisk,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error ?? `Retry failed (${res.status})`);
+      }
+      const conversationId = message.reply_to;
+      if (conversationId) {
+        setFollowUpRequestIds((prev) => {
+          const next = { ...prev };
+          delete next[conversationId];
+          return next;
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
     } finally {
       setBusy(null);
     }
@@ -471,6 +546,7 @@ export function InboxClient({
       onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
       onApproveAndSend={approveAndSend}
       onRetryDelivery={retryDelivery}
+      onRetryFollowUp={retryFollowUp}
       onRetryDraft={retryDraft}
       onFollowUpChange={(id, value) =>
         setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))

@@ -14,8 +14,11 @@ the ordered checklist for the flip. Sandbox setup itself is documented in
 | `EBAY_VERIFICATION_TOKEN` | unused | random 32–80 char token you mint |
 | `EBAY_DELETION_ENDPOINT_URL` | unused | `https://<host>/api/ebay/account-deletion` |
 | `EBAY_TOKEN_ENCRYPTION_KEY` | any | keep stable — rotating it orphans stored seller tokens |
+| `SUPABASE_SERVICE_ROLE_KEY` | current `sb_secret_...` | current `sb_secret_...`; required by tenant-bound completion and cron RPCs |
 | policy ids (`EBAY_*_POLICY_ID`, `EBAY_MERCHANT_LOCATION_KEY`) | sandbox seller's | production seller's |
 | `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` | sandbox convenience | **unset** — production publishes use per-user OAuth |
+| `EBAY_MESSAGING_SANDBOX_OPERATOR_*` | optional one-tenant fallback | **unset** — never allowed in production |
+| `CRON_SECRET` | optional for local/manual checks | required before enabling scheduled inbox sync |
 
 The consent-screen host flips automatically with `EBAY_BASE_URL`
 (`auth.sandbox.ebay.com` ↔ `auth.ebay.com`); nothing else derives state from
@@ -40,8 +43,11 @@ issues production keys.
 
 What the endpoint does once live: verifies each notice's `x-ebay-signature`
 against eBay's notification public key (unverifiable → 412 so eBay retries),
-then erases the eBay user's stored OAuth connection and logs
-`ebay.account_deletion` for compliance.
+then atomically erases every matched seller or buyer data set: OAuth credentials,
+message trees, notifications, unresolved questions, sync state, fallback bindings,
+and private identity provenance. Generation tombstones prevent erased identity
+from being rebound by stale work. The route then logs only the matched-tenant
+count under `ebay.account_deletion` for compliance.
 
 ### 2. Request the production keyset
 
@@ -61,14 +67,17 @@ EBAY_CLIENT_ID=<production App ID>
 EBAY_CLIENT_SECRET=<production Cert ID>
 EBAY_RU_NAME=<production RuName>
 EBAY_TOKEN_ENCRYPTION_KEY=<openssl rand -base64 32; then never rotate casually>
+SUPABASE_SERVICE_ROLE_KEY=<current sb_secret_... value>
 EBAY_MARKETPLACE_ID=EBAY_US
+CRON_SECRET=<openssl rand -hex 32; required before scheduled inbox sync>
 EBAY_FULFILLMENT_POLICY_ID=...   # the real seller's business policies
 EBAY_PAYMENT_POLICY_ID=...
 EBAY_RETURN_POLICY_ID=...
 EBAY_MERCHANT_LOCATION_KEY=...
 ```
 
-and remove `EBAY_OAUTH_TOKEN` / `EBAY_REFRESH_TOKEN` (sandbox-only crutches —
+and remove `EBAY_OAUTH_TOKEN`, `EBAY_REFRESH_TOKEN`, and both
+`EBAY_MESSAGING_SANDBOX_OPERATOR_*` values (Sandbox-only crutches —
 with them unset, publishing *requires* a per-user connection, which is the
 correct production posture).
 
@@ -78,12 +87,27 @@ Settings → **Connect eBay** → approve on eBay's consent screen. Tokens are
 stored AES-256-GCM-encrypted (`ebay_connections`, RLS-scoped); the seller can
 disconnect any time. Publishes now run under the seller's own identity — the
 `EbayTokenProvider` seam swaps per-user tokens in without touching the adapter.
+The same per-user provider resolves authenticated pre-sale messaging tokens;
+connections created before the `commerce.message` scope was added must
+reconnect before messaging is enabled.
+
+Disconnect refuses while a provider dispatch is active. Once it succeeds, it
+deletes the encrypted grant, advances the tenant's eBay account generation,
+clears sync/reconciliation state for the retired generation, and marks any
+still-actionable imported questions `provider_unavailable`; reconnecting cannot
+resume a stale send under the replacement account.
 
 ### 5. First production publish
 
 Upload a real item, save a distinctive seller price override, then review → **Publish to eBay**.
 Verify the live offer uses the override rather than the logged suggestion and that the prediction
 log remains unchanged. Then end the listing from Seller Hub if it was only a smoke test.
+
+Production messaging remains owner-controlled under #17. Enable the five-minute
+Supabase inbox cron from the Sandbox messaging runbook and run a real two-user
+message only after the production keyset, deletion subscription, scopes,
+policies, and owner approval are all confirmed; until then use the Sandbox
+messaging runbook.
 
 ## Known constraint: single production seller
 

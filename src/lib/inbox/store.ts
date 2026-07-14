@@ -9,9 +9,9 @@ import { messageRowSchema, type MessageRow } from "./types";
  * the `supabase_realtime` publication (20260610191000), so each insert/update
  * here is what the live inbox receives over Realtime.
  *
- * Delivery is an injectable seam (`DeliverReply`). The default is a STUB that
- * logs and does nothing — the PRD keeps messaging simulated until the eBay
- * adapter (issue #14) swaps a real sender in behind the same type.
+ * These legacy delivery helpers remain for the credential-free simulator and
+ * its regression tests. Production routes use `transport.ts`, whose marketplace
+ * adapter persists acknowledged/failure/ambiguous delivery truth.
  */
 
 export interface CreateBuyerMessageInput {
@@ -131,16 +131,13 @@ export async function markDraftFailed(
 }
 
 /**
- * The delivery seam. v1 is sandbox-only: the default implementation LOGS and
- * does nothing. The real eBay send (issue #14) replaces the default without
- * touching `approveAndSendReply` or its callers.
+ * Legacy simulator delivery seam. The default implementation logs and does
+ * nothing; authenticated marketplace routes use `transport.ts` instead.
  *
  * IDEMPOTENCY CONTRACT: `idempotencyKey` is stable across send + every retry
- * of the same inbound question (it is the inbound message id). A real adapter
- * MUST deduplicate on it (e.g. pass it as the marketplace idempotency token),
- * because recovery can re-invoke delivery after a crash that lost the
- * outbound row — the unique DB index deduplicates the ROW, only this key can
- * deduplicate the external side effect.
+ * of the same simulated inbound question (it is the inbound message id). Test
+ * deliveries can use it to deduplicate repeated invocations; real marketplace
+ * delivery has its own durable intent and acknowledgement protocol.
  */
 export type DeliverReply = (args: {
   messageId: string;
@@ -149,7 +146,7 @@ export type DeliverReply = (args: {
   idempotencyKey: string;
 }) => Promise<void>;
 
-/** Stubbed delivery: logged no-op (PRD: messaging simulated until the adapter). */
+/** Simulator-only delivery: a logged no-op with no marketplace side effect. */
 export const stubDeliverReply: DeliverReply = async ({
   messageId,
   reply,
@@ -169,7 +166,7 @@ export interface ApproveAndSendReplyInput {
   message: Pick<MessageRow, "id" | "item_id" | "listing_id">;
   /** The seller-approved (possibly edited) reply text. */
   reply: string;
-  /** Injectable delivery; defaults to the logged no-op stub. */
+  /** Simulator-only injectable delivery; defaults to the logged no-op stub. */
   deliver?: DeliverReply;
 }
 
@@ -194,7 +191,7 @@ export class ReplySendConflictError extends Error {
 const PG_UNIQUE_VIOLATION = "23505";
 
 /**
- * Seller approved (or edited) the reply → "send" it. Ordering is chosen so that
+ * Simulator-only approve-and-send helper. Ordering is chosen so that
  * NO crash point leaves the question in a re-deliverable state (the delivery
  * adapter is non-idempotent, so double delivery is the failure we must rule out):
  *
@@ -202,7 +199,7 @@ const PG_UNIQUE_VIOLATION = "23505";
  *      WHERE status = 'drafted'. 0 rows → someone already claimed it →
  *      `ReplySendConflictError` (409). Concurrent sends race on this CAS and
  *      exactly one wins; the claim happens BEFORE the non-idempotent delivery.
- *   2. DELIVER via the injectable seam (stub logs; real send is issue #14).
+ *   2. DELIVER via the simulator's injectable seam (the default only logs).
  *   3. PERSIST the outbound reply row (threaded via `reply_to`, `sent_at`
  *      stamped). The partial unique index on messages(reply_to)
  *      (20260611004000) is the backstop: a unique violation means the reply
@@ -247,7 +244,7 @@ export async function approveAndSendReply(
     throw new ReplySendConflictError();
   }
 
-  // 2. Deliver — only ever reached by the single CAS winner.
+  // 2. Simulator delivery — only ever reached by the single CAS winner.
   await deliver({
     messageId: input.message.id,
     reply,
@@ -292,27 +289,22 @@ export interface SendFollowUpMessageInput {
   message: Pick<MessageRow, "id" | "item_id" | "listing_id">;
   /** The seller's free-text follow-up ("Hold on, let me check…"). */
   body: string;
-  /** Injectable delivery; defaults to the logged no-op stub. */
+  /** Simulator-only injectable delivery; defaults to the logged no-op stub. */
   deliver?: DeliverReply;
 }
 
 /**
- * Send a FOLLOW-UP message in a conversation the seller has already replied to.
- *
- * eBay's member messaging is not one-and-done (AddMemberMessageRTQ / AddMember-
- * MessagesAAQToBidder let a seller send many messages per thread), so after the
- * canonical reply the seller can keep messaging the buyer. A follow-up is an
+ * Simulator-only FOLLOW-UP in a conversation the seller has already replied to.
+ * A follow-up is an
  * outbound row threaded to the same conversation root (`reply_to` = the inbound
  * question) but marked `reply_kind = 'followup'`, so the
  * messages_canonical_reply_unique index (which only covers the canonical reply)
  * never rejects it. Unlike `approveAndSendReply` there is NO status CAS and NO
  * draft: a follow-up is plain seller-authored text, allowed any number of times.
  *
- * v1 ORDERING (deliberate, simpler than the canonical path): insert the row,
- * THEN deliver keyed by the new row id. While delivery is the stubbed no-op this
- * is equivalent to the canonical path; it also gives a real adapter a stable
- * per-follow-up idempotency key. Parity with the canonical claim/retry rigor
- * (deliver-before-persist, crash recovery) lands with the real eBay adapter (#14).
+ * Legacy ordering inserts the row, then invokes the simulator seam keyed by the
+ * new row id. Authenticated marketplace follow-ups use `transport.ts`, which
+ * persists a durable intent before provider dispatch and records delivery truth.
  */
 export async function sendFollowUpMessage(
   supabase: SupabaseClient,
@@ -350,8 +342,7 @@ export async function sendFollowUpMessage(
 
   const row = messageRowSchema.parse(outbound);
 
-  // Deliver via the injectable seam (stub logs; real send is issue #14). Keyed
-  // by the persisted row id so a real adapter can dedupe this specific message.
+  // Invoke the simulator delivery seam, keyed by the persisted row id.
   await deliver({
     messageId: input.message.id,
     reply: body,
@@ -368,7 +359,7 @@ export interface RetryReplyDeliveryInput {
   message: Pick<MessageRow, "id" | "item_id" | "listing_id">;
   /** The reply text to (re)deliver — the persisted draft the claim was for. */
   reply: string;
-  /** Injectable delivery; defaults to the logged no-op stub. */
+  /** Simulator-only injectable delivery; defaults to the logged no-op stub. */
   deliver?: DeliverReply;
 }
 

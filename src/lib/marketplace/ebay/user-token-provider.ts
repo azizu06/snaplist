@@ -3,7 +3,10 @@ import type { EbayTokenProvider } from "./types";
 import { EbayApiError } from "./types";
 import { ebayApiBaseUrl } from "./oauth";
 import {
+  beginEbayProviderDispatch,
+  endEbayProviderDispatch,
   getDecryptedConnection,
+  renewEbayProviderDispatch,
   updateCachedAccessToken,
 } from "./connections";
 
@@ -24,35 +27,120 @@ const SELL_INVENTORY_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.inventor
 
 /** Refresh this many ms before actual expiry. */
 const EXPIRY_SLACK_MS = 60_000;
+const DEFAULT_TOKEN_REFRESH_TIMEOUT_MS = 30_000;
+const MAX_TOKEN_REFRESH_TIMEOUT_MS = 2 * 60_000;
+const PROVIDER_DISPATCH_RENEW_MS = 60_000;
 
 export interface UserTokenProviderOptions {
   fetch?: typeof fetch;
   env?: () => Record<string, string | undefined>;
   now?: () => number;
+  /** Required when the caller uses a service-role client (background sync). */
+  userId?: string;
+  scheduled?: boolean;
 }
 
 export class UserTokenProvider implements EbayTokenProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly readEnv: () => Record<string, string | undefined>;
   private readonly now: () => number;
+  private readonly userId?: string;
+  private readonly scheduled: boolean;
 
   constructor(
-    /** The request's USER-SCOPED client — RLS pins the connection row. */
+    /** RLS client for foreground work, or scheduled server client using pinned RPCs. */
     private readonly supabase: SupabaseClient,
     options: UserTokenProviderOptions = {},
   ) {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.readEnv = options.env ?? (() => process.env);
     this.now = options.now ?? Date.now;
+    this.userId = options.userId;
+    this.scheduled = options.scheduled ?? false;
   }
 
-  async getAccessToken(): Promise<string> {
+  async beginProviderDispatch(
+    resourceId: string,
+    operation: "publish" | "reprice",
+  ) {
+    const { accountGeneration, attemptToken, userId } = await beginEbayProviderDispatch(
+      this.supabase,
+      resourceId,
+      operation,
+      this.scheduled,
+    );
+    if (this.scheduled && userId !== this.userId) {
+      await endEbayProviderDispatch(
+        this.supabase,
+        resourceId,
+        operation,
+        accountGeneration,
+        attemptToken,
+        true,
+      ).catch(() => undefined);
+      throw new Error("Scheduled eBay dispatch tenant does not match its resource");
+    }
+    const controller = new AbortController();
+    let renewing = false;
+    const timer = setInterval(() => {
+      if (renewing || controller.signal.aborted) return;
+      renewing = true;
+      void renewEbayProviderDispatch(
+        this.supabase,
+        resourceId,
+        operation,
+        accountGeneration,
+        attemptToken,
+        this.scheduled,
+      )
+        .catch((error) => {
+          controller.abort(error);
+        })
+        .finally(() => {
+          renewing = false;
+        });
+    }, PROVIDER_DISPATCH_RENEW_MS);
+    timer.unref?.();
+
+    return {
+      accountGeneration,
+      attemptToken,
+      signal: controller.signal,
+      release: async () => {
+        clearInterval(timer);
+        await endEbayProviderDispatch(
+          this.supabase,
+          resourceId,
+          operation,
+          accountGeneration,
+          attemptToken,
+          this.scheduled,
+        ).catch(() => undefined);
+      },
+    };
+  }
+
+  async getAccessToken(
+    expectedAccountGeneration?: string,
+    parentSignal?: AbortSignal,
+  ): Promise<string> {
     const env = this.readEnv();
-    const connection = await getDecryptedConnection(this.supabase, env);
+    const connection = await getDecryptedConnection(
+      this.supabase,
+      env,
+      this.userId,
+      this.scheduled,
+    );
     if (!connection) {
       throw new Error(
         "No eBay account is connected. Connect one in Settings before publishing.",
       );
+    }
+    if (
+      expectedAccountGeneration &&
+      connection.accountGeneration !== expectedAccountGeneration
+    ) {
+      throw new Error("eBay account generation changed before provider dispatch");
     }
 
     if (
@@ -71,6 +159,7 @@ export class UserTokenProvider implements EbayTokenProvider {
       );
     }
 
+    const refreshSignal = tokenRefreshSignal(env, parentSignal);
     const res = await this.fetchImpl(
       `${ebayApiBaseUrl(env)}/identity/v1/oauth2/token`,
       {
@@ -82,8 +171,16 @@ export class UserTokenProvider implements EbayTokenProvider {
         body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: connection.refreshToken,
-          scope: SELL_INVENTORY_SCOPE,
+          // Preserve exactly the scopes granted to this connection. New
+          // connections include the traditional-API base scope for messaging;
+          // existing publish-only connections keep working and are prompted to
+          // reconnect only when they actually use messaging.
+          scope:
+            connection.scopes.length > 0
+              ? connection.scopes.join(" ")
+              : SELL_INVENTORY_SCOPE,
         }).toString(),
+        signal: refreshSignal,
       },
     );
 
@@ -112,10 +209,27 @@ export class UserTokenProvider implements EbayTokenProvider {
     await updateCachedAccessToken(
       this.supabase,
       connection.userId,
+      connection.accountGeneration,
       token,
       expiresAt,
       env,
+      this.scheduled,
     );
     return token;
   }
+}
+
+function tokenRefreshSignal(
+  env: Record<string, string | undefined>,
+  parentSignal?: AbortSignal,
+): AbortSignal {
+  const configured = Number(env.EBAY_TOKEN_REFRESH_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configured) && configured > 0
+      ? Math.min(configured, MAX_TOKEN_REFRESH_TIMEOUT_MS)
+      : DEFAULT_TOKEN_REFRESH_TIMEOUT_MS;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return parentSignal
+    ? AbortSignal.any([parentSignal, timeoutSignal])
+    : timeoutSignal;
 }

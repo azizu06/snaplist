@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cleanupClerkTestUsers,
+  mintUserJwt,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "../../supabase/test-users";
@@ -47,7 +48,7 @@ const GRANT: EbayTokenGrant = {
 };
 
 async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
+  if (!ANON_KEY || !SERVICE_ROLE_KEY?.startsWith("sb_secret_")) return false;
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
       headers: { apikey: ANON_KEY },
@@ -63,6 +64,16 @@ let reachable = false;
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
+let userAServer: SupabaseClient;
+let userBServer: SupabaseClient;
+
+async function createTenantWriteClient(userId: string): Promise<SupabaseClient> {
+  const jwt = await mintUserJwt(userId);
+  return createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
+    accessToken: async () => jwt,
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 beforeAll(async () => {
   reachable = await stackReachable();
@@ -74,6 +85,10 @@ beforeAll(async () => {
   [userA, userB] = await Promise.all([
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "ebayconn_a"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "ebayconn_b"),
+  ]);
+  [userAServer, userBServer] = await Promise.all([
+    createTenantWriteClient(userA.id),
+    createTenantWriteClient(userB.id),
   ]);
 });
 
@@ -97,8 +112,7 @@ describe("ebay_connections (DB-gated)", () => {
     if (!reachable) return;
 
     await saveEbayConnection(
-      userA.client,
-      userA.id,
+      userAServer,
       GRANT,
       { userId: "EBAYUID-A", username: "seller_a" },
       TEST_ENV,
@@ -140,7 +154,7 @@ describe("ebay_connections (DB-gated)", () => {
     const status = await getEbayConnectionStatus(userA.client);
     expect(status).toEqual({ connected: true, ebayUsername: "seller_a" });
 
-    await deleteEbayConnection(userA.client);
+    await deleteEbayConnection(userAServer);
     const after = await getEbayConnectionStatus(userA.client);
     expect(after.connected).toBe(false);
   });
@@ -149,8 +163,7 @@ describe("ebay_connections (DB-gated)", () => {
     if (!reachable) return;
 
     await saveEbayConnection(
-      userA.client,
-      userA.id,
+      userAServer,
       GRANT,
       { userId: "EBAYUID-ERASE", username: "seller_erase" },
       TEST_ENV,
@@ -172,8 +185,7 @@ describe("UserTokenProvider (DB-gated)", () => {
     if (!reachable) return;
 
     await saveEbayConnection(
-      userB.client,
-      userB.id,
+      userBServer,
       GRANT,
       { userId: "EBAYUID-B", username: "seller_b" },
       TEST_ENV,
@@ -193,8 +205,7 @@ describe("UserTokenProvider (DB-gated)", () => {
 
     // Expire the cached access token.
     await saveEbayConnection(
-      userB.client,
-      userB.id,
+      userBServer,
       { ...GRANT, accessTokenExpiresAt: Date.now() - 1000 },
       { userId: "EBAYUID-B", username: "seller_b" },
       TEST_ENV,
@@ -233,7 +244,7 @@ describe("UserTokenProvider (DB-gated)", () => {
   it("explains the fix when no eBay account is connected", async () => {
     if (!reachable) return;
 
-    await deleteEbayConnection(userB.client);
+    await deleteEbayConnection(userBServer);
     const provider = new UserTokenProvider(userB.client, {
       env: () => TEST_ENV,
     });

@@ -18,6 +18,9 @@ import { EbayApiError } from "./types";
  * the seller's account config (business policies + merchant location — the
  * production flip discovers their ids through this; issue #17/#47). */
 export const EBAY_OAUTH_SCOPES = [
+  // Traditional Trading API calls (GetMemberMessages/AddMemberMessageRTQ).
+  "https://api.ebay.com/oauth/api_scope",
+  "https://api.ebay.com/oauth/api_scope/commerce.message",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
@@ -148,9 +151,8 @@ export interface EbayIdentity {
 }
 
 /**
- * Resolve who the connected eBay account is. Best-effort: a null return means
- * "connected but identity unknown" — the connection still works for publishing;
- * only deletion-notice mapping degrades (handled there by username fallback).
+ * Resolve who the connected eBay account is. A null return means identity
+ * verification was unavailable; callers must not persist an unmappable grant.
  */
 export async function fetchEbayIdentity(
   accessToken: string,

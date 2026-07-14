@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { EnvTokenProvider } from "./auth";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { EnvTokenProvider, OperatorSandboxTokenProvider } from "./auth";
 import { EbayApiError } from "./types";
 
 /**
@@ -65,6 +66,31 @@ describe("EnvTokenProvider", () => {
     expect(params.get("scope")).toContain("sell.inventory");
   });
 
+  it("uses the composing adapter's requested scopes for app-level Sandbox refresh", async () => {
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse(200, { access_token: "message-token", expires_in: 7200 }),
+    );
+    const scopes = [
+      "https://api.ebay.com/oauth/api_scope",
+      "https://api.ebay.com/oauth/api_scope/commerce.message",
+    ];
+    const provider = new EnvTokenProvider({
+      fetch: fetchSpy as unknown as typeof fetch,
+      env: () => ({
+        EBAY_CLIENT_ID: "client-id",
+        EBAY_CLIENT_SECRET: "client-secret",
+        EBAY_REFRESH_TOKEN: "refresh-me",
+      }),
+      scopes,
+    });
+
+    await provider.getAccessToken();
+
+    const [, init] = fetchSpy.mock.calls[0]! as unknown as [string, RequestInit];
+    const params = new URLSearchParams(String(init.body));
+    expect(params.get("scope")).toBe(scopes.join(" "));
+  });
+
   it("caches the access token until shortly before expiry, then refreshes", async () => {
     let nowMs = 0;
     const fetchSpy = vi.fn(async () =>
@@ -108,5 +134,48 @@ describe("EnvTokenProvider", () => {
     expect(err).toBeInstanceOf(EbayApiError);
     expect((err as EbayApiError).status).toBe(400);
     expect((err as EbayApiError).body).toEqual({ error: "invalid_grant" });
+  });
+});
+
+describe("OperatorSandboxTokenProvider", () => {
+  it("requires the database-bound fallback generation before returning credentials", async () => {
+    const rpc = vi.fn(async () => ({
+      data: "33333333-3333-4333-8333-333333333333",
+      error: null,
+    }));
+    const provider = new OperatorSandboxTokenProvider(
+      { rpc } as unknown as SupabaseClient,
+      "operator-tenant",
+      "sandbox-seller-id",
+      true,
+      { env: () => ({ EBAY_OAUTH_TOKEN: "sandbox-token" }) },
+    );
+
+    await expect(
+      provider.getAccessToken("33333333-3333-4333-8333-333333333333"),
+    ).resolves.toBe("sandbox-token");
+    expect(rpc).toHaveBeenCalledWith("bind_scheduled_ebay_sandbox_fallback", {
+      p_user_id: "operator-tenant",
+      p_seller_id: "sandbox-seller-id",
+    });
+  });
+
+  it("rejects historical message generations before exposing fallback credentials", async () => {
+    const provider = new OperatorSandboxTokenProvider(
+      {
+        rpc: vi.fn(async () => ({
+          data: "44444444-4444-4444-8444-444444444444",
+          error: null,
+        })),
+      } as unknown as SupabaseClient,
+      "operator-tenant",
+      "sandbox-seller-id",
+      false,
+      { env: () => ({ EBAY_OAUTH_TOKEN: "sandbox-token" }) },
+    );
+
+    await expect(
+      provider.getAccessToken("55555555-5555-4555-8555-555555555555"),
+    ).rejects.toThrow("account generation changed");
   });
 });

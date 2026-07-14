@@ -1,14 +1,16 @@
 import type {
   EbayAdapter,
+  EbayPublishCompletion,
   EbayPublishRequest,
   EbayPublishResult,
   EbayReviseRequest,
+  EbayReviseCompletion,
   EbayReviseResult,
 } from "./types";
 
 /**
- * Offline eBay adapter — the ONLY adapter the test suite ever touches (issue #14
- * acceptance: "all tests run offline against a mock adapter; no live eBay calls").
+ * Offline publishing/repricing adapter. Marketplace-messaging tests use their
+ * own mock; provider HTTP contracts use fake fetches, so no test calls live eBay.
  *
  * Deterministic: ids derive from the request SKU, so assertions are stable.
  * Records every request so tests can assert exactly what WOULD have been sent
@@ -28,19 +30,29 @@ export class MockEbayAdapter implements EbayAdapter {
   /** When set, revisePrice rejects with this error instead of succeeding. */
   reviseFailWith?: Error;
 
-  async publishListing(request: EbayPublishRequest): Promise<EbayPublishResult> {
+  async publishListing(
+    request: EbayPublishRequest,
+    complete?: EbayPublishCompletion,
+  ): Promise<EbayPublishResult> {
     this.requests.push(request);
     if (this.failWith) throw this.failWith;
-    return {
+    const result = {
       listingId: `MOCK-EBAY-LISTING-${request.sku}`,
       offerId: `MOCK-EBAY-OFFER-${request.sku}`,
-      status: "published",
+      status: "published" as const,
     };
+    await complete?.(result, null);
+    return result;
   }
 
-  async revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult> {
+  async revisePrice(
+    request: EbayReviseRequest,
+    complete?: EbayReviseCompletion,
+  ): Promise<EbayReviseResult> {
     this.reviseRequests.push(request);
     if (this.reviseFailWith) throw this.reviseFailWith;
-    return { offerId: request.offerId, status: "revised" };
+    const result = { offerId: request.offerId, status: "revised" as const };
+    await complete?.(result, null);
+    return result;
   }
 }

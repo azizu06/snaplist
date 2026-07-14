@@ -5,7 +5,11 @@ import { logPrediction } from "../pipeline/prediction-log";
 import { priceToConfidence } from "../confidence/from-price";
 import { createDefaultPricer } from "../pricing/default-pricer";
 import type { ItemSignal, PriceResult } from "../pricing";
-import { createEbayAdapter, type EbayAdapter } from "../marketplace/ebay";
+import {
+  createEbayAdapterForUser,
+  type EbayAdapter,
+  type EbayDispatchContext,
+} from "../marketplace/ebay";
 import { marketplaceCurrency } from "../marketplace/ebay/map";
 import { createNotification } from "../notifications";
 import { reportServerError } from "../sentry";
@@ -77,12 +81,12 @@ export interface RepriceSweepDeps {
   /** Price an item signal. Defaults to the REAL PriceRouter over all PRD tiers. */
   priceItem?: (signal: ItemSignal) => Promise<PriceResult>;
   /**
-   * eBay adapter used for auto-apply revisions. Defaults to the app-level env
-   * adapter (the sandbox loop): per-user OAuth token providers need the
-   * seller's RLS-scoped session client, which a cron doesn't have — routing
-   * per-user connections through the sweep is the #17-production follow-up.
+   * Injectable eBay adapter used for every auto-apply revision in tests or
+   * single-seller operator flows.
    */
   adapter?: EbayAdapter;
+  /** Resolve the connected seller's scheduled, generation-bound adapter. */
+  adapterForUser?: (userId: string) => Promise<EbayAdapter>;
   /** Injectable env reader (currency guard); defaults to process.env. */
   env?: () => Record<string, string | undefined>;
   /** Config overrides; defaults to `resolveRepriceConfig(env)`. */
@@ -193,6 +197,13 @@ export async function runRepriceSweep(
         settings: settingsByUser.get(listing.user_id),
         priceItem,
         adapter: deps.adapter,
+        adapterForUser:
+          deps.adapterForUser ??
+          ((userId) =>
+            createEbayAdapterForUser(supabase, userId, {
+              credentialClient: supabase,
+              scheduled: true,
+            })),
         readEnv,
         config,
         now,
@@ -233,6 +244,7 @@ interface RepriceOneContext {
   settings: UserSettingsRow | undefined;
   priceItem: (signal: ItemSignal) => Promise<PriceResult>;
   adapter: EbayAdapter | undefined;
+  adapterForUser: (userId: string) => Promise<EbayAdapter>;
   readEnv: () => Record<string, string | undefined>;
   config: RepriceConfig;
   now: () => Date;
@@ -379,23 +391,29 @@ async function tryAutoApply(
     return false;
   }
 
-  const adapter = ctx.adapter ?? createEbayAdapter();
   try {
-    await adapter.revisePrice({
-      sku: listing.id,
-      offerId: listing.ebay_offer_id,
-      price: { value: apply.decision.targetPrice.toFixed(2), currency },
-    });
+    const adapter = ctx.adapter ?? (await ctx.adapterForUser(listing.user_id));
+    await adapter.revisePrice(
+      {
+        sku: listing.id,
+        offerId: listing.ebay_offer_id,
+        price: { value: apply.decision.targetPrice.toFixed(2), currency },
+      },
+      async (_result, context) => {
+        await persistAutoAppliedReprice(
+          supabase,
+          listing,
+          decision.targetPrice,
+          ctx.now().toISOString(),
+          context,
+        );
+      },
+    );
   } catch (err) {
     reportServerError("reprice.autoApply.revise", err, { listingId: listing.id });
     return false;
   }
 
-  // The revision is LIVE — record it everywhere downstream consumers read:
-  // the audit row, the seller's effective price, and the listing's live price.
-  // Every write here is best-effort so an irreversible eBay change is never
-  // stranded by a failing bookkeeping step.
-  const nowIso = ctx.now().toISOString();
   try {
     await persistSuggestion(supabase, listing, {
       currentPrice: apply.currentPrice,
@@ -410,29 +428,6 @@ async function tryAutoApply(
   } catch (err) {
     reportServerError("reprice.autoApply.audit", err, { listingId: listing.id });
   }
-  const [{ error: itemError }, { error: listingError }] = await Promise.all([
-    supabase
-      .from("items")
-      .update({
-        price_override: decision.targetPrice,
-        review_revision: crypto.randomUUID(),
-      })
-      .eq("id", listing.item_id)
-      .eq("user_id", listing.user_id),
-    supabase
-      .from("listings")
-      .update({ listed_price: decision.targetPrice, last_priced_at: nowIso })
-      .eq("id", listing.id)
-      .eq("user_id", listing.user_id),
-  ]);
-  if (itemError || listingError) {
-    // The eBay revision is live; surface loudly so the operator reconciles.
-    reportServerError(
-      "reprice.autoApply.persist",
-      new Error((itemError ?? listingError)!.message),
-      { listingId: listing.id },
-    );
-  }
   await createNotification(supabase, {
     userId: listing.user_id,
     kind: "system",
@@ -446,6 +441,57 @@ async function tryAutoApply(
     listingId: listing.id,
   });
   return true;
+}
+
+async function persistAutoAppliedReprice(
+  supabase: SupabaseClient,
+  listing: CandidateListing,
+  appliedPrice: number,
+  nowIso: string,
+  context: EbayDispatchContext | null,
+): Promise<void> {
+  if (context) {
+    const { data, error } = await supabase.rpc(
+      "complete_scheduled_ebay_reprice_dispatch",
+      {
+        p_listing_id: listing.id,
+        p_item_id: listing.item_id,
+        p_account_generation: context.accountGeneration,
+        p_attempt_token: context.attemptToken,
+        p_applied_price: appliedPrice,
+        p_resolved_at: nowIso,
+      },
+    );
+    if (error) {
+      throw new Error(
+        `Price revised on eBay but scheduled generation-bound persistence failed: ${error.message}`,
+      );
+    }
+    if (data !== listing.user_id) {
+      throw new Error("Scheduled eBay reprice completion returned the wrong tenant");
+    }
+    return;
+  }
+
+  const [{ error: itemError }, { error: listingError }] = await Promise.all([
+    supabase
+      .from("items")
+      .update({
+        price_override: appliedPrice,
+        review_revision: crypto.randomUUID(),
+      })
+      .eq("id", listing.item_id)
+      .eq("user_id", listing.user_id),
+    supabase
+      .from("listings")
+      .update({ listed_price: appliedPrice, last_priced_at: nowIso })
+      .eq("id", listing.id)
+      .eq("user_id", listing.user_id),
+  ]);
+  const error = itemError ?? listingError;
+  if (error) {
+    throw new Error(`Price revised on eBay but recording it failed: ${error.message}`);
+  }
 }
 
 interface SuggestionWrite {

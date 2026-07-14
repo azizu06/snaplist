@@ -1,10 +1,8 @@
 /**
  * Public surface of the eBay marketplace adapter (issue #14).
  *
- * Callers import from here; the adapter seam (`EbayAdapter`) is the only thing
- * the rest of SnapList depends on. `createEbayAdapter()` is the production
- * composition root: the real HTTP adapter with the app-level env token
- * provider. Tests construct `MockEbayAdapter` directly.
+ * Callers import from here. Listing writes depend on `EbayAdapter`; pre-sale
+ * messaging depends on the separate provider-neutral messaging adapter.
  */
 export type {
   EbayAdapter,
@@ -12,13 +10,17 @@ export type {
   EbayPublishResult,
   EbayReviseRequest,
   EbayReviseResult,
+  EbayDispatchContext,
+  EbayPublishCompletion,
+  EbayReviseCompletion,
   EbayTokenProvider,
   EbayCondition,
 } from "./types";
-export { EbayApiError } from "./types";
+export { EbayApiError, EbayWriteAmbiguousError } from "./types";
 export { HttpEbayAdapter } from "./http";
+export { HttpEbayMessagingAdapter } from "./messaging";
 export { MockEbayAdapter } from "./mock";
-export { EnvTokenProvider } from "./auth";
+export { EnvTokenProvider, OperatorSandboxTokenProvider } from "./auth";
 export {
   toEbayPublishRequest,
   toEbayCondition,
@@ -42,6 +44,7 @@ export {
   saveEbayConnection,
   deleteEbayConnection,
   eraseEbayUserData,
+  listScheduledEbayConnectionUserIds,
   type EbayConnectionStatus,
 } from "./connections";
 export {
@@ -54,24 +57,32 @@ export {
 } from "./oauth";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { EbayAdapter } from "./types";
+import type { EbayAdapter, EbayTokenProvider } from "./types";
 import { HttpEbayAdapter } from "./http";
 import { UserTokenProvider } from "./user-token-provider";
 import { getEbayConnectionStatus } from "./connections";
+import { HttpEbayMessagingAdapter } from "./messaging";
+import type { MarketplaceMessagingAdapter } from "../messaging";
+import { OperatorSandboxTokenProvider } from "./auth";
 
 /**
  * The real adapter, wired for the current environment. Sandbox by default
  * (`EBAY_BASE_URL`); production is a credential/URL flip (docs/ebay-production.md).
  * Env is read lazily inside the adapter, so calling this is always safe.
  */
-export function createEbayAdapter(): EbayAdapter {
-  return new HttpEbayAdapter();
+export function createEbayAdapter(
+  tokenProvider: EbayTokenProvider,
+): EbayAdapter {
+  if (!tokenProvider) {
+    throw new Error("An account-bound eBay token provider is required.");
+  }
+  return new HttpEbayAdapter({ tokenProvider });
 }
 
 /**
  * The adapter for a signed-in seller (issue #17): their own OAuth tokens when
- * an eBay account is connected, the app-level env credentials otherwise (the
- * sandbox loop keeps working with zero per-user setup).
+ * an eBay account is connected. Env credentials are accepted only for the
+ * explicitly configured operator user/seller on the exact Sandbox origin.
  *
  * SINGLE-SELLER CONSTRAINT (deliberate, documented in docs/ebay-production.md):
  * business policies (EBAY_*_POLICY_ID) and the merchant location stay
@@ -83,9 +94,168 @@ export function createEbayAdapter(): EbayAdapter {
  */
 export async function createEbayAdapterForUser(
   supabase: SupabaseClient,
+  userId?: string,
+  options: {
+    credentialClient?: SupabaseClient | (() => Promise<SupabaseClient>);
+    scheduled?: boolean;
+  } = {},
 ): Promise<EbayAdapter> {
-  const { connected } = await getEbayConnectionStatus(supabase);
-  return connected
-    ? new HttpEbayAdapter({ tokenProvider: new UserTokenProvider(supabase) })
-    : new HttpEbayAdapter();
+  const { connected } = await getEbayConnectionStatus(
+    supabase,
+    userId,
+    options.scheduled,
+  );
+  if (connected) {
+    const credentialClient = await resolveCredentialClient(
+      supabase,
+      options.credentialClient,
+    );
+    return new HttpEbayAdapter({
+      tokenProvider: new UserTokenProvider(credentialClient, {
+        userId,
+        scheduled: options.scheduled,
+      }),
+    });
+  }
+  assertOperatorSandboxFallback(userId);
+  const credentialClient = await resolveCredentialClient(
+    supabase,
+    options.credentialClient,
+  );
+  return new HttpEbayAdapter({
+    tokenProvider: operatorSandboxTokenProvider(
+      credentialClient,
+      userId,
+      options.scheduled ?? false,
+    ),
+  });
+}
+
+/** Messaging composition uses connected seller tokens or one operator fallback. */
+export async function createEbayMessagingAdapterForUser(
+  supabase: SupabaseClient,
+  userId?: string,
+  options: { scheduled?: boolean; credentialClient?: SupabaseClient } = {},
+): Promise<MarketplaceMessagingAdapter> {
+  const { connected } = await getEbayConnectionStatus(
+    supabase,
+    userId,
+    options.scheduled,
+  );
+  if (connected) {
+    return new HttpEbayMessagingAdapter({
+      tokenProvider: new UserTokenProvider(options.credentialClient ?? supabase, {
+        userId,
+        scheduled: options.scheduled,
+      }),
+    });
+  }
+  return new HttpEbayMessagingAdapter({
+    tokenProvider: operatorSandboxTokenProvider(
+      options.credentialClient ?? supabase,
+      userId,
+      options.scheduled ?? false,
+      [
+        "https://api.ebay.com/oauth/api_scope",
+        "https://api.ebay.com/oauth/api_scope/commerce.message",
+      ],
+    ),
+  });
+}
+
+/** Whether this tenant may use the app-level Sandbox seller credentials. */
+export function hasEbayMessagingSandboxFallback(
+  userId?: string,
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+  if (!isExactEbaySandboxApiBase(baseUrl)) return false;
+  if (
+    !userId ||
+    !env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID ||
+    !env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID ||
+    userId !== env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID
+  ) {
+    return false;
+  }
+  return !!(
+    env.EBAY_OAUTH_TOKEN ||
+    (env.EBAY_REFRESH_TOKEN && env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET)
+  );
+}
+
+export function ebayMessagingSyncUserIds(
+  connectedUserIds: Iterable<string>,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const userIds = new Set(connectedUserIds);
+  const operatorUserId = env.EBAY_MESSAGING_SANDBOX_OPERATOR_USER_ID;
+  if (operatorUserId && hasEbayMessagingSandboxFallback(operatorUserId, env)) {
+    userIds.add(operatorUserId);
+  }
+  return [...userIds];
+}
+
+function isExactEbaySandboxApiBase(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.origin === "https://api.sandbox.ebay.com" &&
+      (url.pathname === "" || url.pathname === "/") &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function resolveCredentialClient(
+  fallback: SupabaseClient,
+  credentialClient?: SupabaseClient | (() => Promise<SupabaseClient>),
+): Promise<SupabaseClient> {
+  if (!credentialClient) return fallback;
+  return typeof credentialClient === "function"
+    ? credentialClient()
+    : credentialClient;
+}
+
+function operatorSandboxTokenProvider(
+  supabase: SupabaseClient,
+  userId: string | undefined,
+  scheduled: boolean,
+  scopes?: string[],
+): OperatorSandboxTokenProvider {
+  const identity = assertOperatorSandboxFallback(userId);
+  return new OperatorSandboxTokenProvider(
+    supabase,
+    identity.userId,
+    identity.sellerId,
+    scheduled,
+    scopes ? { scopes } : undefined,
+  );
+}
+
+function assertOperatorSandboxFallback(userId: string | undefined): {
+  userId: string;
+  sellerId: string;
+} {
+  const baseUrl = process.env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+  if (!isExactEbaySandboxApiBase(baseUrl)) {
+    throw new Error(
+      "Production eBay writes require the seller's connected account.",
+    );
+  }
+  if (!hasEbayMessagingSandboxFallback(userId)) {
+    throw new Error(
+      "App-level eBay Sandbox credentials are restricted to the configured operator tenant.",
+    );
+  }
+  const sellerId = process.env.EBAY_MESSAGING_SANDBOX_OPERATOR_SELLER_ID;
+  if (!userId || !sellerId) {
+    throw new Error("App-level eBay Sandbox identity is not configured.");
+  }
+  return { userId, sellerId };
 }

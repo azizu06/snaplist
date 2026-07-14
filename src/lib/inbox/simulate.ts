@@ -2,9 +2,9 @@ import type { ReplyGrounding } from "./types";
 import { measurementWords } from "../vision/measurements";
 
 /**
- * Simulated buyer questions (issue #13). v1 has no real buyer traffic — the PRD
- * keeps messaging simulated until the eBay adapter (issue #14) — so the inbox is
- * demonstrated by GENERATING a plausible buyer question about a real item.
+ * Credential-free buyer-question simulator beside the real eBay import path.
+ * It generates a plausible buyer question about a real item without contacting
+ * a marketplace.
  *
  * Pure and deterministic under an injected `random`, so tests assert exact
  * outputs offline. Questions reference the item's ACTUAL facts (brand, model,

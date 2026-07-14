@@ -3,13 +3,13 @@ import type { ExtractedAttributes } from "../pipeline/types";
 
 /**
  * Buyer-inbox domain types (issue #13). The `messages` table (init schema) is the
- * storage; these types are the app-side contract for the simulated-buyer flow:
+ * storage; these types are the app-side contract for simulated and imported
+ * marketplace conversations:
  *
  *   simulated buyer question → `messages` row (inbound, status `new`)
  *   → reply agent drafts (status `drafted`, `draft_reply` + `draft_model` set)
  *   → seller approves/edits → outbound row (status `sent`, threaded via `reply_to`)
- *     + inbound row marked `sent` with `sent_at` — delivery itself is STUBBED
- *     (logged no-op) until the eBay adapter lands (issue #14).
+ *     + explicit external delivery fields retain success/failure/ambiguity.
  */
 
 /** `messages.direction` — who authored the message. */
@@ -22,14 +22,20 @@ export type MessageDirection = z.infer<typeof messageDirectionSchema>;
  * `draft_failed` is the explicit terminal-until-retried state for an inbound
  * row whose draft generation crashed AFTER the insert (serverless interrupt,
  * model/database error) — without it the row would render "drafting…" forever
- * with no recovery path. `approved` is reserved for a future split of
- * "approve" from "send" — today the seller's approve action sends
- * immediately, so it is never persisted.
+ * with no recovery path. `externally_answered` retires a question that eBay
+ * explicitly reports as answered. `provider_unavailable` is the neutral
+ * non-actionable state when eBay no longer reports it as active.
+ * `approved` records a seller-authored follow-up intent before dispatch (and
+ * after retryable failure). Canonical draft approval still dispatches in the
+ * same request, with the durable outbound row carrying delivery truth.
  */
 export const messageStatusSchema = z.enum([
   "new",
+  "drafting",
   "drafted",
   "draft_failed",
+  "externally_answered",
+  "provider_unavailable",
   "approved",
   "sent",
 ]);
@@ -60,6 +66,19 @@ export const messageRowSchema = z.object({
   draft_model: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  marketplace: z.string().optional(),
+  external_message_id: z.string().nullable().optional(),
+  external_parent_id: z.string().nullable().optional(),
+  external_conversation_id: z.string().nullable().optional(),
+  external_listing_id: z.string().nullable().optional(),
+  external_buyer_id: z.string().nullable().optional(),
+  external_created_at: z.string().nullable().optional(),
+  delivery_request_id: z.string().nullable().optional(),
+  delivery_status: z.string().nullable().optional(),
+  external_delivery_id: z.string().nullable().optional(),
+  delivery_attempted_at: z.string().nullable().optional(),
+  delivery_error: z.string().nullable().optional(),
+  ebay_account_generation: z.string().uuid().nullable().optional(),
 });
 
 export type MessageRow = z.infer<typeof messageRowSchema>;

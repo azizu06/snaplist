@@ -1,12 +1,14 @@
 import type {
   EbayAdapter,
   EbayPublishRequest,
+  EbayPublishCompletion,
   EbayPublishResult,
   EbayReviseRequest,
+  EbayReviseCompletion,
   EbayReviseResult,
   EbayTokenProvider,
 } from "./types";
-import { EbayApiError } from "./types";
+import { EbayApiError, EbayWriteAmbiguousError } from "./types";
 import { EnvTokenProvider } from "./auth";
 import { marketplaceContentLanguage } from "./map";
 
@@ -45,6 +47,7 @@ export interface HttpEbayAdapterOptions {
 
 /** eBay's "offer entity already exists" error id (create-offer conflict). */
 const OFFER_ALREADY_EXISTS = 25002;
+const PROVIDER_DISPATCH_TIMEOUT_MS = 4 * 60_000;
 
 interface EbayErrorPayload {
   errors?: Array<{
@@ -67,7 +70,10 @@ export class HttpEbayAdapter implements EbayAdapter {
       new EnvTokenProvider({ fetch: options.fetch, env: options.env });
   }
 
-  async publishListing(request: EbayPublishRequest): Promise<EbayPublishResult> {
+  async publishListing(
+    request: EbayPublishRequest,
+    complete?: EbayPublishCompletion,
+  ): Promise<EbayPublishResult> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
@@ -104,7 +110,16 @@ export class HttpEbayAdapter implements EbayAdapter {
       );
     }
 
-    const token = await this.tokenProvider.getAccessToken();
+    const lease = await this.tokenProvider.beginProviderDispatch?.(
+      request.sku,
+      "publish",
+    );
+    const signal = providerDispatchSignal(lease?.signal);
+    try {
+      const token = await this.tokenProvider.getAccessToken(
+        lease?.accountGeneration,
+        signal,
+      );
 
     // --- 1. Upsert the inventory item (idempotent by SKU). -------------------
     await this.call(
@@ -124,6 +139,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         },
       },
       contentLanguage,
+      signal,
     );
 
     // --- 2. Create (or recover + update) the offer. ---------------------------
@@ -154,9 +170,14 @@ export class HttpEbayAdapter implements EbayAdapter {
         `${baseUrl}/sell/inventory/v1/offer`,
         offerBody,
         contentLanguage,
+        signal,
       );
       if (!created?.offerId) {
-        throw new EbayApiError("eBay offer create returned no offerId", 200, created);
+        throw new EbayWriteAmbiguousError(
+          "eBay offer create returned no offerId",
+          200,
+          created,
+        );
       }
       offerId = created.offerId;
     } catch (err) {
@@ -176,13 +197,16 @@ export class HttpEbayAdapter implements EbayAdapter {
         request.sku,
         marketplaceId,
         contentLanguage,
+        signal,
       );
       if (recovered?.listingId) {
-        return {
+        const result = {
           listingId: recovered.listingId,
           offerId: recovered.offerId,
-          status: "published",
+          status: "published" as const,
         };
+        await complete?.(result, dispatchContext(lease));
+        return result;
       }
       const existing = recovered?.offerId ?? existingOfferIdFrom(err);
       if (!existing) throw err;
@@ -195,6 +219,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`,
         offerBody,
         contentLanguage,
+        signal,
       );
     }
 
@@ -205,12 +230,26 @@ export class HttpEbayAdapter implements EbayAdapter {
       `${baseUrl}/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`,
       {},
       contentLanguage,
+      signal,
     );
     if (!published?.listingId) {
-      throw new EbayApiError("eBay publish returned no listingId", 200, published);
+      throw new EbayWriteAmbiguousError(
+        "eBay publish returned no listingId",
+        200,
+        published,
+      );
     }
 
-    return { listingId: published.listingId, offerId, status: "published" };
+      const result = {
+        listingId: published.listingId,
+        offerId,
+        status: "published" as const,
+      };
+      await complete?.(result, dispatchContext(lease));
+      return result;
+    } finally {
+      await lease?.release();
+    }
   }
 
   /**
@@ -225,7 +264,10 @@ export class HttpEbayAdapter implements EbayAdapter {
    * a silent partial failure here would record a reprice that never reached
    * the live listing.
    */
-  async revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult> {
+  async revisePrice(
+    request: EbayReviseRequest,
+    complete?: EbayReviseCompletion,
+  ): Promise<EbayReviseResult> {
     const env = this.readEnv();
     const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
     const marketplaceId = env.EBAY_MARKETPLACE_ID ?? "EBAY_US";
@@ -234,8 +276,17 @@ export class HttpEbayAdapter implements EbayAdapter {
       env.EBAY_CONTENT_LANGUAGE,
     );
 
-    const token = await this.tokenProvider.getAccessToken();
-    const body = {
+    const lease = await this.tokenProvider.beginProviderDispatch?.(
+      request.sku,
+      "reprice",
+    );
+    const signal = providerDispatchSignal(lease?.signal);
+    try {
+      const token = await this.tokenProvider.getAccessToken(
+        lease?.accountGeneration,
+        signal,
+      );
+      const body = {
       requests: [
         {
           sku: request.sku,
@@ -254,13 +305,14 @@ export class HttpEbayAdapter implements EbayAdapter {
       `${baseUrl}/sell/inventory/v1/bulk_update_price_quantity`,
       body,
       contentLanguage,
+      signal,
     );
 
     const inner = result?.responses?.[0];
     const offer = inner?.offers?.[0];
     const innerStatus = offer?.statusCode ?? inner?.statusCode;
     if (innerStatus == null) {
-      throw new EbayApiError(
+      throw new EbayWriteAmbiguousError(
         `eBay price revision for offer ${request.offerId} returned no per-offer confirmation`,
         200,
         result,
@@ -273,7 +325,15 @@ export class HttpEbayAdapter implements EbayAdapter {
         result,
       );
     }
-    return { offerId: offer?.offerId ?? request.offerId, status: "revised" };
+      const revision = {
+        offerId: offer?.offerId ?? request.offerId,
+        status: "revised" as const,
+      };
+      await complete?.(revision, dispatchContext(lease));
+      return revision;
+    } finally {
+      await lease?.release();
+    }
   }
 
   /**
@@ -291,6 +351,7 @@ export class HttpEbayAdapter implements EbayAdapter {
     sku: string,
     marketplaceId: string,
     contentLanguage: string,
+    signal?: AbortSignal,
   ): Promise<{ offerId: string; listingId?: string } | undefined> {
     try {
       const found = await this.call<{
@@ -306,6 +367,7 @@ export class HttpEbayAdapter implements EbayAdapter {
         `${baseUrl}/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}&marketplace_id=${encodeURIComponent(marketplaceId)}`,
         undefined,
         contentLanguage,
+        signal,
       );
       const offers = found?.offers ?? [];
       // Prefer the offer on OUR marketplace; a SKU can carry offers on others.
@@ -329,6 +391,7 @@ export class HttpEbayAdapter implements EbayAdapter {
     url: string,
     body: unknown,
     contentLanguage: string,
+    signal?: AbortSignal,
   ): Promise<T | undefined> {
     const headers: Record<string, string> = {
       authorization: `Bearer ${token}`,
@@ -340,17 +403,49 @@ export class HttpEbayAdapter implements EbayAdapter {
       // must match the target marketplace (derived in publishListing).
       headers["content-language"] = contentLanguage;
     }
-    const res = await this.fetchImpl(url, {
-      method,
-      headers,
-      body: method === "GET" ? undefined : JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, {
+        method,
+        headers,
+        body: method === "GET" ? undefined : JSON.stringify(body),
+        signal,
+      });
+    } catch (cause) {
+      if (method !== "GET") {
+        throw new EbayWriteAmbiguousError(
+          `eBay ${method} ${new URL(url).pathname} ended without an acknowledgement`,
+          0,
+          cause,
+        );
+      }
+      throw cause;
+    }
 
-    const text = await res.text();
+    let text: string;
+    try {
+      text = await res.text();
+    } catch (cause) {
+      if (method !== "GET") {
+        throw new EbayWriteAmbiguousError(
+          `eBay ${method} ${new URL(url).pathname} returned an unreadable acknowledgement`,
+          res.status,
+          cause,
+        );
+      }
+      throw cause;
+    }
     const parsed: unknown = text ? safeJsonParse(text) : undefined;
 
     if (!res.ok) {
       const detail = firstErrorMessage(parsed);
+      if (method !== "GET" && res.status >= 500) {
+        throw new EbayWriteAmbiguousError(
+          `eBay ${method} ${new URL(url).pathname} returned an unconfirmed server error (HTTP ${res.status})`,
+          res.status,
+          parsed ?? text,
+        );
+      }
       throw new EbayApiError(
         `eBay ${method} ${new URL(url).pathname} failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`,
         res.status,
@@ -359,6 +454,24 @@ export class HttpEbayAdapter implements EbayAdapter {
     }
     return parsed as T | undefined;
   }
+}
+
+function dispatchContext(
+  lease: Awaited<ReturnType<NonNullable<EbayTokenProvider["beginProviderDispatch"]>>> | undefined,
+) {
+  return lease
+    ? {
+        accountGeneration: lease.accountGeneration,
+        attemptToken: lease.attemptToken,
+      }
+    : null;
+}
+
+function providerDispatchSignal(parentSignal?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(PROVIDER_DISPATCH_TIMEOUT_MS);
+  return parentSignal
+    ? AbortSignal.any([parentSignal, timeoutSignal])
+    : timeoutSignal;
 }
 
 function safeJsonParse(text: string): unknown {

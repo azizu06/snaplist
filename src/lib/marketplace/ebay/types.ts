@@ -1,13 +1,12 @@
 /**
  * The eBay marketplace adapter seam (issue #14).
  *
- * Everything that talks to eBay lives behind `EbayAdapter`. The pipeline, the
- * publish service, the API route, and the UI only ever see this interface:
+ * Publishing and repricing live behind `EbayAdapter`; pre-sale messaging has a
+ * separate `MarketplaceMessagingAdapter`. Listing pipeline callers see only:
  *
  *  - `HttpEbayAdapter` (http.ts) is the real Sell API implementation
  *    (inventory item -> offer -> publish against `EBAY_BASE_URL`).
- *  - `MockEbayAdapter` (mock.ts) is the offline implementation every test uses —
- *    no live eBay call ever happens in the suite.
+ *  - `MockEbayAdapter` (mock.ts) is the offline listing implementation.
  *
  * Sandbox <-> production is a credential/`EBAY_BASE_URL` flip (PRD "Path to
  * real"); nothing above this seam changes. Per-user OAuth (issue #17) slots in
@@ -94,19 +93,54 @@ export interface EbayReviseResult {
  * when their slices land, so callers keep a single seam to mock.
  */
 export interface EbayAdapter {
-  publishListing(request: EbayPublishRequest): Promise<EbayPublishResult>;
+  publishListing(
+    request: EbayPublishRequest,
+    complete?: EbayPublishCompletion,
+  ): Promise<EbayPublishResult>;
   /** Update the price of an already-published offer (idempotent per price). */
-  revisePrice(request: EbayReviseRequest): Promise<EbayReviseResult>;
+  revisePrice(
+    request: EbayReviseRequest,
+    complete?: EbayReviseCompletion,
+  ): Promise<EbayReviseResult>;
 }
+
+export interface EbayDispatchContext {
+  accountGeneration: string;
+  attemptToken: string;
+}
+
+export type EbayPublishCompletion = (
+  result: EbayPublishResult,
+  context: EbayDispatchContext | null,
+) => Promise<void>;
+
+export type EbayReviseCompletion = (
+  result: EbayReviseResult,
+  context: EbayDispatchContext | null,
+) => Promise<void>;
 
 /**
  * Where access tokens come from. The HTTP adapter only ever calls
- * `getAccessToken()` — it does not know whether the token is the app-level
- * sandbox token (env refresh-token grant, auth.ts) or a per-user token
- * (issue #17). That swap is the entire production OAuth story.
+ * `getAccessToken()` — it does not know whether the grant is an encrypted
+ * connected-seller token or the generation-bound one-operator Sandbox
+ * fallback. Production composition permits only the former.
  */
 export interface EbayTokenProvider {
-  getAccessToken(): Promise<string>;
+  getAccessToken(
+    expectedAccountGeneration?: string,
+    signal?: AbortSignal,
+  ): Promise<string>;
+  beginProviderDispatch?(
+    resourceId: string,
+    operation: "publish" | "reprice",
+  ): Promise<EbayProviderDispatchLease>;
+}
+
+export interface EbayProviderDispatchLease {
+  accountGeneration: string;
+  attemptToken: string;
+  signal: AbortSignal;
+  release(): Promise<void>;
 }
 
 /** Typed failure for any non-2xx Sell API response, with eBay's error payload. */
@@ -120,5 +154,14 @@ export class EbayApiError extends Error {
   ) {
     super(message);
     this.name = "EbayApiError";
+  }
+}
+
+export class EbayWriteAmbiguousError extends EbayApiError {
+  readonly kind = "ambiguous";
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message, status, body);
+    this.name = "EbayWriteAmbiguousError";
   }
 }

@@ -94,9 +94,13 @@ flowchart TD
     LISTING --> EXPORT["Export packs<br/>Facebook Marketplace · Mercari"]
     EBAY --> LIVE["Live eBay listing"]
 
+    EQUESTION["eBay pre-sale question"] --> SYNC["Shared inbox sync<br/>foreground + 5-minute cron<br/>overlap-safe"]
+    SYNC --> MSGDB["Tenant-scoped messages<br/>external identity + delivery truth"]
+    MSGDB -->|Supabase Realtime| INBOX
     INBOX --> QA["Buyer-Q&A agent<br/>grounded draft reply"]
     QA --> QAPPROVE["Seller approves or edits reply"]
-    QAPPROVE --> DELIVER["Deliver to buyer (simulated in v1)"]
+    QAPPROVE --> DELIVER["eBay message adapter<br/>Sandbox-capable text delivery"]
+    DELIVER --> EBUYER["Buyer's eBay inbox"]
 
     subgraph crosscut["Cross-cutting"]
         REG["LLM provider registry<br/>Gemini dev / OpenAI showcase"]
@@ -123,9 +127,12 @@ item, always shaped as `{ suggested, range, confidence, sources[] }`. The confid
 tier fired + comp agreement + identification completeness — drives publish eligibility: high
 confidence is marked ready and everything else stays in review. Nothing posts in the background;
 the seller chooses **Publish to eBay**, which invokes the adapter (sandbox today; a credential flip
-to production). Listings also render copy-paste export
-packs for Facebook Marketplace and Mercari. Buyer questions arrive in a Realtime inbox where a
-grounded agent drafts a reply for the seller to approve. Cutting across all of it: a role-keyed LLM
+to production). Listings also render copy-paste export packs for Facebook Marketplace and Mercari.
+A shared overlap-safe service imports active-listing
+questions on foreground refresh and a five-minute cron, persists exact provider identities under
+RLS, and lets Realtime update the inbox. A grounded agent drafts one reply for seller approval;
+acknowledged replies and follow-ups go back through the eBay messaging adapter while failed or
+ambiguous attempts stay visibly retryable. Cutting across all of it: a role-keyed LLM
 provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference corpus that grounds
 copy and corroborates price, per-run prediction logs feeding the eval harness, structured-JSON
 observability, and Clerk auth with Postgres RLS enforcing per-user isolation everywhere.
@@ -142,14 +149,16 @@ adapter call. Facebook Marketplace and Mercari can reuse cached generated copy, 
 current effective price and reject an in-flight load if a concurrent seller-price edit advanced the
 review revision.
 
-> This diagram tracks the current build and will keep maturing with the project — the messaging
-> delivery path is simulated in v1, and the production eBay poller/queue lands with the go-live work
-> ([#17](https://github.com/azizu06/snaplist/issues/17), [#65](https://github.com/azizu06/snaplist/issues/65)).
+> This diagram tracks the current build and will keep maturing with the project — real pre-sale text
+> messaging is Sandbox-capable while production activation stays owner-controlled under #17
+> ([operator runbook](./docs/ebay-messaging-sandbox.md),
+> [#17](https://github.com/azizu06/snaplist/issues/17), [#65](https://github.com/azizu06/snaplist/issues/65)).
 
 ## Stack
-Next.js (App Router) + TypeScript · Vercel AI SDK + OpenAI · Tavily/Exa web search · Supabase
-(Postgres + pgvector + Auth + Realtime + Storage) · Zod · Tailwind + shadcn/ui · Vercel · eBay
-Sell/Trading APIs (sandbox → production, behind an adapter) · Docker + GitHub Actions.
+Next.js (App Router) + TypeScript · Vercel AI SDK + OpenAI · Tavily/Exa web search · Clerk · Supabase
+(Postgres + pgvector + Realtime + Storage) · Zod · Tailwind + shadcn/ui · Vercel · eBay
+Sell Inventory + Trading + Commerce Message APIs (sandbox → production, behind adapters) · Docker +
+GitHub Actions.
 
 ## Getting started
 ```bash
@@ -192,8 +201,8 @@ idea seen three ways. The map from skill to code:
 | Coherent human correction loop | `src/lib/pipeline/review-regeneration.ts` + the review RPCs — bounded identity edits, shared pricing/confidence/listing seams, revision guards, atomic RLS persistence, stale export invalidation |
 | Seller-controlled outbound price | `effectivePrice` + eBay publish/export persistence seams — override-first fallback, cent-safe validation, cached-pack freshness, and revision guards |
 | Evals + calibration | `src/lib/eval` — gold set, ID/pricing metrics, reliability buckets + ECE, LLM judge validated against human labels |
-| Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, lazy env validation (`src/lib/env.ts`), eBay account-deletion endpoint |
-| Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell API, sandbox) · export packs for FB Marketplace/Mercari |
+| Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, generation-bound eBay dispatch, lazy env validation (`src/lib/env.ts`), signed account-deletion erasure |
+| Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell + Trading/Message APIs, sandbox) · export packs for FB Marketplace/Mercari |
 | Docker / CI / observability | `Dockerfile`, `.github/workflows/ci.yml`, `src/lib/observability.ts`, `/api/health` |
 
 ## Eval harness
@@ -300,8 +309,9 @@ Being able to state where the system's accuracy tops out is part of the showcase
   sold-price comps. The retrieval architecture is real; only the seed content is synthetic.
 - **Eval gold set + sample predictions:** hand-authored fixtures (overlapping the corpus via
   `sourceRef`), labeled for development — see the accuracy-ceiling notes above.
-- **Buyer traffic is simulated.** The inbox's buyer questions come from a simulation endpoint, not
-  real marketplace buyers; the reply agent is real and grounded in the item's actual data.
+- **Buyer traffic can be simulated or imported from eBay Sandbox.** Both paths use the real grounded
+  reply agent; only the authenticated eBay path can claim marketplace delivery. See the
+  [two-user operator runbook](./docs/ebay-messaging-sandbox.md).
 - **eBay is sandbox.** Publishing targets the eBay sandbox (`EBAY_BASE_URL` flip to production by
   design, see [`docs/ebay-sandbox.md`](./docs/ebay-sandbox.md)); no live marketplace listings are
   created.

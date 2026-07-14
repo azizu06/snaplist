@@ -9,8 +9,8 @@ import { InboxClient, type ItemOption } from "./inbox-client";
  * Buyer inbox (issue #13) — server shell. Loads the initial snapshot (messages +
  * the user's items for the simulate picker) through the USER-SCOPED server client
  * (RLS-scoped: only the caller's rows), then hands off to the client component,
- * which keeps the list LIVE via a Supabase Realtime subscription — a simulated
- * buyer question appears with no refresh.
+ * which keeps the list LIVE via a Supabase Realtime subscription — simulated
+ * and imported buyer questions appear without a page refresh.
  */
 export default async function InboxPage({
   searchParams,

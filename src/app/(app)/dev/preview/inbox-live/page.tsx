@@ -234,6 +234,7 @@ export default function InboxDevPreviewPage() {
       onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
       onApproveAndSend={() => {}}
       onRetryDelivery={() => {}}
+      onRetryFollowUp={() => {}}
       onRetryDraft={() => {}}
       onFollowUpChange={(id, value) =>
         setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))

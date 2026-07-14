@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { HttpEbayAdapter } from "./http";
-import { EbayApiError } from "./types";
+import { EbayApiError, EbayWriteAmbiguousError } from "./types";
 import type { EbayPublishRequest } from "./types";
 
 /**
@@ -59,6 +59,76 @@ function json(status: number, body: unknown): Response {
 }
 
 describe("HttpEbayAdapter.publishListing", () => {
+  it("holds a generation-bound dispatch lease through the publish flow", async () => {
+    const release = vi.fn(async () => undefined);
+    const complete = vi.fn(async () => undefined);
+    const getAccessToken = vi.fn(async () => "generation-token");
+    const leasedProvider = {
+      getAccessToken,
+      beginProviderDispatch: vi.fn(async () => ({
+        accountGeneration: "11111111-1111-4111-8111-111111111111",
+        attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        signal: new AbortController().signal,
+        release,
+      })),
+    };
+    const { fetch } = fakeFetch((url) => {
+      if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });
+      if (url.endsWith("/offer")) return json(201, { offerId: "offer-lease" });
+      return json(200, { listingId: "listing-lease" });
+    });
+
+    await new HttpEbayAdapter({
+      fetch,
+      tokenProvider: leasedProvider,
+      env: () => sellerEnv,
+    }).publishListing(request, complete);
+
+    expect(leasedProvider.beginProviderDispatch).toHaveBeenCalledWith(
+      request.sku,
+      "publish",
+    );
+    expect(getAccessToken).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      expect.any(AbortSignal),
+    );
+    expect(complete).toHaveBeenCalledWith(
+      { listingId: "listing-lease", offerId: "offer-lease", status: "published" },
+      {
+        accountGeneration: "11111111-1111-4111-8111-111111111111",
+        attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      },
+    );
+    expect(complete.mock.invocationCallOrder[0]).toBeLessThan(
+      release.mock.invocationCallOrder[0],
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("releases the lease and reports an acknowledgement-less write as ambiguous", async () => {
+    const release = vi.fn(async () => undefined);
+    const adapter = new HttpEbayAdapter({
+      fetch: vi.fn(async () => {
+        throw new DOMException("timed out", "AbortError");
+      }) as unknown as typeof fetch,
+      tokenProvider: {
+        getAccessToken: async () => "generation-token",
+        beginProviderDispatch: async () => ({
+          accountGeneration: "11111111-1111-4111-8111-111111111111",
+          attemptToken: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          signal: new AbortController().signal,
+          release,
+        }),
+      },
+      env: () => sellerEnv,
+    });
+
+    const error = await adapter.publishListing(request).catch((cause) => cause);
+    expect(error).toBeInstanceOf(EbayWriteAmbiguousError);
+    expect(error).toMatchObject({ kind: "ambiguous" });
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it("runs the documented three-step flow and returns the live listing id", async () => {
     const { fetch, calls } = fakeFetch((url) => {
       if (url.includes("/inventory_item/")) return new Response(null, { status: 204 });

@@ -26,6 +26,7 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 
 - [eBay production setup](./ebay-production.md)
 - [eBay sandbox setup](./ebay-sandbox.md)
+- [eBay pre-sale messaging Sandbox runbook](./ebay-messaging-sandbox.md)
 - [Sold-comps egress and operator smoke](./sold-comps-egress.md)
 
 ## Operations & planning

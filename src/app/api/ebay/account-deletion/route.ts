@@ -12,8 +12,9 @@ import {
 } from "@/lib/marketplace/ebay/deletion";
 
 /**
- * eBay Marketplace Account Deletion / Closure notification endpoint —
- * implemented for real at the production flip (issue #17).
+ * eBay Marketplace Account Deletion / Closure notification endpoint (issue
+ * #17). The route is implemented and remains inactive until its production
+ * verification token, URL, and eBay subscription are configured.
  *
  * --- GET: endpoint verification (challenge-response) ---
  * eBay calls `GET <endpoint>?challenge_code=...`. We must respond with
@@ -28,9 +29,9 @@ import {
  * x-ebay-signature header is verified against eBay's notification public key
  * BEFORE anything is acted on; an unverifiable notice is answered 412 so eBay
  * retries/alerts instead of counting a dropped deletion as delivered. A
- * verified notice erases everything held about that eBay user (their stored
- * OAuth connection — the only eBay-user-keyed data SnapList persists) on the
- * service-role client, and the erasure is logged for compliance.
+ * verified notice erases everything held about that eBay user, including
+ * seller credentials and buyer-message records, through the serialized
+ * generation-safe erasure RPC.
  */
 
 const EBAY_VERIFICATION_TOKEN = process.env.EBAY_VERIFICATION_TOKEN;
@@ -137,14 +138,13 @@ export async function POST(request: NextRequest) {
 
   // 3. Erase what we hold about this eBay user + record it for compliance.
   try {
-    const erased = await eraseEbayUserData(
+    const erasedTenants = await eraseEbayUserData(
       createAdminClient(),
       notice.userId,
       notice.username,
     );
     logEvent("ebay.account_deletion", {
-      ebayUserId: notice.userId ?? "",
-      erasedConnections: erased,
+      erasedTenants,
     });
   } catch (err) {
     // 500 (not 200) — eBay retries, so a transient DB failure can't silently

@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { EbayApiError, type EbayAdapter } from "./types";
+import {
+  EbayApiError,
+  type EbayAdapter,
+  type EbayDispatchContext,
+  type EbayPublishResult,
+} from "./types";
 import { marketplaceCurrency, toEbayPublishRequest } from "./map";
 import {
   PublishValidationError,
@@ -48,6 +53,7 @@ export interface PublishOptions {
    * call; 7 days is comfortable for retries.
    */
   signedUrlTtlSeconds?: number;
+  completionClient?: SupabaseClient;
 }
 
 interface PublishClaimSnapshot {
@@ -290,40 +296,25 @@ export async function publishListingToEbay(
   // 6. Publish through the adapter. An ADAPTER failure is persisted as
   //    ebay_status='failed' (then rethrown); persistence problems after a
   //    SUCCESSFUL publish must NOT be marked failed — the eBay listing is live.
-  let result;
+  let providerAcknowledged = false;
+  let result: EbayPublishResult;
   try {
-    result = await adapter.publishListing(request);
+    result = await adapter.publishListing(request, async (acknowledgement, context) => {
+      providerAcknowledged = true;
+      await persistPublishedListing(
+        options.completionClient ?? supabase,
+        listingId,
+        claimId,
+        price,
+        acknowledgement,
+        context,
+      );
+    });
   } catch (err) {
-    await markPublishFailed(supabase, listingId, claimId);
+    if (!providerAcknowledged) {
+      await markPublishFailed(supabase, listingId, claimId);
+    }
     throw err;
-  }
-
-  // 7. Persist the live ids + status on the listings row (the acceptance seam).
-  //    `listed_price` / `last_priced_at` record the price the live listing
-  //    actually carries and the price event — the stale-inventory repricing
-  //    pipeline (issue #102) selects on and revises against these.
-  const { data: updated, error: updErr } = await supabase
-    .from("listings")
-    .update({
-      ebay_listing_id: result.listingId,
-      ebay_offer_id: result.offerId,
-      ebay_status: "published",
-      status: "published",
-      listed_price: price,
-      last_priced_at: new Date().toISOString(),
-      ebay_publish_claim_id: null,
-      ebay_publish_claimed_at: null,
-    })
-    .eq("id", listingId)
-    .eq("ebay_status", "publishing")
-    .eq("ebay_publish_claim_id", claimId)
-    .select("id");
-  if (updErr || !updated || updated.length === 0) {
-    // The eBay listing IS live; surface a loud, specific error so the operator
-    // reconciles instead of the next retry silently double-publishing.
-    throw new Error(
-      `eBay listing ${result.listingId} published but persisting it failed: ${updErr?.message ?? "publish claim was lost"}`,
-    );
   }
 
   return {
@@ -333,6 +324,57 @@ export async function publishListingToEbay(
     ebayStatus: "published",
     alreadyPublished: false,
   };
+}
+
+async function persistPublishedListing(
+  supabase: SupabaseClient,
+  listingId: string,
+  claimId: string,
+  price: number,
+  result: EbayPublishResult,
+  context: EbayDispatchContext | null,
+): Promise<void> {
+  const pricedAt = new Date().toISOString();
+  if (context) {
+    const { error } = await supabase.rpc("complete_ebay_publish_dispatch", {
+      p_listing_id: listingId,
+      p_claim_id: claimId,
+      p_account_generation: context.accountGeneration,
+      p_attempt_token: context.attemptToken,
+      p_ebay_listing_id: result.listingId,
+      p_ebay_offer_id: result.offerId,
+      p_listed_price: price,
+      p_priced_at: pricedAt,
+    });
+    if (error) {
+      throw new Error(
+        `eBay listing ${result.listingId} published but generation-bound persistence failed: ${error.message}`,
+      );
+    }
+    return;
+  }
+
+  const { data: updated, error } = await supabase
+    .from("listings")
+    .update({
+      ebay_listing_id: result.listingId,
+      ebay_offer_id: result.offerId,
+      ebay_status: "published",
+      status: "published",
+      listed_price: price,
+      last_priced_at: pricedAt,
+      ebay_publish_claim_id: null,
+      ebay_publish_claimed_at: null,
+    })
+    .eq("id", listingId)
+    .eq("ebay_status", "publishing")
+    .eq("ebay_publish_claim_id", claimId)
+    .select("id");
+  if (error || !updated || updated.length === 0) {
+    throw new Error(
+      `eBay listing ${result.listingId} published but persisting it failed: ${error?.message ?? "publish claim was lost"}`,
+    );
+  }
 }
 
 function parsePublishClaimSnapshot(value: unknown): PublishClaimSnapshot | null {

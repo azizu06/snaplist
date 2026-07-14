@@ -11,17 +11,17 @@ import {
 } from "@/lib/reprice";
 import { setAutoRepriceEnabled } from "@/lib/settings/user-settings";
 import { reportServerError } from "@/lib/sentry";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /**
  * Dashboard mutations for reprice suggestions (issue #102): one-tap apply,
  * dismiss, and the per-user auto-reprice opt-in. Thin server actions in the
  * dashboard/actions.ts mold — auth guard + RLS-scoped work, then revalidate.
  *
- * Tenancy: every read/write runs under the request-authed client, so RLS
- * (`public.clerk_user_id() = user_id`) constrains which rows can be touched —
- * a foreign suggestionId is simply not found. The apply path revises the live
- * eBay listing through the seller's own adapter (per-user OAuth when
- * connected, app-level env credentials otherwise — same as publish).
+ * Tenancy: reads and claims run under the request-authenticated client, so RLS
+ * (`public.clerk_user_id() = user_id`) rejects foreign suggestion ids. Durable
+ * completion uses a tenant-bound server client. The apply path uses the
+ * seller's OAuth grant or the restricted one-operator Sandbox fallback.
  */
 
 export interface RepriceActionResult {
@@ -37,12 +37,16 @@ export async function applyReprice(
   if (!userId) return { ok: false, message: "Not signed in." };
 
   try {
-    const adapter = await createEbayAdapterForUser(supabase);
+    const completionClient = await createTenantServerClient();
+    const adapter = await createEbayAdapterForUser(supabase, userId, {
+      credentialClient: completionClient,
+    });
     const { appliedPrice } = await applyRepriceSuggestion(
       supabase,
       userId,
       suggestionId,
       adapter,
+      { completionClient },
     );
     revalidatePath("/dashboard");
     return { ok: true, message: `New price is live: $${appliedPrice.toFixed(2)}` };

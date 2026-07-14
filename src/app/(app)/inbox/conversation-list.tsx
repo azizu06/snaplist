@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { StatusTone } from "@/lib/ui/status";
 import type { MessageRow } from "@/lib/inbox";
+import {
+  canRetryDelivery,
+  deliveryRecoveryLabel,
+  requiresDuplicateRiskConfirmation,
+} from "./delivery-recovery";
 
 /**
  * Buyer inbox — two-pane messaging surface.
@@ -174,8 +179,10 @@ function RelativeTime({ iso, className }: { iso: string; className?: string }) {
 export interface ConversationState {
   message: MessageRow;
   sentReply: MessageRow | undefined;
+  delivered: boolean;
   sending: boolean;
   undelivered: boolean;
+  canRetryFollowUps: boolean;
   statusTone: StatusTone;
   statusLabel: string;
   /** Unread = a buyer question still waiting on you (not yet replied/sent ok). */
@@ -190,26 +197,39 @@ export function deriveConversationState(
   busy: string | null,
 ): ConversationState {
   const sentReply = repliesByQuestion.get(message.id);
+  const delivered = sentReply?.delivery_status === "delivered";
+  const externallyAnswered = message.status === "externally_answered";
+  const providerUnavailable = message.status === "provider_unavailable";
+  const canRetryFollowUps = !externallyAnswered && !providerUnavailable;
   // Claimed-but-undelivered (PR #35 review): the inbound row is `sent` but no
   // outbound row references it — delivery failed (or the process crashed) after
   // the CAS claim, before the outbound insert. While OUR send request is in
   // flight (busy) the two Realtime events (UPDATE then INSERT) may arrive split,
   // so that window renders as "sending", not as a delivery failure.
   const sending =
-    message.status === "sent" && !sentReply && busy === `send:${message.id}`;
-  const undelivered = message.status === "sent" && !sentReply && !sending;
+    message.status === "sent" && !delivered && busy === `send:${message.id}`;
+  const undelivered = message.status === "sent" && !delivered && !sending;
   const statusTone: StatusTone =
     undelivered || message.status === "draft_failed"
       ? "danger"
-      : message.status === "sent"
+      : delivered
         ? "success-solid"
         : "neutral";
-  const statusLabel = undelivered
-    ? "Not delivered"
-    : message.status === "sent"
+  const statusLabel = externallyAnswered
+    ? "Answered on eBay"
+    : providerUnavailable
+      ? "No longer active on eBay"
+    : undelivered
+    ? deliveryRecoveryLabel(
+        message.delivery_status,
+        message.delivery_attempted_at,
+      )
+    : delivered
+      ? "Replied"
+      : message.status === "sent"
       ? sending
         ? "Sending…"
-        : "Replied"
+        : "Not delivered"
       : message.status === "drafted"
         ? "Draft ready"
         : message.status === "draft_failed"
@@ -217,10 +237,12 @@ export function deriveConversationState(
           : "Drafting…";
 
   // Resolved only once the reply is delivered (sent + outbound row present).
-  const unread = !(message.status === "sent" && !!sentReply);
+  const unread = !delivered && !externallyAnswered && !providerUnavailable;
 
   const snippet = sentReply
     ? `You: ${sentReply.body}`
+    : providerUnavailable && message.draft_reply
+      ? message.draft_reply
     : message.status === "drafted" && message.draft_reply
       ? `Draft: ${message.draft_reply}`
       : message.body;
@@ -228,8 +250,10 @@ export function deriveConversationState(
   return {
     message,
     sentReply,
+    delivered,
     sending,
     undelivered,
+    canRetryFollowUps,
     statusTone,
     statusLabel,
     unread,
@@ -416,8 +440,8 @@ interface PendingAttachment {
  * v1 SCOPE (honest): the picker + thumbnail previews are fully functional
  * front-end affordances, but **photos are preview-only** — actually delivering
  * image attachments to the buyer is a backend slice (Storage upload + a
- * message-attachments model + the eBay adapter), mirroring how text delivery is
- * itself stubbed today. So Send delivers the typed text (real path); a faint
+ * message-attachments model + provider-hosted media). Text delivery is real
+ * through the marketplace adapter. A faint
  * note appears while photos are attached so the seller is never misled.
  */
 function FollowUpComposer({
@@ -684,6 +708,7 @@ export interface ConversationThreadProps {
   onEdit: (id: string, value: string) => void;
   onApproveAndSend: (message: MessageRow) => void;
   onRetryDelivery: (message: MessageRow) => void;
+  onRetryFollowUp: (message: MessageRow) => void;
   onRetryDraft: (message: MessageRow) => void;
   /** Composer input change + send for follow-up messages (post-reply). */
   onFollowUpChange: (id: string, value: string) => void;
@@ -702,12 +727,20 @@ export function ConversationThread({
   onEdit,
   onApproveAndSend,
   onRetryDelivery,
+  onRetryFollowUp,
   onRetryDraft,
   onFollowUpChange,
   onSendFollowUp,
   onBack,
 }: ConversationThreadProps) {
-  const { message, sentReply, sending, undelivered } = state;
+  const {
+    message,
+    sentReply,
+    delivered,
+    sending,
+    undelivered,
+    canRetryFollowUps,
+  } = state;
   const draftValue = edits[message.id] ?? message.draft_reply ?? "";
 
   return (
@@ -759,7 +792,7 @@ export function ConversationThread({
           </div>
 
           {/* outbound — your delivered reply: green bubble, tail bottom-right */}
-          {message.status === "sent" && !undelivered ? (
+          {delivered ? (
             <div className="flex flex-col items-end gap-1">
               <div
                 className="msg-bubble msg-out msg-enter max-w-[80%]"
@@ -779,34 +812,88 @@ export function ConversationThread({
             </div>
           ) : null}
 
-          {/* outbound — your follow-up messages (post-reply), newest last. Same
-              green bubble as the reply; a conversation is a thread, not a single
-              Q&A pair, so the seller can keep messaging the buyer. */}
-          {followUps.map((m) => (
+          {/* Persist every seller-authored intent, including a rejected, failed,
+              or ambiguous delivery. Unconfirmed attempts stay visible and
+              retryable instead of being presented as delivered. */}
+          {followUps.map((m) => {
+            const delivered = m.delivery_status === "delivered";
+            const retrying = busy === `retry-followup:${m.id}`;
+            return (
             <div key={m.id} className="flex flex-col items-end gap-1">
-              <div className="msg-bubble msg-out msg-enter max-w-[80%]">
+              <div
+                className={`msg-bubble msg-enter max-w-[80%] ${
+                  delivered
+                    ? "msg-out"
+                    : "border border-danger-border bg-danger-soft text-danger-soft-fg"
+                }`}
+              >
                 <p className="whitespace-pre-wrap">
                   <span className="sr-only">You: </span>
                   {m.body}
                 </p>
               </div>
-              <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
-                <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                Delivered
-              </span>
+              {delivered ? (
+                <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
+                  <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  Delivered
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 px-1 text-[11px] text-danger-soft-fg">
+                  {deliveryRecoveryLabel(
+                    m.delivery_status,
+                    m.delivery_attempted_at,
+                  )}
+                  {canRetryFollowUps ? (
+                    <button
+                      type="button"
+                      onClick={() => onRetryFollowUp(m)}
+                      disabled={!canRetryDelivery(m.delivery_status, retrying)}
+                      className="font-semibold underline underline-offset-2 disabled:no-underline disabled:opacity-60"
+                    >
+                      {retrying ? "Retrying…" : "Retry"}
+                    </button>
+                  ) : null}
+                </span>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       {/* ── composer / recovery dock (pinned) ── */}
       <div className="bg-surface-2 px-4 py-4 sm:px-5">
-        {undelivered ? (
+        {message.status === "externally_answered" ? (
+          <div className="rounded-lg border border-border bg-surface px-3.5 py-3">
+            <p className="text-[13px] font-semibold text-muted">
+              Answered on eBay
+            </p>
+            <p className="mt-1 text-[13px] text-faint">
+              This question is no longer awaiting a reply.
+            </p>
+          </div>
+        ) : message.status === "provider_unavailable" ? (
+          <div className="rounded-lg border border-border bg-surface px-3.5 py-3">
+            <p className="text-[13px] font-semibold text-muted">
+              No longer active on eBay
+            </p>
+            <p className="mt-1 text-[13px] text-faint">
+              eBay no longer reports this question as active, so SnapList cannot safely reply to it.
+            </p>
+          </div>
+        ) : undelivered ? (
           <div className="flex flex-col gap-2 rounded-lg border border-danger-border bg-danger-soft px-3.5 py-3">
             <p className="text-[12.5px] font-semibold text-danger-soft-fg">
-              Reply not delivered. Delivery failed after your approval.
+              {requiresDuplicateRiskConfirmation(
+                message.delivery_status,
+                message.delivery_attempted_at,
+              )
+                ? "Delivery unconfirmed. eBay may already have received this reply."
+                : message.delivery_status === "sending"
+                  ? "Delivery pending. Retry is available if the send lease expired."
+                  : "Reply not delivered. Delivery failed after your approval."}
             </p>
             {message.draft_reply ? (
               <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-fg">

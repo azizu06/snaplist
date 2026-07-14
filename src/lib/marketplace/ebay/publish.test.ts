@@ -225,6 +225,43 @@ describe("publishListingToEbay (mock adapter, offline; persisted under RLS)", ()
     expect(after?.ebay_listing_id).toBe(retried.ebayListingId);
   });
 
+  it("does not mark an acknowledged publish failed when generation-bound completion rejects", async () => {
+    if (!reachable) return;
+
+    const { listingId } = await persistedRun(userA);
+    const adapter = new MockEbayAdapter();
+    adapter.publishListing = async (request, complete) => {
+      adapter.requests.push(request);
+      const result = {
+        listingId: `ACKNOWLEDGED-${request.sku}`,
+        offerId: `ACKNOWLEDGED-OFFER-${request.sku}`,
+        status: "published" as const,
+      };
+      await complete?.(result, {
+        accountGeneration: "55555555-5555-4555-8555-555555555555",
+        attemptToken: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      });
+      return result;
+    };
+    const completionClient = {
+      rpc: async () => ({ data: null, error: { message: "generation changed" } }),
+    } as unknown as SupabaseClient;
+
+    await expect(
+      publishListingToEbay(userA.client, listingId, adapter, {
+        completionClient,
+      }),
+    ).rejects.toThrow(/generation-bound persistence failed/i);
+
+    const { data: row } = await userA.client
+      .from("listings")
+      .select("ebay_status, ebay_publish_claim_id")
+      .eq("id", listingId)
+      .single();
+    expect(row?.ebay_status).toBe("publishing");
+    expect(row?.ebay_publish_claim_id).not.toBeNull();
+  });
+
   it("RLS holds: user B cannot publish user A's listing (indistinguishable from missing)", async () => {
     if (!reachable) return;
 

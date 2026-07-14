@@ -11,6 +11,7 @@ import {
 } from "@/lib/marketplace/ebay";
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
+import { createTenantServerClient } from "@/lib/supabase/tenant-server";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -46,14 +47,18 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Per-user tokens when the seller connected eBay in Settings (issue #17);
-    // app-level env credentials otherwise (the sandbox loop). The shared wrapper
+    // Per-user tokens when the seller connected eBay in Settings (issue #17),
+    // or the restricted one-operator Sandbox fallback. The shared wrapper
     // fires the same activity-feed notifications the "Publish" button does.
+    const completionClient = await createTenantServerClient();
     const outcome = await publishListingToEbayAndNotify(
       supabase,
       userId,
       listingId,
-      await createEbayAdapterForUser(supabase),
+      await createEbayAdapterForUser(supabase, userId, {
+        credentialClient: completionClient,
+      }),
+      { completionClient },
     );
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {
