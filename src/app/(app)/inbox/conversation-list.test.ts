@@ -76,4 +76,23 @@ describe("deriveConversationState", () => {
       statusLabel: "Answered on eBay",
     });
   });
+
+  it("renders provider absence as neutral and non-actionable", () => {
+    expect(
+      deriveConversationState(
+        message({
+          status: "provider_unavailable",
+          draft_reply: "The charger is included.",
+          delivery_status: "ambiguous",
+        }),
+        new Map(),
+        null,
+      ),
+    ).toMatchObject({
+      statusTone: "neutral",
+      statusLabel: "No longer active on eBay",
+      unread: false,
+      snippet: "The charger is included.",
+    });
+  });
 });

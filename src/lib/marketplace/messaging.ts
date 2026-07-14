@@ -26,10 +26,10 @@ export interface PendingMarketplaceQuestion {
   externalMessageId: string;
   externalParentId: string;
   externalListingId: string;
-  externalBuyerId: string;
-  body: string;
+  externalBuyerId: string | null;
+  body: string | null;
   subject: string | null;
-  createdAt: string;
+  createdAt: string | null;
   resolutionWindowFrom: string;
   observedCursorAt: string;
 }
@@ -42,6 +42,7 @@ export interface MarketplaceQuestionResolutionFailure {
 export interface MarketplaceQuestionFetchResult {
   questions: MarketplaceQuestion[];
   unresolved: MarketplaceQuestionResolutionFailure[];
+  answeredExternalMessageIds: string[];
 }
 
 export interface FetchQuestionsInput {

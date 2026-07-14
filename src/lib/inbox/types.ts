@@ -22,8 +22,9 @@ export type MessageDirection = z.infer<typeof messageDirectionSchema>;
  * `draft_failed` is the explicit terminal-until-retried state for an inbound
  * row whose draft generation crashed AFTER the insert (serverless interrupt,
  * model/database error) — without it the row would render "drafting…" forever
- * with no recovery path. `externally_answered` retires an imported question
- * that a complete provider reconciliation no longer reports as unanswered.
+ * with no recovery path. `externally_answered` retires a question that eBay
+ * explicitly reports as answered. `provider_unavailable` is the neutral
+ * non-actionable state when eBay no longer reports it as active.
  * `approved` is reserved for a future split of
  * "approve" from "send" — today the seller's approve action sends
  * immediately, so it is never persisted.
@@ -34,6 +35,7 @@ export const messageStatusSchema = z.enum([
   "drafted",
   "draft_failed",
   "externally_answered",
+  "provider_unavailable",
   "approved",
   "sent",
 ]);

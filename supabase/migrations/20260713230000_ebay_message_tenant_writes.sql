@@ -81,7 +81,7 @@ begin
       p_payload->>'external_buyer_id',
       p_payload->>'body',
       p_payload->>'subject',
-      (p_payload->>'external_created_at')::timestamptz,
+      (nullif(p_payload->>'external_created_at', ''))::timestamptz,
       (p_payload->>'resolution_window_from')::timestamptz,
       (p_payload->>'observed_cursor_at')::timestamptz,
       (p_payload->>'attempted_at')::timestamptz,
@@ -89,15 +89,42 @@ begin
       left(coalesce(p_payload->>'error', 'Conversation resolution failed'), 500)
     )
     on conflict (user_id, external_message_id) do update
-      set last_resolution_attempted_at = excluded.last_resolution_attempted_at,
+      set external_buyer_id = coalesce(
+            pending.external_buyer_id,
+            excluded.external_buyer_id
+          ),
+          body = coalesce(pending.body, excluded.body),
+          subject = coalesce(pending.subject, excluded.subject),
+          external_created_at = coalesce(
+            pending.external_created_at,
+            excluded.external_created_at
+          ),
+          last_resolution_attempted_at = excluded.last_resolution_attempted_at,
           resolution_attempts = pending.resolution_attempts + 1,
-          last_error = excluded.last_error
+          last_error = excluded.last_error,
+          resolution_status = 'pending'
       where pending.external_parent_id = excluded.external_parent_id
         and pending.external_listing_id = excluded.external_listing_id
-        and pending.external_buyer_id = excluded.external_buyer_id
-        and pending.body = excluded.body
-        and pending.subject is not distinct from excluded.subject
-        and pending.external_created_at = excluded.external_created_at;
+        and (
+          pending.external_buyer_id is null
+          or excluded.external_buyer_id is null
+          or pending.external_buyer_id = excluded.external_buyer_id
+        )
+        and (
+          pending.body is null
+          or excluded.body is null
+          or pending.body = excluded.body
+        )
+        and (
+          pending.subject is null
+          or excluded.subject is null
+          or pending.subject = excluded.subject
+        )
+        and (
+          pending.external_created_at is null
+          or excluded.external_created_at is null
+          or pending.external_created_at = excluded.external_created_at
+        );
     get diagnostics v_count = row_count;
     if v_count <> 1 then
       raise exception using errcode = '23505', message = 'Conflicting eBay question identity';
@@ -119,6 +146,23 @@ begin
     where pending.user_id = p_user_id
       and pending.external_message_id = p_payload->>'external_message_id';
     return 'null'::jsonb;
+  elsif p_operation = 'retire_unresolved_question' then
+    if coalesce(p_payload->>'outcome', '') not in (
+      'externally_answered',
+      'provider_unavailable'
+    ) then
+      raise exception using errcode = '22023', message = 'Invalid question reconciliation outcome';
+    end if;
+    update public.ebay_unresolved_questions pending
+    set resolution_status = p_payload->>'outcome',
+        last_resolution_attempted_at = coalesce(
+          (p_payload->>'at')::timestamptz,
+          statement_timestamp()
+        ),
+        last_error = ''
+    where pending.user_id = p_user_id
+      and pending.external_message_id = p_payload->>'external_message_id';
+    return 'null'::jsonb;
   elsif p_operation = 'mark_externally_answered' then
     v_at := coalesce(
       (p_payload->>'at')::timestamptz,
@@ -134,6 +178,34 @@ begin
           when message.status = 'sent' then message.draft_model
           else null
         end
+    where message.user_id = p_user_id
+      and message.marketplace = 'ebay'
+      and message.direction = 'inbound'
+      and message.external_message_id = p_payload->>'external_message_id'
+      and message.status in ('new', 'drafting', 'drafted', 'draft_failed', 'sent')
+      and (
+        message.delivery_status is distinct from 'sending'
+        or message.delivery_attempted_at < v_at - interval '5 minutes'
+      )
+      and not exists (
+        select 1
+        from public.messages reply
+        where reply.user_id = message.user_id
+          and reply.reply_to = message.id
+          and reply.marketplace = 'ebay'
+          and reply.direction = 'outbound'
+          and (reply.reply_kind is null or reply.reply_kind = 'reply')
+          and reply.delivery_status = 'delivered'
+          and reply.external_delivery_id is not null
+      );
+    return 'null'::jsonb;
+  elsif p_operation = 'mark_provider_unavailable' then
+    v_at := coalesce(
+      (p_payload->>'at')::timestamptz,
+      statement_timestamp()
+    );
+    update public.messages message
+    set status = 'provider_unavailable'
     where message.user_id = p_user_id
       and message.marketplace = 'ebay'
       and message.direction = 'inbound'
@@ -578,7 +650,9 @@ begin
     'upsert_unresolved_question',
     'mark_unresolved_question_failed',
     'remove_unresolved_question',
+    'retire_unresolved_question',
     'mark_externally_answered',
+    'mark_provider_unavailable',
     'import_question',
     'ensure_notification',
     'claim_draft',

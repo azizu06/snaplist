@@ -15,7 +15,7 @@ export class SimulatedMarketplaceMessagingAdapter
   implements MarketplaceMessagingAdapter
 {
   async fetchUnansweredQuestions(): Promise<MarketplaceQuestionFetchResult> {
-    return { questions: [], unresolved: [] };
+    return { questions: [], unresolved: [], answeredExternalMessageIds: [] };
   }
 
   async resolveQuestion(): Promise<MarketplaceQuestion> {

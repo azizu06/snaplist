@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select extensions.plan(50);
+select extensions.plan(54);
 
 insert into public.items (id, user_id, attributes)
 values
@@ -183,6 +183,155 @@ select extensions.results_eq(
   $$,
   $$values ('externally_answered'::text, null::text, null::text)$$,
   'an externally answered question is durable and non-actionable'
+);
+
+select public.apply_ebay_message_write(
+  'import_question',
+  jsonb_build_object(
+    'item_id', '91000000-0000-4000-8000-000000000001',
+    'listing_id', '92000000-0000-4000-8000-000000000001',
+    'body', 'Did the listing end?',
+    'external_message_id', 'provider-unavailable-question-a',
+    'external_parent_id', 'provider-unavailable-question-a',
+    'external_conversation_id', 'conversation-provider-unavailable-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-provider-unavailable-a',
+    'external_created_at', '2026-07-13T11:59:00Z'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'claim_draft',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'provider-unavailable-question-a'
+    ),
+    'expected_status', 'new'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'attach_draft',
+  jsonb_build_object(
+    'message_id', (
+      select id from public.messages
+      where external_message_id = 'provider-unavailable-question-a'
+    ),
+    'draft_reply', 'The charger is included.',
+    'draft_model', 'test-reply'
+  )
+);
+
+select public.apply_ebay_message_write(
+  'mark_provider_unavailable',
+  jsonb_build_object(
+    'external_message_id', 'provider-unavailable-question-a',
+    'at', '2026-07-13T12:10:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select status, draft_reply, draft_model
+    from public.messages
+    where external_message_id = 'provider-unavailable-question-a'
+  $$,
+  $$values ('provider_unavailable'::text, 'The charger is included.'::text, 'test-reply'::text)$$,
+  'ambiguous provider absence is neutral and preserves seller-visible history'
+);
+
+select public.apply_ebay_message_write(
+  'upsert_unresolved_question',
+  jsonb_build_object(
+    'external_message_id', 'partial-question-a',
+    'external_parent_id', 'partial-question-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', null,
+    'body', null,
+    'subject', null,
+    'external_created_at', null,
+    'resolution_window_from', '2026-07-13T12:00:00Z',
+    'observed_cursor_at', '2026-07-13T12:05:00Z',
+    'attempted_at', '2026-07-13T12:05:00Z',
+    'error', 'Required Trading fields were missing'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select external_message_id, external_listing_id, external_buyer_id,
+           body, external_created_at, resolution_status
+    from public.ebay_unresolved_questions
+    where external_message_id = 'partial-question-a'
+  $$,
+  $$
+    values (
+      'partial-question-a'::text,
+      'sandbox-item-a'::text,
+      null::text,
+      null::text,
+      null::timestamptz,
+      'pending'::text
+    )
+  $$,
+  'stable partial Trading identity remains durable for later resolution'
+);
+
+select public.apply_ebay_message_write(
+  'upsert_unresolved_question',
+  jsonb_build_object(
+    'external_message_id', 'partial-question-a',
+    'external_parent_id', 'partial-question-a',
+    'external_listing_id', 'sandbox-item-a',
+    'external_buyer_id', 'buyer-partial-a',
+    'body', 'Can this now be resolved?',
+    'subject', 'Question about item',
+    'external_created_at', '2026-07-13T12:01:00Z',
+    'resolution_window_from', '2026-07-13T12:00:00Z',
+    'observed_cursor_at', '2026-07-13T12:10:00Z',
+    'attempted_at', '2026-07-13T12:10:00Z',
+    'error', 'Conversation resolution still pending'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select external_buyer_id, body, subject, external_created_at,
+           resolution_attempts
+    from public.ebay_unresolved_questions
+    where external_message_id = 'partial-question-a'
+  $$,
+  $$
+    values (
+      'buyer-partial-a'::text,
+      'Can this now be resolved?'::text,
+      'Question about item'::text,
+      '2026-07-13T12:01:00Z'::timestamptz,
+      2
+    )
+  $$,
+  'a replay can safely enrich missing fields on the stable pending identity'
+);
+
+select public.apply_ebay_message_write(
+  'retire_unresolved_question',
+  jsonb_build_object(
+    'external_message_id', 'partial-question-a',
+    'outcome', 'provider_unavailable',
+    'at', '2026-07-13T12:10:00Z'
+  )
+);
+
+select extensions.results_eq(
+  $$
+    select resolution_status, count(*)::integer
+    from public.ebay_unresolved_questions
+    where external_message_id = 'partial-question-a'
+    group by resolution_status
+  $$,
+  $$values ('provider_unavailable'::text, 1)$$,
+  'neutral reconciliation retires pending work without deleting its identity'
 );
 
 select public.apply_ebay_message_write(

@@ -198,6 +198,7 @@ export function deriveConversationState(
   const sentReply = repliesByQuestion.get(message.id);
   const delivered = sentReply?.delivery_status === "delivered";
   const externallyAnswered = message.status === "externally_answered";
+  const providerUnavailable = message.status === "provider_unavailable";
   // Claimed-but-undelivered (PR #35 review): the inbound row is `sent` but no
   // outbound row references it — delivery failed (or the process crashed) after
   // the CAS claim, before the outbound insert. While OUR send request is in
@@ -214,6 +215,8 @@ export function deriveConversationState(
         : "neutral";
   const statusLabel = externallyAnswered
     ? "Answered on eBay"
+    : providerUnavailable
+      ? "No longer active on eBay"
     : undelivered
     ? deliveryRecoveryLabel(
         message.delivery_status,
@@ -232,10 +235,12 @@ export function deriveConversationState(
           : "Drafting…";
 
   // Resolved only once the reply is delivered (sent + outbound row present).
-  const unread = !delivered && !externallyAnswered;
+  const unread = !delivered && !externallyAnswered && !providerUnavailable;
 
   const snippet = sentReply
     ? `You: ${sentReply.body}`
+    : providerUnavailable && message.draft_reply
+      ? message.draft_reply
     : message.status === "drafted" && message.draft_reply
       ? `Draft: ${message.draft_reply}`
       : message.body;
@@ -855,6 +860,15 @@ export function ConversationThread({
             </p>
             <p className="mt-1 text-[13px] text-faint">
               This question is no longer awaiting a reply.
+            </p>
+          </div>
+        ) : message.status === "provider_unavailable" ? (
+          <div className="rounded-lg border border-border bg-surface px-3.5 py-3">
+            <p className="text-[13px] font-semibold text-muted">
+              No longer active on eBay
+            </p>
+            <p className="mt-1 text-[13px] text-faint">
+              eBay no longer reports this question as active, so SnapList cannot safely reply to it.
             </p>
           </div>
         ) : undelivered ? (

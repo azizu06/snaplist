@@ -41,7 +41,7 @@ describe("HttpEbayMessagingAdapter", () => {
       expect(headers["x-ebay-api-call-name"]).toBe("GetMemberMessages");
       expect(headers["x-ebay-api-iaf-token"]).toBe("seller-token");
       expect(String(init?.body)).toContain("<MailMessageType>AskSellerQuestion</MailMessageType>");
-      expect(String(init?.body)).toContain("<MessageStatus>Unanswered</MessageStatus>");
+      expect(String(init?.body)).not.toContain("<MessageStatus>");
       return xmlResponse(`<?xml version="1.0" encoding="utf-8"?>
         <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
           <Ack>Success</Ack>
@@ -85,6 +85,7 @@ describe("HttpEbayMessagingAdapter", () => {
         },
       ],
       unresolved: [],
+      answeredExternalMessageIds: [],
     });
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
@@ -117,7 +118,7 @@ describe("HttpEbayMessagingAdapter", () => {
           <MemberMessage><MemberMessageExchange>
             <Item><ItemID>listing-public-id</ItemID></Item>
             <Question><SenderID>immutable-public-user-id</SenderID><Body>Is the box included?</Body><MessageID>question-public-id</MessageID></Question>
-            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+            <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
           </MemberMessageExchange></MemberMessage>
           <HasMoreItems>false</HasMoreItems>
         </GetMemberMessagesResponse>`);
@@ -142,7 +143,41 @@ describe("HttpEbayMessagingAdapter", () => {
         },
       ],
       unresolved: [],
+      answeredExternalMessageIds: [],
     });
+  });
+
+  it("returns explicit answered evidence without resolving a Commerce conversation", async () => {
+    const fetchSpy = vi.fn(async () =>
+      xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-answered</ItemID></Item>
+            <Question><MessageID>question-answered</MessageID></Question>
+            <MessageStatus>Answered</MessageStatus>
+            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`),
+    );
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toEqual({
+      questions: [],
+      unresolved: [],
+      answeredExternalMessageIds: ["question-answered"],
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("imports every exchange when Trading returns multiple questions", async () => {
@@ -172,12 +207,12 @@ describe("HttpEbayMessagingAdapter", () => {
             <MemberMessageExchange>
               <Item><ItemID>listing-a</ItemID></Item>
               <Question><SenderID>buyer-a</SenderID><Body>Question a</Body><MessageID>question-a</MessageID></Question>
-              <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+              <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
             </MemberMessageExchange>
             <MemberMessageExchange>
               <Item><ItemID>listing-b</ItemID></Item>
               <Question><SenderID>buyer-b</SenderID><Body>Question b</Body><MessageID>question-b</MessageID></Question>
-              <CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
+              <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
             </MemberMessageExchange>
           </MemberMessage>
           <HasMoreItems>false</HasMoreItems>
@@ -228,12 +263,12 @@ describe("HttpEbayMessagingAdapter", () => {
             <MemberMessageExchange>
               <Item><ItemID>listing-unresolved</ItemID></Item>
               <Question><SenderID>buyer-unresolved</SenderID><Body>Is this complete?</Body><MessageID>question-unresolved</MessageID></Question>
-              <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+              <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
             </MemberMessageExchange>
             <MemberMessageExchange>
               <Item><ItemID>listing-valid</ItemID></Item>
               <Question><SenderID>buyer-valid</SenderID><Body>Does it power on?</Body><MessageID>question-valid</MessageID></Question>
-              <CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
+              <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:02:00.000Z</CreationDate>
             </MemberMessageExchange>
           </MemberMessage>
           <HasMoreItems>false</HasMoreItems>
@@ -276,6 +311,133 @@ describe("HttpEbayMessagingAdapter", () => {
     });
   });
 
+  it("preserves a stable malformed Trading identity for later resolution", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        return Response.json({ error: "temporarily unavailable" }, { status: 503 });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-partial</ItemID></Item>
+            <Question><MessageID>question-partial</MessageID></Question>
+            <MessageStatus>Unanswered</MessageStatus>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      questions: [],
+      unresolved: [
+        {
+          question: {
+            externalMessageId: "question-partial",
+            externalParentId: "question-partial",
+            externalListingId: "listing-partial",
+            externalBuyerId: null,
+            body: null,
+            createdAt: null,
+          },
+          error: "Failed to resolve eBay Message API conversation (HTTP 503)",
+        },
+      ],
+    });
+  });
+
+  it("recovers missing Trading details from the exact Commerce message", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("/commerce/message/v1/conversation")) {
+        return Response.json({
+          conversations: [
+            {
+              conversationId: "conversation-partial",
+              latestMessage: {
+                messageId: "question-partial",
+                senderUsername: "buyer-partial",
+                messageBody: "Is the charger included?",
+                createdDate: "2026-07-13T14:03:00.000Z",
+              },
+            },
+          ],
+        });
+      }
+      return xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-partial</ItemID></Item>
+            <Question><MessageID>question-partial</MessageID></Question>
+            <MessageStatus>Unanswered</MessageStatus>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`);
+    });
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).resolves.toMatchObject({
+      questions: [
+        {
+          externalMessageId: "question-partial",
+          externalConversationId: "conversation-partial",
+          externalListingId: "listing-partial",
+          externalBuyerId: "buyer-partial",
+          body: "Is the charger included?",
+          createdAt: "2026-07-13T14:03:00.000Z",
+        },
+      ],
+      unresolved: [],
+    });
+  });
+
+  it("fails the fetch when a Trading exchange lacks stable identity", async () => {
+    const fetchSpy = vi.fn(async () =>
+      xmlResponse(`
+        <GetMemberMessagesResponse xmlns="urn:ebay:apis:eBLBaseComponents">
+          <Ack>Success</Ack>
+          <MemberMessage><MemberMessageExchange>
+            <Item><ItemID>listing-without-message-id</ItemID></Item>
+            <Question><SenderID>buyer-a</SenderID><Body>Is this complete?</Body></Question>
+            <MessageStatus>Unanswered</MessageStatus>
+            <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+          </MemberMessageExchange></MemberMessage>
+          <HasMoreItems>false</HasMoreItems>
+        </GetMemberMessagesResponse>`),
+    );
+    const adapter = new HttpEbayMessagingAdapter({
+      fetch: fetchSpy as unknown as typeof fetch,
+      tokenProvider,
+      env: () => ({ EBAY_BASE_URL: BASE }),
+    });
+
+    await expect(
+      adapter.fetchUnansweredQuestions({
+        from: new Date("2026-07-13T14:00:00.000Z"),
+        to: new Date("2026-07-13T14:05:00.000Z"),
+      }),
+    ).rejects.toThrow("stable identity");
+  });
+
   it("preserves digit-only provider identifiers as exact strings", async () => {
     const listingId = "000123";
     const questionId = "000987";
@@ -302,7 +464,7 @@ describe("HttpEbayMessagingAdapter", () => {
           <MemberMessage><MemberMessageExchange>
             <Item><ItemID>${listingId}</ItemID></Item>
             <Question><SenderID>buyer-long-id</SenderID><Body>Is this still available?</Body><MessageID>${questionId}</MessageID></Question>
-            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+            <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
           </MemberMessageExchange></MemberMessage>
           <HasMoreItems>false</HasMoreItems>
         </GetMemberMessagesResponse>`);
@@ -378,7 +540,7 @@ describe("HttpEbayMessagingAdapter", () => {
           <MemberMessage><MemberMessageExchange>
             <Item><ItemID>listing-shared</ItemID></Item>
             <Question><SenderID>buyer-shared</SenderID><Body>Is the manual included?</Body><MessageID>question-older</MessageID></Question>
-            <CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
+            <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:01:00.000Z</CreationDate>
           </MemberMessageExchange></MemberMessage>
           <HasMoreItems>false</HasMoreItems>
         </GetMemberMessagesResponse>`);
@@ -402,6 +564,7 @@ describe("HttpEbayMessagingAdapter", () => {
         },
       ],
       unresolved: [],
+      answeredExternalMessageIds: [],
     });
     expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
@@ -438,7 +601,7 @@ describe("HttpEbayMessagingAdapter", () => {
           <MemberMessage><MemberMessageExchange>
             <Item><ItemID>listing-second-page</ItemID></Item>
             <Question><SenderID>buyer-second-page</SenderID><Body>Can you combine shipping?</Body><MessageID>question-second-page</MessageID></Question>
-            <CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
+            <MessageStatus>Unanswered</MessageStatus><CreationDate>2026-07-13T14:03:00.000Z</CreationDate>
           </MemberMessageExchange></MemberMessage>
           <HasMoreItems>false</HasMoreItems>
         </GetMemberMessagesResponse>`);
@@ -462,6 +625,7 @@ describe("HttpEbayMessagingAdapter", () => {
         },
       ],
       unresolved: [],
+      answeredExternalMessageIds: [],
     });
     expect(conversationUrls).toHaveLength(2);
     expect(conversationUrls[0].searchParams.get("limit")).toBe("10");

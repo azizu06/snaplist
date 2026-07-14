@@ -15,6 +15,7 @@ export class MockMarketplaceMessagingAdapter
 {
   questions: MarketplaceQuestion[] = [];
   unresolved: MarketplaceQuestionResolutionFailure[] = [];
+  answeredExternalMessageIds: string[] = [];
   resolutionFailures = new Map<string, Error>();
   readonly fetches: FetchQuestionsInput[] = [];
   readonly replies: MarketplaceDeliveryInput[] = [];
@@ -32,9 +33,12 @@ export class MockMarketplaceMessagingAdapter
         return created >= input.from.getTime() && created <= input.to.getTime();
       }),
       unresolved: this.unresolved.filter(({ question }) => {
-        const created = Date.parse(question.createdAt);
+        const created = question.createdAt
+          ? Date.parse(question.createdAt)
+          : input.to.getTime();
         return created >= input.from.getTime() && created <= input.to.getTime();
       }),
+      answeredExternalMessageIds: this.answeredExternalMessageIds,
     };
   }
 

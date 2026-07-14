@@ -105,6 +105,9 @@ class MemorySyncRepository implements InboxSyncRepository {
   async removePendingQuestion(externalMessageId: string) {
     this.pending.delete(externalMessageId);
   }
+  async retirePendingQuestion(externalMessageId: string) {
+    this.pending.delete(externalMessageId);
+  }
   async countPendingQuestions() {
     return this.pending.size;
   }
@@ -148,6 +151,26 @@ class MemorySyncRepository implements InboxSyncRepository {
       message.draft_reply = null;
       message.draft_model = null;
     }
+  }
+  async markProviderUnavailable(externalMessageId: string, at: Date) {
+    const message = this.imported.get(externalMessageId);
+    if (
+      !message ||
+      !["new", "drafting", "drafted", "draft_failed", "sent"].includes(
+        message.status,
+      ) ||
+      this.deliveredCanonicalRoots.has(message.id)
+    ) {
+      return;
+    }
+    if (
+      message.delivery_status === "sending" &&
+      message.delivery_attempted_at &&
+      Date.parse(message.delivery_attempted_at) >= at.getTime() - 5 * 60_000
+    ) {
+      return;
+    }
+    message.status = "provider_unavailable";
   }
   async importQuestion(
     external: MarketplaceQuestion,
@@ -556,7 +579,7 @@ describe("syncInboxForSeller", () => {
     ).toBe("commerce-conversation-9");
   });
 
-  it("retires an imported draft when eBay no longer reports the question as unanswered", async () => {
+  it("marks an imported draft externally answered only with explicit provider evidence", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     adapter.questions = [question];
     const repository = new MemorySyncRepository();
@@ -574,6 +597,7 @@ describe("syncInboxForSeller", () => {
       meterDraft: async () => undefined,
     });
     adapter.questions = [];
+    adapter.answeredExternalMessageIds = [question.externalMessageId];
     await syncInboxForSeller({
       adapter,
       repository,
@@ -590,7 +614,45 @@ describe("syncInboxForSeller", () => {
     expect(draft).toHaveBeenCalledTimes(1);
   });
 
-  it("retires an unacknowledged send claim when eBay no longer reports the question as unanswered", async () => {
+  it("uses a neutral non-actionable state when an imported question disappears without answer evidence", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [question];
+    const repository = new MemorySyncRepository();
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      draft: async () => ({
+        reply: "Yes, the charger is included.",
+        model: "test-reply",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+    });
+    const imported = repository.imported.get(question.externalMessageId)!;
+    imported.status = "sent";
+    imported.delivery_status = "ambiguous";
+    imported.delivery_attempted_at = "2026-07-13T12:06:00.000Z";
+
+    adapter.questions = [];
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:12:00.000Z"),
+      draft: vi.fn(),
+      meterDraft: vi.fn(),
+    });
+
+    expect(repository.imported.get(question.externalMessageId)).toMatchObject({
+      status: "provider_unavailable",
+      draft_reply: "Yes, the charger is included.",
+      delivery_status: "ambiguous",
+      delivery_attempted_at: "2026-07-13T12:06:00.000Z",
+    });
+  });
+
+  it("neutralizes an unacknowledged send claim when eBay no longer reports the question", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     adapter.questions = [question];
     const repository = new MemorySyncRepository();
@@ -621,7 +683,7 @@ describe("syncInboxForSeller", () => {
     });
 
     expect(repository.imported.get(question.externalMessageId)).toMatchObject({
-      status: "externally_answered",
+      status: "provider_unavailable",
       delivery_status: "ambiguous",
       delivery_attempted_at: "2026-07-13T12:06:00.000Z",
     });
@@ -675,8 +737,8 @@ describe("syncInboxForSeller", () => {
     });
 
     expect(repository.imported.get(oldQuestion.externalMessageId)).toMatchObject({
-      status: "externally_answered",
-      draft_reply: null,
+      status: "provider_unavailable",
+      draft_reply: "Yes, the charger is included.",
     });
     expect(adapter.fetches).toEqual([
       {

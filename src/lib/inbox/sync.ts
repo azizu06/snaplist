@@ -63,9 +63,15 @@ export interface InboxSyncRepository {
     error: unknown,
   ): Promise<void>;
   removePendingQuestion(externalMessageId: string): Promise<void>;
+  retirePendingQuestion(
+    externalMessageId: string,
+    outcome: "externally_answered" | "provider_unavailable",
+    at: Date,
+  ): Promise<void>;
   countPendingQuestions(): Promise<number>;
   listActionableQuestions(): Promise<ActionableQuestionIdentity[]>;
   markExternallyAnswered(externalMessageId: string, at: Date): Promise<void>;
+  markProviderUnavailable(externalMessageId: string, at: Date): Promise<void>;
   findActiveListing(externalListingId: string): Promise<SyncListingContext | null>;
   importQuestion(
     question: MarketplaceQuestion,
@@ -148,7 +154,7 @@ export async function syncInboxForSeller(
       return Number.isFinite(createdAt) && createdAt <= now.getTime();
     });
     const pendingOutsideFetch = pendingBeforeFetch.filter((pending) => {
-      const createdAt = Date.parse(pending.createdAt);
+      const createdAt = pending.createdAt ? Date.parse(pending.createdAt) : NaN;
       return Number.isFinite(createdAt) && createdAt < from.getTime();
     });
     const actionableIds = new Set(
@@ -163,7 +169,9 @@ export async function syncInboxForSeller(
       ...pendingOutsideFetch,
     ].reduce<number | null>(
       (oldest, candidate) => {
-        const createdAt = Date.parse(candidate.createdAt);
+        const createdAt = candidate.createdAt
+          ? Date.parse(candidate.createdAt)
+          : NaN;
         if (!Number.isFinite(createdAt)) return oldest;
         return oldest === null ? createdAt : Math.min(oldest, createdAt);
       },
@@ -226,10 +234,20 @@ export async function syncInboxForSeller(
       ...(reconciliationFetched?.unresolved ?? [])
         .map(({ question: candidate }) => candidate.externalMessageId)
         .filter((externalMessageId) => historicalTrackedIds.has(externalMessageId)),
+      ...fetched.answeredExternalMessageIds,
+      ...(reconciliationFetched?.answeredExternalMessageIds ?? []).filter(
+        (externalMessageId) => historicalTrackedIds.has(externalMessageId),
+      ),
+    ]);
+    const answeredIds = new Set([
+      ...fetched.answeredExternalMessageIds,
+      ...(reconciliationFetched?.answeredExternalMessageIds ?? []),
     ]);
     for (const { externalMessageId } of reconcilableBeforeFetch) {
-      if (!observedIds.has(externalMessageId)) {
+      if (answeredIds.has(externalMessageId)) {
         await input.repository.markExternallyAnswered(externalMessageId, now);
+      } else if (!observedIds.has(externalMessageId)) {
+        await input.repository.markProviderUnavailable(externalMessageId, now);
       }
     }
     for (const pending of pendingBeforeFetch) {
@@ -238,14 +256,28 @@ export async function syncInboxForSeller(
         await processQuestion(resolved);
         continue;
       }
+      if (answeredIds.has(pending.externalMessageId)) {
+        await input.repository.retirePendingQuestion(
+          pending.externalMessageId,
+          "externally_answered",
+          now,
+        );
+        continue;
+      }
       if (observedIds.has(pending.externalMessageId)) continue;
-      const pendingCreatedAt = Date.parse(pending.createdAt);
+      const pendingCreatedAt = pending.createdAt
+        ? Date.parse(pending.createdAt)
+        : NaN;
       if (
         Number.isFinite(pendingCreatedAt) &&
         pendingCreatedAt >= (oldestReconciliationAt ?? from.getTime()) &&
         pendingCreatedAt <= now.getTime()
       ) {
-        await input.repository.removePendingQuestion(pending.externalMessageId);
+        await input.repository.retirePendingQuestion(
+          pending.externalMessageId,
+          "provider_unavailable",
+          now,
+        );
         continue;
       }
       try {
@@ -370,6 +402,7 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
         "external_message_id, external_parent_id, external_listing_id, external_buyer_id, body, subject, external_created_at, resolution_window_from, observed_cursor_at",
       )
       .eq("user_id", this.userId)
+      .eq("resolution_status", "pending")
       .order("last_resolution_attempted_at", { ascending: true })
       .order("external_created_at", { ascending: true })
       .limit(50);
@@ -381,10 +414,13 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
       externalMessageId: row.external_message_id as string,
       externalParentId: row.external_parent_id as string,
       externalListingId: row.external_listing_id as string,
-      externalBuyerId: row.external_buyer_id as string,
-      body: row.body as string,
+      externalBuyerId: (row.external_buyer_id as string | null) ?? null,
+      body: (row.body as string | null) ?? null,
       subject: (row.subject as string | null) ?? null,
-      createdAt: new Date(row.external_created_at as string).toISOString(),
+      createdAt:
+        typeof row.external_created_at === "string"
+          ? new Date(row.external_created_at).toISOString()
+          : null,
       resolutionWindowFrom: new Date(
         row.resolution_window_from as string,
       ).toISOString(),
@@ -431,11 +467,24 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     });
   }
 
+  async retirePendingQuestion(
+    externalMessageId: string,
+    outcome: "externally_answered" | "provider_unavailable",
+    at: Date,
+  ): Promise<void> {
+    await this.applyWrite("retire_unresolved_question", {
+      external_message_id: externalMessageId,
+      outcome,
+      at: at.toISOString(),
+    });
+  }
+
   async countPendingQuestions(): Promise<number> {
     const { count, error } = await this.supabase
       .from("ebay_unresolved_questions")
       .select("external_message_id", { count: "exact", head: true })
-      .eq("user_id", this.userId);
+      .eq("user_id", this.userId)
+      .eq("resolution_status", "pending");
     if (error) {
       throw new Error(`Failed to count unresolved eBay questions: ${error.message}`);
     }
@@ -499,6 +548,16 @@ export class SupabaseInboxSyncRepository implements InboxSyncRepository {
     at: Date,
   ): Promise<void> {
     await this.applyWrite("mark_externally_answered", {
+      external_message_id: externalMessageId,
+      at: at.toISOString(),
+    });
+  }
+
+  async markProviderUnavailable(
+    externalMessageId: string,
+    at: Date,
+  ): Promise<void> {
+    await this.applyWrite("mark_provider_unavailable", {
       external_message_id: externalMessageId,
       at: at.toISOString(),
     });
