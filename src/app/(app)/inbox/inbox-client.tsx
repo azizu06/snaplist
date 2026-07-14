@@ -91,6 +91,12 @@ export function InboxClient({
   const [edits, setEdits] = useState<Record<string, string>>({});
   // Follow-up composer text keyed by conversation root (post-reply free text).
   const [followUpDrafts, setFollowUpDrafts] = useState<Record<string, string>>({});
+  // Keep the same idempotency key while a seller retries the same typed
+  // follow-up after an uncertain HTTP response. It is cleared only after the
+  // server confirms delivery.
+  const [followUpRequestIds, setFollowUpRequestIds] = useState<
+    Record<string, string>
+  >({});
   const [selectedItem, setSelectedItem] = useState<string>(items[0]?.id ?? "");
   // Which conversation (inbound message id) is open in the right pane / mobile
   // thread view. null → list view on mobile, calm placeholder on desktop.
@@ -174,7 +180,13 @@ export function InboxClient({
           console.error("[realtime] inbox channel", status, err);
         }
         setConnection(connectionFromChannelStatus(status));
-        if (status === "SUBSCRIBED") void refetch();
+        if (status === "SUBSCRIBED") {
+          // Foreground refresh and the cron both enter through the same shared
+          // sync service. The overlapping cursor makes reconnects safe.
+          void fetch("/api/inbox/sync", { method: "POST" })
+            .catch(() => undefined)
+            .finally(refetch);
+        }
       });
 
     // Join watchdog: a channel that never reaches SUBSCRIBED (blocked
@@ -359,21 +371,49 @@ export function InboxClient({
   async function sendFollowUp(message: MessageRow) {
     const body = (followUpDrafts[message.id] ?? "").trim();
     if (body === "") return;
+    const requestId =
+      followUpRequestIds[message.id] ?? window.crypto.randomUUID();
+    setFollowUpRequestIds((prev) => ({ ...prev, [message.id]: requestId }));
     setBusy(`followup:${message.id}`);
     setError(null);
     try {
       const res = await fetch(`/api/inbox/${message.id}/follow-up`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: body }),
+        body: JSON.stringify({ message: body, requestId }),
       });
       if (!res.ok) {
         const b = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(b?.error ?? `Send failed (${res.status})`);
       }
       setFollowUpDrafts((prev) => ({ ...prev, [message.id]: "" }));
+      setFollowUpRequestIds((prev) => {
+        const next = { ...prev };
+        delete next[message.id];
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retryFollowUp(message: MessageRow) {
+    setBusy(`retry-followup:${message.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/inbox/outbound/${message.id}/retry`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error ?? `Retry failed (${res.status})`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
     } finally {
       setBusy(null);
     }
@@ -471,6 +511,7 @@ export function InboxClient({
       onEdit={(id, value) => setEdits((prev) => ({ ...prev, [id]: value }))}
       onApproveAndSend={approveAndSend}
       onRetryDelivery={retryDelivery}
+      onRetryFollowUp={retryFollowUp}
       onRetryDraft={retryDraft}
       onFollowUpChange={(id, value) =>
         setFollowUpDrafts((prev) => ({ ...prev, [id]: value }))

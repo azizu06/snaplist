@@ -98,7 +98,8 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **Adapter** — the isolating interface around eBay (posting + messaging). The pipeline must run and
   be testable against a **mock adapter** with no live eBay. Sandbox→production is a credential flip.
 - **Buyer-Q&A agent** — the **agent** that drafts replies to buyer questions, grounded in an item's
-  attributes/listing. v1: runs on **simulated** messages; final: wired to real eBay messaging.
+  attributes/listing. It runs for simulated demo questions and tenant-scoped eBay Sandbox imports;
+  sellers still approve or edit every reply before authenticated delivery.
 - **Inbox** — the seller's live view of buyer **messages**, fed DB→Supabase Realtime. The seller is
   the only SnapList user; buyers stay on eBay.
 - **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to

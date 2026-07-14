@@ -18,6 +18,9 @@ import { EbayApiError } from "./types";
  * the seller's account config (business policies + merchant location — the
  * production flip discovers their ids through this; issue #17/#47). */
 export const EBAY_OAUTH_SCOPES = [
+  // Traditional Trading API calls (GetMemberMessages/AddMemberMessageRTQ).
+  "https://api.ebay.com/oauth/api_scope",
+  "https://api.ebay.com/oauth/api_scope/commerce.message",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.account.readonly",

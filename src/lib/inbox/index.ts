@@ -1,6 +1,6 @@
 /**
  * Buyer inbox (issue #13): simulated buyer questions → `messages` + Realtime →
- * grounded reply agent → seller approve/edit → stubbed delivery.
+ * grounded reply agent → seller approve/edit → marketplace delivery.
  */
 export {
   messageDirectionSchema,

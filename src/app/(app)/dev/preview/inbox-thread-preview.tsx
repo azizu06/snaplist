@@ -74,6 +74,7 @@ export function InboxThreadPreview() {
         onEdit={noop}
         onApproveAndSend={noop}
         onRetryDelivery={noop}
+        onRetryFollowUp={noop}
         onRetryDraft={noop}
         onFollowUpChange={(_id, v) => setValue(v)}
         onSendFollowUp={noop}

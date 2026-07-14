@@ -96,7 +96,7 @@ flowchart TD
 
     INBOX --> QA["Buyer-Q&A agent<br/>grounded draft reply"]
     QA --> QAPPROVE["Seller approves or edits reply"]
-    QAPPROVE --> DELIVER["Deliver to buyer (simulated in v1)"]
+    QAPPROVE --> DELIVER["eBay message adapter<br/>Sandbox-capable text delivery"]
 
     subgraph crosscut["Cross-cutting"]
         REG["LLM provider registry<br/>Gemini dev / OpenAI showcase"]
@@ -142,8 +142,8 @@ adapter call. Facebook Marketplace and Mercari can reuse cached generated copy, 
 current effective price and reject an in-flight load if a concurrent seller-price edit advanced the
 review revision.
 
-> This diagram tracks the current build and will keep maturing with the project — the messaging
-> delivery path is simulated in v1, and the production eBay poller/queue lands with the go-live work
+> This diagram tracks the current build and will keep maturing with the project — real pre-sale text
+> messaging is Sandbox-capable while production activation stays owner-controlled under #17
 > ([#17](https://github.com/azizu06/snaplist/issues/17), [#65](https://github.com/azizu06/snaplist/issues/65)).
 
 ## Stack
@@ -193,7 +193,7 @@ idea seen three ways. The map from skill to code:
 | Seller-controlled outbound price | `effectivePrice` + eBay publish/export persistence seams — override-first fallback, cent-safe validation, cached-pack freshness, and revision guards |
 | Evals + calibration | `src/lib/eval` — gold set, ID/pricing metrics, reliability buckets + ECE, LLM judge validated against human labels |
 | Security | Clerk auth (Supabase third-party JWTs) + RLS on every domain table (tested in `src/lib/supabase/rls.test.ts` against minted tokens), user-scoped storage paths, lazy env validation (`src/lib/env.ts`), eBay account-deletion endpoint |
-| Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell API, sandbox) · export packs for FB Marketplace/Mercari |
+| Marketplace integration behind an adapter | `src/lib/marketplace` (eBay Sell + Trading/Message APIs, sandbox) · export packs for FB Marketplace/Mercari |
 | Docker / CI / observability | `Dockerfile`, `.github/workflows/ci.yml`, `src/lib/observability.ts`, `/api/health` |
 
 ## Eval harness
@@ -300,8 +300,8 @@ Being able to state where the system's accuracy tops out is part of the showcase
   sold-price comps. The retrieval architecture is real; only the seed content is synthetic.
 - **Eval gold set + sample predictions:** hand-authored fixtures (overlapping the corpus via
   `sourceRef`), labeled for development — see the accuracy-ceiling notes above.
-- **Buyer traffic is simulated.** The inbox's buyer questions come from a simulation endpoint, not
-  real marketplace buyers; the reply agent is real and grounded in the item's actual data.
+- **Buyer traffic can be simulated or imported from eBay Sandbox.** Both paths use the real grounded
+  reply agent; only the authenticated eBay path can claim marketplace delivery.
 - **eBay is sandbox.** Publishing targets the eBay sandbox (`EBAY_BASE_URL` flip to production by
   design, see [`docs/ebay-sandbox.md`](./docs/ebay-sandbox.md)); no live marketplace listings are
   created.

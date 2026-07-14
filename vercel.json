@@ -5,6 +5,10 @@
     {
       "path": "/api/cron/reprice",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/inbox-sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

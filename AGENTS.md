@@ -40,8 +40,9 @@ adapter and is **not on the Phase 1 critical path**.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.
 - **eBay marketplace mutations and messaging only ever go through the adapter interface.** The one
   non-transactional exception is read-only public sold-page research through `ebay-sold`; it cannot
-  post or message. In v1 the adapter is sandbox/stubbed and messaging is simulated. Keep the pipeline
-  testable offline against a mock adapter.
+  post or message. Publishing and pre-sale text messaging are Sandbox-capable; the simulator remains
+  a demo fixture. Keep every path testable offline against mock adapters, and leave production
+  activation owner-controlled under #17.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
 - **Review correction stays coherent and pre-publish.** Bounded identity edits must rerun the shared

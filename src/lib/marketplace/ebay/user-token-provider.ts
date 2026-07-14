@@ -29,12 +29,15 @@ export interface UserTokenProviderOptions {
   fetch?: typeof fetch;
   env?: () => Record<string, string | undefined>;
   now?: () => number;
+  /** Required when the caller uses a service-role client (background sync). */
+  userId?: string;
 }
 
 export class UserTokenProvider implements EbayTokenProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly readEnv: () => Record<string, string | undefined>;
   private readonly now: () => number;
+  private readonly userId?: string;
 
   constructor(
     /** The request's USER-SCOPED client — RLS pins the connection row. */
@@ -44,11 +47,16 @@ export class UserTokenProvider implements EbayTokenProvider {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.readEnv = options.env ?? (() => process.env);
     this.now = options.now ?? Date.now;
+    this.userId = options.userId;
   }
 
   async getAccessToken(): Promise<string> {
     const env = this.readEnv();
-    const connection = await getDecryptedConnection(this.supabase, env);
+    const connection = await getDecryptedConnection(
+      this.supabase,
+      env,
+      this.userId,
+    );
     if (!connection) {
       throw new Error(
         "No eBay account is connected. Connect one in Settings before publishing.",
@@ -82,7 +90,14 @@ export class UserTokenProvider implements EbayTokenProvider {
         body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: connection.refreshToken,
-          scope: SELL_INVENTORY_SCOPE,
+          // Preserve exactly the scopes granted to this connection. New
+          // connections include the traditional-API base scope for messaging;
+          // existing publish-only connections keep working and are prompted to
+          // reconnect only when they actually use messaging.
+          scope:
+            connection.scopes.length > 0
+              ? connection.scopes.join(" ")
+              : SELL_INVENTORY_SCOPE,
         }).toString(),
       },
     );

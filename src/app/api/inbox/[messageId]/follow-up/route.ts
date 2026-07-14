@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { sendFollowUpMessage } from "@/lib/inbox";
+import {
+  MessageDeliveryAttemptError,
+  MessageDeliveryConflictError,
+  SupabaseDeliveryRepository,
+  sendSellerFollowUp,
+} from "@/lib/inbox/transport";
+import { createMessagingAdapterForConversation } from "@/lib/inbox/adapters";
 import { serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 
@@ -15,12 +21,14 @@ import { enforceRateLimit } from "@/lib/abuse";
  * messaging allows many seller messages per thread, so the v1 "nothing further
  * to send" block was our own simplification, not an API limit. The message is
  * threaded to the conversation root (`reply_to` = this inbound question) and
- * marked `reply_kind = 'followup'`. Delivery is the STUBBED seam; the real eBay
- * send is issue #14. The question is loaded through the USER-SCOPED client so
- * RLS proves ownership (another user's messageId 404s).
+ * marked `reply_kind = 'followup'`. The question is loaded through the
+ * USER-SCOPED client so RLS proves ownership (another user's messageId 404s).
  */
 
-const bodySchema = z.object({ message: z.string().trim().min(1) });
+const bodySchema = z.object({
+  message: z.string().trim().min(1).max(2_000),
+  requestId: z.uuid(),
+});
 const paramsSchema = z.object({ messageId: z.uuid() });
 
 export async function POST(
@@ -57,35 +65,53 @@ export async function POST(
   // RLS-scoped read: only the owner's own INBOUND question is a conversation root.
   const { data: message } = await supabase
     .from("messages")
-    .select("id, item_id, listing_id, direction, status")
+    .select("id, marketplace")
     .eq("id", params.data.messageId)
     .eq("direction", "inbound")
     .maybeSingle();
   if (!message) {
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
-  // A follow-up only makes sense once the conversation has a sent reply. The
-  // composer is only shown in that state, so this guards a direct/raced call.
-  if (message.status !== "sent") {
-    return NextResponse.json(
-      { error: "Reply to this question before sending a follow-up." },
-      { status: 409 },
-    );
-  }
-
   try {
-    const { outbound } = await sendFollowUpMessage(supabase, {
-      userId,
-      message: {
-        id: message.id,
-        item_id: message.item_id,
-        listing_id: message.listing_id,
-      },
+    const outbound = await sendSellerFollowUp({
+      repository: new SupabaseDeliveryRepository(supabase, userId),
+      adapter: await createMessagingAdapterForConversation(
+        supabase,
+        userId,
+        message.marketplace,
+      ),
+      conversationId: message.id,
       body: parsed.data.message,
-      // deliver defaults to the stub (logged no-op) — issue #14 swaps it.
+      requestId: parsed.data.requestId,
     });
-    return NextResponse.json({ outboundId: outbound.id, status: "sent" });
+    if (outbound.delivery_status !== "delivered") {
+      return NextResponse.json(
+        {
+          error:
+            "This follow-up already exists but is not confirmed delivered. Use its retry action.",
+          outboundId: outbound.id,
+          deliveryStatus: outbound.delivery_status,
+        },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({
+      outboundId: outbound.id,
+      status: outbound.delivery_status,
+    });
   } catch (err) {
+    if (err instanceof MessageDeliveryConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    if (err instanceof MessageDeliveryAttemptError) {
+      return NextResponse.json(
+        {
+          error: "Follow-up was not confirmed delivered and remains retryable.",
+          deliveryStatus: err.kind,
+        },
+        { status: 502 },
+      );
+    }
     // Never leak the raw Supabase/delivery error to the client (CWE-209, #57).
     return serverErrorJson("inbox.followUp", err, "Failed to send follow-up.");
   }

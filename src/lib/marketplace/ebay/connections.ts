@@ -30,6 +30,7 @@ interface ConnectionRow {
   refresh_token_enc: string;
   access_token_enc: string | null;
   access_token_expires_at: string | null;
+  scopes: string[];
 }
 
 type Env = Record<string, string | undefined>;
@@ -37,11 +38,13 @@ type Env = Record<string, string | undefined>;
 /** What the Settings card shows. Never returns token material. */
 export async function getEbayConnectionStatus(
   supabase: SupabaseClient,
+  userId?: string,
 ): Promise<EbayConnectionStatus> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("ebay_connections")
-    .select("ebay_username")
-    .maybeSingle();
+    .select("ebay_username");
+  if (userId) query = query.eq("user_id", userId);
+  const { data, error } = await query.maybeSingle();
   if (error) throw new Error(`Failed to read eBay connection: ${error.message}`);
   return data
     ? { connected: true, ebayUsername: data.ebay_username ?? null }
@@ -91,18 +94,21 @@ export interface DecryptedConnection {
   accessToken: string | null;
   /** Epoch ms, null when no cached access token. */
   accessTokenExpiresAt: number | null;
+  scopes: string[];
 }
 
 export async function getDecryptedConnection(
   supabase: SupabaseClient,
   env: Env = process.env,
+  userId?: string,
 ): Promise<DecryptedConnection | null> {
-  const { data, error } = await supabase
+  let query = supabase
     .from("ebay_connections")
     .select(
-      "user_id, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at",
-    )
-    .maybeSingle<ConnectionRow>();
+      "user_id, ebay_user_id, ebay_username, refresh_token_enc, access_token_enc, access_token_expires_at, scopes",
+    );
+  if (userId) query = query.eq("user_id", userId);
+  const { data, error } = await query.maybeSingle<ConnectionRow>();
   if (error) throw new Error(`Failed to read eBay connection: ${error.message}`);
   if (!data) return null;
 
@@ -116,6 +122,7 @@ export async function getDecryptedConnection(
     accessTokenExpiresAt: data.access_token_expires_at
       ? Date.parse(data.access_token_expires_at)
       : null,
+    scopes: data.scopes ?? [],
   };
 }
 

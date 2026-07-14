@@ -9,9 +9,9 @@ import { messageRowSchema, type MessageRow } from "./types";
  * the `supabase_realtime` publication (20260610191000), so each insert/update
  * here is what the live inbox receives over Realtime.
  *
- * Delivery is an injectable seam (`DeliverReply`). The default is a STUB that
- * logs and does nothing — the PRD keeps messaging simulated until the eBay
- * adapter (issue #14) swaps a real sender in behind the same type.
+ * These legacy delivery helpers remain for the credential-free simulator and
+ * its regression tests. Production routes use `transport.ts`, whose marketplace
+ * adapter persists acknowledged/failure/ambiguous delivery truth.
  */
 
 export interface CreateBuyerMessageInput {

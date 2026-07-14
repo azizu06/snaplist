@@ -65,6 +65,31 @@ describe("EnvTokenProvider", () => {
     expect(params.get("scope")).toContain("sell.inventory");
   });
 
+  it("uses the composing adapter's requested scopes for app-level Sandbox refresh", async () => {
+    const fetchSpy = vi.fn(async () =>
+      jsonResponse(200, { access_token: "message-token", expires_in: 7200 }),
+    );
+    const scopes = [
+      "https://api.ebay.com/oauth/api_scope",
+      "https://api.ebay.com/oauth/api_scope/commerce.message",
+    ];
+    const provider = new EnvTokenProvider({
+      fetch: fetchSpy as unknown as typeof fetch,
+      env: () => ({
+        EBAY_CLIENT_ID: "client-id",
+        EBAY_CLIENT_SECRET: "client-secret",
+        EBAY_REFRESH_TOKEN: "refresh-me",
+      }),
+      scopes,
+    });
+
+    await provider.getAccessToken();
+
+    const [, init] = fetchSpy.mock.calls[0]! as unknown as [string, RequestInit];
+    const params = new URLSearchParams(String(init.body));
+    expect(params.get("scope")).toBe(scopes.join(" "));
+  });
+
   it("caches the access token until shortly before expiry, then refreshes", async () => {
     let nowMs = 0;
     const fetchSpy = vi.fn(async () =>

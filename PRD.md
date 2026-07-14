@@ -205,8 +205,8 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### eBay adapter (real, built behind interface, later phase)
 - **Posting:** eBay Sell API publish (sandbox first → production).
-- **Messaging (final version):** backend poller calls `GetMyMessages` (~60s; polling because eBay doesn't reliably push member messages) → writes to DB; **Supabase Realtime** pushes inbox updates to the frontend; approved replies delivered via `AddMemberMessageRTQ`.
-- **v1 messaging:** seeded/simulated buyer messages in our DB → real Realtime inbox → agent drafts grounded reply → delivery stubbed (logged/no-op in sandbox).
+- **Messaging:** the shared foreground/background sync service calls `GetMemberMessages` for unanswered active-listing questions, resolves the Commerce Message API conversation, writes through tenant-scoped RLS persistence, and lets **Supabase Realtime** update the frontend. Approved exact-question replies use `AddMemberMessageRTQ`; later seller-authored text uses Commerce `sendMessage`. Overlapping windows are deduplicated and the normal ingestion target is no more than five minutes.
+- **Demo messaging:** seeded/simulated buyer messages remain available for a credential-free demonstration and use an explicitly simulated adapter; they never masquerade as an eBay delivery.
 - **Account-deletion notification endpoint:** route stubbed from day one; fully implemented only at the production flip (required before first production call since we persist data).
 - **Secrets:** app-level eBay creds in v1 (sandbox); **per-user encrypted OAuth tokens** when the real adapter lands.
 

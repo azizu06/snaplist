@@ -78,6 +78,9 @@ Settings → **Connect eBay** → approve on eBay's consent screen. Tokens are
 stored AES-256-GCM-encrypted (`ebay_connections`, RLS-scoped); the seller can
 disconnect any time. Publishes now run under the seller's own identity — the
 `EbayTokenProvider` seam swaps per-user tokens in without touching the adapter.
+The same per-user provider resolves authenticated pre-sale messaging tokens;
+connections created before the `commerce.message` scope was added must
+reconnect before messaging is enabled.
 
 ### 5. First production publish
 

@@ -3,13 +3,13 @@ import type { ExtractedAttributes } from "../pipeline/types";
 
 /**
  * Buyer-inbox domain types (issue #13). The `messages` table (init schema) is the
- * storage; these types are the app-side contract for the simulated-buyer flow:
+ * storage; these types are the app-side contract for simulated and imported
+ * marketplace conversations:
  *
  *   simulated buyer question → `messages` row (inbound, status `new`)
  *   → reply agent drafts (status `drafted`, `draft_reply` + `draft_model` set)
  *   → seller approves/edits → outbound row (status `sent`, threaded via `reply_to`)
- *     + inbound row marked `sent` with `sent_at` — delivery itself is STUBBED
- *     (logged no-op) until the eBay adapter lands (issue #14).
+ *     + explicit external delivery fields retain success/failure/ambiguity.
  */
 
 /** `messages.direction` — who authored the message. */
@@ -28,6 +28,7 @@ export type MessageDirection = z.infer<typeof messageDirectionSchema>;
  */
 export const messageStatusSchema = z.enum([
   "new",
+  "drafting",
   "drafted",
   "draft_failed",
   "approved",
@@ -60,6 +61,18 @@ export const messageRowSchema = z.object({
   draft_model: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  marketplace: z.string().optional(),
+  external_message_id: z.string().nullable().optional(),
+  external_parent_id: z.string().nullable().optional(),
+  external_conversation_id: z.string().nullable().optional(),
+  external_listing_id: z.string().nullable().optional(),
+  external_buyer_id: z.string().nullable().optional(),
+  external_created_at: z.string().nullable().optional(),
+  delivery_request_id: z.string().nullable().optional(),
+  delivery_status: z.string().nullable().optional(),
+  external_delivery_id: z.string().nullable().optional(),
+  delivery_attempted_at: z.string().nullable().optional(),
+  delivery_error: z.string().nullable().optional(),
 });
 
 export type MessageRow = z.infer<typeof messageRowSchema>;

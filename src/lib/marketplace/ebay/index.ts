@@ -17,6 +17,7 @@ export type {
 } from "./types";
 export { EbayApiError } from "./types";
 export { HttpEbayAdapter } from "./http";
+export { HttpEbayMessagingAdapter } from "./messaging";
 export { MockEbayAdapter } from "./mock";
 export { EnvTokenProvider } from "./auth";
 export {
@@ -58,6 +59,8 @@ import type { EbayAdapter } from "./types";
 import { HttpEbayAdapter } from "./http";
 import { UserTokenProvider } from "./user-token-provider";
 import { getEbayConnectionStatus } from "./connections";
+import { HttpEbayMessagingAdapter } from "./messaging";
+import type { MarketplaceMessagingAdapter } from "../messaging";
 
 /**
  * The real adapter, wired for the current environment. Sandbox by default
@@ -83,9 +86,47 @@ export function createEbayAdapter(): EbayAdapter {
  */
 export async function createEbayAdapterForUser(
   supabase: SupabaseClient,
+  userId?: string,
 ): Promise<EbayAdapter> {
-  const { connected } = await getEbayConnectionStatus(supabase);
+  const { connected } = await getEbayConnectionStatus(supabase, userId);
   return connected
-    ? new HttpEbayAdapter({ tokenProvider: new UserTokenProvider(supabase) })
+    ? new HttpEbayAdapter({
+        tokenProvider: new UserTokenProvider(supabase, { userId }),
+      })
     : new HttpEbayAdapter();
+}
+
+/**
+ * Messaging composition mirrors publishing: connected seller token first,
+ * otherwise the already-supported app-level Sandbox credentials.
+ */
+export async function createEbayMessagingAdapterForUser(
+  supabase: SupabaseClient,
+  userId?: string,
+): Promise<MarketplaceMessagingAdapter> {
+  const { connected } = await getEbayConnectionStatus(supabase, userId);
+  if (connected) {
+    return new HttpEbayMessagingAdapter({
+      tokenProvider: new UserTokenProvider(supabase, { userId }),
+    });
+  }
+  const baseUrl = process.env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+  if (!baseUrl.includes("api.sandbox.ebay.com")) {
+    throw new Error(
+      "Production eBay messaging requires the seller's connected account.",
+    );
+  }
+  return new HttpEbayMessagingAdapter();
+}
+
+/** Whether the already-supported app-level Sandbox user-token loop can run. */
+export function hasEbayMessagingSandboxFallback(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const baseUrl = env.EBAY_BASE_URL ?? "https://api.sandbox.ebay.com";
+  if (!baseUrl.includes("api.sandbox.ebay.com")) return false;
+  return !!(
+    env.EBAY_OAUTH_TOKEN ||
+    (env.EBAY_REFRESH_TOKEN && env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET)
+  );
 }

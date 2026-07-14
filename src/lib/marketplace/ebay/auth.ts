@@ -38,12 +38,15 @@ export interface EnvTokenProviderOptions {
   env?: () => Record<string, string | undefined>;
   /** Injectable clock for cache-expiry tests. */
   now?: () => number;
+  /** Refresh-token scopes for the composing adapter. */
+  scopes?: string[];
 }
 
 export class EnvTokenProvider implements EbayTokenProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly readEnv: () => Record<string, string | undefined>;
   private readonly now: () => number;
+  private readonly scopes: string[];
 
   private cached?: { token: string; expiresAt: number };
 
@@ -51,6 +54,7 @@ export class EnvTokenProvider implements EbayTokenProvider {
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.readEnv = options.env ?? (() => process.env);
     this.now = options.now ?? Date.now;
+    this.scopes = options.scopes ?? [SELL_INVENTORY_SCOPE];
   }
 
   async getAccessToken(): Promise<string> {
@@ -86,7 +90,7 @@ export class EnvTokenProvider implements EbayTokenProvider {
       body: new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: refreshToken,
-        scope: SELL_INVENTORY_SCOPE,
+        scope: this.scopes.join(" "),
       }).toString(),
     });
 

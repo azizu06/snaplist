@@ -6,6 +6,10 @@ SnapList publishes listings to eBay through one adapter seam
 never sees eBay HTTP. **Sandbox ↔ production is config-only** — `EBAY_BASE_URL`
 plus credentials/policy ids. No code change.
 
+Pre-sale buyer questions and text replies/follow-ups use the same credential
+boundary through a separate marketplace-messaging adapter. Its two-user
+operator procedure is in [ebay-messaging-sandbox.md](./ebay-messaging-sandbox.md).
+
 ## What the adapter does
 
 `HttpEbayAdapter.publishListing()` runs the documented Sell Inventory flow:
@@ -63,7 +67,8 @@ the HTTP adapter's contract tests). No eBay credential is ever needed to run
      ("User Tokens" → Get a Token from eBay via Your Application, sandbox) and
      set `EBAY_OAUTH_TOKEN`. Tokens live ~2 hours; fine for manual testing.
    - *Durable:* run the authorization-code flow once for the sandbox seller
-     (scope `sell.inventory`), keep the **refresh token** (valid ~18 months),
+     (scopes `sell.inventory`, the traditional base scope, and
+     `commerce.message`), keep the **refresh token** (valid ~18 months),
      and set `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `EBAY_REFRESH_TOKEN`. The
      adapter exchanges it for access tokens automatically and caches them.
 4. **Business policies + location** — on the sandbox seller account create a
@@ -80,10 +85,9 @@ All of these go in `.env.local` (see `.env.example`). The adapter reads them
 lazily at publish time and fails with a readable error naming exactly what is
 missing — nothing breaks at import/boot when they're absent.
 
-> **Status note:** this environment has no sandbox credentials in `.env.local`,
-> so a live sandbox publish has not been executed yet; the code path is
-> complete and contract-tested offline. Live verification happens with the
-> credential work in **#17** (per-user OAuth + production flip).
+> **Status note:** provider actions remain operator-only. Publishing and
+> messaging are contract-tested offline; record any owner-run Sandbox result
+> explicitly. Production activation remains in **#17**.
 
 ## The production flip (config-only)
 

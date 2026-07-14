@@ -416,8 +416,8 @@ interface PendingAttachment {
  * v1 SCOPE (honest): the picker + thumbnail previews are fully functional
  * front-end affordances, but **photos are preview-only** — actually delivering
  * image attachments to the buyer is a backend slice (Storage upload + a
- * message-attachments model + the eBay adapter), mirroring how text delivery is
- * itself stubbed today. So Send delivers the typed text (real path); a faint
+ * message-attachments model + provider-hosted media). Text delivery is real
+ * through the marketplace adapter. A faint
  * note appears while photos are attached so the seller is never misled.
  */
 function FollowUpComposer({
@@ -684,6 +684,7 @@ export interface ConversationThreadProps {
   onEdit: (id: string, value: string) => void;
   onApproveAndSend: (message: MessageRow) => void;
   onRetryDelivery: (message: MessageRow) => void;
+  onRetryFollowUp: (message: MessageRow) => void;
   onRetryDraft: (message: MessageRow) => void;
   /** Composer input change + send for follow-up messages (post-reply). */
   onFollowUpChange: (id: string, value: string) => void;
@@ -702,6 +703,7 @@ export function ConversationThread({
   onEdit,
   onApproveAndSend,
   onRetryDelivery,
+  onRetryFollowUp,
   onRetryDraft,
   onFollowUpChange,
   onSendFollowUp,
@@ -779,25 +781,51 @@ export function ConversationThread({
             </div>
           ) : null}
 
-          {/* outbound — your follow-up messages (post-reply), newest last. Same
-              green bubble as the reply; a conversation is a thread, not a single
-              Q&A pair, so the seller can keep messaging the buyer. */}
-          {followUps.map((m) => (
+          {/* Persist every seller-authored intent, including a rejected, failed,
+              or ambiguous delivery. Unconfirmed attempts stay visible and
+              retryable instead of being presented as delivered. */}
+          {followUps.map((m) => {
+            const delivered =
+              m.delivery_status === "delivered" ||
+              (m.delivery_status == null && m.status === "sent");
+            const retrying = busy === `retry-followup:${m.id}`;
+            return (
             <div key={m.id} className="flex flex-col items-end gap-1">
-              <div className="msg-bubble msg-out msg-enter max-w-[80%]">
+              <div
+                className={`msg-bubble msg-enter max-w-[80%] ${
+                  delivered
+                    ? "msg-out"
+                    : "border border-danger-border bg-danger-soft text-danger-soft-fg"
+                }`}
+              >
                 <p className="whitespace-pre-wrap">
                   <span className="sr-only">You: </span>
                   {m.body}
                 </p>
               </div>
-              <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
-                <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                Delivered
-              </span>
+              {delivered ? (
+                <span className="flex items-center gap-1 px-1 text-[11px] text-faint">
+                  <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  Delivered
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 px-1 text-[11px] text-danger-soft-fg">
+                  Not delivered
+                  <button
+                    type="button"
+                    onClick={() => onRetryFollowUp(m)}
+                    disabled={retrying || m.delivery_status === "sending"}
+                    className="font-semibold underline underline-offset-2 disabled:no-underline disabled:opacity-60"
+                  >
+                    {retrying ? "Retrying…" : "Retry"}
+                  </button>
+                </span>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
