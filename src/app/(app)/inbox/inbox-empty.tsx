@@ -99,7 +99,7 @@ export function InboxEmptyState() {
         </div>
 
         {/* ---- copy: one headline, one sentence, one hint ---- */}
-        <h3 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
+        <h3 className="mt-10 font-display text-[22px] font-bold tracking-tight text-fg-strong">
           No buyer questions yet
         </h3>
         <p className="mx-auto mt-2 max-w-lg text-[16.5px] leading-relaxed text-fg">

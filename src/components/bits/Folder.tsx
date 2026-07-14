@@ -1,8 +1,9 @@
 'use client';
 
-// react-bits Folder (TS-TW registry), light-adapted for SnapList: violet
+// react-bits Folder (TS-TW registry), light-adapted for SnapList: green
 // default to match the app accent, papers slightly toned for the white
-// canvas. Click toggles open; hover lifts the papers.
+// canvas. Callers can use it as either an interactive reveal or a static
+// decorative composition.
 import React, { useEffect, useState } from 'react';
 
 interface FolderProps {
@@ -10,6 +11,7 @@ interface FolderProps {
   size?: number;
   items?: React.ReactNode[];
   className?: string;
+  interactive?: boolean;
 }
 
 // SnapList: the open papers fan out by a translate proportional to `size`, so a
@@ -52,7 +54,13 @@ const darkenColor = (hex: string, percent: number): string => {
   return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
 };
 
-const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = [], className = '' }) => {
+const Folder: React.FC<FolderProps> = ({
+  color = '#008060',
+  size = 1,
+  items = [],
+  className = '',
+  interactive = true,
+}) => {
   const maxItems = 3;
   const papers = items.slice(0, maxItems);
   while (papers.length < maxItems) {
@@ -73,6 +81,7 @@ const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = []
   const paper3 = '#ffffff';
 
   const handleClick = () => {
+    if (!interactive) return;
     setOpen(prev => !prev);
     if (open) {
       setPaperOffsets(Array.from({ length: maxItems }, () => ({ x: 0, y: 0 })));
@@ -80,7 +89,7 @@ const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = []
   };
 
   const handlePaperMouseMove = (e: React.MouseEvent<HTMLDivElement, MouseEvent>, index: number) => {
-    if (!open) return;
+    if (!interactive || !open) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
@@ -132,14 +141,16 @@ const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = []
   return (
     <div style={scaleStyle} className={className}>
       <div
-        className={`group relative transition-all duration-200 ease-in cursor-pointer ${
+        data-folder-behavior={interactive ? 'interactive' : 'static'}
+        aria-hidden={interactive ? undefined : true}
+        className={interactive ? `group relative cursor-pointer transition-all duration-200 ease-in ${
           !open ? 'hover:-translate-y-2' : ''
-        }`}
+        }` : 'relative'}
         style={{
           ...folderStyle,
-          transform: open ? 'translateY(-8px)' : undefined
+          transform: interactive && open ? 'translateY(-8px)' : undefined
         }}
-        onClick={handleClick}
+        onClick={interactive ? handleClick : undefined}
       >
         <div
           className="relative w-[100px] h-[80px] rounded-tl-0 rounded-tr-[10px] rounded-br-[10px] rounded-bl-[10px]"
@@ -164,10 +175,10 @@ const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = []
             return (
               <div
                 key={i}
-                onMouseMove={e => handlePaperMouseMove(e, i)}
-                onMouseLeave={() => handlePaperMouseLeave(i)}
+                onMouseMove={interactive ? e => handlePaperMouseMove(e, i) : undefined}
+                onMouseLeave={interactive ? () => handlePaperMouseLeave(i) : undefined}
                 className={`absolute z-20 bottom-[10%] left-1/2 transition-all duration-300 ease-in-out ${
-                  !open ? 'transform -translate-x-1/2 translate-y-[10%] group-hover:translate-y-0' : 'hover:scale-110'
+                  !open ? `transform -translate-x-1/2 translate-y-[10%]${interactive ? ' group-hover:translate-y-0' : ''}` : interactive ? 'hover:scale-110' : ''
                 } ${sizeClasses}`}
                 style={{
                   ...(!open ? {} : { transform: transformStyle }),
@@ -181,7 +192,7 @@ const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = []
           })}
           <div
             className={`absolute z-30 w-full h-full origin-bottom transition-all duration-300 ease-in-out ${
-              !open ? 'group-hover:[transform:skew(15deg)_scaleY(0.6)]' : ''
+              !open && interactive ? 'group-hover:[transform:skew(15deg)_scaleY(0.6)]' : ''
             }`}
             style={{
               backgroundColor: color,
@@ -191,7 +202,7 @@ const Folder: React.FC<FolderProps> = ({ color = '#008060', size = 1, items = []
           ></div>
           <div
             className={`absolute z-30 w-full h-full origin-bottom transition-all duration-300 ease-in-out ${
-              !open ? 'group-hover:[transform:skew(-15deg)_scaleY(0.6)]' : ''
+              !open && interactive ? 'group-hover:[transform:skew(-15deg)_scaleY(0.6)]' : ''
             }`}
             style={{
               backgroundColor: color,

@@ -34,6 +34,18 @@ function renderRow(status: string) {
   );
 }
 
+function renderEmptyDashboard() {
+  return load(
+    renderToStaticMarkup(
+      <DashboardView
+        rows={[]}
+        counts={{ draft: 0, attention: 0, live: 0 }}
+        filter="all"
+      />,
+    ),
+  );
+}
+
 describe("dashboard row navigation", () => {
   it("keeps non-interactive status cells below the stretched review link", () => {
     const $ = renderRow("draft");
@@ -54,5 +66,20 @@ describe("dashboard row navigation", () => {
     publishLinks.each((_, link) => {
       expect($(link).attr("class")).toContain("relative z-[2]");
     });
+  });
+});
+
+describe("dashboard empty state", () => {
+  it("keeps its folder decorative and centers it with the first-listing action", () => {
+    const $ = renderEmptyDashboard();
+    const emptyState = $("[data-dashboard-empty-state]");
+    const folder = emptyState.find('[data-folder-behavior="static"]');
+
+    expect(emptyState).toHaveLength(1);
+    expect(emptyState.attr("class")).toContain("justify-center");
+    expect(folder).toHaveLength(1);
+    expect(folder.attr("class")).not.toContain("cursor-pointer");
+    expect(folder.attr("class")).not.toContain("group-hover");
+    expect(emptyState.find('a[href="/upload"]')).toHaveLength(1);
   });
 });

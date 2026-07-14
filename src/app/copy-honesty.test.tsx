@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import HowItWorks, { metadata as tourMetadata } from "./(marketing)/tour/page";
 import { SettingsView } from "./(app)/settings/settings-view";
+import { CostBasisCard } from "./(app)/upload/cost-basis-card";
 
 vi.mock("@/components/marketing/reveal", () => ({
   Reveal: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -132,5 +133,14 @@ describe("publish eligibility settings copy", () => {
     expect(card.text()).toMatch(/offers.*shipping.*returns/i);
     expect(card.find('[role="switch"]').attr("aria-checked")).toBe("false");
     expect(card.text()).not.toMatch(/category rules|custom prompt|personality/i);
+  });
+});
+
+describe("upload cost-basis copy", () => {
+  it("uses the direct free-or-unknown helper wording", () => {
+    const text = load(renderToStaticMarkup(<CostBasisCard />))("section").text();
+
+    expect(text).toContain("Enter 0 if it was free. Leave it blank if you don’t know.");
+    expect(text).not.toMatch(/[—–]/);
   });
 });

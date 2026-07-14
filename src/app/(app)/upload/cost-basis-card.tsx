@@ -25,7 +25,7 @@ export function CostBasisCard() {
       </div>
       <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
         Add your cost and SnapList shows net profit after fees on every price.
-        Enter 0 if it was free — leave blank if you don’t know.
+        Enter 0 if it was free. Leave it blank if you don’t know.
       </p>
       <div className="mt-3 flex max-w-[180px] items-center rounded-lg border border-border-strong bg-bg shadow-xs transition-colors focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25">
         <span className="pl-3 text-[15px] text-muted">$</span>

@@ -745,8 +745,8 @@ function AddFilterMenu({
 }
 
 /**
- * Empty dashboard — react-bits Folder holding miniature listing previews from
- * the demo catalog (image + name + price from the SAME DemoProduct).
+ * Empty dashboard — a static folder composition holding miniature listing
+ * previews from the demo catalog (image + name + price from the SAME DemoProduct).
  */
 const FOLDER_ITEMS: DemoProduct[] = [
   DEMO_PRODUCTS_BY_SLUG.kettlebell,
@@ -773,23 +773,24 @@ function MiniListingCard({ product }: { product: DemoProduct }) {
 
 function DashboardEmpty() {
   return (
-    <div className="flex min-h-[560px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
-      <div className="mb-14">
-        <Folder
-          color="#008060"
-          size={2.2}
-          items={FOLDER_ITEMS.map((product) => (
-            <MiniListingCard key={product.slug} product={product} />
-          ))}
-        />
-      </div>
-      <p className="text-base font-semibold text-fg-strong">List your first item</p>
-      <p className="max-w-sm text-[15px] text-muted">
-        Take a photo of your first item and we&apos;ll identify it, price it
-        from sold listings when available or honest fallbacks, and write the
-        listing for you.
-      </p>
-      <div className="mt-1">
+    <div data-dashboard-empty-state className="flex min-h-[560px] flex-col items-center justify-center rounded-xl border border-dashed border-border-strong bg-surface px-6 py-12 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-4">
+        <div className="flex h-44 items-center justify-center">
+          <Folder
+            color="#008060"
+            size={2.2}
+            interactive={false}
+            items={FOLDER_ITEMS.map((product) => (
+              <MiniListingCard key={product.slug} product={product} />
+            ))}
+          />
+        </div>
+        <p className="text-base font-semibold text-fg-strong">List your first item</p>
+        <p className="text-[15px] text-muted">
+          Take a photo of your first item and we&apos;ll identify it, price it
+          from sold listings when available or honest fallbacks, and write the
+          listing for you.
+        </p>
         <Link
           href="/upload"
           className="inline-flex items-center rounded-lg bg-primary px-3.5 py-2 text-[14px] font-semibold text-primary-fg shadow-xs transition-colors hover:bg-primary-hover"
