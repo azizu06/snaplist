@@ -187,6 +187,7 @@ describe("message policy audit RLS", () => {
       .eq("user_id", userA.id)
       .eq("external_message_id", "rls-question-0")
       .single();
+    const attemptedAt = new Date().toISOString();
     const unauthorized = await admin.rpc("apply_scheduled_ebay_message_write", {
       p_user_id: userA.id,
       p_operation: "claim_canonical",
@@ -194,10 +195,11 @@ describe("message policy audit RLS", () => {
       p_payload: {
         message_id: message!.id,
         body: message!.draft_reply,
-        at: "2026-07-14T12:05:00.000Z",
+        at: attemptedAt,
         retry: false,
         delivery_actor: "automatic",
-        marketplace_observed_at: new Date().toISOString(),
+        marketplace_observed_at: attemptedAt,
+        question_observed_at: attemptedAt,
       },
     });
     expect(unauthorized.error?.message).toMatch(/not authorized/i);

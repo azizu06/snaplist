@@ -469,6 +469,8 @@ begin
     from public.message_policy_decisions pending
     join public.messages message
       on message.id = pending.message_id and message.user_id = pending.user_id
+    join public.user_settings settings
+      on settings.user_id = pending.user_id and settings.auto_reply_enabled = true
     where pending.user_id = p_user_id
       and pending.ebay_account_generation = v_account.generation
       and pending.policy_version = p_payload->>'policy_version'
