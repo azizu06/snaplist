@@ -13,6 +13,8 @@ import type {
  *
  * `getEntitlement` is the seam the app reads instead of the pure `resolveTier`
  * default: a fast, RLS-guarded lookup of the user's mirrored `subscriptions` row.
+ * Active/trialing mirrors with a recorded period end stay paid only until that
+ * timestamp passes.
  * It is FAIL-SAFE — any error / missing row resolves to `free`, so a billing or DB
  * hiccup can never *grant* entitlement nor block a request.
  *
@@ -29,10 +31,22 @@ export async function getEntitlement(
     const db = client ?? (await createClient());
     const { data } = await db
       .from("subscriptions")
-      .select("status")
+      .select("status, current_period_end")
       .eq("user_id", userId)
       .maybeSingle();
-    return entitlementTierFromStatus((data as { status?: string } | null)?.status);
+    const row = data as { status?: string; current_period_end?: unknown } | null;
+    const tier = entitlementTierFromStatus(row?.status);
+
+    // An active or trialing status is paid only while a recorded period remains
+    // current. The mirror is asynchronously updated by webhooks, so an expired
+    // or malformed period must fail closed rather than extending Seller Pro.
+    if (tier === "paid" && row?.current_period_end != null) {
+      if (typeof row.current_period_end !== "string") return "free";
+      const periodEnd = Date.parse(row.current_period_end);
+      if (!Number.isFinite(periodEnd) || periodEnd <= Date.now()) return "free";
+    }
+
+    return tier;
   } catch {
     return "free"; // entitlement is best-effort: a read failure never over-entitles
   }

@@ -12,7 +12,10 @@ import {
  */
 function rlsEntitlementClient(
   viewerUserId: string,
-  rows: ReadonlyMap<string, { status: string; tier?: string }>,
+  rows: ReadonlyMap<
+    string,
+    { status: string; tier?: string; current_period_end?: string | null }
+  >,
 ): SupabaseClient {
   return {
     from() {
@@ -62,12 +65,39 @@ describe("resolveSellerPolicy (#153 server entitlement seam)", () => {
   it.each([
     ["active subscription", "seller-paid", { status: "active" }, "paid", 60, 200],
     ["trialing subscription", "seller-trial", { status: "trialing" }, "paid", 60, 200],
+    [
+      "expired active mirror",
+      "seller-expired-active",
+      { status: "active", current_period_end: "2020-01-01T00:00:00.000Z" },
+      "free",
+      20,
+      15,
+    ],
+    [
+      "expired trialing mirror",
+      "seller-expired-trial",
+      { status: "trialing", current_period_end: "2020-01-01T00:00:00.000Z" },
+      "free",
+      20,
+      15,
+    ],
+    [
+      "malformed active mirror period",
+      "seller-malformed-period",
+      { status: "active", current_period_end: "not-a-timestamp" },
+      "free",
+      20,
+      15,
+    ],
     ["missing entitlement", "seller-missing", undefined, "free", 20, 15],
     ["canceled stale mirror", "seller-canceled", { status: "canceled", tier: "paid" }, "free", 20, 15],
   ] as const)(
     "returns the truthful %s policy",
     async (_name, userId, row, expectedTier, meteredPerMinute, itemsPerDay) => {
-      const rows = new Map<string, { status: string; tier?: string }>();
+      const rows = new Map<
+        string,
+        { status: string; tier?: string; current_period_end?: string | null }
+      >();
       if (row) rows.set(userId, row);
 
       await expect(
