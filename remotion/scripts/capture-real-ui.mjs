@@ -80,8 +80,6 @@ function resolveChromeExecutable() {
   );
 }
 
-const CHROME = resolveChromeExecutable();
-
 function connectCdp(url) {
   const socket = new WebSocket(url);
   const pending = new Map();
@@ -255,10 +253,18 @@ export function assertMobileInboxLayout(metrics, label) {
   }
 }
 
-async function captureWithCdp({ url, viewport, output, theme, focusSelector, assertMobileInbox }) {
+async function captureWithCdp({
+  browserExecutable,
+  url,
+  viewport,
+  output,
+  theme,
+  focusSelector,
+  assertMobileInbox,
+}) {
   const profile = await mkdtemp(path.join(os.tmpdir(), "snaplist-capture-"));
   const child = spawn(
-    CHROME,
+    browserExecutable,
     [
       "--headless=new",
       "--disable-background-networking",
@@ -382,7 +388,7 @@ function withTheme(route, theme) {
   return url.toString();
 }
 
-async function capture({ name, route, focusSelector, formFactor, theme }) {
+async function capture({ name, route, focusSelector, formFactor, theme }, browserExecutable) {
   const viewport = VIEWPORTS[formFactor];
   const outputDir = path.join(OUTPUT_ROOT, formFactor, theme);
   const output = path.join(outputDir, `${name}.png`);
@@ -390,6 +396,7 @@ async function capture({ name, route, focusSelector, formFactor, theme }) {
   await rm(output, { force: true });
 
   await captureWithCdp({
+    browserExecutable,
     url: withTheme(route, theme),
     viewport,
     output,
@@ -412,6 +419,10 @@ async function mapLimit(items, limit, worker) {
 }
 
 async function main() {
+  // Browser discovery belongs to direct capture execution, not module import.
+  // The pure layout assertions are imported by Vitest and must remain usable in
+  // browserless CI environments.
+  const browserExecutable = resolveChromeExecutable();
   let server;
   let serverLog = "";
   if (OWN_SERVER) {
@@ -440,7 +451,7 @@ async function main() {
     ).filter(({ name, formFactor, theme }) =>
       CAPTURE_ONLY ? `${formFactor}/${theme}/${name}` === CAPTURE_ONLY : true,
     );
-    await mapLimit(jobs, CAPTURE_CONCURRENCY, capture);
+    await mapLimit(jobs, CAPTURE_CONCURRENCY, (job) => capture(job, browserExecutable));
     process.stdout.write(`[capture-real-ui] ${jobs.length} real-UI captures written to ${OUTPUT_ROOT}\n`);
   } catch (error) {
     if (serverLog) process.stderr.write(serverLog.slice(-6000));

@@ -1,11 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 // The capture harness is intentionally plain Node ESM so it can run without a
 // TypeScript loader. Vitest can import it directly for its deterministic QA seam.
-import {
-  assertCaptureLayout,
-  assertMobileInboxLayout,
-} from "../../remotion/scripts/capture-real-ui.mjs";
+const fsMock = vi.hoisted(() => ({
+  accessSync: vi.fn(() => {
+    throw new Error("browser resolution must not run while importing pure capture assertions");
+  }),
+}));
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...actual, accessSync: fsMock.accessSync };
+});
+
+let assertCaptureLayout: typeof import("../../remotion/scripts/capture-real-ui.mjs").assertCaptureLayout;
+let assertMobileInboxLayout: typeof import("../../remotion/scripts/capture-real-ui.mjs").assertMobileInboxLayout;
+
+beforeAll(async () => {
+  ({ assertCaptureLayout, assertMobileInboxLayout } = await import(
+    "../../remotion/scripts/capture-real-ui.mjs"
+  ));
+});
+
+describe("browserless assertion imports", () => {
+  it("does not resolve Chrome while importing the pure QA exports", () => {
+    expect(assertCaptureLayout).toBeTypeOf("function");
+    expect(assertMobileInboxLayout).toBeTypeOf("function");
+    expect(fsMock.accessSync).not.toHaveBeenCalled();
+  });
+});
 
 const validMetrics = {
   viewportWidth: 390,
