@@ -191,6 +191,33 @@ export interface ConversationState {
   snippet: string;
 }
 
+const POLICY_SOURCE_LABELS: Record<string, string> = {
+  active_listing_specific: "current listing fact",
+  seller_confirmed_measurement: "seller-confirmed measurement",
+  current_asking_price: "current asking price",
+  active_listing_state: "active listing state",
+  seller_approved_policy: "seller-approved policy",
+};
+
+/** Compact, seller-readable projection of the structured authorization audit. */
+export function messagePolicyEvidenceLabel(message: MessageRow): string | null {
+  if (!message.policy_outcome) return null;
+  const reference = message.policy_grounding_references?.find(
+    (candidate): candidate is Record<string, unknown> =>
+      typeof candidate === "object" && candidate !== null,
+  );
+  const source =
+    typeof reference?.source === "string"
+      ? POLICY_SOURCE_LABELS[reference.source]
+      : undefined;
+  if (message.policy_outcome === "auto_send") {
+    return `Automatically sent${source ? ` · ${source}` : ""}`;
+  }
+  if (message.policy_outcome === "escalate") return "Needs seller check";
+  if (message.policy_outcome === "draft_for_approval") return "Needs your approval";
+  return null;
+}
+
 export function deriveConversationState(
   message: MessageRow,
   repliesByQuestion: Map<string, MessageRow>,
@@ -225,7 +252,9 @@ export function deriveConversationState(
         message.delivery_attempted_at,
       )
     : delivered
-      ? "Replied"
+      ? message.policy_outcome === "auto_send"
+        ? "Automatically sent"
+        : "Replied"
       : message.status === "sent"
       ? sending
         ? "Sending…"
@@ -807,7 +836,7 @@ export function ConversationThread({
                 <svg viewBox="0 0 24 24" className="size-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
-                Delivered
+                {messagePolicyEvidenceLabel(message) ?? "Delivered"}
               </span>
             </div>
           ) : null}
@@ -893,7 +922,9 @@ export function ConversationThread({
                 ? "Delivery unconfirmed. eBay may already have received this reply."
                 : message.delivery_status === "sending"
                   ? "Delivery pending. Retry is available if the send lease expired."
-                  : "Reply not delivered. Delivery failed after your approval."}
+                  : message.policy_outcome === "auto_send"
+                    ? "Automatic reply not delivered. The failure is safe to retry."
+                    : "Reply not delivered. Delivery failed after your approval."}
             </p>
             {message.draft_reply ? (
               <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-fg">
@@ -955,7 +986,11 @@ export function ConversationThread({
                 className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold text-accent-soft-fg"
               >
                 <SparkleIcon className="size-3 shrink-0" />
-                Drafted from your listing · edit before sending
+                {message.policy_outcome === "escalate"
+                  ? "Needs seller check · review before sending"
+                  : message.policy_outcome === "draft_for_approval"
+                    ? "Needs your approval · edit before sending"
+                    : "Drafted from your listing · edit before sending"}
                 {message.draft_model ? (
                   <span className="font-normal text-accent-soft-fg/70">
                     · {message.draft_model}

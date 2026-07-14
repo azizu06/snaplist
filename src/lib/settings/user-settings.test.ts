@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  AUTO_REPLY_DEFAULT,
   AUTOPILOT_DEFAULT,
+  getAutoReplyEnabled,
   getAutopilotEnabled,
+  setAutoReplyEnabled,
   setAutopilotEnabled,
 } from "./user-settings";
 
@@ -98,5 +101,20 @@ describe("setAutopilotEnabled", () => {
     await expect(setAutopilotEnabled(client, "user-1", true)).rejects.toThrow(
       /denied/,
     );
+  });
+});
+
+describe("automatic buyer-reply preference", () => {
+  it("defaults to disabled when the seller has no settings row", async () => {
+    const { client } = fakeReadClient({ data: null, error: null });
+    await expect(getAutoReplyEnabled(client, "user-1")).resolves.toBe(false);
+    expect(AUTO_REPLY_DEFAULT).toBe(false);
+  });
+
+  it("stores the one tenant-scoped master toggle", async () => {
+    const { client, calls } = fakeWriteClient({ error: null });
+    await setAutoReplyEnabled(client, "user-1", true);
+    expect(calls.payload).toEqual({ user_id: "user-1", auto_reply_enabled: true });
+    expect(calls.options).toEqual({ onConflict: "user_id" });
   });
 });

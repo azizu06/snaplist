@@ -7,7 +7,10 @@ import type {
 import { MarketplaceDeliveryError } from "@/lib/marketplace/messaging";
 import {
   applyEbayMessageWrite,
+  applyScheduledEbayMessageWrite,
   beginEbayMessageWrite,
+  beginScheduledEbayMessageWrite,
+  readScheduledEbayMessagePolicy,
 } from "./ebay-server-write";
 import { messageRowSchema, type MessageRow } from "./types";
 
@@ -383,10 +386,13 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     private readonly userId: string,
     private readonly serverManaged = false,
     private readonly serverWriteClient: SupabaseClient = supabase,
+    private readonly scheduled = false,
   ) {}
 
   private getWriteGeneration(): Promise<string> {
-    this.writeGeneration ??= beginEbayMessageWrite(this.serverWriteClient);
+    this.writeGeneration ??= this.scheduled
+      ? beginScheduledEbayMessageWrite(this.serverWriteClient, this.userId)
+      : beginEbayMessageWrite(this.serverWriteClient);
     return this.writeGeneration;
   }
 
@@ -394,15 +400,33 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
     operation: string,
     payload: Record<string, unknown>,
   ): Promise<T> {
-    return applyEbayMessageWrite<T>(
-      this.serverWriteClient,
-      operation,
-      payload,
-      await this.getWriteGeneration(),
-    );
+    const generation = await this.getWriteGeneration();
+    return this.scheduled
+      ? applyScheduledEbayMessageWrite<T>(
+          this.serverWriteClient,
+          this.userId,
+          operation,
+          payload,
+          generation,
+        )
+      : applyEbayMessageWrite<T>(
+          this.serverWriteClient,
+          operation,
+          payload,
+          generation,
+        );
   }
 
   async loadConversationRoot(messageId: string): Promise<MessageRow | null> {
+    if (this.scheduled) {
+      const data = await readScheduledEbayMessagePolicy<unknown>(
+        this.serverWriteClient,
+        this.userId,
+        "delivery_root",
+        { message_id: messageId },
+      );
+      return data ? messageRowSchema.parse(data) : null;
+    }
     const { data, error } = await this.supabase
       .from("messages")
       .select("*")
@@ -445,6 +469,15 @@ export class SupabaseDeliveryRepository implements DeliveryRepository {
   }
 
   async canonicalDelivered(root: MessageRow): Promise<MessageRow | null> {
+    if (this.scheduled) {
+      const data = await readScheduledEbayMessagePolicy<unknown>(
+        this.serverWriteClient,
+        this.userId,
+        "canonical_delivered",
+        { message_id: root.id },
+      );
+      return data ? messageRowSchema.parse(data) : null;
+    }
     let query = this.supabase
       .from("messages")
       .select("*")

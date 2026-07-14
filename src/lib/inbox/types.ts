@@ -79,6 +79,12 @@ export const messageRowSchema = z.object({
   delivery_attempted_at: z.string().nullable().optional(),
   delivery_error: z.string().nullable().optional(),
   ebay_account_generation: z.string().uuid().nullable().optional(),
+  policy_version: z.string().nullable().optional(),
+  policy_outcome: z.string().nullable().optional(),
+  policy_reason_codes: z.array(z.string()).optional(),
+  policy_grounding_references: z.array(z.unknown()).optional(),
+  policy_safety_signals: z.record(z.string(), z.unknown()).optional(),
+  policy_decided_at: z.string().nullable().optional(),
 });
 
 export type MessageRow = z.infer<typeof messageRowSchema>;

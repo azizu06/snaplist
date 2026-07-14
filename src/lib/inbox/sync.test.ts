@@ -7,6 +7,12 @@ import type {
   PendingMarketplaceQuestion,
 } from "@/lib/marketplace/messaging";
 import type { MessageRow, ReplyGrounding } from "./types";
+import type {
+  AuthoritativeMessageGrounding,
+  MessagePolicyAuditRecord,
+  MessagePolicyResult,
+} from "./policy";
+import type { MessagePolicyRepository } from "./autoreply";
 import {
   syncInboxForSeller,
   SupabaseInboxSyncRepository,
@@ -243,7 +249,174 @@ class MemorySyncRepository implements InboxSyncRepository {
   }
 }
 
+const authoritativeGrounding: AuthoritativeMessageGrounding = {
+  listingId: LISTING_ID,
+  active: true,
+  current: true,
+  conflicts: [],
+  facts: [
+    {
+      key: "availability",
+      value: "active",
+      source: "active_listing_state",
+      reference: `listing:${LISTING_ID}:active-state`,
+    },
+  ],
+};
+
+class MemoryMessagePolicyRepository implements MessagePolicyRepository {
+  enabled = true;
+  decisions = new Map<string, MessagePolicyAuditRecord>();
+  pending = new Set<string>();
+
+  constructor(private readonly sync: MemorySyncRepository) {}
+
+  async getEnabled() {
+    return this.enabled;
+  }
+
+  async loadGrounding() {
+    return authoritativeGrounding;
+  }
+
+  async recordDecision(
+    message: MessageRow,
+    result: MessagePolicyResult,
+    draft: { reply: string; model: string },
+  ) {
+    const key = `${message.id}:${result.policyVersion}`;
+    const existing = this.decisions.get(key);
+    if (existing) return { inserted: false, decision: existing };
+    const decision: MessagePolicyAuditRecord = {
+      id: "55555555-5555-4555-8555-555555555555",
+      messageId: message.id,
+      ...result,
+      draftReply: draft.reply,
+      draftModel: draft.model,
+      deliveryStatus: "not_attempted",
+      decidedAt: "2026-07-13T12:05:00.000Z",
+    };
+    this.decisions.set(key, decision);
+    message.status = "drafted";
+    message.draft_reply = draft.reply;
+    message.draft_model = draft.model;
+    if (result.outcome === "auto_send") this.pending.add(message.id);
+    return { inserted: true, decision };
+  }
+
+  async listPendingAutoSend() {
+    return [...this.pending].map((messageId) => ({ messageId }));
+  }
+
+  markDelivered(messageId: string) {
+    const message = [...this.sync.imported.values()].find(
+      (candidate) => candidate.id === messageId,
+    );
+    if (message) {
+      message.status = "sent";
+      message.delivery_status = "delivered";
+    }
+    this.pending.delete(messageId);
+  }
+}
+
 describe("syncInboxForSeller", () => {
+  it("routes and auto-sends an eligible imported question once across overlapping syncs", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [{ ...question, body: "Is this still available?" }];
+    const repository = new MemorySyncRepository();
+    const policyRepository = new MemoryMessagePolicyRepository(repository);
+    const send = vi.fn(async (messageId: string) => {
+      policyRepository.markDelivered(messageId);
+    });
+
+    const first = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      policy: { repository: policyRepository, send },
+    });
+    const second = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:06:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      policy: { repository: policyRepository, send },
+    });
+
+    expect(first).toMatchObject({
+      imported: 1,
+      autoSent: 1,
+      autoSendFailed: 0,
+      policyDrafted: 0,
+      policyEscalated: 0,
+    });
+    expect(second).toMatchObject({ imported: 0, autoSent: 0 });
+    expect(policyRepository.decisions).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the default-disabled preference in seller approval with zero external sends", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [{ ...question, body: "Is this still available?" }];
+    const repository = new MemorySyncRepository();
+    const policyRepository = new MemoryMessagePolicyRepository(repository);
+    policyRepository.enabled = false;
+    const send = vi.fn();
+
+    const summary = await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      draft: async () => ({
+        reply: "Yes, it is available.",
+        model: "reply-test",
+        usedFallback: false,
+      }),
+      meterDraft: async () => undefined,
+      policy: { repository: policyRepository, send },
+    });
+
+    expect(summary).toMatchObject({ policyDrafted: 1, autoSent: 0 });
+    expect(send).not.toHaveBeenCalled();
+    expect([...policyRepository.decisions.values()][0]).toMatchObject({
+      outcome: "draft_for_approval",
+      reasonCodes: ["preference_disabled"],
+    });
+  });
+
+  it("attempts an eligible answer in the same sync, within the five-minute scheduler contract", async () => {
+    const adapter = new MockMarketplaceMessagingAdapter();
+    adapter.questions = [
+      {
+        ...question,
+        body: "Is this still available?",
+        createdAt: "2026-07-13T12:00:01.000Z",
+      },
+    ];
+    const repository = new MemorySyncRepository();
+    const policyRepository = new MemoryMessagePolicyRepository(repository);
+    const send = vi.fn(async (messageId: string) => {
+      policyRepository.markDelivered(messageId);
+    });
+
+    await syncInboxForSeller({
+      adapter,
+      repository,
+      now: () => new Date("2026-07-13T12:05:00.000Z"),
+      initialLookbackMs: 10 * 60_000,
+      policy: { repository: policyRepository, send },
+    });
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(
+      Date.parse("2026-07-13T12:05:00.000Z") -
+        Date.parse("2026-07-13T12:00:01.000Z"),
+    ).toBeLessThanOrEqual(5 * 60_000);
+  });
+
   it("durably queues unresolved questions while importing valid peers", async () => {
     const adapter = new MockMarketplaceMessagingAdapter();
     const unresolvedQuestion: PendingMarketplaceQuestion = {

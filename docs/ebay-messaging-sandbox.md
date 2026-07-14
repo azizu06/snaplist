@@ -66,6 +66,13 @@ text only and never silently drops a selected attachment.
 This transport is pre-sale only. It does not handle orders, payment, shipping,
 returns, disputes, post-sale support, or any marketplace other than eBay.
 
+Issue #135 adds one seller-level preference, off by default, for exact safe-fact
+answers. It does not add a second transport: an authorized automatic reply uses
+the same generation-bound canonical RTQ delivery below. Offers, negotiation,
+shipping/return promises, buyer instructions, and non-current or conflicting
+facts stay in seller review. Automatic policy and transport tests remain fully
+offline; production activation is still owner-controlled under #17.
+
 ## Preconditions
 
 1. Use a Sandbox keyset and two Sandbox users: `SELLER` and `BUYER`. eBay's RTQ
