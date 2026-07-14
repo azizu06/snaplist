@@ -65,6 +65,13 @@ describe("message photo attachment migration", () => {
     expect(migration).toMatch(/claim_ebay_message_write_with_photos[\s\S]*private\.apply_authenticated_ebay_message_write/i);
   });
 
+  it("accepts only the matching delivered follow-up photo set on replay", () => {
+    expect(migration).toMatch(/attachment\.message_id is null[\s\S]*p_operation = 'create_followup'/i);
+    expect(migration).toMatch(/followup\.id = attachment\.message_id[\s\S]*followup\.reply_to = v_root_id/i);
+    expect(migration).toMatch(/followup\.delivery_request_id = p_delivery_request_id[\s\S]*followup\.delivery_status = 'delivered'/i);
+    expect(migration).toMatch(/followup\.external_delivery_id is not null/i);
+  });
+
   it("keeps foreground expiry and object draining tenant-derived", () => {
     expect(migration).toMatch(/delete_own_expired_message_photo_upload_intents[\s\S]*candidate\.user_id = v_user_id/i);
     expect(migration).toMatch(/list_own_message_photo_object_deletions[\s\S]*split_part\(queue\.storage_path, '\/', 1\) = v_user_id/i);

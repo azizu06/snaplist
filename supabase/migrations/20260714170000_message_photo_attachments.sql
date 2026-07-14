@@ -421,8 +421,27 @@ begin
     and attachment.conversation_root_id = v_root_id
     and attachment.delivery_request_id = p_delivery_request_id
     and attachment.direction = 'outbound'
-    and attachment.message_id is null
     and attachment.delivery_status <> 'uploading'
+    and (
+      attachment.message_id is null
+      or (
+        p_operation = 'create_followup'
+        and attachment.delivery_status = 'delivered'
+        and exists (
+          select 1
+          from public.messages followup
+          where followup.id = attachment.message_id
+            and followup.user_id = v_user_id
+            and followup.reply_to = v_root_id
+            and followup.reply_kind = 'followup'
+            and followup.marketplace = 'ebay'
+            and followup.direction = 'outbound'
+            and followup.delivery_request_id = p_delivery_request_id
+            and followup.delivery_status = 'delivered'
+            and followup.external_delivery_id is not null
+        )
+      )
+    )
     and attachment.id = any(p_attachment_ids);
   if v_total <> v_expected or v_matched <> v_expected then
     raise exception using errcode = '23514', message = 'Approved photo set changed before delivery claim';
