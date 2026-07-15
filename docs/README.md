@@ -10,6 +10,7 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 - [0003 — Sentry error tracking (DSN-gated)](./adr/0003-sentry-error-tracking-dsn-gated.md)
 - [0004 — Abuse and cost protection](./adr/0004-abuse-and-cost-protection.md)
 - [0005 — Billing: direct Stripe entitlement mirror](./adr/0005-billing-direct-stripe-entitlement-mirror.md)
+- [0007 — Durable listing pipeline on Supabase Queues](./adr/0007-durable-pipeline-supabase-queues.md)
 
 ## Engineering workflow — [`agents/`](./agents)
 
@@ -19,8 +20,10 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 
 ## Architecture — [`architecture/`](./architecture)
 
-- [Scraper worker spec](./architecture/scraper-worker-spec.md) — extracting the eBay
-  sold-comps scraper into a standalone worker.
+- [Durable listing-pipeline architecture](./architecture/durable-pipeline.md) — logged Supabase
+  Queue, run lifecycle, adapter, and worker identity boundary.
+- [Superseded scraper worker spec](./architecture/scraper-worker-spec.md) — historical
+  RabbitMQ/Go analysis retained for context; not the implementation plan.
 
 ## Marketplace integration
 
