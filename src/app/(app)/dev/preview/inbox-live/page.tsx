@@ -5,6 +5,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { notFound } from "next/navigation";
 import { useListResize } from "@/app/(app)/inbox/use-list-resize";
 import { InboxEmptyState } from "@/app/(app)/inbox/inbox-empty";
+import { InboxEmptyScrollArea } from "@/app/(app)/inbox/inbox-empty-scroll-area";
 import { SimulatorCard } from "@/app/(app)/inbox/simulator-card";
 import {
   ConversationList,
@@ -102,6 +103,7 @@ function outbound(
     reply_to: replyTo,
     reply_kind: replyKind,
     draft_model: null,
+    delivery_status: "delivered",
     created_at: minsAgo(sentMinsAgo),
     updated_at: minsAgo(sentMinsAgo),
   };
@@ -121,8 +123,9 @@ const FIXTURE_INBOUND: MessageRow[] = [
     3,
     {
       draft_reply:
-        "Yes — the white DualSense controller shown in the photo is included with the PlayStation 5 console.",
+        "Yes, the white DualSense controller shown in the photo is included with the PlayStation 5 console.",
       draft_model: "gpt-4o-mini",
+      policy_outcome: "draft_for_approval",
     },
   ),
   inbound(
@@ -148,7 +151,7 @@ const FIXTURE_INBOUND: MessageRow[] = [
     48,
     {
       draft_reply:
-        "I can meet at $465 for a local pickup this week — that already reflects a fair discount off the listed price.",
+        "I can meet at $465 for local pickup this week. That already reflects a fair discount off the listed price.",
     },
   ),
 ];
@@ -160,7 +163,7 @@ const FIXTURE_REPLIES = new Map<string, MessageRow>([
       "00000000-0000-0000-0000-0000000000e2",
       ITEM_CAMERA,
       Q_SENT,
-      "Yes — the Sony camera body and all three lenses shown in the listing photo are included as one kit.",
+      "Yes, the Sony camera body and all three lenses shown in the listing photo are included as one kit.",
       18,
     ),
   ],
@@ -252,7 +255,7 @@ export default function InboxDevPreviewPage() {
           no title strip; this preview matches it). Not part of the screen. */}
       <div
         data-preview-controls
-        className="absolute right-4 top-3 z-20 hidden overflow-hidden rounded-lg border border-border text-[13px] font-medium shadow-sm sm:flex"
+        className="absolute right-4 top-3 z-50 hidden overflow-hidden rounded-lg border border-border text-[13px] font-medium shadow-sm sm:flex"
       >
         {(["populated", "empty"] as const).map((v) => (
           <button
@@ -271,7 +274,7 @@ export default function InboxDevPreviewPage() {
       </div>
 
       {view === "empty" ? (
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6">
+        <InboxEmptyScrollArea>
           <SimulatorCard
             items={FIXTURE_ITEMS}
             selectedItem={selectedItem}
@@ -281,7 +284,7 @@ export default function InboxDevPreviewPage() {
             simulating={false}
           />
           <InboxEmptyState />
-        </div>
+        </InboxEmptyScrollArea>
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 10 }}

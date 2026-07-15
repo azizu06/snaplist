@@ -22,6 +22,7 @@ import {
   type StoredMessagePhoto,
 } from "@/lib/inbox/attachments";
 import { InboxEmptyState } from "./inbox-empty";
+import { InboxEmptyScrollArea } from "./inbox-empty-scroll-area";
 import { SimulatorCard } from "./simulator-card";
 import {
   ConversationList,
@@ -616,21 +617,19 @@ export function InboxClient({
   // it), padded into a centered column since the surface is now full-bleed.
   if (inbound.length === 0) {
     return (
-      <div data-inbox-empty-scroll-region className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10 sm:px-6">
-          <SimulatorCard
-            items={items}
-            selectedItem={selectedItem}
-            onSelectItem={setSelectedItem}
-            onSimulate={simulate}
-            connection={connection}
-            onRetryConnection={retryRealtime}
-            simulating={busy === "simulate"}
-          />
-          <InboxEmptyState />
-          <ErrorToast error={error} reduceMotion={!!reduceMotion} onDismiss={() => setError(null)} />
-        </div>
-      </div>
+      <InboxEmptyScrollArea>
+        <SimulatorCard
+          items={items}
+          selectedItem={selectedItem}
+          onSelectItem={setSelectedItem}
+          onSimulate={simulate}
+          connection={connection}
+          onRetryConnection={retryRealtime}
+          simulating={busy === "simulate"}
+        />
+        <InboxEmptyState />
+        <ErrorToast error={error} reduceMotion={!!reduceMotion} onDismiss={() => setError(null)} />
+      </InboxEmptyScrollArea>
     );
   }
 

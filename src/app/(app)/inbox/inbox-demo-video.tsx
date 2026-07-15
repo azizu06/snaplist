@@ -12,14 +12,15 @@ import { RealUiCapturePoster } from "@/components/real-ui-capture-poster";
  * restart), and only ever fetches the active theme on the critical path. A real
  * inbox capture is its loading, error, and reduced-motion fallback.
  */
+export const INBOX_EMPTY_DEMO = {
+  src: "/demo/inbox-qa-mobile.mp4",
+  formFactor: "mobile",
+} as const;
 
 export function InboxDemoVideo() {
   return (
-    /* Full panel width (round 5): the 1920×1080 clip was capped at max-w-md
-       and its on-screen text was illegible. px-4 keeps a slim inset inside
-       the empty-state card; the video now spans the whole panel. */
-    <figure className="mt-8 w-full px-4 pb-4 text-left sm:px-5 sm:pb-5">
-      <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-md">
+    <figure data-inbox-demo className="mt-8 w-full px-4 pb-4 text-left sm:px-5 sm:pb-5">
+      <div data-inbox-demo-frame className="mx-auto w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-surface shadow-md">
         {/* mini app-window chrome so the teaser reads as a product moment */}
         <div className="flex items-center gap-1.5 border-b border-border bg-surface-2/70 px-3.5 py-2.5">
           <span aria-hidden className="size-2.5 rounded-full bg-border-strong" />
@@ -34,21 +35,21 @@ export function InboxDemoVideo() {
           </span>
         </div>
         <SeamlessThemeVideo
-          src="/demo/inbox-qa.mp4"
-          mobileSrc="/demo/inbox-qa-mobile.mp4"
-          label="Demo: a buyer question answered with a drafted reply"
+          src={INBOX_EMPTY_DEMO.src}
+          label="Demo: a buyer asks a question, SnapList drafts a reply, and the seller chooses whether to send it"
           lazy
           rootMargin="160px"
-          className="aspect-[6/5] md:aspect-video"
+          className="aspect-[6/5]"
         >
           <RealUiCapturePoster
             shot="inbox-draft"
+            formFactor={INBOX_EMPTY_DEMO.formFactor}
             label="SnapList inbox with a buyer reply drafted for approval"
           />
         </SeamlessThemeVideo>
       </div>
       <figcaption className="mt-2.5 text-center text-[15px] leading-relaxed text-muted">
-        A buyer asks · the agent drafts from your listing · you approve &amp; send.
+        See the buyer&apos;s question, a draft tied to the listing, and the moment you choose whether to send it.
       </figcaption>
     </figure>
   );

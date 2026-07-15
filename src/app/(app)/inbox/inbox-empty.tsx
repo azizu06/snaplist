@@ -41,7 +41,7 @@ function GhostCard({ className }: { className: string }) {
 
 export function InboxEmptyState() {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-surface pt-10 text-center shadow-xs">
+    <div data-inbox-empty-state className="relative overflow-hidden rounded-xl border border-border bg-surface pt-10 text-center shadow-xs">
       {/* soft brand-green bloom behind the composition (kept low — restraint) */}
       <div
         aria-hidden
@@ -60,7 +60,7 @@ export function InboxEmptyState() {
             message that the bottom gradient melts away — the approved reply
             ("...cables included.") stays fully crisp ABOVE the fade, and the
             dissolving stub reads as "more questions keep arriving." */}
-        <div aria-hidden className="relative mx-auto h-72 w-full max-w-md select-none">
+        <div data-inbox-sample-thread aria-hidden className="relative mx-auto h-80 w-full max-w-md select-none">
           <GhostCard className="top-3 -rotate-3 opacity-40" />
           <GhostCard className="top-1.5 rotate-2 opacity-60" />
 
@@ -70,7 +70,7 @@ export function InboxEmptyState() {
             <div className="max-w-[78%] rounded-2xl rounded-bl-md border border-border bg-surface-2 px-3.5 py-2.5">
               <p className="text-[12.5px] font-semibold text-muted">buyer · via eBay</p>
               <p className="mt-0.5 text-[15px] leading-snug text-fg-strong">
-                Hi! Does it come with the original box and cables?
+                Hi, does it come with the original box and both cables?
               </p>
             </div>
             <div className="ml-auto mt-2.5 max-w-[80%] rounded-2xl rounded-br-md border border-brand-tint bg-brand-soft px-3.5 py-2.5">
@@ -79,7 +79,7 @@ export function InboxEmptyState() {
                 Drafted from your listing
               </p>
               <p className="mt-0.5 text-[15px] leading-snug text-fg-strong">
-                Yes, it ships in the original box with both cables included.
+                The listing says it comes with the original box and both cables.
               </p>
             </div>
             {/* trailing stub — the gradient below dissolves this, giving the
@@ -99,12 +99,15 @@ export function InboxEmptyState() {
         </div>
 
         {/* ---- copy: one headline, one sentence, one hint ---- */}
-        <h3 className="mt-10 font-display text-[22px] font-bold tracking-tight text-fg-strong">
+        <h3 className="mt-12 font-display text-[22px] font-bold tracking-tight text-fg-strong">
           No buyer questions yet
         </h3>
         <p className="mx-auto mt-2 max-w-lg text-[16.5px] leading-relaxed text-fg">
-          When a buyer asks about one of your listings, it lands here live, with
-          a reply already drafted for your approval.
+          When a buyer asks, you see a draft based on the details in your listing.
+          Nothing goes out until you decide.
+        </p>
+        <p className="mt-3 text-[14px] font-medium text-muted">
+          No reply has been sent.
         </p>
         <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-3.5 py-1.5 text-[14px] font-medium text-fg">
           <svg viewBox="0 0 24 24" className="size-3.5 text-faint" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

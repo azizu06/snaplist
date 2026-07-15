@@ -33,12 +33,11 @@ const SHOTS: Record<RealUiSurface, string[]> = {
   price: ["review-price"],
   write: ["review-write"],
   publish: ["publish-draft", "publish-live"],
-  // The Guide's Answer step starts on the drafted response itself. The real
-  // desktop list state contains an intentionally quiet empty thread pane that
-  // reads as blank when the whole Guide is reviewed at page scale. The in-app
-  // inbox teaser below still preserves the broader list → draft → sent story.
+  // The Guide's Answer step starts on the drafted response itself. The in-app
+  // inbox teaser stays on the legible draft → sent conversation, rather than
+  // spending time on a dense desktop-wide list view.
   "buyer-qa": ["inbox-draft", "inbox-sent"],
-  "inbox-qa": ["inbox-list", "inbox-draft", "inbox-sent"],
+  "inbox-qa": ["inbox-draft", "inbox-sent"],
 };
 
 function CaptureFrame({
@@ -59,8 +58,8 @@ function CaptureFrame({
     // real interaction instead of letting a generic center crop land on the
     // intentionally quiet space between the thread and its composer.
     "inbox-list": "50% 24%",
-    "inbox-draft": "50% 88%",
-    "inbox-sent": "50% 52%",
+    "inbox-draft": "50% 100%",
+    "inbox-sent": "50% 30%",
   };
 
   return (

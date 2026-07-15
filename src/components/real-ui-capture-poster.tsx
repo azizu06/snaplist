@@ -6,9 +6,13 @@
 export function RealUiCapturePoster({
   shot,
   label,
+  formFactor = "responsive",
 }: {
   shot: string;
   label: string;
+  /** Use the action-cropped mobile capture at every viewport when dense UI
+   * needs to stay readable inside a compact media frame. */
+  formFactor?: "responsive" | "mobile";
 }) {
   const capture = (formFactor: "desktop" | "mobile", theme: "light" | "dark") =>
     `/demo/captures/${formFactor}/${theme}/${shot}.png`;
@@ -17,10 +21,33 @@ export function RealUiCapturePoster({
     // mobile clips. A generic center crop lands on the inbox thread's quiet
     // middle and makes the Answer step look blank before lazy video mount.
     "inbox-list": "50% 24%",
-    "inbox-draft": "50% 88%",
+    "inbox-draft": "50% 100%",
     "inbox-sent": "50% 52%",
   };
   const backgroundPosition = mobilePosition[shot] ?? "50% 50%";
+
+  if (formFactor === "mobile") {
+    return (
+      <div className="absolute inset-0" role="img" aria-label={label}>
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-cover dark:hidden"
+          style={{
+            backgroundImage: `url(${capture("mobile", "light")})`,
+            backgroundPosition,
+          }}
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 hidden bg-cover dark:block"
+          style={{
+            backgroundImage: `url(${capture("mobile", "dark")})`,
+            backgroundPosition,
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0" role="img" aria-label={label}>
