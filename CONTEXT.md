@@ -144,8 +144,9 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   necessarily the outbound **effective price**. The **eval harness** depends on that distinction.
 - **Pipeline run** — the tenant-owned durable execution record for one complete listing-preparation
   attempt. It links the seller's **Item** and eventual **Listing**, records status/stage, attempts,
-  idempotency, safe failure details, and lifecycle timestamps, and is the product-visible truth when
-  queue delivery is retried. Distinct from a **prediction log**, which records model/eval output.
+  idempotency, lease fencing, cumulative stage checkpoints, safe failure details, and lifecycle
+  timestamps, and is the product-visible truth when queue delivery is retried. Distinct from a
+  **prediction log**, which records model/eval output.
 - **Pipeline queue envelope** — the strict versioned PGMQ message `{ run_id, schema_version }`. It is
   only a wake-up signal: never a photo/signed URL, tenant identity, secret, seller copy, or
   authorization claim. The worker derives tenant scope from the stored **pipeline run**.
