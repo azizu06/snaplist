@@ -1,6 +1,11 @@
 # Spec — Extract the eBay Sold-Comps Scraper into a Go Worker (queue-backed)
 
-> **Audience:** the backend agent implementing this. **Status:** proposed; a few
+> **Status: Superseded historical context.** ADR-0007 and epic #157 ratify a logged Supabase Basic
+> Queue for the entire TypeScript listing-preparation pipeline. The former RabbitMQ/Go/EC2 proposal
+> and its epic #65 were closed `wontfix`. This document is retained for its useful failure-mode,
+> concurrency, idempotency, and observability analysis; it is not an implementation plan or dependency.
+
+> **Historical audience:** the backend agent that would have implemented this. **Former status:** proposed; a few
 > decisions (marked **DECIDE**) need Aziz's sign-off before building.
 > **This is an architecture/build spec, not an ADR.** When a decision here is
 > ratified, fold the durable ones into `docs/adr/`.

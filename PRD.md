@@ -189,6 +189,20 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 - **Same pipeline per item, no accuracy shortcut.** Each staged item runs the *identical* identify → price (sold-comps routing) → generate pipeline and lands as its own reviewable listing with its own confidence. Bulk is a capture/queueing convenience; it never fans out to a cheaper or shared prediction. Confidence-gated publish eligibility still applies per item; publishing remains manual.
 - Complements the reseller-facing surfaces already shipped: **cost-basis → net-profit** tracking per item and scheduled **stale-inventory auto-repricing**. Auto-repricing requires its own explicit opt-in plus the publish-eligibility setting; it only applies a high-confidence price change to an existing live listing and never publishes a new listing.
 
+### Durable pipeline execution
+- **The whole listing-preparation run is durable.** Photos remain in private, seller-scoped Storage;
+  a tenant-owned `pipeline_runs` row records status, stage, attempts, item/listing links, safe failure
+  details, and timestamps; a logged Supabase Basic Queue carries only the strict versioned envelope
+  `{ run_id, schema_version }`. Refreshing or closing the browser must not erase accepted work.
+- **One TypeScript pipeline, two queue backends.** Production uses Supabase PGMQ through a
+  transport-neutral adapter; offline tests use the in-memory backend with the same claim,
+  visibility-timeout, redelivery, and explicit-ack contract. The queue never publishes, messages,
+  charges, or becomes a second pipeline implementation.
+- **Internal queue authority is not tenant-domain authority.** Claim/ack is a narrow internal
+  capability. Worker reads and writes remain RLS-scoped or use audited run-derived RPCs that never
+  trust a tenant id from a message/caller and cannot cross the stored run → item → listing ownership
+  relationships. A generic service-role domain client is prohibited. See ADR-0007.
+
 ### Listing generation (per-platform)
 - **One Zod-validated attribute core → many surface renderings** via per-platform prompt + template.
 - **Bounded pre-publish correction loop.** The review editor can replace brand, model, category,

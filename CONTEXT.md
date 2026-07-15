@@ -142,6 +142,13 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
   for every pipeline execution. Its price is the pipeline's recommendation, not a seller override or
   necessarily the outbound **effective price**. The **eval harness** depends on that distinction.
+- **Pipeline run** — the tenant-owned durable execution record for one complete listing-preparation
+  attempt. It links the seller's **Item** and eventual **Listing**, records status/stage, attempts,
+  idempotency, safe failure details, and lifecycle timestamps, and is the product-visible truth when
+  queue delivery is retried. Distinct from a **prediction log**, which records model/eval output.
+- **Pipeline queue envelope** — the strict versioned PGMQ message `{ run_id, schema_version }`. It is
+  only a wake-up signal: never a photo/signed URL, tenant identity, secret, seller copy, or
+  authorization claim. The worker derives tenant scope from the stored **pipeline run**.
 - **Eval harness** — the offline quality measurement over a fixed **gold set**: ID accuracy,
   pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge). The
   judge is **cross-family** (`--real-judge` runs the OPPOSITE provider from the generator, #61) to

@@ -54,6 +54,11 @@ adapter and is **not on the Phase 1 critical path**.
   pricing router, composite confidence, and grounded listing generator, then atomically persist the
   item, eBay draft, and prediction log under RLS. Preserve seller price overrides, invalidate stale
   export packs, reject stale or authoritative publishing/published state, and never auto-publish.
+- **Durable pipeline execution uses Supabase Queues, not a second pipeline.** `pipeline_runs` is the
+  tenant-owned status/stage/attempt truth; the logged Basic Queue carries only `{ run_id,
+  schema_version }`. Queue claim/ack authority is a narrow internal capability, never a generic
+  service-role domain client. Worker domain access must derive ownership from the stored run through
+  RLS or audited run-scoped RPCs. See ADR-0007.
 
 ## How we build
 - **Tracer-bullet + TDD.** Thin end-to-end threads: one or two backend pieces + minimal frontend to
