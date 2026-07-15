@@ -73,8 +73,13 @@ export async function POST(request: Request) {
         runs: replay.map((run) => ({
           id: run.run_id,
           itemId: run.item_id,
-          status: "queued",
-          stage: "queued",
+          listingId: run.listing_id,
+          status: run.status,
+          stage: run.stage,
+          attemptCount: run.attempt_count,
+          maxAttempts: run.max_attempts,
+          safeFailureMessage: run.safe_failure_message,
+          updatedAt: run.updated_at,
         })),
       }, { status: 200 });
     }
@@ -107,8 +112,13 @@ export async function POST(request: Request) {
       runs: runs.map((run) => ({
         id: run.run_id,
         itemId: run.item_id,
-        status: "queued",
-        stage: "queued",
+        listingId: run.listing_id,
+        status: run.status,
+        stage: run.stage,
+        attemptCount: run.attempt_count,
+        maxAttempts: run.max_attempts,
+        safeFailureMessage: run.safe_failure_message,
+        updatedAt: run.updated_at,
       })),
     }, { status: 202 });
   } catch (error) {

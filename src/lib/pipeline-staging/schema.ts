@@ -58,6 +58,13 @@ const pipelineStageResultSchema = z
     item_id: z.string().uuid(),
     run_id: z.string().uuid(),
     queue_message_id: z.union([z.string(), z.number(), z.bigint()]).transform(String),
+    listing_id: z.string().uuid().nullable(),
+    status: z.enum(["queued", "running", "retrying", "succeeded", "failed", "canceled"]),
+    stage: z.enum(["queued", "identifying", "pricing", "generating", "persisting", "completed"]),
+    attempt_count: z.number().int().nonnegative(),
+    max_attempts: z.number().int().positive(),
+    safe_failure_message: z.string().min(1).max(500).nullable(),
+    updated_at: z.string().min(1),
   })
   .strict();
 

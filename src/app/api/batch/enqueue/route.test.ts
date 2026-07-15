@@ -44,6 +44,13 @@ describe("POST /api/batch/enqueue", () => {
         item_id: "22222222-2222-4222-8222-222222222222",
         run_id: "33333333-3333-4333-8333-333333333333",
         queue_message_id: "9",
+        listing_id: null,
+        status: "queued",
+        stage: "queued",
+        attempt_count: 0,
+        max_attempts: 3,
+        safe_failure_message: null,
+        updated_at: "2026-07-15T12:00:00.000Z",
       },
     ]);
   });
@@ -86,6 +93,13 @@ describe("POST /api/batch/enqueue", () => {
         item_id: "22222222-2222-4222-8222-222222222222",
         run_id: "33333333-3333-4333-8333-333333333333",
         queue_message_id: "9",
+        listing_id: null,
+        status: "retrying",
+        stage: "pricing",
+        attempt_count: 2,
+        max_attempts: 3,
+        safe_failure_message: null,
+        updated_at: "2026-07-15T12:05:00.000Z",
       },
     ]);
     const form = new FormData();
@@ -103,7 +117,11 @@ describe("POST /api/batch/enqueue", () => {
     expect(response.status).toBe(200);
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
-      runs: [{ id: "33333333-3333-4333-8333-333333333333" }],
+      runs: [{
+        id: "33333333-3333-4333-8333-333333333333",
+        status: "retrying",
+        updatedAt: "2026-07-15T12:05:00.000Z",
+      }],
     });
   });
 });

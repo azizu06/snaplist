@@ -80,7 +80,14 @@ returns table (
   idempotency_key text,
   item_id uuid,
   run_id uuid,
-  queue_message_id bigint
+  queue_message_id bigint,
+  listing_id uuid,
+  status text,
+  stage text,
+  attempt_count integer,
+  max_attempts integer,
+  safe_failure_message text,
+  updated_at timestamptz
 )
 language plpgsql
 security definer
@@ -103,6 +110,13 @@ declare
   v_existing_batch_position integer;
   v_existing_capture jsonb;
   v_existing_cost_basis numeric;
+  v_listing_id uuid;
+  v_status text;
+  v_stage text;
+  v_attempt_count integer;
+  v_max_attempts integer;
+  v_safe_failure_message text;
+  v_updated_at timestamptz;
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
     raise exception using errcode = '42501', message = 'Pipeline replay authorization is required';
@@ -173,7 +187,14 @@ begin
       run.batch_id,
       run.batch_position,
       run.capture_input,
-      item.cost_basis
+      item.cost_basis,
+      run.listing_id,
+      run.status,
+      run.stage,
+      run.attempt_count,
+      run.max_attempts,
+      run.safe_failure_message,
+      run.updated_at
     into
       v_run_id,
       v_item_id,
@@ -181,7 +202,14 @@ begin
       v_existing_batch_id,
       v_existing_batch_position,
       v_existing_capture,
-      v_existing_cost_basis
+      v_existing_cost_basis,
+      v_listing_id,
+      v_status,
+      v_stage,
+      v_attempt_count,
+      v_max_attempts,
+      v_safe_failure_message,
+      v_updated_at
     from public.pipeline_runs run
     join public.items item
       on item.id = run.item_id
@@ -208,6 +236,13 @@ begin
     item_id := v_item_id;
     run_id := v_run_id;
     queue_message_id := v_message_id;
+    listing_id := v_listing_id;
+    status := v_status;
+    stage := v_stage;
+    attempt_count := v_attempt_count;
+    max_attempts := v_max_attempts;
+    safe_failure_message := v_safe_failure_message;
+    updated_at := v_updated_at;
     return next;
   end loop;
 end;
@@ -231,7 +266,14 @@ returns table (
   idempotency_key text,
   item_id uuid,
   run_id uuid,
-  queue_message_id bigint
+  queue_message_id bigint,
+  listing_id uuid,
+  status text,
+  stage text,
+  attempt_count integer,
+  max_attempts integer,
+  safe_failure_message text,
+  updated_at timestamptz
 )
 language plpgsql
 security definer
@@ -262,6 +304,13 @@ declare
   v_existing_photos text[];
   v_existing_cost_basis numeric;
   v_expected_capture jsonb;
+  v_listing_id uuid;
+  v_status text;
+  v_stage text;
+  v_attempt_count integer;
+  v_max_attempts integer;
+  v_safe_failure_message text;
+  v_updated_at timestamptz;
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
     raise exception using errcode = '42501', message = 'Pipeline staging authorization is required';
@@ -477,12 +526,38 @@ begin
       v_message_id := public.enqueue_pipeline_message(v_run_id, 1::smallint);
     end if;
 
+    select
+      run.listing_id,
+      run.status,
+      run.stage,
+      run.attempt_count,
+      run.max_attempts,
+      run.safe_failure_message,
+      run.updated_at
+    into
+      v_listing_id,
+      v_status,
+      v_stage,
+      v_attempt_count,
+      v_max_attempts,
+      v_safe_failure_message,
+      v_updated_at
+    from public.pipeline_runs run
+    where run.id = v_run_id;
+
     batch_id := p_batch_id;
     batch_position := v_batch_position;
     idempotency_key := v_idempotency_key;
     item_id := v_item_id;
     run_id := v_run_id;
     queue_message_id := v_message_id;
+    listing_id := v_listing_id;
+    status := v_status;
+    stage := v_stage;
+    attempt_count := v_attempt_count;
+    max_attempts := v_max_attempts;
+    safe_failure_message := v_safe_failure_message;
+    updated_at := v_updated_at;
     return next;
   end loop;
 end;

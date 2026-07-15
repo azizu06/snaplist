@@ -43,6 +43,7 @@ export function DurableBatchCapture({
     () => () => {
       objectUrls.current.forEach((url) => URL.revokeObjectURL(url));
     },
+    [],
   );
 
   const addPhotos = useCallback((incoming: FileList | File[]) => {
@@ -97,24 +98,33 @@ export function DurableBatchCapture({
       const body = (await response.json()) as {
         error?: string;
         batchId?: string;
-        runs?: Array<{ id: string; itemId: string; status: "queued"; stage: "queued" }>;
+        runs?: Array<{
+          id: string;
+          itemId: string;
+          listingId: string | null;
+          status: PipelineProgressRun["status"];
+          stage: PipelineProgressRun["stage"];
+          attemptCount: number;
+          maxAttempts: number;
+          safeFailureMessage: string | null;
+          updatedAt: string;
+        }>;
       };
       if (!response.ok || !body.batchId || !body.runs) {
         throw new Error(body.error ?? "We couldn't save this batch for processing.");
       }
-      const now = new Date().toISOString();
       setRuns(
         body.runs.map((run) => ({
           id: run.id,
           user_id: userId,
           item_id: run.itemId,
-          listing_id: null,
+          listing_id: run.listingId,
           status: run.status,
           stage: run.stage,
-          attempt_count: 0,
-          max_attempts: 3,
-          safe_failure_message: null,
-          updated_at: now,
+          attempt_count: run.attemptCount,
+          max_attempts: run.maxAttempts,
+          safe_failure_message: run.safeFailureMessage,
+          updated_at: run.updatedAt,
         })),
       );
       setEntries(batch);
