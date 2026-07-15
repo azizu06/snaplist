@@ -69,10 +69,10 @@ stack without introducing another pipeline implementation.
 7. **Keep PGMQ 1.4/1.5 behavior compatible.** The fresh local Supabase reset for issue #158 runs
    PostgreSQL 17.6 with PGMQ 1.5.1 installed. Supabase's 2025 upgrade notice says older projects may
    remain on 1.4.4, while PGMQ 1.5 adds a `timestamptz` overload for `delay` and breaks implicit string
-   casts. SnapList therefore requires PGMQ 1.4.4 or newer and always calls the two-argument
-   `pgmq.send(queue_name, msg)` form. Delayed retries will use run state and visibility semantics,
+   casts. SnapList therefore requires PGMQ 1.4.4 or newer and always uses the two-argument
+   `pgmq.send(queue_name, msg)` call form. Delayed retries will use run state and visibility semantics,
    not an untyped delay argument. The pgTAP contract verifies the installed version, the common
-   two-argument signature, and a real send on every reset.
+   two-argument call contract (an overload or defaulted delay), and a real send on every reset.
 
 ## Consequences
 

@@ -28,9 +28,12 @@ select ok(
     join pg_namespace schema on schema.oid = function.pronamespace
     where schema.nspname = 'pgmq'
       and function.proname = 'send'
-      and pg_get_function_identity_arguments(function.oid) = 'queue_name text, msg jsonb'
+      and function.pronargs >= 2
+      and function.pronargs - function.pronargdefaults <= 2
+      and function.proargtypes[0] = 'text'::regtype
+      and function.proargtypes[1] = 'jsonb'::regtype
   ),
-  'cross-version two-argument pgmq.send exists'
+  'pgmq.send is callable with two arguments via an overload or defaults'
 );
 
 select lives_ok(
