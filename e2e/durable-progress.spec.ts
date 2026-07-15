@@ -14,7 +14,7 @@ function previewUrl(
     | "partial-failure",
 ) {
   const theme = testInfo.project.use.colorScheme === "dark" ? "dark" : "light";
-  return `${PREVIEW_PATH}?${new URLSearchParams({ flow, scenario, theme })}`;
+  return `${PREVIEW_PATH}/${flow}/${scenario}/${theme}`;
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
