@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createPipelineQueueEnvelope } from "./envelope";
+import { pipelineQueueEnvelopeSchema } from "./envelope";
 import { createInMemoryPipelineQueue } from "./memory";
 
 const RUN_A = "11111111-1111-4111-8111-111111111111";
 const RUN_B = "22222222-2222-4222-8222-222222222222";
 
 describe("in-memory pipeline queue", () => {
-  it("claims FIFO messages and hides them for the visibility window", async () => {
+  it("redelivers a FIFO message when a worker crashes before processing or ack", async () => {
     let now = new Date("2026-07-14T12:00:00.000Z");
     const queue = createInMemoryPipelineQueue({ now: () => now });
     await queue.enqueue(createPipelineQueueEnvelope(RUN_A));
@@ -21,7 +22,11 @@ describe("in-memory pipeline queue", () => {
     });
 
     const secondClaim = await queue.claim({ limit: 2, visibilityTimeoutSeconds: 30 });
-    expect(secondClaim.map((message) => message.envelope.run_id)).toEqual([RUN_B]);
+    expect(
+      secondClaim.map(
+        (message) => pipelineQueueEnvelopeSchema.parse(message.envelope).run_id,
+      ),
+    ).toEqual([RUN_B]);
 
     now = new Date("2026-07-14T12:00:31.000Z");
     const redelivery = await queue.claim({ limit: 1, visibilityTimeoutSeconds: 30 });
@@ -36,6 +41,19 @@ describe("in-memory pipeline queue", () => {
     expect(await queue.ack(messageId)).toBe(true);
     expect(await queue.ack(messageId)).toBe(false);
     expect(await queue.claim({ limit: 1, visibilityTimeoutSeconds: 30 })).toEqual([]);
+  });
+
+  it("extends visibility for retry backoff without acknowledging the message", async () => {
+    let now = new Date("2026-07-14T12:00:00.000Z");
+    const queue = createInMemoryPipelineQueue({ now: () => now });
+    const messageId = await queue.enqueue(createPipelineQueueEnvelope(RUN_A));
+    await queue.claim({ limit: 1, visibilityTimeoutSeconds: 30 });
+
+    expect(await queue.defer(messageId, 90)).toBe(true);
+    now = new Date("2026-07-14T12:01:00.000Z");
+    expect(await queue.claim({ limit: 1, visibilityTimeoutSeconds: 30 })).toEqual([]);
+    now = new Date("2026-07-14T12:01:31.000Z");
+    await expect(queue.claim({ limit: 1, visibilityTimeoutSeconds: 30 })).resolves.toHaveLength(1);
   });
 
   it("validates messages and claim bounds at the adapter seam", async () => {

@@ -30,7 +30,11 @@ export {
 } from "./photos";
 export {
   createVisionPipeline,
+  createVisionPipelineStages,
   type CreateVisionPipelineOptions,
+  type VisionPipelineStages,
+  type IdentifiedVisionPipelineStage,
+  type GeneratedVisionPipelineStage,
 } from "./pipeline";
 export {
   extractGarmentMeasurements,

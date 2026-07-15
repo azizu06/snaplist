@@ -10,10 +10,14 @@ import {
   type PipelineWorkerRpcClient,
   type PipelineWorkerStore,
 } from "./worker-store";
+import { PHOTOS_BUCKET, createVisionPipelineStages, type DownloadClient } from "@/lib/vision";
+import { createDurableVisionPipelineProcessor } from "./durable-processor";
+import { consumePipelineQueue, type PipelineConsumerSummary } from "./worker";
 
 export interface InternalPipelineWorkerCapabilities {
   queue: PipelineQueue;
   runs: PipelineWorkerStore;
+  photos: DownloadClient;
 }
 
 /**
@@ -35,9 +39,45 @@ export function createInternalPipelineWorkerCapabilities(): InternalPipelineWork
       return { data, error: error ? { message: error.message } : null };
     },
   };
+  const photos: DownloadClient = {
+    storage: {
+      from(bucket) {
+        if (bucket !== PHOTOS_BUCKET) {
+          throw new Error("Pipeline worker may access only the private photos bucket");
+        }
+        const store = admin.storage.from(PHOTOS_BUCKET);
+        return {
+          download(path) {
+            return store.download(path);
+          },
+        };
+      },
+    },
+  };
 
   return {
     queue: createSupabasePgmqPipelineQueue(queueRpc),
     runs: createSupabasePipelineWorkerStore(workerRpc),
+    photos,
+  };
+}
+
+export interface InternalPipelineWorker {
+  consume(): Promise<PipelineConsumerSummary>;
+}
+
+/** Protected composition root: the route receives one bounded operation only. */
+export function createInternalPipelineWorker(): InternalPipelineWorker {
+  const capabilities = createInternalPipelineWorkerCapabilities();
+  const processor = createDurableVisionPipelineProcessor(
+    createVisionPipelineStages({ supabase: capabilities.photos }),
+  );
+  return {
+    consume: () =>
+      consumePipelineQueue({
+        queue: capabilities.queue,
+        runs: capabilities.runs,
+        processor,
+      }),
   };
 }

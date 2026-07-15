@@ -196,8 +196,10 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   `{ run_id, schema_version }`. Refreshing or closing the browser must not erase accepted work.
 - **One TypeScript pipeline, two queue backends.** Production uses Supabase PGMQ through a
   transport-neutral adapter; offline tests use the in-memory backend with the same claim,
-  visibility-timeout, redelivery, and explicit-ack contract. The queue never publishes, messages,
-  charges, or becomes a second pipeline implementation.
+  visibility-timeout, redelivery, defer, and explicit-ack contract. The consumer claims a bounded
+  batch, checkpoints validated identify/price/generate output, fences attempts with an expiring lease,
+  and acknowledges only after durable success or terminal failure. The queue never publishes,
+  messages, charges, or becomes a second pipeline implementation.
 - **Internal queue authority is not tenant-domain authority.** Claim/ack is a narrow internal
   capability. Worker reads and writes remain RLS-scoped or use audited run-derived RPCs that never
   trust a tenant id from a message/caller and cannot cross the stored run → item → listing ownership

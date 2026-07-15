@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Pipeline, PipelineResult } from "./types";
 import { pipeline as defaultPipeline } from "./stub";
-import { logPrediction } from "./prediction-log";
+import { buildPredictionLogValues, logPrediction } from "./prediction-log";
 import { initialListingStatus } from "./autopilot";
 import { logEvent, timed } from "../observability";
 
@@ -33,6 +33,28 @@ export interface RunAndPersistResult {
   itemId: string;
   listingId: string;
   result: PipelineResult;
+}
+
+/** Identity-free write payload shared by request and run-scoped worker persistence. */
+export function buildPipelinePersistencePayload(
+  result: PipelineResult,
+  autopilotEnabled?: boolean,
+) {
+  return {
+    item: {
+      attributes: result.attributes,
+      condition: result.attributes.condition ?? null,
+      identification: result.identification ?? null,
+    },
+    listing: {
+      platform: result.listing.platform,
+      title: result.listing.title,
+      description: result.listing.description,
+      copy: result.listing.fields,
+      status: initialListingStatus(result.confidence),
+    },
+    prediction: buildPredictionLogValues(result, { autopilotEnabled }),
+  };
 }
 
 export async function runPipelineAndPersist(
@@ -87,6 +109,10 @@ export async function runPipelineAndPersist(
           autopilotEnabled: input.autopilotEnabled,
         }),
     );
+    const persistence = buildPipelinePersistencePayload(
+      result,
+      input.autopilotEnabled,
+    );
 
     // 3. Backfill the extracted attributes + condition + identification onto the item.
     //    Persisting `identification` lets the review page render the MODEL's actual
@@ -95,11 +121,7 @@ export async function runPipelineAndPersist(
     //    (the stub pipeline) — the review page falls back to re-derivation then.
     const { error: updErr } = await supabase
       .from("items")
-      .update({
-        attributes: result.attributes,
-        condition: result.attributes.condition ?? null,
-        identification: result.identification ?? null,
-      })
+      .update(persistence.item)
       .eq("id", itemId);
     if (updErr) {
       throw new Error(`Failed to update item attributes: ${updErr.message}`);
@@ -120,17 +142,13 @@ export async function runPipelineAndPersist(
     //    eligibility disposition (issue #127): eligible runs (legacy master switch ON
     //    and high-confidence) are QUEUED as ready for MANUAL publish; everything else
     //    stays a DRAFT awaiting review. This function never calls the eBay adapter.
-    const status = initialListingStatus(result.confidence);
+    const status = persistence.listing.status;
     const { data: listing, error: listingErr } = await supabase
       .from("listings")
       .insert({
         user_id: input.userId,
         item_id: itemId,
-        platform: result.listing.platform,
-        title: result.listing.title,
-        description: result.listing.description,
-        copy: result.listing.fields,
-        status,
+        ...persistence.listing,
         run_id: runId,
       })
       .select("id")

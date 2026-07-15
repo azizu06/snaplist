@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (2026-07-14)
 - **Deciders:** Aziz
-- **Implemented by:** issue #158 (foundation), with execution and UX completed by epic #157
+- **Implemented by:** issue #158 (foundation) and issue #160 (worker), with UX completed by epic #157
 - **Supersedes:** the RabbitMQ/Go sold-comps-only proposal in
   `docs/architecture/scraper-worker-spec.md`
 
@@ -41,23 +41,24 @@ stack without introducing another pipeline implementation.
    output, and authorization claims do not belong in the queue.
 
 4. **Use a transport-neutral adapter.** `PipelineQueue` has `enqueue`, visibility-timeout `claim`,
-   and explicit `ack` operations. The in-memory implementation provides deterministic offline/CI
-   behavior, including redelivery after the visibility window. The Supabase implementation maps
-   only to three fixed PGMQ RPC capabilities. It never uses destructive `pop`, which would make a
-   worker crash an at-most-once loss.
+   visibility extension/defer, and explicit `ack` operations. The in-memory implementation provides
+   deterministic offline/CI behavior, including redelivery after the visibility window. The
+   Supabase implementation maps only to four fixed PGMQ RPC capabilities. It never uses destructive
+   `pop`, which would make a worker crash an at-most-once loss. Retry backoff and checkpoint
+   heartbeats use `pgmq.set_vt`; `pgmq.delete` happens only after durable success or terminal failure.
 
 5. **Separate queue authority from tenant-domain authority.** Queue claim/ack needs internal
    authority, but that authority is not a generic service-role domain client. `service_role` has no
    direct `pipeline_runs` or raw `pgmq` privilege. The worker receives two narrow TypeScript
    capabilities:
 
-   - the three queue RPCs; and
-   - run-scoped worker RPCs that accept a trusted `run_id`, derive `user_id` and `item_id` from the
-     stored run, and validate an optional listing through composite ownership foreign keys.
+   - the four queue RPCs; and
+   - message-paired, lease-fenced worker RPCs that derive `user_id`, `item_id`, private photo paths,
+     and seller configuration from the stored run/item relationship.
 
-   No worker domain function accepts a caller-supplied tenant id. Future worker persistence must
-   extend this audited run-derived RPC boundary (or use a real tenant JWT/RLS client); it must not
-   receive `createAdminClient()` or a generic `.from()` surface.
+   No worker domain function accepts a caller-supplied tenant id. The privileged composition root
+   encloses `createAdminClient()` and exposes only the fixed RPCs plus a photos-bucket-only download
+   capability; pipeline domain code never receives a generic `.from()` surface.
 
 6. **Enforce lifecycle legality in Postgres.** Statuses are `queued`, `running`, `retrying`,
    `succeeded`, `failed`, and `canceled`; stages are `queued`, `identifying`, `pricing`, `generating`,
@@ -74,6 +75,13 @@ stack without introducing another pipeline implementation.
    not an untyped delay argument. The pgTAP contract verifies the installed version, the common
    two-argument call contract (an overload or defaulted delay), and a real send on every reset.
 
+8. **Fence attempts and checkpoint reusable stage output.** A claim must match the run's stored
+   `queue_message_id`; it increments a bounded attempt count and creates a lease token. Identification,
+   pricing, and generation checkpoints are cumulative and validated before resume. A stale token
+   cannot checkpoint, fail, or complete a run. Completion atomically updates the pre-staged item and
+   upserts exactly one draft listing and prediction log for the run before the queue message is
+   acknowledged. Terminal failures persist only bounded safe text and are then acknowledged.
+
 ## Consequences
 
 - **Positive:** a run can outlive a tab, request, or worker invocation; redelivery is explicit and
@@ -82,9 +90,10 @@ stack without introducing another pipeline implementation.
   forged run/item/listing ownership fails in Postgres.
 - **Trade-off:** the worker uses audited RPC capabilities for each domain operation. That is more
   deliberate than a generic admin client, but it keeps the security boundary reviewable.
-- **Rollout:** issue #158 creates the foundation only. Upload, batch, worker routing, notifications,
-  retry/cancel UI, Cron activation, and retention remain owned by the later #157 child issues. Until
-  those land, production request behavior remains synchronous.
+- **Rollout:** issues #158 and #160 provide the foundation and protected bounded consumer. Issue #159
+  owns staging, quota reservation, enqueue, and progress UX; #161 owns notifications/recovery; #162
+  owns hosted Cron, retention, health, and observability. Hosted scheduling remains unactivated until
+  its owner-controlled slice lands.
 
 ## References
 

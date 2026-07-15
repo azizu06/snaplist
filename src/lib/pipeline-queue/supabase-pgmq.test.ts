@@ -16,7 +16,7 @@ function rpcClient(
 }
 
 describe("Supabase PGMQ pipeline queue", () => {
-  it("uses only the three narrow queue RPC capabilities", async () => {
+  it("uses only the four narrow queue RPC capabilities", async () => {
     const client = rpcClient({
       enqueue_pipeline_message: { data: 41, error: null },
       claim_pipeline_messages: {
@@ -32,6 +32,7 @@ describe("Supabase PGMQ pipeline queue", () => {
         error: null,
       },
       ack_pipeline_message: { data: true, error: null },
+      defer_pipeline_message: { data: true, error: null },
     });
     const queue = createSupabasePgmqPipelineQueue(client);
 
@@ -46,15 +47,17 @@ describe("Supabase PGMQ pipeline queue", () => {
       },
     ]);
     expect(await queue.ack("41")).toBe(true);
+    expect(await queue.defer("41", 90)).toBe(true);
 
     expect(client.rpc.mock.calls).toEqual([
       ["enqueue_pipeline_message", { p_run_id: RUN_ID, p_schema_version: 1 }],
       ["claim_pipeline_messages", { p_quantity: 1, p_visibility_timeout_seconds: 60 }],
       ["ack_pipeline_message", { p_message_id: "41" }],
+      ["defer_pipeline_message", { p_message_id: "41", p_visibility_timeout_seconds: 90 }],
     ]);
   });
 
-  it("rejects malformed PGMQ rows before the worker sees them", async () => {
+  it("preserves a malformed envelope for per-message worker validation", async () => {
     const client = rpcClient({
       claim_pipeline_messages: {
         data: [
@@ -71,9 +74,9 @@ describe("Supabase PGMQ pipeline queue", () => {
     });
     const queue = createSupabasePgmqPipelineQueue(client);
 
-    await expect(
-      queue.claim({ limit: 1, visibilityTimeoutSeconds: 60 }),
-    ).rejects.toThrow();
+    await expect(queue.claim({ limit: 1, visibilityTimeoutSeconds: 60 })).resolves.toEqual([
+      expect.objectContaining({ envelope: { run_id: RUN_ID, schema_version: 99 } }),
+    ]);
   });
 
   it("surfaces RPC failures without leaking payload contents", async () => {

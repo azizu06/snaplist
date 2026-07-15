@@ -18,13 +18,19 @@ export interface ClaimedPipelineQueueMessage {
   readCount: number;
   enqueuedAt: string;
   visibleAt: string;
-  envelope: PipelineQueueEnvelope;
+  /** Strictly validated by the consumer so one bad row cannot poison a whole batch. */
+  envelope: unknown;
 }
 
 export interface PipelineQueue {
   enqueue(envelope: PipelineQueueEnvelope): Promise<string>;
   claim(options: PipelineQueueClaimOptions): Promise<ClaimedPipelineQueueMessage[]>;
   ack(messageId: string): Promise<boolean>;
+  defer(messageId: string, visibilityTimeoutSeconds: number): Promise<boolean>;
+}
+
+export function parsePipelineQueueVisibilityTimeoutSeconds(value: unknown): number {
+  return z.number().int().min(1).max(3_600).parse(value);
 }
 
 export function parsePipelineQueueClaimOptions(

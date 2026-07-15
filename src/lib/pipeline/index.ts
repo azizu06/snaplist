@@ -27,15 +27,18 @@ export {
   type ReviewEdits,
 } from "./review-edits";
 export {
+  buildPipelinePersistencePayload,
   runPipelineAndPersist,
   type RunAndPersistInput,
   type RunAndPersistResult,
 } from "./persist";
 export {
   buildPredictionLogRow,
+  buildPredictionLogValues,
   logPrediction,
   readPredictionLogs,
   type PredictionLogRow,
+  type PredictionLogValues,
   type PredictionLogReadRow,
   type PredictionLogPriceRange,
   type ReadPredictionLogsFilter,

@@ -96,6 +96,31 @@ export interface PredictionLogContext {
   runId?: string;
 }
 
+export type PredictionLogValues = Omit<
+  PredictionLogRow,
+  "user_id" | "item_id" | "run_id"
+>;
+
+/** Identity-free prediction values shared by request and run-scoped persistence. */
+export function buildPredictionLogValues(
+  result: PipelineResult,
+  context: PredictionLogContext = {},
+): PredictionLogValues {
+  return {
+    extracted_attrs: result.attributes,
+    autopilot_enabled: context.autopilotEnabled ?? null,
+    autopilot_eligible: result.confidence.autopilotEligible ?? null,
+    price: result.price.suggested,
+    price_range: { low: result.price.range.min, high: result.price.range.max },
+    confidence: result.confidence.score,
+    tier_fired: result.price.tier,
+    model: result.model,
+    listing_model: result.listingModel ?? result.model,
+    pricing_model: result.pricingModel ?? null,
+    sources: result.price.sources,
+  };
+}
+
 /**
  * Map a `PipelineResult` to the `prediction_logs` insert payload. PURE: no I/O, no
  * clock, no randomness — so it is unit-testable directly and reproducible in the
@@ -123,25 +148,7 @@ export function buildPredictionLogRow(
     user_id: userId,
     item_id: itemId,
     run_id: context.runId ?? null,
-    extracted_attrs: result.attributes,
-    // The gate decision as the run saw it — run-time facts for the review
-    // page's disposition explanation; never re-derivable from live settings.
-    autopilot_enabled: context.autopilotEnabled ?? null,
-    autopilot_eligible: result.confidence.autopilotEligible ?? null,
-    price: result.price.suggested,
-    price_range: { low: result.price.range.min, high: result.price.range.max },
-    confidence: result.confidence.score,
-    tier_fired: result.price.tier,
-    model: result.model,
-    // The listing's own model when the pipeline produced one; otherwise the run's
-    // single model (the stub / vision-only path) so provenance is never null (#32).
-    listing_model: result.listingModel ?? result.model,
-    // Pricing-model provenance: present only when an LLM priced the item (web
-    // tiers); null = deterministic pricing (ISBN lookup), NOT a missing value.
-    pricing_model: result.pricingModel ?? null,
-    // Persist the cited comps so the {suggested, range, confidence, sources[]}
-    // contract is complete — rendered for verification, consumed by the eval harness.
-    sources: result.price.sources,
+    ...buildPredictionLogValues(result, context),
   };
 }
 

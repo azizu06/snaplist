@@ -179,6 +179,42 @@ describe("vision/pipeline — garment measurements (issue #104)", () => {
     expect((result.attributes.measurements ?? []).map((m) => m.name)).toContain("pit_to_pit");
   });
 
+  it("keeps pricing and listing generation concurrent with auxiliary measurements", async () => {
+    let releaseMeasurements!: () => void;
+    const measurementGate = new Promise<void>((resolve) => {
+      releaseMeasurements = resolve;
+    });
+    const measure = vi.fn(async (): Promise<ExtractGarmentMeasurementsResult> => {
+      await measurementGate;
+      return {
+        measurements: [],
+        tapeDetected: false,
+        garmentType: "hoodie",
+        model: "measurement-model",
+      };
+    });
+    const priceItem = vi.fn(async () => STUB_PRICE);
+    const generateListing = vi.fn(async () => ({
+      copy: STUB_LISTING,
+      model: STUB_LISTING_MODEL,
+    }));
+
+    const result = makePipeline({
+      extract: fakeExtract(GARMENT_EXTRACTION),
+      measure,
+      priceItem,
+      generateListing,
+    }).run({ photos: ["u/a.jpg"] });
+
+    await vi.waitFor(() => {
+      expect(measure).toHaveBeenCalledOnce();
+      expect(priceItem).toHaveBeenCalledOnce();
+      expect(generateListing).toHaveBeenCalledOnce();
+    });
+    releaseMeasurements();
+    await expect(result).resolves.toMatchObject({ listing: STUB_LISTING });
+  });
+
   it("skips measurement extraction entirely for non-garments", async () => {
     const measure = vi.fn(
       async (): Promise<ExtractGarmentMeasurementsResult> => ({

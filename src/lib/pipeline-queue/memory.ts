@@ -2,6 +2,7 @@ import { pipelineQueueEnvelopeSchema, type PipelineQueueEnvelope } from "./envel
 import {
   parsePipelineQueueClaimOptions,
   parsePipelineQueueMessageId,
+  parsePipelineQueueVisibilityTimeoutSeconds,
   type ClaimedPipelineQueueMessage,
   type PipelineQueue,
 } from "./queue";
@@ -59,6 +60,19 @@ export function createInMemoryPipelineQueue(options: { now?: () => Date } = {}):
     async ack(input) {
       const messageId = parsePipelineQueueMessageId(input);
       return messages.delete(messageId);
+    },
+
+    async defer(input, visibilityTimeoutSeconds) {
+      const messageId = parsePipelineQueueMessageId(input);
+      const timeout = parsePipelineQueueVisibilityTimeoutSeconds(
+        visibilityTimeoutSeconds,
+      );
+      const message = messages.get(messageId);
+      if (!message) return false;
+      const visibleAt = new Date(now().getTime() + timeout * 1_000);
+      message.visibleAt = visibleAt.toISOString();
+      message.visibleAtMs = visibleAt.getTime();
+      return true;
     },
   };
 }
