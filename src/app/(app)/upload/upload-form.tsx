@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import ClickSpark from "@/components/bits/ClickSpark";
 import { Banner } from "@/components/ui/banner";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
@@ -49,32 +49,7 @@ function readAccentColor(): string {
   );
 }
 
-const STEPS = [
-  {
-    label: "Identifying your item",
-    detail: "Reading brand, model, condition, and any barcode from your photos",
-  },
-  {
-    label: "Researching the price",
-    detail: "Looking up what this actually sells for used, with sources",
-  },
-  {
-    label: "Drafting the listing",
-    detail: "Writing the title and description from the verified details",
-  },
-] as const;
-
 function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
-  const [stage, setStage] = useState(0);
-  useEffect(() => {
-    // Pacing only: ~7s per stage, capped at the last (it holds until redirect).
-    const timers = [
-      setTimeout(() => setStage(1), 7000),
-      setTimeout(() => setStage(2), 14000),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
   return (
     <div
       role="status"
@@ -115,63 +90,17 @@ function ProcessingView({ coverUrl }: { coverUrl: string | null }) {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-6 p-6 sm:p-8">
-        <p className="text-[16px] font-semibold text-fg-strong">
-          Building your listing. This usually takes under half a minute.
-        </p>
-        <ol className="flex flex-col gap-5">
-          {STEPS.map((step, i) => (
-            <li key={step.label} className="flex items-start gap-3">
-              <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">
-                {i < stage ? (
-                  <motion.svg
-                    viewBox="0 0 24 24"
-                    className="size-5 text-success"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    initial={{ scale: 0.4, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 18 }}
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </motion.svg>
-                ) : i === stage ? (
-                  <Spinner className="size-4 text-accent" />
-                ) : (
-                  <span className="size-2 rounded-full bg-border-strong" />
-                )}
-              </span>
-              <span>
-                <span
-                  className={`block text-[15px] font-medium ${
-                    i <= stage ? "text-fg-strong" : "text-faint"
-                  }`}
-                >
-                  {step.label}
-                </span>
-                <AnimatePresence>
-                  {i === stage ? (
-                    <motion.span
-                      className="mt-0.5 block text-[13.5px] text-muted"
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      {step.detail}
-                    </motion.span>
-                  ) : null}
-                </AnimatePresence>
-              </span>
-            </li>
-          ))}
-        </ol>
-        <p className="text-[13.5px] text-muted">
-          Keep this page open and you&apos;ll land on the finished draft
-          automatically.
-        </p>
+      <div className="flex items-start gap-3 p-6 sm:p-8">
+        <Spinner className="mt-0.5 size-4 shrink-0 text-accent" />
+        <div className="min-w-0">
+          <p className="text-[16px] font-semibold text-fg-strong">
+            Saving your photos
+          </p>
+          <p className="mt-1 text-[13.5px] leading-relaxed text-muted">
+            We&apos;re adding this item to your processing queue. Once it is saved,
+            you can leave and come back without losing its progress.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -561,6 +490,7 @@ export function UploadForm({
   // away and back (they used to reset to zero). This component owns only the
   // view index and the hidden input the form actually submits.
   const { files, previews, addFiles, removeAt } = useUploadDraft();
+  const idempotencyKey = `single-${useId()}`;
   const [current, setCurrent] = useState(0);
   const submitRef = useRef<HTMLInputElement | null>(null);
 
@@ -588,6 +518,7 @@ export function UploadForm({
 
   return (
     <form action={action}>
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <input
         ref={submitRef}
         type="file"

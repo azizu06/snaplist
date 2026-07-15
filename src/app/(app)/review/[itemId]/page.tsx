@@ -26,6 +26,11 @@ import {
 } from "./actions";
 import { ReviewView, type ReviewData } from "./review-view";
 import { ConsumeUploadDraft } from "./consume-upload-draft";
+import { PipelineRunProgress } from "@/components/pipeline-run-progress";
+import {
+  PIPELINE_PROGRESS_SELECT,
+  pipelineProgressRunSchema,
+} from "@/lib/pipeline-progress";
 
 /** True only for absolute http(s) URLs — used to keep `javascript:`/`data:` and
  *  other non-web schemes out of rendered source <a href>s. The URL constructor
@@ -57,7 +62,7 @@ export default async function ReviewPage({
   searchParams,
 }: {
   params: Promise<{ itemId: string }>;
-  searchParams: Promise<{ error?: string; new?: string }>;
+  searchParams: Promise<{ error?: string; new?: string; ready?: string }>;
 }) {
   const { itemId } = await params;
   const { error: actionError, new: fromUpload } = await searchParams;
@@ -65,6 +70,41 @@ export default async function ReviewPage({
   const supabase = await createClient();
   const userId = await getUserId();
   if (!userId) redirect(`/login?next=/review/${itemId}`);
+
+  const { data: rawRun, error: runError } = await supabase
+    .from("pipeline_runs")
+    .select(PIPELINE_PROGRESS_SELECT)
+    .eq("item_id", itemId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (runError) throw new Error(`Failed to load pipeline progress: ${runError.message}`);
+  const parsedRun = pipelineProgressRunSchema.safeParse(rawRun);
+  if (parsedRun.success && parsedRun.data.status !== "succeeded") {
+    return (
+      <>
+        {fromUpload ? <ConsumeUploadDraft /> : null}
+        <main
+          data-testid="durable-progress"
+          className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6"
+        >
+          <header>
+            <h1 className="font-display text-[22px] font-bold tracking-tight text-fg-strong">
+              Listing progress
+            </h1>
+            <p className="mt-1 text-[14px] leading-relaxed text-muted">
+              This status is saved to your account. You can close this page and come back later.
+            </p>
+          </header>
+          <PipelineRunProgress
+            userId={userId}
+            initialRun={parsedRun.data}
+            reviewHref={`/review/${itemId}?ready=1`}
+          />
+        </main>
+      </>
+    );
+  }
 
   const snapshot = await loadReviewSnapshot(supabase, itemId);
   if (!snapshot) notFound();

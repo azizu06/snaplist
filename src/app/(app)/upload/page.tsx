@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUserId } from "@/lib/auth";
-import { uploadAndProcess } from "./actions";
+import { enqueueUpload } from "./durable-actions";
 import { UploadView } from "./upload-form";
 
 /**
@@ -18,5 +18,5 @@ export default async function UploadPage({
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/upload");
 
-  return <UploadView action={uploadAndProcess} actionError={error ?? null} />;
+  return <UploadView action={enqueueUpload} actionError={error ?? null} />;
 }
