@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { motion } from "motion/react";
 import ClickSpark from "@/components/bits/ClickSpark";
@@ -483,14 +483,15 @@ function FormBody({
 
 export function UploadForm({
   action,
+  captureId,
 }: {
   action: (formData: FormData) => Promise<void>;
+  captureId: string;
 }) {
   // Photos live in the (app)-layout draft context so they survive navigating
   // away and back (they used to reset to zero). This component owns only the
   // view index and the hidden input the form actually submits.
   const { files, previews, addFiles, removeAt } = useUploadDraft();
-  const idempotencyKey = `single-${useId()}`;
   const [current, setCurrent] = useState(0);
   const submitRef = useRef<HTMLInputElement | null>(null);
 
@@ -518,7 +519,8 @@ export function UploadForm({
 
   return (
     <form action={action}>
-      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
+      <input type="hidden" name="batchId" value={captureId} />
+      <input type="hidden" name="idempotencyKey" value={`single:${captureId}`} />
       <input
         ref={submitRef}
         type="file"
@@ -547,9 +549,11 @@ export function UploadForm({
 export function UploadView({
   action,
   actionError,
+  captureId,
 }: {
   action: (formData: FormData) => Promise<void>;
   actionError: string | null;
+  captureId: string;
 }) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
@@ -576,7 +580,7 @@ export function UploadView({
         </Banner>
       ) : null}
 
-      <UploadForm action={action} />
+      <UploadForm action={action} captureId={captureId} />
     </main>
   );
 }

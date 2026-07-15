@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { z } from "zod";
 import { getUserId } from "@/lib/auth";
 import { resolveSellerPolicy } from "@/lib/billing";
 import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
@@ -24,6 +25,8 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     .filter((value): value is File => value instanceof File && value.size > 0);
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
   if (!idempotencyKey) redirectUploadError("Please try that upload again.");
+  const batchId = z.string().uuid().safeParse(formData.get("batchId"));
+  if (!batchId.success) redirectUploadError("Please try that upload again.");
 
   let costBasis: number | null;
   try {
@@ -37,9 +40,22 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
   const store = createInternalPipelineStagingStore();
 
   try {
+    const replay = await store.findReplay({
+      batchId: batchId.data,
+      userId,
+      entries: [{
+        idempotencyKey,
+        source: "single",
+        autopilotEnabled,
+        photoCount: photos.length,
+        costBasis,
+      }],
+    });
+    if (replay[0]) redirect(`/review/${replay[0].item_id}?new=1`);
+
     const [staged] = await stageUploadEntries(
       {
-        batchId: crypto.randomUUID(),
+        batchId: batchId.data,
         userId,
         dailyLimit: policy.limits.itemsPerDay,
         perMinuteLimit: policy.limits.meteredPerMinute,

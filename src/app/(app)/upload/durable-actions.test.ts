@@ -35,6 +35,7 @@ function uploadForm(): FormData {
   form.append("photo", new File(["front"], "front.jpg", { type: "image/jpeg" }));
   form.append("photo", new File(["back"], "back.jpg", { type: "image/jpeg" }));
   form.set("idempotencyKey", "single-capture-1");
+  form.set("batchId", "11111111-1111-4111-8111-111111111111");
   form.set("costBasis", "12.50");
   return form;
 }
@@ -47,7 +48,7 @@ describe("enqueueUpload", () => {
     })),
   };
   const supabase = { storage };
-  const store = { stageAndEnqueue: vi.fn() };
+  const store = { findReplay: vi.fn(), stageAndEnqueue: vi.fn() };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,9 +60,11 @@ describe("enqueueUpload", () => {
       limits: { itemsPerDay: 15, meteredPerMinute: 20 },
     });
     mocks.createStore.mockReturnValue(store);
+    store.findReplay.mockResolvedValue([]);
     mocks.stageUploadEntries.mockResolvedValue([
       {
         batch_id: "11111111-1111-4111-8111-111111111111",
+        batch_position: 0,
         idempotency_key: "single-capture-1",
         item_id: "22222222-2222-4222-8222-222222222222",
         run_id: "33333333-3333-4333-8333-333333333333",
@@ -95,6 +98,32 @@ describe("enqueueUpload", () => {
       }),
       expect.objectContaining({ stageAndEnqueue: store.stageAndEnqueue }),
     );
+  });
+
+  it("recovers the existing run when the committed enqueue response was lost", async () => {
+    store.findReplay.mockResolvedValueOnce([
+      {
+        batch_id: "11111111-1111-4111-8111-111111111111",
+        batch_position: 0,
+        idempotency_key: "single-capture-1",
+        item_id: "22222222-2222-4222-8222-222222222222",
+        run_id: "33333333-3333-4333-8333-333333333333",
+        queue_message_id: "42",
+      },
+    ]);
+
+    await expect(enqueueUpload(uploadForm())).rejects.toThrow(
+      "REDIRECT:/review/22222222-2222-4222-8222-222222222222?new=1",
+    );
+
+    expect(store.findReplay).toHaveBeenCalledWith(expect.objectContaining({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [expect.objectContaining({
+        idempotencyKey: "single-capture-1",
+        photoCount: 2,
+      })],
+    }));
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
   });
 
   it("does not run the request-bound model pipeline", async () => {

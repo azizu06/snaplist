@@ -37,6 +37,7 @@ describe("durable upload staging migration", () => {
 
   it("keeps producer authority service-only and terminal release run-keyed", () => {
     for (const functionName of [
+      "find_pipeline_batch_replay",
       "stage_pipeline_batch",
       "release_pipeline_run_daily_reservation",
     ]) {

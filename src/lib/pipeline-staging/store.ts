@@ -2,11 +2,14 @@ import { z } from "zod";
 import {
   pipelineStageBatchInputSchema,
   pipelineStageBatchResultSchema,
+  pipelineReplayBatchInputSchema,
+  type PipelineReplayBatchInput,
   type PipelineStageBatchInput,
   type PipelineStageBatchResult,
 } from "./schema";
 
 type PipelineStagingRpcName =
+  | "find_pipeline_batch_replay"
   | "stage_pipeline_batch"
   | "release_pipeline_run_daily_reservation";
 
@@ -24,6 +27,7 @@ export interface PipelineStagingRpcClient {
 }
 
 export interface PipelineStagingStore {
+  findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
   releaseDailyReservation(runId: string): Promise<boolean>;
 }
@@ -39,6 +43,22 @@ export function createSupabasePipelineStagingStore(
   client: PipelineStagingRpcClient,
 ): PipelineStagingStore {
   return {
+    async findReplay(rawInput) {
+      const input = pipelineReplayBatchInputSchema.parse(rawInput);
+      const result = await client.rpc("find_pipeline_batch_replay", {
+        p_batch_id: input.batchId,
+        p_entries: input.entries.map((entry) => ({
+          autopilot_enabled: entry.autopilotEnabled,
+          cost_basis: entry.costBasis,
+          idempotency_key: entry.idempotencyKey,
+          photo_count: entry.photoCount,
+          source: entry.source,
+        })),
+        p_user_id: input.userId,
+      });
+      return pipelineStageBatchResultSchema.parse(rpcData("replay lookup", result));
+    },
+
     async stageAndEnqueue(rawInput) {
       const input = pipelineStageBatchInputSchema.parse(rawInput);
       const result = await client.rpc("stage_pipeline_batch", {

@@ -18,5 +18,11 @@ export default async function UploadPage({
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/upload");
 
-  return <UploadView action={enqueueUpload} actionError={error ?? null} />;
+  return (
+    <UploadView
+      action={enqueueUpload}
+      actionError={error ?? null}
+      captureId={crypto.randomUUID()}
+    />
+  );
 }

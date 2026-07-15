@@ -65,6 +65,159 @@ create index pipeline_run_usage_minute_idx
 revoke all on table private.pipeline_run_usage_reservations
   from public, anon, authenticated, service_role;
 
+-- A response can be lost after the atomic staging transaction commits. Check
+-- for that completed producer request before uploading a second set of private
+-- objects. Empty means no prior commit; any partial or conflicting match fails
+-- closed instead of creating or mutating another run.
+create or replace function public.find_pipeline_batch_replay(
+  p_user_id text,
+  p_batch_id uuid,
+  p_entries jsonb
+)
+returns table (
+  batch_id uuid,
+  batch_position integer,
+  idempotency_key text,
+  item_id uuid,
+  run_id uuid,
+  queue_message_id bigint
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_entry jsonb;
+  v_batch_position integer;
+  v_idempotency_key text;
+  v_source text;
+  v_autopilot_enabled boolean;
+  v_photo_count integer;
+  v_cost_basis numeric;
+  v_seen_keys text[] := '{}'::text[];
+  v_match_count integer;
+  v_item_id uuid;
+  v_run_id uuid;
+  v_message_id bigint;
+  v_existing_batch_id uuid;
+  v_existing_batch_position integer;
+  v_existing_capture jsonb;
+  v_existing_cost_basis numeric;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Pipeline replay authorization is required';
+  end if;
+  if coalesce(p_user_id, '') = '' or char_length(p_user_id) > 255 or p_batch_id is null then
+    raise exception using errcode = '22023', message = 'Invalid pipeline replay identity';
+  end if;
+  if jsonb_typeof(p_entries) <> 'array'
+    or jsonb_array_length(p_entries) not between 1 and 200 then
+    raise exception using errcode = '22023', message = 'Pipeline replay requires 1 to 200 entries';
+  end if;
+
+  for v_entry in select value from jsonb_array_elements(p_entries)
+  loop
+    if jsonb_typeof(v_entry) <> 'object'
+      or not (v_entry ?& array[
+        'idempotency_key', 'source', 'autopilot_enabled', 'photo_count', 'cost_basis'
+      ])
+      or (select count(*) from jsonb_object_keys(v_entry)) <> 5
+      or coalesce(char_length(v_entry->>'idempotency_key'), 0) not between 1 and 128
+      or v_entry->>'source' not in ('single', 'batch')
+      or jsonb_typeof(v_entry->'autopilot_enabled') <> 'boolean'
+      or jsonb_typeof(v_entry->'photo_count') <> 'number'
+      or (v_entry->>'photo_count')::integer not between 1 and 4
+      or jsonb_typeof(v_entry->'cost_basis') not in ('number', 'null') then
+      raise exception using errcode = '22023', message = 'Invalid pipeline replay entry';
+    end if;
+    v_idempotency_key := v_entry->>'idempotency_key';
+    if v_idempotency_key = any(v_seen_keys) then
+      raise exception using errcode = '22023', message = 'Duplicate pipeline replay idempotency key';
+    end if;
+    v_seen_keys := array_append(v_seen_keys, v_idempotency_key);
+  end loop;
+
+  select count(*)
+  into v_match_count
+  from public.pipeline_runs run
+  where run.user_id = p_user_id
+    and run.idempotency_key = any(v_seen_keys);
+
+  if v_match_count = 0 then
+    return;
+  end if;
+  if v_match_count <> jsonb_array_length(p_entries) then
+    raise exception using errcode = '23514', message = 'Pipeline replay is partial or conflicting';
+  end if;
+
+  for v_entry, v_batch_position in
+    select entry.value, (entry.position - 1)::integer
+    from jsonb_array_elements(p_entries) with ordinality entry(value, position)
+  loop
+    v_idempotency_key := v_entry->>'idempotency_key';
+    v_source := v_entry->>'source';
+    v_autopilot_enabled := (v_entry->>'autopilot_enabled')::boolean;
+    v_photo_count := (v_entry->>'photo_count')::integer;
+    v_cost_basis := case
+      when jsonb_typeof(v_entry->'cost_basis') = 'null' then null
+      else (v_entry->>'cost_basis')::numeric
+    end;
+    if v_cost_basis is not null and v_cost_basis < 0 then
+      raise exception using errcode = '22023', message = 'Pipeline replay cost basis cannot be negative';
+    end if;
+
+    select
+      run.id,
+      run.item_id,
+      run.queue_message_id,
+      run.batch_id,
+      run.batch_position,
+      run.capture_input,
+      item.cost_basis
+    into
+      v_run_id,
+      v_item_id,
+      v_message_id,
+      v_existing_batch_id,
+      v_existing_batch_position,
+      v_existing_capture,
+      v_existing_cost_basis
+    from public.pipeline_runs run
+    join public.items item
+      on item.id = run.item_id
+     and item.user_id = run.user_id
+    where run.user_id = p_user_id
+      and run.idempotency_key = v_idempotency_key;
+
+    if not found
+      or v_message_id is null
+      or v_existing_batch_id is distinct from p_batch_id
+      or v_existing_batch_position is distinct from v_batch_position
+      or v_existing_capture is distinct from jsonb_build_object(
+        'source', v_source,
+        'autopilot_enabled', v_autopilot_enabled,
+        'photo_count', v_photo_count
+      )
+      or v_existing_cost_basis is distinct from v_cost_basis then
+      raise exception using errcode = '23514', message = 'Pipeline replay conflicts with staged input';
+    end if;
+
+    batch_id := p_batch_id;
+    batch_position := v_batch_position;
+    idempotency_key := v_idempotency_key;
+    item_id := v_item_id;
+    run_id := v_run_id;
+    queue_message_id := v_message_id;
+    return next;
+  end loop;
+end;
+$$;
+
+revoke all on function public.find_pipeline_batch_replay(text, uuid, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.find_pipeline_batch_replay(text, uuid, jsonb)
+  to service_role;
+
 create or replace function public.stage_pipeline_batch(
   p_user_id text,
   p_batch_id uuid,

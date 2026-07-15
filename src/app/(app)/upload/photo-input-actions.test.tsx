@@ -31,7 +31,10 @@ function renderSingleUpload() {
   return load(
     renderToStaticMarkup(
       <UploadDraftProvider>
-        <UploadForm action={async () => undefined} />
+        <UploadForm
+          action={async () => undefined}
+          captureId="00000000-0000-4000-8000-000000000159"
+        />
       </UploadDraftProvider>,
     ),
   );

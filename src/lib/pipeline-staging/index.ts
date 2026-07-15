@@ -4,6 +4,7 @@ export {
   pipelineStageEntrySchema,
   type PipelineStageBatchInput,
   type PipelineStageBatchResult,
+  type PipelineReplayBatchInput,
 } from "./schema";
 export {
   createSupabasePipelineStagingStore,

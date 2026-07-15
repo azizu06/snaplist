@@ -18,6 +18,46 @@ const input = {
 };
 
 describe("Supabase pipeline staging store", () => {
+  it("recovers a committed producer request before Storage is touched again", async () => {
+    const rpc = vi.fn(async () => ({
+      data: [
+        {
+          batch_id: input.batchId,
+          batch_position: 0,
+          idempotency_key: "capture-1",
+          item_id: "22222222-2222-4222-8222-222222222222",
+          run_id: "33333333-3333-4333-8333-333333333333",
+          queue_message_id: 42,
+        },
+      ],
+      error: null,
+    }));
+    const store = createSupabasePipelineStagingStore({ rpc });
+
+    await expect(store.findReplay({
+      batchId: input.batchId,
+      userId: input.userId,
+      entries: [{
+        idempotencyKey: "capture-1",
+        source: "single",
+        autopilotEnabled: false,
+        photoCount: 1,
+        costBasis: null,
+      }],
+    })).resolves.toMatchObject([{ queue_message_id: "42" }]);
+    expect(rpc).toHaveBeenCalledWith("find_pipeline_batch_replay", {
+      p_batch_id: input.batchId,
+      p_entries: [{
+        autopilot_enabled: false,
+        cost_basis: null,
+        idempotency_key: "capture-1",
+        photo_count: 1,
+        source: "single",
+      }],
+      p_user_id: input.userId,
+    });
+  });
+
   it("uses one fixed staging RPC and maps only safe capture inputs", async () => {
     const rpc = vi.fn(async () => ({
       data: [

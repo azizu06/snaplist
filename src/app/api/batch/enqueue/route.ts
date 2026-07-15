@@ -56,6 +56,29 @@ export async function POST(request: Request) {
       };
     });
     const store = createInternalPipelineStagingStore();
+    const replay = await store.findReplay({
+      batchId: manifest.batchId,
+      userId,
+      entries: entries.map((entry) => ({
+        idempotencyKey: entry.idempotencyKey,
+        source: entry.source,
+        autopilotEnabled: entry.autopilotEnabled,
+        photoCount: entry.photos.length,
+        costBasis: entry.costBasis,
+      })),
+    });
+    if (replay.length > 0) {
+      return NextResponse.json({
+        batchId: manifest.batchId,
+        runs: replay.map((run) => ({
+          id: run.run_id,
+          itemId: run.item_id,
+          status: "queued",
+          stage: "queued",
+        })),
+      }, { status: 200 });
+    }
+
     const runs = await stageUploadEntries(
       {
         batchId: manifest.batchId,

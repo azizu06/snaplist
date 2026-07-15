@@ -63,5 +63,37 @@ const pipelineStageResultSchema = z
 
 export const pipelineStageBatchResultSchema = z.array(pipelineStageResultSchema);
 
+export const pipelineReplayEntrySchema = z
+  .object({
+    idempotencyKey: z.string().min(1).max(128),
+    source: z.enum(["single", "batch"]),
+    autopilotEnabled: z.boolean(),
+    photoCount: z.number().int().min(1).max(4),
+    costBasis: z.number().finite().nonnegative().nullable(),
+  })
+  .strict();
+
+export const pipelineReplayBatchInputSchema = z
+  .object({
+    batchId: z.string().uuid(),
+    userId: z.string().min(1).max(255),
+    entries: z.array(pipelineReplayEntrySchema).min(1).max(200),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const keys = new Set<string>();
+    for (const [index, entry] of input.entries.entries()) {
+      if (keys.has(entry.idempotencyKey)) {
+        context.addIssue({
+          code: "custom",
+          message: "Idempotency keys must be unique within a replay",
+          path: ["entries", index, "idempotencyKey"],
+        });
+      }
+      keys.add(entry.idempotencyKey);
+    }
+  });
+
 export type PipelineStageBatchInput = z.infer<typeof pipelineStageBatchInputSchema>;
 export type PipelineStageBatchResult = z.infer<typeof pipelineStageBatchResultSchema>;
+export type PipelineReplayBatchInput = z.infer<typeof pipelineReplayBatchInputSchema>;

@@ -1,6 +1,6 @@
 begin;
 
-select plan(16);
+select plan(19);
 
 select has_column('public', 'pipeline_runs', 'batch_id', 'pipeline runs carry a recovery batch id');
 select has_column('public', 'pipeline_runs', 'batch_position', 'pipeline runs carry stable batch order');
@@ -16,6 +16,12 @@ select col_is_pk(
 
 select has_function(
   'public',
+  'find_pipeline_batch_replay',
+  array['text', 'uuid', 'jsonb'],
+  'fixed replay lookup RPC exists'
+);
+select has_function(
+  'public',
   'stage_pipeline_batch',
   array['text', 'uuid', 'jsonb', 'integer', 'integer'],
   'fixed staging RPC exists'
@@ -27,6 +33,22 @@ select has_function(
   'run-keyed release RPC exists'
 );
 
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.find_pipeline_batch_replay(text,uuid,jsonb)',
+    'execute'
+  ),
+  'service role may recover a committed producer request'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.find_pipeline_batch_replay(text,uuid,jsonb)',
+    'execute'
+  ),
+  'sellers cannot invoke the privileged replay lookup'
+);
 select ok(
   has_function_privilege(
     'service_role',

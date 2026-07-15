@@ -23,6 +23,8 @@ vi.mock("@/lib/api/errors", () => ({ logServerError: mocks.logServerError }));
 import { POST } from "./route";
 
 describe("POST /api/batch/enqueue", () => {
+  const store = { findReplay: vi.fn(), stageAndEnqueue: vi.fn() };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getUserId.mockResolvedValue("user_123");
@@ -32,10 +34,12 @@ describe("POST /api/batch/enqueue", () => {
       limits: { itemsPerDay: 200, meteredPerMinute: 60 },
     });
     mocks.getAutopilotEnabled.mockResolvedValue(true);
-    mocks.createStore.mockReturnValue({ stageAndEnqueue: vi.fn() });
+    store.findReplay.mockResolvedValue([]);
+    mocks.createStore.mockReturnValue(store);
     mocks.stageUploadEntries.mockResolvedValue([
       {
         batch_id: "11111111-1111-4111-8111-111111111111",
+        batch_position: 0,
         idempotency_key: "item-1",
         item_id: "22222222-2222-4222-8222-222222222222",
         run_id: "33333333-3333-4333-8333-333333333333",
@@ -70,6 +74,36 @@ describe("POST /api/batch/enqueue", () => {
     await expect(response.json()).resolves.toMatchObject({
       batchId: "11111111-1111-4111-8111-111111111111",
       runs: [{ id: "33333333-3333-4333-8333-333333333333", status: "queued" }],
+    });
+  });
+
+  it("returns the committed batch without uploading again after a lost response", async () => {
+    store.findReplay.mockResolvedValueOnce([
+      {
+        batch_id: "11111111-1111-4111-8111-111111111111",
+        batch_position: 0,
+        idempotency_key: "item-1",
+        item_id: "22222222-2222-4222-8222-222222222222",
+        run_id: "33333333-3333-4333-8333-333333333333",
+        queue_message_id: "9",
+      },
+    ]);
+    const form = new FormData();
+    form.set("manifest", JSON.stringify({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [{ idempotencyKey: "item-1", costBasis: "5", photoCount: 1 }],
+    }));
+    form.append("photo:0", new File(["photo"], "item.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://snaplist.test/api/batch/enqueue", {
+      method: "POST",
+      body: form,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      runs: [{ id: "33333333-3333-4333-8333-333333333333" }],
     });
   });
 });

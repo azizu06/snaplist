@@ -97,6 +97,32 @@ describe("durable pipeline staging RPC and RLS", () => {
     expect(repeated.error).toBeNull();
     expect(repeated.data).toEqual(first.data);
 
+    const replay = await admin.rpc("find_pipeline_batch_replay", {
+      p_user_id: userA.id,
+      p_batch_id: batchId,
+      p_entries: [{
+        idempotency_key: idempotencyKey,
+        source: "single",
+        autopilot_enabled: false,
+        photo_count: 2,
+        cost_basis: 12.5,
+      }],
+    });
+    expect(replay).toMatchObject({ data: first.data, error: null });
+
+    const conflictingReplay = await admin.rpc("find_pipeline_batch_replay", {
+      p_user_id: userA.id,
+      p_batch_id: batchId,
+      p_entries: [{
+        idempotency_key: idempotencyKey,
+        source: "single",
+        autopilot_enabled: false,
+        photo_count: 2,
+        cost_basis: 99,
+      }],
+    });
+    expect(conflictingReplay.error).not.toBeNull();
+
     const { data: item } = await userA.client
       .from("items")
       .select("photos, cost_basis")
