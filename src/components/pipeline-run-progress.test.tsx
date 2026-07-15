@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { PipelineProgressRun } from "@/lib/pipeline-progress";
-import { PipelineProgressCard } from "./pipeline-run-progress";
+import {
+  isPipelineProgressUpdateStale,
+  PipelineProgressCard,
+} from "./pipeline-run-progress";
 
 const RUN: PipelineProgressRun = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -59,5 +62,24 @@ describe("PipelineProgressCard", () => {
 
     expect(html).toContain("Review draft");
     expect(html).toContain('href="/review/item-1"');
+  });
+});
+
+describe("isPipelineProgressUpdateStale", () => {
+  it("rejects a delayed Realtime row after a newer saved row was accepted", () => {
+    const succeeded: PipelineProgressRun = {
+      ...RUN,
+      status: "succeeded",
+      stage: "completed",
+      listing_id: "00000000-0000-4000-8000-000000000003",
+      updated_at: "2026-07-15T12:05:00.000Z",
+    };
+    const delayedRunning = {
+      ...RUN,
+      updated_at: "2026-07-15T12:04:59.999Z",
+    };
+
+    expect(isPipelineProgressUpdateStale(delayedRunning, succeeded)).toBe(true);
+    expect(isPipelineProgressUpdateStale(succeeded, delayedRunning)).toBe(false);
   });
 });

@@ -37,6 +37,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "This batch could not be read. Try again." }, { status: 400 });
   }
 
+  let costBases: Array<number | null>;
+  try {
+    costBases = manifest.entries.map((entry) => parseCostBasis(entry.costBasis));
+  } catch {
+    return NextResponse.json(
+      {
+        error: "What did you pay must be a plain dollar amount or left blank.",
+        kind: "validation",
+      },
+      { status: 400 },
+    );
+  }
+
   try {
     const policy = await resolveSellerPolicy(userId, { client: supabase });
     const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
@@ -51,7 +64,7 @@ export async function POST(request: Request) {
         idempotencyKey: entry.idempotencyKey,
         source: "batch" as const,
         autopilotEnabled,
-        costBasis: parseCostBasis(entry.costBasis),
+        costBasis: costBases[index],
         photos,
       };
     });

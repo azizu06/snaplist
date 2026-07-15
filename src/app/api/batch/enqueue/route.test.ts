@@ -124,4 +124,30 @@ describe("POST /api/batch/enqueue", () => {
       }],
     });
   });
+
+  it("returns an actionable validation error for a malformed cost basis", async () => {
+    mocks.parseCostBasis.mockImplementationOnce(() => {
+      throw new Error("Cost basis must be a plain decimal amount");
+    });
+    const form = new FormData();
+    form.set("manifest", JSON.stringify({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [{ idempotencyKey: "item-1", costBasis: "$12", photoCount: 1 }],
+    }));
+    form.append("photo:0", new File(["photo"], "item.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://snaplist.test/api/batch/enqueue", {
+      method: "POST",
+      body: form,
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "What did you pay must be a plain dollar amount or left blank.",
+      kind: "validation",
+    });
+    expect(mocks.resolveSellerPolicy).not.toHaveBeenCalled();
+    expect(mocks.logServerError).not.toHaveBeenCalled();
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+  });
 });

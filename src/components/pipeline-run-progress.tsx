@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBadge } from "@/components/ui/badge";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import {
@@ -20,6 +20,18 @@ import {
 } from "@/lib/pipeline-progress";
 
 export const PIPELINE_PROGRESS_POLL_MS = 5_000;
+
+export function isPipelineProgressUpdateStale(
+  candidate: PipelineProgressRun,
+  accepted: PipelineProgressRun,
+): boolean {
+  const candidateTime = Date.parse(candidate.updated_at);
+  const acceptedTime = Date.parse(accepted.updated_at);
+  if (Number.isFinite(candidateTime) && Number.isFinite(acceptedTime)) {
+    return candidateTime < acceptedTime;
+  }
+  return candidate.updated_at < accepted.updated_at;
+}
 
 export interface PipelineProgressCardProps {
   run: PipelineProgressRun;
@@ -177,11 +189,21 @@ export function PipelineRunProgress({
   const [subscribeAttempt, setSubscribeAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
+  const acceptedRunRef = useRef(initialRun);
   const run =
-    liveRun?.id === initialRun.id && liveRun.updated_at >= initialRun.updated_at
+    liveRun?.id === initialRun.id && !isPipelineProgressUpdateStale(liveRun, initialRun)
       ? liveRun
       : initialRun;
   const terminal = isPipelineProgressTerminal(run.status);
+
+  useEffect(() => {
+    if (
+      acceptedRunRef.current.id !== initialRun.id
+      || isPipelineProgressUpdateStale(acceptedRunRef.current, initialRun)
+    ) {
+      acceptedRunRef.current = initialRun;
+    }
+  }, [initialRun]);
 
   const acceptRun = useCallback(
     (raw: unknown) => {
@@ -189,10 +211,16 @@ export function PipelineRunProgress({
       if (!parsed.success || parsed.data.user_id !== userId || parsed.data.id !== initialRun.id) {
         return;
       }
+      if (isPipelineProgressUpdateStale(parsed.data, initialRun)) return;
+      if (
+        acceptedRunRef.current.id === parsed.data.id
+        && isPipelineProgressUpdateStale(parsed.data, acceptedRunRef.current)
+      ) return;
+      acceptedRunRef.current = parsed.data;
       setLiveRun(parsed.data);
       onRunChange?.(parsed.data);
     },
-    [initialRun.id, onRunChange, userId],
+    [initialRun, onRunChange, userId],
   );
 
   const refresh = useCallback(async () => {
