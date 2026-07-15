@@ -1,4 +1,13 @@
 import { z } from "zod";
+import {
+  buildPipelinePersistencePayload,
+  pipelineResultSchema,
+  type PipelineResult,
+} from "@/lib/pipeline";
+import {
+  pipelineWorkerCheckpointSchema,
+  type PipelineWorkerCheckpoint,
+} from "./checkpoint";
 
 export const pipelineRunStatusSchema = z.enum([
   "queued",
@@ -31,6 +40,11 @@ const workerRunSchema = z.object({
   schema_version: z.literal(1),
   attempt_count: z.number().int().min(0),
   max_attempts: z.number().int().positive(),
+  autopilot_enabled: z.boolean(),
+  checkpoint: pipelineWorkerCheckpointSchema,
+  lease_token: z.string().uuid(),
+  lease_expires_at: z.string().min(1),
+  next_attempt_at: z.string().nullable(),
 });
 
 const workerContextSchema = z.object({
@@ -49,21 +63,47 @@ const workerContextSchema = z.object({
 
 export type PipelineWorkerContext = z.infer<typeof workerContextSchema>;
 
+const acquisitionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("acquired"), context: workerContextSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("deferred"),
+      retryAfterSeconds: z.number().int().min(1).max(3_600),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("terminal"),
+      status: z.enum(["succeeded", "failed", "canceled"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("mismatch") }).strict(),
+]);
+
+export type PipelineAttemptAcquisition = z.infer<typeof acquisitionSchema>;
+
+const failureResultSchema = z
+  .object({
+    status: z.enum(["retrying", "failed"]),
+    retryAfterSeconds: z.number().int().min(1).max(3_600).nullable(),
+  })
+  .strict();
+
+export type PipelineAttemptFailureResult = z.infer<typeof failureResultSchema>;
+
 type PipelineWorkerRpcName =
-  | "load_pipeline_run_worker_context"
-  | "transition_pipeline_run"
-  | "link_pipeline_run_listing";
+  | "claim_pipeline_run_attempt"
+  | "checkpoint_pipeline_run"
+  | "complete_pipeline_run"
+  | "finish_pipeline_run_attempt"
+  | "reject_pipeline_message";
 
 interface PipelineWorkerRpcResult {
   data: unknown;
   error: { message: string } | null;
 }
 
-/**
- * The worker receives this capability instead of a generic service-role
- * Supabase client. Its SQL functions derive the tenant from `run_id`; none of
- * the methods accepts a user id or arbitrary table/payload operation.
- */
+/** Fixed run-derived RPC capability; deliberately has no generic table surface. */
 export interface PipelineWorkerRpcClient {
   rpc(
     functionName: PipelineWorkerRpcName,
@@ -71,78 +111,158 @@ export interface PipelineWorkerRpcClient {
   ): PromiseLike<PipelineWorkerRpcResult>;
 }
 
-export interface PipelineRunTransitionInput {
-  runId: string;
-  expectedStatus: PipelineRunStatus;
-  nextStatus: PipelineRunStatus;
-  nextStage: PipelineRunStage;
-  attemptCount: number;
-  failureCode?: string | null;
-  safeFailureMessage?: string | null;
-}
-
 export interface PipelineWorkerStore {
-  loadContext(runId: string): Promise<PipelineWorkerContext>;
-  transition(input: PipelineRunTransitionInput): Promise<z.infer<typeof workerRunSchema>>;
-  linkListing(runId: string, listingId: string): Promise<z.infer<typeof workerRunSchema>>;
+  acquire(input: {
+    runId: string;
+    messageId: string;
+    leaseSeconds: number;
+  }): Promise<PipelineAttemptAcquisition>;
+  checkpoint(input: {
+    runId: string;
+    leaseToken: string;
+    stage: Exclude<PipelineRunStage, "queued" | "completed">;
+    checkpoint: PipelineWorkerCheckpoint;
+    leaseSeconds: number;
+  }): Promise<void>;
+  complete(input: {
+    runId: string;
+    leaseToken: string;
+    result: PipelineResult;
+    autopilotEnabled: boolean;
+  }): Promise<{ listingId: string }>;
+  failAttempt(input: {
+    runId: string;
+    leaseToken: string;
+    retryable: boolean;
+    retryAfterSeconds: number;
+    failureCode: string;
+    safeFailureMessage: string;
+  }): Promise<PipelineAttemptFailureResult>;
+  rejectMessage(input: {
+    runId: string;
+    messageId: string;
+    failureCode: string;
+    safeFailureMessage: string;
+  }): Promise<boolean>;
 }
 
-function rpcData(
-  operation: string,
-  result: PipelineWorkerRpcResult,
-): unknown {
+function rpcData(operation: string, result: PipelineWorkerRpcResult): unknown {
   if (result.error) {
     throw new Error(`Pipeline worker ${operation} failed: ${result.error.message}`);
   }
   return result.data;
 }
 
+const positiveIntegerString = z.string().regex(/^[1-9]\d*$/);
+const leaseSecondsSchema = z.number().int().min(1).max(3_600);
+
 export function createSupabasePipelineWorkerStore(
   client: PipelineWorkerRpcClient,
 ): PipelineWorkerStore {
   return {
-    async loadContext(runId) {
-      const id = z.string().uuid().parse(runId);
-      const result = await client.rpc("load_pipeline_run_worker_context", {
-        p_run_id: id,
-      });
-      return workerContextSchema.parse(rpcData("context load", result));
-    },
-
-    async transition(input) {
+    async acquire(input) {
       const parsed = z
         .object({
           runId: z.string().uuid(),
-          expectedStatus: pipelineRunStatusSchema,
-          nextStatus: pipelineRunStatusSchema,
-          nextStage: pipelineRunStageSchema,
-          attemptCount: z.number().int().min(0),
-          failureCode: z.string().min(1).max(64).nullable().optional(),
-          safeFailureMessage: z.string().min(1).max(500).nullable().optional(),
+          messageId: positiveIntegerString,
+          leaseSeconds: leaseSecondsSchema,
         })
         .strict()
         .parse(input);
-      const result = await client.rpc("transition_pipeline_run", {
-        p_attempt_count: parsed.attemptCount,
-        p_expected_status: parsed.expectedStatus,
-        p_failure_code: parsed.failureCode ?? null,
-        p_failure_message: parsed.safeFailureMessage ?? null,
-        p_next_stage: parsed.nextStage,
-        p_next_status: parsed.nextStatus,
+      const result = await client.rpc("claim_pipeline_run_attempt", {
+        p_lease_seconds: parsed.leaseSeconds,
+        p_message_id: parsed.messageId,
         p_run_id: parsed.runId,
       });
-      return workerRunSchema.parse(rpcData("transition", result));
+      return acquisitionSchema.parse(rpcData("attempt claim", result));
     },
 
-    async linkListing(runId, listingId) {
-      const ids = z
-        .object({ runId: z.string().uuid(), listingId: z.string().uuid() })
-        .parse({ runId, listingId });
-      const result = await client.rpc("link_pipeline_run_listing", {
-        p_listing_id: ids.listingId,
-        p_run_id: ids.runId,
+    async checkpoint(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          leaseToken: z.string().uuid(),
+          stage: pipelineRunStageSchema.exclude(["queued", "completed"]),
+          checkpoint: pipelineWorkerCheckpointSchema,
+          leaseSeconds: leaseSecondsSchema,
+        })
+        .strict()
+        .parse(input);
+      const result = await client.rpc("checkpoint_pipeline_run", {
+        p_checkpoint: parsed.checkpoint,
+        p_lease_seconds: parsed.leaseSeconds,
+        p_lease_token: parsed.leaseToken,
+        p_run_id: parsed.runId,
+        p_stage: parsed.stage,
       });
-      return workerRunSchema.parse(rpcData("listing link", result));
+      z.literal(true).parse(rpcData("checkpoint", result));
+    },
+
+    async complete(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          leaseToken: z.string().uuid(),
+          result: pipelineResultSchema,
+          autopilotEnabled: z.boolean(),
+        })
+        .strict()
+        .parse(input);
+      const persistence = buildPipelinePersistencePayload(
+        parsed.result,
+        parsed.autopilotEnabled,
+      );
+      const result = await client.rpc("complete_pipeline_run", {
+        p_lease_token: parsed.leaseToken,
+        p_persistence: persistence,
+        p_run_id: parsed.runId,
+      });
+      return z
+        .object({ listingId: z.string().uuid() })
+        .strict()
+        .parse(rpcData("completion", result));
+    },
+
+    async failAttempt(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          leaseToken: z.string().uuid(),
+          retryable: z.boolean(),
+          retryAfterSeconds: leaseSecondsSchema,
+          failureCode: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+          safeFailureMessage: z.string().min(1).max(500),
+        })
+        .strict()
+        .parse(input);
+      const result = await client.rpc("finish_pipeline_run_attempt", {
+        p_failure_code: parsed.failureCode,
+        p_failure_message: parsed.safeFailureMessage,
+        p_lease_token: parsed.leaseToken,
+        p_retry_after_seconds: parsed.retryAfterSeconds,
+        p_retryable: parsed.retryable,
+        p_run_id: parsed.runId,
+      });
+      return failureResultSchema.parse(rpcData("attempt finish", result));
+    },
+
+    async rejectMessage(input) {
+      const parsed = z
+        .object({
+          runId: z.string().uuid(),
+          messageId: positiveIntegerString,
+          failureCode: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+          safeFailureMessage: z.string().min(1).max(500),
+        })
+        .strict()
+        .parse(input);
+      const result = await client.rpc("reject_pipeline_message", {
+        p_failure_code: parsed.failureCode,
+        p_failure_message: parsed.safeFailureMessage,
+        p_message_id: parsed.messageId,
+        p_run_id: parsed.runId,
+      });
+      return z.boolean().parse(rpcData("message rejection", result));
     },
   };
 }

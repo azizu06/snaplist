@@ -5,6 +5,7 @@ import { createDefaultPricer } from "../pricing/default-pricer";
 import { generateEbayListing, createRealFewShotRetrieval } from "../listing";
 import type {
   ExtractedAttributes,
+  Identification,
   ListingCopy,
   Pipeline,
   PipelineInput,
@@ -75,6 +76,37 @@ export interface CreateVisionPipelineOptions {
   }) => Promise<{ copy: ListingCopy; model: string }>;
 }
 
+export interface IdentifiedVisionPipelineStage {
+  attributes: ExtractedAttributes;
+  identification?: Identification;
+  model: string;
+}
+
+export interface GeneratedVisionPipelineStage {
+  copy: ListingCopy;
+  model: string;
+}
+
+/**
+ * The existing TypeScript pipeline split into resumable stage seams. The normal
+ * request pipeline and the durable worker both compose these exact operations;
+ * no vision, pricing, confidence, or listing logic is copied into the worker.
+ */
+export interface VisionPipelineStages {
+  run(input: PipelineInput): Promise<PipelineResult>;
+  identify(input: { photos: string[] }): Promise<IdentifiedVisionPipelineStage>;
+  price(input: { attributes: ExtractedAttributes }): Promise<PriceResult>;
+  generate(input: {
+    attributes: ExtractedAttributes;
+  }): Promise<GeneratedVisionPipelineStage>;
+  assemble(input: {
+    identified: IdentifiedVisionPipelineStage;
+    price: PriceResult;
+    generated: GeneratedVisionPipelineStage;
+    autopilotEnabled?: boolean;
+  }): PipelineResult;
+}
+
 // ---------------------------------------------------------------------------
 // Real pricing + listing wiring. The pricing composition root (`createDefaultPricer`)
 // lives in `pricing/default-pricer.ts`; the #31/#32/#60 confidence calibration
@@ -107,9 +139,9 @@ function createDefaultListingGenerator(): (args: {
  * model/network deps are injectable for offline tests, defaulting to the real
  * implementations.
  */
-export function createVisionPipeline(
+export function createVisionPipelineStages(
   options: CreateVisionPipelineOptions,
-): Pipeline {
+): VisionPipelineStages {
   const { supabase, model } = options;
   const extract = options.extract ?? extractItemAttributes;
   const measure = options.measure ?? extractGarmentMeasurements;
@@ -117,105 +149,171 @@ export function createVisionPipeline(
   const generateListing =
     options.generateListing ?? createDefaultListingGenerator();
 
-  return {
-    async run(input: PipelineInput): Promise<PipelineResult> {
-      if (input.photos.length === 0) {
-        throw new Error("Vision pipeline requires at least one photo path");
-      }
+  interface PendingIdentification {
+    baseAttributes: ExtractedAttributes;
+    identification?: Identification;
+    model: string;
+    measurements: Promise<MeasurementDraft[]>;
+  }
 
-      // 1. Download the private Storage objects as inline BYTES for the model. We
-      //    inline rather than hand the model a signed URL: the dev provider (Gemini)
-      //    can't fetch remote URLs — the AI SDK downloads them and blocks private/
-      //    loopback hosts like local Storage at 127.0.0.1 — and inlining also drops a
-      //    prod dependency on the provider fetching a short-TTL URL. RLS still scopes it.
-      const images: VisionImageInput[] = await resolvePhotoImageData(
-        supabase,
-        input.photos,
-      );
+  const beginIdentification = async (input: {
+    photos: string[];
+  }): Promise<PendingIdentification> => {
+    if (input.photos.length === 0) {
+      throw new Error("Vision pipeline requires at least one photo path");
+    }
 
-      // 2. SINGLE multimodal extraction → validated attributes + flagged identification.
-      const extraction = await extract({
-        images,
-        generate: options.generate,
-        model,
-      });
-      const { identification } = extraction;
+    // 1. Download the private Storage objects as inline BYTES for the model. We
+    //    inline rather than hand the model a signed URL: the dev provider (Gemini)
+    //    can't fetch remote URLs — the AI SDK downloads them and blocks private/
+    //    loopback hosts like local Storage at 127.0.0.1 — and inlining also drops a
+    //    prod dependency on the provider fetching a short-TTL URL. RLS still scopes it.
+    const images: VisionImageInput[] = await resolvePhotoImageData(
+      supabase,
+      input.photos,
+    );
 
-      // 2b. GARMENT MEASUREMENTS (issue #104) — only for clothing, best-effort, and
-      //     kicked off CONCURRENTLY with pricing + listing (below) so its extra vision
-      //     round-trip never lands on the pipeline's wall-clock. A second gated vision
-      //     call (same `vision` registry role) estimates flat-lay measurements,
-      //     auto-suggesting ONLY the four listing-grade ones and REFUSING inseam/sleeve
-      //     unless a tape is visible. The unconfirmed drafts feed NEITHER pricing
-      //     (`attributesToSignal` ignores them) NOR listing generation — the listing
-      //     model is shown ONLY confirmed facts, so an AI-estimated measurement the
-      //     seller hasn't vouched for can never surface in the publishable copy (#104's
-      //     confirmed-on-review guarantee). They ride on the persisted `attributes` for
-      //     the review screen alone. Any failure is logged and swallowed so a garment
-      //     still gets its price + listing.
-      const baseAttributes = extraction.attributes;
-      const garmentClass = garmentClassOf(baseAttributes);
-      const measurePromise: Promise<MeasurementDraft[]> = garmentClass
-        ? measure({
-            images,
-            garmentClass,
-            garmentType: baseAttributes.category ?? baseAttributes.title,
-            generate: options.measureGenerate,
-            model,
+    // 2. SINGLE multimodal extraction → validated attributes + flagged identification.
+    const extraction = await extract({
+      images,
+      generate: options.generate,
+      model,
+    });
+    // 2b. GARMENT MEASUREMENTS (issue #104) — only for clothing and best-effort.
+    //     A second gated vision call (same `vision` registry role) estimates flat-lay
+    //     measurements, auto-suggesting ONLY the four listing-grade ones and REFUSING
+    //     inseam/sleeve unless a tape is visible. The unconfirmed drafts feed NEITHER
+    //     pricing (`attributesToSignal` ignores them) NOR listing generation — the
+    //     listing model is shown ONLY confirmed facts, so an AI-estimated measurement
+    //     the seller hasn't vouched for can never surface in the publishable copy
+    //     (#104's confirmed-on-review guarantee). They ride on the persisted
+    //     `attributes` for the review screen alone. Any failure is logged and swallowed
+    //     so a garment still gets its price + listing.
+    const baseAttributes = extraction.attributes;
+    const garmentClass = garmentClassOf(baseAttributes);
+    const measurements: Promise<MeasurementDraft[]> = garmentClass
+      ? measure({
+          images,
+          garmentClass,
+          garmentType: baseAttributes.category ?? baseAttributes.title,
+          generate: options.measureGenerate,
+          model,
+        })
+          .then((measured) => measured.measurements)
+          .catch((err) => {
+            logEvent("pipeline.measure_failed", {
+              garmentClass,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return [];
           })
-            .then((measured) => measured.measurements)
-            .catch((err) => {
-              logEvent("pipeline.measure_failed", {
-                garmentClass,
-                error: err instanceof Error ? err.message : String(err),
-              });
-              return [];
-            })
-        : Promise.resolve([]);
+      : Promise.resolve([]);
 
-      // 3. REAL pricing (PriceRouter) + REAL grounded eBay listing generation over the
-      //    measurement-free attribute core, run ALONGSIDE the measurement call. The
-      //    listing carries its own model id (may differ from the vision model), logged
-      //    for provenance so listing experiments stay attributable (#32).
-      const signal = attributesToSignal(baseAttributes);
-      const [price, generated, measurements] = await Promise.all([
-        priceItem(signal),
-        generateListing({ attributes: listingFactAttributes(baseAttributes) }),
-        measurePromise,
+    return {
+      baseAttributes,
+      identification: extraction.identification,
+      model: extraction.model,
+      measurements,
+    };
+  };
+
+  const finishIdentification = async (
+    pending: PendingIdentification,
+  ): Promise<IdentifiedVisionPipelineStage> => {
+    const completedMeasurements = await pending.measurements;
+
+    // The unconfirmed measurement drafts ride on the PERSISTED attributes only — the
+    // review screen is where the seller confirms them; they were never serialized into
+    // the listing copy generated above.
+    const attributes: ExtractedAttributes =
+      completedMeasurements.length > 0
+        ? {
+            ...pending.baseAttributes,
+            measurements: completedMeasurements,
+          }
+        : pending.baseAttributes;
+
+    return {
+      attributes,
+      identification: pending.identification,
+      model: pending.model,
+    };
+  };
+
+  const price = async ({ attributes }: { attributes: ExtractedAttributes }) =>
+    priceItem(attributesToSignal(attributes));
+
+  const generate = async ({ attributes }: { attributes: ExtractedAttributes }) =>
+    generateListing({ attributes: listingFactAttributes(attributes) });
+
+  const assemble: VisionPipelineStages["assemble"] = ({
+    identified,
+    price: priceResult,
+    generated,
+    autopilotEnabled,
+  }) => {
+    const { copy: listing, model: listingModel } = generated;
+
+    // 4. REAL confidence composite over deterministic signals (tier #31-calibrated;
+    //    the model's self-reported ambiguity stays out of the score — it only flags
+    //    the user-facing identification). The same `priceToConfidence` bridge a
+    //    re-price (clarify-variant) reuses, so the two can never miscalibrate.
+    const confidence = priceToConfidence(identified.attributes, priceResult, {
+      autopilotEnabled,
+    });
+
+    return {
+      attributes: identified.attributes,
+      price: priceResult,
+      confidence,
+      listing,
+      model: identified.model,
+      // The listing model is logged separately so a prediction's listing copy stays
+      // attributable even when LISTING_MODEL differs from the vision model (#32).
+      listingModel,
+      // Pricing-model provenance (same precedent): the web tiers resolve their own
+      // PRICING_MODEL for comp extraction and stamp it on the price result; a
+      // deterministic tier (ISBN lookup) leaves it unset → logged as null (#10 review).
+      pricingModel: priceResult.model,
+      identification: identified.identification,
+    };
+  };
+
+  return {
+    async run(input) {
+      const pending = await beginIdentification({ photos: input.photos });
+      // Preserve the request pipeline's established latency contract: pricing,
+      // listing generation, and auxiliary measurement extraction overlap. The
+      // durable stage seam awaits measurements only so its identify checkpoint is
+      // complete and reusable after a crash.
+      const [priceResult, generated, identified] = await Promise.all([
+        price({ attributes: pending.baseAttributes }),
+        generate({ attributes: pending.baseAttributes }),
+        finishIdentification(pending),
       ]);
-      const { copy: listing, model: listingModel } = generated;
-
-      // The unconfirmed measurement drafts ride on the PERSISTED attributes only — the
-      // review screen is where the seller confirms them; they were never serialized into
-      // the listing copy generated above.
-      const attributes: ExtractedAttributes =
-        measurements.length > 0
-          ? { ...baseAttributes, measurements }
-          : baseAttributes;
-
-      // 4. REAL confidence composite over deterministic signals (tier #31-calibrated;
-      //    the model's self-reported ambiguity stays out of the score — it only flags
-      //    the user-facing identification). The same `priceToConfidence` bridge a
-      //    re-price (clarify-variant) reuses, so the two can never miscalibrate.
-      const confidence = priceToConfidence(attributes, price, {
+      return assemble({
+        identified,
+        price: priceResult,
+        generated,
         autopilotEnabled: input.autopilotEnabled,
       });
-
-      return {
-        attributes,
-        price,
-        confidence,
-        listing,
-        model: extraction.model,
-        // The listing model is logged separately so a prediction's listing copy stays
-        // attributable even when LISTING_MODEL differs from the vision model (#32).
-        listingModel,
-        // Pricing-model provenance (same precedent): the web tiers resolve their own
-        // PRICING_MODEL for comp extraction and stamp it on the price result; a
-        // deterministic tier (ISBN lookup) leaves it unset → logged as null (#10 review).
-        pricingModel: price.model,
-        identification,
-      };
     },
+
+    async identify(input) {
+      return finishIdentification(await beginIdentification(input));
+    },
+
+    price,
+    generate,
+    assemble,
+  };
+}
+
+export function createVisionPipeline(
+  options: CreateVisionPipelineOptions,
+): Pipeline {
+  const stages = createVisionPipelineStages(options);
+  return {
+    run: (input: PipelineInput): Promise<PipelineResult> => stages.run(input),
   };
 }

@@ -186,26 +186,22 @@ describe("pipeline queue tenant and worker boundary", () => {
       { p_listing_id: listingB, p_run_id: runA },
     );
     expect(mismatchedListingError).not.toBeNull();
-
-    const { error: validListingError } = await admin.rpc(
+    const { error: retiredLinkError } = await admin.rpc(
       "link_pipeline_run_listing",
       { p_listing_id: listingA, p_run_id: runA },
     );
-    expect(validListingError).toBeNull();
+    expect(retiredLinkError).not.toBeNull();
   });
 
-  it("derives worker context from run ownership and denies seller access to the RPC", async () => {
+  it("retires the unfenced context RPC and still denies generic service-role reads", async () => {
     if (!reachable) return;
 
     const { data: context, error: contextError } = await admin.rpc(
       "load_pipeline_run_worker_context",
       { p_run_id: runA },
     );
-    expect(contextError).toBeNull();
-    expect(context).toMatchObject({
-      run: { id: runA, user_id: userA.id, item_id: itemA },
-      item: { id: itemA, user_id: userA.id },
-    });
+    expect(context).toBeNull();
+    expect(contextError).not.toBeNull();
 
     const { error: genericAdminReadError } = await admin
       .from("pipeline_runs")
@@ -235,17 +231,20 @@ describe("pipeline queue tenant and worker boundary", () => {
       id: messageId,
       envelope: createPipelineQueueEnvelope(runA),
     });
-    expect(Object.keys(ownMessage!.envelope).sort()).toEqual(["run_id", "schema_version"]);
+    expect(Object.keys(createPipelineQueueEnvelope(runA)).sort()).toEqual([
+      "run_id",
+      "schema_version",
+    ]);
     for (const message of claimed) claimedMessageIds.add(message.id);
 
     expect(await queue.ack(messageId)).toBe(true);
     claimedMessageIds.delete(messageId);
   });
 
-  it("enforces legal state transitions inside the narrow worker RPC", async () => {
+  it("retires the unfenced transition RPC in favor of message-paired attempts", async () => {
     if (!reachable) return;
 
-    const { data: running, error: runningError } = await admin.rpc(
+    const { error: runningError } = await admin.rpc(
       "transition_pipeline_run",
       {
         p_attempt_count: 1,
@@ -257,29 +256,6 @@ describe("pipeline queue tenant and worker boundary", () => {
         p_run_id: runA,
       },
     );
-    expect(runningError).toBeNull();
-    expect(running).toMatchObject({ status: "running", stage: "identifying", attempt_count: 1 });
-
-    const { error: forgedAttemptError } = await admin.rpc("transition_pipeline_run", {
-      p_attempt_count: 2,
-      p_expected_status: "running",
-      p_failure_code: null,
-      p_failure_message: null,
-      p_next_stage: "completed",
-      p_next_status: "succeeded",
-      p_run_id: runA,
-    });
-    expect(forgedAttemptError).not.toBeNull();
-
-    const { error: illegalError } = await admin.rpc("transition_pipeline_run", {
-      p_attempt_count: 1,
-      p_expected_status: "running",
-      p_failure_code: null,
-      p_failure_message: null,
-      p_next_stage: "queued",
-      p_next_status: "queued",
-      p_run_id: runA,
-    });
-    expect(illegalError).not.toBeNull();
+    expect(runningError).not.toBeNull();
   });
 });

@@ -125,8 +125,8 @@ select ok(
   'authenticated cannot acknowledge work'
 );
 select ok(
-  has_function_privilege('service_role', 'public.load_pipeline_run_worker_context(uuid)', 'execute'),
-  'service_role has only the run-derived tenant context read capability'
+  not has_function_privilege('service_role', 'public.load_pipeline_run_worker_context(uuid)', 'execute'),
+  'service_role cannot invoke the retired unfenced context reader'
 );
 select ok(
   not has_function_privilege('authenticated', 'public.load_pipeline_run_worker_context(uuid)', 'execute'),

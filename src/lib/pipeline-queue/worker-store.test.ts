@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PipelineResult } from "@/lib/pipeline";
 import {
   createSupabasePipelineWorkerStore,
   type PipelineWorkerRpcClient,
@@ -6,7 +7,28 @@ import {
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
-const LISTING_ID = "33333333-3333-4333-8333-333333333333";
+const LEASE_TOKEN = "33333333-3333-4333-8333-333333333333";
+const LISTING_ID = "66666666-6666-4666-8666-666666666666";
+
+const RESULT: PipelineResult = {
+  attributes: { brand: "Sony", condition: "good" },
+  price: {
+    suggested: 50,
+    range: { min: 40, max: 60 },
+    confidence: 0.5,
+    sources: [],
+    tier: "llm-only",
+  },
+  confidence: { score: 0.5, band: "medium", autopilotEligible: false },
+  listing: {
+    platform: "ebay",
+    title: "Sony headphones",
+    description: "Used headphones.",
+    fields: {},
+  },
+  model: "vision-model",
+  listingModel: "listing-model",
+};
 
 function rpcClient(responses: Record<string, unknown>) {
   return {
@@ -15,18 +37,23 @@ function rpcClient(responses: Record<string, unknown>) {
 }
 
 describe("run-scoped pipeline worker store", () => {
-  it("loads tenant context from run id without accepting user or item identity", async () => {
+  it("acquires only a run paired to the claimed queue message", async () => {
     const context = {
       run: {
         id: RUN_ID,
         user_id: "user_a",
         item_id: ITEM_ID,
         listing_id: null,
-        status: "queued",
-        stage: "queued",
+        status: "running",
+        stage: "identifying",
         schema_version: 1,
-        attempt_count: 0,
+        attempt_count: 1,
         max_attempts: 3,
+        autopilot_enabled: false,
+        checkpoint: {},
+        lease_token: LEASE_TOKEN,
+        lease_expires_at: "2026-07-15T04:10:00.000Z",
+        next_attempt_at: null,
       },
       item: {
         id: ITEM_ID,
@@ -39,69 +66,85 @@ describe("run-scoped pipeline worker store", () => {
         review_content_revision: "55555555-5555-4555-8555-555555555555",
       },
     };
-    const client = rpcClient({ load_pipeline_run_worker_context: context });
-    const store = createSupabasePipelineWorkerStore(client);
-
-    await expect(store.loadContext(RUN_ID)).resolves.toEqual(context);
-    expect(client.rpc).toHaveBeenCalledWith("load_pipeline_run_worker_context", {
-      p_run_id: RUN_ID,
+    const client = rpcClient({
+      claim_pipeline_run_attempt: { kind: "acquired", context },
     });
-  });
-
-  it("transitions only the claimed run and never accepts tenant-domain payloads", async () => {
-    const transitioned = {
-      id: RUN_ID,
-      user_id: "user_a",
-      item_id: ITEM_ID,
-      listing_id: null,
-      status: "running",
-      stage: "identifying",
-      schema_version: 1,
-      attempt_count: 1,
-      max_attempts: 3,
-    };
-    const client = rpcClient({ transition_pipeline_run: transitioned });
     const store = createSupabasePipelineWorkerStore(client);
 
     await expect(
-      store.transition({
-        runId: RUN_ID,
-        expectedStatus: "queued",
-        nextStatus: "running",
-        nextStage: "identifying",
-        attemptCount: 1,
-      }),
-    ).resolves.toMatchObject(transitioned);
-    expect(client.rpc).toHaveBeenCalledWith("transition_pipeline_run", {
-      p_attempt_count: 1,
-      p_expected_status: "queued",
-      p_failure_code: null,
-      p_failure_message: null,
-      p_next_stage: "identifying",
-      p_next_status: "running",
+      store.acquire({ runId: RUN_ID, messageId: "41", leaseSeconds: 300 }),
+    ).resolves.toEqual({ kind: "acquired", context });
+    expect(client.rpc).toHaveBeenCalledWith("claim_pipeline_run_attempt", {
+      p_lease_seconds: 300,
+      p_message_id: "41",
       p_run_id: RUN_ID,
     });
   });
 
-  it("links only a relation id and leaves ownership validation to the audited RPC", async () => {
-    const linked = {
-      id: RUN_ID,
-      user_id: "user_a",
-      item_id: ITEM_ID,
-      listing_id: LISTING_ID,
-      status: "running",
-      stage: "persisting",
-      schema_version: 1,
-      attempt_count: 1,
-      max_attempts: 3,
+  it("checkpoints and completes through identity-free persistence payloads", async () => {
+    const client = rpcClient({
+      checkpoint_pipeline_run: true,
+      complete_pipeline_run: { listingId: LISTING_ID },
+    });
+    const store = createSupabasePipelineWorkerStore(client);
+    const checkpoint = {
+      identified: { attributes: RESULT.attributes, model: RESULT.model },
     };
-    const client = rpcClient({ link_pipeline_run_listing: linked });
+
+    await store.checkpoint({
+      runId: RUN_ID,
+      leaseToken: LEASE_TOKEN,
+      stage: "identifying",
+      checkpoint,
+      leaseSeconds: 300,
+    });
+    await expect(
+      store.complete({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        result: RESULT,
+        autopilotEnabled: false,
+      }),
+    ).resolves.toEqual({ listingId: LISTING_ID });
+
+    const completion = client.rpc.mock.calls.find(
+      ([name]) => name === "complete_pipeline_run",
+    )?.[1] as Record<string, unknown>;
+    expect(completion).not.toHaveProperty("user_id");
+    expect(completion).not.toHaveProperty("item_id");
+    expect(completion.p_persistence).toMatchObject({
+      listing: { status: "draft" },
+      prediction: { model: "vision-model", listing_model: "listing-model" },
+    });
+  });
+
+  it("uses lease-fenced failure and message-rejection RPCs", async () => {
+    const client = rpcClient({
+      finish_pipeline_run_attempt: {
+        status: "retrying",
+        retryAfterSeconds: 30,
+      },
+      reject_pipeline_message: true,
+    });
     const store = createSupabasePipelineWorkerStore(client);
 
-    await expect(store.linkListing(RUN_ID, LISTING_ID)).resolves.toMatchObject(linked);
-    expect(client.rpc).toHaveBeenCalledWith("link_pipeline_run_listing", {
-      p_listing_id: LISTING_ID,
-      p_run_id: RUN_ID,
-    });
+    await expect(
+      store.failAttempt({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        retryable: true,
+        retryAfterSeconds: 30,
+        failureCode: "provider_timeout",
+        safeFailureMessage: "SnapList will retry this listing.",
+      }),
+    ).resolves.toEqual({ status: "retrying", retryAfterSeconds: 30 });
+    await expect(
+      store.rejectMessage({
+        runId: RUN_ID,
+        messageId: "41",
+        failureCode: "unsupported_schema_version",
+        safeFailureMessage: "Unsupported job version.",
+      }),
+    ).resolves.toBe(true);
   });
 });

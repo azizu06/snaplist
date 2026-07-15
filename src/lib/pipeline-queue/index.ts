@@ -3,3 +3,6 @@ export * from "./memory";
 export * from "./queue";
 export * from "./supabase-pgmq";
 export * from "./worker-store";
+export * from "./checkpoint";
+export * from "./durable-processor";
+export * from "./worker";

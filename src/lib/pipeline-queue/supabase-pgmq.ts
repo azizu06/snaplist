@@ -6,13 +6,15 @@ import {
 import {
   parsePipelineQueueClaimOptions,
   parsePipelineQueueMessageId,
+  parsePipelineQueueVisibilityTimeoutSeconds,
   type PipelineQueue,
 } from "./queue";
 
 type PipelineQueueRpcName =
   | "enqueue_pipeline_message"
   | "claim_pipeline_messages"
-  | "ack_pipeline_message";
+  | "ack_pipeline_message"
+  | "defer_pipeline_message";
 
 interface PipelineQueueRpcResult {
   data: unknown;
@@ -36,7 +38,7 @@ const claimedRowSchema = z
     read_count: z.coerce.number().int().min(1),
     enqueued_at: z.string().min(1),
     visible_at: z.string().min(1),
-    envelope: pipelineQueueEnvelopeSchema,
+    envelope: z.unknown(),
   })
   .strict();
 
@@ -81,6 +83,19 @@ export function createSupabasePgmqPipelineQueue(
         p_message_id: messageId,
       });
       rpcFailure("ack", error);
+      return z.boolean().parse(data);
+    },
+
+    async defer(input, visibilityTimeoutSeconds) {
+      const messageId = parsePipelineQueueMessageId(input);
+      const timeout = parsePipelineQueueVisibilityTimeoutSeconds(
+        visibilityTimeoutSeconds,
+      );
+      const { data, error } = await client.rpc("defer_pipeline_message", {
+        p_message_id: messageId,
+        p_visibility_timeout_seconds: timeout,
+      });
+      rpcFailure("defer", error);
       return z.boolean().parse(data);
     },
   };
