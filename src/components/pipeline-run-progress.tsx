@@ -21,6 +21,11 @@ import {
 
 export const PIPELINE_PROGRESS_POLL_MS = 5_000;
 
+function fractionalNanoseconds(timestamp: string): number {
+  const fraction = timestamp.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/)?.[1] ?? "";
+  return Number(fraction.padEnd(9, "0").slice(0, 9));
+}
+
 export function isPipelineProgressUpdateStale(
   candidate: PipelineProgressRun,
   accepted: PipelineProgressRun,
@@ -28,6 +33,10 @@ export function isPipelineProgressUpdateStale(
   const candidateTime = Date.parse(candidate.updated_at);
   const acceptedTime = Date.parse(accepted.updated_at);
   if (Number.isFinite(candidateTime) && Number.isFinite(acceptedTime)) {
+    if (candidateTime === acceptedTime) {
+      return fractionalNanoseconds(candidate.updated_at)
+        < fractionalNanoseconds(accepted.updated_at);
+    }
     return candidateTime < acceptedTime;
   }
   return candidate.updated_at < accepted.updated_at;

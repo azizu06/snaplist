@@ -82,4 +82,13 @@ describe("isPipelineProgressUpdateStale", () => {
     expect(isPipelineProgressUpdateStale(delayedRunning, succeeded)).toBe(true);
     expect(isPipelineProgressUpdateStale(succeeded, delayedRunning)).toBe(false);
   });
+
+  it("preserves Postgres microsecond ordering within one JavaScript millisecond", () => {
+    const older = { ...RUN, updated_at: "2026-07-15T12:05:00.123456Z" };
+    const newer = { ...RUN, updated_at: "2026-07-15T12:05:00.123999Z" };
+
+    expect(Date.parse(older.updated_at)).toBe(Date.parse(newer.updated_at));
+    expect(isPipelineProgressUpdateStale(older, newer)).toBe(true);
+    expect(isPipelineProgressUpdateStale(newer, older)).toBe(false);
+  });
 });
