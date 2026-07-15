@@ -58,6 +58,7 @@ asset-intake/
 # local render/review scratch
 .review-shots/
 .verify-shots/
+/output/playwright/
 
 # Impeccable design skill + hook (vendored per-developer; reinstall with
 # `npx impeccable skills install`). Kept local so it doesn't bloat the repo.
