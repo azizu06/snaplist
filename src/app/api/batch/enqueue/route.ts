@@ -103,6 +103,7 @@ export async function POST(request: Request) {
           const { error } = await supabase.storage.from("photos").remove(paths);
           if (error) throw error;
         },
+        findReplay: store.findReplay,
         stageAndEnqueue: store.stageAndEnqueue,
       },
     );

@@ -80,6 +80,7 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
           const { error } = await supabase.storage.from("photos").remove(paths);
           if (error) throw error;
         },
+        findReplay: store.findReplay,
         stageAndEnqueue: store.stageAndEnqueue,
       },
     );

@@ -11,10 +11,18 @@ describe("durable upload staging", () => {
       events.push("stage");
       return input.entries.map((entry: { idempotencyKey: string }, index: number) => ({
         batch_id: input.batchId,
+        batch_position: index,
         idempotency_key: entry.idempotencyKey,
         item_id: `00000000-0000-4000-8000-00000000000${index + 1}`,
         run_id: `10000000-0000-4000-8000-00000000000${index + 1}`,
         queue_message_id: String(index + 1),
+        listing_id: null,
+        status: "queued" as const,
+        stage: "queued" as const,
+        attempt_count: 0,
+        max_attempts: 3,
+        safe_failure_message: null,
+        updated_at: "2026-07-15T12:00:00.000Z",
       }));
     });
     const upload = vi.fn(async (path: string) => {
@@ -37,7 +45,7 @@ describe("durable upload staging", () => {
           },
         ],
       },
-      { upload, remove: vi.fn(), stageAndEnqueue },
+      { upload, remove: vi.fn(), findReplay: vi.fn(), stageAndEnqueue },
     );
 
     expect(events.slice(0, 2).every((event) => event.startsWith("upload:"))).toBe(true);
@@ -83,6 +91,7 @@ describe("durable upload staging", () => {
         {
           upload: vi.fn(async () => undefined),
           remove,
+          findReplay: vi.fn(async () => []),
           stageAndEnqueue: vi.fn(async () => {
             throw new Error("daily capacity reached");
           }),
@@ -92,6 +101,80 @@ describe("durable upload staging", () => {
 
     expect(remove).toHaveBeenCalledOnce();
     expect(remove.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it("recovers a committed run instead of deleting photos after a lost RPC response", async () => {
+    const committed = [{
+      batch_id: "11111111-1111-4111-8111-111111111111",
+      batch_position: 0,
+      idempotency_key: "batch-1",
+      item_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "33333333-3333-4333-8333-333333333333",
+      queue_message_id: "42",
+      listing_id: null,
+      status: "queued" as const,
+      stage: "queued" as const,
+      attempt_count: 0,
+      max_attempts: 3,
+      safe_failure_message: null,
+      updated_at: "2026-07-15T12:00:00.000Z",
+    }];
+    const remove = vi.fn();
+
+    await expect(stageUploadEntries(
+      {
+        batchId: committed[0].batch_id,
+        userId: "user_123",
+        dailyLimit: 15,
+        perMinuteLimit: 20,
+        entries: [{
+          idempotencyKey: "batch-1",
+          source: "batch",
+          autopilotEnabled: false,
+          costBasis: null,
+          photos: [photo("front.jpg")],
+        }],
+      },
+      {
+        upload: vi.fn(async () => undefined),
+        remove,
+        stageAndEnqueue: vi.fn(async () => {
+          throw new Error("response timed out");
+        }),
+        findReplay: vi.fn(async () => committed),
+      },
+    )).resolves.toEqual(committed);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("preserves photos when both staging and the replay probe are ambiguous", async () => {
+    const remove = vi.fn();
+    await expect(stageUploadEntries(
+      {
+        batchId: "11111111-1111-4111-8111-111111111111",
+        userId: "user_123",
+        dailyLimit: 15,
+        perMinuteLimit: 20,
+        entries: [{
+          idempotencyKey: "single-ambiguous",
+          source: "single",
+          autopilotEnabled: false,
+          costBasis: null,
+          photos: [photo("front.jpg")],
+        }],
+      },
+      {
+        upload: vi.fn(async () => undefined),
+        remove,
+        stageAndEnqueue: vi.fn(async () => {
+          throw new Error("response timed out");
+        }),
+        findReplay: vi.fn(async () => {
+          throw new Error("replay probe timed out");
+        }),
+      },
+    )).rejects.toThrow("response timed out");
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it("never accepts signed URLs or unsupported photos into staging", async () => {
@@ -112,7 +195,12 @@ describe("durable upload staging", () => {
             },
           ],
         },
-        { upload: vi.fn(), remove: vi.fn(), stageAndEnqueue: vi.fn() },
+        {
+          upload: vi.fn(),
+          remove: vi.fn(),
+          findReplay: vi.fn(),
+          stageAndEnqueue: vi.fn(),
+        },
       ),
     ).rejects.toThrow(/PNG, JPEG, or WEBP/);
   });

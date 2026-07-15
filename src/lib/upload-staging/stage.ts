@@ -1,4 +1,5 @@
 import type {
+  PipelineReplayBatchInput,
   PipelineStageBatchInput,
   PipelineStageBatchResult,
 } from "@/lib/pipeline-staging";
@@ -28,6 +29,7 @@ export interface StageUploadEntriesInput {
 export interface UploadStagingDependencies {
   upload(path: string, photo: File): Promise<void>;
   remove(paths: string[]): Promise<void>;
+  findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
 }
 
@@ -59,8 +61,9 @@ function validateEntry(entry: PendingUploadEntry): void {
 /**
  * Upload every private object first, then atomically create all items/runs and
  * enqueue their identifiers-only envelopes. Until the RPC commits, no worker
- * can observe a partial batch. Any pre-commit failure removes only the objects
- * uploaded by this call.
+ * can observe a partial batch. Upload failures are cleaned immediately. If the
+ * RPC outcome is ambiguous, replay lookup proves whether this batch committed
+ * before this call removes any private objects.
  */
 export async function stageUploadEntries(
   input: StageUploadEntriesInput,
@@ -71,6 +74,7 @@ export async function stageUploadEntries(
 
   const uploadedPaths: string[] = [];
   const stagedEntries: PipelineStageBatchInput["entries"] = [];
+  let stagingAttempted = false;
 
   try {
     for (const [entryIndex, entry] of input.entries.entries()) {
@@ -96,6 +100,7 @@ export async function stageUploadEntries(
       });
     }
 
+    stagingAttempted = true;
     return await dependencies.stageAndEnqueue({
       batchId: input.batchId,
       userId: input.userId,
@@ -104,7 +109,30 @@ export async function stageUploadEntries(
       entries: stagedEntries,
     });
   } catch (error) {
-    if (uploadedPaths.length > 0) {
+    let cleanupConfirmed = !stagingAttempted;
+    if (stagingAttempted) {
+      try {
+        const replay = await dependencies.findReplay({
+          batchId: input.batchId,
+          userId: input.userId,
+          entries: input.entries.map((entry) => ({
+            idempotencyKey: entry.idempotencyKey,
+            source: entry.source,
+            autopilotEnabled: entry.autopilotEnabled,
+            photoCount: entry.photos.length,
+            costBasis: entry.costBasis,
+          })),
+        });
+        if (replay.length > 0) return replay;
+        cleanupConfirmed = true;
+      } catch {
+        // The producer outcome is still ambiguous. Keep the private objects so
+        // a committed run cannot lose its photos; retention can clean an
+        // unreferenced staging prefix after the ambiguity clears.
+      }
+    }
+
+    if (cleanupConfirmed && uploadedPaths.length > 0) {
       try {
         await dependencies.remove(uploadedPaths);
       } catch {
@@ -115,4 +143,3 @@ export async function stageUploadEntries(
     throw error;
   }
 }
-
