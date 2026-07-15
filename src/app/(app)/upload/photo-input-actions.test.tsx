@@ -30,11 +30,8 @@ vi.mock("motion/react", () => ({
 function renderSingleUpload() {
   return load(
     renderToStaticMarkup(
-      <UploadDraftProvider>
-        <UploadForm
-          action={async () => undefined}
-          captureId="00000000-0000-4000-8000-000000000159"
-        />
+      <UploadDraftProvider initialCaptureId="00000000-0000-4000-8000-000000000159">
+        <UploadForm action={async () => undefined} />
       </UploadDraftProvider>,
     ),
   );
@@ -119,5 +116,18 @@ describe("shared accepted-photo append behavior", () => {
     const existing = [photo("cover.jpg")];
 
     expect(appendAcceptedPhotos(existing, []).files).toEqual(existing);
+  });
+});
+
+describe("single upload retry identity", () => {
+  it("uses the capture key owned by the persistent upload draft provider", () => {
+    const $ = renderSingleUpload();
+
+    expect($('input[name="batchId"]').attr("value")).toBe(
+      "00000000-0000-4000-8000-000000000159",
+    );
+    expect($('input[name="idempotencyKey"]').attr("value")).toBe(
+      "single:00000000-0000-4000-8000-000000000159",
+    );
   });
 });

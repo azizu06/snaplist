@@ -22,7 +22,6 @@ export default async function UploadPage({
     <UploadView
       action={enqueueUpload}
       actionError={error ?? null}
-      captureId={crypto.randomUUID()}
     />
   );
 }
