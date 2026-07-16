@@ -6,13 +6,31 @@ where they disagree.
 
 ## What this is
 A production-real AI-engineering showcase: photo of a used item → priced, ready-to-post listing →
-buyer-Q&A. The **AI pipeline is the product**; eBay is a real integration but lives behind an
-adapter and is **not on the Phase 1 critical path**.
+buyer-Q&A. The **AI pipeline is the product** for the average consumer reseller; eBay is the only
+direct launch marketplace and lives behind adapters. Advanced volume workflows are a growth path,
+not the default product posture.
 
 ## Non-negotiable decisions (don't relitigate without the user)
 - **Multi-tenant from day one:** Clerk auth (Supabase third-party JWTs; issue #41), text `user_id`
   (the Clerk id) on every domain table, Postgres **RLS** enforces isolation via
   `public.clerk_user_id()`. Never write a query path that bypasses tenant isolation.
+- **First value precedes account creation.** One App Attest-backed guest allowance includes exactly
+  one complete AI item run and one guided identity correction for the same item/photo set; manual
+  edits that preserve the immutable photo-set fingerprint, technical retries, recovery, and queue
+  redelivery do not consume another credit. Adding, replacing, or removing a photo changes the photo
+  set and requires a new run. The usable
+  result remains encrypted and recoverable for 24 hours. Account creation/eBay connection become
+  blocking only when the guest chooses **Publish to eBay**, after which the same result is claimed
+  and reopened. Pre-value onboarding has no seller questionnaire. See ADR-0008.
+- **AI-item credits settle on durable value.** The first usable listing and first seller-confirmed
+  eBay publish are free. SnapList Pro gates complete AI item run #2 and uses a configurable monthly
+  allowance whose public count waits for TestFlight median/p95 cost data. For Apple billing, the
+  server-verified StoreKit subscription period is the reset window; verified grace keeps the current
+  remainder without resetting, and late or ambiguous state cannot advance credits. Reserve before
+  processing, settle exactly once when a coherent item, price recommendation, and editable draft are
+  durably available, and restore exactly once on failure/cancel before that point. A new item,
+  changed photo set, or full re-analysis uses a new credit. Legacy daily limits are operational
+  guardrails, not the native product promise. See ADR-0008.
 - **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). All model
   calls resolve through `resolveLanguageModel(role, …)`; the provider is a `LLM_PROVIDER` flip
   (dev → Gemini for the free tier, showcase → OpenAI) — never construct a provider inline at a call
@@ -38,16 +56,30 @@ adapter and is **not on the Phase 1 critical path**.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
   search agent, not a price source.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.
-- **eBay marketplace mutations and messaging only ever go through the adapter interface.** The one
+- **eBay marketplace mutations and messaging only ever go through adapter interfaces.** The one
   non-transactional exception is read-only public sold-page research through `ebay-sold`; it cannot
-  post or message. Publishing and pre-sale text messaging are Sandbox-capable; the simulator remains
-  a demo fixture. Keep every path testable offline against mock adapters, and leave production
-  activation owner-controlled under #17.
-- **Automatic buyer replies are one narrow, default-off seller preference.** A deterministic,
-  versioned policy may authorize only an exact low-risk restatement of current seller-approved
-  listing facts. Negotiation, commitments, untrusted buyer instructions, missing/stale/conflicting
-  facts, and post-sale support stay seller-gated. Persist the outcome, reasons, grounding, signals,
-  policy version, and canonical delivery truth; never let retries create a second external reply.
+  post or message. SnapList owns unpublished drafts; after publish, eBay is authoritative for listing
+  and order truth. External changes sync in, seller-confirmed changes go through the adapter, and
+  only confirmed provider results become local truth. Conflicts are explicit, never silent
+  last-write-wins. Keep every path testable offline against mock adapters, and leave production
+  activation owner-controlled under #17 and ADR-0008.
+- **Launch has no autonomous marketplace actions.** Publish, reprice, end, relist, add tracking/mark
+  shipped, and send-message actions all require explicit seller confirmation. Buyer-Q&A may draft and
+  ground a reply but cannot authorize delivery. Persist intent, outcome, grounding, provider result,
+  and canonical delivery truth so retries never create a second external action.
+- **Post-sale writes are allowlisted.** Standard Fulfillment may read orders/payment/fulfillment and
+  ship-by data; `createShippingFulfillment` may add tracking/mark shipped after explicit confirmation.
+  Inventory `withdrawOffer` may end a SnapList-managed listing sold elsewhere; a Trading end call is
+  allowed only for a verified owned/mapped non-Inventory listing. Fulfillment `FULFILLED` means
+  shipped, not carrier-delivered. Cancellations, refunds, returns/cases, disputes, and label purchase
+  remain status/deep-link surfaces at launch.
+- **Unsupported launch marketplaces use honest assisted handoffs.** Mercari, Facebook Marketplace,
+  and Depop may receive platform-appropriate text/photos, the native share sheet or an honest deep
+  link, and a completion checklist. Never claim SnapList filled or published the destination form.
+  A sold-elsewhere record defaults **Also end on eBay** on but still requires one explicit confirm.
+- **Profit requires cost basis.** Cost is optional on the draft and may be requested again at sale.
+  Without it, show revenue, estimated fees, and estimated net proceeds—never profit. Adding cost later
+  may update profit retroactively.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
 - **Review correction stays coherent and pre-publish.** Bounded identity edits must rerun the shared
@@ -75,14 +107,17 @@ adapter and is **not on the Phase 1 critical path**.
 Next.js (App Router) + TypeScript · Vercel AI SDK (OpenAI showcase / Gemini dev, via a role-keyed
 provider registry) · Tavily (primary) / Exa (secondary) web search · eBay public sold-page scraper
 (cheerio) · Clerk (auth) · Supabase (Postgres + pgvector + Realtime + Storage + cron) · Zod · Tailwind +
-shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, via adapter).
+shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, via adapter). The native
+launch client is SwiftUI with StoreKit subscription state and App Attest-backed guest abuse
+resistance; native implementation remains issue-owned and is not authorized by documentation work.
 
 ## Conventions
 - Confirm current OpenAI model IDs against live docs before hardcoding — they move fast.
 - Secrets via env; never commit keys. Transactional eBay calls use per-user **encrypted** OAuth
   tokens; the app-level Sandbox fallback is restricted to one configured operator tenant/seller.
-- For non-trivial UI work, use the Open Design workflow (see the user's global instructions) rather
-  than hand-writing large CSS/JSX blind.
+- For non-trivial UI work, follow the current provider-neutral Claude Design handoff and the user's
+  global design workflow. Do not substitute a retired generator or begin SwiftUI implementation
+  before the high-fidelity direction and owning issue are approved.
 - **Mutation seams:** views mutate through **server actions**; API routes serve external/programmatic
   callers (and client fetch flows like the inbox that need JSON/streaming). When an operation has both
   entry points, ALL domain behavior (persistence, notifications) lives in the shared `src/lib` service
