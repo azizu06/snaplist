@@ -109,6 +109,13 @@ describe("resolveNewAiItemRunPolicy", () => {
       reason: "snaplist-pro-required",
     },
     {
+      name: "an active mirror without a period end after a completed run",
+      completedRun: true,
+      subscription: { status: "active" },
+      allowed: false,
+      reason: "snaplist-pro-required",
+    },
+    {
       name: "a malformed active mirror after a completed run",
       completedRun: true,
       subscription: { status: "active", current_period_end: "not-a-date" },

@@ -13,8 +13,8 @@ import type {
  *
  * `getEntitlement` is the seam the app reads instead of the pure `resolveTier`
  * default: a fast, RLS-guarded lookup of the user's mirrored `subscriptions` row.
- * Active/trialing mirrors with a recorded period end stay paid only until that
- * timestamp passes.
+ * Active/trialing mirrors stay paid only while they carry a current, valid
+ * period end.
  * It is FAIL-SAFE — any error / missing row resolves to `free`, so a billing or DB
  * hiccup can never *grant* entitlement nor block a request.
  *
@@ -38,11 +38,13 @@ export async function getEntitlement(
     const tier = entitlementTierFromStatus(row?.status);
 
     // An active or trialing status is paid only while a recorded period remains
-    // current. The mirror is asynchronously updated by webhooks, so an expired
-    // or malformed period must fail closed rather than extending SnapList Pro.
-    if (tier === "paid" && row?.current_period_end != null) {
-      if (typeof row.current_period_end !== "string") return "free";
-      const periodEnd = Date.parse(row.current_period_end);
+    // current. The mirror is asynchronously updated by webhooks, so a missing,
+    // expired, or malformed period must fail closed rather than extending
+    // SnapList Pro.
+    if (tier === "paid") {
+      const currentPeriodEnd = row?.current_period_end;
+      if (typeof currentPeriodEnd !== "string") return "free";
+      const periodEnd = Date.parse(currentPeriodEnd);
       if (!Number.isFinite(periodEnd) || periodEnd <= Date.now()) return "free";
     }
 

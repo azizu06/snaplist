@@ -72,13 +72,14 @@ describe("runBatch", () => {
     expect(states[2].phase).toBe("done");
   });
 
-  it("quota outcome blocks the entry AND all not-yet-started entries without calling the runner", async () => {
+  it("a terminal capacity outcome preserves its reason for every blocked entry", async () => {
     const calls: number[] = [];
+    const message = "SnapList Pro is required to start another new item.";
     const states = await runBatch(
       5,
       async (i) => {
         calls.push(i);
-        if (i === 1) return { ok: false, kind: "quota", message: "Daily limit reached" };
+        if (i === 1) return { ok: false, kind: "quota", message };
         return ok(i);
       },
       { concurrency: 1 },
@@ -86,9 +87,9 @@ describe("runBatch", () => {
     // Sequential: 0 ran, 1 hit quota, 2–4 were never dispatched.
     expect(calls).toEqual([0, 1]);
     expect(states[0].phase).toBe("done");
-    expect(states[1]).toEqual({ phase: "blocked", message: "Daily limit reached" });
+    expect(states[1]).toEqual({ phase: "blocked", message });
     for (const s of states.slice(2)) {
-      expect(s.phase).toBe("blocked");
+      expect(s).toEqual({ phase: "blocked", message });
     }
   });
 
