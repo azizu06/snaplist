@@ -3,29 +3,27 @@ import Link from "next/link";
 import ElectricBorder from "@/components/bits/ElectricBorder";
 import { Reveal } from "@/components/marketing/reveal";
 import { FaqAccordion } from "@/components/marketing/faq-accordion";
-import { SELLER_CAPABILITY_MATRIX, sellerPolicyForTier } from "@/lib/billing";
 
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Two plans, no surprises. Free and Seller Pro include every core seller workflow; Seller Pro adds capacity for high-volume days.",
+    "Two plans, no surprises. Free covers 15 items a day; Seller Pro is $10 a month for 200 items a day, bulk capture, and priority pricing.",
 };
 
 /**
  * /pricing — Shopify-grade plan comparison. Two plans side by side (Free and
  * the recommended Seller Pro at $10/mo, hugged by ElectricBorder), then a
- * grouped feature-comparison table that makes the Free → Pro capacity delta
- * explicit. Both pages derive their capability rows from the shared #153
- * contract; limits come from the same policy the server enforces.
+ * grouped feature-comparison table that makes the Free → Pro delta explicit
+ * with checks / em-dashes per row. Numbers are grounded in the real app:
+ * the daily item limits are the enforced quota defaults
+ * (QUOTA_FREE_ITEMS_PER_DAY = 15, QUOTA_PAID_ITEMS_PER_DAY = 200; see
+ * src/lib/abuse/config.ts), and every feature row maps to a shipped capability.
  */
-
-const FREE_POLICY = sellerPolicyForTier("free");
-const PRO_POLICY = sellerPolicyForTier("paid");
 
 const PRICING_FAQ = [
   {
     q: "What's the difference between Free and Seller Pro?",
-    a: `Both plans get the full pipeline: identification, source-backed pricing when available with clearly labeled estimates otherwise, listing generation, eBay publishing, export packs, buyer-Q&A, and bulk / haul capture. Seller Pro raises capacity from ${FREE_POLICY.limits.itemsPerDay} to ${PRO_POLICY.limits.itemsPerDay} items a day and from ${FREE_POLICY.limits.meteredPerMinute} to ${PRO_POLICY.limits.meteredPerMinute} metered requests a minute.`,
+    a: "Both plans get the full pipeline: identification, source-backed pricing when available with clearly labeled estimates otherwise, listing generation, eBay publishing, export packs, and the buyer-Q&A inbox. Seller Pro raises the daily limit from 15 items to 200, adds bulk photo uploads, a priority research queue, listing and pricing analytics, and priority support. It's built for flippers and steady resellers.",
   },
   {
     q: "What does Seller Pro cost?",
@@ -33,7 +31,7 @@ const PRICING_FAQ = [
   },
   {
     q: "Is the Free plan time-limited?",
-    a: `No. Free is a real plan, not a trial. It covers every core feature for up to ${FREE_POLICY.limits.itemsPerDay} items a day, with no card on file and no expiry timer.`,
+    a: "No. Free is a real plan, not a trial. It covers every core feature for up to 15 items a day, with no card on file and no expiry timer.",
   },
   {
     q: "What counts toward the daily item limit?",
@@ -52,7 +50,6 @@ const PRICING_FAQ = [
 /** Per-plan card summary. Limits use tabular-nums; CTAs bottom-align. */
 const FREE_HIGHLIGHTS = [
   "Pricing research with labeled fallbacks",
-  "Bulk / haul capture",
   "eBay publishing from your own account",
   "Facebook & Mercari export packs",
   "High-confidence publish eligibility",
@@ -61,9 +58,10 @@ const FREE_HIGHLIGHTS = [
 
 const PRO_HIGHLIGHTS = [
   "Everything in Free",
-  `Up to ${PRO_POLICY.limits.itemsPerDay} items a day`,
-  `${PRO_POLICY.limits.meteredPerMinute} metered requests a minute`,
-  "More room for high-volume days",
+  "Bulk photo uploads",
+  "Priority pricing-research queue",
+  "Listing & pricing analytics",
+  "Priority support",
 ] as const;
 
 /**
@@ -77,27 +75,46 @@ type FeatureGroup = { group: string; rows: readonly FeatureRow[] };
 
 const FEATURE_MATRIX: readonly FeatureGroup[] = [
   {
-    group: "Capacity",
+    group: "Volume",
     rows: [
-      {
-        label: "Items identified & priced per day",
-        free: String(FREE_POLICY.limits.itemsPerDay),
-        pro: String(PRO_POLICY.limits.itemsPerDay),
-      },
-      {
-        label: "Metered requests per minute",
-        free: String(FREE_POLICY.limits.meteredPerMinute),
-        pro: String(PRO_POLICY.limits.meteredPerMinute),
-      },
+      { label: "Items identified & priced per day", free: "15", pro: "200" },
+      { label: "Bulk photo uploads", free: false, pro: true },
+      { label: "Priority research queue", free: false, pro: true },
     ],
   },
   {
-    group: "Core seller workflows",
-    rows: SELLER_CAPABILITY_MATRIX.map((capability) => ({
-      label: capability.label,
-      free: capability.free,
-      pro: capability.paid,
-    })),
+    group: "Pricing & identification",
+    rows: [
+      { label: "Photo identification & attribute extraction", free: true, pro: true },
+      { label: "Source-backed price range when available", free: true, pro: true },
+      { label: "ISBN & barcode lookup", free: true, pro: true },
+      { label: "Priority pricing-model quality", free: false, pro: true },
+    ],
+  },
+  {
+    group: "Listings & posting",
+    rows: [
+      { label: "Listing copy generated per marketplace", free: true, pro: true },
+      { label: "eBay publishing from your own account", free: true, pro: true },
+      { label: "Facebook & Mercari export packs", free: true, pro: true },
+      { label: "High-confidence publish eligibility", free: true, pro: true },
+      { label: "Manual eBay publish control", free: true, pro: true },
+    ],
+  },
+  {
+    group: "Messaging & insight",
+    rows: [
+      { label: "Buyer-Q&A inbox with drafted replies", free: true, pro: true },
+      { label: "Listing & pricing analytics", free: false, pro: true },
+    ],
+  },
+  {
+    group: "Account & support",
+    rows: [
+      { label: "Private photo storage", free: true, pro: true },
+      { label: "Per-account data isolation", free: true, pro: true },
+      { label: "Priority support", free: false, pro: true },
+    ],
   },
 ] as const;
 
@@ -178,7 +195,7 @@ export default function Pricing() {
               Two plans, <em className="text-iris">no surprises</em>
             </h1>
             <p className="mx-auto mt-5 max-w-[48ch] text-[16px] leading-relaxed text-flash-dim">
-              Start free with {FREE_POLICY.limits.itemsPerDay} items a day. Move up to Seller Pro when your
+              Start free with 15 items a day. Move up to Seller Pro when your
               volume outgrows it. No per-listing fees, no paywall sprung halfway
               through.
             </p>
@@ -205,7 +222,7 @@ export default function Pricing() {
               </span>
             </p>
             <p className="nums mt-3 text-[15px] font-medium text-flash-dim">
-              Up to {FREE_POLICY.limits.itemsPerDay} items a day
+              Up to 15 items a day
             </p>
             <PlanHighlights items={FREE_HIGHLIGHTS} />
             <Link
@@ -246,7 +263,7 @@ export default function Pricing() {
                 </span>
               </p>
               <p className="nums mt-3 text-[15px] font-medium text-flash-dim">
-                Up to {PRO_POLICY.limits.itemsPerDay} items a day
+                Up to 200 items a day
               </p>
               <PlanHighlights items={PRO_HIGHLIGHTS} />
               <Link
@@ -272,8 +289,8 @@ export default function Pricing() {
               What you get, line by line
             </h2>
             <p className="mt-4 max-w-[54ch] text-[16px] leading-relaxed text-flash-dim">
-              Both plans run the full pipeline. Seller Pro adds capacity for
-              high-volume selling days.
+              Both plans run the full pipeline. Seller Pro adds the volume,
+              speed, and insight that steady resellers lean on.
             </p>
           </Reveal>
 

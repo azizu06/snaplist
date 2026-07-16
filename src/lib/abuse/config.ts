@@ -1,6 +1,6 @@
 /**
  * Abuse & cost-protection limits (issue #58). Pure + env-configurable: sensible
- * defaults that the server-side Seller policy (#153) gates by tier. Every limit is overridable via
+ * defaults that billing (#64) will gate by tier. Every limit is overridable via
  * env so production can tune without a deploy-code change.
  */
 
@@ -37,12 +37,10 @@ export function tierLimits(
 }
 
 /**
- * Pure fallback for lower-level, non-request callers. Server behavior MUST use
- * `resolveSellerPolicy` from `src/lib/billing/policy.ts`, which reads the
- * RLS-protected entitlement mirror asynchronously and fails closed to Free.
+ * The caller's tier. Everyone is `free` until billing (#64) lands and flips paid
+ * subscribers — this is the single seam that issue will set; nothing else changes.
  */
 export function resolveTier(_userId: string): Tier {
-  void _userId;
   return "free";
 }
 

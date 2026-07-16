@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   openAiDailyCallBudget,
+  resolveTier,
+  tierLimits,
   type Tier,
 } from "./config";
-import {
-  resolveSellerPolicy,
-  sellerPolicyForTier,
-  type SellerPolicy,
-} from "../billing/policy";
 import {
   decrDaily,
   getLimiter,
@@ -20,8 +17,8 @@ import { captureError } from "../sentry";
 
 /**
  * Abuse & cost protection (issue #58): rate limiting + spend guardrail. All paths
- * are offline-safe (in-memory fallback when Upstash env is unset) and use the
- * async, server-resolved Seller policy for every production enforcement seam.
+ * are offline-safe (in-memory fallback when Upstash env is unset) and tier-aware
+ * (everyone `free` until billing #64 flips paid).
  */
 
 export type { Tier } from "./config";
@@ -74,33 +71,9 @@ export async function checkRateLimit(
   tier: Tier = "free",
   env: Record<string, string | undefined> = process.env,
 ): Promise<LimitResult> {
-  return checkRateLimitForPolicy(identifier, sellerPolicyForTier(tier, env), env);
-}
-
-async function checkRateLimitForPolicy(
-  identifier: string,
-  policy: SellerPolicy,
-  env: Record<string, string | undefined>,
-): Promise<LimitResult> {
   maybeAlertFallbackInProduction(env);
-  const limiter = getLimiter("metered", policy.limits.meteredPerMinute, 60, env);
+  const limiter = getLimiter("metered", tierLimits(tier, env).meteredPerMinute, 60, env);
   return limiter.limit(identifier);
-}
-
-/** A trusted policy may be carried from a request's one RLS entitlement read. */
-export interface PolicyEnforcementOptions {
-  policy?: SellerPolicy;
-  env?: Record<string, string | undefined>;
-}
-
-async function policyForEnforcement(
-  userId: string | null | undefined,
-  options: PolicyEnforcementOptions,
-): Promise<{ policy: SellerPolicy; env: Record<string, string | undefined> }> {
-  const env = options.env ?? process.env;
-  if (options.policy) return { policy: options.policy, env };
-  if (!userId) return { policy: sellerPolicyForTier("free", env), env };
-  return { policy: await resolveSellerPolicy(userId, { env }), env };
 }
 
 /**
@@ -111,13 +84,12 @@ async function policyForEnforcement(
 export async function enforceRateLimit(
   request: Request,
   userId?: string | null,
-  options: PolicyEnforcementOptions = {},
 ): Promise<NextResponse | null> {
-  const { policy, env } = await policyForEnforcement(userId, options);
+  const tier = userId ? resolveTier(userId) : "free";
   const id = requestIdentifier(request, userId);
   let result: LimitResult;
   try {
-    result = await checkRateLimitForPolicy(id, policy, env);
+    result = await checkRateLimit(id, tier);
   } catch (err) {
     // FAIL OPEN: a limiter/store (Upstash) outage must not take down the metered
     // routes — degrade to "no rate limiting" and move on, logging the failure.
@@ -142,14 +114,9 @@ export async function enforceRateLimit(
 export async function rateLimitAllows(
   userId: string,
   env: Record<string, string | undefined> = process.env,
-  options: PolicyEnforcementOptions = {},
 ): Promise<boolean> {
   try {
-    const { policy, env: policyEnv } = await policyForEnforcement(userId, {
-      ...options,
-      env: options.env ?? env,
-    });
-    const result = await checkRateLimitForPolicy(`user:${userId}`, policy, policyEnv);
+    const result = await checkRateLimit(`user:${userId}`, resolveTier(userId), env);
     if (!result.success) logEvent("ratelimit.block", { id: `user:${userId}`, limit: result.limit });
     return result.success;
   } catch (err) {
@@ -167,17 +134,17 @@ export interface QuotaResult {
 /**
  * Spend guardrail — the per-user/day ITEM cap, gated by the caller's tier. Each
  * item is a full vision+pricing+listing run, so this is the real cost lever.
- * Pass the resolved `SellerPolicy` from the request seam so the exact same
- * trusted policy drives daily capacity and per-minute enforcement. The default
- * exists only for lower-level offline callers and is intentionally Free.
+ * `tier` is optional: pass the resolved billing entitlement (`getEntitlement`,
+ * #64) so paid users get the higher cap; it defaults to the pure `resolveTier`
+ * (free) for callers that don't resolve entitlement.
  */
 export async function checkDailyItemQuota(
   userId: string,
   env: Record<string, string | undefined> = process.env,
-  policy: SellerPolicy = sellerPolicyForTier("free", env),
+  tier: Tier = resolveTier(userId),
 ): Promise<QuotaResult> {
   maybeAlertFallbackInProduction(env);
-  const limit = policy.limits.itemsPerDay;
+  const limit = tierLimits(tier, env).itemsPerDay;
   let used: number;
   try {
     used = await incrDaily(`items:user:${userId}`, env);
@@ -188,7 +155,7 @@ export async function checkDailyItemQuota(
     return { allowed: true, used: 0, limit };
   }
   const allowed = used <= limit;
-  if (!allowed) logEvent("quota.item.block", { userId, used, limit, tier: policy.tier });
+  if (!allowed) logEvent("quota.item.block", { userId, used, limit, tier });
   return { allowed, used, limit };
 }
 
