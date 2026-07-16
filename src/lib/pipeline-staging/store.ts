@@ -11,7 +11,9 @@ import {
 type PipelineStagingRpcName =
   | "find_pipeline_batch_replay"
   | "stage_pipeline_batch"
-  | "release_pipeline_run_daily_reservation";
+  | "release_pipeline_run_daily_reservation"
+  | "reserve_legacy_pipeline_usage"
+  | "release_legacy_pipeline_usage";
 
 interface PipelineStagingRpcResult {
   data: unknown;
@@ -30,7 +32,20 @@ export interface PipelineStagingStore {
   findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
   releaseDailyReservation(runId: string): Promise<boolean>;
+  reserveLegacyUsage(input: LegacyPipelineUsageInput): Promise<boolean>;
+  releaseLegacyDailyReservation(reservationId: string): Promise<boolean>;
 }
+
+const legacyPipelineUsageInputSchema = z.object({
+  reservationId: z.string().uuid(),
+  userId: z.string().min(1).max(255),
+  dailyLimit: z.number().int().positive().max(10_000),
+  perMinuteLimit: z.number().int().positive().max(10_000),
+}).strict();
+
+export type LegacyPipelineUsageInput = z.infer<
+  typeof legacyPipelineUsageInputSchema
+>;
 
 function rpcData(operation: string, result: PipelineStagingRpcResult): unknown {
   if (result.error) {
@@ -83,6 +98,25 @@ export function createSupabasePipelineStagingStore(
         p_run_id: id,
       });
       return z.boolean().parse(rpcData("quota release", result));
+    },
+
+    async reserveLegacyUsage(rawInput) {
+      const input = legacyPipelineUsageInputSchema.parse(rawInput);
+      const result = await client.rpc("reserve_legacy_pipeline_usage", {
+        p_daily_limit: input.dailyLimit,
+        p_per_minute_limit: input.perMinuteLimit,
+        p_reservation_id: input.reservationId,
+        p_user_id: input.userId,
+      });
+      return z.boolean().parse(rpcData("legacy usage reservation", result));
+    },
+
+    async releaseLegacyDailyReservation(reservationId) {
+      const id = z.string().uuid().parse(reservationId);
+      const result = await client.rpc("release_legacy_pipeline_usage", {
+        p_reservation_id: id,
+      });
+      return z.boolean().parse(rpcData("legacy quota release", result));
     },
   };
 }

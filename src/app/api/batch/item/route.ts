@@ -10,8 +10,10 @@ import {
   enforceRateLimit,
   recordPipelineRunAndMaybeAlert,
   refundDailyItem,
+  tierLimits,
 } from "@/lib/abuse";
 import { resolveNewAiItemRunPolicy } from "@/lib/billing";
+import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
 
 /**
  * POST /api/batch/item — run ONE item of a bulk/haul batch (issue #100)
@@ -132,6 +134,48 @@ export async function POST(request: Request) {
     );
   }
 
+  // Keep the existing Upstash guardrail intact, then mirror this accepted
+  // legacy request into the durable Postgres ledger. The durable enqueue RPC
+  // and this route now serialize and count one another without turning the
+  // queue payload or browser into quota authority.
+  let usageStore: ReturnType<typeof createInternalPipelineStagingStore>;
+  const usageReservationId = crypto.randomUUID();
+  try {
+    usageStore = createInternalPipelineStagingStore();
+    await usageStore.reserveLegacyUsage({
+      reservationId: usageReservationId,
+      userId,
+      dailyLimit: quota.limit,
+      perMinuteLimit: tierLimits("free").meteredPerMinute,
+    });
+  } catch (error) {
+    await refundDailyItem(userId);
+    const detail = error instanceof Error ? error.message.toLowerCase() : "";
+    if (detail.includes("daily capacity")) {
+      return NextResponse.json(
+        {
+          error: "Capacity limit reached. Please try again later.",
+          kind: "quota",
+        },
+        { status: 429 },
+      );
+    }
+    if (detail.includes("minute capacity") || detail.includes("per-minute")) {
+      return NextResponse.json(
+        {
+          error: "Too many requests. Please slow down and try again shortly.",
+          kind: "rate-limit",
+        },
+        { status: 429, headers: { "Retry-After": "60" } },
+      );
+    }
+    return serverErrorJson(
+      "batch.item.reserve",
+      error,
+      "We couldn't reserve capacity for this item. Please try again.",
+    );
+  }
+
   // User-scoped object paths: first segment MUST be the user's id (storage policy).
   const paths: string[] = [];
   for (const photo of photos) {
@@ -144,6 +188,11 @@ export async function POST(request: Request) {
       logServerError("batch.item.store", uploadErr);
       // Give back the daily slot — nothing persisted — and drop any photos
       // already stored for this failed item (best-effort, own objects only).
+      try {
+        await usageStore.releaseLegacyDailyReservation(usageReservationId);
+      } catch (releaseError) {
+        logServerError("batch.item.reserve.release", releaseError);
+      }
       await refundDailyItem(userId);
       if (paths.length > 0) await supabase.storage.from("photos").remove(paths);
       return NextResponse.json(
@@ -178,6 +227,11 @@ export async function POST(request: Request) {
     // Pipeline errors stay server-side; the client gets a generic, retryable
     // message (CWE-209, #57). The item row was cleaned up inside
     // runPipelineAndPersist; refund the slot and drop the stored photos.
+    try {
+      await usageStore.releaseLegacyDailyReservation(usageReservationId);
+    } catch (releaseError) {
+      logServerError("batch.item.reserve.release", releaseError);
+    }
     await refundDailyItem(userId);
     await supabase.storage.from("photos").remove(paths);
     return serverErrorJson(

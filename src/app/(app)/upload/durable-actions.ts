@@ -2,8 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { tierLimits } from "@/lib/abuse";
 import { getUserId } from "@/lib/auth";
-import { resolveSellerPolicy } from "@/lib/billing";
+import { resolveNewAiItemRunPolicy } from "@/lib/billing";
 import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
 import { parseCostBasis } from "@/lib/pipeline/autopilot";
 import { reportServerError } from "@/lib/sentry";
@@ -35,7 +36,6 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     redirectUploadError("What did you pay must be a plain dollar amount or left blank.");
   }
 
-  const policy = await resolveSellerPolicy(userId, { client: supabase });
   const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
   const store = createInternalPipelineStagingStore();
 
@@ -53,12 +53,29 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     });
     if (replay[0]) redirect(`/review/${replay[0].item_id}?new=1`);
 
+    const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
+      client: supabase,
+    });
+    if (!itemRunPolicy.allowed) {
+      if (itemRunPolicy.reason === "policy-unavailable") {
+        redirectUploadError(
+          "We couldn't verify whether this item can start. Please try again.",
+        );
+      }
+      redirectUploadError("SnapList Pro is required to start another new item.");
+    }
+
+    // #155 keeps these daily/minute values as operational guardrails rather
+    // than subscription allowance. SnapList Pro authorization is the separate
+    // server policy above.
+    const limits = tierLimits("free");
+
     const [staged] = await stageUploadEntries(
       {
         batchId: batchId.data,
         userId,
-        dailyLimit: policy.limits.itemsPerDay,
-        perMinuteLimit: policy.limits.meteredPerMinute,
+        dailyLimit: limits.itemsPerDay,
+        perMinuteLimit: limits.meteredPerMinute,
         entries: [
           {
             idempotencyKey,
@@ -95,10 +112,7 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     reportServerError("upload.enqueue", error);
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (message.includes("daily capacity")) {
-      const plan = policy.tier === "paid" ? "Pro" : "free";
-      redirectUploadError(
-        `Daily limit reached at ${policy.limits.itemsPerDay} items on the ${plan} plan. Try again tomorrow.`,
-      );
+      redirectUploadError("Capacity limit reached. Try again tomorrow.");
     }
     if (message.includes("per-minute") || message.includes("minute capacity")) {
       redirectUploadError("You are starting listings too quickly. Wait a minute and try again.");

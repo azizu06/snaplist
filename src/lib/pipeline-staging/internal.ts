@@ -6,7 +6,7 @@ import {
   type PipelineStagingStore,
 } from "./store";
 
-/** Encloses the service credential and exports only the two audited producer RPCs. */
+/** Encloses the service credential and exports only audited producer/quota RPCs. */
 export function createInternalPipelineStagingStore(): PipelineStagingStore {
   const admin = createAdminClient();
   const rpcClient: PipelineStagingRpcClient = {

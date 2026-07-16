@@ -119,6 +119,30 @@ describe("Supabase pipeline staging store", () => {
     });
   });
 
+  it("reserves and releases legacy request usage through fixed RPCs", async () => {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const store = createSupabasePipelineStagingStore({ rpc });
+    const reservationId = "44444444-4444-4444-8444-444444444444";
+
+    await expect(store.reserveLegacyUsage({
+      reservationId,
+      userId: "user_123",
+      dailyLimit: 15,
+      perMinuteLimit: 20,
+    })).resolves.toBe(true);
+    expect(rpc).toHaveBeenNthCalledWith(1, "reserve_legacy_pipeline_usage", {
+      p_daily_limit: 15,
+      p_per_minute_limit: 20,
+      p_reservation_id: reservationId,
+      p_user_id: "user_123",
+    });
+
+    await expect(store.releaseLegacyDailyReservation(reservationId)).resolves.toBe(true);
+    expect(rpc).toHaveBeenNthCalledWith(2, "release_legacy_pipeline_usage", {
+      p_reservation_id: reservationId,
+    });
+  });
+
   it("surfaces RPC errors without exposing a generic Supabase client", async () => {
     const store = createSupabasePipelineStagingStore({
       rpc: vi.fn(async () => ({ data: null, error: { message: "daily capacity reached" } })),

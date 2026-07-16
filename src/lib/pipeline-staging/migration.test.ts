@@ -14,6 +14,7 @@ describe("durable upload staging migration", () => {
     expect(migration).toMatch(/add column batch_id uuid/i);
     expect(migration).toMatch(/add column batch_position integer/i);
     expect(migration).toMatch(/add column capture_input jsonb/i);
+    expect(migration).toMatch(/capture_input is null\s+or/i);
     expect(migration).toMatch(/photo_count/i);
     expect(migration).toMatch(/autopilot_enabled/i);
     expect(migration).toMatch(/source/i);
@@ -25,6 +26,13 @@ describe("durable upload staging migration", () => {
     expect(migration).toMatch(/run_id uuid primary key/i);
     expect(migration).toMatch(/pg_advisory_xact_lock/i);
     expect(migration).toMatch(/daily_released_at/i);
+  });
+
+  it("bridges legacy request accounting into the same durable capacity checks", () => {
+    expect(migration).toMatch(/create table private\.legacy_pipeline_usage_reservations/i);
+    expect(migration).toMatch(/create or replace function public\.reserve_legacy_pipeline_usage/i);
+    expect(migration).toMatch(/create or replace function public\.release_legacy_pipeline_usage/i);
+    expect(migration).toMatch(/from private\.legacy_pipeline_usage_reservations/i);
   });
 
   it("stages items, runs, and identifiers-only messages in one RPC transaction", () => {
@@ -40,6 +48,8 @@ describe("durable upload staging migration", () => {
       "find_pipeline_batch_replay",
       "stage_pipeline_batch",
       "release_pipeline_run_daily_reservation",
+      "reserve_legacy_pipeline_usage",
+      "release_legacy_pipeline_usage",
     ]) {
       expect(migration).toMatch(
         new RegExp(`grant execute on function public\\.${functionName}\\([^;]+to service_role`, "i"),

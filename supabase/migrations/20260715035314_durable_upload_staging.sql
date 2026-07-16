@@ -9,26 +9,25 @@ create schema if not exists private;
 alter table public.pipeline_runs
   add column batch_id uuid,
   add column batch_position integer,
-  add column capture_input jsonb not null default jsonb_build_object(
-    'source', 'single',
-    'autopilot_enabled', false,
-    'photo_count', 0
-  );
+  add column capture_input jsonb;
 
 alter table public.pipeline_runs
   add constraint pipeline_runs_batch_position_check check (
     batch_position is null or batch_position >= 0
   ),
   add constraint pipeline_runs_capture_input_check check (
-    jsonb_typeof(capture_input) = 'object'
-    and capture_input ?& array['source', 'autopilot_enabled', 'photo_count']
-    and (
-      capture_input - array['source', 'autopilot_enabled', 'photo_count']::text[]
-    ) = '{}'::jsonb
-    and capture_input->>'source' in ('single', 'batch')
-    and jsonb_typeof(capture_input->'autopilot_enabled') = 'boolean'
-    and jsonb_typeof(capture_input->'photo_count') = 'number'
-    and capture_input->>'photo_count' in ('0', '1', '2', '3', '4')
+    capture_input is null
+    or (
+      jsonb_typeof(capture_input) = 'object'
+      and capture_input ?& array['source', 'autopilot_enabled', 'photo_count']
+      and (
+        capture_input - array['source', 'autopilot_enabled', 'photo_count']::text[]
+      ) = '{}'::jsonb
+      and capture_input->>'source' in ('single', 'batch')
+      and jsonb_typeof(capture_input->'autopilot_enabled') = 'boolean'
+      and jsonb_typeof(capture_input->'photo_count') = 'number'
+      and capture_input->>'photo_count' in ('0', '1', '2', '3', '4')
+    )
   );
 
 create index pipeline_runs_user_batch_created_at_idx
@@ -64,6 +63,193 @@ create index pipeline_run_usage_minute_idx
 
 revoke all on table private.pipeline_run_usage_reservations
   from public, anon, authenticated, service_role;
+
+-- The request-bound batch item route remains available while the durable
+-- producer rolls out. Mirror each accepted legacy request into the same
+-- Postgres capacity boundary so neither entry point can ignore the other's
+-- daily or per-minute usage. This is an operational guardrail, not the native
+-- AI-item credit ledger owned by #168.
+create table private.legacy_pipeline_usage_reservations (
+  reservation_id uuid primary key,
+  user_id text not null,
+  daily_bucket date not null,
+  minute_bucket timestamp without time zone not null,
+  daily_limit integer not null check (daily_limit between 1 and 10000),
+  per_minute_limit integer not null check (per_minute_limit between 1 and 10000),
+  reserved_at timestamptz not null default statement_timestamp(),
+  daily_released_at timestamptz,
+  constraint legacy_pipeline_usage_release_time_check check (
+    daily_released_at is null or daily_released_at >= reserved_at
+  )
+);
+
+create index legacy_pipeline_usage_daily_idx
+  on private.legacy_pipeline_usage_reservations (user_id, daily_bucket)
+  where daily_released_at is null;
+create index legacy_pipeline_usage_minute_idx
+  on private.legacy_pipeline_usage_reservations (user_id, minute_bucket);
+
+revoke all on table private.legacy_pipeline_usage_reservations
+  from public, anon, authenticated, service_role;
+
+create or replace function public.reserve_legacy_pipeline_usage(
+  p_reservation_id uuid,
+  p_user_id text,
+  p_daily_limit integer,
+  p_per_minute_limit integer
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_now timestamptz := statement_timestamp();
+  v_daily_bucket date := (v_now at time zone 'UTC')::date;
+  v_minute_bucket timestamp without time zone := date_trunc('minute', v_now at time zone 'UTC');
+  v_existing_user_id text;
+  v_existing_daily_bucket date;
+  v_existing_minute_bucket timestamp without time zone;
+  v_existing_daily_limit integer;
+  v_existing_per_minute_limit integer;
+  v_daily_used integer;
+  v_minute_used integer;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Pipeline usage authorization is required';
+  end if;
+  if p_reservation_id is null
+    or coalesce(p_user_id, '') = ''
+    or char_length(p_user_id) > 255
+    or p_daily_limit not between 1 and 10000
+    or p_per_minute_limit not between 1 and 10000 then
+    raise exception using errcode = '22023', message = 'Invalid legacy pipeline usage reservation';
+  end if;
+
+  perform pg_advisory_xact_lock(
+    hashtextextended('pipeline-daily:' || p_user_id || ':' || v_daily_bucket::text, 0)
+  );
+  perform pg_advisory_xact_lock(
+    hashtextextended('pipeline-minute:' || p_user_id || ':' || v_minute_bucket::text, 0)
+  );
+
+  select
+    reservation.user_id,
+    reservation.daily_bucket,
+    reservation.minute_bucket,
+    reservation.daily_limit,
+    reservation.per_minute_limit
+  into
+    v_existing_user_id,
+    v_existing_daily_bucket,
+    v_existing_minute_bucket,
+    v_existing_daily_limit,
+    v_existing_per_minute_limit
+  from private.legacy_pipeline_usage_reservations reservation
+  where reservation.reservation_id = p_reservation_id
+  for update;
+
+  if found then
+    if v_existing_user_id is distinct from p_user_id
+      or v_existing_daily_bucket is distinct from v_daily_bucket
+      or v_existing_minute_bucket is distinct from v_minute_bucket
+      or v_existing_daily_limit is distinct from p_daily_limit
+      or v_existing_per_minute_limit is distinct from p_per_minute_limit then
+      raise exception using errcode = '23514', message = 'Legacy pipeline usage reservation conflicts';
+    end if;
+    return false;
+  end if;
+
+  select count(*)
+  into v_daily_used
+  from (
+    select reservation.run_id
+    from private.pipeline_run_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.daily_bucket = v_daily_bucket
+      and reservation.daily_released_at is null
+    union all
+    select reservation.reservation_id
+    from private.legacy_pipeline_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.daily_bucket = v_daily_bucket
+      and reservation.daily_released_at is null
+  ) usage;
+
+  select count(*)
+  into v_minute_used
+  from (
+    select reservation.run_id
+    from private.pipeline_run_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.minute_bucket = v_minute_bucket
+    union all
+    select reservation.reservation_id
+    from private.legacy_pipeline_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.minute_bucket = v_minute_bucket
+  ) usage;
+
+  if v_daily_used + 1 > p_daily_limit then
+    raise exception using errcode = 'P0001', message = 'Pipeline daily capacity reached';
+  end if;
+  if v_minute_used + 1 > p_per_minute_limit then
+    raise exception using errcode = 'P0001', message = 'Pipeline per-minute capacity reached';
+  end if;
+
+  insert into private.legacy_pipeline_usage_reservations (
+    reservation_id,
+    user_id,
+    daily_bucket,
+    minute_bucket,
+    daily_limit,
+    per_minute_limit
+  ) values (
+    p_reservation_id,
+    p_user_id,
+    v_daily_bucket,
+    v_minute_bucket,
+    p_daily_limit,
+    p_per_minute_limit
+  );
+  return true;
+end;
+$$;
+
+revoke all on function public.reserve_legacy_pipeline_usage(uuid, text, integer, integer)
+  from public, anon, authenticated;
+grant execute on function public.reserve_legacy_pipeline_usage(uuid, text, integer, integer)
+  to service_role;
+
+create or replace function public.release_legacy_pipeline_usage(p_reservation_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_released boolean;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Pipeline usage authorization is required';
+  end if;
+  if p_reservation_id is null then
+    raise exception using errcode = '22023', message = 'Legacy pipeline usage reservation is required';
+  end if;
+
+  update private.legacy_pipeline_usage_reservations reservation
+  set daily_released_at = statement_timestamp()
+  where reservation.reservation_id = p_reservation_id
+    and reservation.daily_released_at is null;
+  v_released := found;
+  return v_released;
+end;
+$$;
+
+revoke all on function public.release_legacy_pipeline_usage(uuid)
+  from public, anon, authenticated;
+grant execute on function public.release_legacy_pipeline_usage(uuid)
+  to service_role;
 
 -- A response can be lost after the atomic staging transaction commits. Check
 -- for that completed producer request before uploading a second set of private
@@ -397,16 +583,33 @@ begin
 
   select count(*)
   into v_daily_used
-  from private.pipeline_run_usage_reservations reservation
-  where reservation.user_id = p_user_id
-    and reservation.daily_bucket = v_daily_bucket
-    and reservation.daily_released_at is null;
+  from (
+    select reservation.run_id
+    from private.pipeline_run_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.daily_bucket = v_daily_bucket
+      and reservation.daily_released_at is null
+    union all
+    select reservation.reservation_id
+    from private.legacy_pipeline_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.daily_bucket = v_daily_bucket
+      and reservation.daily_released_at is null
+  ) usage;
 
   select count(*)
   into v_minute_used
-  from private.pipeline_run_usage_reservations reservation
-  where reservation.user_id = p_user_id
-    and reservation.minute_bucket = v_minute_bucket;
+  from (
+    select reservation.run_id
+    from private.pipeline_run_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.minute_bucket = v_minute_bucket
+    union all
+    select reservation.reservation_id
+    from private.legacy_pipeline_usage_reservations reservation
+    where reservation.user_id = p_user_id
+      and reservation.minute_bucket = v_minute_bucket
+  ) usage;
 
   if v_daily_used + v_new_count > p_daily_limit then
     raise exception using errcode = 'P0001', message = 'Pipeline daily capacity reached';

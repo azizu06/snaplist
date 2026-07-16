@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { tierLimits } from "@/lib/abuse";
 import { getUserId } from "@/lib/auth";
-import { resolveSellerPolicy } from "@/lib/billing";
+import { resolveNewAiItemRunPolicy } from "@/lib/billing";
 import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
 import { parseCostBasis } from "@/lib/pipeline/autopilot";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
@@ -51,7 +52,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const policy = await resolveSellerPolicy(userId, { client: supabase });
     const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
     const entries = manifest.entries.map((entry, index) => {
       const photos = form
@@ -97,12 +97,47 @@ export async function POST(request: Request) {
       }, { status: 200 });
     }
 
+    const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
+      client: supabase,
+    });
+    if (!itemRunPolicy.allowed) {
+      if (itemRunPolicy.reason === "policy-unavailable") {
+        return NextResponse.json(
+          {
+            error: "We couldn't verify whether this item can start. Please try again.",
+            kind: "policy-unavailable",
+          },
+          { status: 503 },
+        );
+      }
+      return NextResponse.json(
+        {
+          error: "SnapList Pro is required to start another new item.",
+          kind: "quota",
+          reason: "snaplist-pro-required",
+        },
+        { status: 403 },
+      );
+    }
+    if (itemRunPolicy.entitlement !== "paid" && entries.length > 1) {
+      return NextResponse.json(
+        {
+          error: "SnapList Pro is required to start another new item.",
+          kind: "quota",
+          reason: "snaplist-pro-required",
+        },
+        { status: 403 },
+      );
+    }
+
+    const limits = tierLimits("free");
+
     const runs = await stageUploadEntries(
       {
         batchId: manifest.batchId,
         userId,
-        dailyLimit: policy.limits.itemsPerDay,
-        perMinuteLimit: policy.limits.meteredPerMinute,
+        dailyLimit: limits.itemsPerDay,
+        perMinuteLimit: limits.meteredPerMinute,
         entries,
       },
       {

@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   getUserId: vi.fn(),
   getAutopilotEnabled: vi.fn(),
   parseCostBasis: vi.fn(() => 12.5),
-  resolveSellerPolicy: vi.fn(),
+  resolveNewAiItemRunPolicy: vi.fn(),
+  tierLimits: vi.fn(() => ({ itemsPerDay: 15, meteredPerMinute: 20 })),
   createStore: vi.fn(),
   stageUploadEntries: vi.fn(),
   reportServerError: vi.fn(),
@@ -21,7 +22,10 @@ vi.mock("@/lib/settings/user-settings", () => ({
   getAutopilotEnabled: mocks.getAutopilotEnabled,
 }));
 vi.mock("@/lib/pipeline/autopilot", () => ({ parseCostBasis: mocks.parseCostBasis }));
-vi.mock("@/lib/billing", () => ({ resolveSellerPolicy: mocks.resolveSellerPolicy }));
+vi.mock("@/lib/billing", () => ({
+  resolveNewAiItemRunPolicy: mocks.resolveNewAiItemRunPolicy,
+}));
+vi.mock("@/lib/abuse", () => ({ tierLimits: mocks.tierLimits }));
 vi.mock("@/lib/pipeline-staging/internal", () => ({
   createInternalPipelineStagingStore: mocks.createStore,
 }));
@@ -55,9 +59,11 @@ describe("enqueueUpload", () => {
     mocks.createClient.mockResolvedValue(supabase);
     mocks.getUserId.mockResolvedValue("user_123");
     mocks.getAutopilotEnabled.mockResolvedValue(false);
-    mocks.resolveSellerPolicy.mockResolvedValue({
-      tier: "free",
-      limits: { itemsPerDay: 15, meteredPerMinute: 20 },
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
+      allowed: true,
+      reason: "included-first-run",
+      entitlement: "free",
+      hasCompletedAiItemRun: false,
     });
     mocks.createStore.mockReturnValue(store);
     store.findReplay.mockResolvedValue([]);
@@ -80,14 +86,15 @@ describe("enqueueUpload", () => {
     ]);
   });
 
-  it("uses the shared Seller policy and returns after durable enqueue", async () => {
+  it("uses operational limits and returns after durable enqueue", async () => {
     await expect(enqueueUpload(uploadForm())).rejects.toThrow(
       "REDIRECT:/review/22222222-2222-4222-8222-222222222222?new=1",
     );
 
-    expect(mocks.resolveSellerPolicy).toHaveBeenCalledWith("user_123", {
+    expect(mocks.resolveNewAiItemRunPolicy).toHaveBeenCalledWith("user_123", {
       client: supabase,
     });
+    expect(mocks.tierLimits).toHaveBeenCalledWith("free");
     expect(mocks.stageUploadEntries).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user_123",
@@ -137,6 +144,38 @@ describe("enqueueUpload", () => {
         photoCount: 2,
       })],
     }));
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    expect(mocks.resolveNewAiItemRunPolicy).not.toHaveBeenCalled();
+  });
+
+  it("preserves the merged SnapList Pro gate before a new durable run", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
+      allowed: false,
+      reason: "snaplist-pro-required",
+      entitlement: "free",
+      hasCompletedAiItemRun: true,
+    });
+
+    await expect(enqueueUpload(uploadForm())).rejects.toThrow(
+      /SnapList%20Pro%20is%20required/i,
+    );
+
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    expect(storage.from).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the merged new-run policy is unavailable", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
+      allowed: false,
+      reason: "policy-unavailable",
+      entitlement: "free",
+      hasCompletedAiItemRun: null,
+    });
+
+    await expect(enqueueUpload(uploadForm())).rejects.toThrow(
+      /couldn't%20verify%20whether%20this%20item%20can%20start/i,
+    );
+
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
   });
 

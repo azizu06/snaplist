@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getUserId: vi.fn(),
-  resolveSellerPolicy: vi.fn(),
+  resolveNewAiItemRunPolicy: vi.fn(),
+  tierLimits: vi.fn(() => ({ itemsPerDay: 15, meteredPerMinute: 20 })),
   getAutopilotEnabled: vi.fn(),
   createStore: vi.fn(),
   stageUploadEntries: vi.fn(),
@@ -13,7 +14,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 vi.mock("@/lib/auth", () => ({ getUserId: mocks.getUserId }));
-vi.mock("@/lib/billing", () => ({ resolveSellerPolicy: mocks.resolveSellerPolicy }));
+vi.mock("@/lib/billing", () => ({
+  resolveNewAiItemRunPolicy: mocks.resolveNewAiItemRunPolicy,
+}));
+vi.mock("@/lib/abuse", () => ({ tierLimits: mocks.tierLimits }));
 vi.mock("@/lib/settings/user-settings", () => ({ getAutopilotEnabled: mocks.getAutopilotEnabled }));
 vi.mock("@/lib/pipeline-staging/internal", () => ({ createInternalPipelineStagingStore: mocks.createStore }));
 vi.mock("@/lib/upload-staging", () => ({ stageUploadEntries: mocks.stageUploadEntries }));
@@ -29,9 +33,11 @@ describe("POST /api/batch/enqueue", () => {
     vi.clearAllMocks();
     mocks.getUserId.mockResolvedValue("user_123");
     mocks.createClient.mockResolvedValue({ storage: { from: vi.fn() } });
-    mocks.resolveSellerPolicy.mockResolvedValue({
-      tier: "paid",
-      limits: { itemsPerDay: 200, meteredPerMinute: 60 },
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
+      allowed: true,
+      reason: "snaplist-pro",
+      entitlement: "paid",
+      hasCompletedAiItemRun: true,
     });
     mocks.getAutopilotEnabled.mockResolvedValue(true);
     store.findReplay.mockResolvedValue([]);
@@ -55,7 +61,7 @@ describe("POST /api/batch/enqueue", () => {
     ]);
   });
 
-  it("stages the whole accepted batch with the shared Seller policy limits", async () => {
+  it("stages the whole accepted batch with operational limits", async () => {
     const form = new FormData();
     form.set("manifest", JSON.stringify({
       batchId: "11111111-1111-4111-8111-111111111111",
@@ -69,11 +75,14 @@ describe("POST /api/batch/enqueue", () => {
     }));
 
     expect(response.status).toBe(202);
+    expect(mocks.resolveNewAiItemRunPolicy).toHaveBeenCalledWith("user_123", {
+      client: expect.any(Object),
+    });
     expect(mocks.stageUploadEntries).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user_123",
-        dailyLimit: 200,
-        perMinuteLimit: 60,
+        dailyLimit: 15,
+        perMinuteLimit: 20,
         entries: [expect.objectContaining({ source: "batch", costBasis: 5 })],
       }),
       expect.any(Object),
@@ -116,6 +125,7 @@ describe("POST /api/batch/enqueue", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    expect(mocks.resolveNewAiItemRunPolicy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       runs: [{
         id: "33333333-3333-4333-8333-333333333333",
@@ -146,8 +156,66 @@ describe("POST /api/batch/enqueue", () => {
       error: "What did you pay must be a plain dollar amount or left blank.",
       kind: "validation",
     });
-    expect(mocks.resolveSellerPolicy).not.toHaveBeenCalled();
     expect(mocks.logServerError).not.toHaveBeenCalled();
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+  });
+
+  it("preserves the merged Pro gate for a free seller's second durable run", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
+      allowed: false,
+      reason: "snaplist-pro-required",
+      entitlement: "free",
+      hasCompletedAiItemRun: true,
+    });
+    const form = new FormData();
+    form.set("manifest", JSON.stringify({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [{ idempotencyKey: "item-1", costBasis: "5", photoCount: 1 }],
+    }));
+    form.append("photo:0", new File(["photo"], "item.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://snaplist.test/api/batch/enqueue", {
+      method: "POST",
+      body: form,
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "SnapList Pro is required to start another new item.",
+      kind: "quota",
+      reason: "snaplist-pro-required",
+    });
+    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+  });
+
+  it("allows only the included first item in a free durable batch", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
+      allowed: true,
+      reason: "included-first-run",
+      entitlement: "free",
+      hasCompletedAiItemRun: false,
+    });
+    const form = new FormData();
+    form.set("manifest", JSON.stringify({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [
+        { idempotencyKey: "item-1", costBasis: "5", photoCount: 1 },
+        { idempotencyKey: "item-2", costBasis: "6", photoCount: 1 },
+      ],
+    }));
+    form.append("photo:0", new File(["one"], "one.jpg", { type: "image/jpeg" }));
+    form.append("photo:1", new File(["two"], "two.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://snaplist.test/api/batch/enqueue", {
+      method: "POST",
+      body: form,
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      kind: "quota",
+      reason: "snaplist-pro-required",
+    });
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
   });
 });

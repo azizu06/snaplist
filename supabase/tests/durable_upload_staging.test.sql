@@ -1,11 +1,12 @@
 begin;
 
-select plan(19);
+select plan(29);
 
 select has_column('public', 'pipeline_runs', 'batch_id', 'pipeline runs carry a recovery batch id');
 select has_column('public', 'pipeline_runs', 'batch_position', 'pipeline runs carry stable batch order');
 select has_column('public', 'pipeline_runs', 'capture_input', 'pipeline runs carry a safe capture snapshot');
 select has_table('private', 'pipeline_run_usage_reservations', 'run-keyed usage reservations exist');
+select has_table('private', 'legacy_pipeline_usage_reservations', 'legacy requests share durable usage accounting');
 
 select col_is_pk(
   'private',
@@ -13,12 +14,30 @@ select col_is_pk(
   'run_id',
   'each run has one idempotent usage reservation'
 );
+select col_is_pk(
+  'private',
+  'legacy_pipeline_usage_reservations',
+  'reservation_id',
+  'legacy request reservations are idempotent'
+);
 
 select has_function(
   'public',
   'find_pipeline_batch_replay',
   array['text', 'uuid', 'jsonb'],
   'fixed replay lookup RPC exists'
+);
+select has_function(
+  'public',
+  'reserve_legacy_pipeline_usage',
+  array['uuid', 'text', 'integer', 'integer'],
+  'fixed legacy usage reservation RPC exists'
+);
+select has_function(
+  'public',
+  'release_legacy_pipeline_usage',
+  array['uuid'],
+  'fixed legacy usage release RPC exists'
 );
 select has_function(
   'public',
@@ -81,6 +100,38 @@ select ok(
   ),
   'sellers cannot release capacity directly'
 );
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.reserve_legacy_pipeline_usage(uuid,text,integer,integer)',
+    'execute'
+  ),
+  'service role may reserve legacy request usage'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.reserve_legacy_pipeline_usage(uuid,text,integer,integer)',
+    'execute'
+  ),
+  'sellers cannot reserve legacy request usage'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.release_legacy_pipeline_usage(uuid)',
+    'execute'
+  ),
+  'service role may release failed legacy request usage'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.release_legacy_pipeline_usage(uuid)',
+    'execute'
+  ),
+  'sellers cannot release legacy request usage'
+);
 
 select ok(
   not has_table_privilege(
@@ -97,6 +148,22 @@ select ok(
     'select'
   ),
   'sellers cannot read internal reservations'
+);
+select ok(
+  not has_table_privilege(
+    'service_role',
+    'private.legacy_pipeline_usage_reservations',
+    'select'
+  ),
+  'service role cannot bypass legacy usage RPCs'
+);
+select ok(
+  not has_table_privilege(
+    'authenticated',
+    'private.legacy_pipeline_usage_reservations',
+    'select'
+  ),
+  'sellers cannot read legacy usage reservations'
 );
 select ok(
   exists (

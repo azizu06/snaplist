@@ -18,6 +18,8 @@ let reachable = false;
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
+let mixedUserA: ClerkTestUser;
+let mixedUserB: ClerkTestUser;
 const messageIds = new Set<string>();
 
 async function stackReachable(): Promise<boolean> {
@@ -53,9 +55,11 @@ beforeAll(async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  [userA, userB] = await Promise.all([
+  [userA, userB, mixedUserA, mixedUserB] = await Promise.all([
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_stage_a"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_stage_b"),
+    provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_mixed_a"),
+    provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_mixed_b"),
   ]);
 });
 
@@ -66,7 +70,12 @@ afterAll(async () => {
       admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
     ),
   );
-  await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+  await cleanupClerkTestUsers(admin, [
+    userA.id,
+    userB.id,
+    mixedUserA.id,
+    mixedUserB.id,
+  ]);
 });
 
 describe("durable pipeline staging RPC and RLS", () => {
@@ -227,25 +236,31 @@ describe("durable pipeline staging RPC and RLS", () => {
     });
     expect(premature.error).not.toBeNull();
 
-    const failed = await admin.rpc("transition_pipeline_run", {
-      p_attempt_count: 0,
-      p_expected_status: "queued",
+    const claimed = await admin.rpc("claim_pipeline_run_attempt", {
+      p_lease_seconds: 60,
+      p_message_id: row.queue_message_id,
+      p_run_id: row.run_id,
+    });
+    expect(claimed.error).toBeNull();
+    const leaseToken = (
+      claimed.data as { context: { run: { lease_token: string } } }
+    ).context.run.lease_token;
+
+    const failed = await admin.rpc("finish_pipeline_run_attempt", {
       p_failure_code: "staging_failed",
       p_failure_message: "We couldn't finish staging this item.",
-      p_next_stage: "queued",
-      p_next_status: "failed",
+      p_lease_token: leaseToken,
+      p_retry_after_seconds: 30,
+      p_retryable: false,
       p_run_id: row.run_id,
     });
     expect(failed.error).toBeNull();
+    expect(failed.data).toMatchObject({ status: "failed" });
 
     const released = await admin.rpc("release_pipeline_run_daily_reservation", {
       p_run_id: row.run_id,
     });
-    expect(released).toMatchObject({ data: true, error: null });
-    const repeated = await admin.rpc("release_pipeline_run_daily_reservation", {
-      p_run_id: row.run_id,
-    });
-    expect(repeated).toMatchObject({ data: false, error: null });
+    expect(released).toMatchObject({ data: false, error: null });
 
     const { data: item } = await userB.client
       .from("items")
@@ -253,5 +268,96 @@ describe("durable pipeline staging RPC and RLS", () => {
       .eq("id", (staged.data as Array<{ item_id: string }>)[0].item_id)
       .single();
     expect(item?.photos).toHaveLength(2);
+  });
+
+  it("shares daily capacity across legacy and durable entry points without crossing tenants", async () => {
+    if (!reachable) return;
+    const legacyReservationId = crypto.randomUUID();
+    const legacyArgs = {
+      p_reservation_id: legacyReservationId,
+      p_user_id: mixedUserA.id,
+      p_daily_limit: 1,
+      p_per_minute_limit: 10,
+    };
+
+    const legacy = await admin.rpc("reserve_legacy_pipeline_usage", legacyArgs);
+    expect(legacy).toMatchObject({ data: true, error: null });
+    const repeated = await admin.rpc("reserve_legacy_pipeline_usage", legacyArgs);
+    expect(repeated).toMatchObject({ data: false, error: null });
+
+    const durableBlocked = await admin.rpc("stage_pipeline_batch", {
+      p_user_id: mixedUserA.id,
+      p_batch_id: crypto.randomUUID(),
+      p_entries: [entry(mixedUserA.id, `mixed-blocked-${crypto.randomUUID()}`)],
+      p_daily_limit: 1,
+      p_per_minute_limit: 10,
+    });
+    expect(durableBlocked.error?.message).toMatch(/daily capacity/i);
+
+    const durableMinuteBlocked = await admin.rpc("stage_pipeline_batch", {
+      p_user_id: mixedUserA.id,
+      p_batch_id: crypto.randomUUID(),
+      p_entries: [entry(mixedUserA.id, `mixed-minute-${crypto.randomUUID()}`)],
+      p_daily_limit: 10,
+      p_per_minute_limit: 1,
+    });
+    expect(durableMinuteBlocked.error?.message).toMatch(/per-minute capacity/i);
+
+    const otherTenant = await admin.rpc("stage_pipeline_batch", {
+      p_user_id: mixedUserB.id,
+      p_batch_id: crypto.randomUUID(),
+      p_entries: [entry(mixedUserB.id, `mixed-other-${crypto.randomUUID()}`)],
+      p_daily_limit: 1,
+      p_per_minute_limit: 10,
+    });
+    expect(otherTenant.error).toBeNull();
+    const otherRow = (otherTenant.data as Array<{
+      queue_message_id: number;
+    }>)[0];
+    messageIds.add(String(otherRow.queue_message_id));
+
+    const legacyMinuteBlocked = await admin.rpc("reserve_legacy_pipeline_usage", {
+      p_reservation_id: crypto.randomUUID(),
+      p_user_id: mixedUserB.id,
+      p_daily_limit: 10,
+      p_per_minute_limit: 1,
+    });
+    expect(legacyMinuteBlocked.error?.message).toMatch(/per-minute capacity/i);
+
+    const released = await admin.rpc("release_legacy_pipeline_usage", {
+      p_reservation_id: legacyReservationId,
+    });
+    expect(released).toMatchObject({ data: true, error: null });
+    const releasedAgain = await admin.rpc("release_legacy_pipeline_usage", {
+      p_reservation_id: legacyReservationId,
+    });
+    expect(releasedAgain).toMatchObject({ data: false, error: null });
+
+    const durable = await admin.rpc("stage_pipeline_batch", {
+      p_user_id: mixedUserA.id,
+      p_batch_id: crypto.randomUUID(),
+      p_entries: [entry(mixedUserA.id, `mixed-durable-${crypto.randomUUID()}`)],
+      p_daily_limit: 1,
+      p_per_minute_limit: 10,
+    });
+    expect(durable.error).toBeNull();
+    const durableRow = (durable.data as Array<{
+      queue_message_id: number;
+    }>)[0];
+    messageIds.add(String(durableRow.queue_message_id));
+
+    const legacyBlocked = await admin.rpc("reserve_legacy_pipeline_usage", {
+      p_reservation_id: crypto.randomUUID(),
+      p_user_id: mixedUserA.id,
+      p_daily_limit: 1,
+      p_per_minute_limit: 10,
+    });
+    expect(legacyBlocked.error?.message).toMatch(/daily capacity/i);
+
+    const sellerCall = await mixedUserA.client.rpc(
+      "reserve_legacy_pipeline_usage",
+      legacyArgs,
+    );
+    expect(sellerCall.error).not.toBeNull();
   });
 });
