@@ -137,6 +137,33 @@ the measured offline lower bound from a clearly labeled provider-inclusive sensi
 seconds wall time, 10 seconds active CPU, and 512 MiB per item. The 30/120/300-second sensitivity must
 still be replaced by sandbox/provider p50/p95 before hosted cutover.
 
+## Owner-approved zero-cost staging path
+
+Aziz has authorized **$0 infrastructure spend only** during development and initial validation. No
+payment method, billing account, paid plan, or provider setup is authorized by this proof.
+
+| Stage | Truthful topology | What it proves | Explicit limitation / upgrade trigger |
+| --- | --- | --- | --- |
+| **Local development now** | Local Supabase plus local Node API and Node PGMQ worker; checked-in tests and no-network Docker proofs | Full durable behavior: enqueue-and-return API, RLS, narrow worker RPCs, leases/checkpoints, redelivery, and completion-before-ack | Not remotely available; this remains the default until external validation needs a shared endpoint |
+| **$0 remote prototype/TestFlight** | Supabase Free hosts Postgres/Storage/PGMQ; an optional Render Free web service hosts only the Node API; the Node worker runs locally during supervised sessions | Remote SwiftUI auth/contract/enqueue/status plus real queued durable completion when the operator worker is online | Render sleeps after 15 inbound-idle minutes and may take about a minute to wake; no free Render background worker exists. When the local worker is offline, runs wait in PGMQ. No always-on latency, uptime, unattended retry, or push promise |
+| **Deferred production** | Railway Node/Docker API plus persistent PGMQ worker, owned by #196 | Reliable unattended processing after all measurement/security/staging gates | Begins only when an external TestFlight cohort needs bounded unattended processing, a measured free-host limit blocks validation, or first revenue/payment activation justifies paid infrastructure |
+
+Supabase Free currently provides two projects, 500 MB database per project, 1 GB Storage, 5 GB
+egress, and 500,000 Edge Function invocations; low-activity projects may pause after seven days.
+Render provides 750 Free web-service hours/month, but its free service may restart/suspend and cannot
+host a background worker. Using Render without a payment method makes quota exhaustion suspend the
+service or builds instead of producing an overage charge. This is the smallest remote topology that
+preserves the Node worker without pretending it is continuous.
+
+Railway Free's post-trial allowance is only $1 credit/month, so it is useful for a short deploy check,
+not a reliable always-on worker. Cloud Run has a substantial free allowance but requires an active
+Cloud Billing account even for free usage and therefore fails the strict no-billing/no-charge-risk
+constraint. Vercel Hobby is $0 but is restricted to personal, non-commercial use and has a 300-second
+function maximum; it remains a marketing/personal-preview plan-compliance question, not the trusted
+external TestFlight worker. Public commercial marketing must resolve plan eligibility separately
+before launch. Supabase Edge Free has 150 seconds wall time, 2 seconds CPU/request, 256 MB memory, and
+a Deno runtime; it does not justify a second pipeline or premature rewrite.
+
 ## Measured baseline cost
 
 At the measured container p95, a 256 MiB allocation consumes **0.0016005 GB-s and 0.010041 CPU-s per
@@ -173,15 +200,15 @@ support.
 
 | Host | Current runtime / scaling facts | Fit with ADR-0007 PGMQ | Scenario cost and operational consequence |
 | --- | --- | --- | --- |
-| **Vercel Fluid Compute** | Native Node. Hobby max 300 s; Pro/Enterprise GA max 800 s. Supported Node/Python functions may opt per function into a 1,800 s beta limit. Fluid pauses active-CPU billing during I/O but bills provisioned memory for the request lifetime. | An authenticated bounded-consume HTTP call can retain PGMQ, but execution remains request-duration-coupled and Vercel supplies no native PGMQ trigger. | Assumed raw IAD compute is about **$0.05 / $5.33**, generally inside plan inclusions. Excellent API locality and low ops; duration is no longer the categorical blocker the old 300 s comparison implied. |
+| **Vercel Fluid Compute** | Native Node. Hobby is $0, personal/non-commercial only, and max 300 s; Pro/Enterprise GA max 800 s, with an optional 1,800 s beta for supported Node/Python. Fluid pauses active-CPU billing during I/O but bills provisioned memory for the request lifetime. | An authenticated bounded-consume HTTP call can retain PGMQ, but execution remains request-duration-coupled and Vercel supplies no native PGMQ trigger. | Assumed raw IAD compute is about **$0.05 / $5.33**, generally inside plan inclusions. Hobby permitted use makes it unsuitable as SnapList's external commercial validation backend; longer paid durations do not supply worker wake-up. |
 | **Vercel Workflows (GA)** | Durable, observable pause/resume workflows using Vercel Queues and persistence; GA since 2026-04-16. | Poor as an *additional* engine: it would duplicate PGMQ, `pipeline_runs`, redelivery, checkpoints, lease fencing, and ack authority. Credible only as an intentional replacement under a separate migration ADR. | Low operator burden, but underlying Fluid/persistence usage and the engineering cost of changing the durability model make it a high-migration option, not a hosting toggle. |
-| **Railway** | Runs the proved Node/Docker artifact as an API and/or long-lived pull worker. Vertical resources autoscale within configured limits; horizontal replicas and multi-region placement are manual. A PGMQ pull loop emits outbound traffic, so the worker cannot sleep and has a warm floor. | Strongest direct fit: the existing process can claim PGMQ without a queue or domain rewrite; scheduled bounded HTTP consumption also remains possible. | Assumed one warm 0.5 GB service is about **$5.05 / $6.19** on the $5 Hobby proof plan. Railway recommends the $20 Pro plan for a commercial app; both commitments count toward usage. Only four regions are documented, cross-cloud Supabase egress remains, and a hard spend limit shuts down workloads. Healthchecks are deployment-time rather than continuous, logs retain 7/30 days on Hobby/Pro, and contractual SLA is Enterprise. |
-| **Render web service + background worker** | Native Node and Docker. A web service receives HTTPS while a first-class worker continuously pulls without accepting inbound traffic. Same-region services share private networking, although the worker can initiate but not receive private requests. Deploys support health-gated web cutover, retained-artifact rollback, and `SIGTERM`; the default 30 s shutdown delay can be raised to 300 s before `SIGKILL`. | Strong direct PGMQ fit: the API enqueues and returns; a separate worker claims continuously. Shutdown must stop new claims and let unfinished work redeliver under the existing lease fence—Render does not replace completion-before-ack. | Minimum paid topology is two fixed 512 MiB Starter instances at **$14/month**. The production-oriented Pro workspace and its autoscaling raise the floor to **$39/month** before compute scale/egress; background workers have no free tier. Hobby/Pro include 5/25 GB bandwidth then charge $0.15/GB. Autoscaling is Pro+ and CPU/memory-based, not PGMQ-depth-based; each minimum instance is billed. |
-| **Cloud Run service** | HTTPS container with request timeout up to 60 min. Request-based billing allocates CPU around requests; instance-based billing covers the full lifecycle. With minimum instances zero it scales to zero. | Strong for the API and an authenticated scheduled bounded-consume endpoint. It is not a continuously polling worker unless kept active through requests or instance-based execution. | Excellent low-volume economics and platform maturity. Requires GCP project, Artifact Registry/deploy, IAM, logging, and an external scheduler/wake-up; budgets alert rather than hard-stop, while max instances is a useful but imperfect spend guard. |
+| **Railway** | Runs the proved Node/Docker artifact as an API and/or long-lived pull worker. Vertical resources autoscale within configured limits; horizontal replicas and multi-region placement are manual. A PGMQ pull loop emits outbound traffic, so the worker cannot sleep and has a warm floor. | Strongest paid direct fit: the existing process can claim PGMQ without a queue or domain rewrite. | Free supplies only $1 monthly credit after the trial and is not an always-on production plan. The deferred paid scenario is about **$5.05 / $6.19** on Hobby; Railway recommends $20 Pro for a commercial app. Region, cross-cloud egress, hard-limit shutdown, healthcheck/log retention, and SLA caveats remain #196 gates. |
+| **Render web service + background worker** | Native Node and Docker. A web service receives HTTPS while a first-class worker continuously pulls. Deploys support health-gated cutover, rollback, and a 30–300 s `SIGTERM` shutdown window. Free web services sleep after 15 minutes without inbound traffic; background workers have no free tier. | Paid worker is a strong PGMQ fit. At $0, only the API can be hosted; the same Node worker must run locally during supervised sessions and queued work waits while it is offline. | No-payment-method Free is the chosen optional prototype API because quota exhaustion suspends rather than bills. Reliable paid topology is two 512 MiB Starter instances at **$14/month**, or **$39/month** with the production-oriented Pro workspace; scaling is CPU/memory-based, not PGMQ-depth-based. |
+| **Cloud Run service** | HTTPS container with request timeout up to 60 min. Request-based billing allocates CPU around requests; instance-based billing covers the lifecycle; minimum instances zero scales to zero. Cloud Run usage requires an active Cloud Billing account. | Strong for the API and an authenticated scheduled bounded-consume endpoint; not a continuously polling worker without active requests or instance-based execution. | Excellent free allowance/low-volume economics and platform maturity, but the billing-account requirement violates the current strict no-billing constraint. Later use also adds GCP registry/deploy, IAM, logging, and scheduler/wake-up. |
 | **Cloud Run job** | One-off task execution; 10 min default and up to 168 h per task; always instance-based billing. Execution must be manual, scheduled, API-triggered, or orchestrated. | Long-job capable but weakly aligned: each PGMQ batch needs a trigger and job-execution control plane, while PGMQ still owns retry/lease/ack truth. | Low raw task compute, no permanent worker required, but more orchestration and slower startup than a bounded service request. |
 | **Cloud Run worker pool** | Designed for continuous pull workers, with CPU allocated and billing while instances run. No native autoscaling and at least one instance is required while enabled. | Excellent runtime shape for PGMQ pulling. Native backlog scaling does not exist; PGMQ is not a CREMA source. | Warm floor plus manual scaling. CREMA or Google Workflows scaling adds a separate autoscaler/control plane, APIs, secrets, IAM, and custom PGMQ metric logic. |
 | **Cloudflare Workers** | 128 MB isolate; paid CPU limits can fit orchestration but the measured Node/`tsx` proof peaked at 171.1 MiB and needs compatibility/bundle work. | Weak: no native PGMQ trigger, and adopting Cloudflare Queues would replace rather than preserve ADR-0007. | Assumed paid floor/usage about **$5 / $6.40**; not a valid cost comparison until a production bundle fits the isolate. Attractive only as a later thin edge adapter. |
-| **Supabase Edge Functions** | Deno runtime; current documented 256 MB memory, 2 s CPU, and 400 s wall-clock limits. | Same provider, but the heavy Node dependency graph and CPU envelope do not map cleanly. PGMQ wake-up still needs an invocation path. | Assumed incremental invocations may remain inside plan quotas, but cost does not cure the runtime mismatch. Appropriate for small webhooks, not the durable pipeline proof. |
+| **Supabase Edge Functions** | Deno runtime; 256 MB memory and 2 s CPU; wall clock is 150 s Free / 400 s paid. | Same provider, but the heavy Node dependency graph and CPU envelope do not map cleanly. PGMQ wake-up still needs an invocation path. | Free includes 500,000 invocations, but cost does not cure the runtime mismatch. Use Supabase Free for Postgres/Storage/PGMQ and keep the worker Node/local; do not rewrite the pipeline for a quota. |
 | **AWS Lambda** | Native Node with a 900 s/15 min hard maximum and scale-to-zero economics. | Weak/conditional. PGMQ is not a Lambda event source, so EventBridge/Supabase must invoke a poller; SnapList still owns empty polling, redelivery, lease fencing, and ack. | Assumed 512 MiB × 120 s is **$0 / about $3.33** after the published free tier. Good only if representative p95 is safely below 15 min and scheduler latency/empty invocations are accepted. |
 | **AWS App Runner** | Managed HTTP container, but requests time out at 120 s and at least one provisioned-memory instance remains. AWS closed the service to new customers on 2026-03-31. | Poor: API-only here, with no durable pull-worker primitive and a timeout equal to the assumed wall case. | Ineligible unless the account was already enrolled. Even then, assumed minimum 0.5 GB idle memory is about **$2.56/month** before active CPU, logs, and transfer. |
 | **ECS on Fargate** | Portable long-running containers with no application request-duration ceiling; service autoscaling is available. | Strong. A warm service can pull PGMQ directly; scale-from-zero/backlog scaling needs a custom CloudWatch metric because PGMQ is not native. | Credible AWS alternative, but low-volume floors and setup span ECR, ECS, IAM, VPC/subnets/security groups, logs, and ALB or API Gateway/VPC Link. NAT, public IPv4, logs, and front door can outweigh raw task compute. |
@@ -196,11 +223,11 @@ time; “low-volume” includes those obvious floors.
 
 | Candidate | Raw compute | Low-volume cost | Long-job fit | PGMQ worker fit | Operational burden | Vendor lock-in | Migration effort |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Vercel Fluid | Low | Low on existing plan | Medium (13m20s GA; 30m beta) | Medium via HTTP wake-up | Low | Medium | Low |
+| Vercel Fluid | Low | $0 only for personal/non-commercial Hobby | Medium (5m Hobby; 13m20s GA paid; 30m beta) | Medium via HTTP wake-up | Low | Medium | Low |
 | Vercel Workflows | Low/medium | Low/medium | Strong | Weak unless replacing PGMQ | Low after migration | High | Very high |
-| **Railway** | Medium | Medium ($5 proof / $20 Pro commitment; warm worker) | Strong | **Strong** | **Low** | Low/medium | **Low** |
-| **Render web + worker** | Medium | High ($14 compute / $39 Pro floor) | Strong | **Strong** | Low/medium | Low/medium | Low |
-| Cloud Run service | Low | **Low** at min=0 | Strong (60m request) | Strong via HTTP wake-up | Medium | Medium | Medium |
+| **Railway** | Medium | $1 Free credit is not always-on; paid deferred | Strong | **Strong** | **Low** | Low/medium | **Low** |
+| **Render web + worker** | Medium | $0 sleeping API + supervised local worker; paid worker $14/$39 floor | Strong when paid | **Strong** when paid/local supervised | Low/medium | Low/medium | Low |
+| Cloud Run service | Low | Low allowance but billing account required | Strong (60m request) | Strong via HTTP wake-up | Medium | Medium | Medium |
 | Cloud Run job | Low | Low | **Strong** (168h task) | Medium/weak | Medium/high | Medium | Medium/high |
 | Cloud Run worker pool | Low/medium | Medium (warm floor) | Strong | **Strong** | High without custom autoscaling | Medium | Medium/high |
 | Cloudflare Workers | Low | Low | Weak for current memory/runtime | Weak | Medium | High | High |
@@ -211,32 +238,26 @@ time; “low-volume” includes those obvious floors.
 | EC2 | Low at committed steady load | High | Strong | **Strong** | **Very high** | Low/medium | Very high |
 | Amplify Hosting / Gen 2 | Low for frontend | Low for frontend | None as worker | None | Medium if backend adopted | High | Very high |
 
-### Re-evaluated ranked recommendation
+### Owner-approved staged recommendation
 
-1. **Railway** remains the selected issue #196 target. The already-proved Node/Docker artifact maps
-   directly, a persistent process can pull PGMQ, and the first migration adds the least infrastructure
-   and engineering time. It is not the cheapest raw compute or broadest platform; its region,
-   availability, observability, warm-floor, and spend-control gates remain mandatory.
-2. **Render web service + background worker** is the closest operational alternative. Its explicit
-   two-process model, Docker support, private network, retained-artifact rollback, and documented
-   graceful shutdown make the deploy shape clearer than Railway's single generic service model.
-   It does **not** make the domain safer—PGMQ, run-scoped RPCs, lease fencing, redelivery, and
-   completion-before-ack do that—and it imposes a materially higher two-service floor ($14 paid
-   compute; $39 with the Pro workspace), fixed instance sizing, and no queue-depth autoscaling.
-3. **Cloud Run service** is the strongest scale-to-zero/mature-platform alternative. It offers a
-   60-minute request limit and can preserve PGMQ through an authenticated bounded-consume endpoint,
-   but adds GCP registry/IAM/logging/scheduler work; its continuous worker-pool shape has a warm floor
-   and no native autoscaling.
-4. **Vercel Fluid Compute** remains the lowest-migration interim API/bounded-attempt host. Longer
-   current duration options remove the old categorical timeout objection, but the API must still
-   enqueue and return and a separate PGMQ wake-up path remains.
-5. **Vercel Workflows** is not a launch hosting seam. It is a credible future durability replacement,
-   but layering its queue and persistence beside ADR-0007 would create two workflow truths.
+1. **Now: local Supabase + local Node API/worker.** This is the ranked first choice because it is $0,
+   exercises the complete architecture, creates no billing risk, and preserves every ADR-0007
+   invariant. Automated local/container verification is the default development path.
+2. **Remote pre-revenue: Supabase Free + optional Render Free API + supervised local Node worker.**
+   This is the smallest truthful $0 TestFlight path. It keeps enqueue-and-return and durable PGMQ
+   state, but it is intentionally not always-on: API cold starts can approach a minute, Supabase may
+   pause for inactivity, and queued runs wait while the operator worker is offline. Test plans must
+   schedule supervised worker windows and describe pending processing honestly.
+3. **After an upgrade trigger: Railway paid API/worker under #196.** Railway remains the production
+   preference because its Node/Docker/PGMQ locality minimizes engineering time. Payment is deferred
+   until external testers need reliable unattended processing, an observed free-tier limit blocks a
+   defined validation goal, or first revenue/payment activation justifies the commitment. The
+   provider-inclusive measurement and security/staging gates still apply before any cutover.
 
-Render therefore does not change the launch recommendation. It is easier than Cloud Run for a warm
-two-process deployment and more explicit than Railway about worker lifecycle/rollback, but not
-easier or safer enough for this repo to justify the higher fixed cost and extra service coordination.
-ECS Fargate remains the strongest AWS fallback when organizational AWS controls justify its setup.
+Among paid fallbacks, Render remains second for a clear web-service/background-worker lifecycle and
+Cloud Run service third for scale-to-zero and hyperscaler controls. Vercel Fluid remains an interim
+framework adapter, while Vercel Workflows would be a separate durability replacement decision. The
+AWS and edge options retain their matrix rankings. None is authorized for setup by #195.
 
 All external compute still downloads photos/data from Supabase, so Supabase Storage/database egress
 must be measured independently of the host's response-egress price.
@@ -250,4 +271,5 @@ must be measured independently of the host's response-egress price.
 3. Timeout/restart/redelivery acceptance at 30, 120, and 300 seconds with stale-lease rejection.
 4. Concrete Clerk JWT verification plus RLS two-tenant tests; no caller-supplied `user_id`.
 5. Staging-only eBay/StoreKit/App Attest callback fixtures from their owning issues.
-6. Operator approval for provider, plan, secrets, DNS, scheduler, and production traffic.
+6. Evidence that one declared upgrade trigger occurred, followed by explicit operator approval for
+   provider, billing/plan, secrets, DNS, scheduler, and production traffic.

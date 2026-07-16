@@ -382,11 +382,14 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Deploy
 - **Split marketing from trusted native compute.** Keep the public marketing site on Vercel. The
-  accepted target for the trusted SwiftUI API and bounded durable worker is a provider-neutral
-  Node/TypeScript container on Railway, after the separate migration owner satisfies ADR-0009's
-  measurement, security, staging, and operator-controlled cutover gates. Supabase continues to own
-  Postgres, Storage, Realtime, and PGMQ. The current Vercel routes remain in place until that migration;
-  this architecture decision does not deploy, move DNS, activate Cron, or mutate hosted data.
+  development default is $0 local Supabase plus the provider-neutral local Node API/worker. A remote
+  pre-revenue test may use Supabase Free plus an optional sleeping Render Free API while the Node
+  worker runs only during supervised local sessions; queued work honestly waits while that worker is
+  offline. Railway is the deferred paid target only after external TestFlight needs reliable
+  unattended processing, a measured free-host limit blocks validation, or first revenue/payment
+  activation justifies an owner-approved commitment. Supabase continues to own Postgres, Storage,
+  Realtime, and PGMQ. This decision does not authorize provider setup, billing, deployment, DNS,
+  hosted Cron, credentials, or hosted-data mutation.
 
 ## Testing Decisions
 

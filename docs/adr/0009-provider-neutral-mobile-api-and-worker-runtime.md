@@ -2,7 +2,8 @@
 
 - **Status:** Accepted (2026-07-16)
 - **Owned by:** issue #195 (architecture proof)
-- **Production migration:** issue #196 (`Lane = Blocked`, `Phase 1`); no hosting change occurs in #195
+- **Production migration:** issue #196 (`Lane = Blocked`, `Phase 1`), deferred until an explicit
+  upgrade trigger; no hosting or billing change occurs in #195
 - **Preserved owners:** #17, #159, #161, #162, #168, #173, and #174
 
 ## Context
@@ -23,54 +24,54 @@ SwiftUI contract is [`mobile-api-v1.openapi.json`](../contracts/mobile-api-v1.op
 
 ## Decision
 
-### 1. Separate the marketing host from trusted native compute
+### 1. Stage hosting by evidence and explicit owner authorization
 
-- Keep the public marketing site on Vercel. This decision does not require the trusted native API
-  or durable worker to share its host.
-- After re-evaluating all current candidates, choose **Railway** as the first migration target for
-  the trusted mobile API plus bounded PGMQ consumer. It runs the proved Node/TypeScript Docker
-  artifact with the least new infrastructure and no queue, domain, or durability-engine rewrite.
-  This is an engineering-time decision, not a claim that Railway has the lowest raw compute price
-  or the broadest platform maturity. Its $5 Hobby proof / recommended $20 Pro commercial commitment,
-  four documented regions, manual horizontal scaling, pull-worker warm floor, deployment-time-only
-  healthcheck, retention limits, spend-cap shutdown behavior, and Enterprise-only contractual SLA
-  are explicit staging gates for #196.
-- Rank **Render web service + background worker** second. Both run the existing Node/Docker code,
-  and Render makes the API/continuous-worker split first-class with same-region private networking,
-  health-gated web deploys, retained-artifact rollback, and documented `SIGTERM` shutdown. That is a
-  clearer operational shape, not a new durability guarantee: the worker must stop claiming, respect
-  the configurable 30–300 second shutdown window, and rely on PGMQ redelivery/lease fencing if a run
-  cannot finish before `SIGKILL`. Separate 512 MiB Starter services create a $14/month paid-compute
-  floor; the production-oriented $25 Pro workspace makes the planning floor $39 before overages,
-  and its CPU/memory autoscaling is not queue-depth autoscaling. Render is not sufficiently easier or
-  safer than Railway for this repo to justify that higher fixed floor and two-service coordination.
-- Rank **Cloud Run service** third. Its request-based mode, minimum-instances
-  zero, and 60-minute request timeout are a strong scale-to-zero fit for the API plus an authenticated
-  scheduled bounded-consume endpoint. It trails the first two for the initial migration because it adds a
-  GCP project, registry/deploy, IAM, logging, and scheduler surface. A continuous Cloud Run worker
-  pool fits PGMQ pulling but has no native autoscaling and a billed warm floor; CREMA or Google
-  Workflows scaling adds another control plane and custom PGMQ metric logic. Cloud Run jobs support
-  168-hour tasks but still require execution orchestration and do not replace PGMQ lease/ack truth.
-- Treat the current Vercel route as an interim adapter, not the SwiftUI contract. Fluid Compute is a
-  viable API and bounded-worker fallback: current maxima are 300 seconds on Hobby, 800 seconds GA on
-  Pro/Enterprise, and an optional 1,800-second beta for supported Node/Python functions. Vercel
-  Workflows is GA and technically credible, but adding its queues, event log, step persistence,
-  retries, and observability beside PGMQ/`pipeline_runs` would create two durability authorities.
-  Evaluate it only as an intentional replacement in a separate ADR, never as an additive host seam.
-- Rank **ECS on Fargate** as the strongest AWS container/PGMQ alternative, with materially more ECR,
-  ECS, IAM, VPC/security-group, logging, and ALB or API Gateway configuration. **Lambda** retains a
-  15-minute maximum and has no native PGMQ trigger, so it needs scheduled/external polling and is
-  conditional on a representative p95 safely below that ceiling. **EC2** fits long-running work and
-  can favor steady load, but makes SnapList own patching, hardening, scaling, failover, backups, and
-  continuous operations. **App Runner** is rejected: AWS closed it to new customers on 2026-03-31,
-  and eligible accounts still face a 120-second HTTP timeout and warm memory floor. **Amplify
-  Hosting/Gen 2** is a frontend/full-stack serverless platform rather than a persistent worker host;
-  its backend primitives would duplicate Clerk, Supabase, and PGMQ.
-- Do not choose Cloudflare Workers or Supabase Edge Functions for the durable pipeline worker.
-  Cloudflare's 128 MB isolate and Node-compatibility migration, and Supabase Edge's Deno runtime plus
-  CPU/memory limits, are poor fits for the current dependency graph and image/AI orchestration. A
-  lightweight API gateway or webhook adapter may be reconsidered separately after the Node runtime
-  is measured in production-like tests.
+Keep the public marketing site on Vercel, separate from trusted native compute; its plan eligibility
+is a separate owner decision because Hobby permits only personal, non-commercial use. Aziz has
+approved a strict **$0 infrastructure commitment during development and initial validation**: no
+paid plan, billing account, payment method, or usage commitment is authorized by this ADR or issue
+#195.
+
+1. **Local development and automated verification now.** Run local Supabase plus the provider-neutral
+   Node API and Node worker. This is the only full-fidelity $0 environment: the worker can poll PGMQ
+   continuously while preserving RLS, narrow run-scoped RPC authority, lease fencing, checkpointing,
+   and completion-before-ack. The checked-in local/no-network container tests remain the automated
+   proof. No hosted runtime is required for ordinary development.
+2. **Zero-cost remote prototype/TestFlight, with disclosed limits.** The smallest truthful no-billing
+   topology is a free hosted Supabase project for Postgres/Storage/PGMQ, an optional Render Free web
+   service for the versioned Node API, and the same Node worker running locally during supervised test
+   sessions. The API enqueues and returns; it never performs the durable pipeline inline. When the
+   operator's worker is offline, runs remain queued and status stays pending until a supervised worker
+   session resumes them.
+   - Supabase Free currently allows two projects, 500 MB database per project, 1 GB Storage, 5 GB
+     egress, and 500,000 Edge Function invocations. Low-activity projects may pause after seven days.
+   - Render Free web services sleep after 15 minutes without inbound traffic, can take about a minute
+     to wake, provide 750 instance-hours/month, may restart or suspend at platform limits, and cannot
+     host a free background worker. With no payment method, exhaustion suspends service/builds rather
+     than creating an overage charge.
+   - This path can exercise remote SwiftUI contract, auth, enqueue, status, RLS, and supervised durable
+     completion. It cannot promise always-on processing, bounded queue latency, uptime, or unattended
+     push/retry behavior. Those limitations must be visible to testers.
+3. **Deferred paid production target.** Railway remains the first paid target because the proved
+   Node/Docker API and persistent PGMQ worker require the least migration and no second durability
+   engine. It is not required now. Railway Free provides only $1 monthly credit after its trial and
+   cannot sustain a reliable always-on worker. Issue #196 may request provider/billing setup only when
+   at least one owner-approved trigger occurs:
+   - an external TestFlight cohort requires reliable unattended processing or bounded queue latency;
+   - observed free-host cold starts, pauses, quotas, egress, or supervised-worker availability block
+     a defined validation goal; or
+   - the first real revenue/payment activation justifies a production infrastructure commitment.
+
+The migration still must pass the representative provider-inclusive measurement, security, staging,
+and operator cutover gates. Render web + paid background worker remains the second warm-worker option;
+Cloud Run service remains the stronger scale-to-zero/mature-platform option, but Cloud Run requires
+an active billing account even when usage fits its free allowance and therefore fails the current
+no-billing/no-charge-risk constraint. Vercel Hobby is free but limited to personal, non-commercial
+use and a 300-second function maximum; it is not the trusted external commercial TestFlight runtime.
+Vercel Workflows remains a future intentional replacement candidate, never a second durability
+engine beside PGMQ. Supabase Edge Functions remain Deno with a 150-second Free wall limit, 2-second
+CPU limit, and 256 MB memory limit; avoiding payment does not justify rewriting the Node worker or
+weakening ADR-0007.
 
 ### 2. One deep pipeline module, multiple thin runtime adapters
 
@@ -117,24 +118,26 @@ envelopes; the eBay callback remains an explicit 303 redirect boundary.
 
 ### 4. Migration is a separate, review-gated change
 
-The hosted migration is owned by issue #196 and may begin only after its declared
-dependencies land. It must add a concrete Clerk JWT verifier, RLS-scoped Supabase request adapter,
-provider configuration, staging acceptance, production-like measurements, and operator-controlled
-cutover. Deployment, DNS, secrets, plans, Cron, production data, and live provider acceptance remain
+The paid hosted migration is owned by issue #196 and remains deferred until both its declared
+dependencies and one of the owner-approved upgrade triggers above are satisfied. It must add a
+concrete Clerk JWT verifier, RLS-scoped Supabase request adapter, provider configuration, staging
+acceptance, production-like measurements, and operator-controlled cutover. This ADR does not create
+or authorize a Render, Railway, Cloud Run, Supabase, or Vercel resource. Deployment, billing accounts,
+payment methods, DNS, secrets, plans, Cron, production data, and live provider acceptance remain
 outside #195.
 
 ## Consequences
 
 - SwiftUI can generate a client from a stable HTTP contract while Next.js routes evolve or retire.
 - Marketing delivery can remain optimized for Vercel without coupling trusted mobile compute to it.
-- Railway offers the shortest first migration from the current Node/TypeScript dependency graph and
-  keeps long-running bounded work out of edge-isolate limits. A continuous PGMQ poller cannot use
-  Railway serverless sleep because its database traffic prevents outbound-idle detection, so the
-  production plan must price a warm worker and use health/metrics beyond deployment checks.
-- If Railway fails region/latency, production-bundle memory, availability, observability, or
-  spend-control gates, Render is the lower-setup warm-worker alternative and Cloud Run service is the
-  stronger scale-to-zero/mature-platform alternative. Both preserve the same composition root and
-  PGMQ contracts; switching candidates does not authorize a second pipeline.
+- Full-fidelity development stays local at $0. The optional remote pre-revenue topology is explicitly
+  supervised: the hosted API can enqueue while the local worker is offline, and PGMQ preserves the
+  run until the operator resumes the worker. It is not presented as production availability.
+- Railway is a deferred production target, not an immediate requirement. A continuous PGMQ poller
+  has a warm floor and cannot rely on Railway Free's $1 monthly credit; no paid setup begins without
+  an explicit trigger and operator approval.
+- Render and Cloud Run preserve the same composition root and PGMQ contracts if later selected.
+  Switching candidates never authorizes a second pipeline or weakens completion-before-ack.
 - The worker's security is still enforced at the narrow capability and Postgres RPC seams, not by
   trusting a host, queue payload, or caller-supplied tenant id.
 - The air-gapped four-photo container profile measured a 6.402 ms wall p95, 10.041 ms process-CPU
@@ -150,8 +153,11 @@ outside #195.
 
 - [Vercel Fluid compute limits and duration](https://vercel.com/docs/functions/configuring-functions/duration)
 - [Vercel Fluid compute pricing](https://vercel.com/docs/functions/usage-and-pricing)
+- [Vercel Hobby plans](https://vercel.com/docs/plans)
+- [Vercel Hobby fair-use and commercial-use limits](https://vercel.com/docs/limits/fair-use-guidelines)
 - [Vercel Workflows GA](https://vercel.com/blog/a-new-programming-model-for-durable-execution)
 - [Railway plans and usage pricing](https://docs.railway.com/pricing/plans)
+- [Railway free trial and $1/month Free credit](https://docs.railway.com/pricing/free-trial)
 - [Railway cost controls](https://docs.railway.com/pricing/cost-control)
 - [Railway serverless sleeping](https://docs.railway.com/deployments/serverless)
 - [Railway scaling](https://docs.railway.com/deployments/scaling)
@@ -176,11 +182,14 @@ outside #195.
 - [Cloud Run worker-pool CREMA autoscaling](https://cloud.google.com/run/docs/configuring/workerpools/crema-autoscaling)
 - [Cloud Run worker-pool Workflows scaling](https://cloud.google.com/run/docs/configuring/workerpools/workflows-autoscaling)
 - [Cloud Run pricing](https://cloud.google.com/run/pricing)
+- [Google Cloud billing-account requirement](https://cloud.google.com/billing/docs/how-to/modify-project)
 - [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 - [Cloudflare Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Supabase Edge Functions](https://supabase.com/docs/guides/functions)
 - [Supabase Edge resource limits](https://supabase.com/docs/guides/functions/limits)
 - [Supabase Edge pricing](https://supabase.com/docs/guides/functions/pricing)
+- [Supabase Free quotas](https://supabase.com/docs/guides/platform/billing-on-supabase)
+- [Supabase Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing)
 - [AWS Lambda timeout](https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html)
 - [AWS Lambda event-source mappings](https://docs.aws.amazon.com/lambda/latest/api/API_CreateEventSourceMapping.html)
 - [AWS Lambda with EventBridge Scheduler](https://docs.aws.amazon.com/lambda/latest/dg/with-eventbridge-scheduler.html)
