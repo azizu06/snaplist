@@ -1,6 +1,6 @@
 # Sold-comps provider benchmark — Issue #188
 
-Run: `issue188-20260716T163607155Z` · 2026-07-16T16:36:07.155Z
+Run: `issue188-20260716T190054137Z` · 2026-07-16T19:00:54.137Z
 
 - Harness status: complete
 - Live benchmark status: incomplete
@@ -14,6 +14,7 @@ Run: `issue188-20260716T163607155Z` · 2026-07-16T16:36:07.155Z
 | Provider | Coverage | Empty | Block/error | Relevant precision | Variant contamination | Condition contamination | Usable pricing queries | p50 / p95 latency | Retries | Spend |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | ScrapingBee public page | 0.0% | 7.5% | 92.5% | operator-pending | operator-pending | operator-pending | 0/40 | 8002 / 8005 ms | 0 | $0.0000 + 380 credits |
+| Caffein Apify | 95.0% | 5.0% | 0.0% | operator-pending | operator-pending | operator-pending | 20/40 | 19743 / 43477 ms | 0 | $3.6574 |
 
 Cross-provider comparable queries: 0; median price delta: operator-pending; median range overlap: operator-pending.
 
@@ -29,7 +30,8 @@ The public eBay page does not disclose the accepted offer amount. The displayed 
 - ScrapingBee credit evidence: 380 account-delta credits; 30 response-header credits; 350 charged credits intentionally left unassigned to individual timed-out queries.
 - ScrapingBee allocated reference cost in this run: $0.0745. This is allocation math, not an additional charge.
 - ScrapingBee public page marginal result: $0.0000/query and operator-pending/usable pricing query; 9.50 credits/query and operator-pending credits/usable pricing query.
-- Apify live public price snapshot: up to $0.0040/result plus $0.00005 per GB-start event, observed 2026-07-16T16:30:47.117Z.
+- Caffein Apify marginal result: $0.0914/query and $0.1829/usable pricing query.
+- Apify live public price snapshot: up to $0.0040/result plus $0.00005 per GB-start event, observed 2026-07-16T19:00:54.137Z.
 - Fixed-cost crossover model: ~490 queries/month at the 25-result Apify upper bound versus the $49 ScrapingBee subscription. If ScrapingBee is already paid for other traffic, its marginal crossover does not occur until included credits are exhausted.
 
 Sources: [Caffein Actor](https://apify.com/caffein.dev/ebay-sold-listings), [Apify maximum run charge](https://docs.apify.com/api/v2/act-run-sync-get-dataset-items-get), [ScrapingBee pricing](https://www.scrapingbee.com/pricing/), [ScrapingBee credit costs](https://help.scrapingbee.com/en/article/credit-system-explained-1h2ackp/).
@@ -60,5 +62,7 @@ A production follow-up, if later approved, must preserve the provider-neutral ad
 
 ## Live-access limitations
 
-- APIFY_TOKEN is absent; the Caffein Actor live run is operator-blocked before any paid call.
+- Human comp labels remain operator-pending; heuristic suggestions are not treated as human review.
+- Product Research aggregate remains operator-pending.
+- Apify MCP did not expose usageTotalUsd; $3.6574 is calculated from observed billable dataset items at the verified Free-tier event price plus seven 4 GB starts.
 - Product Research aggregate remains operator-pending.

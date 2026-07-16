@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "runId": "issue188-20260716T163607155Z",
+  "runId": "issue188-20260716T190054137Z",
   "mode": "live",
-  "createdAt": "2026-07-16T16:36:07.155Z",
+  "createdAt": "2026-07-16T19:00:54.137Z",
   "corpusDigest": "sha256:584afd38a568a5072061c6b592ee0d70523cfc56616792438e28c870488ce6cc",
   "queryCount": 40,
   "maxResultsPerQuery": 25,
@@ -12,7 +12,7 @@
     "actorBuildId": "x9YHX1iN97Vs1N8nN",
     "actorBuildNumber": "1.18.3",
     "actorBuildFinishedAt": "2026-07-07T13:31:08.410Z",
-    "metadataObservedAt": "2026-07-16T16:30:47.117Z"
+    "metadataObservedAt": "2026-07-16T19:00:54.137Z"
   },
   "providers": [
     {
@@ -40,6 +40,32 @@
       "actualUsdSpent": 0,
       "costPerQueryUsd": 0,
       "costPerUsablePricingResultUsd": null
+    },
+    {
+      "provider": "caffein-apify",
+      "queryCount": 40,
+      "successfulQueryCoverage": 0.95,
+      "emptyResultRate": 0.05,
+      "blockErrorRate": 0,
+      "relevantPrecision": null,
+      "variantContaminationRate": null,
+      "conditionContaminationRate": null,
+      "labeledCompCount": 0,
+      "usableCompCount": 162,
+      "usablePricingQueryCount": 20,
+      "medianUsableCompsPerSuccessfulQuery": 3,
+      "medianSplitStabilityDelta": 0.1572,
+      "medianRangeWidthRatio": 0.6073,
+      "latencyMs": {
+        "p50": 19743,
+        "p95": 43477
+      },
+      "retries": 0,
+      "bestOfferRowsObserved": 194,
+      "creditsSpent": 0,
+      "actualUsdSpent": 3.6574,
+      "costPerQueryUsd": 0.091435,
+      "costPerUsablePricingResultUsd": 0.18287
     }
   ],
   "perQuery": [
@@ -602,6 +628,659 @@
       "retries": 0,
       "creditsSpent": 0,
       "actualUsdSpent": 0
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q01",
+      "status": "success",
+      "compCount": 6,
+      "usableCompCount": 6,
+      "labeledCompCount": 0,
+      "median": 4.41,
+      "range": {
+        "min": 4.17,
+        "max": 5.54
+      },
+      "latencyMs": 29145,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.024033333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q02",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 9,
+      "labeledCompCount": 0,
+      "median": 19.99,
+      "range": {
+        "min": 10,
+        "max": 33.12
+      },
+      "latencyMs": 29145,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q03",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 18.99,
+      "range": {
+        "min": 18.99,
+        "max": 18.99
+      },
+      "latencyMs": 29145,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q04",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 6,
+      "labeledCompCount": 0,
+      "median": 27.494999999999997,
+      "range": {
+        "min": 20.6,
+        "max": 34.99
+      },
+      "latencyMs": 29145,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q05",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 6,
+      "labeledCompCount": 0,
+      "median": 363,
+      "range": {
+        "min": 275,
+        "max": 449.99
+      },
+      "latencyMs": 29145,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q06",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 10,
+      "labeledCompCount": 0,
+      "median": 415.495,
+      "range": {
+        "min": 349,
+        "max": 575
+      },
+      "latencyMs": 29145,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q07",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 4,
+      "labeledCompCount": 0,
+      "median": 69.99,
+      "range": {
+        "min": 41.39,
+        "max": 79.99
+      },
+      "latencyMs": 16137,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q08",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 16137,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q09",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 8,
+      "labeledCompCount": 0,
+      "median": 131.94,
+      "range": {
+        "min": 100,
+        "max": 160
+      },
+      "latencyMs": 16137,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q10",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 69,
+      "range": {
+        "min": 69,
+        "max": 69
+      },
+      "latencyMs": 16137,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q11",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 13,
+      "labeledCompCount": 0,
+      "median": 999,
+      "range": {
+        "min": 690,
+        "max": 1377.49
+      },
+      "latencyMs": 16137,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q12",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 1200,
+      "range": {
+        "min": 1200,
+        "max": 1200
+      },
+      "latencyMs": 16137,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q13",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 3,
+      "labeledCompCount": 0,
+      "median": 179.95,
+      "range": {
+        "min": 175,
+        "max": 189
+      },
+      "latencyMs": 25603,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q14",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 6,
+      "labeledCompCount": 0,
+      "median": 387.5,
+      "range": {
+        "min": 150,
+        "max": 440
+      },
+      "latencyMs": 25603,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q15",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 16,
+      "labeledCompCount": 0,
+      "median": 407.495,
+      "range": {
+        "min": 285,
+        "max": 699.99
+      },
+      "latencyMs": 25603,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q16",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 139.99,
+      "range": {
+        "min": 139.99,
+        "max": 139.99
+      },
+      "latencyMs": 25603,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q17",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 14,
+      "labeledCompCount": 0,
+      "median": 44.49,
+      "range": {
+        "min": 24.98,
+        "max": 49.99
+      },
+      "latencyMs": 25603,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q18",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 8,
+      "labeledCompCount": 0,
+      "median": 34.99,
+      "range": {
+        "min": 30,
+        "max": 55
+      },
+      "latencyMs": 25603,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q19",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 16.99,
+      "range": {
+        "min": 16.99,
+        "max": 16.99
+      },
+      "latencyMs": 19743,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q20",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 11,
+      "labeledCompCount": 0,
+      "median": 19.99,
+      "range": {
+        "min": 15.88,
+        "max": 39.95
+      },
+      "latencyMs": 19743,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q21",
+      "status": "empty",
+      "compCount": 0,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 19743,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.000033333333333333335
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q22",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 3,
+      "labeledCompCount": 0,
+      "median": 25,
+      "range": {
+        "min": 24.49,
+        "max": 29.95
+      },
+      "latencyMs": 19743,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q23",
+      "status": "empty",
+      "compCount": 0,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 19743,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.000033333333333333335
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q24",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 19743,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q25",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 4,
+      "labeledCompCount": 0,
+      "median": 331.6,
+      "range": {
+        "min": 40.61,
+        "max": 389.65
+      },
+      "latencyMs": 43477,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q26",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 200,
+      "range": {
+        "min": 200,
+        "max": 200
+      },
+      "latencyMs": 43477,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q27",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 6,
+      "labeledCompCount": 0,
+      "median": 30.99,
+      "range": {
+        "min": 16.5,
+        "max": 34
+      },
+      "latencyMs": 43477,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q28",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 127.5,
+      "range": {
+        "min": 127.5,
+        "max": 127.5
+      },
+      "latencyMs": 43477,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q29",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 7,
+      "labeledCompCount": 0,
+      "median": 29.74,
+      "range": {
+        "min": 10,
+        "max": 179.99
+      },
+      "latencyMs": 43477,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q30",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 5,
+      "labeledCompCount": 0,
+      "median": 100,
+      "range": {
+        "min": 50,
+        "max": 115
+      },
+      "latencyMs": 43477,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q31",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 38.5,
+      "range": {
+        "min": 38.5,
+        "max": 38.5
+      },
+      "latencyMs": 18191,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q32",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 24,
+      "range": {
+        "min": 24,
+        "max": 24
+      },
+      "latencyMs": 18191,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q33",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 6,
+      "labeledCompCount": 0,
+      "median": 129.99,
+      "range": {
+        "min": 55.24,
+        "max": 229.99
+      },
+      "latencyMs": 18191,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q34",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 18191,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q35",
+      "status": "success",
+      "compCount": 8,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 18191,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.03203333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q36",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 18191,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10003333333333334
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q37",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 12,
+      "range": {
+        "min": 12,
+        "max": 12
+      },
+      "latencyMs": 13504,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10005
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q38",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 13504,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10005
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q39",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 1,
+      "labeledCompCount": 0,
+      "median": 31,
+      "range": {
+        "min": 31,
+        "max": 31
+      },
+      "latencyMs": 13504,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10005
+    },
+    {
+      "provider": "caffein-apify",
+      "queryId": "Q40",
+      "status": "success",
+      "compCount": 25,
+      "usableCompCount": 0,
+      "labeledCompCount": 0,
+      "median": null,
+      "range": null,
+      "latencyMs": 13504,
+      "retries": 0,
+      "creditsSpent": null,
+      "actualUsdSpent": 0.10005
     }
   ],
   "crossProvider": {
