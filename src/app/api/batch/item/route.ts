@@ -109,7 +109,11 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: "SnapList Pro is required to start another new item.",
-        kind: "snaplist-pro-required",
+        // The existing batch orchestrator treats `quota` as its terminal
+        // stop-dispatching class. Preserve the precise policy reason separately
+        // so this cannot be mistaken for a native credit balance.
+        kind: "quota",
+        reason: "snaplist-pro-required",
       },
       { status: 403 },
     );

@@ -77,7 +77,10 @@ describe("POST /api/batch/item new AI-item authorization", () => {
     const body = await response.json();
 
     expect(response.status).toBe(403);
-    expect(body).toMatchObject({ kind: "snaplist-pro-required" });
+    expect(body).toMatchObject({
+      kind: "quota",
+      reason: "snaplist-pro-required",
+    });
     expect(body.error).toMatch(/SnapList Pro/i);
     expect(mocks.resolveNewAiItemRunPolicy).toHaveBeenCalledWith("tenant-a", {
       client: supabase,
