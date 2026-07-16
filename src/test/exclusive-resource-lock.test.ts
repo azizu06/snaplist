@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { acquireExclusiveTestResource } from "./exclusive-resource-lock";
 
 const sleep = (milliseconds: number) =>
@@ -32,5 +32,52 @@ describe("exclusive test resource lock", () => {
     ]);
 
     await Promise.all([first.release(), second.release()]);
+  });
+
+  it("does not let a delayed contender delete a successor lease", async () => {
+    const resource = `delayed-publish-${randomUUID()}`;
+    const realNow = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(realNow);
+    let signalFirstPublish!: () => void;
+    const firstMayPublish = new Promise<void>((resolve) => {
+      signalFirstPublish = resolve;
+    });
+    let firstReachedPublish!: () => void;
+    const firstAtPublish = new Promise<void>((resolve) => {
+      firstReachedPublish = resolve;
+    });
+
+    const firstPromise = acquireExclusiveTestResource(resource, {
+      beforePublish: async () => {
+        firstReachedPublish();
+        await firstMayPublish;
+      },
+      retryDelayMs: 5,
+    });
+
+    try {
+      await firstAtPublish;
+      now.mockReturnValue(realNow + 3_000);
+      const successor = await acquireExclusiveTestResource(resource, {
+        retryDelayMs: 5,
+      });
+      signalFirstPublish();
+
+      const earlyFirstOutcome = await Promise.race([
+        firstPromise.then(
+          () => "acquired" as const,
+          () => "rejected" as const,
+        ),
+        sleep(50).then(() => "waiting" as const),
+      ]);
+
+      await successor.release();
+      const first = await firstPromise;
+      await first.release();
+      expect(earlyFirstOutcome).toBe("waiting");
+    } finally {
+      signalFirstPublish();
+      now.mockRestore();
+    }
   });
 });
