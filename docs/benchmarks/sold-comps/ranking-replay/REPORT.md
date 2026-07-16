@@ -20,4 +20,4 @@
 
 The provider retrieval metric and SnapList ranking metric are intentionally separate. Only price anchors may enter the median, cited source set, or minimum-two-comp pricing gate. Corroboration can support later review but cannot silently price an item.
 
-This replay supports keeping the captured Apify evidence as a promising retrieval source while production activation remains blocked. The corpus is condition-skewed and the labels are agent-assisted rather than a completed human gold set; provider routing requires a separate owner decision after balanced-condition and Product Research validation.
+The Issue #188 `reject-apify` conclusion combined provider retrieval with the prior binary matcher. This corrected replay supersedes that ranking conclusion: it supports keeping the captured Apify evidence as a promising retrieval source while production activation remains blocked. The corpus is condition-skewed and the labels are agent-assisted rather than a completed human gold set; provider routing requires a separate owner decision after balanced-condition and Product Research validation.
