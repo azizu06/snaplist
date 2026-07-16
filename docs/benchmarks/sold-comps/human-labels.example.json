@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
-  "reviewedByHuman": true,
+  "reviewedByHuman": false,
+  "reviewedByAgent": true,
+  "reviewMethod": "codex-agent-assisted",
   "labels": [
     {
       "compId": "replace-with-private-review-comp-id",

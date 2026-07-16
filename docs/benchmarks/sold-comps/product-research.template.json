@@ -1,70 +1,82 @@
 {
-  "schemaVersion": 1,
-  "reviewedByHuman": false,
-  "instructions": "Manual eBay Product Research aggregate reference only. Use a 90-day window. Record count, median, and range; do not copy seller data, listing rows, item ids, URLs, screenshots, cookies, or raw responses.",
-  "rows": [
+  "schemaVersion": 2,
+  "source": "eBay Seller Hub Product Research",
+  "capturedAt": null,
+  "reviewMethod": "authenticated in-app browser, operator-authorized Codex assistance",
+  "marketplace": "EBAY-US",
+  "window": "Last 90 days",
+  "tab": "Sold",
+  "instructions": "Record only average sold price, sold-price range, sell-through, and total sellers. Never copy seller data, listing rows, item ids, URLs, images, cookies, screenshots, or raw responses. This capture is not human review.",
+  "queries": [
     {
-      "queryId": "Q01",
+      "id": "Q01",
       "query": "9780140328721",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Very Good + Good + Acceptable",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     },
     {
-      "queryId": "Q05",
+      "id": "Q05",
       "query": "Apple iPhone 14 Pro 256GB",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     },
     {
-      "queryId": "Q09",
+      "id": "Q09",
       "query": "Sony WH-1000XM4",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     },
     {
-      "queryId": "Q11",
+      "id": "Q11",
       "query": "Dell XPS 15 9530 RTX 4070 32GB 1TB SSD",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     },
     {
-      "queryId": "Q14",
+      "id": "Q14",
       "query": "Sony PlayStation 5 Disc Edition",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     },
     {
-      "queryId": "Q24",
+      "id": "Q24",
       "query": "LEGO 75192 Millennium Falcon Complete",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     },
     {
-      "queryId": "Q28",
+      "id": "Q28",
       "query": "Nike Air Jordan 1 Retro High OG Lost and Found Size 10",
-      "targetCondition": "used",
-      "resultCount": null,
-      "median": null,
-      "range": { "min": null, "max": null },
-      "reviewedAt": null
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
     }
   ]
 }

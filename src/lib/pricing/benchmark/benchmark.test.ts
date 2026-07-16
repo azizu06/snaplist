@@ -10,6 +10,7 @@ import {
   buildApifyRunBudget,
   buildDryRunPlan,
   buildRedactedArtifact,
+  migrateDuplicateCompIds,
   normalizeApifyItems,
   parseBenchmarkArgs,
   runScrapingBeeQuery,
@@ -163,6 +164,20 @@ describe("provider-neutral normalization", () => {
     expect(JSON.stringify(items)).not.toContain("sellerFeedbackScore");
   });
 
+  it("assigns a unique private review id to repeated provider rows", () => {
+    const repeated = {
+      itemId: "same-provider-item",
+      title: `${entry.query} used`,
+      soldPrice: "12.00",
+      soldCurrency: "USD",
+      condition: "Pre-Owned",
+    };
+    const items = normalizeApifyItems(entry, [repeated, repeated]);
+
+    expect(items).toHaveLength(2);
+    expect(new Set(items.map((item) => item.id)).size).toBe(2);
+  });
+
   it("runs the current HTML parser/filter with the same 25-result ceiling", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(FIXTURE_HTML, {
@@ -276,7 +291,7 @@ describe("human labels, metrics, and redacted output", () => {
     },
   ];
 
-  it("computes relevance and contamination from explicit human labels", () => {
+  it("computes relevance and contamination from attributed review labels", () => {
     const existing = summarizeProvider(
       capture.queries.filter((query) => query.provider === "scrapingbee-public-page"),
       labels,
@@ -291,6 +306,150 @@ describe("human labels, metrics, and redacted output", () => {
     expect(existing.conditionContaminationRate).toBe(0.5);
     expect(apify.relevantPrecision).toBe(1);
     expect(apify.conditionContaminationRate).toBe(0.5);
+    expect(apify.costPerUsableCompUsd).toBe(0.08);
+  });
+
+  it("migrates duplicate ids in a legacy private capture without dropping rows", () => {
+    const duplicated = queryCapture("caffein-apify");
+    duplicated.comps[1] = { ...duplicated.comps[1], id: duplicated.comps[0].id };
+    const migrated = migrateDuplicateCompIds({ ...capture, queries: [duplicated] });
+
+    expect(migrated.queries[0].comps).toHaveLength(2);
+    expect(new Set(migrated.queries[0].comps.map((comp) => comp.id)).size).toBe(2);
+    expect(migrated.queries[0].comps.map((comp) => comp.title)).toEqual(
+      duplicated.comps.map((comp) => comp.title),
+    );
+  });
+
+  it("compares Product Research average to provider average and preserves review provenance", () => {
+    const completeCapture: BenchmarkCapture = {
+      ...capture,
+      productResearch: {
+        status: "complete",
+        queryIds: ["Q01"],
+        reviewMethod: "codex-assisted-operator",
+        rows: [
+          {
+            queryId: "Q01",
+            condition: "Used",
+            average: 105,
+            range: { min: 90, max: 120 },
+            sellThroughPct: 40,
+            totalSellers: 12,
+            capturedAt: "2026-07-16",
+          },
+        ],
+      },
+    };
+    const comparisonLabels = labels.map((label) =>
+      label.compId === "caffein-apify-two"
+        ? { ...label, conditionCorrect: true }
+        : label,
+    );
+    const artifact = buildRedactedArtifact(completeCapture, comparisonLabels, {
+      status: "complete",
+      reviewMethod: "codex-agent-assisted",
+      labelCount: comparisonLabels.length,
+    });
+
+    expect(artifact.labelReview).toEqual({
+      status: "complete",
+      reviewMethod: "codex-agent-assisted",
+      labelCount: 4,
+    });
+    expect(artifact.productResearchComparison.rows).toEqual([
+      {
+        provider: "scrapingbee-public-page",
+        queryId: "Q01",
+        providerAverage: 100,
+        referenceAverage: 105,
+        absoluteAverageDeltaRate: 0.0488,
+        rangeOverlapRate: 0,
+      },
+      {
+        provider: "caffein-apify",
+        queryId: "Q01",
+        providerAverage: 105,
+        referenceAverage: 105,
+        absoluteAverageDeltaRate: 0,
+        rangeOverlapRate: 0.3333,
+      },
+    ]);
+  });
+
+  it("can finalize a primary decision when the baseline has zero rows but all gates pass", () => {
+    const existingQueries = SOLD_COMPS_BENCHMARK_CORPUS.map<ProviderQueryCapture>((entry) => ({
+      provider: "scrapingbee-public-page",
+      queryId: entry.id,
+      status: "blocked",
+      latencyMs: 8_000,
+      attempts: 1,
+      retries: 0,
+      creditsSpent: 10,
+      actualUsdSpent: 0,
+      bestOfferPolicy: "excluded-by-parser",
+      comps: [],
+      boundedError: "timeout",
+    }));
+    const apifyQueries = SOLD_COMPS_BENCHMARK_CORPUS.map<ProviderQueryCapture>((entry) => ({
+      provider: "caffein-apify",
+      queryId: entry.id,
+      status: "success",
+      latencyMs: 20_000,
+      attempts: 1,
+      retries: 0,
+      creditsSpent: 0,
+      actualUsdSpent: 0.01,
+      bestOfferPolicy: "labeled-and-excluded",
+      comps: [100, 110].map((price, index) => ({
+        id: `${entry.id}-${index}`,
+        title: "private",
+        price,
+        currency: "USD",
+        condition: "Pre-Owned",
+        endedAt: null,
+        usableForPricing: true,
+        isBestOfferAccepted: false,
+        priceDisclosure: "displayed-sold-price",
+      })),
+    }));
+    const complete: BenchmarkCapture = {
+      ...capture,
+      queries: [...existingQueries, ...apifyQueries],
+      productResearch: {
+        status: "complete",
+        queryIds: SOLD_COMPS_BENCHMARK_CORPUS
+          .filter((entry) => entry.tags.includes("product-research-subset"))
+          .map((entry) => entry.id),
+        reviewMethod: "codex-assisted-operator",
+        rows: SOLD_COMPS_BENCHMARK_CORPUS
+          .filter((entry) => entry.tags.includes("product-research-subset"))
+          .map((entry) => ({
+            queryId: entry.id,
+            condition: "Used",
+            average: 105,
+            range: { min: 100, max: 110 },
+            sellThroughPct: 50,
+            totalSellers: 10,
+            capturedAt: "2026-07-16",
+          })),
+      },
+    };
+    const completeLabels = apifyQueries.flatMap((query) => query.comps.map((comp) => ({
+      compId: comp.id,
+      relevant: true,
+      variantCorrect: true,
+      conditionCorrect: true,
+    })));
+
+    const artifact = buildRedactedArtifact(complete, completeLabels, {
+      status: "complete",
+      reviewMethod: "codex-agent-assisted",
+      labelCount: completeLabels.length,
+    });
+
+    expect(artifact.recommendation.status).toBe("apify-primary");
+    expect(artifact.productResearchComparison.byProvider[1].comparableQueryCount).toBe(7);
   });
 
   it("removes titles, URLs, seller data, tokens, and raw responses from the saved artifact", () => {

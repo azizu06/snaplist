@@ -21,6 +21,7 @@ import type {
   BenchmarkCompLabel,
   BenchmarkCorpusEntry,
   BenchmarkProvider,
+  LabelReviewStatus,
   ProviderQueryCapture,
   ProviderSummary,
   RedactedBenchmarkArtifact,
@@ -211,15 +212,19 @@ export function normalizeApifyItems(
   entry: BenchmarkCorpusEntry,
   rawItems: readonly ApifyItemLike[],
 ): BenchmarkComp[] {
-  const selected = rawItems.slice(0, BENCHMARK_MAX_RESULTS_PER_QUERY).flatMap((raw) => {
+  const selected = rawItems.slice(0, BENCHMARK_MAX_RESULTS_PER_QUERY).flatMap((raw, rowIndex) => {
     const price = toFinitePositive(raw.soldPrice);
     const title = typeof raw.title === "string" ? raw.title.trim() : "";
     const currency = typeof raw.soldCurrency === "string" ? raw.soldCurrency : "";
     if (!price || !title || !currency) return [];
-    const itemIdentity =
+    const providerIdentity =
       (typeof raw.itemId === "string" && raw.itemId) ||
       (typeof raw.url === "string" && raw.url) ||
       `${title}\0${price}`;
+    // A provider can repeat the same listing in one dataset. Keep every
+    // observed row for quality scoring while giving each review decision a
+    // stable occurrence-specific id.
+    const itemIdentity = `${providerIdentity}\0row-${rowIndex}`;
     const bestOffer =
       raw.isBestOfferAccepted === true || raw.listingType === "best_offer_accepted";
     const normalized: BenchmarkComp = {
@@ -258,6 +263,40 @@ export function normalizeApifyItems(
       !comp.isBestOfferAccepted &&
       relevant.has(comp.id),
   }));
+}
+
+/**
+ * Older Issue #188 captures predate occurrence-specific row ids. Migrate only
+ * duplicate ids so all observed rows can receive an independent private label
+ * without changing or dropping their evidence.
+ */
+export function migrateDuplicateCompIds(capture: BenchmarkCapture): BenchmarkCapture {
+  return {
+    ...capture,
+    queries: capture.queries.map((query) => {
+      const counts = new Map<string, number>();
+      for (const comp of query.comps) {
+        counts.set(comp.id, (counts.get(comp.id) ?? 0) + 1);
+      }
+      const occurrences = new Map<string, number>();
+      return {
+        ...query,
+        comps: query.comps.map((comp) => {
+          if ((counts.get(comp.id) ?? 0) < 2) return comp;
+          const occurrence = occurrences.get(comp.id) ?? 0;
+          occurrences.set(comp.id, occurrence + 1);
+          return {
+            ...comp,
+            id: compId(
+              query.provider,
+              query.queryId,
+              `legacy-${comp.id}\0occurrence-${occurrence}`,
+            ),
+          };
+        }),
+      };
+    }),
+  };
 }
 
 function boundedExistingError(error: unknown): ProviderQueryCapture["boundedError"] {
@@ -500,6 +539,10 @@ export function summarizeProvider(
     actualUsdSpent,
     costPerQueryUsd:
       actualUsdSpent == null ? null : roundUsd(actualUsdSpent / queries.length),
+    costPerUsableCompUsd:
+      actualUsdSpent == null || usableCompCount === 0
+        ? null
+        : roundUsd(actualUsdSpent / usableCompCount),
     costPerUsablePricingResultUsd:
       actualUsdSpent == null || usablePricingQueryCount === 0
         ? null
@@ -520,6 +563,9 @@ function perQueryRedacted(
     compCount: query.comps.length,
     usableCompCount: usable.length,
     labeledCompCount: query.comps.filter((comp) => labelMap.has(comp.id)).length,
+    average: prices.length
+      ? roundUsd(prices.reduce((sum, price) => sum + price, 0) / prices.length)
+      : null,
     median: sortedMedian(prices),
     range: prices.length ? { min: prices[0], max: prices.at(-1)! } : null,
     latencyMs: query.latencyMs,
@@ -556,6 +602,8 @@ function maintainability(): RedactedBenchmarkArtifact["maintainability"] {
 function recommendationFor(
   capture: BenchmarkCapture,
   summaries: ProviderSummary[],
+  labelReview: LabelReviewStatus,
+  productResearchComparison: RedactedBenchmarkArtifact["productResearchComparison"],
 ): RedactedBenchmarkArtifact["recommendation"] {
   const existing = summaries.find((summary) => summary.provider === "scrapingbee-public-page");
   const apify = summaries.find((summary) => summary.provider === "caffein-apify");
@@ -571,8 +619,8 @@ function recommendationFor(
   const fullyLabeled = Boolean(
     existing &&
       apify &&
-      existingCompCount > 0 &&
-      apifyCompCount > 0 &&
+      labelReview.status === "complete" &&
+      labelReview.labelCount === existingCompCount + apifyCompCount &&
       existing.labeledCompCount === existingCompCount &&
       apify.labeledCompCount === apifyCompCount,
   );
@@ -588,7 +636,7 @@ function recommendationFor(
   if (!fullyCovered || !fullyLabeled || capture.productResearch.status !== "complete") {
     return {
       status: "operator-pending",
-      reason: "A primary/fallback/reject decision requires both 40-query live runs, human comp labels, and the manual Product Research aggregate subset.",
+      reason: "A primary/fallback/reject decision requires both 40-query live runs, a complete attributed comp review, and the operator-authorized Product Research aggregate subset.",
       monthlyCrossoverQueries: modeledCrossover,
     };
   }
@@ -603,20 +651,35 @@ function recommendationFor(
   const monthlyCrossoverQueries = apifyCostPerSuccess
     ? Math.ceil(49 / apifyCostPerSuccess)
     : null;
-  const apifyAccuracyBetter =
-    (apify!.relevantPrecision ?? 0) >= (existing!.relevantPrecision ?? 0) + 0.03 &&
-    apify!.conditionContaminationRate! <= existing!.conditionContaminationRate!;
+  const apifyReference = productResearchComparison.byProvider.find(
+    (summary) => summary.provider === "caffein-apify",
+  );
+  const apifyAccuracyStrong = Boolean(
+    apifyReference &&
+      apifyReference.comparableQueryCount >= 5 &&
+      (apifyReference.medianAbsoluteAverageDeltaRate ?? Infinity) <= 0.2 &&
+      (apify!.relevantPrecision ?? 0) >= 0.75 &&
+      (apify!.variantContaminationRate ?? 1) <= 0.25 &&
+      (apify!.conditionContaminationRate ?? 1) <= 0.25,
+  );
   const apifyReliabilityBetter =
     apify!.successfulQueryCoverage >= existing!.successfulQueryCoverage &&
     apify!.blockErrorRate <= existing!.blockErrorRate;
-  if (apifyAccuracyBetter && apifyReliabilityBetter) {
+  if (apifyAccuracyStrong && apifyReliabilityBetter) {
     return {
       status: "apify-primary",
       reason: "Apify cleared the measured accuracy and reliability bars; keep the existing provider as a kill-switched fallback behind the same normalized adapter/cache budget.",
       monthlyCrossoverQueries,
     };
   }
-  if (apify!.successfulQueryCoverage > existing!.successfulQueryCoverage) {
+  const apifyFallbackViable = Boolean(
+    apifyReference &&
+      apifyReference.comparableQueryCount >= 5 &&
+      (apifyReference.medianAbsoluteAverageDeltaRate ?? Infinity) <= 0.5 &&
+      apify!.usablePricingQueryCount > 0 &&
+      apify!.successfulQueryCoverage > existing!.successfulQueryCoverage,
+  );
+  if (apifyFallbackViable) {
     return {
       status: "apify-fallback",
       reason: "Apify improves coverage but did not clear the accuracy/reliability margin required to replace the existing primary.",
@@ -625,7 +688,7 @@ function recommendationFor(
   }
   return {
     status: "reject-apify",
-    reason: "Apify did not improve measured accuracy or reliability enough to justify a second paid provider.",
+    reason: "Apify eliminated the observed block failures, but fewer than five Product Research queries produced comparable usable evidence and variant/condition contamination exceeded the 25% primary-quality limits; reject the candidate rather than add a second paid provider.",
     monthlyCrossoverQueries,
   };
 }
@@ -633,6 +696,11 @@ function recommendationFor(
 export function buildRedactedArtifact(
   capture: BenchmarkCapture,
   labels: readonly BenchmarkCompLabel[],
+  labelReview: LabelReviewStatus = {
+    status: "operator-pending",
+    reviewMethod: null,
+    labelCount: labels.length,
+  },
 ): RedactedBenchmarkArtifact {
   const labelMap = new Map(labels.map((label) => [label.compId, label]));
   const providers = (["scrapingbee-public-page", "caffein-apify"] as const)
@@ -670,6 +738,40 @@ export function buildRedactedArtifact(
   const overlaps = pairs.map(({ existing, apify }) =>
     overlapRate(existing.range!, apify.range!),
   );
+  const productResearchById = new Map(
+    (capture.productResearch.rows ?? []).map((row) => [row.queryId, row]),
+  );
+  const productResearchRows = perQuery.flatMap((query) => {
+    const reference = productResearchById.get(query.queryId);
+    if (query.average == null || !query.range || !reference) return [];
+    return [{
+      provider: query.provider,
+      queryId: query.queryId,
+      providerAverage: query.average,
+      referenceAverage: reference.average,
+      absoluteAverageDeltaRate: roundRate(
+        Math.abs(query.average - reference.average) /
+          ((query.average + reference.average) / 2),
+      ),
+      rangeOverlapRate: roundRate(overlapRate(query.range, reference.range)),
+    }];
+  });
+  const productResearchComparison: RedactedBenchmarkArtifact["productResearchComparison"] = {
+    byProvider: providers.map((provider) => {
+      const rows = productResearchRows.filter((row) => row.provider === provider.provider);
+      return {
+        provider: provider.provider,
+        comparableQueryCount: rows.length,
+        medianAbsoluteAverageDeltaRate: rows.length
+          ? roundRate(sortedMedian(rows.map((row) => row.absoluteAverageDeltaRate))!)
+          : null,
+        medianRangeOverlapRate: rows.length
+          ? roundRate(sortedMedian(rows.map((row) => row.rangeOverlapRate))!)
+          : null,
+      };
+    }),
+    rows: productResearchRows,
+  };
   return {
     schemaVersion: 1,
     runId: capture.runId,
@@ -700,12 +802,19 @@ export function buildRedactedArtifact(
         ? roundRate(sortedMedian(overlaps)!)
         : null,
     },
+    labelReview,
+    productResearchComparison,
     maintainability: maintainability(),
     costAccounting: {
       scrapingBee: capture.scrapingBeeCreditAccounting ?? null,
     },
     productResearch: capture.productResearch,
-    recommendation: recommendationFor(capture, providers),
+    recommendation: recommendationFor(
+      capture,
+      providers,
+      labelReview,
+      productResearchComparison,
+    ),
     redaction: {
       rawResponsesPersisted: false,
       sellerFieldsPersisted: false,

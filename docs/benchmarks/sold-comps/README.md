@@ -29,8 +29,9 @@ unchanged.
   review capture retains only title, displayed price, condition, date, provider,
   query ID, and a hashed comp ID; it is written mode `0600` under the OS temp
   directory.
-- eBay Product Research is manual aggregate reference only. The harness never
-  logs in to, reads, automates, or extracts Seller Hub.
+- eBay Product Research is aggregate reference only. The harness never logs in
+  to or automates Seller Hub; it can ingest a local operator-authorized capture
+  containing only the declared summary fields.
 
 ## Commands
 
@@ -72,10 +73,12 @@ The command also prints two private temp paths:
 
 - `*.capture.json` — normalized title/price/condition rows, no seller/source/raw
   data;
-- `*.labels.json` — heuristic label suggestions for human review.
+- `*.labels.json` — heuristic queueing suggestions for attributed human or
+  agent-assisted review.
 
-After a human reviews every private row, edits the labels, and sets
-`reviewedByHuman: true`, rescore without provider calls:
+After every private row is reviewed, record truthful provenance as either
+`reviewedByHuman: true` or `reviewedByAgent: true` with
+`reviewMethod: "codex-agent-assisted"`, then rescore without provider calls:
 
 ```bash
 pnpm benchmark:sold-comps -- \
@@ -85,17 +88,21 @@ pnpm benchmark:sold-comps -- \
 
 The heuristic suggestion is only a queueing aid. Relevance precision and
 variant/condition contamination remain `operator-pending` until the file is
-explicitly human-confirmed.
+fully reviewed and attributed. Agent-assisted review must never be represented
+as human review.
 
-## Manual Product Research subset
+## Product Research aggregate subset
 
-Use [product-research.template.json](./product-research.template.json) only as a
-manual transcription sheet. In eBay Product Research, paste each exact query,
-set the same 90-day window and used/new target shown in the template, and record
-only aggregate result count, median, and range. Do not copy seller names, listing
-rows, item IDs, URLs, screenshots, cookies, or raw responses.
+Use [product-research.template.json](./product-research.template.json) as the
+aggregate-only capture contract. In eBay Product Research, use the Sold tab,
+Last 90 days, and the exact condition semantics shown for each query. Record
+only average sold price, sold-price range, sell-through, and total sellers.
+Product Research does not expose a median in this summary, so the benchmark
+compares provider average to Product Research average. Do not copy seller names,
+listing rows, item IDs, URLs, screenshots, cookies, or raw responses.
 
-After all rows are reviewed, set `reviewedByHuman: true` and pass the local copy:
+After the seven aggregates are captured with operator authorization, pass the
+local copy:
 
 ```bash
 pnpm benchmark:sold-comps -- \
@@ -104,7 +111,7 @@ pnpm benchmark:sold-comps -- \
   --product-research /path/to/product-research.reviewed.json
 ```
 
-Until this manual step and both 40-query provider runs are complete, the report
+Until this aggregate step and both 40-query provider runs are complete, the report
 must remain `operator-pending` rather than inventing a recommendation.
 
 ## Cost model
@@ -139,7 +146,7 @@ The public page shows the asking price for a Best Offer Accepted sale, not the
 accepted amount. The existing parser excludes those cards. The Apify adapter
 retains the row only for audit with
 `asking-price-not-accepted-amount` and `usableForPricing: false`. It can never
-enter a median, range, usable-comp count, or recommendation score.
+enter an average, median, range, usable-comp count, or recommendation score.
 
 ## Adoption controls
 

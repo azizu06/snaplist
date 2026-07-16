@@ -71,16 +71,30 @@ export function buildPrivateReviewRows(capture: BenchmarkCapture): PrivateReview
   });
 }
 
-export function parseHumanLabelFile(value: unknown): BenchmarkCompLabel[] {
+export interface ParsedHumanLabelReview {
+  reviewMethod: "human" | "codex-agent-assisted";
+  labels: BenchmarkCompLabel[];
+}
+
+export function parseHumanLabelFile(value: unknown): ParsedHumanLabelReview {
   const object = value as {
     reviewedByHuman?: unknown;
+    reviewedByAgent?: unknown;
+    reviewMethod?: unknown;
     labels?: unknown;
   };
-  if (object.reviewedByHuman !== true || !Array.isArray(object.labels)) {
-    throw new Error("Human labels require reviewedByHuman=true and a labels array.");
+  const reviewMethod = object.reviewedByHuman === true
+    ? "human"
+    : object.reviewedByAgent === true && object.reviewMethod === "codex-agent-assisted"
+    ? "codex-agent-assisted"
+    : null;
+  if (!reviewMethod || !Array.isArray(object.labels)) {
+    throw new Error(
+      "Attributed labels require either human review or codex-agent-assisted review plus a labels array.",
+    );
   }
   const ids = new Set<string>();
-  return object.labels.map((raw, index) => {
+  const labels = object.labels.map((raw, index) => {
     const label = raw as Partial<BenchmarkCompLabel>;
     if (
       typeof label.compId !== "string" ||
@@ -88,10 +102,10 @@ export function parseHumanLabelFile(value: unknown): BenchmarkCompLabel[] {
       typeof label.variantCorrect !== "boolean" ||
       typeof label.conditionCorrect !== "boolean"
     ) {
-      throw new Error(`Invalid human label at index ${index}`);
+      throw new Error(`Invalid attributed label at index ${index}`);
     }
     if (ids.has(label.compId)) {
-      throw new Error(`Duplicate human label at index ${index}`);
+      throw new Error(`Duplicate attributed label at index ${index}`);
     }
     ids.add(label.compId);
     return {
@@ -102,6 +116,7 @@ export function parseHumanLabelFile(value: unknown): BenchmarkCompLabel[] {
       ...(typeof label.note === "string" ? { note: label.note } : {}),
     };
   });
+  return { reviewMethod, labels };
 }
 
 export function parseProductResearchFile(
@@ -109,47 +124,72 @@ export function parseProductResearchFile(
   requiredQueryIds: readonly string[],
 ): ProductResearchStatus {
   const object = value as {
-    reviewedByHuman?: unknown;
-    rows?: Array<{ queryId?: unknown; resultCount?: unknown; median?: unknown; range?: unknown }>;
+    capturedAt?: unknown;
+    reviewMethod?: unknown;
+    window?: unknown;
+    tab?: unknown;
+    queries?: Array<{
+      id?: unknown;
+      condition?: unknown;
+      averageSoldPriceUsd?: unknown;
+      soldPriceMinUsd?: unknown;
+      soldPriceMaxUsd?: unknown;
+      sellThroughPct?: unknown;
+      totalSellers?: unknown;
+    }>;
   };
-  if (object.reviewedByHuman !== true || !Array.isArray(object.rows)) {
-    throw new Error("Product Research reference requires reviewedByHuman=true and rows.");
+  if (
+    object.reviewMethod !==
+      "authenticated in-app browser, operator-authorized Codex assistance" ||
+    typeof object.capturedAt !== "string" ||
+    object.window !== "Last 90 days" ||
+    object.tab !== "Sold" ||
+    !Array.isArray(object.queries)
+  ) {
+    throw new Error(
+      "Product Research reference requires the operator-authorized Codex capture contract.",
+    );
   }
   const ids = new Set<string>();
   const parsedRows: NonNullable<ProductResearchStatus["rows"]> = [];
-  for (const [index, row] of object.rows.entries()) {
-    const range = row.range as { min?: unknown; max?: unknown } | undefined;
+  for (const [index, row] of object.queries.entries()) {
     if (
-      typeof row.queryId !== "string" ||
-      typeof row.resultCount !== "number" ||
-      !Number.isInteger(row.resultCount) ||
-      row.resultCount < 0 ||
-      typeof row.median !== "number" ||
-      !Number.isFinite(row.median) ||
-      row.median <= 0 ||
-      typeof range?.min !== "number" ||
-      !Number.isFinite(range.min) ||
-      range.min <= 0 ||
-      typeof range?.max !== "number" ||
-      !Number.isFinite(range.max) ||
-      range.max < range.min ||
-      row.median < range.min ||
-      row.median > range.max
+      typeof row.id !== "string" ||
+      typeof row.condition !== "string" ||
+      row.condition.trim().length === 0 ||
+      typeof row.averageSoldPriceUsd !== "number" ||
+      !Number.isFinite(row.averageSoldPriceUsd) ||
+      row.averageSoldPriceUsd <= 0 ||
+      typeof row.soldPriceMinUsd !== "number" ||
+      !Number.isFinite(row.soldPriceMinUsd) ||
+      row.soldPriceMinUsd <= 0 ||
+      typeof row.soldPriceMaxUsd !== "number" ||
+      !Number.isFinite(row.soldPriceMaxUsd) ||
+      row.soldPriceMaxUsd < row.soldPriceMinUsd ||
+      row.averageSoldPriceUsd < row.soldPriceMinUsd ||
+      row.averageSoldPriceUsd > row.soldPriceMaxUsd ||
+      typeof row.sellThroughPct !== "number" ||
+      !Number.isFinite(row.sellThroughPct) ||
+      row.sellThroughPct < 0 ||
+      row.sellThroughPct > 100 ||
+      typeof row.totalSellers !== "number" ||
+      !Number.isInteger(row.totalSellers) ||
+      row.totalSellers < 0
     ) {
       throw new Error(`Invalid Product Research aggregate row at index ${index}`);
     }
-    if (ids.has(row.queryId)) {
+    if (ids.has(row.id)) {
       throw new Error(`Duplicate Product Research aggregate row at index ${index}`);
     }
-    ids.add(row.queryId);
+    ids.add(row.id);
     parsedRows.push({
-      queryId: row.queryId,
-      resultCount: row.resultCount,
-      median: row.median,
-      range: { min: range.min, max: range.max },
-      ...(typeof (row as { reviewedAt?: unknown }).reviewedAt === "string"
-        ? { reviewedAt: (row as { reviewedAt: string }).reviewedAt }
-        : {}),
+      queryId: row.id,
+      condition: row.condition,
+      average: row.averageSoldPriceUsd,
+      range: { min: row.soldPriceMinUsd, max: row.soldPriceMaxUsd },
+      sellThroughPct: row.sellThroughPct,
+      totalSellers: row.totalSellers,
+      capturedAt: object.capturedAt,
     });
   }
   const missing = requiredQueryIds.filter((id) => !ids.has(id));
@@ -159,6 +199,7 @@ export function parseProductResearchFile(
   return {
     status: "complete",
     queryIds: [...requiredQueryIds],
+    reviewMethod: "codex-assisted-operator",
     rows: parsedRows.filter((row) => requiredQueryIds.includes(row.queryId)),
   };
 }

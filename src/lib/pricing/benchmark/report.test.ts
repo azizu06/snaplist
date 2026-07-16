@@ -40,6 +40,7 @@ const artifact: RedactedBenchmarkArtifact = {
       creditsSpent: 400,
       actualUsdSpent: 0,
       costPerQueryUsd: 0,
+      costPerUsableCompUsd: 0,
       costPerUsablePricingResultUsd: 0,
     },
   ],
@@ -48,6 +49,15 @@ const artifact: RedactedBenchmarkArtifact = {
     comparableQueryCount: 0,
     medianAbsoluteMedianDeltaRate: null,
     medianRangeOverlapRate: null,
+  },
+  labelReview: {
+    status: "operator-pending",
+    reviewMethod: null,
+    labelCount: 0,
+  },
+  productResearchComparison: {
+    byProvider: [],
+    rows: [],
   },
   maintainability: {
     "scrapingbee-public-page": {
@@ -107,6 +117,8 @@ describe("concise benchmark report", () => {
     expect(report).toContain("Best Offer");
     expect(report).toContain("asking price");
     expect(report).toContain("Product Research");
+    expect(report).toContain("average sold price");
+    expect(report).not.toContain("count/median/range");
     expect(report).toContain("~490 queries/month");
     expect(report).toContain("cache");
     expect(report).toContain("kill switch");

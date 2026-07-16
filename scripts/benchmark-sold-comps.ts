@@ -22,6 +22,7 @@ import {
   buildDryRunPlan,
   buildRedactedArtifact,
   corpusDigest,
+  migrateDuplicateCompIds,
   parseBenchmarkArgs,
   runScrapingBeeQuery,
 } from "../src/lib/pricing/benchmark/core";
@@ -44,6 +45,7 @@ import type {
   ApifyPricingSnapshot,
   BenchmarkCapture,
   BenchmarkCompLabel,
+  LabelReviewStatus,
   ProductResearchStatus,
   ProviderQueryCapture,
   ScrapingBeeCreditAccounting,
@@ -213,13 +215,14 @@ async function liveCapture(
 function saveOutputs(
   capture: BenchmarkCapture,
   labels: BenchmarkCompLabel[],
+  labelReview: LabelReviewStatus,
   outputDir: string,
   pricing: ApifyPricingSnapshot | null,
   limitations: string[],
 ): { resultPath: string; reportPath: string; capturePath: string; labelsPath: string } {
   const absoluteOutput = resolve(outputDir);
   mkdirSync(absoluteOutput, { recursive: true });
-  const artifact = buildRedactedArtifact(capture, labels);
+  const artifact = buildRedactedArtifact(capture, labels, labelReview);
   const resultPath = join(absoluteOutput, "results.json");
   const reportPath = join(absoluteOutput, "REPORT.md");
   writeJson(resultPath, artifact);
@@ -238,8 +241,10 @@ function saveOutputs(
     {
       schemaVersion: 1,
       reviewedByHuman: false,
+      reviewedByAgent: false,
+      reviewMethod: null,
       instructions:
-        "Review every title/condition, edit labels as needed, then set reviewedByHuman=true and rerun with --from-capture plus --labels. Best Offer displayed prices remain unusable regardless of labels.",
+        "Review every title/condition, edit labels as needed, record the truthful review method, then rerun with --from-capture plus --labels. Best Offer displayed prices remain unusable regardless of labels.",
       labels: buildPrivateReviewRows(capture).map((row) => ({
         ...row.suggested,
         note: `${row.queryId} ${row.provider}: review '${row.title}' (${row.condition ?? "condition missing"}; ${row.priceDisclosure})`,
@@ -292,8 +297,10 @@ async function main(): Promise<void> {
   let pricing: ApifyPricingSnapshot | null;
   let limitations: string[] = [];
   if (args.capturePath) {
-    capture = migrateLegacyScrapingBeeAccounting(
-      readJson(args.capturePath) as BenchmarkCapture,
+    capture = migrateDuplicateCompIds(
+      migrateLegacyScrapingBeeAccounting(
+        readJson(args.capturePath) as BenchmarkCapture,
+      ),
     );
     if (args.productResearchPath) {
       capture = {
@@ -313,12 +320,31 @@ async function main(): Promise<void> {
     limitations = live.limitations;
   }
 
-  const labels = args.labelsPath
+  const parsedLabels = args.labelsPath
     ? parseHumanLabelFile(readJson(args.labelsPath))
-    : [];
+    : null;
+  if (parsedLabels) {
+    limitations = limitations.filter(
+      (limitation) => !/human comp labels remain operator-pending/i.test(limitation),
+    );
+  }
+  if (capture.productResearch.status === "complete") {
+    limitations = limitations.filter(
+      (limitation) => !/product research aggregate remains operator-pending/i.test(limitation),
+    );
+  }
+  const labels = parsedLabels?.labels ?? [];
+  const labelReview: LabelReviewStatus = parsedLabels
+    ? {
+        status: "complete",
+        reviewMethod: parsedLabels.reviewMethod,
+        labelCount: labels.length,
+      }
+    : { status: "operator-pending", reviewMethod: null, labelCount: 0 };
   const paths = saveOutputs(
     capture,
     labels,
+    labelReview,
     args.outputDir,
     pricing,
     limitations,
@@ -339,10 +365,14 @@ async function main(): Promise<void> {
         resultPath: paths.resultPath,
         reportPath: paths.reportPath,
         privateCapturePath: paths.capturePath,
-        privateHumanLabelsPath: paths.labelsPath,
+        privateReviewLabelsPath: paths.labelsPath,
         apifyActualUsdSpent: apifySpent,
         scrapingBeeCreditsSpent: scrapingBeeCredits,
-        recommendationStatus: buildRedactedArtifact(capture, labels).recommendation.status,
+        recommendationStatus: buildRedactedArtifact(
+          capture,
+          labels,
+          labelReview,
+        ).recommendation.status,
       },
       null,
       2,

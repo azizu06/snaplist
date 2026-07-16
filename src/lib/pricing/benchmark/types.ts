@@ -43,7 +43,8 @@ export type PriceDisclosure =
 /**
  * Private, normalized review row. It deliberately has no URL, item id, seller,
  * feedback, image, cookie, token, or raw-response field. The title is retained
- * only in the operator-local review queue so a human can label relevance.
+ * only in the operator-local review queue for human or disclosed agent-assisted
+ * relevance review.
  */
 export interface BenchmarkComp {
   id: string;
@@ -98,12 +99,15 @@ export interface ScrapingBeeCreditAccounting {
 export interface ProductResearchStatus {
   status: "operator-pending" | "complete";
   queryIds: string[];
+  reviewMethod?: "codex-assisted-operator";
   rows?: Array<{
     queryId: string;
-    resultCount: number;
-    median: number;
+    condition: string;
+    average: number;
     range: { min: number; max: number };
-    reviewedAt?: string;
+    sellThroughPct: number;
+    totalSellers: number;
+    capturedAt: string;
   }>;
 }
 
@@ -130,6 +134,12 @@ export interface BenchmarkCompLabel {
   note?: string;
 }
 
+export interface LabelReviewStatus {
+  status: "operator-pending" | "complete";
+  reviewMethod: "human" | "codex-agent-assisted" | null;
+  labelCount: number;
+}
+
 export interface ProviderSummary {
   provider: BenchmarkProvider;
   queryCount: number;
@@ -151,6 +161,7 @@ export interface ProviderSummary {
   creditsSpent: number;
   actualUsdSpent: number | null;
   costPerQueryUsd: number | null;
+  costPerUsableCompUsd: number | null;
   costPerUsablePricingResultUsd: number | null;
 }
 
@@ -178,6 +189,7 @@ export interface RedactedBenchmarkArtifact {
     compCount: number;
     usableCompCount: number;
     labeledCompCount: number;
+    average: number | null;
     median: number | null;
     range: { min: number; max: number } | null;
     latencyMs: number;
@@ -189,6 +201,23 @@ export interface RedactedBenchmarkArtifact {
     comparableQueryCount: number;
     medianAbsoluteMedianDeltaRate: number | null;
     medianRangeOverlapRate: number | null;
+  };
+  labelReview: LabelReviewStatus;
+  productResearchComparison: {
+    byProvider: Array<{
+      provider: BenchmarkProvider;
+      comparableQueryCount: number;
+      medianAbsoluteAverageDeltaRate: number | null;
+      medianRangeOverlapRate: number | null;
+    }>;
+    rows: Array<{
+      provider: BenchmarkProvider;
+      queryId: string;
+      providerAverage: number;
+      referenceAverage: number;
+      absoluteAverageDeltaRate: number;
+      rangeOverlapRate: number;
+    }>;
   };
   maintainability: Record<BenchmarkProvider, {
     schemaBurden: string;
