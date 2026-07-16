@@ -224,7 +224,7 @@ describe("UserTokenProvider (DB-gated)", () => {
       );
     };
 
-    const provider = new UserTokenProvider(userB.client, {
+    const provider = new UserTokenProvider(userBServer, {
       env: () => TEST_ENV,
       fetch: stubFetch,
     });
