@@ -6,3 +6,4 @@ export * from "./worker-store";
 export * from "./checkpoint";
 export * from "./durable-processor";
 export * from "./worker";
+export * from "./composition";

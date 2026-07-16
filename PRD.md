@@ -381,7 +381,12 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 - **Lightweight-but-real eval harness** over a fixed gold set (~30–50 hero-domain items): ID field accuracy, pricing-within-band (median error + % within band), **confidence calibration** (reliability bucketing), and **listing quality** via a *validated* LLM-judge rubric. Script first; CI later (Phase 4). Gold set doubles as demo set and overlaps the seed corpus.
 
 ### Deploy
-- **Vercel** (Next.js App Router + TypeScript). Docker/CI/observability layered in Phase 4 as Boot.dev coursework lands.
+- **Split marketing from trusted native compute.** Keep the public marketing site on Vercel. The
+  accepted target for the trusted SwiftUI API and bounded durable worker is a provider-neutral
+  Node/TypeScript container on Railway, after the separate migration owner satisfies ADR-0009's
+  measurement, security, staging, and operator-controlled cutover gates. Supabase continues to own
+  Postgres, Storage, Realtime, and PGMQ. The current Vercel routes remain in place until that migration;
+  this architecture decision does not deploy, move DNS, activate Cron, or mutate hosted data.
 
 ## Testing Decisions
 

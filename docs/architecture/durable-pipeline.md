@@ -89,8 +89,9 @@ context. The superseded unfenced context, transition, and listing-link RPCs are 
 by the worker identity.
 
 The queue adapter and worker store accept capability-shaped RPC clients with fixed function names,
-not a generic Supabase client. The server-only composition root encloses the service credential and
-passes pipeline code only those capabilities plus private-photo download. Durable completion derives
+not a generic Supabase client. The runtime adapter encloses the service credential; the shared
+provider-neutral composition root passes pipeline code only those capabilities plus private-photo
+download. Durable completion derives
 tenant/item identity from the leased run and atomically upserts one draft listing and one prediction
 log. It has no publish, messaging, billing, or production-provider side-effect seam.
 

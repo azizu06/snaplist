@@ -11,6 +11,8 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 - [0004 — Abuse and cost protection](./adr/0004-abuse-and-cost-protection.md)
 - [0005 — Billing: direct Stripe entitlement mirror](./adr/0005-billing-direct-stripe-entitlement-mirror.md)
 - [0007 — Durable listing pipeline on Supabase Queues](./adr/0007-durable-pipeline-supabase-queues.md)
+- [0008 — Native launch entitlement, credits, and eBay authority](./adr/0008-native-launch-entitlement-credits-and-ebay-authority.md)
+- [0009 — Provider-neutral mobile API and worker runtime](./adr/0009-provider-neutral-mobile-api-and-worker-runtime.md)
 
 ## Engineering workflow — [`agents/`](./agents)
 
@@ -22,6 +24,10 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 
 - [Durable listing-pipeline architecture](./architecture/durable-pipeline.md) — logged Supabase
   Queue, run lifecycle, adapter, and worker identity boundary.
+- [Mobile API/runtime hosting proof](./architecture/mobile-runtime-hosting-proof.md) — v1 contract,
+  entry-point inventory, standalone Node/container proof, current host comparison, and cost model.
+- [Mobile API v1 OpenAPI contract](./contracts/mobile-api-v1.openapi.json) — provider-neutral SwiftUI
+  transport, authentication, idempotency, error, and callback interfaces.
 - [Superseded scraper worker spec](./architecture/scraper-worker-spec.md) — historical
   RabbitMQ/Go analysis retained for context; not the implementation plan.
 

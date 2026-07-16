@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+# Local-only architecture proof for issue #195. This image performs no hosted
+# calls and exits after the versioned API + bounded PGMQ-adapter smoke succeeds.
+FROM node:22-alpine
+WORKDIR /app
+RUN corepack enable && addgroup -S -g 1001 nodejs && adduser -S -u 1001 -G nodejs runner
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY --chown=runner:nodejs tsconfig.json vitest.config.ts ./
+COPY --chown=runner:nodejs src ./src
+COPY --chown=runner:nodejs scripts/mobile-runtime-smoke.ts ./scripts/mobile-runtime-smoke.ts
+USER runner
+CMD ["./node_modules/.bin/tsx", "scripts/mobile-runtime-smoke.ts"]
