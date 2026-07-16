@@ -16,6 +16,10 @@ import {
   type PipelineAttemptAcquisition,
   type PipelineWorkerRpcClient,
 } from "./worker-store";
+import {
+  acquireExclusiveTestResource,
+  type ExclusiveTestResourceLease,
+} from "@/test/exclusive-resource-lock";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -71,6 +75,7 @@ let runRetry = "";
 let messageA = "";
 let messageB = "";
 let messageRetry = "";
+let queueLease: ExclusiveTestResourceLease | undefined;
 const messageIds = new Set<string>();
 
 const sleep = (milliseconds: number) =>
@@ -79,6 +84,9 @@ const sleep = (milliseconds: number) =>
 beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
+  queueLease = await acquireExclusiveTestResource(
+    `local-pgmq:pipeline_jobs:${SUPABASE_URL}`,
+  );
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -157,13 +165,19 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (!reachable || !admin) return;
-  await Promise.all(
-    [...messageIds].map((messageId) =>
-      admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
-    ),
-  );
-  await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+  try {
+    if (!reachable || !admin) return;
+    await Promise.all(
+      [...messageIds].map((messageId) =>
+        admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
+      ),
+    );
+    if (userA && userB) {
+      await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+    }
+  } finally {
+    await queueLease?.release();
+  }
 });
 
 function acquired(
