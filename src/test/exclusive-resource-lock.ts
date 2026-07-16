@@ -1,88 +1,49 @@
-import { createHash, randomUUID } from "node:crypto";
-import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { Client } from "pg";
 
-const LOCK_ROOT = join(tmpdir(), "snaplist-exclusive-test-resources");
-
-interface LockOwner {
-  pid: number;
-  startedAt: number;
-  token: string;
-}
+const DEFAULT_LOCAL_DATABASE_URL =
+  "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
 export interface ExclusiveTestResourceLease {
   release(): Promise<void>;
 }
 
 interface ExclusiveTestResourceOptions {
-  beforePublish?: () => Promise<void>;
   retryDelayMs?: number;
   timeoutMs?: number;
 }
 
-function errorCode(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException | undefined)?.code;
+export function resolveLocalTestDatabaseUrl(
+  connectionString =
+    process.env.SUPABASE_TEST_DB_URL ?? DEFAULT_LOCAL_DATABASE_URL,
+): string {
+  const hostname = new URL(connectionString).hostname;
+
+  if (
+    hostname !== "127.0.0.1" &&
+    hostname !== "localhost" &&
+    hostname !== "::1" &&
+    hostname !== "[::1]"
+  ) {
+    throw new Error(
+      "Exclusive DB test resources may only use a loopback Postgres connection",
+    );
+  }
+
+  return connectionString;
 }
 
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return errorCode(error) === "EPERM";
-  }
-}
-
-async function readLockOwner(lockPath: string): Promise<Partial<LockOwner> | null> {
-  try {
-    return JSON.parse(await readFile(lockPath, "utf8")) as Partial<LockOwner>;
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") return null;
-    if (error instanceof SyntaxError) return {};
-    throw error;
-  }
-}
-
-async function removeAbandonedLock(
-  lockPath: string,
-  reaperDirectory: string,
-): Promise<boolean> {
-  const observed = await readLockOwner(lockPath);
-  if (observed === null) return true;
-  if (typeof observed.pid === "number" && processIsAlive(observed.pid)) {
-    return false;
-  }
-
-  // Serialize stale-owner removal and re-read after winning. Without this,
-  // two waiters could both observe a dead owner and the slower waiter could
-  // unlink a successor lease after the faster waiter replaces it.
-  try {
-    await mkdir(reaperDirectory);
-  } catch (error) {
-    if (errorCode(error) === "EEXIST") return false;
-    throw error;
-  }
-
-  try {
-    const current = await readLockOwner(lockPath);
-    if (current === null) return true;
-    if (typeof current.pid === "number" && processIsAlive(current.pid)) {
-      return false;
-    }
-    await rm(lockPath, { force: true });
-    return true;
-  } finally {
-    await rm(reaperDirectory, { force: true, recursive: true });
-  }
+function advisoryLockKeys(resource: string): [number, number] {
+  const digest = createHash("sha256").update(resource).digest();
+  return [digest.readInt32BE(0), digest.readInt32BE(4)];
 }
 
 /**
- * Cross-process mutex for live local integration tests that share one external
- * resource. Vitest files run in separate workers, so an in-memory mutex cannot
- * protect a global PGMQ queue. An owner record is fully written before an
- * atomic hard-link publishes it as the lock, keeping this coordination
- * test-only without exposing an ownerless acquisition window.
+ * Cross-process mutex for live local integration tests that share one database
+ * resource. The lock lives on a dedicated local Postgres session, so Vitest
+ * workers serialize through the database and Postgres releases ownership
+ * automatically if a worker exits or is killed. This stays test-only and adds
+ * no production RPC, migration, or queue authority.
  */
 export async function acquireExclusiveTestResource(
   resource: string,
@@ -94,56 +55,47 @@ export async function acquireExclusiveTestResource(
 
   const retryDelayMs = options.retryDelayMs ?? 25;
   const timeoutMs = options.timeoutMs ?? 60_000;
-  const lockName = createHash("sha256").update(resource).digest("hex").slice(0, 24);
-  const lockPath = join(LOCK_ROOT, lockName);
-  const reaperDirectory = join(LOCK_ROOT, `${lockName}.reaper`);
-  const owner: LockOwner = {
-    pid: process.pid,
-    startedAt: Date.now(),
-    token: randomUUID(),
-  };
-  const candidatePath = join(
-    LOCK_ROOT,
-    `${lockName}.${owner.pid}.${owner.token}.candidate`,
-  );
   const deadline = Date.now() + timeoutMs;
-
-  await mkdir(LOCK_ROOT, { recursive: true });
-  await writeFile(candidatePath, JSON.stringify(owner), { flag: "wx" });
+  const [firstKey, secondKey] = advisoryLockKeys(resource);
+  const client = new Client({
+    connectionString: resolveLocalTestDatabaseUrl(),
+    connectionTimeoutMillis: Math.min(timeoutMs, 2_000),
+  });
 
   try {
-    await options.beforePublish?.();
+    await client.connect();
+
     while (true) {
-      try {
-        await link(candidatePath, lockPath);
-      } catch (error) {
-        if (errorCode(error) !== "EEXIST") throw error;
-        if (await removeAbandonedLock(lockPath, reaperDirectory)) continue;
-        if (Date.now() >= deadline) {
-          throw new Error(`Timed out waiting for exclusive test resource: ${resource}`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-        continue;
+      const result = await client.query<{ acquired: boolean }>(
+        "select pg_try_advisory_lock($1::integer, $2::integer) as acquired",
+        [firstKey, secondKey],
+      );
+
+      if (result.rows[0]?.acquired) {
+        let released = false;
+        return {
+          async release() {
+            if (released) return;
+            released = true;
+            try {
+              await client.query(
+                "select pg_advisory_unlock($1::integer, $2::integer)",
+                [firstKey, secondKey],
+              );
+            } finally {
+              await client.end();
+            }
+          },
+        };
       }
 
-      let released = false;
-      return {
-        async release() {
-          if (released) return;
-          released = true;
-          try {
-            const current = await readLockOwner(lockPath);
-            if (current === null) return;
-            if (current.token !== owner.token) return;
-          } catch (error) {
-            if (errorCode(error) === "ENOENT") return;
-            throw error;
-          }
-          await rm(lockPath, { force: true });
-        },
-      };
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for exclusive test resource: ${resource}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
-  } finally {
-    await rm(candidatePath, { force: true });
+  } catch (error) {
+    await client.end().catch(() => undefined);
+    throw error;
   }
 }
