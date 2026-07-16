@@ -9,5 +9,7 @@ RUN pnpm install --frozen-lockfile
 COPY --chown=runner:nodejs tsconfig.json vitest.config.ts ./
 COPY --chown=runner:nodejs src ./src
 COPY --chown=runner:nodejs scripts/mobile-runtime-smoke.ts ./scripts/mobile-runtime-smoke.ts
+COPY --chown=runner:nodejs scripts/mobile-runtime-pipeline-benchmark.ts ./scripts/mobile-runtime-pipeline-benchmark.ts
+COPY --chown=runner:nodejs public/demo/headphones.jpg public/demo/camera.jpg public/demo/macbook.jpg public/demo/book.jpg ./public/demo/
 USER runner
 CMD ["./node_modules/.bin/tsx", "scripts/mobile-runtime-smoke.ts"]

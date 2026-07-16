@@ -32,7 +32,7 @@
         "x-implementation-status": "contract-only",
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["attestation", "challenge"], "properties": { "attestation": { "type": "string" }, "challenge": { "type": "string" } } } } } },
-        "responses": { "202": { "description": "Attestation accepted for server verification" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
+        "responses": { "202": { "description": "Attestation accepted for server verification", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GuestAttestationEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
       }
     },
     "/v1/items/runs": {
@@ -91,22 +91,23 @@
         "x-related-owner-issues": [173],
         "x-implementation-status": "contract-only",
         "security": [{ "ClerkBearer": [] }],
-        "responses": { "200": { "description": "Server-authoritative allowance period and remaining items" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+        "responses": { "200": { "description": "Server-authoritative allowance period and remaining items", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AiItemEntitlementEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
       }
     },
     "/v1/ebay/oauth/sessions": {
       "post": {
         "operationId": "createEbayOauthSession",
-        "x-owner-issue": 174,
+        "x-owner-issue": 17,
         "x-implementation-status": "contract-only",
         "security": [{ "ClerkBearer": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
-        "responses": { "201": { "description": "Server-created OAuth state and authorization URL; provider tokens never transit SwiftUI" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+        "responses": { "201": { "description": "Server-created OAuth state and authorization URL; provider tokens never transit SwiftUI", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayOauthSessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
       }
     },
     "/v1/ebay/oauth/callback": {
       "get": {
         "operationId": "completeEbayOauthCallback",
+        "x-owner-issue": 17,
         "x-implementation-status": "contract-only",
         "parameters": [
           { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } },
@@ -154,6 +155,9 @@
       "ErrorEnvelope": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["unauthorized", "forbidden", "invalid_request", "not_found", "method_not_allowed", "conflict", "rate_limited", "internal_error"] }, "message": { "type": "string" }, "requestId": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } } } },
       "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "GuestAttestationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["attestationId", "status"], "properties": { "attestationId": { "type": "string", "format": "uuid" }, "status": { "const": "pending_verification" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["status", "remainingItems", "periodStart", "periodEnd"], "properties": { "status": { "type": "string", "enum": ["active", "grace", "expired"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": "string", "format": "date-time" }, "periodEnd": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "EbayOauthSessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["sessionId", "authorizationUrl", "expiresAt"], "properties": { "sessionId": { "type": "string", "format": "uuid" }, "authorizationUrl": { "type": "string", "format": "uri" }, "expiresAt": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "ResponseMeta": { "type": "object", "required": ["requestId"], "properties": { "requestId": { "type": "string" } } },
       "CreateRunRequest": { "type": "object", "required": ["photoObjectPaths", "photoSetFingerprint"], "properties": { "photoObjectPaths": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string" } }, "photoSetFingerprint": { "type": "string" }, "costBasis": { "type": ["number", "null"], "minimum": 0 } }, "additionalProperties": false },
       "RunEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PipelineRun" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },

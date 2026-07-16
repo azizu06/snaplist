@@ -107,9 +107,11 @@ not the default product posture.
 Next.js (App Router) + TypeScript · Vercel AI SDK (OpenAI showcase / Gemini dev, via a role-keyed
 provider registry) · Tavily (primary) / Exa (secondary) web search · eBay public sold-page scraper
 (cheerio) · Clerk (auth) · Supabase (Postgres + pgvector + Realtime + Storage + cron) · Zod · Tailwind +
-shadcn/ui · Vercel deploy · eBay Sell + Trading APIs (sandbox → production, via adapter). The native
-launch client is SwiftUI with StoreKit subscription state and App Attest-backed guest abuse
-resistance; native implementation remains issue-owned and is not authorized by documentation work.
+shadcn/ui · Vercel marketing deploy · Railway selected as the future trusted API/worker target under
+#196 after ADR-0009's gates · eBay Sell + Trading APIs (sandbox → production, via adapter). Issue #195
+proves the split but performs no hosting migration. The native launch client is SwiftUI with StoreKit
+subscription state and App Attest-backed guest abuse resistance; native implementation remains
+issue-owned and is not authorized by documentation work.
 
 ## Conventions
 - Confirm current OpenAI model IDs against live docs before hardcoding — they move fast.
