@@ -15,6 +15,18 @@ export {
 } from "./types";
 export { PriceRouter } from "./router";
 export {
+  classifySoldComp,
+  normalizeComparableText,
+  normalizeSoldCompCondition,
+  selectSoldCompEvidence,
+  type SoldCompCandidate,
+  type SoldCompClassification,
+  type SoldCompCondition,
+  type SoldCompEvidence,
+  type SoldCompMatch,
+  type SoldCompMatchReason,
+} from "./sold-comp-matcher";
+export {
   createIsbnPricingProvider,
   USED_PRICE_FRACTION,
   type FetchJson,

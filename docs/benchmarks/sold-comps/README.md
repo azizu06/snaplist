@@ -91,6 +91,23 @@ variant/condition contamination remain `operator-pending` until the file is
 fully reviewed and attributed. Agent-assisted review must never be represented
 as human review.
 
+## Offline matcher replay
+
+Issue #198 separates provider retrieval from SnapList's own evidence ranking.
+Replay the attributed private capture without making any provider requests:
+
+```bash
+pnpm benchmark:sold-comp-ranking -- \
+  --capture /private/tmp/snaplist-issue188-....capture.json \
+  --labels /private/tmp/snaplist-issue188-....labels.json
+```
+
+The command writes aggregate-only output to
+`docs/benchmarks/sold-comps/ranking-replay/`. Price anchors are the only rows
+allowed into the median, citations, or minimum-two-comp gate; corroboration is
+reported separately and cannot silently price an item. The private capture and
+labels remain outside the repository.
+
 ## Product Research aggregate subset
 
 Use [product-research.template.json](./product-research.template.json) as the

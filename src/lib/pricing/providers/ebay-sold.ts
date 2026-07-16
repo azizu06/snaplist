@@ -19,6 +19,7 @@ import {
   buildEbaySoldProxyRequestUrl,
   resolveEbaySoldEgressConfig,
 } from "../ebay-sold-egress";
+import { selectSoldCompEvidence } from "../sold-comp-matcher";
 
 /**
  * Tier "ebay-sold" — a scraper over eBay's PUBLIC sold-listings pages (issue #56).
@@ -560,7 +561,7 @@ const ACCESSORY_OR_PARTS_RE =
 /**
  * New/sealed-condition markers, INCLUDING the standalone "NEW". SnapList prices
  * USED goods, so a new sold listing is not a valid comp for a used item and
- * inflates the median — UNLESS the seller's OWN item is new (see `sellerItemIsNew`).
+ * inflates the median when used by the legacy boolean helpers below.
  * Group 1 captures a leading "like " so `isNewConditionComp` SKIPS "Like New" (a
  * used grade). Identity uses of "new" (e.g. brand "New Balance") are handled by
  * STRIPPING the identity phrases from the title before scanning, not by a substring
@@ -656,16 +657,6 @@ function stripIdentity(title: string, signal: ItemSignal): string {
 }
 
 /**
- * Is the seller's OWN item new (so new-condition comps are valid)? Matches the
- * EXACT new grade only — "like-new" / "like new" is a USED grade and must not
- * exempt new comps (#56 review: a substring `.includes("new")` wrongly did).
- */
-function sellerItemIsNew(signal: ItemSignal): boolean {
-  const c = signal.condition?.trim().toLowerCase() ?? "";
-  return c === "new" || c === "brand new" || c === "brand-new";
-}
-
-/**
  * Is the comp an accessory/part rather than the item itself? True when ANY
  * accessory term in the title is NOT part of the item's own identity. Checking
  * EVERY match (not just the first) is essential: "DualSense Controller Case" for
@@ -719,15 +710,7 @@ export function filterRelevantComps(
   comps: readonly EbaySoldComp[],
   signal: ItemSignal,
 ): EbaySoldComp[] {
-  const keepNew = sellerItemIsNew(signal);
-  return comps.filter((c) => {
-    const title = c.title ?? "";
-    if (!matchesIdentity(title, signal)) return false;
-    if (isAccessoryOrParts(title, signal)) return false;
-    if (isMultiUnitLot(title)) return false;
-    if (!keepNew && isNewConditionComp(title, signal, c.condition)) return false;
-    return true;
-  });
+  return selectSoldCompEvidence(comps, signal).anchors.map((entry) => entry.comp);
 }
 
 // ---------------------------------------------------------------------------
@@ -827,6 +810,8 @@ export interface SoldSynthesisOptions {
   now?: number;
   /** Recency half-life in days; defaults to the freshness module default. */
   halfLifeDays?: number;
+  /** Optional relevance/condition weight from the provider-neutral matcher. */
+  evidenceWeight?: (comp: EbaySoldComp) => number;
 }
 
 /**
@@ -856,11 +841,14 @@ export function synthesizeSoldResult(
   const core = coreComps(comps);
   const prices = core.map((c) => c.price).sort((a, b) => a - b);
   const suggested =
-    opts.now != null
+    opts.now != null || opts.evidenceWeight
       ? weightedMedian(
           core.map((c) => c.price),
           core.map((c) =>
-            recencyWeight(c.soldAt, opts.now as number, opts.halfLifeDays),
+            (opts.evidenceWeight?.(c) ?? 1) *
+            (opts.now != null
+              ? recencyWeight(c.soldAt, opts.now, opts.halfLifeDays)
+              : 1),
           ),
         )
       : median(prices);
@@ -1104,7 +1092,11 @@ export function createEbaySoldPricingProvider(
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
-      const relevant = filterRelevantComps(comps, signal);
+      const evidence = selectSoldCompEvidence(comps, signal);
+      const relevant = evidence.anchors.map((entry) => entry.comp);
+      const evidenceWeights = new Map(
+        evidence.anchors.map((entry) => [entry.comp, entry.score]),
+      );
 
       // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
       // then recency-weight the suggested price toward more recent sales.
@@ -1114,7 +1106,10 @@ export function createEbaySoldPricingProvider(
       if (fresh.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
       return synthesizeSoldResult(
         fresh,
-        tNow != null ? { now: tNow, halfLifeDays } : {},
+        {
+          ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
+          evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,
+        },
       );
     },
   };
