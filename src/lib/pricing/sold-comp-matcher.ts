@@ -511,7 +511,19 @@ export function classifySoldComp<T extends SoldCompCandidate>(
     return reject(comp, sellerCondition, compCondition, "parts-mismatch", reasons);
   }
 
-  if (sellerCondition === "unknown" || compCondition === "unknown") {
+  if (sellerCondition === "unknown") {
+    reasons.push("condition-unknown");
+    return {
+      comp,
+      classification: "corroboration",
+      score: identityVerified ? 0.68 : 0.6,
+      sellerCondition,
+      compCondition,
+      reasons,
+    };
+  }
+
+  if (compCondition === "unknown") {
     reasons.push("condition-unknown");
     return {
       comp,

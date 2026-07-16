@@ -83,4 +83,43 @@ describe("replaySoldCompRanking", () => {
     expect(formatSoldCompRankingReplay(summary)).toContain("50.00%");
     expect(formatSoldCompRankingReplay(summary)).not.toContain("iPhone");
   });
+
+  it("never treats a non-USD row as valid pricing evidence", () => {
+    const eur = { ...comp("eur", "Apple iPhone 14 Pro 256GB", "Like New", 700), currency: "EUR" };
+    const query: ProviderQueryCapture = {
+      provider: "caffein-apify",
+      queryId: "Q05",
+      status: "success",
+      latencyMs: 10,
+      attempts: 1,
+      retries: 0,
+      creditsSpent: null,
+      actualUsdSpent: 0.01,
+      bestOfferPolicy: "labeled-and-excluded",
+      comps: [eur],
+    };
+    const capture: BenchmarkCapture = {
+      schemaVersion: 1,
+      runId: "non-usd-test",
+      mode: "live",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      corpusDigest: "test",
+      maxResultsPerQuery: 25,
+      apifyHardCeilingUsd: 5,
+      queries: [query],
+      apifyPricingSnapshot: null,
+      productResearch: { status: "operator-pending", queryIds: [] },
+    };
+    const labels: BenchmarkCompLabel[] = [
+      { compId: "eur", relevant: true, variantCorrect: true, conditionCorrect: true },
+    ];
+
+    const summary = replaySoldCompRanking(capture, labels);
+
+    expect(summary.ranking.anchorRows).toBe(1);
+    expect(summary.ranking.validAnchorRows).toBe(0);
+    expect(summary.ranking.validComparableRows).toBe(0);
+    expect(summary.ranking.anchorPrecision).toBe(0);
+    expect(summary.ranking.validAnchorRecall).toBeNull();
+  });
 });

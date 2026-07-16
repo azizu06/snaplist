@@ -37,6 +37,7 @@ const isValidComparable = (
   comp: BenchmarkComp,
   label: BenchmarkCompLabel,
 ): boolean =>
+  comp.currency === "USD" &&
   comp.priceDisclosure === "displayed-sold-price" &&
   !comp.isBestOfferAccepted &&
   label.relevant &&

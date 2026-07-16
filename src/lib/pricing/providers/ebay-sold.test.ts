@@ -409,7 +409,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
   });
 
   it("without a catalog identity, only anchors a barcode-exposing row and still drops noise", () => {
-    const upcSignal = { upc: "027242920569" } as ItemSignal;
+    const upcSignal = { upc: "027242920569", condition: "good" } as ItemSignal;
     const comps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
       { url: "https://www.ebay.com/itm/4", title: "Sony WH-1000XM4 UPC 027242920569", price: 190 },
@@ -437,7 +437,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
 
   it("treats an accessory term as noise UNLESS it is part of the item's own identity", () => {
     // Selling a PS5 console: a DualSense Controller sale is an accessory → dropped.
-    const consoleSignal: ItemSignal = { brand: "Sony", model: "PS5" };
+    const consoleSignal: ItemSignal = { brand: "Sony", model: "PS5", condition: "good" };
     const consoleComps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/a", title: "Sony PS5 Console Disc Edition", price: 400 },
       { url: "https://www.ebay.com/itm/b", title: "Sony PS5 DualSense Controller", price: 55 },
@@ -451,6 +451,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
       brand: "Sony",
       model: "DualSense",
       resolvedName: "Sony DualSense Wireless Controller",
+      condition: "good",
     };
     const controllerComps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/c", title: "Sony DualSense Wireless Controller", price: 55 },
@@ -478,6 +479,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
       brand: "Sony",
       model: "DualSense",
       resolvedName: "Sony DualSense Wireless Controller",
+      condition: "good",
     };
     const comps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/1", title: "Sony DualSense Wireless Controller", price: 55 },

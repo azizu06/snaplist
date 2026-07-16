@@ -92,6 +92,21 @@ describe("classifySoldComp", () => {
     expect(match.reasons).toContain("condition-distant");
   });
 
+  it("does not anchor known-new evidence when the seller condition is unknown", () => {
+    const signal: ItemSignal = {
+      brand: "Sony",
+      model: "WH-1000XM4",
+    };
+
+    const match = classifySoldComp(
+      candidate("Sony WH-1000XM4 Wireless Headphones", "Brand New"),
+      signal,
+    );
+
+    expect(match.classification).toBe("corroboration");
+    expect(match.reasons).toContain("condition-unknown");
+  });
+
   it("does not reject new inventory merely because the old pipeline was used-first", () => {
     const signal: ItemSignal = {
       brand: "Sony",
