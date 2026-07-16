@@ -72,7 +72,7 @@ terminal-fallback output may qualify when it is honest, coherent, and fully edit
 - Cancellation or deletion after a usable draft exists does not restore the already settled credit.
 - The first usable listing and its first seller-confirmed eBay publish are free. Editing, saving, or
   publishing that existing draft does not spend another AI-item credit.
-- Seller Pro's hard paywall appears when complete AI item run #2 attempts to reserve. Seller Pro has
+- SnapList Pro's hard paywall appears when complete AI item run #2 attempts to reserve. SnapList Pro has
   a configurable monthly AI-item allowance. StoreKit supplies localized price and subscription
   state; the public item count stays unset until TestFlight measures median and p95 cost per usable
   item.
@@ -174,7 +174,7 @@ Each gap remains outside this documentation branch and has one narrow owner:
 | #170  | Seller-confirmed launch buyer-message delivery                        | Phase 2       |
 | #171  | Deterministic, localizable Scout guidance contract                    | Phase 1       |
 | #172  | Recommendation-only stale-inventory repricing                         | Phase 3       |
-| #173  | StoreKit-to-server Seller Pro entitlement bridge                      | Phase 2       |
+| #173  | StoreKit-to-server SnapList Pro entitlement bridge                    | Phase 2       |
 | #174  | App Attest guest allowance and publish-authentication handoff         | Phase 1       |
 | #175  | Atomic account claim, encrypted recovery, and guest expiry owner      | Phase 1       |
 | #176  | Thin post-sale read model and confirmed add-tracking/mark-shipped     | Phase 3       |

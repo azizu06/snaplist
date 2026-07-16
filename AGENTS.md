@@ -23,7 +23,7 @@ not the default product posture.
   blocking only when the guest chooses **Publish to eBay**, after which the same result is claimed
   and reopened. Pre-value onboarding has no seller questionnaire. See ADR-0008.
 - **AI-item credits settle on durable value.** The first usable listing and first seller-confirmed
-  eBay publish are free. Seller Pro gates complete AI item run #2 and uses a configurable monthly
+  eBay publish are free. SnapList Pro gates complete AI item run #2 and uses a configurable monthly
   allowance whose public count waits for TestFlight median/p95 cost data. For Apple billing, the
   server-verified StoreKit subscription period is the reset window; verified grace keeps the current
   remainder without resetting, and late or ambiguous state cannot advance credits. Reserve before

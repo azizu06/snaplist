@@ -173,7 +173,7 @@ receive honest **assisted marketplace handoffs**.
   restored exactly once after failure/cancellation before that point. Internal retries/recovery and
   the one included same-item/same-photo-set guided correction reuse it; a new item, changed photo set,
   or full re-analysis needs a new credit.
-- **Seller Pro allowance period** — for Apple billing, the server-verified StoreKit subscription
+- **SnapList Pro allowance period** — for Apple billing, the server-verified StoreKit subscription
   period `[period_start, expires_date)`. It is not a calendar month or client-clock interval. A later
   signed renewal advances the allowance once; verified grace keeps the current remainder without a
   reset; late, duplicate, out-of-order, or ambiguous state cannot advance credits.

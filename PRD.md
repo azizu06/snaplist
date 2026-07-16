@@ -62,7 +62,7 @@ entitlement, settlement, and marketplace-authority semantics.
   not spend another credit.
 - The first usable listing and first seller-confirmed eBay publish are free.
   Account creation/eBay connection occur only when the guest chooses Publish.
-- Seller Pro's hard paywall appears when complete AI item run #2 begins. Paid
+- SnapList Pro's hard paywall appears when complete AI item run #2 begins. Paid
   usage is a configurable monthly AI-item allowance; the public number waits for
   TestFlight median/p95 cost data. Do not preserve the legacy daily allowance as
   the new native product promise.
@@ -133,8 +133,8 @@ authoritative source supports it and otherwise hands that status check to eBay.
 23. As a guest, I want account creation to become blocking only when I tap **Publish to eBay**, so that signup does not interrupt first value.
 24. As a guest, I want authentication to claim my recoverable result and return me to the same draft before eBay connection.
 25. As a new seller, I want my first usable listing and first seller-confirmed eBay publish to remain free.
-26. As a seller, I want the Seller Pro paywall only when I attempt complete AI item run #2, so that editing or publishing an existing draft does not consume another credit.
-27. As a Seller Pro subscriber, I want a configurable monthly AI-item allowance with localized StoreKit price and status, so that the product does not promise a guessed public limit.
+26. As a seller, I want the SnapList Pro paywall only when I attempt complete AI item run #2, so that editing or publishing an existing draft does not consume another credit.
+27. As a SnapList Pro subscriber, I want a configurable monthly AI-item allowance with localized StoreKit price and status, so that the product does not promise a guessed public limit.
 28. As a seller, I want a credit reserved when processing starts, settled only after a usable draft exists, and restored after failure/cancellation before usable output.
 29. As a seller, I want internal retries, crash recovery, queue redelivery, and my included guided correction to reuse the same credit.
 30. As a seller, I expect a new item, new photo set, or full re-analysis to use another credit.
@@ -231,10 +231,10 @@ authoritative source supports it and otherwise hands that status check to eBay.
   the photo set and requires a new run.
   Account creation and eBay connection become blocking only when the guest chooses **Publish to
   eBay**; after authentication the same guest result is claimed and reopened.
-- **First listing and first publish are free.** Seller Pro does not interrupt the first usable draft
+- **First listing and first publish are free.** SnapList Pro does not interrupt the first usable draft
   or its first seller-confirmed eBay publish. The hard paywall appears when complete AI item run #2
   attempts to reserve capacity.
-- **Monthly, not daily, product entitlement.** Seller Pro grants a configurable monthly AI-item
+- **Monthly, not daily, product entitlement.** SnapList Pro grants a configurable monthly AI-item
   allowance. For an Apple-billed seller, the allowance follows the server-verified StoreKit
   subscription period, not a calendar month or a client clock. A verified renewal advances it once;
   verified grace preserves the current period's remainder without resetting; late or ambiguous state
@@ -450,7 +450,7 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - Automatic publish after seller-triggered identity correction — regeneration always returns to a
   reviewable draft.
 - A pre-value seller questionnaire. Optional personalization begins only after a usable first draft.
-- Presenting legacy daily server limits as the native Seller Pro entitlement or public allowance.
+- Presenting legacy daily server limits as the native SnapList Pro entitlement or public allowance.
 - Making bulk/haul or inventory-scale automation the default launch posture.
 
 ## Further Notes
@@ -476,7 +476,7 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
   complete manual editing; one guided same-item/photo-set correction; encrypted 24-hour recovery;
   no pre-value questionnaire.
 - **Phase 2 — claim, metering, activity:** claim the guest result at Publish; monthly AI-item credit
-  reservation/settlement and run-#2 Seller Pro gate; Home/contextual Runs/activity center; bounded
+  reservation/settlement and run-#2 SnapList Pro gate; Home/contextual Runs/activity center; bounded
   push; seller-approved buyer-reply delivery.
 - **Phase 3 — eBay authority and assisted launch marketplaces:** first seller-confirmed eBay publish;
   two-way listing/order synchronization with visible conflicts; seller-confirmed add-tracking/
