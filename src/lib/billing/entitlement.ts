@@ -39,7 +39,7 @@ export async function getEntitlement(
 
     // An active or trialing status is paid only while a recorded period remains
     // current. The mirror is asynchronously updated by webhooks, so an expired
-    // or malformed period must fail closed rather than extending Seller Pro.
+    // or malformed period must fail closed rather than extending SnapList Pro.
     if (tier === "paid" && row?.current_period_end != null) {
       if (typeof row.current_period_end !== "string") return "free";
       const periodEnd = Date.parse(row.current_period_end);

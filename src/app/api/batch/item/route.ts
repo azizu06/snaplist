@@ -11,7 +11,7 @@ import {
   recordPipelineRunAndMaybeAlert,
   refundDailyItem,
 } from "@/lib/abuse";
-import { getEntitlement } from "@/lib/billing";
+import { resolveNewAiItemRunPolicy } from "@/lib/billing";
 
 /**
  * POST /api/batch/item — run ONE item of a bulk/haul batch (issue #100)
@@ -20,8 +20,8 @@ import { getEntitlement } from "@/lib/billing";
  * outcomes, not redirects); every guardrail from that path applies unchanged
  * and in the same order:
  *
- *   auth → per-minute rate limit → photo validation → per-user/day item
- *   quota (#58, tier-aware via billing #64) → user-scoped storage upload →
+ *   auth → operational per-minute rate limit → photo validation → #153 new-run
+ *   policy → operational per-user/day capacity guard → user-scoped storage upload →
  *   global OpenAI budget counter → `runPipelineAndPersist` (items row +
  *   prediction_logs row + listings row under RLS).
  *
@@ -90,19 +90,39 @@ export async function POST(request: Request) {
     }
   }
 
-  // Spend guardrail (#58): the per-user/day ITEM cap, checked BEFORE any
-  // storage or model work — exactly as the single-item upload does. A haul
-  // that crosses the cap gets `kind: "quota"`, which tells the orchestrator to
-  // stop dispatching the rest of the batch (they'd all be denied today).
-  const tier = await getEntitlement(userId);
-  const quota = await checkDailyItemQuota(userId, undefined, tier);
-  if (!quota.allowed) {
-    const plan = tier === "paid" ? "Pro" : "free";
+  // #153: batch capture is not itself a paid capability. Each new item start
+  // consumes the same RLS-scoped server policy as single-item capture before
+  // any storage or provider work.
+  const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
+    client: supabase,
+  });
+  if (!itemRunPolicy.allowed) {
+    if (itemRunPolicy.reason === "policy-unavailable") {
+      return NextResponse.json(
+        {
+          error: "We couldn't verify whether this item can start. Please try again.",
+          kind: "policy-unavailable",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       {
-        error: `Daily limit reached (${quota.limit} items/day on the ${plan} plan). Remaining items will need to wait until tomorrow.`,
+        error: "SnapList Pro is required to start another new item.",
+        kind: "snaplist-pro-required",
+      },
+      { status: 403 },
+    );
+  }
+
+  // Legacy daily capacity remains an operational guardrail, not a tier-based
+  // allowance or customer-visible credit balance.
+  const quota = await checkDailyItemQuota(userId);
+  if (!quota.allowed) {
+    return NextResponse.json(
+      {
+        error: "Capacity limit reached. Please try again later.",
         kind: "quota",
-        limit: quota.limit,
       },
       { status: 429 },
     );

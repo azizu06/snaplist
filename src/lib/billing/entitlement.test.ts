@@ -68,14 +68,17 @@ describe("getEntitlement (#64 — fail-safe tier read)", () => {
     ["active", "2020-01-01T00:00:00.000Z"],
     ["trialing", "2020-01-01T00:00:00.000Z"],
     ["active", "not-a-timestamp"],
-  ])("fails closed for a %s mirror with an expired or malformed period", async (status, currentPeriodEnd) => {
-    expect(
-      await getEntitlement(
-        "u1",
-        fakeClient({ selectData: { status, current_period_end: currentPeriodEnd } }),
-      ),
-    ).toBe("free");
-  });
+  ])(
+    "fails closed for a %s mirror with an expired or malformed period",
+    async (status, currentPeriodEnd) => {
+      expect(
+        await getEntitlement(
+          "u1",
+          fakeClient({ selectData: { status, current_period_end: currentPeriodEnd } }),
+        ),
+      ).toBe("free");
+    },
+  );
 
   it("NEVER throws / over-entitles on a read error — defaults free", async () => {
     expect(await getEntitlement("u1", fakeClient({ selectThrows: true }))).toBe("free");
