@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "source": "eBay Seller Hub Product Research",
+  "capturedAt": null,
+  "reviewMethod": "authenticated in-app browser, operator-authorized Codex assistance",
+  "marketplace": "EBAY-US",
+  "window": "Last 90 days",
+  "tab": "Sold",
+  "instructions": "Record only average sold price, sold-price range, sell-through, and total sellers. Never copy seller data, listing rows, item ids, URLs, images, cookies, screenshots, or raw responses. This capture is not human review.",
+  "queries": [
+    {
+      "id": "Q01",
+      "query": "9780140328721",
+      "condition": "Very Good + Good + Acceptable",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    },
+    {
+      "id": "Q05",
+      "query": "Apple iPhone 14 Pro 256GB",
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    },
+    {
+      "id": "Q09",
+      "query": "Sony WH-1000XM4",
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    },
+    {
+      "id": "Q11",
+      "query": "Dell XPS 15 9530 RTX 4070 32GB 1TB SSD",
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    },
+    {
+      "id": "Q14",
+      "query": "Sony PlayStation 5 Disc Edition",
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    },
+    {
+      "id": "Q24",
+      "query": "LEGO 75192 Millennium Falcon Complete",
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    },
+    {
+      "id": "Q28",
+      "query": "Nike Air Jordan 1 Retro High OG Lost and Found Size 10",
+      "condition": "Used",
+      "averageSoldPriceUsd": null,
+      "soldPriceMinUsd": null,
+      "soldPriceMaxUsd": null,
+      "sellThroughPct": null,
+      "totalSellers": null
+    }
+  ]
+}

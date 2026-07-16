@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "reviewedByHuman": false,
+  "reviewedByAgent": true,
+  "reviewMethod": "codex-agent-assisted",
+  "labels": [
+    {
+      "compId": "replace-with-private-review-comp-id",
+      "relevant": true,
+      "variantCorrect": true,
+      "conditionCorrect": true,
+      "note": "Optional short rationale; never paste seller data or source URLs."
+    }
+  ]
+}
