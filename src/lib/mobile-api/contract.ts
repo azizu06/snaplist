@@ -9,8 +9,12 @@ export const apiErrorCodeSchema = z.enum([
   "invalid_request",
   "not_found",
   "method_not_allowed",
+  "conflict",
+  "rate_limited",
   "internal_error",
 ]);
+
+export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
 
 export const apiErrorEnvelopeSchema = z
   .object({

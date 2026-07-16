@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { apiErrorEnvelopeSchema } from "./contract";
 
 const contract = JSON.parse(
   readFileSync(resolve("docs/contracts/mobile-api-v1.openapi.json"), "utf8"),
@@ -32,6 +33,17 @@ describe("SwiftUI mobile HTTP contract", () => {
     );
     expect(JSON.stringify(contract)).toContain("Idempotency-Key");
   });
+
+  it.each(["conflict", "rate_limited"])(
+    "can emit the documented %s error code",
+    (code) => {
+      expect(() =>
+        apiErrorEnvelopeSchema.parse({
+          error: { code, message: "Stable native error.", requestId: "req_test" },
+        }),
+      ).not.toThrow();
+    },
+  );
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);

@@ -5,6 +5,7 @@ import {
   healthEnvelopeSchema,
   sessionEnvelopeSchema,
   workerSummaryEnvelopeSchema,
+  type ApiErrorCode,
 } from "./contract";
 
 export interface MobileApiPrincipal {
@@ -42,11 +43,7 @@ function bearerToken(request: Request): string | null {
 function errorResponse(
   requestId: string,
   status: number,
-  code:
-    | "unauthorized"
-    | "not_found"
-    | "method_not_allowed"
-    | "internal_error",
+  code: ApiErrorCode,
   message: string,
 ): Response {
   return json(
