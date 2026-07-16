@@ -32,9 +32,10 @@ allowance promise.
   unchanged. Any fingerprint-changing photo mutation, including adding, replacing, or removing a
   photo, or an edit that requests provider-backed full re-analysis or creates a second item, is a
   new complete AI item run.
-- The guided correction is included only when it keeps the original item identity and immutable
-  photo-set fingerprint. It may regenerate fields that depend on corrected identity through the
-  shared pricing/confidence/listing seams. It cannot silently become a second complete analysis.
+- The guided correction is included only for the same physical item and unchanged immutable
+  photo-set fingerprint; it may correct the model's original identity. It may regenerate fields that
+  depend on corrected identity through the shared pricing/confidence/listing seams. It cannot
+  silently become a second complete analysis.
 - Account creation and eBay connection become blocking only when the guest chooses **Publish to
   eBay**. The guest-activation owner initiates authentication, then invokes the #175-owned atomic
   claim primitive and returns to the same draft. That single primitive transfers the guest
