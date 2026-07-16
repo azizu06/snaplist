@@ -34,8 +34,10 @@ allowance promise.
   photo-set fingerprint. It may regenerate fields that depend on corrected identity through the
   shared pricing/confidence/listing seams. It cannot silently become a second complete analysis.
 - Account creation and eBay connection become blocking only when the guest chooses **Publish to
-  eBay**. Authentication claims the same guest item/run/draft atomically and returns to that draft;
-  claim does not create a second reservation or consume a credit.
+  eBay**. The guest-activation owner initiates authentication, then invokes the #175-owned atomic
+  claim primitive and returns to the same draft. That single primitive transfers the guest
+  item/run/draft/reservation against the 24-hour expiry fence; claim does not create a second
+  reservation or consume a credit.
 
 ### 2. Usable draft is the settlement point
 
@@ -151,9 +153,11 @@ approved official partner API.
   processing copies expire after operational recovery needs. Listing/account deletion purges
   associated SnapList data subject to required provider/legal records.
 - Issue #175 exclusively owns the guest 24-hour clock, encrypted local/server recovery artifacts,
-  claim-or-delete predicate, and guest expiry deletion path. Issue #181 consumes that outcome but may
-  not change guest TTL, claim fencing, or guest cleanup selection; it owns only non-guest listing/
-  account deletion and non-guest temporary processing retention.
+  atomic guest-to-account transfer, claim-or-delete predicate, claim/expiry fencing, and guest expiry
+  deletion path. Issue #174 initiates authentication and consumes that primitive but cannot transfer
+  guest ownership independently. Issue #181 consumes the claimed/expired outcome but may not change
+  guest TTL, claim fencing, or guest cleanup selection; it owns only non-guest listing/account
+  deletion and non-guest temporary processing retention.
 
 ## Implementation owners created from #166
 
@@ -168,8 +172,8 @@ Each gap remains outside this documentation branch and has one narrow owner:
 | #171  | Deterministic, localizable Scout guidance contract                    | Phase 1       |
 | #172  | Recommendation-only stale-inventory repricing                         | Phase 3       |
 | #173  | StoreKit-to-server Seller Pro entitlement bridge                      | Phase 2       |
-| #174  | App Attest guest allowance and publish-time account claim             | Phase 1       |
-| #175  | Exclusive encrypted 24-hour guest recovery, claim, and expiry owner   | Phase 1       |
+| #174  | App Attest guest allowance and publish-authentication handoff         | Phase 1       |
+| #175  | Atomic account claim, encrypted recovery, and guest expiry owner      | Phase 1       |
 | #176  | Thin post-sale read model and confirmed add-tracking/mark-shipped     | Phase 3       |
 | #177  | Sold-elsewhere record and confirmed verified eBay end-listing         | Phase 3       |
 | #178  | Assisted Mercari, Facebook Marketplace, and Depop handoffs            | Phase 3       |
