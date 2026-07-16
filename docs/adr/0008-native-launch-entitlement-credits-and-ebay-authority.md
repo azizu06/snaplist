@@ -71,13 +71,25 @@ terminal-fallback output may qualify when it is honest, coherent, and fully edit
   a configurable monthly AI-item allowance. StoreKit supplies localized price and subscription
   state; the public item count stays unset until TestFlight measures median and p95 cost per usable
   item.
+- For an Apple-billed seller, “monthly” means the server-verified StoreKit subscription period
+  `[period_start, expires_date)`, not a calendar month and not 30 days from first use. The server
+  entitlement mirror derived from signed StoreKit transaction/renewal data is the reservation
+  authority; device state, device time, and an unverified client callback cannot reset credits.
+- A later verified renewal period advances the allowance exactly once by a monotonic period identity.
+  Late, duplicate, or out-of-order StoreKit events cannot reopen an earlier period or reset the same
+  period twice. A verified billing-grace state keeps the remaining allowance from the current period
+  but does not create a new period. Billing retry without verified grace, expiration, revocation, or
+  refund blocks new reservations; it does not revoke existing drafts or reverse settled credits.
+  If renewal state is late or ambiguous, the server fails closed to the last verified period and
+  remaining credits until a newer signed period is verified.
 - Legacy per-day item and per-minute request limits are separate abuse/capacity guardrails. They must
   not be labeled monthly credits or used as the native product promise.
 
 Required contract tests include same-run retries, queue redelivery, crash recovery, guided
 correction, manual edits, changed photo sets, cancel/fail before settlement, cancel/delete after
-settlement, guest-to-account claim, duplicate callbacks, monthly boundary, and concurrent run-#2
-reservation.
+settlement, guest-to-account claim, concurrent run-#2 reservation, mid-period signup, verified
+renewal, grace without reset, retry/expiration/revocation, late renewal, and duplicate/out-of-order
+StoreKit callbacks.
 
 ### 4. eBay authority and synchronization
 
@@ -138,6 +150,10 @@ approved official partner API.
   remain recoverable for 24 hours. Account claim transfers them; expiry deletes them. Temporary
   processing copies expire after operational recovery needs. Listing/account deletion purges
   associated SnapList data subject to required provider/legal records.
+- Issue #175 exclusively owns the guest 24-hour clock, encrypted local/server recovery artifacts,
+  claim-or-delete predicate, and guest expiry deletion path. Issue #181 consumes that outcome but may
+  not change guest TTL, claim fencing, or guest cleanup selection; it owns only non-guest listing/
+  account deletion and non-guest temporary processing retention.
 
 ## Implementation owners created from #166
 
@@ -153,13 +169,13 @@ Each gap remains outside this documentation branch and has one narrow owner:
 | #172  | Recommendation-only stale-inventory repricing                         | Phase 3       |
 | #173  | StoreKit-to-server Seller Pro entitlement bridge                      | Phase 2       |
 | #174  | App Attest guest allowance and publish-time account claim             | Phase 1       |
-| #175  | Encrypted 24-hour guest recovery and expiry                           | Phase 1       |
+| #175  | Exclusive encrypted 24-hour guest recovery, claim, and expiry owner   | Phase 1       |
 | #176  | Thin post-sale read model and confirmed add-tracking/mark-shipped     | Phase 3       |
 | #177  | Sold-elsewhere record and confirmed verified eBay end-listing         | Phase 3       |
 | #178  | Assisted Mercari, Facebook Marketplace, and Depop handoffs            | Phase 3       |
 | #179  | Native navigation, contextual Runs, activity center, and bounded push | Phase 2       |
 | #180  | Truthful native sale economics with optional cost basis               | Phase 3       |
-| #181  | SnapList-owned deletion and temporary-artifact retention              | Phase 4       |
+| #181  | Non-guest deletion and temporary-processing retention                 | Phase 4       |
 
 All are `Lane = Blocked` while their declared dependencies remain open. Existing owners #17, #47,
 #141, #153, #159, #161, and #162 remain unchanged.

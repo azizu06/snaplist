@@ -173,6 +173,10 @@ receive honest **assisted marketplace handoffs**.
   restored exactly once after failure/cancellation before that point. Internal retries/recovery and
   the one included same-item/same-photo-set guided correction reuse it; a new item, changed photo set,
   or full re-analysis needs a new credit.
+- **Seller Pro allowance period** — for Apple billing, the server-verified StoreKit subscription
+  period `[period_start, expires_date)`. It is not a calendar month or client-clock interval. A later
+  signed renewal advances the allowance once; verified grace keeps the current remainder without a
+  reset; late, duplicate, out-of-order, or ambiguous state cannot advance credits.
 - **Guest allowance** — one App Attest-backed device entitlement containing one **AI-item credit** and
   exactly one guided identity correction for the same item/photo set. Manual edits are unlimited.
   The usable result remains encrypted/recoverable for 24 hours, then is claimed by an account or

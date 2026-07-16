@@ -22,11 +22,13 @@ not the default product posture.
   and reopened. Pre-value onboarding has no seller questionnaire. See ADR-0008.
 - **AI-item credits settle on durable value.** The first usable listing and first seller-confirmed
   eBay publish are free. Seller Pro gates complete AI item run #2 and uses a configurable monthly
-  allowance whose public count waits for TestFlight median/p95 cost data. Reserve before processing,
-  settle exactly once when a coherent item, price recommendation, and editable draft are durably
-  available, and restore exactly once on failure/cancel before that point. A new item, changed photo
-  set, or full re-analysis uses a new credit. Legacy daily limits are operational guardrails, not the
-  native product promise. See ADR-0008.
+  allowance whose public count waits for TestFlight median/p95 cost data. For Apple billing, the
+  server-verified StoreKit subscription period is the reset window; verified grace keeps the current
+  remainder without resetting, and late or ambiguous state cannot advance credits. Reserve before
+  processing, settle exactly once when a coherent item, price recommendation, and editable draft are
+  durably available, and restore exactly once on failure/cancel before that point. A new item,
+  changed photo set, or full re-analysis uses a new credit. Legacy daily limits are operational
+  guardrails, not the native product promise. See ADR-0008.
 - **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). All model
   calls resolve through `resolveLanguageModel(role, …)`; the provider is a `LLM_PROVIDER` flip
   (dev → Gemini for the free tier, showcase → OpenAI) — never construct a provider inline at a call

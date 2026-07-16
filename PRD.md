@@ -231,10 +231,13 @@ authoritative source supports it and otherwise hands that status check to eBay.
   or its first seller-confirmed eBay publish. The hard paywall appears when complete AI item run #2
   attempts to reserve capacity.
 - **Monthly, not daily, product entitlement.** Seller Pro grants a configurable monthly AI-item
-  allowance. StoreKit supplies localized price and subscription state. The public allowance remains
-  unset until TestFlight measures median and p95 cost per usable item. Existing server daily limits
-  remain legacy operational guardrails until a focused reconciliation issue replaces them; they are
-  not the native product promise and must not be presented as credits.
+  allowance. For an Apple-billed seller, the allowance follows the server-verified StoreKit
+  subscription period, not a calendar month or a client clock. A verified renewal advances it once;
+  verified grace preserves the current period's remainder without resetting; late or ambiguous state
+  fails closed to the last verified period. StoreKit supplies localized price and subscription state.
+  The public allowance remains unset until TestFlight measures median and p95 cost per usable item.
+  Existing server daily limits remain legacy operational guardrails until a focused reconciliation
+  issue replaces them; they are not the native product promise and must not be presented as credits.
 - **Reservation settles on durable value.** Reserve one credit before provider-backed processing;
   settle it exactly once only after the coherent item, price recommendation, and editable draft are
   durably available. Failure or cancellation before that point restores the reservation exactly once.
