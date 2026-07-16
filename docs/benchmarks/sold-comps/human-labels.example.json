@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "reviewedByHuman": true,
+  "labels": [
+    {
+      "compId": "replace-with-private-review-comp-id",
+      "relevant": true,
+      "variantCorrect": true,
+      "conditionCorrect": true,
+      "note": "Optional short rationale; never paste seller data or source URLs."
+    }
+  ]
+}

@@ -15,6 +15,7 @@
     "demo:capture-ui": "node remotion/scripts/capture-real-ui.mjs",
     "demo:render-real-ui": "node remotion/scripts/render-real-ui.mjs",
     "smoke:sold-comps": "tsx scripts/scrape-smoke.ts",
+    "benchmark:sold-comps": "tsx scripts/benchmark-sold-comps.ts",
     "eval": "tsx src/lib/eval/run.ts",
     "eval:build-gold": "tsx src/lib/eval/build-gold-set.ts",
     "supabase": "supabase"

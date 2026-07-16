@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "reviewedByHuman": false,
+  "instructions": "Manual eBay Product Research aggregate reference only. Use a 90-day window. Record count, median, and range; do not copy seller data, listing rows, item ids, URLs, screenshots, cookies, or raw responses.",
+  "rows": [
+    {
+      "queryId": "Q01",
+      "query": "9780140328721",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    },
+    {
+      "queryId": "Q05",
+      "query": "Apple iPhone 14 Pro 256GB",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    },
+    {
+      "queryId": "Q09",
+      "query": "Sony WH-1000XM4",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    },
+    {
+      "queryId": "Q11",
+      "query": "Dell XPS 15 9530 RTX 4070 32GB 1TB SSD",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    },
+    {
+      "queryId": "Q14",
+      "query": "Sony PlayStation 5 Disc Edition",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    },
+    {
+      "queryId": "Q24",
+      "query": "LEGO 75192 Millennium Falcon Complete",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    },
+    {
+      "queryId": "Q28",
+      "query": "Nike Air Jordan 1 Retro High OG Lost and Found Size 10",
+      "targetCondition": "used",
+      "resultCount": null,
+      "median": null,
+      "range": { "min": null, "max": null },
+      "reviewedAt": null
+    }
+  ]
+}
