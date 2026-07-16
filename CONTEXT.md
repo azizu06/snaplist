@@ -7,8 +7,9 @@ requirements live in `PRD.md`; this file is the language layer the engineering s
 A seller photographs a used item; SnapList **identifies** it, **prices** it with a range and a
 **confidence** score, cites the evidence-backed tiers, and clearly labels the terminal uncited
 fallback when necessary. It **generates** platform-specific listing copy and **drafts**
-buyer replies. The confidence gate can mark high-confidence items **ready to publish**; the seller still
-chooses every eBay publish through the **adapter**. Other platforms receive **export packs**.
+buyer replies. The confidence gate can mark high-confidence items **ready to publish**; the seller
+still confirms every consequential eBay action through an **adapter**. Other launch platforms
+receive honest **assisted marketplace handoffs**.
 
 ## Glossary (ubiquitous language)
 
@@ -49,8 +50,9 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   **$0** is a real value (a free find). Persisted as `items.cost_basis`; feeds **net profit**.
 - **Net profit (margin)** — the estimated amount a seller pockets on a sale:
   `price − estimated platform fees − cost basis`. Resellers think in margin, not list price, so it's
-  surfaced wherever a price is. **Null** (price-only) when no cost basis is recorded — never a fake
-  $0. Pure, unit-tested math in `src/lib/pricing/fees.ts`.
+  shown only when cost basis is known. When cost is missing, show revenue, estimated fees, and
+  estimated net proceeds—never profit and never a fake $0. Pure, unit-tested math in
+  `src/lib/pricing/fees.ts`.
 - **Platform fees** — the per-platform selling-fee **estimate** (`rate × price + fixed`) behind
   net-profit math: eBay ≈13.25% + $0.30, Facebook Marketplace 5%, Mercari ≈12.9% + $0.50. Always an
   *estimate* (labeled "est."), not an invoice — real fees vary by category, store level, and promos.
@@ -65,14 +67,14 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   items stay in review. Toggleable off. Eligibility never calls the eBay **adapter** or publishes in
   the background; only the seller's explicit **Publish to eBay** action creates a marketplace post.
   A seller-triggered **review correction** always returns to `draft`, regardless of score.
-- **Bulk / haul capture** — the reseller-native capture flow (issue #100) at `/batch`: photograph
+- **Bulk / haul capture** — an advanced-volume growth path (issue #100) at `/batch`: photograph
   several items in one session (1–4 photos each), then submit the whole **batch**. Each item runs
-  through the *same* single-item pipeline spine (`POST /api/batch/item`) under the same rate-limit and
-  daily-**item**-cap guardrails, at small bounded concurrency — a haul is a slow trickle of ordinary
-  runs, never a stampede. Additive to the single-item capture, not a replacement.
+  through the *same* single-item pipeline spine (`POST /api/batch/item`) with its own **AI-item
+  credit**, evidence, review, and bounded concurrency. Additive to the primary one-item native path,
+  never the default posture or a shared-credit shortcut.
 - **Triage list** — the live results surface of a bulk **batch**: one row per captured **item**, each
-  showing a **triage status** (processing → needs-review / autopilot-eligible / active, plus failed /
-  daily-limit). Triage statuses are a *reading* of the item's persisted **listing** status — no new
+  showing a **triage status** (processing → needs-review / ready-to-publish / active, plus failed /
+  credit-limit). Triage statuses are a *reading* of the item's persisted **listing** status — no new
   persisted vocabulary — and the list polls `GET /api/batch/status` so rows track DB truth (e.g. a
   `queued` listing becoming `published` after the seller acts elsewhere). Every row links to the
   item's normal review page.
@@ -86,17 +88,30 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **Review revision** — the item-owned concurrency token coordinating review edits, regeneration,
   export-pack generation, dashboard edits, applied reprices, and publish acquisition. Any seller-price
   change advances it; stale writers fail rather than mixing identity, price, copy, or marketplace state.
-- **Export pack** — copy-paste listing text for a platform with no write API (Facebook Marketplace,
-  Mercari). Distinct from a real **post**. Generated copy is tied to the review content revision, while
+- **Export pack** — platform-appropriate listing text/photos for a platform with no approved write API
+  (Facebook Marketplace, Mercari, Depop). It feeds an **assisted marketplace handoff** and is distinct
+  from a real **post**. Generated copy is tied to the review content revision, while
   every fresh or cached read carries the current **effective price** and verifies the full review
   revision. Content edits regenerate copy; price-only edits reuse copy without serving a stale price.
+- **Assisted marketplace handoff** — prepare Facebook Marketplace, Mercari, or Depop text/photos,
+  invoke the native share sheet or an honest deep link when available, and show a short checklist.
+  The seller completes the destination form; SnapList never claims it filled or published it.
 - **Effective price** — the one amount every outbound consumer uses: a valid, positive,
   cent-normalized seller `price_override`, otherwise the latest suggested price from the prediction
   log. Invalid legacy overrides are ignored rather than published; the underlying recommendation log
   remains unchanged when the seller chooses a different price.
-- **Post / publish** — actually putting a listing live on eBay via the **adapter**.
-- **Adapter** — the isolating interface around eBay (posting + messaging). The pipeline must run and
-  be testable against a **mock adapter** with no live eBay. Sandbox→production is a credential flip.
+- **Post / publish** — actually putting a listing live on eBay via the **adapter**, always after an
+  explicit seller confirmation.
+- **eBay authority** — SnapList owns unpublished drafts. After publish, eBay is authoritative for
+  listing and order truth. External changes sync into SnapList; seller-confirmed local changes go
+  through an **adapter** and persist from the confirmed provider result. Divergence creates a visible
+  **sync conflict**, never silent last-write-wins.
+- **Sync conflict** — an explicit state where local seller intent and current eBay truth differ or
+  provider acknowledgement is ambiguous. SnapList shows both sides and a safe next action rather
+  than choosing a winner silently.
+- **Adapter** — an isolating interface around an eBay capability such as publish/listing mutation,
+  fulfillment, or messaging. Launch flows must run against **mock adapters** with no live eBay.
+  Sandbox→production is a credential/configuration flip.
 - **Marketplace messaging adapter** — the provider-neutral seam for fetching unresolved pre-sale
   questions, resolving their provider conversation, replying to the exact question, and sending a
   later seller-authored follow-up. Both delivery paths can carry supported hosted photos with the
@@ -112,7 +127,7 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
 - **eBay account generation** — the tenant-bound version of a connected or operator-fallback seller
   identity. Sync, messages, token refresh, and provider dispatch are pinned to it so disconnect,
   reconnect, replacement, or erasure cannot let stale work cross account boundaries.
-- **Delivery truth** — the external state of an authorized automatic reply or seller-approved reply/follow-up: `sending`, `delivered`,
+- **Delivery truth** — the external state of a seller-approved reply/follow-up: `sending`, `delivered`,
   `rejected`, `failed`, or `ambiguous`. `sent_at` and an external delivery ID exist only after an
   acknowledgement; ambiguous delivery remains visibly retryable with an explicit duplicate-risk
   confirmation.
@@ -120,18 +135,20 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   unresolved conversation matches for later reconciliation, deduplicates external identity,
   routes each question once per **message policy version**, and retires questions eBay reports as answered or no
   longer available. Normal ingestion targets the next five-minute boundary or sooner.
-- **Safe buyer auto-reply** — one tenant-scoped, default-off seller preference. A deterministic
-  **message policy** may send only an exact restatement of a current authoritative listing fact
-  (including the asking price or seller-confirmed measurement). Negotiation, commitments,
-  post-sale support, untrusted buyer instructions/premises, raw vision guesses, and
-  missing/stale/conflicting facts remain seller-gated.
-- **Message policy decision** — the versioned, once-per-question audit outcome: **auto-send**,
-  **draft for approval**, or **escalate**, with structured reasons, grounding references, safety
-  signals, and canonical delivery truth. Model confidence never authorizes a send.
+- **Safe buyer auto-reply** — the legacy name for a default-off implemented capability. It is not
+  authorized in the native launch contract: a deterministic **message policy** may recommend or
+  draft an exact restatement of a current authoritative listing fact, but every external send still
+  requires explicit seller confirmation. Negotiation, commitments, post-sale support, untrusted
+  buyer instructions/premises, raw vision guesses, and missing/stale/conflicting facts remain
+  seller-gated.
+- **Message policy decision** — the versioned, once-per-question audit outcome: **draft for
+  approval** or **escalate**, with structured reasons, grounding references, safety signals, and
+  canonical delivery truth. Existing `auto-send` records are legacy state, not launch authorization.
+  Model confidence never authorizes a send.
 - **Buyer-Q&A agent** — the **agent** that drafts replies to buyer questions, grounded in an item's
   attributes/listing. It runs for simulated demo questions and tenant-scoped eBay Sandbox imports;
-  it never authorizes an automatic send. The deterministic **message policy** does; all non-safe-fact
-  outcomes still require seller approval or review before authenticated delivery.
+  it never authorizes a send. The deterministic **message policy** selects draft or escalation, and
+  every authenticated delivery requires explicit seller approval.
 - **Inbox** — the seller's live view of simulated or imported buyer **messages**, fed
   DB→Supabase Realtime after **inbox sync**. The seller is the only SnapList user; buyers stay on eBay.
 - **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to
@@ -147,6 +164,19 @@ chooses every eBay publish through the **adapter**. Other platforms receive **ex
   idempotency, lease fencing, cumulative stage checkpoints, safe failure details, and lifecycle
   timestamps, and is the product-visible truth when queue delivery is retried. Distinct from a
   **prediction log**, which records model/eval output.
+- **Usable draft** — the durable settlement point for one complete AI item run: one coherent item,
+  price recommendation (including an honestly labeled fallback), and editable listing draft are
+  atomically available to the seller. Provider retries, queue attempts, and partial checkpoints do
+  not qualify.
+- **AI-item credit** — one logical entitlement reservation for one complete AI item run. It is
+  reserved before provider-backed processing, settles exactly once at **usable draft**, and is
+  restored exactly once after failure/cancellation before that point. Internal retries/recovery and
+  the one included same-item/same-photo-set guided correction reuse it; a new item, changed photo set,
+  or full re-analysis needs a new credit.
+- **Guest allowance** — one App Attest-backed device entitlement containing one **AI-item credit** and
+  exactly one guided identity correction for the same item/photo set. Manual edits are unlimited.
+  The usable result remains encrypted/recoverable for 24 hours, then is claimed by an account or
+  deleted with its server-side guest artifacts.
 - **Pipeline queue envelope** — the strict versioned PGMQ message `{ run_id, schema_version }`. It is
   only a wake-up signal: never a photo/signed URL, tenant identity, secret, seller copy, or
   authorization claim. The worker derives tenant scope from the stored **pipeline run**.
