@@ -49,7 +49,17 @@ function fakeClient(opts: {
 
 describe("getEntitlement (#64 — fail-safe tier read)", () => {
   it("returns paid for a paid mirror row", async () => {
-    expect(await getEntitlement("u1", fakeClient({ selectData: { status: "active" } }))).toBe("paid");
+    expect(
+      await getEntitlement(
+        "u1",
+        fakeClient({
+          selectData: {
+            status: "active",
+            current_period_end: "2099-01-01T00:00:00.000Z",
+          },
+        }),
+      ),
+    ).toBe("paid");
   });
 
   it("returns free for a free row, a missing row, or an unknown value", async () => {
@@ -63,6 +73,24 @@ describe("getEntitlement (#64 — fail-safe tier read)", () => {
       await getEntitlement("u1", fakeClient({ selectData: { status: "canceled", tier: "paid" } })),
     ).toBe("free");
   });
+
+  it.each([
+    ["active", null],
+    ["trialing", undefined],
+    ["active", "2020-01-01T00:00:00.000Z"],
+    ["trialing", "2020-01-01T00:00:00.000Z"],
+    ["active", "not-a-timestamp"],
+  ])(
+    "fails closed for a %s mirror with a missing, expired, or malformed period",
+    async (status, currentPeriodEnd) => {
+      expect(
+        await getEntitlement(
+          "u1",
+          fakeClient({ selectData: { status, current_period_end: currentPeriodEnd } }),
+        ),
+      ).toBe("free");
+    },
+  );
 
   it("NEVER throws / over-entitles on a read error — defaults free", async () => {
     expect(await getEntitlement("u1", fakeClient({ selectThrows: true }))).toBe("free");

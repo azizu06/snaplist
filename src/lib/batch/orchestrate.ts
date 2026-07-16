@@ -69,17 +69,17 @@ export async function runBatch(
   };
 
   let next = 0;
-  let quotaHit = false;
+  let terminalCapacityMessage: string | null = null;
 
   async function worker(): Promise<void> {
     while (true) {
       const index = next;
       if (index >= count) return;
       next += 1;
-      if (quotaHit) {
+      if (terminalCapacityMessage) {
         set(index, {
           phase: "blocked",
-          message: "Daily limit reached — this item was not processed.",
+          message: terminalCapacityMessage,
         });
         continue;
       }
@@ -93,8 +93,9 @@ export async function runBatch(
           listingStatus: outcome.listingStatus,
         });
       } else if (outcome.kind === "quota") {
-        // Stop dispatching new entries; this one and all later ones are blocked.
-        quotaHit = true;
+        // Stop dispatching new entries and preserve the authoritative reason
+        // (operational capacity or SnapList Pro) for every blocked sibling.
+        terminalCapacityMessage = outcome.message;
         set(index, { phase: "blocked", message: outcome.message });
       } else {
         set(index, { phase: "failed", kind: outcome.kind, message: outcome.message });

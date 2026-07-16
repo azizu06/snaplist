@@ -11,10 +11,11 @@ import { getAutopilotEnabled, setAutopilotEnabled } from "@/lib/settings/user-se
 import { reportServerError } from "@/lib/sentry";
 import {
   checkDailyItemQuota,
+  rateLimitAllows,
   recordPipelineRunAndMaybeAlert,
   refundDailyItem,
 } from "@/lib/abuse";
-import { getEntitlement } from "@/lib/billing";
+import { resolveNewAiItemRunPolicy } from "@/lib/billing";
 
 /**
  * Upload server action — the spine wired to the request:
@@ -78,17 +79,34 @@ export async function uploadAndProcess(formData: FormData) {
     );
   }
 
-  // Spend guardrail (#58): the per-user/day ITEM cap — gate the expensive vision +
-  // pricing + listing run BEFORE uploading photos or calling any model. Resolve the
-  // billing entitlement (#64) so Pro subscribers get the higher cap; getEntitlement
-  // is fail-safe (defaults free), so a billing hiccup never blocks an upload. (A
-  // friendlier limit screen is UI polish tracked to the frontend issue.)
-  const tier = await getEntitlement(userId);
-  const quota = await checkDailyItemQuota(userId, undefined, tier);
-  if (!quota.allowed) {
-    const plan = tier === "paid" ? "Pro" : "free";
+  // Operational abuse guardrail (#58), independent of subscription entitlement.
+  // The server action shares the same per-user bucket as metered API routes.
+  if (!(await rateLimitAllows(userId))) {
     redirect(
-      `/upload?error=${encodeURIComponent(`Daily limit reached (${quota.limit} items/day on the ${plan} plan). Please try again tomorrow.`)}`,
+      `/upload?error=${encodeURIComponent("Too many requests. Please slow down and try again shortly.")}`,
+    );
+  }
+
+  // #153: one request-scoped, RLS-enforcing server policy owns authorization to
+  // begin provider-backed work. No browser/client tier state participates.
+  const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
+    client: supabase,
+  });
+  if (!itemRunPolicy.allowed) {
+    const message =
+      itemRunPolicy.reason === "policy-unavailable"
+        ? "We couldn't verify whether this item can start. Please try again."
+        : "SnapList Pro is required to start another new item.";
+    redirect(`/upload?error=${encodeURIComponent(message)}`);
+  }
+
+  // Legacy daily capacity remains an operational cost guardrail only. It is
+  // deliberately not resolved from entitlement and is not presented as a plan
+  // allowance or native credit balance.
+  const quota = await checkDailyItemQuota(userId);
+  if (!quota.allowed) {
+    redirect(
+      `/upload?error=${encodeURIComponent("Capacity limit reached. Please try again later.")}`,
     );
   }
 

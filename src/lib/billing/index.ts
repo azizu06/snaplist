@@ -18,6 +18,12 @@ export {
   type BillingLifecycleStore,
 } from "./entitlement";
 export {
+  resolveNewAiItemRunPolicy,
+  type NewAiItemRunPolicy,
+  type NewAiItemRunPolicyReason,
+  type ResolveNewAiItemRunPolicyOptions,
+} from "./item-run-policy";
+export {
   subscriptionFromStripe,
   subscriptionReferenceFromEvent,
   handleStripeEvent,
