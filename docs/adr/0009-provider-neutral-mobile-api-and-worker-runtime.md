@@ -32,26 +32,28 @@ approved a strict **$0 infrastructure commitment during development and initial 
 paid plan, billing account, payment method, or usage commitment is authorized by this ADR or issue
 #195.
 
-1. **Local development and automated verification now.** Run local Supabase plus the provider-neutral
-   Node API and Node worker. This is the only full-fidelity $0 environment: the worker can poll PGMQ
-   continuously while preserving RLS, narrow run-scoped RPC authority, lease fencing, checkpointing,
-   and completion-before-ack. The checked-in local/no-network container tests remain the automated
-   proof. No hosted runtime is required for ordinary development.
-2. **Zero-cost remote prototype/TestFlight, with disclosed limits.** The smallest truthful no-billing
-   topology is a free hosted Supabase project for Postgres/Storage/PGMQ, an optional Render Free web
-   service for the versioned Node API, and the same Node worker running locally during supervised test
-   sessions. The API enqueues and returns; it never performs the durable pipeline inline. When the
-   operator's worker is offline, runs remain queued and status stays pending until a supervised worker
-   session resumes them.
+1. **Local development and automated verification now.** Run local Supabase and the implemented Node
+   runtime/worker seams. Issue #195 proves `/v1/health`, `/v1/session`, the internal consume endpoint,
+   queue/RPC validation, checkpointing, lease fencing, and completion-before-ack. It does **not**
+   implement the #159-owned `/v1/items/runs` enqueue/RLS adapter, so the full local Node API + worker
+   topology is the approved development target after that owner lands, not a current #195 result. The
+   checked-in local/no-network container tests remain the automated proof of the implemented seams.
+2. **Zero-cost remote prototype/TestFlight, with disclosed limits.** After the owning API/auth issues
+   land, the smallest truthful no-billing topology is a free hosted Supabase project for
+   Postgres/Storage/PGMQ, an optional Render Free web service for the versioned Node API, and the same
+   Node worker running locally during supervised test sessions. The future API must enqueue and
+   return; it never performs the durable pipeline inline. When the operator's worker is offline, runs
+   remain queued and status stays pending until a supervised worker session resumes them.
    - Supabase Free currently allows two projects, 500 MB database per project, 1 GB Storage, 5 GB
      egress, and 500,000 Edge Function invocations. Low-activity projects may pause after seven days.
    - Render Free web services sleep after 15 minutes without inbound traffic, can take about a minute
      to wake, provide 750 instance-hours/month, may restart or suspend at platform limits, and cannot
      host a free background worker. With no payment method, exhaustion suspends service/builds rather
      than creating an overage charge.
-   - This path can exercise remote SwiftUI contract, auth, enqueue, status, RLS, and supervised durable
-     completion. It cannot promise always-on processing, bounded queue latency, uptime, or unattended
-     push/retry behavior. Those limitations must be visible to testers.
+   - Once those owner-owned operations exist, this path can exercise remote SwiftUI contract, auth,
+     enqueue, status, RLS, and supervised durable completion. It cannot promise always-on processing,
+     bounded queue latency, uptime, or unattended push/retry behavior. Those limitations must be
+     visible to testers.
 3. **Deferred paid production target.** Railway remains the first paid target because the proved
    Node/Docker API and persistent PGMQ worker require the least migration and no second durability
    engine. It is not required now. Railway Free provides only $1 monthly credit after its trial and

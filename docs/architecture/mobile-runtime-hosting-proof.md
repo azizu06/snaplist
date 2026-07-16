@@ -144,8 +144,8 @@ payment method, billing account, paid plan, or provider setup is authorized by t
 
 | Stage | Truthful topology | What it proves | Explicit limitation / upgrade trigger |
 | --- | --- | --- | --- |
-| **Local development now** | Local Supabase plus local Node API and Node PGMQ worker; checked-in tests and no-network Docker proofs | Full durable behavior: enqueue-and-return API, RLS, narrow worker RPCs, leases/checkpoints, redelivery, and completion-before-ack | Not remotely available; this remains the default until external validation needs a shared endpoint |
-| **$0 remote prototype/TestFlight** | Supabase Free hosts Postgres/Storage/PGMQ; an optional Render Free web service hosts only the Node API; the Node worker runs locally during supervised sessions | Remote SwiftUI auth/contract/enqueue/status plus real queued durable completion when the operator worker is online | Render sleeps after 15 inbound-idle minutes and may take about a minute to wake; no free Render background worker exists. When the local worker is offline, runs wait in PGMQ. No always-on latency, uptime, unattended retry, or push promise |
+| **Local development now / target** | Today: local Supabase plus the standalone Node health/session/internal-consume proof and durable worker. Target after #159: the local v1 enqueue/status API plus the same worker | Today proves runtime startup, queue/RPC validation, leases/checkpoints, redelivery, and completion-before-ack. It does not prove the #159-owned enqueue/RLS API; that operation remains contract-only | Keep current implemented flows on their existing adapters until owners land; do not describe #195 as a runnable full v1 backend |
+| **$0 remote prototype/TestFlight (after API/auth owners land)** | Supabase Free hosts Postgres/Storage/PGMQ; an optional Render Free web service hosts only the Node API; the Node worker runs locally during supervised sessions | Will exercise remote SwiftUI auth/contract/enqueue/status plus queued durable completion when the operator worker is online | Not currently end-to-end in #195. Render sleeps after 15 inbound-idle minutes and may take about a minute to wake; no free Render background worker exists. When the local worker is offline, runs wait in PGMQ. No always-on latency, uptime, unattended retry, or push promise |
 | **Deferred production** | Railway Node/Docker API plus persistent PGMQ worker, owned by #196 | Reliable unattended processing after all measurement/security/staging gates | Begins only when an external TestFlight cohort needs bounded unattended processing, a measured free-host limit blocks validation, or first revenue/payment activation justifies paid infrastructure |
 
 Supabase Free currently provides two projects, 500 MB database per project, 1 GB Storage, 5 GB
@@ -240,14 +240,16 @@ time; “low-volume” includes those obvious floors.
 
 ### Owner-approved staged recommendation
 
-1. **Now: local Supabase + local Node API/worker.** This is the ranked first choice because it is $0,
-   exercises the complete architecture, creates no billing risk, and preserves every ADR-0007
-   invariant. Automated local/container verification is the default development path.
-2. **Remote pre-revenue: Supabase Free + optional Render Free API + supervised local Node worker.**
-   This is the smallest truthful $0 TestFlight path. It keeps enqueue-and-return and durable PGMQ
-   state, but it is intentionally not always-on: API cold starts can approach a minute, Supabase may
-   pause for inactivity, and queued runs wait while the operator worker is offline. Test plans must
-   schedule supervised worker windows and describe pending processing honestly.
+1. **Now: local Supabase + implemented Node runtime/worker seams.** This is the ranked first choice
+   because it is $0, creates no billing risk, and verifies the existing ADR-0007 consumer invariants.
+   The full local v1 Node API/worker topology remains the target after #159 implements enqueue/status
+   under RLS; #195 does not claim that owner-owned API exists.
+2. **After API/auth owners land: Supabase Free + optional Render Free API + supervised local Node
+   worker.** This is the smallest truthful $0 remote TestFlight topology, not a current runnable #195
+   result. It must keep enqueue-and-return and durable PGMQ state, but it is intentionally not
+   always-on: API cold starts can approach a minute, Supabase may pause for inactivity, and queued
+   runs wait while the operator worker is offline. Test plans must schedule supervised worker windows
+   and describe pending processing honestly.
 3. **After an upgrade trigger: Railway paid API/worker under #196.** Railway remains the production
    preference because its Node/Docker/PGMQ locality minimizes engineering time. Payment is deferred
    until external testers need reliable unattended processing, an observed free-tier limit blocks a

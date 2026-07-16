@@ -382,14 +382,16 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Deploy
 - **Split marketing from trusted native compute.** Keep the public marketing site on Vercel. The
-  development default is $0 local Supabase plus the provider-neutral local Node API/worker. A remote
-  pre-revenue test may use Supabase Free plus an optional sleeping Render Free API while the Node
-  worker runs only during supervised local sessions; queued work honestly waits while that worker is
-  offline. Railway is the deferred paid target only after external TestFlight needs reliable
-  unattended processing, a measured free-host limit blocks validation, or first revenue/payment
-  activation justifies an owner-approved commitment. Supabase continues to own Postgres, Storage,
-  Realtime, and PGMQ. This decision does not authorize provider setup, billing, deployment, DNS,
-  hosted Cron, credentials, or hosted-data mutation.
+  development target is $0 local Supabase plus the provider-neutral local Node API/worker. Issue #195
+  proves health/session/internal-consume composition and durable worker behavior; the enqueue/RLS v1
+  API remains contract-only under #159. After the owning API/auth issues land, a remote pre-revenue
+  test may use Supabase Free plus an optional sleeping Render Free API while the Node worker runs only
+  during supervised local sessions; queued work honestly waits while that worker is offline. Railway
+  is the deferred paid target only after external TestFlight needs reliable unattended processing, a
+  measured free-host limit blocks validation, or first revenue/payment activation justifies an
+  owner-approved commitment. Supabase continues to own Postgres, Storage, Realtime, and PGMQ. This
+  decision does not authorize provider setup, billing, deployment, DNS, hosted Cron, credentials, or
+  hosted-data mutation.
 
 ## Testing Decisions
 
