@@ -27,9 +27,11 @@ allowance promise.
 - One device may receive one guest allowance backed by a verified App Attest assertion.
 - The guest allowance contains exactly one complete AI item run and exactly one guided identity
   correction for the same item and same photo set.
-- Manual editing of identity, condition, title, description, item specifics, photos, and price does
-  not consume an AI-item credit. If an edit requests provider-backed full re-analysis, replaces or
-  adds photos, or creates a second item, it is a new complete AI item run.
+- Manual editing of identity, condition, title, description, item specifics, photo presentation,
+  and price does not consume an AI-item credit while the immutable photo-set fingerprint is
+  unchanged. Any fingerprint-changing photo mutation, including adding, replacing, or removing a
+  photo, or an edit that requests provider-backed full re-analysis or creates a second item, is a
+  new complete AI item run.
 - The guided correction is included only when it keeps the original item identity and immutable
   photo-set fingerprint. It may regenerate fields that depend on corrected identity through the
   shared pricing/confidence/listing seams. It cannot silently become a second complete analysis.

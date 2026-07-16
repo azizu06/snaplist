@@ -56,8 +56,10 @@ entitlement, settlement, and marketplace-authority semantics.
 - Pre-value onboarding has no seller questionnaire. Optional lightweight
   personalization may appear only after a usable first draft.
 - Guest entitlement: one App Attest-backed complete AI item run plus exactly one
-  guided identity correction for the same item/photo set. Manual editing is
-  unlimited. Technical retries/recovery do not spend another credit.
+  guided identity correction for the same item/photo set. Manual editing that
+  preserves the immutable photo-set fingerprint is unlimited. Adding, replacing,
+  or removing a photo creates a changed photo set. Technical retries/recovery do
+  not spend another credit.
 - The first usable listing and first seller-confirmed eBay publish are free.
   Account creation/eBay connection occur only when the guest chooses Publish.
 - Seller Pro's hard paywall appears when complete AI item run #2 begins. Paid
@@ -224,7 +226,9 @@ authoritative source supports it and otherwise hands that status check to eBay.
 
 ### Native activation, entitlement & AI-item credits
 - **First value before identity.** One device gets one App Attest-backed complete AI item run and
-  exactly one guided identity correction for the same item/photo set. Manual edits are unlimited.
+  exactly one guided identity correction for the same item/photo set. Manual edits that preserve
+  the immutable photo-set fingerprint are unlimited; adding, replacing, or removing a photo changes
+  the photo set and requires a new run.
   Account creation and eBay connection become blocking only when the guest chooses **Publish to
   eBay**; after authentication the same guest result is claimed and reopened.
 - **First listing and first publish are free.** Seller Pro does not interrupt the first usable draft

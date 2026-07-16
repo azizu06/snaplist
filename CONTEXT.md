@@ -178,7 +178,9 @@ receive honest **assisted marketplace handoffs**.
   signed renewal advances the allowance once; verified grace keeps the current remainder without a
   reset; late, duplicate, out-of-order, or ambiguous state cannot advance credits.
 - **Guest allowance** — one App Attest-backed device entitlement containing one **AI-item credit** and
-  exactly one guided identity correction for the same item/photo set. Manual edits are unlimited.
+  exactly one guided identity correction for the same item/photo set. Manual edits that preserve the
+  immutable photo-set fingerprint are unlimited; adding, replacing, or removing a photo requires a
+  new run.
   The usable result remains encrypted/recoverable for 24 hours, then is claimed by an account or
   deleted with its server-side guest artifacts.
 - **Pipeline queue envelope** — the strict versioned PGMQ message `{ run_id, schema_version }`. It is

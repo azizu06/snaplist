@@ -16,7 +16,9 @@ not the default product posture.
   `public.clerk_user_id()`. Never write a query path that bypasses tenant isolation.
 - **First value precedes account creation.** One App Attest-backed guest allowance includes exactly
   one complete AI item run and one guided identity correction for the same item/photo set; manual
-  edits, technical retries, recovery, and queue redelivery do not consume another credit. The usable
+  edits that preserve the immutable photo-set fingerprint, technical retries, recovery, and queue
+  redelivery do not consume another credit. Adding, replacing, or removing a photo changes the photo
+  set and requires a new run. The usable
   result remains encrypted and recoverable for 24 hours. Account creation/eBay connection become
   blocking only when the guest chooses **Publish to eBay**, after which the same result is claimed
   and reopened. Pre-value onboarding has no seller questionnaire. See ADR-0008.
