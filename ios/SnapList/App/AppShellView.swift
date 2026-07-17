@@ -164,6 +164,12 @@ enum AppCaptureHandoffCoordinator {
               router.presentedSheet == nil,
               router.presentedFullScreen == nil else { return }
 
+        if case .library = context, captureFlow.stagedPhoto != nil {
+            // A prior source-cleanup failure keeps the durable capture authoritative.
+            // Retry only the idempotent source consume; never stage the photo again.
+            _ = onboardingModel.consumeStagedLibraryPhotosAfterSuccessfulCapture()
+        }
+
         if case .library = context,
            captureFlow.stagedPhoto == nil,
            let photoData = onboardingModel.firstStagedLibraryPhotoForCapture() {

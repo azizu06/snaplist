@@ -172,6 +172,7 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
     private let rootDirectory: URL
     private let manifestURL: URL
     private let writeData: @Sendable (Data, URL, Data.WritingOptions) throws -> Void
+    private let discardRoot: @Sendable (URL) throws -> Void
     private let now: @Sendable () -> Date
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -183,6 +184,7 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             data, url, options in
             try data.write(to: url, options: options)
         },
+        discardRoot: (@Sendable (URL) throws -> Void)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         let defaultRoot = fileManager.urls(
@@ -195,6 +197,9 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         self.rootDirectory = rootDirectory ?? defaultRoot
         manifestURL = self.rootDirectory.appendingPathComponent("manifest.json")
         self.writeData = writeData
+        self.discardRoot = discardRoot ?? { url in
+            try fileManager.removeItem(at: url)
+        }
         self.now = now
     }
 
@@ -275,7 +280,7 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
 
     func discard() async throws {
         guard fileManager.fileExists(atPath: rootDirectory.path) else { return }
-        try fileManager.removeItem(at: rootDirectory)
+        try discardRoot(rootDirectory)
     }
 
     private func purgeOwnedDraft(photoURL: URL, thumbnailURL: URL) {

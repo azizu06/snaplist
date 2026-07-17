@@ -371,19 +371,47 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedSheet, .capture)
     }
 
-    func testDiscardFailurePreservesTheDurableCaptureAndOnboardingSource() async throws {
-        let photos = [Data([0x01]), Data([0x02])]
-        let stagedLibraryPhotos = FailingConsumeStagedLibraryPhotoStore(photos: photos)
+    func testDiscardFailureReconcilesTheRestoredCaptureBeforeExpiry() async throws {
+        let fileManager = FileManager.default
+        let parent = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-library-discard-failure-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let onboardingRoot = parent.appendingPathComponent("Onboarding", isDirectory: true)
+        let captureRoot = parent.appendingPathComponent("Capture", isDirectory: true)
+        let createdAt = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        let progressStore = InMemoryOnboardingProgressStore()
+        let consumeController = ConsumeMoveController(fileManager: fileManager)
+        let discardController = DiscardRootController()
+        let initialLibraryStore = FileSystemStagedLibraryPhotoStore(
+            fileManager: fileManager,
+            directoryURL: onboardingRoot
+        )
+        let stagedLibraryPhotos = FileSystemStagedLibraryPhotoStore(
+            fileManager: fileManager,
+            directoryURL: onboardingRoot,
+            consumeMoveItem: consumeController.move
+        )
+        defer { try? fileManager.removeItem(at: parent) }
+
+        try initialLibraryStore.replace(with: [makeLandscapeImageData()])
         let onboarding = OnboardingFlowModel(
-            state: .init(screen: .libraryHandoff, stagedPhotoCount: photos.count),
+            state: .init(screen: .libraryHandoff, stagedPhotoCount: 1),
             cameraAuthorization: FixtureCameraAuthorizationClient(status: .denied),
-            progressStore: InMemoryOnboardingProgressStore(),
+            progressStore: progressStore,
             stagedLibraryPhotos: stagedLibraryPhotos,
             guestAllowance: DeferredGuestAllowanceCapability()
         )
         onboarding.continueToCaptureBoundary()
-        let captureStore = TestCaptureStore(discardError: TestCaptureError.failed)
-        let capture = makeModel(store: captureStore)
+        let capture = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: LocalCaptureDraftStore(
+                rootDirectory: captureRoot,
+                discardRoot: discardController.discard,
+                now: { createdAt }
+            )
+        )
         _ = await capture.restore()
         let router = AppRouter()
 
@@ -394,15 +422,19 @@ final class CaptureFlowTests: XCTestCase {
         )
 
         let durablyStaged = try XCTUnwrap(capture.stagedPhoto)
-        XCTAssertEqual(captureStore.stageCount, 1)
-        XCTAssertEqual(captureStore.discardCount, 1)
+        XCTAssertEqual(discardController.discardCount, 1)
         XCTAssertEqual(capture.phase, .captured)
-        XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
-        XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
-        XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: photos.count))
+        XCTAssertEqual(try stagedLibraryPhotos.load().count, 1)
+        XCTAssertEqual(onboarding.state.stagedPhotoCount, 1)
+        XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: 1))
         XCTAssertEqual(router.presentedSheet, .capture)
 
-        let relaunchedCapture = makeModel(store: captureStore)
+        consumeController.shouldFail = false
+        let relaunchedCapture = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: LocalCaptureDraftStore(rootDirectory: captureRoot, now: { createdAt })
+        )
         let restoration = await relaunchedCapture.restore()
         XCTAssertEqual(restoration, .stagedPhoto)
         XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
@@ -413,9 +445,41 @@ final class CaptureFlowTests: XCTestCase {
             router: relaunchedRouter
         )
 
-        XCTAssertEqual(captureStore.stageCount, 1)
         XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
+        XCTAssertEqual(try stagedLibraryPhotos.load(), [])
+        XCTAssertEqual(onboarding.state.stagedPhotoCount, 0)
+        XCTAssertEqual(onboarding.captureEntryContext, .camera)
         XCTAssertEqual(relaunchedRouter.presentedSheet, .capture)
+
+        let expiredCapture = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: LocalCaptureDraftStore(
+                rootDirectory: captureRoot,
+                now: { createdAt.addingTimeInterval(LocalCaptureDraftStore.recoveryWindow) }
+            )
+        )
+        let expiredRestoration = await expiredCapture.restore()
+        XCTAssertEqual(expiredRestoration, .noDraft)
+        let restoredOnboarding = OnboardingFlowModel(
+            cameraAuthorization: FixtureCameraAuthorizationClient(status: .authorized),
+            progressStore: progressStore,
+            stagedLibraryPhotos: stagedLibraryPhotos,
+            guestAllowance: DeferredGuestAllowanceCapability()
+        )
+        restoredOnboarding.restorePersistedProgress()
+        let expiredRouter = AppRouter()
+        await AppCaptureHandoffCoordinator.presentCaptureLauncher(
+            onboardingModel: restoredOnboarding,
+            captureFlow: expiredCapture,
+            router: expiredRouter
+        )
+
+        XCTAssertNil(expiredCapture.stagedPhoto)
+        XCTAssertEqual(restoredOnboarding.state.stagedPhotoCount, 0)
+        XCTAssertEqual(restoredOnboarding.captureEntryContext, .camera)
+        XCTAssertEqual(try stagedLibraryPhotos.load(), [])
+        XCTAssertEqual(expiredRouter.presentedSheet, .capture)
     }
 
     func testExpiredTransferredLibraryPhotoCannotRestageAfterRelaunch() async throws {
@@ -646,21 +710,13 @@ private final class ConsumeMoveController {
     }
 }
 
-private final class FailingConsumeStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
-    private var photos: [Data]
+private final class DiscardRootController: @unchecked Sendable {
+    private(set) var discardCount = 0
 
-    init(photos: [Data]) {
-        self.photos = photos
+    func discard(_ url: URL) throws {
+        discardCount += 1
+        throw TestCaptureError.failed
     }
-
-    func replace(with photos: [Data]) throws -> Int {
-        self.photos = photos
-        return photos.count
-    }
-
-    func load() throws -> [Data] { photos }
-    func consume() throws { throw TestCaptureError.failed }
-    func clear() { photos = [] }
 }
 
 private actor TestFramingEvaluator: FramingEvaluating {
@@ -681,16 +737,13 @@ private final class TestCaptureStore: CaptureDraftStoring {
     var discardCount = 0
     var lastStagedImageData: Data?
     private let stageError: Error?
-    private let discardError: Error?
 
     init(
         staged: StagedCapturePhoto? = nil,
-        stageError: Error? = nil,
-        discardError: Error? = nil
+        stageError: Error? = nil
     ) {
         self.staged = staged
         self.stageError = stageError
-        self.discardError = discardError
     }
 
     func load() async throws -> StagedCapturePhoto? { staged }
@@ -711,7 +764,6 @@ private final class TestCaptureStore: CaptureDraftStoring {
 
     func discard() async throws {
         discardCount += 1
-        if let discardError { throw discardError }
         staged = nil
     }
 }
