@@ -72,6 +72,7 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
 }
 
 enum FoundationFixture: String, CaseIterable {
+    case onboarding
     case home
     case listings
     case inbox
@@ -82,7 +83,7 @@ enum FoundationFixture: String, CaseIterable {
 
     var initialTab: PrimaryTab {
         switch self {
-        case .home, .account, .activity, .capture: .home
+        case .onboarding, .home, .account, .activity, .capture: .home
         case .listings: .listings
         case .inbox: .inbox
         case .insights: .insights
@@ -93,7 +94,7 @@ enum FoundationFixture: String, CaseIterable {
         switch self {
         case .account: .account
         case .activity: .activity
-        case .home, .listings, .inbox, .insights, .capture: nil
+        case .onboarding, .home, .listings, .inbox, .insights, .capture: nil
         }
     }
 
@@ -109,14 +110,20 @@ struct LaunchConfiguration: Equatable {
     var keyboardProbe: Bool
     var dynamicTypeSize: DynamicTypeSize?
     var usesZeroNetworkFixtures: Bool
+    var cameraAuthorizationFixture: CameraAuthorizationStatus?
+    var resetOnboardingProgress: Bool
+    var stagedLibraryPhotoFixtureCount: Int?
 
     static let standard = LaunchConfiguration(
-        fixture: .home,
+        fixture: .onboarding,
         visualState: nil,
         forceReducedMotion: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
-        usesZeroNetworkFixtures: false
+        usesZeroNetworkFixtures: false,
+        cameraAuthorizationFixture: nil,
+        resetOnboardingProgress: false,
+        stagedLibraryPhotoFixtureCount: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -125,7 +132,10 @@ struct LaunchConfiguration: Equatable {
         forceReducedMotion: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
-        usesZeroNetworkFixtures: true
+        usesZeroNetworkFixtures: true,
+        cameraAuthorizationFixture: .authorized,
+        resetOnboardingProgress: false,
+        stagedLibraryPhotoFixtureCount: nil
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -138,6 +148,13 @@ struct LaunchConfiguration: Equatable {
                 configuration.keyboardProbe = true
             } else if argument == "--zero-network-fixtures" {
                 configuration.usesZeroNetworkFixtures = true
+            } else if argument == "--reset-onboarding-progress" {
+                configuration.resetOnboardingProgress = true
+            } else if argument.hasPrefix("--fixture-staged-library-photos=") {
+                let value = String(
+                    argument.dropFirst("--fixture-staged-library-photos=".count)
+                )
+                configuration.stagedLibraryPhotoFixtureCount = Int(value).map { min(max($0, 0), 4) }
             } else if argument.hasPrefix("--fixture=") {
                 let value = String(argument.dropFirst("--fixture=".count))
                 configuration.fixture = FoundationFixture(rawValue: value) ?? .home
@@ -145,11 +162,49 @@ struct LaunchConfiguration: Equatable {
                 let value = String(argument.dropFirst("--visual-state=".count))
                 configuration.visualState = ApprovedVisualStateID(rawValue: value)
                 configuration.usesZeroNetworkFixtures = true
+            } else if argument.hasPrefix("--camera-status=") {
+                let value = String(argument.dropFirst("--camera-status=".count))
+                configuration.cameraAuthorizationFixture = CameraAuthorizationStatus(rawValue: value)
             } else if argument == "--dynamic-type=accessibility3" {
                 configuration.dynamicTypeSize = .accessibility3
             }
         }
 
         return configuration
+    }
+
+    var usesOnboarding: Bool {
+        fixture == .onboarding || visualState?.ownerIssue == 206
+    }
+
+    var initialOnboardingState: OnboardingFlowState {
+        guard let visualState,
+              let screen = OnboardingScreen(visualState: visualState) else {
+            return .init()
+        }
+
+        let overlay: OnboardingOverlay?
+        switch visualState {
+        case .onboardingMarketplace:
+            overlay = .marketplace
+        case .returningSignIn:
+            overlay = .returningSignIn
+        default:
+            overlay = nil
+        }
+
+        return OnboardingFlowState(
+            screen: screen,
+            overlay: overlay,
+            stagedPhotoCount: visualState == .onboardingLibraryHandoff ? 1 : 0
+        )
+    }
+
+    var shouldRequestCameraOnLaunch: Bool {
+        visualState == .nativeCameraPermission
+    }
+
+    var shouldOpenSettingsOnLaunch: Bool {
+        visualState == .settingsHandoff
     }
 }

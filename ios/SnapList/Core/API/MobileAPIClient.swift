@@ -79,13 +79,28 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
 struct AppDependencies {
     let mobileAPIClient: any MobileAPIClient
     let contractFixtureProvider: any ContractOnlyFixtureProviding
+    let cameraAuthorization: any CameraAuthorizationProviding
+    let onboardingProgressStore: any OnboardingProgressPersisting
+    let stagedLibraryPhotos: any StagedLibraryPhotoPersisting
+    let guestAllowance: any GuestAllowanceCapability
 
     static func make(configuration: LaunchConfiguration) -> AppDependencies {
+        let cameraAuthorization: any CameraAuthorizationProviding
+        if let fixtureStatus = configuration.cameraAuthorizationFixture {
+            cameraAuthorization = FixtureCameraAuthorizationClient(status: fixtureStatus)
+        } else {
+            cameraAuthorization = AVCameraAuthorizationClient()
+        }
+
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
             return AppDependencies(
                 mobileAPIClient: client,
-                contractFixtureProvider: client
+                contractFixtureProvider: client,
+                cameraAuthorization: cameraAuthorization,
+                onboardingProgressStore: InMemoryOnboardingProgressStore(),
+                stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
+                guestAllowance: DeferredGuestAllowanceCapability()
             )
         }
 
@@ -95,7 +110,11 @@ struct AppDependencies {
 
         return AppDependencies(
             mobileAPIClient: URLSessionMobileAPIClient(baseURL: origin),
-            contractFixtureProvider: ZeroNetworkMobileAPIClient()
+            contractFixtureProvider: ZeroNetworkMobileAPIClient(),
+            cameraAuthorization: cameraAuthorization,
+            onboardingProgressStore: UserDefaultsOnboardingProgressStore(),
+            stagedLibraryPhotos: FileSystemStagedLibraryPhotoStore(),
+            guestAllowance: DeferredGuestAllowanceCapability()
         )
     }
 }
