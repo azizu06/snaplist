@@ -1,6 +1,6 @@
 begin;
 
-select plan(35);
+select plan(36);
 
 select ok(
   to_regclass('public.ai_item_allowance_periods') is not null,
@@ -208,6 +208,30 @@ select is(
   ),
   'included',
   'the first complete run uses the included first-run period'
+);
+
+select throws_ok(
+  $$
+    select *
+    from public.stage_pipeline_batch(
+      'credit_pgtap_user',
+      '33333333-3333-4333-8333-333333333333'::uuid,
+      jsonb_build_array(jsonb_build_object(
+        'idempotency_key', 'credit-pgtap-pro-gate',
+        'source', 'single',
+        'autopilot_enabled', false,
+        'photo_paths', jsonb_build_array(
+          'credit_pgtap_user/pgtap/pro-gate.jpg'
+        ),
+        'cost_basis', null
+      )),
+      100,
+      100
+    )
+  $$,
+  'P0001',
+  'AI item credit unavailable: snaplist-pro-required',
+  'complete AI item run #2 requires SnapList Pro while the included credit is reserved'
 );
 
 update public.pipeline_runs run
