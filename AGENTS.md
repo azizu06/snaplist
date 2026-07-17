@@ -36,8 +36,10 @@ not the default product posture.
   (dev → Gemini for the free tier, showcase → OpenAI) — never construct a provider inline at a call
   site. Structured output via `generateObject` + **Zod** — no ad-hoc JSON parsing of model output.
   Embeddings are excluded from the switch (pgvector `vector(1536)` dimension lock).
-- **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → **eBay public
-  sold comps** → web-search agent → depreciation → LLM fallback; see `docs/adr/0001`). Every result is
+- **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → **eBay
+  sold comps** → web-search agent → depreciation → LLM fallback; see `docs/adr/0001`). Caffein Apify
+  is the default-off leading automatic sold-comp candidate, followed by the public-page provider;
+  both must use the provider-neutral matcher. Every result is
   `{ suggested, range, confidence, sources[] }` and is user-editable. Never collapse this to a single
   source. The eBay-sold scraper is **read-only price research** — distinct from the transactional eBay
   **adapter**, which remains the only path for posting/messaging. Sold prices are **live-fetched**

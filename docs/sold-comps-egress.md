@@ -9,6 +9,41 @@ depreciation, or LLM-only fallback tiers; it does not fail the listing pipeline.
 This seam is unrelated to the transactional eBay adapter. It cannot create a
 listing, send a message, or use seller OAuth.
 
+## Default-off Caffein Apify retrieval adapter
+
+Issue #200 adds a second retrieval strategy inside the same provider-neutral
+`ebay-sold` tier. When explicitly enabled, the Caffein Apify adapter runs first;
+on any failure, thin matcher output, or open circuit, the public-page provider
+below remains the immediate fallback. Both strategies feed the same
+anchor/corroboration/reject matcher, freshness layer, and minimum-two-anchor gate.
+
+The adapter is disabled unless both `APIFY_SOLD_ENABLED=true` and `APIFY_TOKEN`
+are present. The token is passed to the official Apify client only; it never
+enters an Actor URL, cache key, result, or diagnostic. Actor rows are untrusted:
+normalization keeps only canonical eBay URL, title, positive USD sold price,
+condition, sale date, and Best Offer disclosure. Seller fields, images, raw
+payload fields, malformed URLs/prices, non-USD rows, and duplicates are dropped.
+
+The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.18.3` and caps a
+run at 25 rows, $0.11, 55 seconds of Actor runtime, 60 seconds of client wait,
+two official-client post-run read retries, and no automatic Actor restart. The
+paid Actor-start request itself is never retried. These safety
+environment values can tighten but not raise the in-code ceilings. SnapList does
+not launch a second paid run after failure: it falls through. Successful empty
+results are cached because repeating a paid no-result run is not useful; cache
+misses for the same identity are coalesced, and age decay/staleness are reapplied
+on every cache read.
+
+Production activation is not part of Issue #200. Leave the flag off until the
+owner approves a separate budget and validates current Actor schema/build/pricing
+plus shared-cache deployment. The zero-network readiness command and measured
+gate are in [the benchmark guide](./benchmarks/sold-comps/README.md).
+
+Official contract references: [Caffein sold-listings Actor](https://apify.com/caffein.dev/ebay-sold-listings),
+[Apify client retry/timeout options](https://docs.apify.com/api/client/js/reference/interface/ApifyClientOptions),
+[Actor call caps and restart controls](https://docs.apify.com/api/client/js/reference/interface/ActorCallOptions),
+and [eBay condition ID meanings](https://developer.ebay.com/api-docs/sell/static/metadata/condition-id-values.html).
+
 ## Optional proxy-template configuration
 
 `EBAY_SOLD_PROXY_TEMPLATE` routes the already SSRF-validated eBay target through

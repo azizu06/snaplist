@@ -1,5 +1,5 @@
 import { PriceRouter } from "./router";
-import type { ItemSignal, PriceResult } from "./types";
+import type { ItemSignal, PriceResult, PricingProvider } from "./types";
 import { getTtlCache } from "./comp-cache";
 import {
   createIsbnPricingProvider,
@@ -11,6 +11,11 @@ import {
   type EbaySoldComp,
   type EbaySoldPricingProviderOptions,
 } from "./providers/ebay-sold";
+import {
+  createApifySoldPricingProvider,
+  type ApifySoldComp,
+  type ApifySoldPricingProviderOptions,
+} from "./providers/apify-sold";
 import {
   createBrandedWebPricingProvider,
   createUpcWebPricingProvider,
@@ -42,6 +47,8 @@ export interface CreateDefaultPricerOptions {
   isbn?: IsbnPricingProviderOptions;
   /** eBay-sold scraper deps (offline tests inject `fetchPage`; #56). */
   ebaySold?: EbaySoldPricingProviderOptions;
+  /** Default-off Caffein Apify sold-comps adapter deps (#200). */
+  apifySold?: ApifySoldPricingProviderOptions;
   /** Web-search agent deps (shared by the UPC-aided and branded tiers). */
   webSearch?: WebSearchPricingProviderOptions;
   /** Tier-5 depreciation deps (retail search + extraction). */
@@ -66,10 +73,43 @@ function withSoldFreshness(
   };
 }
 
+function withApifySoldFreshness(
+  opts: ApifySoldPricingProviderOptions = {},
+): ApifySoldPricingProviderOptions {
+  return {
+    ...opts,
+    now: opts.now ?? (() => Date.now()),
+    cache:
+      opts.cache ??
+      getTtlCache<ApifySoldComp[]>("apify-sold", resolveSoldCacheTtlMs()),
+  };
+}
+
+/** One sold tier with ordered, fail-soft retrieval strategies. */
+function orderedSoldProvider(
+  providers: readonly PricingProvider[],
+): PricingProvider {
+  return {
+    tier: "ebay-sold",
+    canHandle(signal) {
+      return providers.some((provider) => provider.canHandle?.(signal) ?? true);
+    },
+    async price(signal) {
+      for (const provider of providers) {
+        if (provider.canHandle && !provider.canHandle(signal)) continue;
+        const result = await provider.price(signal);
+        if (result) return result;
+      }
+      return null;
+    },
+  };
+}
+
 /**
  * The default real pricer in PRD priority order: ISBN structured lookup, then the
- * #56 eBay PUBLIC sold-comps scraper (real completed sales — the strongest used
- * signal, declining gracefully when disabled/blocked), then the #10 web-search
+ * default-off Caffein Apify adapter followed by the #56 eBay PUBLIC sold-comps
+ * scraper (both normalized through the same matcher and declining gracefully),
+ * then the #10 web-search
  * agent tiers (UPC-aided → branded; Tavily/Exa + comp extraction, env-key gated —
  * a keyless deployment makes those tiers decline gracefully), then the #11 fallback
  * tiers: depreciation (retail anchor × condition factor, low confidence) and last
@@ -86,7 +126,10 @@ export function createDefaultPricer(
   // fetched at most once (the router returns the ISBN result before reaching the
   // standalone tier). Searching by the exact ISBN pins the precise edition, so the
   // comps cluster tightly — exactly what the agreement signal rewards.
-  const soldProvider = createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold));
+  const soldProvider = orderedSoldProvider([
+    createApifySoldPricingProvider(withApifySoldFreshness(options.apifySold)),
+    createEbaySoldPricingProvider(withSoldFreshness(options.ebaySold)),
+  ]);
   const router = new PriceRouter([
     createIsbnPricingProvider({
       ...options.isbn,

@@ -28,10 +28,12 @@ receive honest **assisted marketplace handoffs**.
 - **Tier** — one PricingProvider strategy in the routing pipeline: *ISBN lookup* → *eBay sold comps*
   → *web-search agent* → *depreciation estimate* → *LLM fallback*. "Which tier fired" is a logged,
   confidence-bearing fact.
-- **eBay-sold scraper** — the `ebay-sold` tier (ADR-0001): reads eBay's PUBLIC sold/completed pages
-  (`LH_Sold=1&LH_Complete=1`) for real **sold comps**. Read-only price research — distinct from the
+- **eBay-sold provider** — the `ebay-sold` evidence tier (ADR-0001): retrieves real **sold comps**
+  through replaceable read-only strategies. The default-off Caffein Apify adapter is the leading
+  automatic candidate; eBay's PUBLIC sold/completed pages (`LH_Sold=1&LH_Complete=1`) remain the
+  immediate fallback. Both feed the same provider-neutral matcher and are distinct from the
   transactional eBay **adapter** (posting/messaging). Never used to post. Availability is
-  best-effort; blocked or too-thin results decline to the next tier.
+  best-effort; blocked or too-thin anchor sets decline to the next tier.
 - **Sold-comps egress** — the outbound fetch path for the **eBay-sold scraper**. Direct HTTPS fetch
   is the default. An operator may configure one validated `EBAY_SOLD_PROXY_TEMPLATE` for hosted
   environments; malformed templates fail before egress, and credentials/raw upstream errors are

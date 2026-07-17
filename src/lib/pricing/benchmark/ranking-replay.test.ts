@@ -5,6 +5,7 @@ import type {
   BenchmarkComp,
   BenchmarkCompLabel,
   ProviderQueryCapture,
+  ProductResearchStatus,
 } from "./types";
 
 const comp = (
@@ -82,6 +83,71 @@ describe("replaySoldCompRanking", () => {
     expect(JSON.stringify(summary)).not.toContain("iPhone");
     expect(formatSoldCompRankingReplay(summary)).toContain("50.00%");
     expect(formatSoldCompRankingReplay(summary)).not.toContain("iPhone");
+  });
+
+  it("compares matcher-selected suggestions with aggregate Product Research without row leakage", () => {
+    const comps = [
+      comp("same", "Apple iPhone 14 Pro 256GB", "Like New", 700),
+      comp("fair", "Apple iPhone 14 Pro 256GB", "Acceptable", 560),
+      comp("wrong", "Apple iPhone 14 Pro Max 256GB", "Like New", 920),
+    ];
+    const capture: BenchmarkCapture = {
+      schemaVersion: 1,
+      runId: "reference-test",
+      mode: "live",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      corpusDigest: "test",
+      maxResultsPerQuery: 25,
+      apifyHardCeilingUsd: 5,
+      queries: [{
+        provider: "caffein-apify",
+        queryId: "Q05",
+        status: "success",
+        latencyMs: 10,
+        attempts: 1,
+        retries: 0,
+        creditsSpent: null,
+        actualUsdSpent: 0.01,
+        bestOfferPolicy: "labeled-and-excluded",
+        comps,
+      }],
+      apifyPricingSnapshot: null,
+      productResearch: { status: "operator-pending", queryIds: [] },
+    };
+    const labels: BenchmarkCompLabel[] = comps.map(({ id }) => ({
+      compId: id,
+      relevant: true,
+      variantCorrect: true,
+      conditionCorrect: true,
+    }));
+    const reference: ProductResearchStatus = {
+      status: "complete",
+      queryIds: ["Q05"],
+      reviewMethod: "codex-assisted-operator",
+      rows: [{
+        queryId: "Q05",
+        condition: "Used",
+        average: 630,
+        range: { min: 500, max: 750 },
+        sellThroughPct: 50,
+        totalSellers: 10,
+        capturedAt: "2026-07-16T00:00:00.000Z",
+      }],
+    };
+
+    const summary = replaySoldCompRanking(capture, labels, reference);
+
+    expect(summary.productResearchReference).toMatchObject({
+      status: "complete",
+      referenceQueryCount: 1,
+      comparableQueryCount: 1,
+    });
+    expect(summary.productResearchReference.medianAbsoluteSuggestedErrorRate).not.toBeNull();
+    expect(summary.productResearchReference.medianRangeOverlapRate).not.toBeNull();
+    const serialized = JSON.stringify(summary);
+    expect(serialized).not.toContain("iPhone");
+    expect(serialized).not.toContain("totalSellers");
+    expect(formatSoldCompRankingReplay(summary)).toContain("Product Research reference");
   });
 
   it("never lets matching non-USD anchors make a query usable for pricing", () => {

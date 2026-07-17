@@ -99,7 +99,8 @@ Replay the attributed private capture without making any provider requests:
 ```bash
 pnpm benchmark:sold-comp-ranking -- \
   --capture /private/tmp/snaplist-issue188-....capture.json \
-  --labels /private/tmp/snaplist-issue188-....labels.json
+  --labels /private/tmp/snaplist-issue188-....labels.json \
+  --product-research /private/tmp/snaplist-issue188-product-research.json
 ```
 
 The command writes aggregate-only output to
@@ -107,6 +108,22 @@ The command writes aggregate-only output to
 allowed into the median, citations, or minimum-two-comp gate; corroboration is
 reported separately and cannot silently price an item. The private capture and
 labels remain outside the repository.
+
+## Production-adapter readiness replay
+
+Issue #200 adds the default-off Caffein adapter behind `PricingProvider` and a
+synthetic balanced-condition contract. Its bare command is always zero-network:
+
+```bash
+pnpm benchmark:apify-readiness
+```
+
+It writes aggregate-only results under `apify-readiness/` for new, open-box,
+like-new, refurbished, used-good, used-fair, and parts inventory. The report also
+reconciles the completed #188 live retrieval/cost evidence with the #198 matcher
+replay. The synthetic 100% contract metrics prove normalization/ranking behavior;
+they are not a replacement for live retrieval precision or an activation signal.
+Production remains default-off and another paid Actor run requires owner approval.
 
 ## Product Research aggregate subset
 

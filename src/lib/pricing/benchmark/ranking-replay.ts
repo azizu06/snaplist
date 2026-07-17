@@ -1,10 +1,14 @@
+import { selectFreshComps } from "../freshness";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
+import { synthesizeSoldResult, type EbaySoldComp } from "../providers/ebay-sold";
 import { SOLD_COMPS_BENCHMARK_CORPUS } from "./corpus";
 import { migrateDuplicateCompIds } from "./core";
 import type {
   BenchmarkCapture,
   BenchmarkComp,
   BenchmarkCompLabel,
+  ProductResearchStatus,
+  ProviderQueryCapture,
 } from "./types";
 
 export interface SoldCompRankingReplaySummary {
@@ -27,6 +31,14 @@ export interface SoldCompRankingReplaySummary {
     usablePricingQueries: number;
     pricingQueryCoverage: number | null;
     missingCorpusQueries: number;
+  };
+  productResearchReference: {
+    status: "not-provided" | "complete";
+    referenceQueryCount: number;
+    comparableQueryCount: number;
+    medianAbsoluteSuggestedErrorRate: number | null;
+    medianRangeOverlapRate: number | null;
+    basis: "aggregate-average-and-range";
   };
 }
 
@@ -54,9 +66,109 @@ const isValidComparable = (
   label.variantCorrect &&
   label.conditionCorrect;
 
+const median = (values: readonly number[]): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+
+function rangeOverlapRate(
+  left: { min: number; max: number },
+  right: { min: number; max: number },
+): number {
+  const overlap = Math.max(0, Math.min(left.max, right.max) - Math.max(left.min, right.min));
+  const union = Math.max(left.max, right.max) - Math.min(left.min, right.min);
+  return union === 0 ? 1 : overlap / union;
+}
+
+function matcherPrice(
+  query: ProviderQueryCapture,
+  signal: (typeof SOLD_COMPS_BENCHMARK_CORPUS)[number]["signal"],
+  benchmarkNow: number | undefined,
+): { suggested: number; range: { min: number; max: number } } | null {
+  const candidates = query.comps
+    .filter(hasUsablePricingAmount)
+    .map((comp) => ({
+      normalized: {
+        url: `https://www.ebay.com/itm/${comp.id}`,
+        title: comp.title,
+        price: comp.price,
+        ...(comp.condition ? { condition: comp.condition } : {}),
+        ...(comp.endedAt && Number.isFinite(Date.parse(comp.endedAt))
+          ? { soldAt: Date.parse(comp.endedAt) }
+          : {}),
+        isBestOfferAccepted: comp.isBestOfferAccepted,
+        priceDisclosure: comp.priceDisclosure,
+      } satisfies EbaySoldComp & Pick<BenchmarkComp, "isBestOfferAccepted" | "priceDisclosure">,
+    }));
+  const evidence = selectSoldCompEvidence(
+    candidates.map(({ normalized }) => normalized),
+    signal,
+  );
+  const weights = new Map<EbaySoldComp, number>(
+    evidence.anchors.map(({ comp, score }) => [comp, score]),
+  );
+  const anchors = evidence.anchors.map(({ comp }) => comp);
+  const fresh = benchmarkNow == null
+    ? anchors
+    : selectFreshComps(anchors, benchmarkNow);
+  if (fresh.length < 2) return null;
+  const result = synthesizeSoldResult(fresh, {
+    ...(benchmarkNow != null ? { now: benchmarkNow } : {}),
+    evidenceWeight: (comp) => weights.get(comp) ?? 1,
+  });
+  return { suggested: result.suggested, range: result.range };
+}
+
+function compareProductResearch(
+  capture: BenchmarkCapture,
+  reference: ProductResearchStatus | undefined,
+): SoldCompRankingReplaySummary["productResearchReference"] {
+  const rows = reference?.status === "complete" ? reference.rows ?? [] : [];
+  if (rows.length === 0) {
+    return {
+      status: "not-provided",
+      referenceQueryCount: 0,
+      comparableQueryCount: 0,
+      medianAbsoluteSuggestedErrorRate: null,
+      medianRangeOverlapRate: null,
+      basis: "aggregate-average-and-range",
+    };
+  }
+  const corpus = new Map(SOLD_COMPS_BENCHMARK_CORPUS.map((entry) => [entry.id, entry]));
+  const references = new Map(rows.map((row) => [row.queryId, row]));
+  const parsedNow = Date.parse(capture.createdAt);
+  const benchmarkNow = Number.isFinite(parsedNow) ? parsedNow : undefined;
+  const comparisons = capture.queries
+    .filter((query) => query.provider === "caffein-apify")
+    .flatMap((query) => {
+      const entry = corpus.get(query.queryId);
+      const row = references.get(query.queryId);
+      if (!entry || !row) return [];
+      const result = matcherPrice(query, entry.signal, benchmarkNow);
+      if (!result) return [];
+      return [{
+        error: Math.abs(result.suggested - row.average) / row.average,
+        overlap: rangeOverlapRate(result.range, row.range),
+      }];
+    });
+  return {
+    status: "complete",
+    referenceQueryCount: rows.length,
+    comparableQueryCount: comparisons.length,
+    medianAbsoluteSuggestedErrorRate: median(comparisons.map(({ error }) => error)),
+    medianRangeOverlapRate: median(comparisons.map(({ overlap }) => overlap)),
+    basis: "aggregate-average-and-range",
+  };
+}
+
 export function replaySoldCompRanking(
   capture: BenchmarkCapture,
   labels: readonly BenchmarkCompLabel[],
+  productResearch?: ProductResearchStatus,
 ): SoldCompRankingReplaySummary {
   const normalizedCapture = migrateDuplicateCompIds(capture);
   const corpus = new Map(SOLD_COMPS_BENCHMARK_CORPUS.map((entry) => [entry.id, entry]));
@@ -135,6 +247,7 @@ export function replaySoldCompRanking(
       pricingQueryCoverage: ratio(usablePricingQueries, queries.length),
       missingCorpusQueries,
     },
+    productResearchReference: compareProductResearch(capture, productResearch),
   };
 }
 
@@ -165,6 +278,16 @@ export function formatSoldCompRankingReplay(
 - Valid comparable recall into anchors: ${percent(summary.ranking.validAnchorRecall)}
 - Queries with at least two price anchors: ${summary.ranking.usablePricingQueries} (${percent(summary.ranking.pricingQueryCoverage)})
 - Missing corpus queries: ${summary.ranking.missingCorpusQueries}
+
+## Product Research reference
+
+- Status: ${summary.productResearchReference.status}
+- Aggregate reference queries: ${summary.productResearchReference.referenceQueryCount}
+- Matcher-price comparisons: ${summary.productResearchReference.comparableQueryCount}
+- Median absolute suggested-price error vs aggregate average: ${percent(summary.productResearchReference.medianAbsoluteSuggestedErrorRate)}
+- Median matcher/reference range overlap: ${percent(summary.productResearchReference.medianRangeOverlapRate)}
+
+Product Research exposes an aggregate average and range, not a listing-level gold price or median. These comparison metrics are reference-limited and must not be presented as field accuracy.
 
 ## Interpretation
 

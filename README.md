@@ -71,7 +71,7 @@ flowchart TD
 
     subgraph tiers["Pricing tiers · PRD priority order"]
         T1["1 · ISBN lookup<br/>Open Library + Google Books"]
-        T2["2 · eBay PUBLIC sold comps<br/>completed-sale scrape"]
+        T2["2 · eBay sold comps<br/>Apify candidate → public fallback"]
         T3["3 · UPC-aided web search<br/>Tavily / Exa agent"]
         T4["4 · Branded web search<br/>Tavily / Exa agent"]
         T5["5 · Depreciation<br/>retail x condition factor"]
@@ -180,6 +180,7 @@ pnpm dev                     # http://localhost:3000
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint |
 | `pnpm smoke:sold-comps` | Sold-comps egress/router smoke (0 requests by default; doubly confirmed live mode in the [operator procedure](./docs/sold-comps-egress.md)) |
+| `pnpm benchmark:apify-readiness` | Zero-network balanced-condition adapter/matcher contract and aggregate readiness evidence |
 | `pnpm eval` | Eval harness — offline by default (see below) |
 | `pnpm supabase` | Supabase CLI |
 
@@ -286,8 +287,9 @@ pnpm exec tsx supabase/seed/reference-corpus.ts
 Being able to state where the system's accuracy tops out is part of the showcase:
 
 - **Pricing is bounded by its data and egress.** The preferred `ebay-sold` tier reads real completed
-  sales from eBay's public sold pages when the environment can reach them and enough relevant comps
-  exist. Hosted egress can be blocked or a query can be too thin; in those cases the router falls
+  sales through a default-off Caffein Apify candidate and the immediate eBay public-page fallback;
+  untrusted rows must survive the shared matcher and minimum-two-anchor gate. Either provider can
+  fail or a query can be too thin; in those cases the router falls
   through to cited web search (often *asking* prices), depreciation, or the LLM-only floor. The
   corpus-corroboration signal is built on synthetic comps. Treat every price as a *smart
   suggestion*, not an oracle. See the [operator smoke procedure](./docs/sold-comps-egress.md).
