@@ -235,10 +235,13 @@ authoritative source supports it and otherwise hands that status check to eBay.
   or its first seller-confirmed eBay publish. The hard paywall appears when complete AI item run #2
   attempts to reserve capacity.
 - **Monthly, not daily, product entitlement.** SnapList Pro grants a configurable monthly AI-item
-  allowance. For an Apple-billed seller, the allowance follows the server-verified StoreKit
-  subscription period, not a calendar month or a client clock. A verified renewal advances it once;
-  verified grace preserves the current period's remainder without resetting; late or ambiguous state
-  fails closed to the last verified period. StoreKit supplies localized price and subscription state.
+  allowance. For a monthly Apple product, the allowance follows the verified transaction span. For
+  an annual product, billing is cadence only: the server derives UTC calendar-month-anniversary
+  subperiods inside the signed annual span, anchored to verified `purchaseDate`, capped at verified
+  `expiresDate`, and identified by the verified transaction plus subperiod index. No client clock or
+  callback can reset it. Verified active state advances a period once; verified grace preserves the
+  current remainder without advancing; late or ambiguous state fails closed to the last verified
+  period. StoreKit supplies localized price and subscription state.
   The public allowance remains unset until TestFlight measures median and p95 cost per usable item.
   Existing server daily limits remain legacy operational guardrails until a focused reconciliation
   issue replaces them; they are not the native product promise and must not be presented as credits.

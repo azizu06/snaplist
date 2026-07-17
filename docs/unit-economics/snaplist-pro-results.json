@@ -1,0 +1,827 @@
+{
+  "schemaVersion": 1,
+  "modelId": "snaplist-pro-2026-07-17",
+  "generatedAt": "2026-07-17",
+  "status": "provisional-testflight-required",
+  "scenarioCosts": [
+    {
+      "scenarioId": "median",
+      "componentCostUsd": {
+        "vision": 0.039,
+        "garmentMeasurement": 0.003225,
+        "pricingAgent": 0.0235,
+        "listing": 0.027983,
+        "embedding": 0.000016,
+        "webSearch": 0.008,
+        "soldComps": 0.038631,
+        "infrastructure": 0.01
+      },
+      "initialAttemptCostUsd": 0.150355,
+      "correctionCostUsd": 0.014717,
+      "restoredFailureBurdenUsd": 0.005144,
+      "directSuccessfulListingCogsUsd": 0.170216,
+      "freeActivationCostPerPaidSubscriberUsd": 0.085108
+    },
+    {
+      "scenarioId": "p90",
+      "componentCostUsd": {
+        "vision": 0.09,
+        "garmentMeasurement": 0.013325,
+        "pricingAgent": 0.089813,
+        "listing": 0.057406,
+        "embedding": 0.00003,
+        "webSearch": 0.016,
+        "soldComps": 0.058518,
+        "infrastructure": 0.03
+      },
+      "initialAttemptCostUsd": 0.355092,
+      "correctionCostUsd": 0.066521,
+      "restoredFailureBurdenUsd": 0.036316,
+      "directSuccessfulListingCogsUsd": 0.45793,
+      "freeActivationCostPerPaidSubscriberUsd": 0.686894
+    },
+    {
+      "scenarioId": "stress",
+      "componentCostUsd": {
+        "vision": 0.375,
+        "garmentMeasurement": 0.0497,
+        "pricingAgent": 0.42,
+        "listing": 0.202,
+        "embedding": 0.00006,
+        "webSearch": 0.024,
+        "soldComps": 0.091435,
+        "infrastructure": 0.08
+      },
+      "initialAttemptCostUsd": 1.242195,
+      "correctionCostUsd": 0.368718,
+      "restoredFailureBurdenUsd": 0.372659,
+      "directSuccessfulListingCogsUsd": 1.983571,
+      "freeActivationCostPerPaidSubscriberUsd": 7.934284
+    }
+  ],
+  "candidateMatrix": [
+    {
+      "candidateId": "starter-5",
+      "usageCase": "low",
+      "scenarioId": "median",
+      "usedListings": 1.25,
+      "monthly": {
+        "netRevenueUsd": 6.65567,
+        "directUsageCogsUsd": 0.21277,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.297878,
+        "grossMarginRate": 0.968032,
+        "contributionUsd": 6.357792,
+        "contributionMarginRate": 0.955244,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 4.164306,
+        "directUsageCogsUsd": 0.21277,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.297878,
+        "grossMarginRate": 0.948906,
+        "contributionPerRecognizedMonthUsd": 3.866428,
+        "contributionMarginRate": 0.928469,
+        "subscribersToCoverFixedCosts": 3
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "low",
+      "scenarioId": "p90",
+      "usedListings": 1.25,
+      "monthly": {
+        "netRevenueUsd": 5.996495,
+        "directUsageCogsUsd": 0.572413,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 1.259307,
+        "grossMarginRate": 0.904542,
+        "contributionUsd": 4.737188,
+        "contributionMarginRate": 0.789993,
+        "subscribersToCoverFixedCosts": 13
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 3.751875,
+        "directUsageCogsUsd": 0.572413,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 1.259307,
+        "grossMarginRate": 0.847433,
+        "contributionPerRecognizedMonthUsd": 2.492568,
+        "contributionMarginRate": 0.664353,
+        "subscribersToCoverFixedCosts": 24
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "low",
+      "scenarioId": "stress",
+      "usedListings": 1.25,
+      "monthly": {
+        "netRevenueUsd": 4.24269,
+        "directUsageCogsUsd": 2.479464,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 10.413748,
+        "grossMarginRate": 0.415592,
+        "contributionUsd": -6.171058,
+        "contributionMarginRate": -1.454515,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 2.654558,
+        "directUsageCogsUsd": 2.479464,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 10.413748,
+        "grossMarginRate": 0.06596,
+        "contributionPerRecognizedMonthUsd": -7.75919,
+        "contributionMarginRate": -2.922969,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "expected",
+      "scenarioId": "median",
+      "usedListings": 3,
+      "monthly": {
+        "netRevenueUsd": 6.65567,
+        "directUsageCogsUsd": 0.510648,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.595756,
+        "grossMarginRate": 0.923276,
+        "contributionUsd": 6.059914,
+        "contributionMarginRate": 0.910489,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 4.164306,
+        "directUsageCogsUsd": 0.510648,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.595756,
+        "grossMarginRate": 0.877375,
+        "contributionPerRecognizedMonthUsd": 3.56855,
+        "contributionMarginRate": 0.856938,
+        "subscribersToCoverFixedCosts": 3
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "expected",
+      "scenarioId": "p90",
+      "usedListings": 3,
+      "monthly": {
+        "netRevenueUsd": 5.996495,
+        "directUsageCogsUsd": 1.37379,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 2.060684,
+        "grossMarginRate": 0.770901,
+        "contributionUsd": 3.935811,
+        "contributionMarginRate": 0.656352,
+        "subscribersToCoverFixedCosts": 16
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 3.751875,
+        "directUsageCogsUsd": 1.37379,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 2.060684,
+        "grossMarginRate": 0.633839,
+        "contributionPerRecognizedMonthUsd": 1.691191,
+        "contributionMarginRate": 0.450759,
+        "subscribersToCoverFixedCosts": 36
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "expected",
+      "scenarioId": "stress",
+      "usedListings": 3,
+      "monthly": {
+        "netRevenueUsd": 4.24269,
+        "directUsageCogsUsd": 5.950713,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 13.884997,
+        "grossMarginRate": -0.40258,
+        "contributionUsd": -9.642307,
+        "contributionMarginRate": -2.272687,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 2.654558,
+        "directUsageCogsUsd": 5.950713,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 13.884997,
+        "grossMarginRate": -1.241697,
+        "contributionPerRecognizedMonthUsd": -11.23044,
+        "contributionMarginRate": -4.230626,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "high",
+      "scenarioId": "median",
+      "usedListings": 5,
+      "monthly": {
+        "netRevenueUsd": 6.65567,
+        "directUsageCogsUsd": 0.85108,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.936188,
+        "grossMarginRate": 0.872127,
+        "contributionUsd": 5.719482,
+        "contributionMarginRate": 0.85934,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 4.164306,
+        "directUsageCogsUsd": 0.85108,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.936188,
+        "grossMarginRate": 0.795625,
+        "contributionPerRecognizedMonthUsd": 3.228118,
+        "contributionMarginRate": 0.775188,
+        "subscribersToCoverFixedCosts": 3
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "high",
+      "scenarioId": "p90",
+      "usedListings": 5,
+      "monthly": {
+        "netRevenueUsd": 5.996495,
+        "directUsageCogsUsd": 2.28965,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 2.976544,
+        "grossMarginRate": 0.618169,
+        "contributionUsd": 3.019951,
+        "contributionMarginRate": 0.503619,
+        "subscribersToCoverFixedCosts": 20
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 3.751875,
+        "directUsageCogsUsd": 2.28965,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 2.976544,
+        "grossMarginRate": 0.389732,
+        "contributionPerRecognizedMonthUsd": 0.775331,
+        "contributionMarginRate": 0.206652,
+        "subscribersToCoverFixedCosts": 77
+      }
+    },
+    {
+      "candidateId": "starter-5",
+      "usageCase": "high",
+      "scenarioId": "stress",
+      "usedListings": 5,
+      "monthly": {
+        "netRevenueUsd": 4.24269,
+        "directUsageCogsUsd": 9.917855,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 17.852139,
+        "grossMarginRate": -1.337634,
+        "contributionUsd": -13.609449,
+        "contributionMarginRate": -3.207741,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 2.654558,
+        "directUsageCogsUsd": 9.917855,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 17.852139,
+        "grossMarginRate": -2.736161,
+        "contributionPerRecognizedMonthUsd": -15.197582,
+        "contributionMarginRate": -5.72509,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "low",
+      "scenarioId": "median",
+      "usedListings": 2.5,
+      "monthly": {
+        "netRevenueUsd": 8.32167,
+        "directUsageCogsUsd": 0.42554,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.510648,
+        "grossMarginRate": 0.948864,
+        "contributionUsd": 7.811022,
+        "contributionMarginRate": 0.938636,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 6.940972,
+        "directUsageCogsUsd": 0.42554,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.510648,
+        "grossMarginRate": 0.938692,
+        "contributionPerRecognizedMonthUsd": 6.430324,
+        "contributionMarginRate": 0.92643,
+        "subscribersToCoverFixedCosts": 2
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "low",
+      "scenarioId": "p90",
+      "usedListings": 2.5,
+      "monthly": {
+        "netRevenueUsd": 7.497495,
+        "directUsageCogsUsd": 1.144825,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 1.831719,
+        "grossMarginRate": 0.847306,
+        "contributionUsd": 5.665776,
+        "contributionMarginRate": 0.755689,
+        "subscribersToCoverFixedCosts": 11
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 6.253541,
+        "directUsageCogsUsd": 1.144825,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 1.831719,
+        "grossMarginRate": 0.816932,
+        "contributionPerRecognizedMonthUsd": 4.421822,
+        "contributionMarginRate": 0.707091,
+        "subscribersToCoverFixedCosts": 14
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "low",
+      "scenarioId": "stress",
+      "usedListings": 2.5,
+      "monthly": {
+        "netRevenueUsd": 5.30469,
+        "directUsageCogsUsd": 4.958928,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 12.893212,
+        "grossMarginRate": 0.065181,
+        "contributionUsd": -7.588521,
+        "contributionMarginRate": -1.430531,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 4.424558,
+        "directUsageCogsUsd": 4.958928,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 12.893212,
+        "grossMarginRate": -0.120774,
+        "contributionPerRecognizedMonthUsd": -8.468654,
+        "contributionMarginRate": -1.914012,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "expected",
+      "scenarioId": "median",
+      "usedListings": 6,
+      "monthly": {
+        "netRevenueUsd": 8.32167,
+        "directUsageCogsUsd": 1.021296,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 1.106404,
+        "grossMarginRate": 0.877273,
+        "contributionUsd": 7.215266,
+        "contributionMarginRate": 0.867045,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 6.940972,
+        "directUsageCogsUsd": 1.021296,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 1.106404,
+        "grossMarginRate": 0.85286,
+        "contributionPerRecognizedMonthUsd": 5.834569,
+        "contributionMarginRate": 0.840598,
+        "subscribersToCoverFixedCosts": 2
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "expected",
+      "scenarioId": "p90",
+      "usedListings": 6,
+      "monthly": {
+        "netRevenueUsd": 7.497495,
+        "directUsageCogsUsd": 2.74758,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 3.434474,
+        "grossMarginRate": 0.633534,
+        "contributionUsd": 4.063021,
+        "contributionMarginRate": 0.541917,
+        "subscribersToCoverFixedCosts": 15
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 6.253541,
+        "directUsageCogsUsd": 2.74758,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 3.434474,
+        "grossMarginRate": 0.560636,
+        "contributionPerRecognizedMonthUsd": 2.819067,
+        "contributionMarginRate": 0.450795,
+        "subscribersToCoverFixedCosts": 22
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "expected",
+      "scenarioId": "stress",
+      "usedListings": 6,
+      "monthly": {
+        "netRevenueUsd": 5.30469,
+        "directUsageCogsUsd": 11.901426,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 19.83571,
+        "grossMarginRate": -1.243567,
+        "contributionUsd": -14.53102,
+        "contributionMarginRate": -2.739278,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 4.424558,
+        "directUsageCogsUsd": 11.901426,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 19.83571,
+        "grossMarginRate": -1.689857,
+        "contributionPerRecognizedMonthUsd": -15.411152,
+        "contributionMarginRate": -3.483095,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "high",
+      "scenarioId": "median",
+      "usedListings": 10,
+      "monthly": {
+        "netRevenueUsd": 8.32167,
+        "directUsageCogsUsd": 1.70216,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 1.787268,
+        "grossMarginRate": 0.795455,
+        "contributionUsd": 6.534402,
+        "contributionMarginRate": 0.785227,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 6.940972,
+        "directUsageCogsUsd": 1.70216,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 1.787268,
+        "grossMarginRate": 0.754766,
+        "contributionPerRecognizedMonthUsd": 5.153704,
+        "contributionMarginRate": 0.742505,
+        "subscribersToCoverFixedCosts": 2
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "high",
+      "scenarioId": "p90",
+      "usedListings": 10,
+      "monthly": {
+        "netRevenueUsd": 7.497495,
+        "directUsageCogsUsd": 4.5793,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 5.266194,
+        "grossMarginRate": 0.389223,
+        "contributionUsd": 2.231301,
+        "contributionMarginRate": 0.297606,
+        "subscribersToCoverFixedCosts": 27
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 6.253541,
+        "directUsageCogsUsd": 4.5793,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 5.266194,
+        "grossMarginRate": 0.267727,
+        "contributionPerRecognizedMonthUsd": 0.987347,
+        "contributionMarginRate": 0.157886,
+        "subscribersToCoverFixedCosts": 61
+      }
+    },
+    {
+      "candidateId": "balanced-10",
+      "usageCase": "high",
+      "scenarioId": "stress",
+      "usedListings": 10,
+      "monthly": {
+        "netRevenueUsd": 5.30469,
+        "directUsageCogsUsd": 19.83571,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 27.769994,
+        "grossMarginRate": -2.739278,
+        "contributionUsd": -22.465304,
+        "contributionMarginRate": -4.234989,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 4.424558,
+        "directUsageCogsUsd": 19.83571,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 27.769994,
+        "grossMarginRate": -3.483095,
+        "contributionPerRecognizedMonthUsd": -23.345436,
+        "contributionMarginRate": -5.276332,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "low",
+      "scenarioId": "median",
+      "usedListings": 5,
+      "monthly": {
+        "netRevenueUsd": 10.82067,
+        "directUsageCogsUsd": 0.85108,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.936188,
+        "grossMarginRate": 0.921347,
+        "contributionUsd": 9.884482,
+        "contributionMarginRate": 0.913482,
+        "subscribersToCoverFixedCosts": 1
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 8.329306,
+        "directUsageCogsUsd": 0.85108,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 0.936188,
+        "grossMarginRate": 0.897821,
+        "contributionPerRecognizedMonthUsd": 7.393118,
+        "contributionMarginRate": 0.887603,
+        "subscribersToCoverFixedCosts": 2
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "low",
+      "scenarioId": "p90",
+      "usedListings": 5,
+      "monthly": {
+        "netRevenueUsd": 9.748995,
+        "directUsageCogsUsd": 2.28965,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 2.976544,
+        "grossMarginRate": 0.76514,
+        "contributionUsd": 6.772451,
+        "contributionMarginRate": 0.694682,
+        "subscribersToCoverFixedCosts": 9
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 7.504375,
+        "directUsageCogsUsd": 2.28965,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 2.976544,
+        "grossMarginRate": 0.694891,
+        "contributionPerRecognizedMonthUsd": 4.527831,
+        "contributionMarginRate": 0.603359,
+        "subscribersToCoverFixedCosts": 14
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "low",
+      "scenarioId": "stress",
+      "usedListings": 5,
+      "monthly": {
+        "netRevenueUsd": 6.89769,
+        "directUsageCogsUsd": 9.917855,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 17.852139,
+        "grossMarginRate": -0.437852,
+        "contributionUsd": -10.954449,
+        "contributionMarginRate": -1.588133,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 5.309557,
+        "directUsageCogsUsd": 9.917855,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 17.852139,
+        "grossMarginRate": -0.867925,
+        "contributionPerRecognizedMonthUsd": -12.542581,
+        "contributionMarginRate": -2.362265,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "expected",
+      "scenarioId": "median",
+      "usedListings": 12,
+      "monthly": {
+        "netRevenueUsd": 10.82067,
+        "directUsageCogsUsd": 2.042592,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 2.1277,
+        "grossMarginRate": 0.811232,
+        "contributionUsd": 8.69297,
+        "contributionMarginRate": 0.803367,
+        "subscribersToCoverFixedCosts": 1
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 8.329306,
+        "directUsageCogsUsd": 2.042592,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 2.1277,
+        "grossMarginRate": 0.75477,
+        "contributionPerRecognizedMonthUsd": 6.201606,
+        "contributionMarginRate": 0.744553,
+        "subscribersToCoverFixedCosts": 2
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "expected",
+      "scenarioId": "p90",
+      "usedListings": 12,
+      "monthly": {
+        "netRevenueUsd": 9.748995,
+        "directUsageCogsUsd": 5.49516,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 6.182054,
+        "grossMarginRate": 0.436336,
+        "contributionUsd": 3.566941,
+        "contributionMarginRate": 0.365878,
+        "subscribersToCoverFixedCosts": 17
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 7.504375,
+        "directUsageCogsUsd": 5.49516,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 6.182054,
+        "grossMarginRate": 0.267739,
+        "contributionPerRecognizedMonthUsd": 1.322321,
+        "contributionMarginRate": 0.176207,
+        "subscribersToCoverFixedCosts": 45
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "expected",
+      "scenarioId": "stress",
+      "usedListings": 12,
+      "monthly": {
+        "netRevenueUsd": 6.89769,
+        "directUsageCogsUsd": 23.802852,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 31.737136,
+        "grossMarginRate": -2.450844,
+        "contributionUsd": -24.839446,
+        "contributionMarginRate": -3.601125,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 5.309557,
+        "directUsageCogsUsd": 23.802852,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 31.737136,
+        "grossMarginRate": -3.48302,
+        "contributionPerRecognizedMonthUsd": -26.427578,
+        "contributionMarginRate": -4.97736,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "high",
+      "scenarioId": "median",
+      "usedListings": 20,
+      "monthly": {
+        "netRevenueUsd": 10.82067,
+        "directUsageCogsUsd": 3.40432,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 3.489428,
+        "grossMarginRate": 0.685387,
+        "contributionUsd": 7.331242,
+        "contributionMarginRate": 0.677522,
+        "subscribersToCoverFixedCosts": 2
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 8.329306,
+        "directUsageCogsUsd": 3.40432,
+        "freeActivationSubsidyUsd": 0.085108,
+        "variableCogsUsd": 3.489428,
+        "grossMarginRate": 0.591284,
+        "contributionPerRecognizedMonthUsd": 4.839878,
+        "contributionMarginRate": 0.581066,
+        "subscribersToCoverFixedCosts": 2
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "high",
+      "scenarioId": "p90",
+      "usedListings": 20,
+      "monthly": {
+        "netRevenueUsd": 9.748995,
+        "directUsageCogsUsd": 9.1586,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 9.845494,
+        "grossMarginRate": 0.06056,
+        "contributionUsd": -0.096499,
+        "contributionMarginRate": -0.009898,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 7.504375,
+        "directUsageCogsUsd": 9.1586,
+        "freeActivationSubsidyUsd": 0.686894,
+        "variableCogsUsd": 9.845494,
+        "grossMarginRate": -0.220435,
+        "contributionPerRecognizedMonthUsd": -2.341119,
+        "contributionMarginRate": -0.311967,
+        "subscribersToCoverFixedCosts": null
+      }
+    },
+    {
+      "candidateId": "volume-20",
+      "usageCase": "high",
+      "scenarioId": "stress",
+      "usedListings": 20,
+      "monthly": {
+        "netRevenueUsd": 6.89769,
+        "directUsageCogsUsd": 39.67142,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 47.605704,
+        "grossMarginRate": -4.751407,
+        "contributionUsd": -40.708014,
+        "contributionMarginRate": -5.901688,
+        "subscribersToCoverFixedCosts": null
+      },
+      "annual": {
+        "recognizedNetRevenuePerMonthUsd": 5.309557,
+        "directUsageCogsUsd": 39.67142,
+        "freeActivationSubsidyUsd": 7.934284,
+        "variableCogsUsd": 47.605704,
+        "grossMarginRate": -6.4717,
+        "contributionPerRecognizedMonthUsd": -42.296146,
+        "contributionMarginRate": -7.96604,
+        "subscribersToCoverFixedCosts": null
+      }
+    }
+  ],
+  "sensitivity": {
+    "baseline": {
+      "candidateId": "balanced-10",
+      "usageCase": "expected",
+      "scenarioId": "median",
+      "monthlyVariableCogsUsd": 1.106404,
+      "monthlyContributionMarginRate": 0.867045
+    },
+    "changes": [
+      {
+        "id": "cache-hit-rate-to-zero",
+        "monthlyVariableCogsUsd": 1.266518,
+        "monthlyContributionMarginRate": 0.847805,
+        "variableCogsDeltaUsd": 0.160114,
+        "contributionMarginDeltaRate": -0.01924
+      },
+      {
+        "id": "failed-run-rate-to-15pct",
+        "monthlyVariableCogsUsd": 1.185067,
+        "monthlyContributionMarginRate": 0.857593,
+        "variableCogsDeltaUsd": 0.078663,
+        "contributionMarginDeltaRate": -0.009452
+      },
+      {
+        "id": "correction-rate-to-50pct",
+        "monthlyVariableCogsUsd": 1.329608,
+        "monthlyContributionMarginRate": 0.840223,
+        "variableCogsDeltaUsd": 0.223204,
+        "contributionMarginDeltaRate": -0.026822
+      },
+      {
+        "id": "free-activations-per-paid-to-two",
+        "monthlyVariableCogsUsd": 1.361727,
+        "monthlyContributionMarginRate": 0.836364,
+        "variableCogsDeltaUsd": 0.255323,
+        "contributionMarginDeltaRate": -0.030681
+      },
+      {
+        "id": "refund-rate-to-10pct",
+        "monthlyVariableCogsUsd": 1.106404,
+        "monthlyContributionMarginRate": 0.855227,
+        "variableCogsDeltaUsd": 0,
+        "contributionMarginDeltaRate": -0.011818
+      }
+    ]
+  },
+  "currentGateEvaluation": {
+    "status": "not-ready-testflight-evidence-missing",
+    "expectedMedianMonthlyMarginPasses": true,
+    "p90HighUseMonthlyMarginPasses": false,
+    "p90HighUseAnnualMarginPasses": false,
+    "stressMonthlyNonNegative": false,
+    "stressAnnualNonNegative": false
+  },
+  "planBreakpoints": {
+    "scrapingBeeVsMeasuredApifyQueries": 536,
+    "scrapingBeeVsMatcherUsableListings": 215,
+    "revenueCatFreeMtrUsd": 2500,
+    "posthogFreeListingsAtAssumedEventVolume": 40000,
+    "supabaseProMonthlyUsd": 25
+  }
+}

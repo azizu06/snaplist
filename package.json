@@ -19,6 +19,8 @@
     "benchmark:sold-comps": "tsx scripts/benchmark-sold-comps.ts",
     "benchmark:sold-comp-ranking": "tsx scripts/replay-sold-comp-ranking.ts",
     "benchmark:apify-readiness": "tsx scripts/evaluate-apify-sold-readiness.ts",
+    "unit-economics:generate": "tsx scripts/generate-unit-economics.ts",
+    "unit-economics:check": "tsx scripts/generate-unit-economics.ts --check",
     "eval": "tsx src/lib/eval/run.ts",
     "eval:build-gold": "tsx src/lib/eval/build-gold-set.ts",
     "supabase": "supabase"

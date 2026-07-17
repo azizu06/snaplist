@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "modelId": "snaplist-pro-2026-07-17",
+  "asOf": "2026-07-17",
+  "currency": "USD",
+  "status": "provisional-testflight-required",
+  "boundaries": {
+    "firstSuccessfulListingFree": true,
+    "firstConfirmedEbayPublishFree": true,
+    "includedGuidedCorrection": 1,
+    "annualAllowanceReset": "monthly",
+    "allowancePeriodAuthority": {
+      "monthlyProduct": "verified-storekit-transaction-period",
+      "annualProduct": "server-derived-monthly-subperiod",
+      "annualAnchor": "verified-purchase-date",
+      "annualCap": "verified-expires-date",
+      "annualBoundaryRule": "utc-calendar-month-anniversary-end-of-month-clamped",
+      "annualPeriodIdentity": ["originalTransactionId", "transactionId", "subperiodIndex"],
+      "sourceIds": ["adr-0008", "apple-storekit-transaction", "apple-subscription-billing"],
+      "advancesDuringGrace": false,
+      "clientClockAllowed": false
+    },
+    "rollover": false,
+    "unlimited": false,
+    "productionCommitment": false
+  },
+  "providerRates": {
+    "openaiGpt55": {
+      "inputPerMillionUsd": 5,
+      "cachedInputPerMillionUsd": 0.5,
+      "outputPerMillionUsd": 30
+    },
+    "gemini25Flash": {
+      "inputPerMillionUsd": 0.3,
+      "outputPerMillionUsd": 2.5
+    },
+    "openaiEmbedding3Small": {
+      "inputPerMillionUsd": 0.02
+    },
+    "tavilyPerCreditUsd": 0.008
+  },
+  "usageCases": [
+    { "id": "low", "allowanceUtilizationRate": 0.25 },
+    { "id": "expected", "allowanceUtilizationRate": 0.6 },
+    { "id": "high", "allowanceUtilizationRate": 1 }
+  ],
+  "scenarios": [
+    {
+      "id": "median",
+      "description": "Launch-planning midpoint. Every token, route-mix, activation, and behavior input remains an assumption until TestFlight; only the sold-comps query price is measured.",
+      "stages": {
+        "vision": { "model": "openai-gpt-5.5", "calls": 1, "inputTokensPerCall": 3000, "cachedInputRate": 0, "outputTokensPerCall": 800 },
+        "garmentMeasurement": { "model": "openai-gpt-5.5", "calls": 1, "inputTokensPerCall": 2200, "cachedInputRate": 0, "outputTokensPerCall": 350 },
+        "pricingAgent": { "model": "openai-gpt-5.5", "calls": 0.8, "inputTokensPerCall": 2500, "cachedInputRate": 0.1, "outputTokensPerCall": 600 },
+        "listing": { "model": "openai-gpt-5.5", "calls": 1.05, "inputTokensPerCall": 2000, "cachedInputRate": 0.15, "outputTokensPerCall": 600 }
+      },
+      "garmentShare": 0.15,
+      "embeddingTokens": 800,
+      "webSearchRequests": 1,
+      "soldComp": { "attemptRate": 0.65, "cacheHitRate": 0.35, "historicalCostPerQueryUsd": 0.091435 },
+      "infrastructurePerAttemptUsd": 0.01,
+      "failedRunRate": 0.05,
+      "failedAttemptCostShare": 0.65,
+      "correctionRate": 0.15,
+      "freeActivationsPerPaidSubscriber": 0.5,
+      "appleCommissionRate": 0.15,
+      "refundRate": 0.02,
+      "indirectTaxWithheldRate": 0,
+      "revenueCatMarginalRate": 0,
+      "fixedCosts": [
+        { "service": "Apple Developer Program", "monthlyUsd": 8.25, "sourceId": "apple-program", "note": "$99/year amortized monthly." }
+      ]
+    },
+    {
+      "id": "p90",
+      "description": "Conservative operating case using higher token volume, retries, provider calls, paid-plan exposure, failures, corrections, and free activation subsidy. Inputs are dated assumptions, not observed percentiles.",
+      "stages": {
+        "vision": { "model": "openai-gpt-5.5", "calls": 1.2, "inputTokensPerCall": 6000, "cachedInputRate": 0, "outputTokensPerCall": 1500 },
+        "garmentMeasurement": { "model": "openai-gpt-5.5", "calls": 1.3, "inputTokensPerCall": 4000, "cachedInputRate": 0, "outputTokensPerCall": 700 },
+        "pricingAgent": { "model": "openai-gpt-5.5", "calls": 1.5, "inputTokensPerCall": 5000, "cachedInputRate": 0.05, "outputTokensPerCall": 1200 },
+        "listing": { "model": "openai-gpt-5.5", "calls": 1.25, "inputTokensPerCall": 3500, "cachedInputRate": 0.1, "outputTokensPerCall": 1000 }
+      },
+      "garmentShare": 0.25,
+      "embeddingTokens": 1500,
+      "webSearchRequests": 2,
+      "soldComp": { "attemptRate": 0.8, "cacheHitRate": 0.2, "historicalCostPerQueryUsd": 0.091435 },
+      "infrastructurePerAttemptUsd": 0.03,
+      "failedRunRate": 0.12,
+      "failedAttemptCostShare": 0.75,
+      "correctionRate": 0.3,
+      "freeActivationsPerPaidSubscriber": 1.5,
+      "appleCommissionRate": 0.15,
+      "refundRate": 0.05,
+      "indirectTaxWithheldRate": 0.05,
+      "revenueCatMarginalRate": 0.01,
+      "fixedCosts": [
+        { "service": "Apple Developer Program", "monthlyUsd": 8.25, "sourceId": "apple-program", "note": "$99/year amortized monthly." },
+        { "service": "Supabase Pro", "monthlyUsd": 25, "sourceId": "supabase-pricing", "note": "Conservative step-up from Free." },
+        { "service": "Sentry Team", "monthlyUsd": 26, "sourceId": "sentry-pricing", "note": "Annual-billing monthly equivalent from the public rate card." }
+      ]
+    },
+    {
+      "id": "stress",
+      "description": "Deliberately adverse bound: maximum in-repo model retry envelopes, no sold-comp cache hits, high free activation and correction load, and standard 30% Apple commission. It is a guardrail, not a forecast.",
+      "stages": {
+        "vision": { "model": "openai-gpt-5.5", "calls": 3, "inputTokensPerCall": 10000, "cachedInputRate": 0, "outputTokensPerCall": 2500 },
+        "garmentMeasurement": { "model": "openai-gpt-5.5", "calls": 2, "inputTokensPerCall": 7000, "cachedInputRate": 0, "outputTokensPerCall": 1200 },
+        "pricingAgent": { "model": "openai-gpt-5.5", "calls": 3, "inputTokensPerCall": 10000, "cachedInputRate": 0, "outputTokensPerCall": 3000 },
+        "listing": { "model": "openai-gpt-5.5", "calls": 2, "inputTokensPerCall": 7000, "cachedInputRate": 0, "outputTokensPerCall": 2200 }
+      },
+      "garmentShare": 0.35,
+      "embeddingTokens": 3000,
+      "webSearchRequests": 3,
+      "soldComp": { "attemptRate": 1, "cacheHitRate": 0, "historicalCostPerQueryUsd": 0.091435 },
+      "infrastructurePerAttemptUsd": 0.08,
+      "failedRunRate": 0.25,
+      "failedAttemptCostShare": 0.9,
+      "correctionRate": 0.5,
+      "freeActivationsPerPaidSubscriber": 4,
+      "appleCommissionRate": 0.3,
+      "refundRate": 0.1,
+      "indirectTaxWithheldRate": 0.1,
+      "revenueCatMarginalRate": 0.01,
+      "fixedCosts": [
+        { "service": "Apple Developer Program", "monthlyUsd": 8.25, "sourceId": "apple-program", "note": "$99/year amortized monthly." },
+        { "service": "Supabase Pro", "monthlyUsd": 25, "sourceId": "supabase-pricing", "note": "Paid database floor." },
+        { "service": "Sentry Team", "monthlyUsd": 26, "sourceId": "sentry-pricing", "note": "Paid observability floor." },
+        { "service": "Railway Hobby API/worker floor", "monthlyUsd": 5, "sourceId": "railway-pricing", "note": "Deferred paid target floor before usage overages; provider activation remains unauthorized." },
+        { "service": "Vercel Pro", "monthlyUsd": 20, "sourceId": "vercel-pricing", "note": "Broader company fixed-cost burden, separate from native listing COGS." },
+        { "service": "Resend Pro", "monthlyUsd": 20, "sourceId": "resend-pricing", "note": "Paid email floor; not required by each listing." },
+        { "service": "Clerk Pro", "monthlyUsd": 25, "sourceId": "clerk-pricing", "note": "Monthly public plan floor." },
+        { "service": "Upstash fixed plan", "monthlyUsd": 10, "sourceId": "upstash-pricing", "note": "Fixed-plan floor; pay-as-you-go remains an alternative." }
+      ]
+    }
+  ],
+  "candidates": [
+    { "id": "starter-5", "label": "Lower price / lower allowance", "monthlyPriceUsd": 7.99, "annualPriceUsd": 59.99, "monthlyAllowance": 5, "annualReset": "monthly", "rollover": false, "unlimited": false },
+    { "id": "balanced-10", "label": "Balanced provisional recommendation", "monthlyPriceUsd": 9.99, "annualPriceUsd": 99.99, "monthlyAllowance": 10, "annualReset": "monthly", "rollover": false, "unlimited": false },
+    { "id": "volume-20", "label": "Higher price / higher allowance", "monthlyPriceUsd": 12.99, "annualPriceUsd": 119.99, "monthlyAllowance": 20, "annualReset": "monthly", "rollover": false, "unlimited": false }
+  ],
+  "planBreakpoints": {
+    "scrapingBeeMonthlyUsd": 49,
+    "scrapingBeeIncludedCredits": 250000,
+    "revenueCatFreeMtrUsd": 2500,
+    "posthogFreeEvents": 1000000,
+    "assumedPosthogEventsPerListing": 25,
+    "supabaseProMonthlyUsd": 25
+  },
+  "costInventory": [
+    { "service": "Apple Developer Program", "classification": "fixed", "treatment": "included", "sourceIds": ["apple-program"], "note": "$99/year amortized to $8.25/month in every scenario." },
+    { "service": "Supabase", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["supabase-pricing"], "note": "Free launch capacity; Pro's $25/month enters p90/stress fixed-cost sensitivity, not per-listing COGS." },
+    { "service": "Render prototype API / Railway paid runtime", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["runtime-proof", "render-pricing", "railway-pricing"], "note": "Render Free is only the optional supervised prototype API. Railway is ADR-0009's deferred paid target and its Hobby floor enters stress fixed costs. No deployment is authorized." },
+    { "service": "Vercel marketing surface", "classification": "fixed", "treatment": "breakpoint-only", "sourceIds": ["vercel-pricing"], "note": "Marketing hosting is not caused by one native AI-item run; keep it out of listing COGS and include it only in the broader stress fixed-cost crossover." },
+    { "service": "OpenAI vision, pricing, and listing calls", "classification": "per-attempt", "treatment": "included", "sourceIds": ["openai-gpt55", "pipeline-code"], "note": "Token volumes and route shares are dated scenario assumptions; the current public rate card is official." },
+    { "service": "Gemini 2.5 Flash development path", "classification": "per-attempt", "treatment": "breakpoint-only", "sourceIds": ["gemini-pricing", "pipeline-code"], "note": "Inventory only: the modeled showcase path uses OpenAI, while the provider registry keeps Gemini as the development flip." },
+    { "service": "OpenAI embedding query", "classification": "per-attempt", "treatment": "included", "sourceIds": ["openai-embedding", "pipeline-code"], "note": "One few-shot retrieval query is assumed; pgvector's 1536-dimension lock keeps the embedding provider separate from the language-model flip." },
+    { "service": "Tavily / Exa web pricing", "classification": "per-attempt", "treatment": "included", "sourceIds": ["tavily-pricing", "exa-pricing", "pipeline-code"], "note": "Tavily pay-as-you-go is modeled; Exa remains a provider breakpoint/fallback because route mix is unmeasured." },
+    { "service": "Caffein Apify sold-comps retrieval", "classification": "cache-sensitive", "treatment": "included", "sourceIds": ["sold-comp-benchmark", "sold-comp-replay", "apify-actor"], "note": "Uses #188's measured $0.091435/query historical evidence, varied by assumed route share and cache hit. Production activation remains default-off." },
+    { "service": "ScrapingBee sold-page proxy", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["sold-comp-benchmark", "scrapingbee-pricing"], "note": "The measured benchmark produced no usable result and 92.5% block/error; retain only the $49 plan crossover, not a production route assumption." },
+    { "service": "Durable queue, storage, egress, logs, and push/email metadata", "classification": "per-successful-listing", "treatment": "included", "sourceIds": ["supabase-pricing", "runtime-proof", "resend-pricing", "apple-program"], "note": "Bundled as a dated per-attempt infrastructure range until server metering separates storage, egress, queue, APNs, and email." },
+    { "service": "First complete guest activation", "classification": "free-activation", "treatment": "included", "sourceIds": ["adr-0008"], "note": "One durable free listing is a subsidy. The model allocates an assumed number of free activations to each paid subscriber instead of hiding it in paid-run COGS." },
+    { "service": "One guided identity correction", "classification": "included-correction", "treatment": "included", "sourceIds": ["adr-0008", "pipeline-code"], "note": "Reruns pricing plus listing generation for the same photo fingerprint and consumes no second credit; correction incidence varies by scenario." },
+    { "service": "Failed run, retry, and credit restoration", "classification": "failure-retry-restoration", "treatment": "included", "sourceIds": ["ledger-168", "pipeline-code"], "note": "The credit restores before durable value, but sunk provider cost remains. Expected failure burden uses f/(1-f) failures per durable success." },
+    { "service": "Apple commission, refunds, and indirect tax", "classification": "commission-refund-tax", "treatment": "included", "sourceIds": ["apple-small-business", "apple-agreement"], "note": "15% requires Small Business Program eligibility/approval; stress uses 30%. Refund and tax-withheld rates are dated assumptions awaiting RevenueCat/App Store proceeds." },
+    { "service": "RevenueCat", "classification": "step-variable", "treatment": "included", "sourceIds": ["revenuecat-pricing"], "note": "Free through $2,500 monthly tracked revenue; p90/stress apply the 1% marginal rate to avoid hiding the scale breakpoint." },
+    { "service": "PostHog", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["posthog-pricing"], "note": "First 1M product analytics events are free; no session replay is required for the decision gate. Event volume is an assumption." },
+    { "service": "Clerk, Upstash, Sentry, Resend, and APNs", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["clerk-pricing", "upstash-pricing", "sentry-pricing", "resend-pricing", "apple-program"], "note": "Current free tiers cover the planning case; p90/stress fixed-cost bundles include likely paid-plan floors. APNs has no separate modeled marginal fee." }
+  ],
+  "recommendation": { "candidateId": "balanced-10", "confidence": "medium-low", "gateRequired": true },
+  "testflightGate": {
+    "minimumSuccessfulListings": 100,
+    "minimumDistinctTesters": 30,
+    "minimumObservationDays": 28,
+    "minimumCorrections": 20,
+    "maximumP90CostDriftRate": 0.15,
+    "minimumExpectedContributionMarginRate": 0.6,
+    "minimumP90HighUseContributionMarginRate": 0.3,
+    "stressMustRemainNonNegative": true
+  },
+  "sources": [
+    { "id": "sold-comp-benchmark", "title": "Issue #188 sold-comps live benchmark", "url": "https://github.com/azizu06/snaplist/blob/main/docs/benchmarks/sold-comps/latest/REPORT.md", "observedAt": "2026-07-16", "kind": "measured", "note": "40-query historical run: $3.6574 spend, $0.091435/query, 95% retrieval coverage, 0 retries; production activation rejected in the original report." },
+    { "id": "sold-comp-replay", "title": "Issue #188 provider-neutral matcher replay", "url": "https://github.com/azizu06/snaplist/blob/main/docs/benchmarks/sold-comps/ranking-replay/REPORT.md", "observedAt": "2026-07-16", "kind": "measured", "note": "16/40 queries reached two anchors, 91.53% anchor precision, and 40.91% valid-comparable recall; saved capture only." },
+    { "id": "runtime-proof", "title": "Issue #195 runtime and hosting proof", "url": "https://github.com/azizu06/snaplist/blob/main/docs/architecture/mobile-runtime-hosting-proof.md", "observedAt": "2026-07-17", "kind": "architecture", "note": "Air-gapped orchestration lower bound plus an explicitly assumed provider-inclusive 120-second/10-active-CPU-second/512-MiB envelope." },
+    { "id": "ledger-168", "title": "Issue #168 AI-item credit ledger", "url": "https://github.com/azizu06/snaplist/blob/main/supabase/migrations/20260716180000_ai_item_credit_ledger.sql", "observedAt": "2026-07-17", "kind": "architecture", "note": "Reserve, settle once on durable value, restore once before value, monthly StoreKit period, and one guided correction semantics." },
+    { "id": "adr-0008", "title": "ADR-0008 native entitlements and credits", "url": "https://github.com/azizu06/snaplist/blob/main/docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md", "observedAt": "2026-07-17", "kind": "architecture", "note": "Free activation, included correction, monthly allowance, annual monthly reset, and no-rollover/unlimited product boundary." },
+    { "id": "pipeline-code", "title": "Current pipeline implementation", "url": "https://github.com/azizu06/snaplist/blob/main/src/lib/vision/pipeline.ts", "observedAt": "2026-07-17", "kind": "architecture", "note": "Current extraction, optional garment measurement, pricing, listing, and bounded retry seams used to define cost stages." },
+    { "id": "openai-gpt55", "title": "OpenAI GPT-5.5 API pricing", "url": "https://developers.openai.com/api/docs/models/gpt-5.5", "observedAt": "2026-07-17", "kind": "official", "note": "$5/M input, $0.50/M cached input, and $30/M output; token volumes are not yet measured." },
+    { "id": "openai-embedding", "title": "OpenAI text-embedding-3-small pricing", "url": "https://developers.openai.com/api/docs/models/text-embedding-3-small", "observedAt": "2026-07-17", "kind": "official", "note": "$0.02/M input tokens." },
+    { "id": "gemini-pricing", "title": "Google Gemini API pricing", "url": "https://ai.google.dev/gemini-api/docs/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Gemini 2.5 Flash paid tier: $0.30/M text-image-video input and $2.50/M output; development free tier exists." },
+    { "id": "tavily-pricing", "title": "Tavily API credits", "url": "https://docs.tavily.com/documentation/api-credits", "observedAt": "2026-07-17", "kind": "official", "note": "1,000 free monthly credits and $0.008/credit pay-as-you-go; basic search is one credit." },
+    { "id": "exa-pricing", "title": "Exa API pricing", "url": "https://exa.ai/pricing?tab=api", "observedAt": "2026-07-17", "kind": "official", "note": "20,000 free requests/month; Search $7/1,000 and Contents $1/1,000 pages after the free tier." },
+    { "id": "apify-actor", "title": "Caffein eBay sold listings actor", "url": "https://apify.com/caffein.dev/ebay-sold-listings", "observedAt": "2026-07-17", "kind": "official", "note": "Current public card says from $2.50/1,000 results. The model intentionally uses #188's measured historical run cost instead of retrofitting it." },
+    { "id": "scrapingbee-pricing", "title": "ScrapingBee pricing", "url": "https://www.scrapingbee.com/pricing/", "observedAt": "2026-07-17", "kind": "official", "note": "$49/month for 250,000 credits on the lowest public plan." },
+    { "id": "apple-storekit-transaction", "title": "Apple signed transaction fields", "url": "https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload", "observedAt": "2026-07-17", "kind": "official", "note": "Server-verifiable signed transaction payload supplies purchaseDate, expiresDate, originalTransactionId, and transactionId; these authoritative fields bound and identify allowance periods." },
+    { "id": "apple-subscription-billing", "title": "Apple subscription billing guidance", "url": "https://developer.apple.com/documentation/storekit/handling-subscriptions-billing", "observedAt": "2026-07-17", "kind": "official", "note": "Subscription access must use verified transaction periods rather than inferring an Apple billing period by adding a nominal duration; SnapList's annual monthly subperiod remains bounded by the signed span." },
+    { "id": "apple-program", "title": "Apple Developer Program", "url": "https://developer.apple.com/programs/whats-included/", "observedAt": "2026-07-17", "kind": "official", "note": "$99/year membership; APNs and TestFlight are included capabilities, with no separate APNs marginal fee modeled." },
+    { "id": "apple-small-business", "title": "App Store Small Business Program", "url": "https://developer.apple.com/news/?id=i7jzeefs", "observedAt": "2026-07-17", "kind": "official", "note": "15% commission for eligible enrolled developers up to the program threshold; enrollment is not assumed approved." },
+    { "id": "apple-agreement", "title": "Apple Developer Program License Agreement", "url": "https://developer.apple.com/support/terms/apple-developer-program-license-agreement/", "observedAt": "2026-07-17", "kind": "official", "note": "Apple deducts commission and applicable taxes and accounts for refunds; exact proceeds require live App Store/RevenueCat evidence." },
+    { "id": "revenuecat-pricing", "title": "RevenueCat pricing", "url": "https://www.revenuecat.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Free through $2,500 in monthly tracked revenue, then 1% of tracked revenue." },
+    { "id": "posthog-pricing", "title": "PostHog pricing", "url": "https://posthog.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "First 1M product analytics events/month free; mobile replay has a separate 2,500 free recording allowance and is excluded from the minimum gate." },
+    { "id": "supabase-pricing", "title": "Supabase pricing", "url": "https://supabase.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Free plan limits and Pro from $25/month define step-variable breakpoints; no production plan mutation is authorized." },
+    { "id": "vercel-pricing", "title": "Vercel pricing", "url": "https://vercel.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Pro is $20/month with included usage; marketing hosting is separated from native API/worker economics." },
+    { "id": "render-pricing", "title": "Render pricing", "url": "https://render.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Free and Starter compute prices define a deferred runtime breakpoint; no deployment is authorized." },
+    { "id": "railway-pricing", "title": "Railway pricing", "url": "https://docs.railway.com/pricing/plans", "observedAt": "2026-07-17", "kind": "official", "note": "Free, $5 Hobby, and $20 Pro plan floors are inventoried behind ADR-0009's owner-controlled trigger." },
+    { "id": "clerk-pricing", "title": "Clerk pricing", "url": "https://clerk.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Hobby includes 50,000 MRU; Pro begins at $25 monthly or $20/month billed annually." },
+    { "id": "upstash-pricing", "title": "Upstash Redis pricing", "url": "https://upstash.com/pricing/redis", "observedAt": "2026-07-17", "kind": "official", "note": "Free includes 500,000 commands; pay-as-you-go is $0.20/100,000 commands before storage/bandwidth overages." },
+    { "id": "sentry-pricing", "title": "Sentry pricing", "url": "https://sentry.io/pricing/", "observedAt": "2026-07-17", "kind": "official", "note": "Developer is free; Team starts at $26/month billed annually. Paid-plan exposure is fixed, not per listing." },
+    { "id": "resend-pricing", "title": "Resend pricing", "url": "https://resend.com/pricing", "observedAt": "2026-07-17", "kind": "official", "note": "Free includes 3,000 emails/month; Pro is $20 for 50,000. Email is not required per successful listing." }
+  ],
+  "excludedCosts": [
+    { "service": "Stripe web billing", "reason": "Legacy web billing is not the native StoreKit/RevenueCat launch path." },
+    { "service": "eBay seller fees, shipping, and taxes", "reason": "These affect the seller's transaction economics, not SnapList subscription COGS." },
+    { "service": "Buyer Q&A and post-sale actions", "reason": "They occur after listing creation and are not part of one complete AI-item credit." },
+    { "service": "Model judge/eval runs", "reason": "Offline product-quality evaluation is not a per-customer listing path." },
+    { "service": "Provider migration or production activation", "reason": "Issue #189 authorizes analysis only; no account, plan, credential, deployment, or routing mutation." }
+  ]
+}
