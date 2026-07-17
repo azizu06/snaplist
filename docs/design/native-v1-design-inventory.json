@@ -23,8 +23,51 @@
     "status": "design_only_active",
     "live_project_mutation_authorized": false
   },
+  "approved_deltas": [
+    {
+      "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16.zip",
+      "sha256": "d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001",
+      "exact_base": "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
+      "internal_checksums_verified": true,
+      "approved_frame_ids": [
+        "RUN-01",
+        "RUN-02",
+        "RUN-03",
+        "RUN-04",
+        "RUN-05",
+        "RUN-06",
+        "RUN-07",
+        "RUN-08",
+        "REV-01",
+        "REV-02a",
+        "REV-02b",
+        "REV-02c",
+        "REV-02d",
+        "REV-02d-retry",
+        "REV-02e",
+        "REV-07",
+        "REV-08"
+      ],
+      "candidate_unchanged": ["CAP-03a", "CAP-03b", "CAP-03c", "CAP-03d", "CAP-03e", "CAP-04"],
+      "withheld_unchanged": ["CAP-05"]
+    }
+  ],
+  "known_contract_conflicts": [
+    {
+      "id": "run-08-paid-plan-customer-name",
+      "source_locations": [
+        "changes/copy-catalog-delta.json",
+        "contracts/exact-copy-catalog.json",
+        "resolved/snaplist-copy-catalog.json"
+      ],
+      "package_issue": "RUN-08 exact copy uses the pre-ADR customer plan name.",
+      "required_customer_copy": "SnapList Pro",
+      "disposition": "repo_product_contract_override_required_before_implementation"
+    }
+  ],
   "status_definitions": {
     "implementation_frozen": "Visually approved and authorized for implementation only by its owning issue and declared dependencies.",
+    "implementation_frozen_parent": "Approved parent contract whose renderable variants are individually listed as implementation-frozen.",
     "candidate_not_implementation_frozen": "Design candidate only; it must not be implemented or treated as approved.",
     "withheld_interaction_repair": "Explicitly withheld while interaction repair is active.",
     "approved_awaiting_machine_readable_delta": "Visually approved, but implementation remains blocked until a separate machine-readable delta package arrives.",
@@ -38,7 +81,13 @@
     "accountless_onboarding": "https://github.com/azizu06/snaplist/issues/206",
     "capture": "https://github.com/azizu06/snaplist/issues/207",
     "seller_home": "https://github.com/azizu06/snaplist/issues/208",
-    "pricing_evidence": "https://github.com/azizu06/snaplist/issues/209"
+    "pricing_evidence": "https://github.com/azizu06/snaplist/issues/209",
+    "durable_runs_recovery": "https://github.com/azizu06/snaplist/issues/211",
+    "identity_guided_correction": "https://github.com/azizu06/snaplist/issues/212"
+  },
+  "implementation_dependencies": {
+    "211": {"lane":"Blocked","phase":"Phase 2","blocked_by":[205,161]},
+    "212": {"lane":"Blocked","phase":"Phase 1","blocked_by":[205,174,211]}
   },
   "visual_contract": {
     "direction": "White Seller Utility",
@@ -175,27 +224,33 @@
     {"id":"CAP-08","family":"assisted_measurement","status":"planned_not_implementation_frozen","implementation_issue":null},
     {"id":"CAP-09","family":"assisted_measurement","status":"planned_not_implementation_frozen","implementation_issue":null},
 
-    {"id":"RUN-01","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-02","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-03","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-04","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-05","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-06","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-07","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"RUN-08","family":"durable_runs","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
+    {"id":"RUN-01","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-02","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-03","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-04","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-05","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-06","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-07","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
+    {"id":"RUN-08","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
 
     {"id":"S1","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
     {"id":"S1b","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
     {"id":"S2","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
     {"id":"S3","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
-    {"id":"REV-01","family":"review","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"REV-02","family":"review","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
+    {"id":"REV-01","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-02","family":"review","status":"implementation_frozen_parent","implementation_issue":212},
+    {"id":"REV-02a","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-02b","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-02c","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-02d","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-02d-retry","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-02e","family":"review","status":"implementation_frozen","implementation_issue":212},
     {"id":"REV-03","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
     {"id":"REV-04","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
     {"id":"REV-05","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
     {"id":"REV-06","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"REV-07","family":"review","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
-    {"id":"REV-08","family":"review","status":"approved_awaiting_machine_readable_delta","implementation_issue":null},
+    {"id":"REV-07","family":"review","status":"implementation_frozen","implementation_issue":212},
+    {"id":"REV-08","family":"review","status":"implementation_frozen","implementation_issue":212},
     {"id":"REV-09","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
 
     {"id":"PUB-01","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},

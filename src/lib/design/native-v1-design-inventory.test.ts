@@ -18,6 +18,22 @@ type NativeDesignInventory = {
     sha256: string;
     approved_state_count: number;
   };
+  approved_deltas: Array<{
+    path: string;
+    sha256: string;
+    exact_base: string;
+    internal_checksums_verified: boolean;
+    approved_frame_ids: string[];
+    candidate_unchanged: string[];
+    withheld_unchanged: string[];
+  }>;
+  known_contract_conflicts: Array<{
+    id: string;
+    source_locations: string[];
+    package_issue: string;
+    required_customer_copy: string;
+    disposition: string;
+  }>;
   implementation_epic: Record<string, string>;
   product_contract: Record<string, unknown>;
   visual_contract: Record<string, unknown>;
@@ -37,7 +53,7 @@ describe("native V1 design inventory contract", () => {
         .map((state) => state.id)
         .sort();
 
-    expect(stateIds).toHaveLength(115);
+    expect(stateIds).toHaveLength(121);
     expect(new Set(stateIds).size).toBe(stateIds.length);
 
     expect(idsWithStatus("implementation_frozen")).toEqual(
@@ -67,14 +83,6 @@ describe("native V1 design inventory contract", () => {
         "HOME-02",
         "HOME-03",
         "HOME-04",
-      ].sort(),
-    );
-    expect(idsWithStatus("candidate_not_implementation_frozen")).toEqual(
-      ["CAP-03a", "CAP-03b", "CAP-03c", "CAP-03d", "CAP-03e", "CAP-04"].sort(),
-    );
-    expect(idsWithStatus("withheld_interaction_repair")).toEqual(["CAP-05"]);
-    expect(idsWithStatus("approved_awaiting_machine_readable_delta")).toEqual(
-      [
         "RUN-01",
         "RUN-02",
         "RUN-03",
@@ -84,11 +92,22 @@ describe("native V1 design inventory contract", () => {
         "RUN-07",
         "RUN-08",
         "REV-01",
-        "REV-02",
+        "REV-02a",
+        "REV-02b",
+        "REV-02c",
+        "REV-02d",
+        "REV-02d-retry",
+        "REV-02e",
         "REV-07",
         "REV-08",
       ].sort(),
     );
+    expect(idsWithStatus("candidate_not_implementation_frozen")).toEqual(
+      ["CAP-03a", "CAP-03b", "CAP-03c", "CAP-03d", "CAP-03e", "CAP-04"].sort(),
+    );
+    expect(idsWithStatus("withheld_interaction_repair")).toEqual(["CAP-05"]);
+    expect(idsWithStatus("implementation_frozen_parent")).toEqual(["REV-02"]);
+    expect(idsWithStatus("approved_awaiting_machine_readable_delta")).toEqual([]);
   });
 
   it("pins package provenance, product truth, visual exceptions, and implementation owners", () => {
@@ -104,6 +123,48 @@ describe("native V1 design inventory contract", () => {
       status: "design_only_active",
       live_project_mutation_authorized: false,
     });
+    expect(inventory.approved_deltas).toEqual([
+      {
+        path: "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16.zip",
+        sha256: "d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001",
+        exact_base: "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
+        internal_checksums_verified: true,
+        approved_frame_ids: [
+          "RUN-01",
+          "RUN-02",
+          "RUN-03",
+          "RUN-04",
+          "RUN-05",
+          "RUN-06",
+          "RUN-07",
+          "RUN-08",
+          "REV-01",
+          "REV-02a",
+          "REV-02b",
+          "REV-02c",
+          "REV-02d",
+          "REV-02d-retry",
+          "REV-02e",
+          "REV-07",
+          "REV-08",
+        ],
+        candidate_unchanged: ["CAP-03a", "CAP-03b", "CAP-03c", "CAP-03d", "CAP-03e", "CAP-04"],
+        withheld_unchanged: ["CAP-05"],
+      },
+    ]);
+    expect(inventory.known_contract_conflicts).toEqual([
+      {
+        id: "run-08-paid-plan-customer-name",
+        source_locations: [
+          "changes/copy-catalog-delta.json",
+          "contracts/exact-copy-catalog.json",
+          "resolved/snaplist-copy-catalog.json",
+        ],
+        package_issue: "RUN-08 exact copy uses the pre-ADR customer plan name.",
+        required_customer_copy: "SnapList Pro",
+        disposition: "repo_product_contract_override_required_before_implementation",
+      },
+    ]);
     expect(inventory.implementation_epic).toEqual({
       epic: "https://github.com/azizu06/snaplist/issues/204",
       foundation: "https://github.com/azizu06/snaplist/issues/205",
@@ -111,6 +172,8 @@ describe("native V1 design inventory contract", () => {
       capture: "https://github.com/azizu06/snaplist/issues/207",
       seller_home: "https://github.com/azizu06/snaplist/issues/208",
       pricing_evidence: "https://github.com/azizu06/snaplist/issues/209",
+      durable_runs_recovery: "https://github.com/azizu06/snaplist/issues/211",
+      identity_guided_correction: "https://github.com/azizu06/snaplist/issues/212",
     });
     expect(inventory.visual_contract).toMatchObject({
       direction: "White Seller Utility",
