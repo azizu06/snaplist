@@ -408,15 +408,16 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
     expect(r[0].price).toBe(180);
   });
 
-  it("without a known model, trusts the exact eBay query but still drops parts/accessories", () => {
-    const upcSignal = { upc: "027242920569" } as ItemSignal;
+  it("without a catalog identity, only anchors a barcode-exposing row and still drops noise", () => {
+    const upcSignal = { upc: "027242920569", condition: "good" } as ItemSignal;
     const comps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/1", title: "Sony WH-1000XM4 Headphones", price: 180 },
+      { url: "https://www.ebay.com/itm/4", title: "Sony WH-1000XM4 UPC 027242920569", price: 190 },
       { url: "https://www.ebay.com/itm/2", title: "WH-1000XM4 replacement ear pads", price: 20 },
       { url: "https://www.ebay.com/itm/3", title: "Headphones for parts not working", price: 30 },
     ];
     const r = filterRelevantComps(comps, upcSignal);
-    expect(r.map((c) => c.price)).toEqual([180]);
+    expect(r.map((c) => c.price)).toEqual([190]);
   });
 
   it("drops new/sealed comps for a USED item, keeps them when the seller's item is new", () => {
@@ -436,7 +437,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
 
   it("treats an accessory term as noise UNLESS it is part of the item's own identity", () => {
     // Selling a PS5 console: a DualSense Controller sale is an accessory → dropped.
-    const consoleSignal: ItemSignal = { brand: "Sony", model: "PS5" };
+    const consoleSignal: ItemSignal = { brand: "Sony", model: "PS5", condition: "good" };
     const consoleComps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/a", title: "Sony PS5 Console Disc Edition", price: 400 },
       { url: "https://www.ebay.com/itm/b", title: "Sony PS5 DualSense Controller", price: 55 },
@@ -450,6 +451,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
       brand: "Sony",
       model: "DualSense",
       resolvedName: "Sony DualSense Wireless Controller",
+      condition: "good",
     };
     const controllerComps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/c", title: "Sony DualSense Wireless Controller", price: 55 },
@@ -477,6 +479,7 @@ describe("filterRelevantComps (#56 review: accessories/parts/wrong-model)", () =
       brand: "Sony",
       model: "DualSense",
       resolvedName: "Sony DualSense Wireless Controller",
+      condition: "good",
     };
     const comps: EbaySoldComp[] = [
       { url: "https://www.ebay.com/itm/1", title: "Sony DualSense Wireless Controller", price: 55 },
@@ -717,6 +720,30 @@ describe("synthesizeSoldResult", () => {
     expect(scattered.compAgreement!).toBeLessThan(TIGHT_AGREEMENT_MIN);
     // A scattered sold set is honestly less confident than a tight one.
     expect(scattered.confidence).toBeLessThan(result.confidence);
+  });
+});
+
+describe("synthesizeSoldResult — condition-aware evidence weight (#198)", () => {
+  it("lets same-condition anchors outweigh adjacent-condition anchors", () => {
+    const same: EbaySoldComp = {
+      url: "https://www.ebay.com/itm/same",
+      title: "Apple iPhone 14 Pro 256GB",
+      price: 700,
+      condition: "Like New",
+    };
+    const adjacent: EbaySoldComp = {
+      url: "https://www.ebay.com/itm/adjacent",
+      title: "Apple iPhone 14 Pro 256GB",
+      price: 760,
+      condition: "Open Box",
+    };
+
+    const result = synthesizeSoldResult([same, adjacent], {
+      evidenceWeight: (comp) => (comp === same ? 0.98 : 0.85),
+    });
+
+    expect(result.suggested).toBe(700);
+    expect(result.range).toEqual({ min: 700, max: 760 });
   });
 });
 

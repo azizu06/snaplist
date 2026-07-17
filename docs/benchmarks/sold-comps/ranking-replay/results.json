@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "runId": "issue188-20260716T190054137Z",
+  "retrieval": {
+    "queryCount": 40,
+    "labeledRows": 914,
+    "relevantPrecision": 0.8238512035010941
+  },
+  "ranking": {
+    "anchorRows": 118,
+    "corroborationRows": 382,
+    "rejectedRows": 414,
+    "labeledAnchorRows": 118,
+    "validAnchorRows": 108,
+    "validComparableRows": 264,
+    "anchorPrecision": 0.9152542372881356,
+    "validAnchorRecall": 0.4090909090909091,
+    "usablePricingQueries": 16,
+    "pricingQueryCoverage": 0.4,
+    "missingCorpusQueries": 0
+  }
+}

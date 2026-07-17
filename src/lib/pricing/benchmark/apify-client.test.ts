@@ -132,7 +132,7 @@ describe("Apify live benchmark client", () => {
             itemId: "one",
             keyword: first.query,
             url: "https://www.ebay.com/itm/one",
-            title: "Matilda Roald Dahl paperback",
+            title: "Matilda Roald Dahl paperback ISBN 9780140328721",
             soldPrice: "8.00",
             soldCurrency: "USD",
             condition: "Pre-Owned",
