@@ -272,6 +272,7 @@ enum CaptureDraftStoreError: Error {
     case invalidImage
     case couldNotEncodeImage
     case transferReceiptMismatch
+    case invalidManifest
 }
 
 actor LocalCaptureDraftStore: CaptureDraftStoring {
@@ -322,9 +323,15 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             StagedCapturePhoto.self,
             from: Data(contentsOf: manifestURL)
         )
-        let currentPhotoURL = rootDirectory.appendingPathComponent(staged.photoURL.lastPathComponent)
-        let currentThumbnailURL = rootDirectory.appendingPathComponent(
-            staged.thumbnailURL.lastPathComponent
+        let currentPhotoURL = try ownedArtifactURL(
+            storedURL: staged.photoURL,
+            expectedPrefix: "photo",
+            draftID: staged.id
+        )
+        let currentThumbnailURL = try ownedArtifactURL(
+            storedURL: staged.thumbnailURL,
+            expectedPrefix: "thumbnail",
+            draftID: staged.id
         )
         guard now().timeIntervalSince(staged.createdAt) < Self.recoveryWindow else {
             purgeOwnedDraft(
@@ -404,10 +411,42 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
     }
 
     private func purgeOwnedDraft(photoURL: URL, thumbnailURL: URL) {
-        // Reconstructed URLs remain inside the store-owned root even if a manifest is corrupt.
+        // Callers validate both reconstructed artifact URLs before any deletion begins.
         for url in Set([photoURL, thumbnailURL, manifestURL]) {
             try? fileManager.removeItem(at: url)
         }
+    }
+
+    private func ownedArtifactURL(
+        storedURL: URL,
+        expectedPrefix: String,
+        draftID: UUID
+    ) throws -> URL {
+        let expectedName = "\(expectedPrefix)-\(draftID.uuidString).jpg"
+        let storedComponents = storedURL.pathComponents.dropFirst(
+            storedURL.pathComponents.first == "/" ? 1 : 0
+        )
+        guard storedURL.isFileURL,
+              !storedComponents.isEmpty,
+              storedComponents.allSatisfy({ component in
+                  !component.isEmpty
+                      && component != "."
+                      && component != ".."
+                      && !component.contains("/")
+                      && !component.contains("\\")
+              }),
+              storedURL.lastPathComponent == expectedName else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+
+        let standardizedRoot = rootDirectory.standardizedFileURL
+        let reconstructedURL = standardizedRoot
+            .appendingPathComponent(expectedName, isDirectory: false)
+            .standardizedFileURL
+        guard reconstructedURL.deletingLastPathComponent().standardizedFileURL == standardizedRoot else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+        return reconstructedURL
     }
 
     private func removeSupersededImages(keeping currentURLs: Set<URL>) throws {
@@ -576,6 +615,9 @@ final class CaptureFlowModel {
             phase = .captured
         } catch {
             guard activeCaptureID == captureID else { return }
+            activeCaptureID = nil
+            camera.stop()
+            resumeAfterBackground = false
             phase = .failed
         }
     }
@@ -600,6 +642,9 @@ final class CaptureFlowModel {
             phase = .captured
             return true
         } catch {
+            activeCaptureID = nil
+            camera.stop()
+            resumeAfterBackground = false
             phase = .failed
             return false
         }

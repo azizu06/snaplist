@@ -106,8 +106,11 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(model.phase, .failed)
         XCTAssertFalse(model.isCapturingPhoto)
         XCTAssertEqual(store.stageCount, 0)
+        XCTAssertEqual(camera.stopCount, 1)
+        XCTAssertFalse(camera.isSessionActive)
 
         await model.startCamera()
+        XCTAssertTrue(camera.isSessionActive)
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         XCTAssertTrue(model.canTakePhoto)
         await model.takePhoto()
@@ -115,6 +118,43 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(model.isCapturingPhoto)
         XCTAssertEqual(camera.captureCount, 2)
         XCTAssertEqual(store.stageCount, 1)
+        XCTAssertEqual(camera.stopCount, 2)
+        XCTAssertFalse(camera.isSessionActive)
+    }
+
+    func testLocalStageFailureStopsCameraAndAllowsARealRetry() async throws {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let accepted = FramingObservation(
+            subjectBounds: CGRect(x: 0.18, y: 0.14, width: 0.64, height: 0.70)
+        )
+        let evaluator = TestFramingEvaluator(
+            observations: [accepted, accepted, accepted, accepted]
+        )
+        let store = TestCaptureStore(stageError: TestCaptureError.failed)
+        let model = makeModel(camera: camera, evaluator: evaluator, store: store)
+
+        await model.startCamera()
+        for _ in 0..<2 { await model.process(frame: try makeFrame()) }
+        await model.takePhoto()
+
+        XCTAssertEqual(model.phase, .failed)
+        XCTAssertFalse(model.isCapturingPhoto)
+        XCTAssertEqual(camera.captureCount, 1)
+        XCTAssertEqual(store.stageCount, 1)
+        XCTAssertEqual(camera.stopCount, 1)
+        XCTAssertFalse(camera.isSessionActive)
+
+        await model.startCamera()
+        XCTAssertTrue(camera.isSessionActive)
+        for _ in 0..<2 { await model.process(frame: try makeFrame()) }
+        await model.takePhoto()
+
+        XCTAssertEqual(model.phase, .captured)
+        XCTAssertFalse(model.isCapturingPhoto)
+        XCTAssertEqual(camera.captureCount, 2)
+        XCTAssertEqual(store.stageCount, 2)
+        XCTAssertEqual(camera.stopCount, 2)
+        XCTAssertFalse(camera.isSessionActive)
     }
 
     func testCancelInvalidatesAPendingCaptureAndReleasesTheShutterLock() async throws {
@@ -1111,6 +1151,7 @@ private final class TestCaptureCamera: CaptureCamera {
     var startCount = 0
     var stopCount = 0
     var captureCount = 0
+    private(set) var isSessionActive = false
     var frameHandler: ((CaptureFrame) -> Void)?
     private let suspendsCapture: Bool
     private var captureError: Error?
@@ -1133,11 +1174,13 @@ private final class TestCaptureCamera: CaptureCamera {
 
     func start(frameHandler: @escaping (CaptureFrame) -> Void) async throws {
         startCount += 1
+        isSessionActive = true
         self.frameHandler = frameHandler
     }
 
     func stop() {
         stopCount += 1
+        isSessionActive = false
     }
 
     func capturePhoto() async throws -> Data {
@@ -1221,7 +1264,7 @@ private final class TestCaptureStore: CaptureDraftStoring {
     var stageCount = 0
     var discardCount = 0
     var lastStagedImageData: Data?
-    private let stageError: Error?
+    private var stageError: Error?
 
     init(
         staged: StagedCapturePhoto? = nil,
@@ -1239,7 +1282,10 @@ private final class TestCaptureStore: CaptureDraftStoring {
     ) async throws -> StagedCapturePhoto {
         stageCount += 1
         lastStagedImageData = imageData
-        if let stageError { throw stageError }
+        if let stageError {
+            self.stageError = nil
+            throw stageError
+        }
         let photo = StagedCapturePhoto(
             id: UUID(),
             photoURL: URL(fileURLWithPath: "/tmp/photo.jpg"),

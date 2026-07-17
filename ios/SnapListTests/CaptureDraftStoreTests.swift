@@ -151,9 +151,18 @@ final class CaptureDraftStoreTests: XCTestCase {
     }
 
     func testRestorePurgesDraftAtTheTwentyFourHourBoundary() async throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fileManager = FileManager.default
+        let parent = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-capture-expiry-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let root = parent.appendingPathComponent("CaptureDraft", isDirectory: true)
+        let siblingURL = parent.appendingPathComponent("sibling.txt")
         let createdAt = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        defer { try? fileManager.removeItem(at: parent) }
+
+        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        try Data([0xAA]).write(to: siblingURL)
         let store = LocalCaptureDraftStore(rootDirectory: root, now: { createdAt })
         let staged = try await store.stage(imageData: makeLandscapeImageData())
         let manifestURL = root.appendingPathComponent("manifest.json")
@@ -168,44 +177,68 @@ final class CaptureDraftStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.photoURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.thumbnailURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: manifestURL.path))
-
-        try? FileManager.default.removeItem(at: root)
+        XCTAssertTrue(fileManager.fileExists(atPath: parent.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: siblingURL.path))
     }
 
-    func testExpiredManifestCannotPurgePathsOutsideTheOwnedRoot() async throws {
+    func testMalformedManifestArtifactNamesFailClosedBeforeDeletingAnything() async throws {
         let fileManager = FileManager.default
-        let parent = fileManager.temporaryDirectory.appendingPathComponent(
-            "snaplist-capture-confinement-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        let root = parent.appendingPathComponent("CaptureDraft", isDirectory: true)
-        let outsidePhotoURL = parent.appendingPathComponent("outside-photo.jpg")
-        let outsideThumbnailURL = parent.appendingPathComponent("outside-thumbnail.jpg")
         let createdAt = Date(timeIntervalSinceReferenceDate: 1_000_000)
-        defer { try? fileManager.removeItem(at: parent) }
+        let draftID = UUID()
+        let expectedPhotoName = "photo-\(draftID.uuidString).jpg"
+        let maliciousURLs = [
+            URL(string: "file:///tmp/..")!,
+            URL(string: "file:///tmp/.")!,
+            URL(string: "file:///tmp/nested/../\(expectedPhotoName)")!,
+            URL(string: "file:///tmp/%2E%2E/\(expectedPhotoName)")!,
+            URL(string: "file:///tmp/%2Fetc%2Fpasswd")!,
+            URL(string: "file:///")!
+        ]
 
-        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        try Data([0x01]).write(to: outsidePhotoURL)
-        try Data([0x02]).write(to: outsideThumbnailURL)
-        let staged = StagedCapturePhoto(
-            id: UUID(),
-            photoURL: outsidePhotoURL,
-            thumbnailURL: outsideThumbnailURL,
-            createdAt: createdAt
-        )
-        let manifestURL = root.appendingPathComponent("manifest.json")
-        try JSONEncoder().encode(staged).write(to: manifestURL)
-        let store = LocalCaptureDraftStore(
-            rootDirectory: root,
-            fileManager: fileManager,
-            now: { createdAt.addingTimeInterval(24 * 60 * 60) }
-        )
+        for maliciousURL in maliciousURLs {
+            let parent = fileManager.temporaryDirectory.appendingPathComponent(
+                "snaplist-capture-confinement-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            let root = parent.appendingPathComponent("CaptureDraft", isDirectory: true)
+            let siblingURL = parent.appendingPathComponent("sibling.txt")
+            let manifestURL = root.appendingPathComponent("manifest.json")
+            let ownedThumbnailURL = root.appendingPathComponent(
+                "thumbnail-\(draftID.uuidString).jpg"
+            )
+            defer { try? fileManager.removeItem(at: parent) }
 
-        let restored = try await store.load()
-        XCTAssertNil(restored)
-        XCTAssertTrue(fileManager.fileExists(atPath: outsidePhotoURL.path))
-        XCTAssertTrue(fileManager.fileExists(atPath: outsideThumbnailURL.path))
-        XCTAssertFalse(fileManager.fileExists(atPath: manifestURL.path))
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+            try Data([0x01]).write(to: siblingURL)
+            try Data([0x02]).write(to: ownedThumbnailURL)
+            let staged = StagedCapturePhoto(
+                id: draftID,
+                photoURL: maliciousURL,
+                thumbnailURL: ownedThumbnailURL,
+                createdAt: createdAt
+            )
+            try JSONEncoder().encode(staged).write(to: manifestURL)
+            let store = LocalCaptureDraftStore(
+                rootDirectory: root,
+                fileManager: fileManager,
+                now: { createdAt.addingTimeInterval(24 * 60 * 60) }
+            )
+
+            do {
+                _ = try await store.load()
+                XCTFail("Expected malformed manifest URL to fail closed: \(maliciousURL)")
+            } catch CaptureDraftStoreError.invalidManifest {
+                // Expected: validation completes before expiry cleanup can delete anything.
+            } catch {
+                XCTFail("Unexpected error for \(maliciousURL): \(error)")
+            }
+
+            XCTAssertTrue(fileManager.fileExists(atPath: parent.path))
+            XCTAssertTrue(fileManager.fileExists(atPath: root.path))
+            XCTAssertTrue(fileManager.fileExists(atPath: siblingURL.path))
+            XCTAssertTrue(fileManager.fileExists(atPath: ownedThumbnailURL.path))
+            XCTAssertTrue(fileManager.fileExists(atPath: manifestURL.path))
+        }
     }
 
     private func makeLandscapeImageData() throws -> Data {
