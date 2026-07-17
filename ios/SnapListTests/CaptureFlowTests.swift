@@ -206,6 +206,47 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(model.handoffTitle, "Photos ready to review")
     }
 
+    func testReviewHandoffReturnsToLiveCameraWithoutDiscardingTheStagedPhoto() async throws {
+        let staged = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/photo.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/thumb.jpg"),
+            createdAt: Date()
+        )
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let accepted = FramingObservation(
+            subjectBounds: CGRect(x: 0.18, y: 0.14, width: 0.64, height: 0.70)
+        )
+        let store = TestCaptureStore(staged: staged)
+        let model = makeModel(
+            camera: camera,
+            evaluator: TestFramingEvaluator(observations: [accepted, accepted]),
+            store: store
+        )
+        let restoration = await model.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        model.continueToReviewHandoff()
+        XCTAssertEqual(model.phase, .reviewHandoff)
+
+        await model.reopenCameraFromReviewHandoff()
+
+        XCTAssertEqual(model.phase, .camera)
+        XCTAssertEqual(model.stagedPhoto, staged)
+        XCTAssertEqual(camera.startCount, 1)
+        XCTAssertTrue(camera.isSessionActive)
+
+        for _ in 0..<2 { await model.process(frame: try makeFrame()) }
+        XCTAssertEqual(model.guidance, .accepted)
+        XCTAssertFalse(model.canTakePhoto)
+        await model.takePhoto()
+        let didStageLibraryReplacement = await model.stageLibraryPhoto(Data([0x01, 0x02]))
+        XCTAssertEqual(camera.captureCount, 0)
+        XCTAssertFalse(didStageLibraryReplacement)
+        XCTAssertEqual(store.stageCount, 0)
+        XCTAssertEqual(store.discardCount, 0)
+        XCTAssertEqual(model.stagedPhoto, staged)
+    }
+
     func testBackgroundStopsAndForegroundRestartsAnActiveCamera() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let model = makeModel(camera: camera)

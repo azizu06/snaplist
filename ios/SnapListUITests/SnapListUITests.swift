@@ -97,6 +97,29 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["capture.handoff.title"].waitForExistence(timeout: 2))
     }
 
+    func testReviewHandoffBackToCameraRestartsCaptureAndKeepsTheStagedPhoto() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        app.buttons["button.primary.resume-captured-photo"].tap()
+        XCTAssertTrue(app.buttons["capture.continue"].waitForExistence(timeout: 3))
+        app.buttons["capture.continue"].tap()
+        let backToCamera = app.buttons["capture.handoff.back-to-camera"]
+        XCTAssertTrue(backToCamera.waitForExistence(timeout: 2))
+
+        backToCamera.tap()
+
+        XCTAssertTrue(app.buttons["camera.close"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["camera.staged-photo-boundary"].exists)
+        XCTAssertFalse(app.buttons["camera.shutter"].isEnabled)
+        XCTAssertFalse(app.buttons["camera.library"].isEnabled)
+        app.buttons["camera.close"].tap()
+        app.buttons["dock.capture"].tap()
+        XCTAssertTrue(app.staticTexts["1 of 4 photos saved"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["button.primary.resume-captured-photo"].exists)
+    }
+
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
         let expectedTextByState = [
             ("CAP-01", "Add an item"),

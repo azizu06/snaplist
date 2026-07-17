@@ -249,6 +249,19 @@ extension CaptureCamera {
     var captureDevice: AVCaptureDevice? { nil }
 }
 
+#if DEBUG
+final class RestoredCaptureFixtureCamera: CaptureCamera {
+    let session = AVCaptureSession()
+    let isAvailable = true
+
+    func authorizationStatus() -> CaptureCameraAuthorization { .authorized }
+    func requestAuthorization() async -> CaptureCameraAuthorization { .authorized }
+    func start(frameHandler: @escaping (CaptureFrame) -> Void) async throws {}
+    func stop() {}
+    func capturePhoto() async throws -> Data { Data() }
+}
+#endif
+
 protocol FramingEvaluating {
     func evaluate(frame: CaptureFrame) async throws -> FramingObservation
 }
@@ -582,7 +595,10 @@ final class CaptureFlowModel {
     var captureDevice: AVCaptureDevice? { camera.captureDevice }
     var isCapturingPhoto: Bool { activeCaptureID != nil }
     var canTakePhoto: Bool {
-        phase == .camera && guidance == .accepted && !isCapturingPhoto
+        phase == .camera
+            && stagedPhoto == nil
+            && guidance == .accepted
+            && !isCapturingPhoto
     }
     var handoffTitle: String { "Photos ready to review" }
 
@@ -678,6 +694,7 @@ final class CaptureFlowModel {
         _ imageData: Data,
         transferReceipt: LibraryPhotoTransferReceipt? = nil
     ) async -> Bool {
+        guard stagedPhoto == nil else { return false }
         if let transferReceipt,
            !transferReceipt.matchesTransferredPhoto(imageData) {
             phase = .failed
@@ -718,6 +735,11 @@ final class CaptureFlowModel {
     func continueToReviewHandoff() {
         guard stagedPhoto != nil else { return }
         phase = .reviewHandoff
+    }
+
+    func reopenCameraFromReviewHandoff() async {
+        guard phase == .reviewHandoff, stagedPhoto != nil else { return }
+        await startCamera()
     }
 
     func cancelCamera() {

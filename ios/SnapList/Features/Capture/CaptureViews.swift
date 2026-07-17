@@ -375,7 +375,20 @@ struct GuidedCameraView: View {
 
     @ViewBuilder
     private var cameraGuidance: some View {
-        if flow.guidance == .coaching {
+        if flow.stagedPhoto != nil {
+            Label(
+                "1 photo is still saved. This frozen handoff won’t replace it; additional photos aren’t available yet.",
+                systemImage: "photo.stack"
+            )
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 16)
+            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+            .background(SnapListColorToken.action.color.opacity(0.48))
+            .background(.ultraThinMaterial)
+            .clipShape(.capsule)
+            .accessibilityIdentifier("camera.staged-photo-boundary")
+        } else if flow.guidance == .coaching {
             HStack(alignment: .bottom, spacing: 8) {
                 Image("ScoutCoaching")
                     .resizable()
@@ -425,7 +438,14 @@ struct GuidedCameraView: View {
                     .clipShape(.rect(cornerRadius: 12))
             }
             .accessibilityLabel("Choose from photo library")
+            .accessibilityHint(
+                flow.stagedPhoto == nil
+                    ? "Selects one photo for this item"
+                    : "One photo is already staged; additional photos belong to a later capture slice"
+            )
             .accessibilityIdentifier("camera.library")
+            .disabled(flow.stagedPhoto != nil)
+            .opacity(flow.stagedPhoto == nil ? 1 : 0.52)
 
             Spacer()
 
@@ -444,7 +464,9 @@ struct GuidedCameraView: View {
             .opacity(flow.canTakePhoto ? 1 : 0.52)
             .accessibilityLabel("Take photo")
             .accessibilityHint(
-                flow.isCapturingPhoto
+                flow.stagedPhoto != nil
+                    ? "One photo is already staged; additional photos belong to a later capture slice"
+                    : flow.isCapturingPhoto
                     ? "Capture in progress"
                     : flow.canTakePhoto
                         ? "Captures the item in frame"
@@ -581,8 +603,7 @@ struct GuidedCameraView: View {
         VStack(spacing: 0) {
             HStack {
                 Button {
-                    flow.cancelCamera()
-                    close()
+                    Task { await flow.reopenCameraFromReviewHandoff() }
                 } label: {
                     Image(systemName: "chevron.left")
                         .frame(width: 44, height: 44)
@@ -633,12 +654,12 @@ struct GuidedCameraView: View {
                 .accessibilityLabel("Photo review is the next implementation boundary")
 
             Button("Back to camera") {
-                flow.cancelCamera()
-                close()
+                Task { await flow.reopenCameraFromReviewHandoff() }
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(SnapListColorToken.action.color)
             .frame(minHeight: 44)
+            .accessibilityIdentifier("capture.handoff.back-to-camera")
 
             Label(
                 "Prototype bridge only — CAP-03 photo review remains outside this slice.",

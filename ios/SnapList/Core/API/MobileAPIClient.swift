@@ -95,6 +95,7 @@ struct AppDependencies {
             cameraAuthorization = AVCameraAuthorizationClient()
         }
         let captureDraftStore = makeCaptureDraftStore(configuration: configuration)
+        let captureCamera = makeCaptureCamera(configuration: configuration)
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
             return AppDependencies(
@@ -104,7 +105,7 @@ struct AppDependencies {
                 onboardingProgressStore: InMemoryOnboardingProgressStore(),
                 stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
                 guestAllowance: DeferredGuestAllowanceCapability(),
-                captureCamera: AVFoundationCaptureCamera(),
+                captureCamera: captureCamera,
                 framingEvaluator: VisionObjectFramingEvaluator(),
                 captureDraftStore: captureDraftStore
             )
@@ -121,10 +122,21 @@ struct AppDependencies {
             onboardingProgressStore: UserDefaultsOnboardingProgressStore(),
             stagedLibraryPhotos: FileSystemStagedLibraryPhotoStore(),
             guestAllowance: DeferredGuestAllowanceCapability(),
-            captureCamera: AVFoundationCaptureCamera(),
+            captureCamera: captureCamera,
             framingEvaluator: VisionObjectFramingEvaluator(),
             captureDraftStore: captureDraftStore
         )
+    }
+
+    private static func makeCaptureCamera(
+        configuration: LaunchConfiguration
+    ) -> any CaptureCamera {
+#if DEBUG
+        if configuration.usesRestoredCaptureFixture {
+            return RestoredCaptureFixtureCamera()
+        }
+#endif
+        return AVFoundationCaptureCamera()
     }
 
     private static func makeCaptureDraftStore(
