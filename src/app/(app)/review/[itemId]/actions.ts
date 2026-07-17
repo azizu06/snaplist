@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
+import { getPostHogClient } from "@/lib/posthog-server";
 import { parseReviewEdits } from "@/lib/pipeline";
 import { repriceWithSpecs } from "@/lib/pipeline/reprice";
 import {
@@ -180,6 +181,19 @@ export async function saveReview(formData: FormData) {
     );
   }
 
+  const posthog = getPostHogClient();
+  posthog.capture({
+    distinctId: userId,
+    event: "review_edited",
+    properties: {
+      item_id: id,
+      has_price_override: edits.override != null,
+      has_cost_basis: edits.costBasis != null,
+      has_listing_edits: edits.listing != null,
+    },
+  });
+  await posthog.flush();
+
   revalidatePath(`/review/${id}`);
   backTo(id);
 }
@@ -253,6 +267,19 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
       band: result.confidence.band,
       priceOverridePreserved: result.priceOverride != null,
     });
+    const phIdentity = getPostHogClient();
+    phIdentity.capture({
+      distinctId: userId,
+      event: "review_identity_corrected",
+      properties: {
+        item_id: id,
+        tier: result.price.tier,
+        confidence_score: result.confidence.score,
+        confidence_band: result.confidence.band,
+        price_override_preserved: result.priceOverride != null,
+      },
+    });
+    await phIdentity.flush();
   } catch (err) {
     reportServerError("review.identity_regenerate", err);
     const message =
@@ -420,6 +447,19 @@ export async function sharpenEstimate(formData: FormData) {
     confidence: reprice.confidence.score,
     band: reprice.confidence.band,
   });
+  const phSharpen = getPostHogClient();
+  phSharpen.capture({
+    distinctId: userId,
+    event: "review_estimate_sharpened",
+    properties: {
+      item_id: id,
+      specs_added: addedSpecs.length,
+      tier: reprice.price.tier,
+      confidence_score: reprice.confidence.score,
+      confidence_band: reprice.confidence.band,
+    },
+  });
+  await phSharpen.flush();
   revalidatePath(`/review/${id}`);
   backTo(id);
 }

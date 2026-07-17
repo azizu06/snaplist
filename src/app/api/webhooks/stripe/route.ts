@@ -9,6 +9,7 @@ import {
   resolveStripeConfig,
   stripeConfigured,
 } from "@/lib/billing";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 // Node runtime: the Stripe SDK + signature verification need Node crypto and the
 // RAW request body (read via request.text(), unparsed) — mirrors the eBay
@@ -61,6 +62,24 @@ export async function POST(request: NextRequest) {
       processed: result.processed,
       ...(result.reason ? { reason: result.reason } : {}),
     });
+    if (
+      result.processed &&
+      (event.type === "customer.subscription.created" ||
+        event.type === "customer.subscription.updated")
+    ) {
+      const subscription = event.object as { customer?: string; status?: string };
+      const status = typeof subscription.status === "string" ? subscription.status : undefined;
+      const customer = typeof subscription.customer === "string" ? subscription.customer : undefined;
+      if (customer && (status === "active" || status === "trialing")) {
+        const posthog = getPostHogClient();
+        posthog.capture({
+          distinctId: customer,
+          event: "subscription_activated",
+          properties: { stripe_event_type: event.type, status },
+        });
+        await posthog.flush();
+      }
+    }
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (err) {
     reportServerError("billing.webhook", err, { type: event.type });

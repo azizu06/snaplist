@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
+import { getPostHogClient } from "@/lib/posthog-server";
 import {
   MessageDeliveryAttemptError,
   MessageDeliveryConflictError,
@@ -136,6 +137,17 @@ export async function POST(
       body: parsed.data.reply,
       expectedPhotoIds: stagedPhotos.map((photo) => photo.id),
     });
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: "buyer_reply_sent",
+      properties: {
+        message_id: message.id,
+        marketplace: message.marketplace,
+        has_photos: stagedPhotos.length > 0,
+      },
+    });
+    await posthog.flush();
     return NextResponse.json({ outboundId: outbound.id, status: "sent" });
   } catch (err) {
     if (err instanceof MessagePhotoConflictError) {

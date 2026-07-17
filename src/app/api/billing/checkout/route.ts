@@ -10,6 +10,7 @@ import {
   stripeConfigured,
 } from "@/lib/billing";
 import { serverErrorJson } from "@/lib/api/errors";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 /**
  * Start a Stripe Checkout for the Pro subscription (issue #64). POST → `{ url }`
@@ -53,6 +54,13 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: "checkout_started",
+      properties: { price_id: config.pricePro },
+    });
+    await posthog.flush();
     return NextResponse.json({ url: result.url }, { status: 200 });
   } catch (err) {
     return serverErrorJson("billing.checkout", err, "Could not start checkout.");

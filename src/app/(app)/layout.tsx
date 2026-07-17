@@ -3,6 +3,7 @@ import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { listRecentNotifications, type NotificationView } from "@/lib/notifications";
 import { AppShell } from "@/components/app-shell";
+import { PostHogUserIdentifier } from "@/components/posthog-user-identifier";
 import { UploadDraftProvider } from "./upload/upload-draft-context";
 import type { ProfileUser } from "@/components/profile-menu";
 import type { PaletteHit } from "@/components/command-palette";
@@ -103,6 +104,7 @@ export default async function AppLayout({
         previewSignedIn && !userId ? PREVIEW_SEARCH_FIXTURES : undefined
       }
     >
+      <PostHogUserIdentifier />
       {/* Holds pending upload photos so a half-built listing survives in-app
           navigation (Home/inbox and back). Lives in the layout, which persists
           across (app) route changes. */}

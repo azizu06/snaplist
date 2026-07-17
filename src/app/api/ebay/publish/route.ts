@@ -12,6 +12,7 @@ import {
 import { logServerError, serverErrorJson } from "@/lib/api/errors";
 import { enforceRateLimit } from "@/lib/abuse";
 import { createTenantServerClient } from "@/lib/supabase/tenant-server";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 /**
  * eBay publish endpoint (issue #14).
@@ -60,6 +61,13 @@ export async function POST(request: NextRequest) {
       }),
       { completionClient },
     );
+    const phPublish = getPostHogClient();
+    phPublish.capture({
+      distinctId: userId,
+      event: "listing_published",
+      properties: { listing_id: listingId },
+    });
+    await phPublish.flush();
     return NextResponse.json(outcome, { status: 200 });
   } catch (err) {
     // User-actionable validation errors carry a SAFE message the seller can act on
@@ -68,6 +76,13 @@ export async function POST(request: NextRequest) {
     // error logged server-side (CWE-209, #57).
     if (err instanceof PublishValidationError) {
       const status = /not found/i.test(err.message) ? 404 : 422;
+      const phFail = getPostHogClient();
+      phFail.capture({
+        distinctId: userId,
+        event: "listing_publish_failed",
+        properties: { listing_id: listingId, failure_type: "validation" },
+      });
+      await phFail.flush();
       return NextResponse.json({ error: err.message }, { status });
     }
     // EbayApiError carries an author-controlled, user-actionable summary — surface
@@ -75,12 +90,29 @@ export async function POST(request: NextRequest) {
     // invalid token) is normalized to the ONE actionable reconnect message instead
     // of the raw HTTP-401 text. Plain errors (Supabase/internal) are redacted.
     if (err instanceof EbayApiError) {
+      const phFail = getPostHogClient();
+      phFail.capture({
+        distinctId: userId,
+        event: "listing_publish_failed",
+        properties: {
+          listing_id: listingId,
+          failure_type: isEbayAuthError(err) ? "auth" : "ebay_api",
+        },
+      });
+      await phFail.flush();
       return NextResponse.json(
         { error: isEbayAuthError(err) ? EBAY_RECONNECT_MESSAGE : err.message },
         { status: 502 },
       );
     }
     logServerError("ebay.publish", err);
+    const phFail = getPostHogClient();
+    phFail.capture({
+      distinctId: userId,
+      event: "listing_publish_failed",
+      properties: { listing_id: listingId, failure_type: "internal" },
+    });
+    await phFail.flush();
     return NextResponse.json({ error: "Failed to publish to eBay." }, { status: 502 });
   }
 }

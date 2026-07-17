@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { motion } from "motion/react";
+import posthog from "posthog-js";
 import ClickSpark from "@/components/bits/ClickSpark";
 import { Banner } from "@/components/ui/banner";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
@@ -523,9 +524,12 @@ export function UploadForm({
     <form
       action={action}
       data-recovery-href={`/upload?batch=${batchId}`}
-      onSubmit={() =>
-        persistPipelineRecoveryHandle(window.history, "/upload", batchId)
-      }
+      onSubmit={() => {
+        persistPipelineRecoveryHandle(window.history, "/upload", batchId);
+        posthog.capture("item_upload_started", {
+          photo_count: files.length,
+        });
+      }}
     >
       <input type="hidden" name="batchId" value={batchId} />
       <input type="hidden" name="idempotencyKey" value={`single:${batchId}`} />

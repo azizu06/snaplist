@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import posthog from "posthog-js";
 
 /**
  * Copy-to-clipboard button for an export pack block (issue #15; redesign/export).
@@ -29,6 +30,7 @@ export function CopyButton({
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
+      posthog.capture("export_pack_copied", { platform_label: label });
     } catch {
       // Clipboard unavailable (permissions / non-secure context) — leave the
       // label unchanged; the user can still select the block manually.

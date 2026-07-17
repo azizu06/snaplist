@@ -10,6 +10,7 @@ import { reportServerError } from "@/lib/sentry";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { createClient } from "@/lib/supabase/server";
 import { stageUploadEntries } from "@/lib/upload-staging";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 function redirectUploadError(message: string, batchId?: string): never {
   const params = new URLSearchParams({ error: message });
@@ -99,6 +100,18 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     );
 
     if (!staged) throw new Error("Pipeline staging returned no run");
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: "item_pipeline_enqueued",
+      properties: {
+        item_id: staged.item_id,
+        photo_count: photos.length,
+        has_cost_basis: costBasis != null,
+        autopilot_enabled: autopilotEnabled,
+      },
+    });
+    await posthog.flush();
     redirect(`/review/${staged.item_id}?new=1`);
   } catch (error) {
     // Next redirects are represented as thrown control-flow errors. Let them
