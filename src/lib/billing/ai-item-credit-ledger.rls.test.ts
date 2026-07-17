@@ -657,6 +657,29 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
     );
     expect(repeatedAuthorization).toMatchObject({ data: false, error: null });
 
+    const editedRevision = crypto.randomUUID();
+    const editAfterAuthorization = await lifecycleUser.client.rpc("save_review_edits", {
+      p_item_id: settledRun.item_id,
+      p_listing_id: completion.listingId,
+      p_expected_review_revision: settled?.settled_review_revision,
+      p_new_review_revision: editedRevision,
+      p_attributes: RESULT.attributes,
+      p_condition: "good",
+      p_price_override: null,
+      p_cost_basis: null,
+      p_listing_title: "Seller edit before guided correction",
+      p_listing_description: "The seller changed the review before model work committed.",
+    });
+    expect(editAfterAuthorization.error).toBeNull();
+    const reboundAuthorization = await lifecycleUser.client.rpc(
+      "authorize_ai_item_guided_correction",
+      {
+        p_item_id: settledRun.item_id,
+        p_expected_review_revision: editedRevision,
+      },
+    );
+    expect(reboundAuthorization).toMatchObject({ data: true, error: null });
+
     const correctedRunId = crypto.randomUUID();
     const correction = await lifecycleUser.client.rpc(
       "regenerate_review_listing_with_credit",
@@ -665,7 +688,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
         p_listing_id: completion.listingId,
         p_run_id: correctedRunId,
         p_expected_run_id: settledRun.run_id,
-        p_expected_review_revision: settled?.settled_review_revision,
+        p_expected_review_revision: editedRevision,
         p_attributes: { ...RESULT.attributes, model: "WH-1000XM5" },
         p_condition: "good",
         p_identification: {
@@ -696,7 +719,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       .single();
     expect(correctedReservation).toMatchObject({
       state: "settled",
-      guided_correction_revision: settled?.settled_review_revision,
+      guided_correction_revision: editedRevision,
       guided_correction_completed_at: expect.any(String),
     });
     const secondCorrection = await lifecycleUser.client.rpc(

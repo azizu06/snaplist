@@ -476,17 +476,17 @@ begin
       message = 'AI-item credit terminal evidence is immutable';
   end if;
 
-  if old.guided_correction_revision is not null
+  if old.guided_correction_completed_at is not null
     and new.guided_correction_revision is distinct from old.guided_correction_revision then
     raise exception using
       errcode = '23514',
-      message = 'Guided correction identity is immutable';
+      message = 'Completed guided correction identity is immutable';
   end if;
-  if old.guided_correction_started_at is not null
+  if old.guided_correction_completed_at is not null
     and new.guided_correction_started_at is distinct from old.guided_correction_started_at then
     raise exception using
       errcode = '23514',
-      message = 'Guided correction start is immutable';
+      message = 'Completed guided correction start is immutable';
   end if;
   if old.guided_correction_completed_at is not null
     and new.guided_correction_completed_at
@@ -957,19 +957,17 @@ begin
   order by reservation.settled_at desc
   limit 1
   for update;
-  if not found
-    or v_reservation.guided_correction_completed_at is not null
-    or (
-      v_reservation.guided_correction_revision is not null
-      and v_reservation.guided_correction_revision
-          is distinct from p_expected_review_revision
-    ) then
+  if not found or v_reservation.guided_correction_completed_at is not null then
     raise exception using
       errcode = 'P0001',
       message = 'The included guided correction is unavailable.';
   end if;
 
-  if v_reservation.guided_correction_revision is null then
+  if v_reservation.guided_correction_revision is distinct from p_expected_review_revision then
+    -- A seller edit can advance the review revision after authorization but
+    -- before model work commits. The old attempt is then guaranteed to fail its
+    -- stale-revision check, so rebind the still-uncompleted correction instead
+    -- of permanently stranding the included retry.
     update public.ai_item_credit_reservations
     set guided_correction_revision = p_expected_review_revision,
         guided_correction_started_at = statement_timestamp(),
