@@ -14,6 +14,7 @@ import {
 import {
   listRecentPipelineRuns,
   mergePipelineRun,
+  mergePipelineRuns,
 } from "@/lib/pipeline-recovery/runs";
 import {
   connectionAfterJoinTimeout,
@@ -191,7 +192,7 @@ export function NotificationBell({
 
   const refreshRuns = useCallback(async () => {
     const saved = await listRecentPipelineRuns(supabase);
-    setRuns(saved);
+    setRuns((current) => mergePipelineRuns(current, saved));
   }, [supabase]);
 
   // Live updates — notifications and pipeline rows share one tenant-filtered

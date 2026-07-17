@@ -39,3 +39,14 @@ export function mergePipelineRun(
     })
     .slice(0, limit);
 }
+
+export function mergePipelineRuns(
+  current: PipelineProgressRun[],
+  candidates: PipelineProgressRun[],
+  limit = RECENT_PIPELINE_RUN_LIMIT,
+): PipelineProgressRun[] {
+  return candidates.reduce(
+    (merged, candidate) => mergePipelineRun(merged, candidate, limit),
+    current.slice(0, limit),
+  );
+}

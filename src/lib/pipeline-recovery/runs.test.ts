@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { listRecentPipelineRuns, mergePipelineRun } from "./runs";
+import {
+  listRecentPipelineRuns,
+  mergePipelineRun,
+  mergePipelineRuns,
+} from "./runs";
 
 const run = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -70,5 +74,17 @@ describe("listRecentPipelineRuns", () => {
     };
 
     expect(mergePipelineRun([run], later, 1)).toEqual([later]);
+  });
+
+  it("does not let an older saved refresh overwrite a newer Realtime event", () => {
+    const terminalEvent = {
+      ...run,
+      status: "succeeded" as const,
+      stage: "completed" as const,
+      listing_id: "20000000-0000-4000-8000-000000000001",
+      updated_at: "2026-07-17T00:00:00.000003Z",
+    };
+
+    expect(mergePipelineRuns([terminalEvent], [run])).toEqual([terminalEvent]);
   });
 });
