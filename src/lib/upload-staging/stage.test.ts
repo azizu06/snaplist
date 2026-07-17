@@ -28,6 +28,12 @@ describe("durable upload staging", () => {
     const upload = vi.fn(async (path: string) => {
       events.push(`upload:${path}`);
     });
+    const recordCleanupIntent = vi.fn(async () => {
+      events.push("record-cleanup");
+    });
+    const resolveCleanupIntent = vi.fn(async () => {
+      events.push("resolve-cleanup");
+    });
 
     const result = await stageUploadEntries(
       {
@@ -45,11 +51,29 @@ describe("durable upload staging", () => {
           },
         ],
       },
-      { upload, remove: vi.fn(), findReplay: vi.fn(), stageAndEnqueue },
+      {
+        upload,
+        remove: vi.fn(),
+        recordCleanupIntent,
+        resolveCleanupIntent,
+        findReplay: vi.fn(),
+        stageAndEnqueue,
+      },
     );
 
-    expect(events.slice(0, 2).every((event) => event.startsWith("upload:"))).toBe(true);
-    expect(events.at(-1)).toBe("stage");
+    expect(events[0]).toBe("record-cleanup");
+    expect(events.slice(1, 3).every((event) => event.startsWith("upload:"))).toBe(true);
+    expect(events.slice(-2)).toEqual(["stage", "resolve-cleanup"]);
+    expect(recordCleanupIntent).toHaveBeenCalledWith({
+      cleanupId: expect.any(String),
+      userId: "user_123",
+      batchId: "11111111-1111-4111-8111-111111111111",
+      photoPaths: [
+        expect.stringMatching(/^user_123\/pipeline-staging\//),
+        expect.stringMatching(/^user_123\/pipeline-staging\//),
+      ],
+    });
+    expect(resolveCleanupIntent).toHaveBeenCalledWith(expect.any(String));
     expect(stageAndEnqueue).toHaveBeenCalledWith(
       expect.objectContaining({
         entries: [
@@ -91,6 +115,8 @@ describe("durable upload staging", () => {
         {
           upload: vi.fn(async () => undefined),
           remove,
+          recordCleanupIntent: vi.fn(async () => undefined),
+          resolveCleanupIntent: vi.fn(async () => undefined),
           findReplay: vi.fn(async () => []),
           stageAndEnqueue: vi.fn(async () => {
             throw new Error("daily capacity reached");
@@ -138,6 +164,8 @@ describe("durable upload staging", () => {
       {
         upload: vi.fn(async () => undefined),
         remove,
+        recordCleanupIntent: vi.fn(async () => undefined),
+        resolveCleanupIntent: vi.fn(async () => undefined),
         stageAndEnqueue: vi.fn(async () => {
           throw new Error("response timed out");
         }),
@@ -184,6 +212,8 @@ describe("durable upload staging", () => {
       {
         upload: vi.fn(async () => undefined),
         remove,
+        recordCleanupIntent: vi.fn(async () => undefined),
+        resolveCleanupIntent: vi.fn(async () => undefined),
         stageAndEnqueue: vi.fn(async () => {
           throw new Error(
             "Pipeline staging failed: Pipeline idempotency key conflicts with staged input",
@@ -198,6 +228,8 @@ describe("durable upload staging", () => {
 
   it("preserves photos when both staging and the replay probe are ambiguous", async () => {
     const remove = vi.fn();
+    const recordCleanupIntent = vi.fn(async () => undefined);
+    const resolveCleanupIntent = vi.fn(async () => undefined);
     await expect(stageUploadEntries(
       {
         batchId: "11111111-1111-4111-8111-111111111111",
@@ -215,6 +247,8 @@ describe("durable upload staging", () => {
       {
         upload: vi.fn(async () => undefined),
         remove,
+        recordCleanupIntent,
+        resolveCleanupIntent,
         stageAndEnqueue: vi.fn(async () => {
           throw new Error("response timed out");
         }),
@@ -224,6 +258,8 @@ describe("durable upload staging", () => {
       },
     )).rejects.toThrow("response timed out");
     expect(remove).not.toHaveBeenCalled();
+    expect(recordCleanupIntent).toHaveBeenCalledOnce();
+    expect(resolveCleanupIntent).not.toHaveBeenCalled();
   });
 
   it("never accepts signed URLs or unsupported photos into staging", async () => {
@@ -247,6 +283,8 @@ describe("durable upload staging", () => {
         {
           upload: vi.fn(),
           remove: vi.fn(),
+          recordCleanupIntent: vi.fn(async () => undefined),
+          resolveCleanupIntent: vi.fn(async () => undefined),
           findReplay: vi.fn(),
           stageAndEnqueue: vi.fn(),
         },

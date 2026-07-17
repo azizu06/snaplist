@@ -64,6 +64,137 @@ create index pipeline_run_usage_minute_idx
 revoke all on table private.pipeline_run_usage_reservations
   from public, anon, authenticated, service_role;
 
+-- Storage writes happen before the atomic item/run transaction. Register the
+-- exact seller-owned staging paths before the first object write so ambiguous
+-- RPC or Storage outcomes remain recoverable by guarded retention. A later
+-- cleanup pass must still prove that an item does not reference a path before
+-- removing it; successful listing photos are never cleanup candidates.
+create table private.pipeline_staging_cleanup_intents (
+  cleanup_id uuid primary key,
+  user_id text not null,
+  batch_id uuid not null,
+  photo_paths text[] not null,
+  created_at timestamptz not null default statement_timestamp(),
+  cleanup_after timestamptz not null default (statement_timestamp() + interval '24 hours'),
+  constraint pipeline_staging_cleanup_paths_check check (
+    cardinality(photo_paths) between 1 and 800
+  ),
+  constraint pipeline_staging_cleanup_time_check check (
+    cleanup_after >= created_at
+  )
+);
+
+create index pipeline_staging_cleanup_after_idx
+  on private.pipeline_staging_cleanup_intents (cleanup_after, cleanup_id);
+
+revoke all on table private.pipeline_staging_cleanup_intents
+  from public, anon, authenticated, service_role;
+
+create or replace function public.record_pipeline_staging_cleanup_intent(
+  p_cleanup_id uuid,
+  p_user_id text,
+  p_batch_id uuid,
+  p_photo_paths text[]
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_path text;
+  v_prefix text;
+  v_existing_user_id text;
+  v_existing_batch_id uuid;
+  v_existing_photo_paths text[];
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Pipeline cleanup authorization is required';
+  end if;
+  if p_cleanup_id is null
+    or coalesce(p_user_id, '') = ''
+    or char_length(p_user_id) > 255
+    or p_batch_id is null
+    or p_photo_paths is null
+    or cardinality(p_photo_paths) not between 1 and 800 then
+    raise exception using errcode = '22023', message = 'Invalid pipeline cleanup intent';
+  end if;
+
+  v_prefix := p_user_id || '/pipeline-staging/' || p_batch_id::text || '/';
+  foreach v_path in array p_photo_paths loop
+    if coalesce(char_length(v_path), 0) < char_length(v_prefix) + 1
+      or char_length(v_path) > 1024
+      or left(v_path, char_length(v_prefix)) <> v_prefix
+      or v_path like '%://%'
+      or v_path like '%?%'
+      or v_path like '%#%' then
+      raise exception using errcode = '22023', message = 'Invalid pipeline cleanup path';
+    end if;
+  end loop;
+
+  select intent.user_id, intent.batch_id, intent.photo_paths
+  into v_existing_user_id, v_existing_batch_id, v_existing_photo_paths
+  from private.pipeline_staging_cleanup_intents intent
+  where intent.cleanup_id = p_cleanup_id
+  for update;
+
+  if found then
+    if v_existing_user_id is distinct from p_user_id
+      or v_existing_batch_id is distinct from p_batch_id
+      or v_existing_photo_paths is distinct from p_photo_paths then
+      raise exception using errcode = '23514', message = 'Pipeline cleanup intent conflicts';
+    end if;
+    return false;
+  end if;
+
+  insert into private.pipeline_staging_cleanup_intents (
+    cleanup_id,
+    user_id,
+    batch_id,
+    photo_paths
+  ) values (
+    p_cleanup_id,
+    p_user_id,
+    p_batch_id,
+    p_photo_paths
+  );
+  return true;
+end;
+$$;
+
+revoke all on function public.record_pipeline_staging_cleanup_intent(uuid, text, uuid, text[])
+  from public, anon, authenticated;
+grant execute on function public.record_pipeline_staging_cleanup_intent(uuid, text, uuid, text[])
+  to service_role;
+
+create or replace function public.resolve_pipeline_staging_cleanup_intent(p_cleanup_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_resolved boolean;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Pipeline cleanup authorization is required';
+  end if;
+  if p_cleanup_id is null then
+    raise exception using errcode = '22023', message = 'Pipeline cleanup intent is required';
+  end if;
+
+  delete from private.pipeline_staging_cleanup_intents intent
+  where intent.cleanup_id = p_cleanup_id;
+  v_resolved := found;
+  return v_resolved;
+end;
+$$;
+
+revoke all on function public.resolve_pipeline_staging_cleanup_intent(uuid)
+  from public, anon, authenticated;
+grant execute on function public.resolve_pipeline_staging_cleanup_intent(uuid)
+  to service_role;
+
 -- The request-bound batch item route remains available while the durable
 -- producer rolls out. Mirror each accepted legacy request into the same
 -- Postgres capacity boundary so neither entry point can ignore the other's

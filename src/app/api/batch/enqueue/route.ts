@@ -153,6 +153,8 @@ export async function POST(request: Request) {
         },
         findReplay: store.findReplay,
         stageAndEnqueue: store.stageAndEnqueue,
+        recordCleanupIntent: store.recordCleanupIntent,
+        resolveCleanupIntent: store.resolveCleanupIntent,
       },
     );
 

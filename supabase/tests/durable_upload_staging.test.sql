@@ -1,18 +1,25 @@
 begin;
 
-select plan(29);
+select plan(39);
 
 select has_column('public', 'pipeline_runs', 'batch_id', 'pipeline runs carry a recovery batch id');
 select has_column('public', 'pipeline_runs', 'batch_position', 'pipeline runs carry stable batch order');
 select has_column('public', 'pipeline_runs', 'capture_input', 'pipeline runs carry a safe capture snapshot');
 select has_table('private', 'pipeline_run_usage_reservations', 'run-keyed usage reservations exist');
 select has_table('private', 'legacy_pipeline_usage_reservations', 'legacy requests share durable usage accounting');
+select has_table('private', 'pipeline_staging_cleanup_intents', 'unresolved staging paths have durable cleanup intents');
 
 select col_is_pk(
   'private',
   'pipeline_run_usage_reservations',
   'run_id',
   'each run has one idempotent usage reservation'
+);
+select col_is_pk(
+  'private',
+  'pipeline_staging_cleanup_intents',
+  'cleanup_id',
+  'cleanup intent retries are idempotent'
 );
 select col_is_pk(
   'private',
@@ -26,6 +33,18 @@ select has_function(
   'find_pipeline_batch_replay',
   array['text', 'uuid', 'jsonb'],
   'fixed replay lookup RPC exists'
+);
+select has_function(
+  'public',
+  'record_pipeline_staging_cleanup_intent',
+  array['uuid', 'text', 'uuid', 'text[]'],
+  'fixed cleanup registration RPC exists'
+);
+select has_function(
+  'public',
+  'resolve_pipeline_staging_cleanup_intent',
+  array['uuid'],
+  'fixed cleanup resolution RPC exists'
 );
 select has_function(
   'public',
@@ -67,6 +86,38 @@ select ok(
     'execute'
   ),
   'sellers cannot invoke the privileged replay lookup'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.record_pipeline_staging_cleanup_intent(uuid,text,uuid,text[])',
+    'execute'
+  ),
+  'service role may register unresolved staging paths'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.record_pipeline_staging_cleanup_intent(uuid,text,uuid,text[])',
+    'execute'
+  ),
+  'sellers cannot register cleanup paths'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.resolve_pipeline_staging_cleanup_intent(uuid)',
+    'execute'
+  ),
+  'service role may resolve cleanup intents'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.resolve_pipeline_staging_cleanup_intent(uuid)',
+    'execute'
+  ),
+  'sellers cannot resolve cleanup intents'
 );
 select ok(
   has_function_privilege(
@@ -164,6 +215,22 @@ select ok(
     'select'
   ),
   'sellers cannot read legacy usage reservations'
+);
+select ok(
+  not has_table_privilege(
+    'service_role',
+    'private.pipeline_staging_cleanup_intents',
+    'select'
+  ),
+  'service role cannot bypass cleanup intent RPCs'
+);
+select ok(
+  not has_table_privilege(
+    'authenticated',
+    'private.pipeline_staging_cleanup_intents',
+    'select'
+  ),
+  'sellers cannot read cleanup intents'
 );
 select ok(
   exists (

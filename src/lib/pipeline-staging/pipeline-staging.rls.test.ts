@@ -79,6 +79,53 @@ afterAll(async () => {
 });
 
 describe("durable pipeline staging RPC and RLS", () => {
+  it("records exact seller/batch staging paths through a service-only cleanup seam", async () => {
+    if (!reachable) return;
+    const cleanupId = crypto.randomUUID();
+    const batchId = crypto.randomUUID();
+    const paths = [
+      `${userA.id}/pipeline-staging/${batchId}/0/0-${crypto.randomUUID()}.jpg`,
+    ];
+    const args = {
+      p_cleanup_id: cleanupId,
+      p_user_id: userA.id,
+      p_batch_id: batchId,
+      p_photo_paths: paths,
+    };
+
+    const sellerCall = await userA.client.rpc(
+      "record_pipeline_staging_cleanup_intent",
+      args,
+    );
+    expect(sellerCall.error).not.toBeNull();
+
+    const invalidPrefix = await admin.rpc(
+      "record_pipeline_staging_cleanup_intent",
+      { ...args, p_photo_paths: [`${userB.id}/pipeline-staging/${batchId}/0/photo.jpg`] },
+    );
+    expect(invalidPrefix.error?.message).toMatch(/cleanup path/i);
+
+    const first = await admin.rpc("record_pipeline_staging_cleanup_intent", args);
+    expect(first).toMatchObject({ data: true, error: null });
+    const repeated = await admin.rpc("record_pipeline_staging_cleanup_intent", args);
+    expect(repeated).toMatchObject({ data: false, error: null });
+
+    const conflicting = await admin.rpc(
+      "record_pipeline_staging_cleanup_intent",
+      { ...args, p_photo_paths: [...paths, `${userA.id}/pipeline-staging/${batchId}/0/other.jpg`] },
+    );
+    expect(conflicting.error?.message).toMatch(/conflicts/i);
+
+    const resolved = await admin.rpc("resolve_pipeline_staging_cleanup_intent", {
+      p_cleanup_id: cleanupId,
+    });
+    expect(resolved).toMatchObject({ data: true, error: null });
+    const resolvedAgain = await admin.rpc("resolve_pipeline_staging_cleanup_intent", {
+      p_cleanup_id: cleanupId,
+    });
+    expect(resolvedAgain).toMatchObject({ data: false, error: null });
+  });
+
   it("atomically stages ordered photos, one run, and one identifiers-only message", async () => {
     if (!reachable) return;
     const batchId = crypto.randomUUID();

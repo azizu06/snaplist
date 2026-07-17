@@ -3,9 +3,11 @@ import {
   pipelineStageBatchInputSchema,
   pipelineStageBatchResultSchema,
   pipelineReplayBatchInputSchema,
+  pipelineStagingCleanupIntentInputSchema,
   type PipelineReplayBatchInput,
   type PipelineStageBatchInput,
   type PipelineStageBatchResult,
+  type PipelineStagingCleanupIntentInput,
 } from "./schema";
 
 type PipelineStagingRpcName =
@@ -13,7 +15,9 @@ type PipelineStagingRpcName =
   | "stage_pipeline_batch"
   | "release_pipeline_run_daily_reservation"
   | "reserve_legacy_pipeline_usage"
-  | "release_legacy_pipeline_usage";
+  | "release_legacy_pipeline_usage"
+  | "record_pipeline_staging_cleanup_intent"
+  | "resolve_pipeline_staging_cleanup_intent";
 
 interface PipelineStagingRpcResult {
   data: unknown;
@@ -34,6 +38,8 @@ export interface PipelineStagingStore {
   releaseDailyReservation(runId: string): Promise<boolean>;
   reserveLegacyUsage(input: LegacyPipelineUsageInput): Promise<boolean>;
   releaseLegacyDailyReservation(reservationId: string): Promise<boolean>;
+  recordCleanupIntent(input: PipelineStagingCleanupIntentInput): Promise<boolean>;
+  resolveCleanupIntent(cleanupId: string): Promise<boolean>;
 }
 
 const legacyPipelineUsageInputSchema = z.object({
@@ -117,6 +123,25 @@ export function createSupabasePipelineStagingStore(
         p_reservation_id: id,
       });
       return z.boolean().parse(rpcData("legacy quota release", result));
+    },
+
+    async recordCleanupIntent(rawInput) {
+      const input = pipelineStagingCleanupIntentInputSchema.parse(rawInput);
+      const result = await client.rpc("record_pipeline_staging_cleanup_intent", {
+        p_batch_id: input.batchId,
+        p_cleanup_id: input.cleanupId,
+        p_photo_paths: input.photoPaths,
+        p_user_id: input.userId,
+      });
+      return z.boolean().parse(rpcData("staging cleanup registration", result));
+    },
+
+    async resolveCleanupIntent(cleanupId) {
+      const id = z.string().uuid().parse(cleanupId);
+      const result = await client.rpc("resolve_pipeline_staging_cleanup_intent", {
+        p_cleanup_id: id,
+      });
+      return z.boolean().parse(rpcData("staging cleanup resolution", result));
     },
   };
 }

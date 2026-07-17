@@ -28,6 +28,14 @@ describe("durable upload staging migration", () => {
     expect(migration).toMatch(/daily_released_at/i);
   });
 
+  it("retains unresolved private staging paths for guarded cleanup", () => {
+    expect(migration).toMatch(/create table private\.pipeline_staging_cleanup_intents/i);
+    expect(migration).toMatch(/cleanup_after timestamptz/i);
+    expect(migration).toMatch(/create or replace function public\.record_pipeline_staging_cleanup_intent/i);
+    expect(migration).toMatch(/create or replace function public\.resolve_pipeline_staging_cleanup_intent/i);
+    expect(migration).toMatch(/pipeline-staging/i);
+  });
+
   it("bridges legacy request accounting into the same durable capacity checks", () => {
     expect(migration).toMatch(/create table private\.legacy_pipeline_usage_reservations/i);
     expect(migration).toMatch(/create or replace function public\.reserve_legacy_pipeline_usage/i);
@@ -50,6 +58,8 @@ describe("durable upload staging migration", () => {
       "release_pipeline_run_daily_reservation",
       "reserve_legacy_pipeline_usage",
       "release_legacy_pipeline_usage",
+      "record_pipeline_staging_cleanup_intent",
+      "resolve_pipeline_staging_cleanup_intent",
     ]) {
       expect(migration).toMatch(
         new RegExp(`grant execute on function public\\.${functionName}\\([^;]+to service_role`, "i"),

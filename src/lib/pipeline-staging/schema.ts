@@ -70,6 +70,27 @@ const pipelineStageResultSchema = z
 
 export const pipelineStageBatchResultSchema = z.array(pipelineStageResultSchema);
 
+export const pipelineStagingCleanupIntentInputSchema = z
+  .object({
+    cleanupId: z.string().uuid(),
+    userId: z.string().min(1).max(255),
+    batchId: z.string().uuid(),
+    photoPaths: z.array(storagePathSchema).min(1).max(800),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    const prefix = `${input.userId}/pipeline-staging/${input.batchId}/`;
+    for (const [index, path] of input.photoPaths.entries()) {
+      if (!path.startsWith(prefix)) {
+        context.addIssue({
+          code: "custom",
+          message: "Cleanup paths must use the owning seller and batch staging prefix",
+          path: ["photoPaths", index],
+        });
+      }
+    }
+  });
+
 export const pipelineReplayEntrySchema = z
   .object({
     idempotencyKey: z.string().min(1).max(128),
@@ -104,3 +125,6 @@ export const pipelineReplayBatchInputSchema = z
 export type PipelineStageBatchInput = z.infer<typeof pipelineStageBatchInputSchema>;
 export type PipelineStageBatchResult = z.infer<typeof pipelineStageBatchResultSchema>;
 export type PipelineReplayBatchInput = z.infer<typeof pipelineReplayBatchInputSchema>;
+export type PipelineStagingCleanupIntentInput = z.infer<
+  typeof pipelineStagingCleanupIntentInputSchema
+>;

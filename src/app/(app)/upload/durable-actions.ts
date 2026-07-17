@@ -110,6 +110,8 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
         },
         findReplay: store.findReplay,
         stageAndEnqueue: store.stageAndEnqueue,
+        recordCleanupIntent: store.recordCleanupIntent,
+        resolveCleanupIntent: store.resolveCleanupIntent,
       },
     );
 

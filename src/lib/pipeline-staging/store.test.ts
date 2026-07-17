@@ -119,6 +119,34 @@ describe("Supabase pipeline staging store", () => {
     });
   });
 
+  it("records and resolves private staging cleanup through fixed RPCs", async () => {
+    const rpc = vi.fn(async () => ({ data: true, error: null }));
+    const store = createSupabasePipelineStagingStore({ rpc });
+    const cleanupId = "55555555-5555-4555-8555-555555555555";
+    const batchId = "11111111-1111-4111-8111-111111111111";
+    const photoPaths = [
+      `user_123/pipeline-staging/${batchId}/0/0-photo.jpg`,
+    ];
+
+    await expect(store.recordCleanupIntent({
+      cleanupId,
+      userId: "user_123",
+      batchId,
+      photoPaths,
+    })).resolves.toBe(true);
+    expect(rpc).toHaveBeenNthCalledWith(1, "record_pipeline_staging_cleanup_intent", {
+      p_batch_id: batchId,
+      p_cleanup_id: cleanupId,
+      p_photo_paths: photoPaths,
+      p_user_id: "user_123",
+    });
+
+    await expect(store.resolveCleanupIntent(cleanupId)).resolves.toBe(true);
+    expect(rpc).toHaveBeenNthCalledWith(2, "resolve_pipeline_staging_cleanup_intent", {
+      p_cleanup_id: cleanupId,
+    });
+  });
+
   it("reserves and releases legacy request usage through fixed RPCs", async () => {
     const rpc = vi.fn(async () => ({ data: true, error: null }));
     const store = createSupabasePipelineStagingStore({ rpc });

@@ -31,6 +31,13 @@ export interface UploadStagingDependencies {
   remove(paths: string[]): Promise<void>;
   findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
+  recordCleanupIntent(input: {
+    cleanupId: string;
+    userId: string;
+    batchId: string;
+    photoPaths: string[];
+  }): Promise<boolean | void>;
+  resolveCleanupIntent(cleanupId: string): Promise<boolean | void>;
 }
 
 function extensionFor(photo: File): string {
@@ -72,14 +79,11 @@ export async function stageUploadEntries(
   if (input.entries.length < 1) throw new Error("Add at least one item.");
   input.entries.forEach(validateEntry);
 
-  const uploadedPaths: string[] = [];
-  const stagedEntries: PipelineStageBatchInput["entries"] = [];
-  let stagingAttempted = false;
-
-  try {
-    for (const [entryIndex, entry] of input.entries.entries()) {
-      const photoPaths: string[] = [];
-      for (const [photoIndex, photo] of entry.photos.entries()) {
+  const cleanupId = crypto.randomUUID();
+  const uploads: Array<{ path: string; photo: File }> = [];
+  const stagedEntries: PipelineStageBatchInput["entries"] = input.entries.map(
+    (entry, entryIndex) => {
+      const photoPaths = entry.photos.map((photo, photoIndex) => {
         const path = [
           input.userId,
           "pipeline-staging",
@@ -87,27 +91,57 @@ export async function stageUploadEntries(
           String(entryIndex),
           `${photoIndex}-${crypto.randomUUID()}.${extensionFor(photo)}`,
         ].join("/");
-        await dependencies.upload(path, photo);
-        uploadedPaths.push(path);
-        photoPaths.push(path);
-      }
-      stagedEntries.push({
+        uploads.push({ path, photo });
+        return path;
+      });
+      return {
         idempotencyKey: entry.idempotencyKey,
         source: entry.source,
         autopilotEnabled: entry.autopilotEnabled,
         photoPaths,
         costBasis: entry.costBasis,
-      });
+      };
+    },
+  );
+  const plannedPaths = uploads.map(({ path }) => path);
+  const uploadedPaths: string[] = [];
+  let cleanupIntentRecorded = false;
+  let stagingAttempted = false;
+
+  const resolveCleanupIntent = async (): Promise<void> => {
+    if (!cleanupIntentRecorded) return;
+    try {
+      await dependencies.resolveCleanupIntent(cleanupId);
+    } catch {
+      // Keep the durable intent. Retention must verify that no item references
+      // a path before removing it, so a committed run remains safe.
+    }
+  };
+
+  try {
+    await dependencies.recordCleanupIntent({
+      cleanupId,
+      userId: input.userId,
+      batchId: input.batchId,
+      photoPaths: plannedPaths,
+    });
+    cleanupIntentRecorded = true;
+
+    for (const { path, photo } of uploads) {
+      await dependencies.upload(path, photo);
+      uploadedPaths.push(path);
     }
 
     stagingAttempted = true;
-    return await dependencies.stageAndEnqueue({
+    const result = await dependencies.stageAndEnqueue({
       batchId: input.batchId,
       userId: input.userId,
       dailyLimit: input.dailyLimit,
       perMinuteLimit: input.perMinuteLimit,
       entries: stagedEntries,
     });
+    await resolveCleanupIntent();
+    return result;
   } catch (error) {
     const losingIdempotentRace =
       error instanceof Error &&
@@ -131,28 +165,32 @@ export async function stageUploadEntries(
         if (replay.length > 0) {
           if (losingIdempotentRace && uploadedPaths.length > 0) {
             try {
-              await dependencies.remove(uploadedPaths);
+              await dependencies.remove(plannedPaths);
+              await resolveCleanupIntent();
             } catch {
-              // The winner remains authoritative. Retention can retry cleanup
-              // of this losing request's unreferenced paths.
+              // The winner remains authoritative. The durable cleanup intent
+              // retains this losing request's unreferenced paths.
             }
+          } else {
+            await resolveCleanupIntent();
           }
           return replay;
         }
         cleanupConfirmed = true;
       } catch {
         // The producer outcome is still ambiguous. Keep the private objects so
-        // a committed run cannot lose its photos; retention can clean an
-        // unreferenced staging prefix after the ambiguity clears.
+        // a committed run cannot lose its photos. The durable cleanup intent
+        // keeps the exact paths available after the ambiguity clears.
       }
     }
 
-    if (cleanupConfirmed && uploadedPaths.length > 0) {
+    if (cleanupConfirmed && cleanupIntentRecorded) {
       try {
-        await dependencies.remove(uploadedPaths);
+        await dependencies.remove(plannedPaths);
+        await resolveCleanupIntent();
       } catch {
-        // Preserve the staging error. Storage cleanup is best-effort and owns
-        // only this request's new paths; retention can retry leftover objects.
+        // Preserve the staging error. The durable cleanup intent owns only
+        // this request's planned paths and remains pending for retention.
       }
     }
     throw error;
