@@ -15,8 +15,9 @@ Claude project and candidate/repair work are read-only to implementation owners.
 
 - Base ZIP: `/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-package-v1-2026-07-16.zip`
 - Base SHA-256: `13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415`
-- RUN/REV delta ZIP: `/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16.zip`
-- Delta SHA-256: `d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001`
+- RUN/REV delta ZIP: `/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip`
+- RUN/REV delta version: `run-rev-delta-v1.1`
+- Delta SHA-256: `93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884`
 - Exact delta base: `snaplist-implementation-fidelity-package-v1-2026-07-16.zip`.
 - Entry point for each package: `README-FIRST.md`, followed by every machine-readable manifest used
   by the owning implementation issue. All delta-internal checksums were verified.
@@ -64,14 +65,6 @@ authorization from V1. No barcode screen, success state, fallback, or interactio
 from adjacent capture screens.
 
 All other families in the JSON inventory remain planned or optional and not implementation-frozen.
-
-### Product-copy override recorded for RUN-08
-
-The delta is internally intact, but RUN-08 exact-copy files use the pre-ADR customer plan name in
-one allowance message. Customer-visible implementation must use **SnapList Pro**. This repo-level
-product-contract override applies to `changes/copy-catalog-delta.json`,
-`contracts/exact-copy-catalog.json`, and `resolved/snaplist-copy-catalog.json`; do not edit the ZIP or
-silently accept the stale package copy.
 
 ## Binding product corrections
 
