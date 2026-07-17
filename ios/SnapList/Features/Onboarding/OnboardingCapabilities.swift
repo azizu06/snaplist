@@ -68,15 +68,20 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
 
     private let fileManager: FileManager
     private let directoryURL: URL
+    private let consumeMoveItem: (URL, URL) throws -> Void
 
     init(
         fileManager: FileManager = .default,
-        directoryURL: URL? = nil
+        directoryURL: URL? = nil,
+        consumeMoveItem: ((URL, URL) throws -> Void)? = nil
     ) {
         self.fileManager = fileManager
         self.directoryURL = directoryURL
             ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("SnapList/OnboardingStagedPhotos", isDirectory: true)
+        self.consumeMoveItem = consumeMoveItem ?? { sourceURL, destinationURL in
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        }
     }
 
     @discardableResult
@@ -151,7 +156,7 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
             "\(Self.pendingPrefix)consumed-\(UUID().uuidString)",
             isDirectory: true
         )
-        try fileManager.moveItem(at: directoryURL, to: consumedURL)
+        try consumeMoveItem(directoryURL, consumedURL)
         try? fileManager.removeItem(at: consumedURL)
     }
 

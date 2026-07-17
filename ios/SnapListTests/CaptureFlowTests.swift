@@ -304,6 +304,73 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedSheet, .capture)
     }
 
+    func testSourceConsumeFailureRollsBackCaptureAndKeepsADeterministicRetry() async throws {
+        let fileManager = FileManager.default
+        let parent = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-library-consume-failure-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let onboardingRoot = parent.appendingPathComponent("Onboarding", isDirectory: true)
+        let photos = [Data([0x01]), Data([0x02])]
+        let initialStore = FileSystemStagedLibraryPhotoStore(
+            fileManager: fileManager,
+            directoryURL: onboardingRoot
+        )
+        let moveController = ConsumeMoveController(fileManager: fileManager)
+        let stagedLibraryPhotos = FileSystemStagedLibraryPhotoStore(
+            fileManager: fileManager,
+            directoryURL: onboardingRoot,
+            consumeMoveItem: moveController.move
+        )
+        defer { try? fileManager.removeItem(at: parent) }
+
+        try initialStore.replace(with: photos)
+        let onboarding = OnboardingFlowModel(
+            state: .init(screen: .libraryHandoff, stagedPhotoCount: photos.count),
+            cameraAuthorization: FixtureCameraAuthorizationClient(status: .denied),
+            progressStore: InMemoryOnboardingProgressStore(),
+            stagedLibraryPhotos: stagedLibraryPhotos,
+            guestAllowance: DeferredGuestAllowanceCapability()
+        )
+        onboarding.continueToCaptureBoundary()
+        let captureStore = TestCaptureStore()
+        let capture = makeModel(store: captureStore)
+        _ = await capture.restore()
+        let router = AppRouter()
+
+        await AppCaptureHandoffCoordinator.presentCaptureLauncher(
+            onboardingModel: onboarding,
+            captureFlow: capture,
+            router: router
+        )
+
+        XCTAssertEqual(captureStore.stageCount, 1)
+        XCTAssertEqual(captureStore.discardCount, 1)
+        XCTAssertNil(capture.stagedPhoto)
+        XCTAssertEqual(capture.phase, .failed)
+        XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
+        XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
+        XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: photos.count))
+        XCTAssertEqual(router.presentedSheet, .capture)
+
+        moveController.shouldFail = false
+        router.presentedSheet = nil
+        await AppCaptureHandoffCoordinator.presentCaptureLauncher(
+            onboardingModel: onboarding,
+            captureFlow: capture,
+            router: router
+        )
+
+        XCTAssertEqual(captureStore.stageCount, 2)
+        XCTAssertEqual(captureStore.discardCount, 1)
+        XCTAssertNotNil(capture.stagedPhoto)
+        XCTAssertEqual(capture.phase, .captured)
+        XCTAssertEqual(try stagedLibraryPhotos.load(), [])
+        XCTAssertEqual(onboarding.state.stagedPhotoCount, 0)
+        XCTAssertEqual(onboarding.captureEntryContext, .camera)
+        XCTAssertEqual(router.presentedSheet, .capture)
+    }
+
     func testExpiredTransferredLibraryPhotoCannotRestageAfterRelaunch() async throws {
         let fileManager = FileManager.default
         let parent = fileManager.temporaryDirectory.appendingPathComponent(
@@ -518,6 +585,20 @@ private enum TestCaptureError: Error {
     case failed
 }
 
+private final class ConsumeMoveController {
+    var shouldFail = true
+    private let fileManager: FileManager
+
+    init(fileManager: FileManager) {
+        self.fileManager = fileManager
+    }
+
+    func move(from sourceURL: URL, to destinationURL: URL) throws {
+        if shouldFail { throw TestCaptureError.failed }
+        try fileManager.moveItem(at: sourceURL, to: destinationURL)
+    }
+}
+
 private actor TestFramingEvaluator: FramingEvaluating {
     private var observations: [FramingObservation]
 
@@ -533,6 +614,7 @@ private actor TestFramingEvaluator: FramingEvaluating {
 private final class TestCaptureStore: CaptureDraftStoring {
     var staged: StagedCapturePhoto?
     var stageCount = 0
+    var discardCount = 0
     var lastStagedImageData: Data?
     private let stageError: Error?
 
@@ -555,5 +637,10 @@ private final class TestCaptureStore: CaptureDraftStoring {
         )
         staged = photo
         return photo
+    }
+
+    func discard() async throws {
+        discardCount += 1
+        staged = nil
     }
 }

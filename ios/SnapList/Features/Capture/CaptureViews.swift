@@ -64,9 +64,10 @@ struct CaptureLauncherSheet: View {
                 guard let data = try? await item.loadTransferable(type: Data.self) else {
                     return
                 }
-                await flow.stageLibraryPhoto(data)
-                showCapturedPhoto()
-                dismiss()
+                if await flow.stageLibraryPhoto(data) {
+                    showCapturedPhoto()
+                    dismiss()
+                }
             }
         }
     }

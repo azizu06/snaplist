@@ -155,6 +155,7 @@ protocol FramingEvaluating {
 protocol CaptureDraftStoring {
     func load() async throws -> StagedCapturePhoto?
     func stage(imageData: Data) async throws -> StagedCapturePhoto
+    func discard() async throws
 }
 
 enum CaptureDraftStoreError: Error {
@@ -270,6 +271,11 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         try writeData(encoder.encode(staged), manifestURL, Self.writingOptions)
         try? removeSupersededImages(keeping: [nextPhotoURL, nextThumbnailURL])
         return staged
+    }
+
+    func discard() async throws {
+        guard fileManager.fileExists(atPath: rootDirectory.path) else { return }
+        try fileManager.removeItem(at: rootDirectory)
     }
 
     private func purgeOwnedDraft(photoURL: URL, thumbnailURL: URL) {
@@ -461,6 +467,14 @@ final class CaptureFlowModel {
             phase = .failed
             return false
         }
+    }
+
+    func rollBackLibraryTransferAfterSourceConsumptionFailure() async {
+        try? await store.discard()
+        stagedPhoto = nil
+        camera.stop()
+        resumeAfterBackground = false
+        phase = .failed
     }
 
     func continueToReviewHandoff() {
