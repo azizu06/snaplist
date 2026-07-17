@@ -52,6 +52,68 @@ export const sessionEnvelopeSchema = z
   })
   .strict();
 
+export const revenueCatConfigurationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        configured: z.boolean(),
+        appUserId: z.string().min(1),
+        publicSdkKey: z.string().min(1).optional(),
+        entitlementId: z.string().min(1).optional(),
+        monthlyProductId: z.string().min(1).optional(),
+        offeringId: z.string().min(1).optional(),
+        transitionState: z
+          .enum(["not_required", "required", "reconciled"])
+          .optional(),
+        legacyStripeStatus: z.string().nullable().optional(),
+      })
+      .strict()
+      .superRefine((data, context) => {
+        if (
+          data.configured &&
+          (!data.publicSdkKey || !data.entitlementId || !data.monthlyProductId)
+        ) {
+          context.addIssue({
+            code: "custom",
+            message:
+              "Configured RevenueCat state needs server-provided SDK, entitlement, and monthly product identifiers.",
+          });
+        }
+      }),
+    meta: apiMetaSchema,
+  })
+  .strict();
+
+export const aiItemEntitlementEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        billingSource: z.enum(["included", "storekit", "none"]),
+        status: z.enum([
+          "included",
+          "active",
+          "grace",
+          "billing_retry",
+          "expired",
+          "revoked",
+          "refunded",
+          "ambiguous",
+          "unconfigured",
+        ]),
+        remainingItems: z.number().int().nonnegative(),
+        periodStart: z.string().datetime().nullable(),
+        periodEnd: z.string().datetime().nullable(),
+        gracePeriodEnd: z.string().datetime().nullable(),
+        transitionState: z
+          .enum(["not_required", "required", "reconciled"])
+          .nullable(),
+        legacyStripeStatus: z.string().nullable(),
+      })
+      .strict(),
+    meta: apiMetaSchema,
+  })
+  .strict();
+
 export const workerSummaryEnvelopeSchema = z
   .object({ data: pipelineConsumerSummarySchema, meta: apiMetaSchema })
   .strict();

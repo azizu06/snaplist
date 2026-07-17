@@ -66,6 +66,11 @@ entitlement, settlement, and marketplace-authority semantics.
   usage is a configurable monthly AI-item allowance; the public number waits for
   TestFlight median/p95 cost data. Do not preserve the legacy daily allowance as
   the new native product promise.
+- RevenueCat manages the native StoreKit purchase and subscription lifecycle,
+  but its client state is advisory. Only the server bridge's authenticated,
+  idempotent mapping into the #168 allowance ledger can grant or reset credits;
+  RevenueCat is never the quota source of truth. The approved custom SwiftUI
+  paywall may consume StoreKit/RevenueCat product metadata later without RevenueCatUI.
 - Credit accounting: reserve at run start, settle when a usable draft exists,
   restore on failure/cancel before usable output, bundle internal retries and the
   one guided correction, and charge a new credit for a new item/photo set/full
@@ -235,13 +240,14 @@ authoritative source supports it and otherwise hands that status check to eBay.
   or its first seller-confirmed eBay publish. The hard paywall appears when complete AI item run #2
   attempts to reserve capacity.
 - **Monthly, not daily, product entitlement.** SnapList Pro grants a configurable monthly AI-item
-  allowance. For a monthly Apple product, the allowance follows the verified transaction span. For
-  an annual product, billing is cadence only: the server derives UTC calendar-month-anniversary
-  subperiods inside the signed annual span, anchored to verified `purchaseDate`, capped at verified
-  `expiresDate`, and identified by the verified transaction plus subperiod index. No client clock or
-  callback can reset it. Verified active state advances a period once; verified grace preserves the
-  current remainder without advancing; late or ambiguous state fails closed to the last verified
-  period. StoreKit supplies localized price and subscription state.
+  allowance. RevenueCat supplies StoreKit product metadata and lifecycle delivery; localized
+  price/period text comes from StoreKit product metadata only. For a monthly Apple product, the
+  allowance follows the verified transaction span. For an annual product, billing is cadence only:
+  the server derives UTC calendar-month-anniversary subperiods inside the signed annual span,
+  anchored to verified `purchaseDate`, capped at verified `expiresDate`, and identified by the
+  verified transaction plus subperiod index. No client clock or callback can reset it. Verified
+  active state advances a period once; verified grace preserves the current remainder without
+  advancing; late or ambiguous state fails closed to the last verified period.
   The public allowance remains unset until TestFlight measures median and p95 cost per usable item.
   Existing server daily limits remain legacy operational guardrails until a focused reconciliation
   issue replaces them; they are not the native product promise and must not be presented as credits.

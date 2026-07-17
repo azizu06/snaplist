@@ -7,10 +7,15 @@ final class MobileAPIContractTests: XCTestCase {
 
         let health = try await client.getHealth()
         let session = try await client.getSession(bearerToken: "fixture-token")
+        let configuration = try await client.getRevenueCatConfiguration(bearerToken: "fixture-token")
+        let entitlement = try await client.getAiItemEntitlement(bearerToken: "fixture-token")
 
         XCTAssertEqual(health.data.apiVersion, "v1")
         XCTAssertEqual(health.data.status, "ok")
         XCTAssertEqual(session.data.userId, "fixture-clerk-user")
+        XCTAssertFalse(configuration.data.configured)
+        XCTAssertEqual(entitlement.data.billingSource, .included)
+        XCTAssertEqual(entitlement.data.remainingItems, 1)
     }
 
     func testEveryContractOnlyFixtureNamesItsExistingOwnerAndNoBehavior() {
@@ -24,6 +29,25 @@ final class MobileAPIContractTests: XCTestCase {
                 "Schema fixture only. No server behavior or network request is executed."
             )
         }
+    }
+
+    func testServerEntitlementParsesPostgresDatesWithAndWithoutFractions() {
+        let payload = AiItemEntitlementEnvelope.DataPayload(
+            billingSource: .storeKit,
+            status: .grace,
+            remainingItems: 3,
+            periodStart: "2026-07-01T00:00:00Z",
+            periodEnd: "2026-08-01T00:00:00.000Z",
+            gracePeriodEnd: "2026-08-08T00:00:00+00:00",
+            transitionState: .notRequired,
+            legacyStripeStatus: nil
+        )
+
+        let verified = payload.serverVerifiedSubscription
+
+        XCTAssertNotNil(verified.periodStart)
+        XCTAssertNotNil(verified.periodEnd)
+        XCTAssertNotNil(verified.gracePeriodEnd)
     }
 
     func testSwiftOperationInventoryMatchesOpenAPIContractOnlyOperations() throws {

@@ -73,9 +73,11 @@ terminal-fallback output may qualify when it is honest, coherent, and fully edit
 - The first usable listing and its first seller-confirmed eBay publish are free. Editing, saving, or
   publishing that existing draft does not spend another AI-item credit.
 - SnapList Pro's hard paywall appears when complete AI item run #2 attempts to reserve. SnapList Pro has
-  a configurable monthly AI-item allowance. StoreKit supplies localized price and subscription
-  state; the public item count stays unset until TestFlight measures median and p95 cost per usable
-  item.
+  a configurable monthly AI-item allowance. RevenueCat manages the native StoreKit purchase and
+  subscription lifecycle and exposes StoreKit product metadata; the public item count stays unset
+  until TestFlight measures median and p95 cost per usable item. RevenueCat client CustomerInfo is
+  advisory and RevenueCatUI is not required. Only the server-verified bridge into the #168 ledger is
+  reservation authority.
 - For a monthly Apple product, the allowance period is the server-verified StoreKit transaction span
   `[purchaseDate, expiresDate)`. For an annual Apple product, annual billing is cadence only: the
   server derives monthly allowance subperiods inside that same signed annual span. Subperiod zero is
@@ -84,10 +86,11 @@ terminal-fallback output may qualify when it is honest, coherent, and fully edit
   credit-window derivation, not an invented StoreKit renewal or a claim about Apple's billing period.
   See Apple's signed [transaction fields](https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload)
   and [subscription billing guidance](https://developer.apple.com/documentation/storekit/handling-subscriptions-billing).
-- The reservation authority is the server entitlement mirror derived from verified signed StoreKit
-  transaction/renewal data. A monthly period identity uses the verified transaction identity; an
-  annual subperiod identity is the tuple `(originalTransactionId, transactionId, subperiodIndex)`.
-  Device state, device time, and an unverified client callback cannot select or reset a period.
+- The reservation authority is the server entitlement mirror derived from authenticated RevenueCat
+  lifecycle delivery or a future direct Apple-signed transaction verifier. A monthly period identity
+  uses the verified transaction identity; an annual subperiod identity is the tuple
+  `(originalTransactionId, transactionId, subperiodIndex)`. Device state, device time, RevenueCat
+  client entitlement claims, and unverified callbacks cannot select or reset a period.
 - A verified active entitlement advances to a later allowance period exactly once by its monotonic
   identity. A verified annual renewal supplies a new signed span and anchor; a lapse, resubscribe, or
   cadence change takes effect only from the newly verified signed transaction. Late, duplicate, or
@@ -105,7 +108,7 @@ correction, manual edits, changed photo sets, cancel/fail before settlement, can
 settlement, guest-to-account claim, concurrent run-#2 reservation, mid-period signup, verified
 monthly renewal, annual mid-subperiod access, end-of-month-clamped annual boundaries, verified annual
 renewal, grace without reset or annual-subperiod advance, retry/expiration/revocation, late renewal,
-cadence change, and duplicate/out-of-order StoreKit callbacks.
+cadence change, and duplicate/out-of-order RevenueCat/StoreKit callbacks.
 
 ### 4. eBay authority and synchronization
 

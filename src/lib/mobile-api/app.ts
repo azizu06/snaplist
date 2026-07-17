@@ -1,8 +1,11 @@
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
+import type { NativeSubscriptionBridge } from "@/lib/billing";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
   healthEnvelopeSchema,
+  aiItemEntitlementEnvelopeSchema,
+  revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
   workerSummaryEnvelopeSchema,
   type ApiErrorCode,
@@ -21,6 +24,7 @@ export interface MobileApiDependencies {
    */
   authenticate(token: string): Promise<MobileApiPrincipal>;
   worker: PipelineWorker;
+  subscriptionBridge?: NativeSubscriptionBridge;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -120,6 +124,74 @@ export function createMobileApiHandler(
           "unauthorized",
           "Authentication is required.",
         );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/billing/revenuecat/identity`) {
+      if (request.method !== "POST") {
+        return errorResponse(requestId, 405, "method_not_allowed", "This method is not allowed.");
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      if (!dependencies.subscriptionBridge) {
+        return errorResponse(requestId, 503, "internal_error", "Native subscriptions are not configured.");
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      try {
+        const configuration = await dependencies.subscriptionBridge.configurationFor(
+          principal.userId,
+        );
+        return json(
+          revenueCatConfigurationEnvelopeSchema.parse({
+            data: configuration,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.revenuecat-identity", error);
+        return errorResponse(requestId, 500, "internal_error", "Native subscription setup failed.");
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/entitlements/ai-items`) {
+      if (request.method !== "GET") {
+        return errorResponse(requestId, 405, "method_not_allowed", "This method is not allowed.");
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      if (!dependencies.subscriptionBridge) {
+        return errorResponse(requestId, 503, "internal_error", "Native subscriptions are not configured.");
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      try {
+        const entitlement = await dependencies.subscriptionBridge.entitlementFor(
+          principal.userId,
+        );
+        return json(
+          aiItemEntitlementEnvelopeSchema.parse({
+            data: entitlement,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.ai-item-entitlement", error);
+        return errorResponse(requestId, 500, "internal_error", "Verified entitlement lookup failed.");
       }
     }
 

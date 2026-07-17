@@ -180,7 +180,9 @@ receive honest **assisted marketplace handoffs**.
   that signed span, anchored to verified `purchaseDate`, capped at verified `expiresDate`, and keyed
   by `(originalTransactionId, transactionId, subperiodIndex)`. It is never selected by a client clock.
   Verified active state advances once; verified grace preserves the current remainder without
-  advancing; late, duplicate, out-of-order, or ambiguous state cannot advance credits.
+  advancing; late, duplicate, out-of-order, or ambiguous state cannot advance credits. RevenueCat
+  manages the native StoreKit lifecycle, while its client state stays advisory and the server/#168
+  ledger remains the only quota authority.
 - **Guest allowance** — one App Attest-backed device entitlement containing one **AI-item credit** and
   exactly one guided identity correction for the same item/photo set. Manual edits that preserve the
   immutable photo-set fingerprint are unlimited; adding, replacing, or removing a photo requires a
