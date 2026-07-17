@@ -84,6 +84,29 @@ values
     'fair'
   );
 
+-- This operations fixture intentionally exercises multiple logical runs for one
+-- seller. Model the verified paid allowance that makes those runs valid instead
+-- of bypassing the production reservation trigger or weakening tenant coverage.
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+do $$
+begin
+  perform public.record_verified_storekit_ai_item_period(
+    'pipeline-operations-user',
+    'pipeline-operations-fixture-period',
+    'pipeline-operations-fixture-transaction',
+    statement_timestamp() - interval '1 day',
+    statement_timestamp() + interval '29 days',
+    'active',
+    null,
+    2,
+    'pipeline-operations-fixture-event',
+    statement_timestamp()
+  );
+end;
+$$;
+reset role;
+
 insert into public.pipeline_runs (id, user_id, item_id, idempotency_key, checkpoint, capture_input)
 values
   (
@@ -112,26 +135,53 @@ set status = 'running',
     lease_token = '83000000-0000-4000-8000-000000000001',
     lease_expires_at = statement_timestamp() + interval '1 minute'
 where id = '82000000-0000-4000-8000-000000000001';
+
+update public.items
+set identification = '{"label":"Protected item","confident":true}'::jsonb
+where id = '81000000-0000-4000-8000-000000000001';
+
+insert into public.prediction_logs (
+  user_id, item_id, run_id, extracted_attrs, price, price_range, confidence,
+  tier_fired, model, listing_model, sources, autopilot_enabled,
+  autopilot_eligible
+) values (
+  'pipeline-operations-user',
+  '81000000-0000-4000-8000-000000000001',
+  '82000000-0000-4000-8000-000000000001',
+  '{"brand":"protected"}',
+  100,
+  '{"min":90,"max":110}',
+  0.9,
+  'llm-only',
+  'test-vision',
+  'test-listing',
+  '[]',
+  false,
+  false
+);
+
+insert into public.listings (
+  id, user_id, item_id, platform, title, description, copy, status, run_id
+) values (
+  '84000000-0000-4000-8000-000000000001',
+  'pipeline-operations-user',
+  '81000000-0000-4000-8000-000000000001',
+  'ebay',
+  'Protected item',
+  'Protected successful listing retained for pipeline operations coverage.',
+  '{"itemSpecifics":{"Brand":"protected"}}',
+  'draft',
+  '82000000-0000-4000-8000-000000000001'
+);
+update public.pipeline_runs
+set listing_id = '84000000-0000-4000-8000-000000000001'
+where id = '82000000-0000-4000-8000-000000000001';
 update public.pipeline_runs
 set status = 'succeeded',
     stage = 'completed',
     completed_at = statement_timestamp() - interval '31 days',
     lease_token = null,
     lease_expires_at = null
-where id = '82000000-0000-4000-8000-000000000001';
-
-insert into public.listings (
-  id, user_id, item_id, platform, status, run_id
-) values (
-  '84000000-0000-4000-8000-000000000001',
-  'pipeline-operations-user',
-  '81000000-0000-4000-8000-000000000001',
-  'ebay',
-  'draft',
-  '82000000-0000-4000-8000-000000000001'
-);
-update public.pipeline_runs
-set listing_id = '84000000-0000-4000-8000-000000000001'
 where id = '82000000-0000-4000-8000-000000000001';
 
 select pgmq.send(
