@@ -8,8 +8,8 @@
   },
   "ranking": {
     "anchorRows": 126,
-    "corroborationRows": 376,
-    "rejectedRows": 412,
+    "corroborationRows": 374,
+    "rejectedRows": 414,
     "labeledAnchorRows": 126,
     "validAnchorRows": 116,
     "validComparableRows": 264,

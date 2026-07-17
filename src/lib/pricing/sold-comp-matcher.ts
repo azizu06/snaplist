@@ -373,8 +373,13 @@ function compareSpecs(title: string, signal: ItemSignal): "equivalent" | "unveri
     return "conflict";
   }
 
-  const normalizedSpecs = normalizeComparableText(specs);
-  if (containsPhrase(title, normalizedSpecs) || compositionEquivalent(title, specs)) {
+  const normalizedSpecs = (signal.specs ?? [])
+    .map((spec) => normalizeComparableText(spec))
+    .filter(Boolean);
+  if (
+    normalizedSpecs.every((spec) => containsPhrase(title, spec)) ||
+    compositionEquivalent(title, specs)
+  ) {
     return "equivalent";
   }
 
@@ -422,12 +427,29 @@ function accessoryQuantity(text: string, accessory: string): number {
   return 0;
 }
 
+const ACCESSORY_INCLUSION_WORDS = new Set(["with", "include", "includes", "including"]);
+
+function accessoryIsIncluded(text: string, accessory: string): boolean {
+  const tokens = text.split(" ");
+  let found = false;
+  for (const phrase of accessoryPhrases(accessory)) {
+    for (let index = 0; index <= tokens.length - phrase.length; index += 1) {
+      if (!phrase.every((word, offset) => tokens[index + offset] === word)) continue;
+      found = true;
+      if (!tokens.slice(0, index).some((word) => ACCESSORY_INCLUSION_WORDS.has(word))) {
+        return false;
+      }
+    }
+  }
+  return found;
+}
+
 function accessoryMismatch(title: string, signal: ItemSignal): boolean {
   const identity = identityText(signal);
   for (const accessory of ACCESSORY_WORDS) {
     if (accessoryQuantity(title, accessory) === 0) continue;
     if (accessoryQuantity(identity, accessory) > 0) continue;
-    if (/\b(with|includes?|including)\b/.test(title)) continue;
+    if (accessoryIsIncluded(title, accessory)) continue;
     return true;
   }
   return false;

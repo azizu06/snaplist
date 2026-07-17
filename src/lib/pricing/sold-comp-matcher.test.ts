@@ -228,6 +228,34 @@ describe("classifySoldComp", () => {
     expect(match.reasons).toContain("accessory-mismatch");
   });
 
+  it("rejects accessory-only rows even when they include another accessory", () => {
+    const cases: Array<{ signal: ItemSignal; title: string }> = [
+      {
+        signal: {
+          brand: "Apple",
+          model: "iPhone 14 Pro",
+          condition: "good",
+        },
+        title: "iPhone 14 Pro Case with Screen Protector",
+      },
+      {
+        signal: {
+          brand: "Sony",
+          model: "WH-1000XM4",
+          condition: "good",
+        },
+        title: "WH-1000XM4 Replacement Ear Pads with Case",
+      },
+    ];
+
+    for (const { signal, title } of cases) {
+      const match = classifySoldComp(candidate(title, "Pre-Owned"), signal);
+
+      expect(match.classification).toBe("reject");
+      expect(match.reasons).toContain("accessory-mismatch");
+    }
+  });
+
   it("keeps a genuine target bundle when its composition matches", () => {
     const signal: ItemSignal = {
       brand: "Sony",
@@ -260,6 +288,26 @@ describe("classifySoldComp", () => {
 
     expect(match.classification).toBe("corroboration");
     expect(match.reasons).toContain("spec-unverified");
+  });
+
+  it("matches independent free-form specs regardless of title order", () => {
+    const signal: ItemSignal = {
+      brand: "Sony",
+      model: "WH-1000XM4",
+      specs: ["wireless", "noise cancelling", "over ear"],
+      condition: "good",
+    };
+
+    const match = classifySoldComp(
+      candidate(
+        "Sony WH-1000XM4 Over-Ear Wireless Noise Cancelling Headphones",
+        "Pre-Owned",
+      ),
+      signal,
+    );
+
+    expect(match.classification).toBe("anchor");
+    expect(match.reasons).toContain("spec-equivalent");
   });
 
   it.each([
