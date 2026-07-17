@@ -53,6 +53,7 @@ export {
 export {
   createEbaySoldPricingProvider,
   createDefaultFetchPage,
+  buildSoldSearchQuery,
   buildSoldSearchUrl,
   parseSoldComps,
   parsePrice,
@@ -68,6 +69,25 @@ export {
   type EbaySoldComp,
   type EbaySoldPricingProviderOptions,
 } from "./providers/ebay-sold";
+export {
+  createApifySoldPricingProvider,
+  createDefaultApifySoldActorRunner,
+  normalizeApifySoldItems,
+  apifySoldConfigured,
+  APIFY_SOLD_ACTOR_ID,
+  APIFY_SOLD_ACTOR_BUILD_DEFAULT,
+  APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT,
+  APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT,
+  APIFY_SOLD_MAX_RESULTS_DEFAULT,
+  APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT,
+  APIFY_SOLD_REQUEST_RETRIES_DEFAULT,
+  APIFY_SOLD_WAIT_SECS_DEFAULT,
+  type ApifySoldComp,
+  type ApifySoldRunRequest,
+  type ApifySoldRunResult,
+  type RunApifySoldActor,
+  type ApifySoldPricingProviderOptions,
+} from "./providers/apify-sold";
 export {
   createDepreciationPricingProvider,
   createOpenAIRetailExtractor,

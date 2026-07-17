@@ -267,7 +267,7 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
  * items, the same false precision the branded-web tier refuses — so it yields
  * no query (→ the provider declines).
  */
-function identityQuery(signal: ItemSignal): string | null {
+export function buildSoldSearchQuery(signal: ItemSignal): string | null {
   const brand = signal.brand?.trim();
   const model = signal.model?.trim();
   if (brand && model) {
@@ -306,7 +306,7 @@ export function buildSoldSearchUrl(
   signal: ItemSignal,
   baseUrl: string = resolveBaseUrl(),
 ): string | null {
-  const q = identityQuery(signal);
+  const q = buildSoldSearchQuery(signal);
   if (!q) return null;
   // A malformed EBAY_SOLD_BASE_URL (e.g. "www.ebay.com" with no scheme) makes the
   // URL constructor throw. This runs inside the router's `canHandle` precheck —

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (2026-06-14)
 - **Deciders:** Aziz
-- **Implemented by:** issue #56 (this tier) · #59 (freshness) · #60 (confidence wiring) · #61 (gold set) · #125 (egress validation and operator smoke)
+- **Implemented by:** issue #56 (this tier) · #59 (freshness) · #60 (confidence wiring) · #61 (gold set) · #125 (egress validation and operator smoke) · #188 (provider benchmark) · #198 (provider-neutral matcher) · #200 (default-off Apify adapter)
 
 ## Context
 
@@ -33,6 +33,15 @@ sold-comp research is now a first-class tier.
    for **sold comps**, and slot it in the router **above the web-search tiers** (sold beats
    asking) and below `isbn-lookup`. New router order:
    `isbn-lookup → ebay-sold → upc-aided-web → branded-web → depreciation → llm-only`.
+
+   **2026-07-16 retrieval addendum:** `ebay-sold` is the evidence tier, not a
+   single transport. The completed #188 benchmark made Caffein Apify the leading
+   automatic retrieval candidate; #198 supplies the Actor-independent
+   anchor/corroboration/reject matcher. #200 adds the normalized adapter first
+   inside this tier, default-off, with the public-page provider immediately after
+   it. Actor failure or insufficient anchors must decline through the existing
+   provider order. Production activation remains an owner-controlled config and
+   budget decision, not part of this ADR addendum.
 
 2. **Plain `fetch` + `cheerio` by default; a Playwright-style fallback behind an injected
    seam.** No login is required. IP rate-limits, CAPTCHAs, markup drift, and other egress failures
@@ -80,8 +89,12 @@ sold-comp research is now a first-class tier.
 
 ## Alternatives considered
 
-- **Apify / a paid scraping API** — rejected: ~$39/mo recurring, against the 100%-free-tier
-  constraint, and it hides the engineering (the scraper *is* part of the showcase).
+- **Apify / a paid scraping API** — originally rejected before measured evidence.
+  Issues #188/#198 later showed that the Caffein pay-per-result Actor retrieved
+  substantially more sold evidence than the blocked public-page path while the
+  in-repo matcher retained SnapList's precision logic. It is therefore retained
+  as a default-off primary candidate behind the same interface, not adopted as a
+  subscription or activated production dependency.
 - **Reuse `branded-web` and just feed it eBay results** — rejected: conflates a distinct, higher-
   authority source (completed sales) with LLM-extracted open-web asking comps, and muddies the
   "which tier fired" provenance the confidence/eval spine depends on.

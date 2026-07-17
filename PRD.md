@@ -258,7 +258,7 @@ authoritative source supports it and otherwise hands that status check to eBay.
 ### Pricing pipeline (behind a `PricingProvider` interface; routing pipeline, not one source)
 Routing by item signal, each result always `{ suggested, range, confidence, sources[] }`, always user-editable:
 1. **ISBN present** → true structured catalog lookup (Open Library + Google Books, free). Highest identification confidence; pricing trust remains estimate-level unless the result is also sold-backed.
-2. **Identifiable item → eBay public sold comps** → scrape eBay's PUBLIC sold/completed results pages (`LH_Sold=1&LH_Complete=1`) for real **completed-sale** comps — the strongest used signal, no API/login needed. Slots **above** the web-search tiers (sold beats asking). Read-only price research, never a posting mechanism. See **ADR-0001**.
+2. **Identifiable item → eBay sold comps** → retrieve real completed-sale comps behind a provider-neutral `ebay-sold` strategy. The leading automatic candidate is the default-off Caffein Apify adapter, whose untrusted rows must pass the shared anchor/corroboration/reject matcher; the public sold/completed page provider remains its immediate fallback. Both are read-only price research, never posting mechanisms, and any failure/thin anchor set falls through. See **ADR-0001**.
 3. **UPC present** → decode as a strong **identification/query aid** (not a price oracle — no reliable free UPC price API). Feed decoded code + resolved product name into the web-search agent; price comes from comps.
 4. **Recognizable branded item** → **bounded tool-calling web-search pricing agent** (see below).
 5. **Generic, only retail found** → retail × condition-based depreciation factor, labeled low-confidence estimate.
@@ -268,11 +268,14 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   no usable override exists do those paths fall back to the latest pipeline suggestion. Prediction
   logs keep the recommendation for evaluation; choosing an override never rewrites that history.
 - eBay **Browse** API dropped; eBay **Marketplace Insights** (true sold prices) is gated/unavailable to solo devs — not used **as an API**. Instead, eBay's PUBLIC sold-listings *pages* are scraped (ADR-0001) for real sold comps. Open-web comps (web-search tier) remain mostly *asking* prices; the agent seeks resale/sold signals and **down-weights confidence when only asking prices are found**. Honest ceiling: a *smart, sold-grounded suggestion*, not an oracle.
-- **Sold-comps egress is best-effort and configurable.** Direct HTTPS fetch is the default; hosted
-  environments may set one validated, vendor-neutral `EBAY_SOLD_PROXY_TEMPLATE`. Missing/blank
-  preserves direct fetch, malformed configuration fails before any request, and blocked/thin
-  results decline to lower tiers. Proxy credentials and raw upstream errors never enter reports or
-  pricing diagnostics.
+- **Sold-comps retrieval is best-effort and configurable.** Caffein Apify is
+  default-off and requires explicit config; its normalized output never bypasses
+  the provider-neutral matcher. The public-page fallback uses direct HTTPS by
+  default, while hosted environments may set one validated, vendor-neutral
+  `EBAY_SOLD_PROXY_TEMPLATE`. Missing config preserves the fallback, malformed
+  config fails before egress, and Actor/public blocked or thin results decline to
+  lower tiers. Provider credentials and raw upstream errors never enter results,
+  reports, cache keys, or pricing diagnostics.
 - **Freshness:** sold prices drift, so the source of truth is a **live fetch at query time**; a TTL cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The pgvector **reference corpus** grounds listing copy and *corroborates* pricing — it is **never** the price oracle.
 
 ### Pricing research agent

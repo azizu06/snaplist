@@ -11,13 +11,18 @@ import {
   formatSoldCompRankingReplay,
   replaySoldCompRanking,
 } from "../src/lib/pricing/benchmark/ranking-replay";
-import { parseHumanLabelFile } from "../src/lib/pricing/benchmark/review";
+import { PRODUCT_RESEARCH_SUBSET_IDS } from "../src/lib/pricing/benchmark/corpus";
+import {
+  parseHumanLabelFile,
+  parseProductResearchFile,
+} from "../src/lib/pricing/benchmark/review";
 import type { BenchmarkCapture } from "../src/lib/pricing/benchmark/types";
 
 interface ReplayArgs {
   capturePath: string;
   labelsPath: string;
   outputDir: string;
+  productResearchPath?: string;
 }
 
 function requiredValue(args: string[], index: number, flag: string): string {
@@ -30,6 +35,7 @@ function parseArgs(args: string[]): ReplayArgs {
   let capturePath: string | undefined;
   let labelsPath: string | undefined;
   let outputDir = "docs/benchmarks/sold-comps/ranking-replay";
+  let productResearchPath: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--") {
@@ -43,6 +49,9 @@ function parseArgs(args: string[]): ReplayArgs {
     } else if (arg === "--output-dir") {
       outputDir = requiredValue(args, index, arg);
       index += 1;
+    } else if (arg === "--product-research") {
+      productResearchPath = requiredValue(args, index, arg);
+      index += 1;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -50,7 +59,7 @@ function parseArgs(args: string[]): ReplayArgs {
   if (!capturePath || !labelsPath) {
     throw new Error("Offline replay requires --capture and --labels");
   }
-  return { capturePath, labelsPath, outputDir };
+  return { capturePath, labelsPath, outputDir, productResearchPath };
 }
 
 function readJson(path: string): unknown {
@@ -63,7 +72,13 @@ if (capture.schemaVersion !== 1 || !Array.isArray(capture.queries)) {
   throw new Error("Unsupported sold-comp capture schema");
 }
 const labels = parseHumanLabelFile(readJson(args.labelsPath)).labels;
-const summary = replaySoldCompRanking(capture, labels);
+const productResearch = args.productResearchPath
+  ? parseProductResearchFile(
+      readJson(args.productResearchPath),
+      PRODUCT_RESEARCH_SUBSET_IDS,
+    )
+  : capture.productResearch;
+const summary = replaySoldCompRanking(capture, labels, productResearch);
 const outputDir = resolve(args.outputDir);
 mkdirSync(outputDir, { recursive: true });
 writeFileSync(

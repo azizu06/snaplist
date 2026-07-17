@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runId": "issue188-20260716T190054137Z",
+  "providerRequests": 0,
+  "retrieval": {
+    "queryCount": 40,
+    "labeledRows": 914,
+    "successfulQueries": 38,
+    "relevantPrecision": 0.8238512035010941
+  },
+  "ranking": {
+    "anchorRows": 118,
+    "corroborationRows": 382,
+    "rejectedRows": 414,
+    "validAnchorRows": 108,
+    "validComparableRows": 264,
+    "anchorPrecision": 0.9152542372881356,
+    "validAnchorRecall": 0.4090909090909091,
+    "usablePricingQueries": 16,
+    "pricingQueryCoverage": 0.4
+  },
+  "productResearchReference": {
+    "referenceQueryCount": 7,
+    "comparableQueryCount": 4,
+    "medianAbsoluteSuggestedErrorRate": 0.07060988194395393,
+    "medianRangeOverlapRate": 0.1264245553332973,
+    "basis": "aggregate-average-and-range"
+  },
+  "cost": {
+    "historicalSpendUsd": 3.6574,
+    "issue200SpendUsd": 0,
+    "costPerMatcherUsableListingUsd": 0.2285875
+  }
+}
