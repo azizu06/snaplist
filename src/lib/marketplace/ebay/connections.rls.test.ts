@@ -40,6 +40,14 @@ const TEST_ENV = {
   EBAY_CLIENT_SECRET: "test-client-secret",
 };
 
+// Production tombstones are intentionally durable. Give each Vitest process a
+// fresh seller while keeping one stable identity for the erase/reconnect proof.
+const ERASED_SELLER_RUN_ID = randomBytes(8).toString("hex");
+const ERASED_SELLER_IDENTITY = {
+  userId: `EBAYUID-ERASE-${ERASED_SELLER_RUN_ID}`,
+  username: `seller_erase_${ERASED_SELLER_RUN_ID}`,
+};
+
 const GRANT: EbayTokenGrant = {
   accessToken: "access-token-plain",
   refreshToken: "refresh-token-plain",
@@ -165,18 +173,37 @@ describe("ebay_connections (DB-gated)", () => {
     await saveEbayConnection(
       userAServer,
       GRANT,
-      { userId: "EBAYUID-ERASE", username: "seller_erase" },
+      ERASED_SELLER_IDENTITY,
       TEST_ENV,
     );
 
-    const erased = await eraseEbayUserData(admin, "EBAYUID-ERASE", "seller_erase");
+    const erased = await eraseEbayUserData(
+      admin,
+      ERASED_SELLER_IDENTITY.userId,
+      ERASED_SELLER_IDENTITY.username,
+    );
     expect(erased).toBe(1);
     expect((await getEbayConnectionStatus(userA.client)).connected).toBe(false);
 
     // Idempotent: a second notice for the same user erases nothing, no error.
     await expect(
-      eraseEbayUserData(admin, "EBAYUID-ERASE", "seller_erase"),
+      eraseEbayUserData(
+        admin,
+        ERASED_SELLER_IDENTITY.userId,
+        ERASED_SELLER_IDENTITY.username,
+      ),
     ).resolves.toBe(0);
+
+    // The durable identity tombstone rejects the erased seller even when a
+    // different tenant attempts to claim it within this run.
+    await expect(
+      saveEbayConnection(
+        userBServer,
+        GRANT,
+        ERASED_SELLER_IDENTITY,
+        TEST_ENV,
+      ),
+    ).rejects.toThrow("eBay seller identity has been erased");
   });
 });
 
