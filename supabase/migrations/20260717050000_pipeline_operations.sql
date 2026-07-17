@@ -212,6 +212,8 @@ declare
   v_staging_intents_protected integer := 0;
   v_storage_jobs_queued integer := 0;
   v_terminal_runs_pruned integer := 0;
+  v_item_terminal_runs_pruned integer := 0;
+  v_sweep_terminal_runs_pruned integer := 0;
   v_cron_rows_deleted integer := 0;
   v_http_rows_deleted integer := 0;
   v_cron_relation regclass := to_regclass('cron.job_run_details');
@@ -311,12 +313,51 @@ begin
         select 1
         from public.pipeline_runs protected_run
         where protected_run.item_id = item.id
-          and protected_run.status in ('queued', 'running', 'retrying', 'succeeded')
+          and (
+            protected_run.status in ('queued', 'running', 'retrying', 'succeeded')
+            or (
+              protected_run.status in ('failed', 'canceled')
+              and (
+                protected_run.completed_at is null
+                or protected_run.completed_at
+                  >= statement_timestamp() - interval '30 days'
+              )
+            )
+          )
       )
     order by item.updated_at, item.id
     for update of item skip locked
     limit p_batch_size
   loop
+    -- Retry locks the run row before changing failed/canceled back to queued.
+    -- Lock every sibling in deterministic order, then re-check eligibility.
+    -- If retry won first, its queued row protects the photos. If retention won
+    -- first, retry waits and then observes retention_cleaned_at after commit.
+    perform run.id
+    from public.pipeline_runs run
+    where run.item_id = v_item.id
+    order by run.id
+    for update;
+
+    if exists (
+      select 1
+      from public.pipeline_runs protected_run
+      where protected_run.item_id = v_item.id
+        and (
+          protected_run.status in ('queued', 'running', 'retrying', 'succeeded')
+          or (
+            protected_run.status in ('failed', 'canceled')
+            and (
+              protected_run.completed_at is null
+              or protected_run.completed_at
+                >= statement_timestamp() - interval '30 days'
+            )
+          )
+        )
+    ) then
+      continue;
+    end if;
+
     insert into private.pipeline_storage_cleanup_jobs (
       source_type,
       source_id,
@@ -328,6 +369,17 @@ begin
     ) on conflict (source_type, source_id) do nothing;
 
     if found then
+      update public.pipeline_runs run
+      set checkpoint = '{}'::jsonb,
+          capture_input = null,
+          retention_cleaned_at = statement_timestamp()
+      where run.item_id = v_item.id
+        and run.status in ('failed', 'canceled')
+        and run.retention_cleaned_at is null;
+      get diagnostics v_item_terminal_runs_pruned = row_count;
+      v_terminal_runs_pruned :=
+        v_terminal_runs_pruned + v_item_terminal_runs_pruned;
+
       update public.items
       set photos = '{}'::text[],
           attributes = '{}'::jsonb,
@@ -368,7 +420,9 @@ begin
       retention_cleaned_at = statement_timestamp()
   from targets
   where run.id = targets.id;
-  get diagnostics v_terminal_runs_pruned = row_count;
+  get diagnostics v_sweep_terminal_runs_pruned = row_count;
+  v_terminal_runs_pruned :=
+    v_terminal_runs_pruned + v_sweep_terminal_runs_pruned;
 
   -- Normal workers delete after durable terminal state. This bounded sweep is
   -- crash recovery for messages left behind after completion/terminal failure.

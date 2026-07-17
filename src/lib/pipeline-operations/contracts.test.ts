@@ -26,6 +26,9 @@ describe("pipeline operations database contract", () => {
     expect(migration).toMatch(/create or replace function public\.retry_pipeline_run/i);
     expect(migration).toMatch(/v_run\.retention_cleaned_at is not null/i);
     expect(migration).toMatch(/This saved run has expired\. Start a new capture\./i);
+    expect(migration).toMatch(
+      /for v_item in[\s\S]*?for update of item skip locked[\s\S]*?loop[\s\S]*?perform run\.id[\s\S]*?order by run\.id[\s\S]*?for update;[\s\S]*?status in \('queued', 'running', 'retrying', 'succeeded'\)[\s\S]*?continue;[\s\S]*?update public\.pipeline_runs[\s\S]*?retention_cleaned_at = statement_timestamp\(\)[\s\S]*?update public\.items/i,
+    );
   });
 
   it("ships only an inactive Vault + Cron + pg_net activation template", () => {

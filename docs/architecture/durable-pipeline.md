@@ -124,8 +124,11 @@ offline partial-completion acceptance.
 
 Hourly maintenance performs a short, concurrency-fenced Postgres preparation followed by leased
 Storage cleanup outside the transaction. Staging paths are deleted only when no item references them.
-Abandoned failed/canceled captures are tombstoned after 30 days only when no listing or active/successful
-run protects the item. Successful listing photos are never cleanup candidates. Terminal run identities
+Abandoned failed/canceled captures are tombstoned only after every terminal attempt is 30 days old and
+no listing or active/successful run protects the item. Retention locks and re-checks the item’s run rows,
+then marks them non-retryable in the same transaction that queues photo cleanup, so a concurrent seller
+retry either wins and protects the photos or waits and fails closed. Successful listing photos are never
+cleanup candidates. Terminal run identities
 remain for notifications and credit accounting while checkpoint/capture metadata is pruned. A
 tombstoned failed/canceled run is explicitly non-retryable: the authenticated retry RPC fails closed,
 and seller-facing progress directs the seller to start a new capture instead of enqueueing a run whose

@@ -1,6 +1,6 @@
 begin;
 
-select plan(42);
+select plan(44);
 
 select extensions.has_column(
   'public', 'pipeline_runs', 'retention_cleaned_at',
@@ -75,6 +75,13 @@ values
     array['pipeline-operations-user/abandoned.jpg'],
     '{"brand":"abandoned"}',
     'poor'
+  ),
+  (
+    '81000000-0000-4000-8000-000000000003',
+    'pipeline-operations-user',
+    array['pipeline-operations-user/recent-retry.jpg'],
+    '{"brand":"recent-retry"}',
+    'fair'
   );
 
 insert into public.pipeline_runs (id, user_id, item_id, idempotency_key, checkpoint, capture_input)
@@ -156,6 +163,48 @@ set status = 'failed',
     lease_expires_at = null
 where id = '82000000-0000-4000-8000-000000000002';
 
+insert into public.pipeline_runs (id, user_id, item_id, idempotency_key)
+values
+  (
+    '82000000-0000-4000-8000-000000000003',
+    'pipeline-operations-user',
+    '81000000-0000-4000-8000-000000000003',
+    'operations-old-failure'
+  ),
+  (
+    '82000000-0000-4000-8000-000000000004',
+    'pipeline-operations-user',
+    '81000000-0000-4000-8000-000000000003',
+    'operations-recent-failure'
+  );
+update public.pipeline_runs
+set status = 'running',
+    stage = 'identifying',
+    attempt_count = 1,
+    started_at = statement_timestamp() - interval '31 days',
+    last_attempted_at = statement_timestamp() - interval '31 days',
+    lease_token = gen_random_uuid(),
+    lease_expires_at = statement_timestamp() + interval '1 minute'
+where id in (
+  '82000000-0000-4000-8000-000000000003',
+  '82000000-0000-4000-8000-000000000004'
+);
+update public.pipeline_runs
+set status = 'failed',
+    failure_code = 'provider_unavailable',
+    safe_failure_message = 'The listing could not be prepared.',
+    completed_at = case
+      when id = '82000000-0000-4000-8000-000000000003'
+        then statement_timestamp() - interval '31 days'
+      else statement_timestamp() - interval '1 day'
+    end,
+    lease_token = null,
+    lease_expires_at = null
+where id in (
+  '82000000-0000-4000-8000-000000000003',
+  '82000000-0000-4000-8000-000000000004'
+);
+
 insert into private.pipeline_staging_cleanup_intents (
   cleanup_id, user_id, batch_id, photo_paths, created_at, cleanup_after
 ) values (
@@ -206,6 +255,11 @@ select extensions.is(
   'an abandoned terminal item releases its photo references'
 );
 select extensions.is(
+  (select photos[1] from public.items where id = '81000000-0000-4000-8000-000000000003'),
+  'pipeline-operations-user/recent-retry.jpg',
+  'a recent terminal retry protects shared photos from an older sibling run'
+);
+select extensions.is(
   (select attributes from public.items where id = '81000000-0000-4000-8000-000000000002'),
   '{}'::jsonb,
   'an abandoned terminal item is reduced to an accounting tombstone'
@@ -224,6 +278,14 @@ select extensions.is(
   (select checkpoint from public.pipeline_runs where id = '82000000-0000-4000-8000-000000000002'),
   '{}'::jsonb,
   'failed terminal checkpoint metadata is pruned'
+);
+select extensions.ok(
+  (
+    select retention_cleaned_at is not null
+    from public.pipeline_runs
+    where id = '82000000-0000-4000-8000-000000000002'
+  ),
+  'an abandoned terminal run is marked non-retryable in the tombstone transaction'
 );
 select extensions.is(
   (select checkpoint from public.pipeline_runs where id = '82000000-0000-4000-8000-000000000001'),
@@ -296,7 +358,7 @@ select extensions.is(
 );
 select extensions.is(
   (select (value->>'terminalFailures')::integer from health_before),
-  1,
+  3,
   'health exposes terminal failures'
 );
 select extensions.is(
