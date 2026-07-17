@@ -306,6 +306,19 @@ describe("RevenueCat verified lifecycle bridge", () => {
     },
   );
 
+  it("requires reconciliation for a product change before monthly SKU filtering", async () => {
+    const { result, fake } = await handle({
+      type: "PRODUCT_CHANGE",
+      id: "event-annual-product-change",
+      product_id: "unexpected-annual-product",
+    });
+
+    expect(result).toEqual({ processed: false, reason: "reconciliation_required" });
+    expect(fake.requireReconciliation).toHaveBeenCalledOnce();
+    expect(fake.resolveCustomer).not.toHaveBeenCalled();
+    expect(fake.recordPeriod).not.toHaveBeenCalled();
+  });
+
   it("ignores another app, entitlement, or store without selecting a tenant", async () => {
     const { result, fake } = await handle({ app_id: "other-app" });
     expect(result).toEqual({ processed: false, reason: "ignored" });

@@ -298,7 +298,6 @@ export async function handleRevenueCatWebhook(
   if (
     event.app_id !== config.appId ||
     event.store !== "APP_STORE" ||
-    event.product_id !== config.monthlyProductId ||
     !event.entitlement_ids.includes(config.entitlementId)
   ) {
     return { processed: false, reason: "ignored" };
@@ -314,6 +313,10 @@ export async function handleRevenueCatWebhook(
       eventCreatedAt,
     });
     return { processed: false, reason: "reconciliation_required" };
+  }
+
+  if (event.product_id !== config.monthlyProductId) {
+    return { processed: false, reason: "ignored" };
   }
 
   const state = periodState(event);
