@@ -21,7 +21,7 @@ const contract = JSON.parse(serverContractSource) as {
 };
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
-const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174]);
+const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174, 175]);
 
 function operations() {
   return Object.entries(contract.paths).flatMap(([path, pathItem]) =>
@@ -59,6 +59,7 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(contract.components.securitySchemes).toHaveProperty("ClerkBearer");
     expect(contract.components.schemas).toHaveProperty("ErrorEnvelope");
     expect(contract.paths).toHaveProperty("/v1/items/runs");
+    expect(contract.paths).toHaveProperty("/v1/guest/claims");
     expect(contract.paths).toHaveProperty("/v1/ebay/oauth/callback");
     expect(contract.paths).toHaveProperty("/v1/webhooks/revenuecat");
     expect(contract.paths).toHaveProperty("/v1/billing/revenuecat/identity");
@@ -122,9 +123,31 @@ describe("SwiftUI mobile HTTP contract", () => {
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);
-    for (const issue of [17, 159, 161, 162, 168, 173, 174]) {
+    for (const issue of [17, 159, 161, 162, 168, 173, 174, 175]) {
       expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
     }
+  });
+
+  it("keeps #175's claim result terminal and prevents clients from setting TTL or ownership", () => {
+    const claim = contract.paths["/v1/guest/claims"].post as Record<string, unknown>;
+    expect(claim).toMatchObject({
+      "x-owner-issue": 175,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+    });
+    expect(JSON.stringify(claim)).toContain("X-SnapList-Guest-Handoff");
+    expect(JSON.stringify(claim)).not.toContain("expiresAt");
+    expect(JSON.stringify(claim)).not.toContain("targetUserId");
+    expect(contract.components.schemas.GuestClaimEnvelope).toMatchObject({
+      properties: {
+        data: {
+          properties: {
+            outcome: { enum: ["claimed", "expired"] },
+            purgeLocalRecovery: { const: true },
+          },
+        },
+      },
+    });
   });
 
   it("assigns every contract-only operation to an explicit issue owner", () => {

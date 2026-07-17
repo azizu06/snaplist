@@ -5,6 +5,10 @@ describe("pipeline operations fixed RPC store", () => {
   it("prepares retention, claims cleanup work, records outcomes, and loads health", async () => {
     const rpc = vi.fn()
       .mockResolvedValueOnce({
+        data: { expiredCount: 2, skippedForLock: false },
+        error: null,
+      })
+      .mockResolvedValueOnce({
         data: {
           queueMessagesDeleted: 2,
           queueArchiveRowsDeleted: 3,
@@ -49,6 +53,10 @@ describe("pipeline operations fixed RPC store", () => {
       });
     const store = createSupabasePipelineOperationsStore({ rpc });
 
+    await expect(store.expireGuestRecoveries(25)).resolves.toEqual({
+      expiredCount: 2,
+      skippedForLock: false,
+    });
     await expect(store.prepareRetention(25)).resolves.toMatchObject({
       storageJobsQueued: 4,
       skippedForLock: false,
@@ -82,6 +90,7 @@ describe("pipeline operations fixed RPC store", () => {
     });
 
     expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      "expire_guest_draft_recoveries",
       "prepare_pipeline_retention",
       "claim_pipeline_storage_cleanup",
       "complete_pipeline_storage_cleanup",

@@ -25,6 +25,12 @@ describe("internal pipeline maintenance composition", () => {
 
   it("encloses admin authority behind fixed RPCs and photos-only deletion", async () => {
     rpc.mockImplementation(async (name: string) => {
+      if (name === "expire_guest_draft_recoveries") {
+        return {
+          data: { expiredCount: 0, skippedForLock: false },
+          error: null,
+        };
+      }
       if (name === "prepare_pipeline_retention") {
         return {
           data: {
@@ -91,6 +97,7 @@ describe("internal pipeline maintenance composition", () => {
     expect(remove).toHaveBeenCalledWith(["user/pipeline-staging/photo.jpg"]);
     expect(genericFrom).not.toHaveBeenCalled();
     expect(rpc.mock.calls.map(([name]) => name)).toEqual([
+      "expire_guest_draft_recoveries",
       "prepare_pipeline_retention",
       "claim_pipeline_storage_cleanup",
       "complete_pipeline_storage_cleanup",

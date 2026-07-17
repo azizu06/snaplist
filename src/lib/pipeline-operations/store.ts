@@ -30,6 +30,11 @@ const cleanupOutcomeSchema = preparationSchema.extend({
   failedObjects: z.number().int().nonnegative(),
 }).strict();
 
+const guestRecoveryExpirySchema = z.object({
+  expiredCount: z.number().int().nonnegative(),
+  skippedForLock: z.boolean(),
+}).strict();
+
 const healthSchema = z.object({
   queueDepth: z.number().int().nonnegative(),
   oldestJobAgeSeconds: z.number().int().nonnegative(),
@@ -46,9 +51,11 @@ const healthSchema = z.object({
 export type PipelineRetentionPreparation = z.infer<typeof preparationSchema>;
 export type PipelineStorageCleanupClaim = z.infer<typeof cleanupClaimSchema>;
 export type PipelineCleanupOutcome = z.infer<typeof cleanupOutcomeSchema>;
+export type GuestRecoveryExpiry = z.infer<typeof guestRecoveryExpirySchema>;
 export type PipelineOperationsHealth = z.infer<typeof healthSchema>;
 
 type PipelineOperationsRpcName =
+  | "expire_guest_draft_recoveries"
   | "prepare_pipeline_retention"
   | "claim_pipeline_storage_cleanup"
   | "complete_pipeline_storage_cleanup"
@@ -70,6 +77,7 @@ export interface PipelineOperationsRpcClient {
 }
 
 export interface PipelineOperationsStore {
+  expireGuestRecoveries(batchSize: number): Promise<GuestRecoveryExpiry>;
   prepareRetention(batchSize: number): Promise<PipelineRetentionPreparation>;
   claimStorageCleanup(leaseSeconds: number): Promise<PipelineStorageCleanupClaim>;
   completeStorageCleanup(jobId: string, leaseToken: string): Promise<boolean>;
@@ -96,6 +104,16 @@ export function createSupabasePipelineOperationsStore(
   client: PipelineOperationsRpcClient,
 ): PipelineOperationsStore {
   return {
+    async expireGuestRecoveries(rawBatchSize) {
+      const batchSize = batchSizeSchema.parse(rawBatchSize);
+      const result = await client.rpc("expire_guest_draft_recoveries", {
+        p_batch_size: batchSize,
+      });
+      return guestRecoveryExpirySchema.parse(
+        rpcData("guest recovery expiry", result),
+      );
+    },
+
     async prepareRetention(rawBatchSize) {
       const batchSize = batchSizeSchema.parse(rawBatchSize);
       const result = await client.rpc("prepare_pipeline_retention", {

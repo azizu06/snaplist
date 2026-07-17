@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { homeProjectionSchema } from "@/lib/home/projection";
 import { pipelineConsumerSummarySchema } from "./worker-summary";
+import { guestClaimTerminalOutcomeSchema } from "@/lib/guest-recovery/service";
 
 export const MOBILE_API_VERSION = "v1" as const;
 
@@ -121,4 +122,8 @@ export const aiItemEntitlementEnvelopeSchema = z
 
 export const workerSummaryEnvelopeSchema = z
   .object({ data: pipelineConsumerSummarySchema, meta: apiMetaSchema })
+  .strict();
+
+export const guestClaimEnvelopeSchema = z
+  .object({ data: guestClaimTerminalOutcomeSchema, meta: apiMetaSchema })
   .strict();

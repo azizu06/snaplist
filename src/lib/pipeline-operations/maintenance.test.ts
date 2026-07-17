@@ -4,6 +4,10 @@ import { runPipelineMaintenance } from "./maintenance";
 describe("pipeline maintenance", () => {
   it("deletes only claimed photo paths and exposes aggregate health", async () => {
     const store = {
+      expireGuestRecoveries: vi.fn().mockResolvedValue({
+        expiredCount: 2,
+        skippedForLock: false,
+      }),
       prepareRetention: vi.fn().mockResolvedValue({
         queueMessagesDeleted: 1,
         queueArchiveRowsDeleted: 2,
@@ -48,6 +52,7 @@ describe("pipeline maintenance", () => {
       claimedStorageJobs: 1,
       deletedObjects: 1,
       failedObjects: 0,
+      guestRecoveryExpiry: { expiredCount: 2, skippedForLock: false },
       health: { queueDepth: 0 },
     });
     expect(photos.remove).toHaveBeenCalledWith([
@@ -61,6 +66,10 @@ describe("pipeline maintenance", () => {
 
   it("dead-letters through the store without leaking raw Storage errors", async () => {
     const store = {
+      expireGuestRecoveries: vi.fn().mockResolvedValue({
+        expiredCount: 0,
+        skippedForLock: false,
+      }),
       prepareRetention: vi.fn().mockResolvedValue({
         queueMessagesDeleted: 0,
         queueArchiveRowsDeleted: 0,
