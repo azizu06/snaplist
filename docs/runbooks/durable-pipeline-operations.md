@@ -10,7 +10,7 @@ invoke an HTTP route, deploy a worker, or change a provider.
 | Concern | v1 bound | Terminal behavior |
 | --- | ---: | --- |
 | Worker cadence | one invocation/minute | owner-activated only |
-| Worker batch | 5 messages | partial batches commit independently |
+| Scheduled worker claim | 1 message | every run receives the full visibility window |
 | Invocation duration | 300 seconds | platform terminates the request |
 | Queue visibility / run lease | 300 seconds | expiry permits fenced redelivery |
 | Concurrent scheduled worker invocations | at most 5 by cadence/duration | PGMQ visibility plus run leases fence duplicate work |
@@ -21,10 +21,13 @@ invoke an HTTP route, deploy a worker, or change a provider.
 | Storage cleanup attempts | 5 | private dead letter, exposed by health |
 
 The five-minute maximum and one-minute cadence permit no more than five
-overlapping worker requests, below Supabase Cron's documented recommendation of
-no more than eight concurrent jobs. The database does not trust that bound:
-message visibility, message/run pairing, and expiring fencing tokens remain the
-authoritative concurrency controls.
+overlapping single-message worker requests, below Supabase Cron's documented
+recommendation of no more than eight concurrent jobs. Claiming one message per
+request prevents later serial work from inheriting an already-spent visibility
+window. The database does not trust that bound: message visibility, message/run
+pairing, and expiring fencing tokens remain the authoritative concurrency
+controls. The consumer retains an explicit bounded-batch option for deterministic
+partial-completion acceptance, but the scheduled production contract does not use it.
 
 ## Retention policy
 

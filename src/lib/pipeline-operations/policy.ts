@@ -1,6 +1,6 @@
 export const PIPELINE_OPERATIONS_POLICY = {
   worker: {
-    batchSize: 5,
+    batchSize: 1,
     cadenceMinutes: 1,
     maxConcurrentInvocations: 5,
     maxAttempts: 3,

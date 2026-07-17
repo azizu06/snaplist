@@ -322,8 +322,8 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   relationships. A generic service-role domain client is prohibited. See ADR-0007.
 - **Operations are bounded and inactive by default.** The provider-neutral worker and maintenance
   HTTP seams fail closed without a bearer secret; no migration activates hosted Cron. The owner-only
-  Supabase Cron + pg_net template reads its origin and secret from Vault. V1 uses a five-message,
-  300-second worker lease, three attempts with bounded backoff, hourly retention, and structured
+  Supabase Cron + pg_net template reads its origin and secret from Vault. V1 scheduled requests claim
+  one message with a 300-second worker lease, use three attempts with bounded backoff, hourly retention, and structured
   queue/run/cleanup health. Successful listing photos are retained; abandoned captures become
   accounting tombstones only after 30 days; exact Storage cleanup jobs retry five times before a
   visible dead letter. See `docs/runbooks/durable-pipeline-operations.md`.

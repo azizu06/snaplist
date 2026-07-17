@@ -115,10 +115,12 @@ migration activates them. The owner-only template uses Supabase Cron + pg_net wi
 bearer secret read from Vault; the same HTTP contract can be invoked by another scheduler without
 changing queue or worker behavior.
 
-The worker claims five messages with a 300-second visibility/lease window, retries at 30 seconds with
-bounded exponential backoff, and uses three attempts by default. A one-minute cadence plus five-minute
-request ceiling bounds scheduled overlap at five; PGMQ visibility and per-run fencing remain the real
-duplicate-delivery defense.
+Each scheduled worker request claims one message with a 300-second visibility/lease window, retries at
+30 seconds with bounded exponential backoff, and uses three attempts by default. A one-minute cadence
+plus five-minute request ceiling bounds scheduled overlap at five independent requests; each claimed
+run receives its full visibility window, while PGMQ visibility and per-run fencing remain the real
+duplicate-delivery defense. The transport-neutral consumer still supports explicit bounded batches for
+offline partial-completion acceptance.
 
 Hourly maintenance performs a short, concurrency-fenced Postgres preparation followed by leased
 Storage cleanup outside the transaction. Staging paths are deleted only when no item references them.

@@ -130,6 +130,21 @@ function processor(result: PipelineResult = RESULT): DurablePipelineProcessor & 
 }
 
 describe("durable pipeline queue consumer", () => {
+  it("claims one message by default so every run receives the full visibility window", async () => {
+    const queue = queueWith();
+
+    await consumePipelineQueue({
+      queue,
+      runs: storeWith(),
+      processor: processor(),
+    });
+
+    expect(queue.claim).toHaveBeenCalledWith({
+      limit: 1,
+      visibilityTimeoutSeconds: 300,
+    });
+  });
+
   it("claims one bounded batch, checkpoints, completes durably, then acknowledges", async () => {
     const queue = queueWith();
     const runs = storeWith();

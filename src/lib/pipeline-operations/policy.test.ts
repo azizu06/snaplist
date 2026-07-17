@@ -8,7 +8,7 @@ import {
 describe("durable pipeline operating policy", () => {
   it("keeps worker concurrency, visibility, attempts, and retry delay bounded", () => {
     expect(PIPELINE_OPERATIONS_POLICY.worker).toEqual({
-      batchSize: 5,
+      batchSize: 1,
       cadenceMinutes: 1,
       maxConcurrentInvocations: 5,
       maxAttempts: 3,

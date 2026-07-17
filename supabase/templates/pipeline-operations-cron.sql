@@ -18,8 +18,8 @@ select vault.create_secret(
   'OWNER MUST REPLACE with the same unlogged CRON_SECRET used by the app'
 );
 
--- One five-minute-bounded worker invocation per minute. The worker claims only
--- five messages and PGMQ visibility/DB leases fence overlapping deliveries.
+-- One five-minute-bounded worker invocation per minute. Each request claims one
+-- message so that run receives the full PGMQ visibility/DB lease window.
 select cron.schedule(
   'snaplist-pipeline-worker',
   '* * * * *',
