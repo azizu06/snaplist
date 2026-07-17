@@ -33,7 +33,7 @@ describe("SnapList Pro unit-economics model", () => {
       model.scenarios.map((scenario) =>
         scenario.fixedCosts.reduce((total, entry) => total + entry.monthlyUsd, 0),
       ),
-    ).toEqual([8.25, 59.25, 148.25]);
+    ).toEqual([8.25, 59.25, 139.25]);
     for (const entry of model.costInventory) {
       for (const sourceId of entry.sourceIds) {
         expect(sourceIds.has(sourceId), `${entry.service}: ${sourceId}`).toBe(true);

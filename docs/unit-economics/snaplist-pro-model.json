@@ -114,7 +114,7 @@
         { "service": "Apple Developer Program", "monthlyUsd": 8.25, "sourceId": "apple-program", "note": "$99/year amortized monthly." },
         { "service": "Supabase Pro", "monthlyUsd": 25, "sourceId": "supabase-pricing", "note": "Paid database floor." },
         { "service": "Sentry Team", "monthlyUsd": 26, "sourceId": "sentry-pricing", "note": "Paid observability floor." },
-        { "service": "Render API plus worker", "monthlyUsd": 14, "sourceId": "render-pricing", "note": "Two Starter instances; provider activation remains unauthorized." },
+        { "service": "Railway Hobby API/worker floor", "monthlyUsd": 5, "sourceId": "railway-pricing", "note": "Deferred paid target floor before usage overages; provider activation remains unauthorized." },
         { "service": "Vercel Pro", "monthlyUsd": 20, "sourceId": "vercel-pricing", "note": "Broader company fixed-cost burden, separate from native listing COGS." },
         { "service": "Resend Pro", "monthlyUsd": 20, "sourceId": "resend-pricing", "note": "Paid email floor; not required by each listing." },
         { "service": "Clerk Pro", "monthlyUsd": 25, "sourceId": "clerk-pricing", "note": "Monthly public plan floor." },
@@ -138,7 +138,7 @@
   "costInventory": [
     { "service": "Apple Developer Program", "classification": "fixed", "treatment": "included", "sourceIds": ["apple-program"], "note": "$99/year amortized to $8.25/month in every scenario." },
     { "service": "Supabase", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["supabase-pricing"], "note": "Free launch capacity; Pro's $25/month enters p90/stress fixed-cost sensitivity, not per-listing COGS." },
-    { "service": "Render or Railway runtime", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["runtime-proof", "render-pricing", "railway-pricing"], "note": "Local/Free validation first; paid runtime floors enter p90/stress fixed costs. No deployment is authorized." },
+    { "service": "Render prototype API / Railway paid runtime", "classification": "step-variable", "treatment": "breakpoint-only", "sourceIds": ["runtime-proof", "render-pricing", "railway-pricing"], "note": "Render Free is only the optional supervised prototype API. Railway is ADR-0009's deferred paid target and its Hobby floor enters stress fixed costs. No deployment is authorized." },
     { "service": "Vercel marketing surface", "classification": "fixed", "treatment": "breakpoint-only", "sourceIds": ["vercel-pricing"], "note": "Marketing hosting is not caused by one native AI-item run; keep it out of listing COGS and include it only in the broader stress fixed-cost crossover." },
     { "service": "OpenAI vision, pricing, and listing calls", "classification": "per-attempt", "treatment": "included", "sourceIds": ["openai-gpt55", "pipeline-code"], "note": "Token volumes and route shares are dated scenario assumptions; the current public rate card is official." },
     { "service": "Gemini 2.5 Flash development path", "classification": "per-attempt", "treatment": "breakpoint-only", "sourceIds": ["gemini-pricing", "pipeline-code"], "note": "Inventory only: the modeled showcase path uses OpenAI, while the provider registry keeps Gemini as the development flip." },
