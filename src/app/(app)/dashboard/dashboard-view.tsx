@@ -883,6 +883,7 @@ export function DashboardView({
   deleteAction,
   bulkUpdateAction,
   repriceSlot,
+  activitySlot,
 }: {
   rows: DashboardRow[];
   counts: DashboardCounts;
@@ -898,6 +899,8 @@ export function DashboardView({
   bulkUpdateAction?: (updates: BulkListingUpdate[]) => Promise<void>;
   /** Additive slot: the stale-inventory reprice panel (issue #102). */
   repriceSlot?: ReactNode;
+  /** Durable pipeline status, assembled from RLS-scoped database rows. */
+  activitySlot?: ReactNode;
 }) {
   const [query, setQuery] = useState(initialQuery ?? "");
   // Search MODE (the expanded Shopify search bar) is distinct from a non-empty
@@ -1102,6 +1105,7 @@ export function DashboardView({
         ) : null}
       </header>
 
+      {activitySlot}
       {repriceSlot}
       {/* #101 — invested / projected-profit band. Renders only when at least
           one active item carries a cost basis (logic lives in ./profit). */}

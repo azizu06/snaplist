@@ -6,6 +6,8 @@ import { AppShell } from "@/components/app-shell";
 import { UploadDraftProvider } from "./upload/upload-draft-context";
 import type { ProfileUser } from "@/components/profile-menu";
 import type { PaletteHit } from "@/components/command-palette";
+import { listRecentPipelineRuns } from "@/lib/pipeline-recovery/runs";
+import type { PipelineProgressRun } from "@/lib/pipeline-progress";
 
 /**
  * (app) group layout — the signed-in product shell (moved out of the root
@@ -36,6 +38,20 @@ const PREVIEW_NOTIFICATIONS: NotificationView[] = [
   { id: "n-2", kind: "listing_published", title: "White Air Jordan sneakers are live on eBay", body: "Listed at $110. You can view or edit them anytime.", href: "/dashboard", read: false, createdAt: "2026-06-16T11:32:00Z" },
   { id: "n-3", kind: "listing_failed", title: "Couldn’t publish the Sony camera kit", body: "eBay rejected the listing — add a price and try again.", href: "/dashboard", read: true, createdAt: "2026-06-15T18:05:00Z" },
 ];
+const PREVIEW_PIPELINE_RUNS: PipelineProgressRun[] = [
+  {
+    id: "30000000-0000-4000-8000-000000000001",
+    user_id: "preview-seller",
+    item_id: "31000000-0000-4000-8000-000000000001",
+    listing_id: null,
+    status: "retrying",
+    stage: "pricing",
+    attempt_count: 2,
+    max_attempts: 3,
+    safe_failure_message: "SnapList will retry this listing.",
+    updated_at: "2026-07-17T00:00:00.000Z",
+  },
+];
 
 export default async function AppLayout({
   children,
@@ -52,6 +68,7 @@ export default async function AppLayout({
 
   let user: ProfileUser | null = null;
   let notifications: NotificationView[] = [];
+  let pipelineRuns: PipelineProgressRun[] = [];
   if (userId) {
     const clerkUser = await currentUser();
     user = {
@@ -65,10 +82,14 @@ export default async function AppLayout({
     };
     // RLS scopes the read to this user; the bell rides Realtime from here.
     const supabase = await createClient();
-    notifications = await listRecentNotifications(supabase);
+    [notifications, pipelineRuns] = await Promise.all([
+      listRecentNotifications(supabase),
+      listRecentPipelineRuns(supabase),
+    ]);
   } else if (previewSignedIn) {
     user = PREVIEW_USER;
     notifications = PREVIEW_NOTIFICATIONS;
+    pipelineRuns = PREVIEW_PIPELINE_RUNS;
   }
 
   return (
@@ -77,6 +98,7 @@ export default async function AppLayout({
       user={user}
       userId={userId}
       notifications={notifications}
+      pipelineRuns={pipelineRuns}
       searchFixtures={
         previewSignedIn && !userId ? PREVIEW_SEARCH_FIXTURES : undefined
       }

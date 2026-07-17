@@ -13,6 +13,8 @@ import { reportServerError } from "@/lib/sentry";
  */
 
 export type NotificationKind =
+  | "listing_ready"
+  | "pipeline_failed"
   | "listing_published"
   | "listing_failed"
   | "buyer_message"
@@ -51,6 +53,8 @@ interface NotificationRow {
 }
 
 const KINDS: ReadonlySet<string> = new Set<NotificationKind>([
+  "listing_ready",
+  "pipeline_failed",
   "listing_published",
   "listing_failed",
   "buyer_message",

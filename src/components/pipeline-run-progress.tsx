@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { StatusBadge } from "@/components/ui/badge";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import {
@@ -12,35 +12,21 @@ import {
 } from "@/lib/ui/realtime-status";
 import {
   isPipelineProgressTerminal,
+  isPipelineProgressUpdateStale,
   PIPELINE_PROGRESS_SELECT,
   pipelineProgressRunSchema,
   pipelineProgressSteps,
   pipelineProgressView,
   type PipelineProgressRun,
 } from "@/lib/pipeline-progress";
+import {
+  cancelPipelineRun,
+  retryPipelineRun,
+} from "@/app/(app)/pipeline-runs/actions";
 
 export const PIPELINE_PROGRESS_POLL_MS = 5_000;
 
-function fractionalNanoseconds(timestamp: string): number {
-  const fraction = timestamp.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/)?.[1] ?? "";
-  return Number(fraction.padEnd(9, "0").slice(0, 9));
-}
-
-export function isPipelineProgressUpdateStale(
-  candidate: PipelineProgressRun,
-  accepted: PipelineProgressRun,
-): boolean {
-  const candidateTime = Date.parse(candidate.updated_at);
-  const acceptedTime = Date.parse(accepted.updated_at);
-  if (Number.isFinite(candidateTime) && Number.isFinite(acceptedTime)) {
-    if (candidateTime === acceptedTime) {
-      return fractionalNanoseconds(candidate.updated_at)
-        < fractionalNanoseconds(accepted.updated_at);
-    }
-    return candidateTime < acceptedTime;
-  }
-  return candidate.updated_at < accepted.updated_at;
-}
+export { isPipelineProgressUpdateStale } from "@/lib/pipeline-progress";
 
 export interface PipelineProgressCardProps {
   run: PipelineProgressRun;
@@ -50,6 +36,10 @@ export interface PipelineProgressCardProps {
   refreshFailed?: boolean;
   onRefresh?: () => void;
   onRetryConnection?: () => void;
+  onRetryRun?: () => void;
+  onCancelRun?: () => void;
+  actionPending?: boolean;
+  actionError?: string | null;
   title?: string;
 }
 
@@ -61,6 +51,10 @@ export function PipelineProgressCard({
   refreshFailed = false,
   onRefresh,
   onRetryConnection,
+  onRetryRun,
+  onCancelRun,
+  actionPending = false,
+  actionError,
   title = "Building your listing",
 }: PipelineProgressCardProps) {
   const view = pipelineProgressView(run);
@@ -129,7 +123,7 @@ export function PipelineProgressCard({
       </ol>
 
       <div className="flex min-w-0 flex-col gap-2 border-t border-border bg-surface-2/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-        {!terminal ? (
+        {!terminal || connection !== "live" ? (
           <p className="min-w-0 break-words text-[12.5px] text-faint">
             {connection === "live"
               ? "Live updates on"
@@ -143,6 +137,11 @@ export function PipelineProgressCard({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {refreshFailed ? (
             <span className="text-[12px] text-danger-soft-fg">Could not refresh yet.</span>
+          ) : null}
+          {actionError ? (
+            <span role="alert" className="text-[12px] text-danger-soft-fg">
+              {actionError}
+            </span>
           ) : null}
           {connection === "failed" && !terminal && onRetryConnection ? (
             <button
@@ -161,6 +160,26 @@ export function PipelineProgressCard({
               className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-[12.5px] font-semibold text-fg transition-colors hover:bg-surface-2 disabled:opacity-60 motion-reduce:transition-none"
             >
               {refreshing ? "Refreshing" : "Refresh status"}
+            </button>
+          ) : null}
+          {(run.status === "failed" || run.status === "canceled") && onRetryRun ? (
+            <button
+              type="button"
+              onClick={onRetryRun}
+              disabled={actionPending}
+              className="rounded-md bg-primary px-3 py-1.5 text-[12.5px] font-semibold text-primary-fg transition-colors hover:bg-primary-hover disabled:opacity-60 motion-reduce:transition-none"
+            >
+              {actionPending ? "Starting" : "Try again"}
+            </button>
+          ) : null}
+          {(run.status === "queued" || run.status === "running" || run.status === "retrying") && onCancelRun ? (
+            <button
+              type="button"
+              onClick={onCancelRun}
+              disabled={actionPending}
+              className="rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-[12.5px] font-semibold text-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-60 motion-reduce:transition-none"
+            >
+              {actionPending ? "Stopping" : "Cancel processing"}
             </button>
           ) : null}
           {run.status === "succeeded" && reviewHref ? (
@@ -198,6 +217,8 @@ export function PipelineRunProgress({
   const [subscribeAttempt, setSubscribeAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionPending, startAction] = useTransition();
   const acceptedRunRef = useRef(initialRun);
   const run =
     liveRun?.id === initialRun.id && !isPipelineProgressUpdateStale(liveRun, initialRun)
@@ -293,6 +314,20 @@ export function PipelineRunProgress({
     setSubscribeAttempt((attempt) => attempt + 1);
   };
 
+  const runAction = (
+    action: typeof retryPipelineRun | typeof cancelPipelineRun,
+  ) => {
+    setActionError(null);
+    startAction(async () => {
+      const result = await action(run.id);
+      if (!result.ok) {
+        setActionError(result.error);
+        return;
+      }
+      await refresh();
+    });
+  };
+
   return (
     <PipelineProgressCard
       run={run}
@@ -302,6 +337,10 @@ export function PipelineRunProgress({
       refreshFailed={refreshFailed}
       onRefresh={() => void refresh()}
       onRetryConnection={retryConnection}
+      onRetryRun={() => runAction(retryPipelineRun)}
+      onCancelRun={() => runAction(cancelPipelineRun)}
+      actionPending={actionPending}
+      actionError={actionError}
       title={title}
     />
   );

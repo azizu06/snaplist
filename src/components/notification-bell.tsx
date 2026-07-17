@@ -1,10 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useEscapeToClose } from "@/components/ui/overlay-behavior";
 import { useSupabaseClient } from "@/lib/supabase/client";
 import type { NotificationKind, NotificationView } from "@/lib/notifications";
+import { StatusBadge } from "@/components/ui/badge";
+import {
+  pipelineProgressRunSchema,
+  pipelineProgressView,
+  type PipelineProgressRun,
+} from "@/lib/pipeline-progress";
+import {
+  listRecentPipelineRuns,
+  mergePipelineRun,
+  mergePipelineRuns,
+} from "@/lib/pipeline-recovery/runs";
+import {
+  connectionAfterJoinTimeout,
+  connectionFromChannelStatus,
+  REALTIME_JOIN_TIMEOUT_MS,
+  type RealtimeConnectionState,
+} from "@/lib/ui/realtime-status";
 import {
   markAllNotificationsRead,
   markNotificationRead,
@@ -21,6 +38,8 @@ import {
  */
 
 const KINDS = [
+  "listing_ready",
+  "pipeline_failed",
   "listing_published",
   "listing_failed",
   "buyer_message",
@@ -65,7 +84,7 @@ function rowToView(raw: unknown): NotificationView | null {
 
 function KindIcon({ kind }: { kind: NotificationKind }) {
   const cls = "size-4";
-  if (kind === "listing_published") {
+  if (kind === "listing_published" || kind === "listing_ready") {
     return (
       <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent-soft text-accent-soft-fg">
         <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -74,7 +93,7 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
       </span>
     );
   }
-  if (kind === "listing_failed") {
+  if (kind === "listing_failed" || kind === "pipeline_failed") {
     return (
       <span className="grid size-8 shrink-0 place-items-center rounded-full bg-danger-soft text-danger-soft-fg">
         <svg viewBox="0 0 24 24" className={cls} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -103,26 +122,84 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
   );
 }
 
+export function PipelineRunMenu({
+  runs,
+  connection,
+  onOpenRun,
+}: {
+  runs: PipelineProgressRun[];
+  connection: RealtimeConnectionState;
+  onOpenRun: (run: PipelineProgressRun) => void;
+}) {
+  if (runs.length === 0) return null;
+  return (
+    <section aria-label="Listing preparation" className="border-b border-border">
+      <div className="flex items-center justify-between px-3.5 py-2">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">
+          Listing preparation
+        </p>
+        {connection === "failed" ? (
+          <span className="text-[11px] text-warning-soft-fg">
+            Live updates unavailable. We are checking saved status.
+          </span>
+        ) : null}
+      </div>
+      <ul className="divide-y divide-border">
+        {runs.map((run) => {
+          const view = pipelineProgressView(run);
+          return (
+            <li key={run.id}>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => onOpenRun(run)}
+                className="flex w-full min-w-0 items-start gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-surface-2 motion-reduce:transition-none"
+              >
+                <span className="min-w-0 flex-1">
+                  <StatusBadge label={view.label} tone={view.tone} pulse={view.pulse} />
+                  <span className="mt-1 line-clamp-2 block text-[12.5px] leading-snug text-muted">
+                    {view.detail}
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function NotificationBell({
   userId,
   initial,
+  initialRuns = [],
 }: {
   userId: string | null;
   initial: NotificationView[];
+  initialRuns?: PipelineProgressRun[];
 }) {
   const router = useRouter();
   const supabase = useSupabaseClient();
   const [items, setItems] = useState<NotificationView[]>(initial);
+  const [runs, setRuns] = useState<PipelineProgressRun[]>(initialRuns);
+  const [connection, setConnection] = useState<RealtimeConnectionState>("connecting");
   const [open, setOpen] = useState(false);
   const [, startTransition] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
 
   const unread = items.reduce((n, it) => (it.read ? n : n + 1), 0);
 
-  // Live updates — INSERT prepends, UPDATE reconciles read-state. RLS authorizes
-  // each event against the subscriber's JWT, so only the user's own rows arrive.
+  const refreshRuns = useCallback(async () => {
+    const saved = await listRecentPipelineRuns(supabase);
+    setRuns((current) => mergePipelineRuns(current, saved));
+  }, [supabase]);
+
+  // Live updates — notifications and pipeline rows share one tenant-filtered
+  // channel. RLS authorizes every event against the subscriber's JWT.
   useEffect(() => {
     if (!userId) return;
+    let cancelled = false;
     const channel = supabase
       .channel("topbar-notifications")
       .on(
@@ -145,17 +222,51 @@ export function NotificationBell({
           setItems((prev) => prev.map((p) => (p.id === row.id ? row : p)));
         },
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "pipeline_runs", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const parsed = pipelineProgressRunSchema.safeParse(payload.new);
+          if (parsed.success) setRuns((previous) => mergePipelineRun(previous, parsed.data));
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "pipeline_runs", filter: `user_id=eq.${userId}` },
+        (payload) => {
+          const parsed = pipelineProgressRunSchema.safeParse(payload.new);
+          if (parsed.success) setRuns((previous) => mergePipelineRun(previous, parsed.data));
+        },
+      )
       .subscribe((status, err) => {
         // The bell degrades gracefully (server-seeded rows still render), but a
         // dead channel must not die silently — log it for diagnosis (audit).
         if (err || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.error("[realtime] notifications channel", status, err);
         }
+        if (cancelled) return;
+        setConnection(connectionFromChannelStatus(status));
+        if (status === "SUBSCRIBED") void refreshRuns();
       });
+    const joinTimer = setTimeout(() => {
+      if (!cancelled) setConnection((current) => connectionAfterJoinTimeout(current));
+    }, REALTIME_JOIN_TIMEOUT_MS);
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      clearTimeout(joinTimer);
+      void supabase.removeChannel(channel);
     };
-  }, [supabase, userId]);
+  }, [refreshRuns, supabase, userId]);
+
+  useEffect(() => {
+    if (!open || !userId || connection === "live") return;
+    const refreshTimer = setTimeout(() => void refreshRuns(), 0);
+    const timer = setInterval(() => void refreshRuns(), 5_000);
+    return () => {
+      clearTimeout(refreshTimer);
+      clearInterval(timer);
+    };
+  }, [connection, open, refreshRuns, userId]);
 
   // Click-outside close; Escape rides the shared topmost-wins overlay stack.
   useEscapeToClose(open, () => setOpen(false));
@@ -189,6 +300,11 @@ export function NotificationBell({
     startTransition(() => {
       void markAllNotificationsRead();
     });
+  };
+
+  const openRun = (run: PipelineProgressRun) => {
+    setOpen(false);
+    router.push(`/review/${run.item_id}`);
   };
 
   return (
@@ -233,7 +349,7 @@ export function NotificationBell({
             ) : null}
           </div>
 
-          {items.length === 0 ? (
+          {items.length === 0 && runs.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
               <span className="grid size-10 place-items-center rounded-full bg-surface-2 text-muted">
                 <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -247,43 +363,48 @@ export function NotificationBell({
               </p>
             </div>
           ) : (
-            <ul className="max-h-[60vh] divide-y divide-border overflow-y-auto">
-              {items.map((n) => (
-                <li key={n.id}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => onItemClick(n)}
-                    className={`flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-surface-2 ${
-                      n.read ? "" : "bg-accent-soft/40"
-                    }`}
-                  >
-                    <KindIcon kind={n.kind} />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className={`min-w-0 flex-1 truncate text-[14px] ${n.read ? "font-medium text-fg" : "font-semibold text-fg-strong"}`}>
-                          {n.title}
+            <div className="max-h-[60vh] overflow-y-auto">
+              <PipelineRunMenu runs={runs} connection={connection} onOpenRun={openRun} />
+              {items.length > 0 ? (
+                <ul className="divide-y divide-border">
+                  {items.map((n) => (
+                    <li key={n.id}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => onItemClick(n)}
+                        className={`flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-surface-2 ${
+                          n.read ? "" : "bg-accent-soft/40"
+                        }`}
+                      >
+                        <KindIcon kind={n.kind} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <span className={`min-w-0 flex-1 truncate text-[14px] ${n.read ? "font-medium text-fg" : "font-semibold text-fg-strong"}`}>
+                              {n.title}
+                            </span>
+                            <span className="shrink-0 text-[12px] text-muted" data-nums>
+                              {formatTime(n.createdAt)}
+                            </span>
+                          </span>
+                          {n.body ? (
+                            <span className="mt-0.5 line-clamp-2 block text-[13px] leading-snug text-muted">
+                              {n.body}
+                            </span>
+                          ) : null}
                         </span>
-                        <span className="shrink-0 text-[12px] text-muted" data-nums>
-                          {formatTime(n.createdAt)}
-                        </span>
-                      </span>
-                      {n.body ? (
-                        <span className="mt-0.5 line-clamp-2 block text-[13px] leading-snug text-muted">
-                          {n.body}
-                        </span>
-                      ) : null}
-                    </span>
-                    {n.read ? null : (
-                      <>
-                        <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-accent-solid" />
-                        <span className="sr-only">Unread</span>
-                      </>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
+                        {n.read ? null : (
+                          <>
+                            <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-accent-solid" />
+                            <span className="sr-only">Unread</span>
+                          </>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           )}
         </div>
       ) : null}

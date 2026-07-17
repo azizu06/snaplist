@@ -46,6 +46,16 @@ export function DurableProgressPreview({
                 reviewHref={run.status === "succeeded" ? `/review/${run.item_id}` : undefined}
                 onRefresh={() => setChecked((count) => count + 1)}
                 onRetryConnection={() => undefined}
+                onRetryRun={
+                  run.status === "failed" || run.status === "canceled"
+                    ? () => undefined
+                    : undefined
+                }
+                onCancelRun={
+                  run.status === "queued" || run.status === "running" || run.status === "retrying"
+                    ? () => undefined
+                    : undefined
+                }
                 title={flow === "batch" ? `Item ${index + 1}` : "Building your listing"}
               />
             ))}

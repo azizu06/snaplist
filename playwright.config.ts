@@ -42,6 +42,24 @@ export default defineConfig({
         contextOptions: { reducedMotion: "reduce" },
       },
     },
+    {
+      name: "desktop-light",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+        colorScheme: "light",
+        contextOptions: { reducedMotion: "no-preference" },
+      },
+    },
+    {
+      name: "desktop-dark-reduced",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+        colorScheme: "dark",
+        contextOptions: { reducedMotion: "reduce" },
+      },
+    },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
