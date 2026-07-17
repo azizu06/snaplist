@@ -8,11 +8,11 @@
 
 ## SnapList matcher output
 
-- Price anchors: 134
-- Corroboration-only rows: 382
-- Rejected rows: 398
-- Anchor precision: 92.54%
-- Valid comparable recall into anchors: 46.97%
+- Price anchors: 126
+- Corroboration-only rows: 376
+- Rejected rows: 412
+- Anchor precision: 92.06%
+- Valid comparable recall into anchors: 43.94%
 - Queries with at least two price anchors: 17 (42.50%)
 - Missing corpus queries: 0
 

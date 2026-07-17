@@ -194,6 +194,57 @@ describe("classifySoldComp", () => {
     expect(match.reasons).not.toContain("accessory-mismatch");
   });
 
+  it("downgrades bundled or multiple extra accessories for a standalone target", () => {
+    const signal: ItemSignal = {
+      brand: "Sony",
+      model: "PS5 Console",
+      condition: "good",
+    };
+
+    for (const title of [
+      "Sony PS5 Console Bundle with 2 Controllers",
+      "Sony PS5 Console with 2 Controllers",
+    ]) {
+      const match = classifySoldComp(candidate(title, "Pre-Owned"), signal);
+
+      expect(match.classification).toBe("corroboration");
+      expect(match.reasons).toContain("composition-mismatch");
+    }
+  });
+
+  it("still rejects accessory-only bundle rows", () => {
+    const signal: ItemSignal = {
+      brand: "Sony",
+      model: "PS5",
+      condition: "good",
+    };
+
+    const match = classifySoldComp(
+      candidate("Sony PS5 Controller Bundle", "Pre-Owned"),
+      signal,
+    );
+
+    expect(match.classification).toBe("reject");
+    expect(match.reasons).toContain("accessory-mismatch");
+  });
+
+  it("keeps a genuine target bundle when its composition matches", () => {
+    const signal: ItemSignal = {
+      brand: "Sony",
+      model: "PS5 Console Bundle",
+      specs: ["2 Controllers"],
+      condition: "good",
+    };
+
+    const match = classifySoldComp(
+      candidate("Sony PS5 Console Bundle with 2 Controllers", "Pre-Owned"),
+      signal,
+    );
+
+    expect(match.classification).toBe("anchor");
+    expect(match.reasons).not.toContain("composition-mismatch");
+  });
+
   it("keeps material but missing specs out of the price-anchor set", () => {
     const signal: ItemSignal = {
       brand: "Apple",

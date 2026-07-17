@@ -7,14 +7,14 @@
     "relevantPrecision": 0.8238512035010941
   },
   "ranking": {
-    "anchorRows": 134,
-    "corroborationRows": 382,
-    "rejectedRows": 398,
-    "labeledAnchorRows": 134,
-    "validAnchorRows": 124,
+    "anchorRows": 126,
+    "corroborationRows": 376,
+    "rejectedRows": 412,
+    "labeledAnchorRows": 126,
+    "validAnchorRows": 116,
     "validComparableRows": 264,
-    "anchorPrecision": 0.9253731343283582,
-    "validAnchorRecall": 0.4696969696969697,
+    "anchorPrecision": 0.9206349206349206,
+    "validAnchorRecall": 0.4393939393939394,
     "usablePricingQueries": 17,
     "pricingQueryCoverage": 0.425,
     "missingCorpusQueries": 0

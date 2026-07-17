@@ -25,6 +25,7 @@ export type SoldCompMatchReason =
   | "condition-distant"
   | "condition-unknown"
   | "accessory-mismatch"
+  | "composition-mismatch"
   | "parts-mismatch"
   | "quantity-mismatch"
   | "accepted-price-unknown";
@@ -400,14 +401,51 @@ function exactIdentifierMatches(title: string, signal: ItemSignal): boolean {
   });
 }
 
+function accessoryPhrases(accessory: string): string[][] {
+  const singular = accessory.split(" ");
+  const last = singular.at(-1);
+  if (!last || last.endsWith("s")) return [singular];
+  return [singular, [...singular.slice(0, -1), `${last}s`]];
+}
+
+function accessoryQuantity(text: string, accessory: string): number {
+  const tokens = text.split(" ");
+  for (const phrase of accessoryPhrases(accessory)) {
+    for (let index = 0; index <= tokens.length - phrase.length; index += 1) {
+      if (!phrase.every((word, offset) => tokens[index + offset] === word)) continue;
+      for (let before = index - 1; before >= Math.max(0, index - 3); before -= 1) {
+        if (/^\d+$/.test(tokens[before])) return Number(tokens[before]);
+      }
+      return 1;
+    }
+  }
+  return 0;
+}
+
 function accessoryMismatch(title: string, signal: ItemSignal): boolean {
   const identity = identityText(signal);
   for (const accessory of ACCESSORY_WORDS) {
-    if (!containsPhrase(title, accessory) || containsPhrase(identity, accessory)) continue;
-    if (/\b(with|includes?|including|bundle)\b/.test(title)) continue;
+    if (accessoryQuantity(title, accessory) === 0) continue;
+    if (accessoryQuantity(identity, accessory) > 0) continue;
+    if (/\b(with|includes?|including)\b/.test(title)) continue;
     return true;
   }
   return false;
+}
+
+function compositionMismatch(title: string, signal: ItemSignal): boolean {
+  const identity = identityText(signal);
+  const titleIsBundle = containsPhrase(title, "bundle");
+  const targetIsBundle = containsPhrase(identity, "bundle");
+  if (titleIsBundle && !targetIsBundle) return true;
+
+  return ACCESSORY_WORDS.some((accessory) => {
+    const observed = accessoryQuantity(title, accessory);
+    if (observed === 0) return false;
+    const expected = accessoryQuantity(identity, accessory);
+    if (observed === expected) return false;
+    return titleIsBundle || observed > 1 || expected > 0;
+  });
 }
 
 function stripIdentityFromTitle(title: string, signal: ItemSignal): string {
@@ -509,6 +547,18 @@ export function classifySoldComp<T extends SoldCompCandidate>(
   const compParts = compCondition === "parts" || PARTS_RE.test(title);
   if (sellerParts !== compParts) {
     return reject(comp, sellerCondition, compCondition, "parts-mismatch", reasons);
+  }
+
+  if (compositionMismatch(title, signal)) {
+    reasons.push("composition-mismatch");
+    return {
+      comp,
+      classification: "corroboration",
+      score: identityVerified ? 0.65 : 0.58,
+      sellerCondition,
+      compCondition,
+      reasons,
+    };
   }
 
   if (sellerCondition === "unknown") {
