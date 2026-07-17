@@ -55,5 +55,10 @@ export function UploadPreview({
     };
   }, []);
 
-  return <UploadView action={action} actionError={null} />;
+  return (
+    <UploadView
+      action={action}
+      actionError={null}
+    />
+  );
 }

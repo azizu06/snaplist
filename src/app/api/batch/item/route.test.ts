@@ -13,12 +13,18 @@ const mocks = vi.hoisted(() => ({
   getAutopilotEnabled: vi.fn(),
   logServerError: vi.fn(),
   serverErrorJson: vi.fn(),
+  createStore: vi.fn(),
+  tierLimits: vi.fn(() => ({ itemsPerDay: 15, meteredPerMinute: 20 })),
 }));
 
 const upload = vi.fn(async () => ({ error: null }));
 const remove = vi.fn(async () => ({ error: null }));
 const supabase = {
   storage: { from: vi.fn(() => ({ upload, remove })) },
+};
+const usageStore = {
+  reserveLegacyUsage: vi.fn(),
+  releaseLegacyDailyReservation: vi.fn(),
 };
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
@@ -31,6 +37,10 @@ vi.mock("@/lib/abuse", () => ({
   checkDailyItemQuota: mocks.checkDailyItemQuota,
   recordPipelineRunAndMaybeAlert: mocks.recordPipelineRunAndMaybeAlert,
   refundDailyItem: mocks.refundDailyItem,
+  tierLimits: mocks.tierLimits,
+}));
+vi.mock("@/lib/pipeline-staging/internal", () => ({
+  createInternalPipelineStagingStore: mocks.createStore,
 }));
 vi.mock("@/lib/pipeline", () => ({
   initialListingStatus: vi.fn(() => "draft"),
@@ -62,6 +72,16 @@ beforeEach(() => {
   mocks.getUserId.mockResolvedValue("tenant-a");
   mocks.enforceRateLimit.mockResolvedValue(null);
   mocks.checkDailyItemQuota.mockResolvedValue({ allowed: true, used: 1, limit: 7 });
+  mocks.createStore.mockReturnValue(usageStore);
+  usageStore.reserveLegacyUsage.mockResolvedValue(true);
+  usageStore.releaseLegacyDailyReservation.mockResolvedValue(true);
+  mocks.getAutopilotEnabled.mockResolvedValue(false);
+  mocks.createVisionPipeline.mockReturnValue({ run: vi.fn() });
+  mocks.runPipelineAndPersist.mockResolvedValue({
+    itemId: "item-1",
+    listingId: "listing-1",
+    result: { confidence: { score: 0.5 } },
+  });
 });
 
 describe("POST /api/batch/item new AI-item authorization", () => {
@@ -128,5 +148,93 @@ describe("POST /api/batch/item new AI-item authorization", () => {
       kind: "quota",
     });
     expect(JSON.stringify(body)).not.toMatch(/free|paid|pro|items\/day|\b7\b/i);
+  });
+
+  it("adds a durable reservation to the legacy request before provider work", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
+      allowed: true,
+      reason: "included-first-run",
+      entitlement: "free",
+      hasCompletedAiItemRun: false,
+    });
+
+    const response = await POST(validRequest());
+
+    expect(response.status).toBe(200);
+    expect(usageStore.reserveLegacyUsage).toHaveBeenCalledWith({
+      reservationId: expect.any(String),
+      userId: "tenant-a",
+      dailyLimit: 7,
+      perMinuteLimit: 20,
+    });
+    expect(upload).toHaveBeenCalledOnce();
+    expect(mocks.runPipelineAndPersist).toHaveBeenCalledOnce();
+    expect(usageStore.releaseLegacyDailyReservation).not.toHaveBeenCalled();
+  });
+
+  it("releases durable daily capacity when legacy provider work fails", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
+      allowed: true,
+      reason: "included-first-run",
+      entitlement: "free",
+      hasCompletedAiItemRun: false,
+    });
+    mocks.runPipelineAndPersist.mockRejectedValueOnce(new Error("provider failed"));
+    mocks.serverErrorJson.mockReturnValueOnce(
+      new Response(JSON.stringify({ error: "retry" }), { status: 500 }),
+    );
+
+    const response = await POST(validRequest());
+
+    expect(response.status).toBe(500);
+    expect(usageStore.releaseLegacyDailyReservation).toHaveBeenCalledWith(
+      expect.any(String),
+    );
+    expect(mocks.refundDailyItem).toHaveBeenCalledWith("tenant-a");
+  });
+
+  it("maps shared durable capacity denial without touching storage", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
+      allowed: true,
+      reason: "snaplist-pro",
+      entitlement: "paid",
+      hasCompletedAiItemRun: true,
+    });
+    usageStore.reserveLegacyUsage.mockRejectedValueOnce(
+      new Error("Pipeline daily capacity reached"),
+    );
+
+    const response = await POST(validRequest());
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toEqual({
+      error: "Capacity limit reached. Please try again later.",
+      kind: "quota",
+    });
+    expect(mocks.refundDailyItem).toHaveBeenCalledWith("tenant-a");
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("maps shared durable per-minute denial without touching storage", async () => {
+    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
+      allowed: true,
+      reason: "snaplist-pro",
+      entitlement: "paid",
+      hasCompletedAiItemRun: true,
+    });
+    usageStore.reserveLegacyUsage.mockRejectedValueOnce(
+      new Error("Pipeline per-minute capacity reached"),
+    );
+
+    const response = await POST(validRequest());
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    await expect(response.json()).resolves.toEqual({
+      error: "Too many requests. Please slow down and try again shortly.",
+      kind: "rate-limit",
+    });
+    expect(mocks.refundDailyItem).toHaveBeenCalledWith("tenant-a");
+    expect(upload).not.toHaveBeenCalled();
   });
 });

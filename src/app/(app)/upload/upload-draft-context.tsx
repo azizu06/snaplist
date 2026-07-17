@@ -51,6 +51,7 @@ export function appendAcceptedPhotos(
 }
 
 export interface UploadDraft {
+  captureId: string;
   files: File[];
   previews: string[];
   addFiles: (incoming: FileList | File[]) => void;
@@ -64,16 +65,20 @@ const UploadDraftContext = createContext<UploadDraft | null>(null);
  * Holds the pending upload photos ABOVE the page, in the persistent (app)
  * layout, so a half-built listing survives in-app navigation: a seller can add
  * photos, pop over to Home or the inbox, come back, and the photos are still
- * there instead of resetting to zero. The object URLs live as long as this
- * provider does and are revoked only when a photo is removed, so previews never
- * dangle. A full page reload still starts fresh — File objects can't be
- * serialized — which is the expected limit.
+ * there instead of resetting to zero. The capture ID lives here too, so an
+ * error redirect retries the same idempotency key while these photos remain.
+ * The object URLs live as long as this provider does and are revoked only when
+ * a photo is removed, so previews never dangle. A full page reload still starts
+ * fresh — File objects can't be serialized — which is the expected limit.
  */
 export function UploadDraftProvider({
   children,
+  initialCaptureId,
 }: {
   children: React.ReactNode;
+  initialCaptureId: string;
 }) {
+  const [captureId, setCaptureId] = useState(initialCaptureId);
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   // Refs mirror state so the handlers read current values without being
@@ -100,19 +105,27 @@ export function UploadDraftProvider({
   const removeAt = useCallback((index: number) => {
     const url = previewsRef.current[index];
     if (url) URL.revokeObjectURL(url);
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    setPreviews((prev) => prev.filter((_, i) => i !== index));
+    const nextFiles = filesRef.current.filter((_, i) => i !== index);
+    const nextPreviews = previewsRef.current.filter((_, i) => i !== index);
+    filesRef.current = nextFiles;
+    previewsRef.current = nextPreviews;
+    setFiles(nextFiles);
+    setPreviews(nextPreviews);
+    if (nextFiles.length === 0) setCaptureId(crypto.randomUUID());
   }, []);
 
   const clear = useCallback(() => {
     previewsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    filesRef.current = [];
+    previewsRef.current = [];
     setFiles([]);
     setPreviews([]);
+    setCaptureId(crypto.randomUUID());
   }, []);
 
   return (
     <UploadDraftContext.Provider
-      value={{ files, previews, addFiles, removeAt, clear }}
+      value={{ captureId, files, previews, addFiles, removeAt, clear }}
     >
       {children}
     </UploadDraftContext.Provider>

@@ -84,7 +84,9 @@ export default async function AppLayout({
       {/* Holds pending upload photos so a half-built listing survives in-app
           navigation (Home/inbox and back). Lives in the layout, which persists
           across (app) route changes. */}
-      <UploadDraftProvider>{children}</UploadDraftProvider>
+      <UploadDraftProvider initialCaptureId={crypto.randomUUID()}>
+        {children}
+      </UploadDraftProvider>
     </AppShell>
   );
 }

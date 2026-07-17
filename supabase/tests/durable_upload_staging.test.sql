@@ -1,0 +1,266 @@
+begin;
+
+select plan(39);
+
+select has_column('public', 'pipeline_runs', 'batch_id', 'pipeline runs carry a recovery batch id');
+select has_column('public', 'pipeline_runs', 'batch_position', 'pipeline runs carry stable batch order');
+select has_column('public', 'pipeline_runs', 'capture_input', 'pipeline runs carry a safe capture snapshot');
+select has_table('private', 'pipeline_run_usage_reservations', 'run-keyed usage reservations exist');
+select has_table('private', 'legacy_pipeline_usage_reservations', 'legacy requests share durable usage accounting');
+select has_table('private', 'pipeline_staging_cleanup_intents', 'unresolved staging paths have durable cleanup intents');
+
+select col_is_pk(
+  'private',
+  'pipeline_run_usage_reservations',
+  'run_id',
+  'each run has one idempotent usage reservation'
+);
+select col_is_pk(
+  'private',
+  'pipeline_staging_cleanup_intents',
+  'cleanup_id',
+  'cleanup intent retries are idempotent'
+);
+select col_is_pk(
+  'private',
+  'legacy_pipeline_usage_reservations',
+  'reservation_id',
+  'legacy request reservations are idempotent'
+);
+
+select has_function(
+  'public',
+  'find_pipeline_batch_replay',
+  array['text', 'uuid', 'jsonb'],
+  'fixed replay lookup RPC exists'
+);
+select has_function(
+  'public',
+  'record_pipeline_staging_cleanup_intent',
+  array['uuid', 'text', 'uuid', 'text[]'],
+  'fixed cleanup registration RPC exists'
+);
+select has_function(
+  'public',
+  'resolve_pipeline_staging_cleanup_intent',
+  array['uuid'],
+  'fixed cleanup resolution RPC exists'
+);
+select has_function(
+  'public',
+  'reserve_legacy_pipeline_usage',
+  array['uuid', 'text', 'integer', 'integer'],
+  'fixed legacy usage reservation RPC exists'
+);
+select has_function(
+  'public',
+  'release_legacy_pipeline_usage',
+  array['uuid'],
+  'fixed legacy usage release RPC exists'
+);
+select has_function(
+  'public',
+  'stage_pipeline_batch',
+  array['text', 'uuid', 'jsonb', 'integer', 'integer'],
+  'fixed staging RPC exists'
+);
+select has_function(
+  'public',
+  'release_pipeline_run_daily_reservation',
+  array['uuid'],
+  'run-keyed release RPC exists'
+);
+
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.find_pipeline_batch_replay(text,uuid,jsonb)',
+    'execute'
+  ),
+  'service role may recover a committed producer request'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.find_pipeline_batch_replay(text,uuid,jsonb)',
+    'execute'
+  ),
+  'sellers cannot invoke the privileged replay lookup'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.record_pipeline_staging_cleanup_intent(uuid,text,uuid,text[])',
+    'execute'
+  ),
+  'service role may register unresolved staging paths'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.record_pipeline_staging_cleanup_intent(uuid,text,uuid,text[])',
+    'execute'
+  ),
+  'sellers cannot register cleanup paths'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.resolve_pipeline_staging_cleanup_intent(uuid)',
+    'execute'
+  ),
+  'service role may resolve cleanup intents'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.resolve_pipeline_staging_cleanup_intent(uuid)',
+    'execute'
+  ),
+  'sellers cannot resolve cleanup intents'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.stage_pipeline_batch(text,uuid,jsonb,integer,integer)',
+    'execute'
+  ),
+  'service role may stage runs'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.stage_pipeline_batch(text,uuid,jsonb,integer,integer)',
+    'execute'
+  ),
+  'sellers cannot invoke the privileged producer RPC'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.release_pipeline_run_daily_reservation(uuid)',
+    'execute'
+  ),
+  'service role may release terminal daily capacity'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.release_pipeline_run_daily_reservation(uuid)',
+    'execute'
+  ),
+  'sellers cannot release capacity directly'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.reserve_legacy_pipeline_usage(uuid,text,integer,integer)',
+    'execute'
+  ),
+  'service role may reserve legacy request usage'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.reserve_legacy_pipeline_usage(uuid,text,integer,integer)',
+    'execute'
+  ),
+  'sellers cannot reserve legacy request usage'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.release_legacy_pipeline_usage(uuid)',
+    'execute'
+  ),
+  'service role may release failed legacy request usage'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.release_legacy_pipeline_usage(uuid)',
+    'execute'
+  ),
+  'sellers cannot release legacy request usage'
+);
+
+select ok(
+  not has_table_privilege(
+    'service_role',
+    'private.pipeline_run_usage_reservations',
+    'select'
+  ),
+  'service role cannot bypass the reservation RPCs'
+);
+select ok(
+  not has_table_privilege(
+    'authenticated',
+    'private.pipeline_run_usage_reservations',
+    'select'
+  ),
+  'sellers cannot read internal reservations'
+);
+select ok(
+  not has_table_privilege(
+    'service_role',
+    'private.legacy_pipeline_usage_reservations',
+    'select'
+  ),
+  'service role cannot bypass legacy usage RPCs'
+);
+select ok(
+  not has_table_privilege(
+    'authenticated',
+    'private.legacy_pipeline_usage_reservations',
+    'select'
+  ),
+  'sellers cannot read legacy usage reservations'
+);
+select ok(
+  not has_table_privilege(
+    'service_role',
+    'private.pipeline_staging_cleanup_intents',
+    'select'
+  ),
+  'service role cannot bypass cleanup intent RPCs'
+);
+select ok(
+  not has_table_privilege(
+    'authenticated',
+    'private.pipeline_staging_cleanup_intents',
+    'select'
+  ),
+  'sellers cannot read cleanup intents'
+);
+select ok(
+  exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'pipeline_runs'
+  ),
+  'pipeline run progress is available through Realtime'
+);
+select ok(
+  exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and indexname = 'pipeline_runs_user_batch_created_at_idx'
+  ),
+  'batch recovery lookup is indexed'
+);
+select ok(
+  exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and indexname = 'pipeline_runs_user_batch_position_idx'
+      and indexdef like 'CREATE UNIQUE INDEX%'
+  ),
+  'batch position is unique within a seller batch'
+);
+
+select * from finish();
+rollback;
