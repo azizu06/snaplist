@@ -46,7 +46,14 @@ export const scenarioSchema = z.object({
   refundRate: rate,
   indirectTaxWithheldRate: rate,
   revenueCatMarginalRate: rate,
-  monthlyFixedCostUsd: z.number().min(0),
+  fixedCosts: z.array(
+    z.object({
+      service: z.string().min(1),
+      monthlyUsd: z.number().min(0),
+      sourceId: z.string().min(1),
+      note: z.string().min(1),
+    }),
+  ).min(1),
 });
 
 export const candidateSchema = z
@@ -198,6 +205,23 @@ export const unitEconomicsModelSchema = z.object({
         });
       }
     }
+  });
+  model.scenarios.forEach((scenario, scenarioIndex) => {
+    scenario.fixedCosts.forEach((entry, fixedCostIndex) => {
+      if (!sourceIds.has(entry.sourceId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Unknown evidence source id: ${entry.sourceId}`,
+          path: [
+            "scenarios",
+            scenarioIndex,
+            "fixedCosts",
+            fixedCostIndex,
+            "sourceId",
+          ],
+        });
+      }
+    });
   });
 });
 

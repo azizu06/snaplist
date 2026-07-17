@@ -156,6 +156,10 @@ export function calculateUnitEconomics(model: ParsedUnitEconomicsModel) {
         scenario.revenueCatMarginalRate);
     const monthlyContribution = monthlyNetRevenue - variableCogs;
     const annualContribution = annualRecognizedNetRevenue - variableCogs;
+    const monthlyFixedCost = scenario.fixedCosts.reduce(
+      (total, entry) => total + entry.monthlyUsd,
+      0,
+    );
 
     return {
       candidateId: candidate.id,
@@ -176,7 +180,7 @@ export function calculateUnitEconomics(model: ParsedUnitEconomicsModel) {
         contributionMarginRate: round(monthlyContribution / monthlyNetRevenue),
         subscribersToCoverFixedCosts:
           monthlyContribution > 0
-            ? Math.ceil(scenario.monthlyFixedCostUsd / monthlyContribution)
+            ? Math.ceil(monthlyFixedCost / monthlyContribution)
             : null,
       },
       annual: {
@@ -196,7 +200,7 @@ export function calculateUnitEconomics(model: ParsedUnitEconomicsModel) {
         ),
         subscribersToCoverFixedCosts:
           annualContribution > 0
-            ? Math.ceil(scenario.monthlyFixedCostUsd / annualContribution)
+            ? Math.ceil(monthlyFixedCost / annualContribution)
             : null,
       },
     };
