@@ -111,6 +111,119 @@ final class CaptureDraftStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testThumbnailWriteFailureRemovesTheNewFullPhotoWithoutLeavingAManifest() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let writeFailer = FileBackedWriteFailer(failingWriteNumber: 2)
+        let store = LocalCaptureDraftStore(
+            rootDirectory: root,
+            fileManager: fileManager,
+            writeData: { data, url, options in
+                try writeFailer.write(data: data, url: url, options: options)
+            }
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        do {
+            _ = try await store.stage(imageData: makeLandscapeImageData())
+            XCTFail("Expected the injected thumbnail write failure")
+        } catch FileBackedWriteFailer.InjectedError.writeFailed {
+            // Expected: the first JPEG was written before the second write failed.
+        } catch {
+            XCTFail("Unexpected staging error: \(error)")
+        }
+
+        let contents = try fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertTrue(contents.filter { $0.pathExtension == "jpg" }.isEmpty)
+        XCTAssertFalse(
+            fileManager.fileExists(
+                atPath: root.appendingPathComponent("manifest.json").path
+            )
+        )
+        let restored = try await store.load()
+        XCTAssertNil(restored)
+    }
+
+    func testManifestWriteFailureRemovesNewAssetsAndPreservesThePriorDraft() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let originalStore = LocalCaptureDraftStore(
+            rootDirectory: root,
+            fileManager: fileManager
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let original = try await originalStore.stage(
+            imageData: makeLandscapeImageData()
+        )
+        let writeFailer = FileBackedWriteFailer(failingWriteNumber: 3)
+        let replacementStore = LocalCaptureDraftStore(
+            rootDirectory: root,
+            fileManager: fileManager,
+            writeData: { data, url, options in
+                try writeFailer.write(data: data, url: url, options: options)
+            }
+        )
+
+        do {
+            _ = try await replacementStore.stage(
+                imageData: makeLandscapeImageData()
+            )
+            XCTFail("Expected the injected manifest write failure")
+        } catch FileBackedWriteFailer.InjectedError.writeFailed {
+            // Expected: both replacement JPEGs existed before the manifest failed.
+        } catch {
+            XCTFail("Unexpected staging error: \(error)")
+        }
+
+        let restored = try await originalStore.load()
+        XCTAssertEqual(restored, original)
+        let jpgFiles = try fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "jpg" }
+        XCTAssertEqual(Set(jpgFiles), Set([original.photoURL, original.thumbnailURL]))
+        XCTAssertTrue(
+            fileManager.fileExists(
+                atPath: root.appendingPathComponent("manifest.json").path
+            )
+        )
+    }
+
+    func testLoadWithoutManifestPurgesOnlyUnmanifestedOwnedArtifacts() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let orphanID = UUID()
+        let ownedPhoto = root.appendingPathComponent("photo-\(orphanID.uuidString).jpg")
+        let ownedThumbnail = root.appendingPathComponent(
+            "thumbnail-\(orphanID.uuidString).jpg"
+        )
+        let unownedJPEG = root.appendingPathComponent("seller-reference.jpg")
+        defer { try? fileManager.removeItem(at: root) }
+
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        for url in [ownedPhoto, ownedThumbnail, unownedJPEG] {
+            try Data([0x01]).write(to: url)
+        }
+        let store = LocalCaptureDraftStore(
+            rootDirectory: root,
+            fileManager: fileManager
+        )
+
+        let restored = try await store.load()
+
+        XCTAssertNil(restored)
+        XCTAssertFalse(fileManager.fileExists(atPath: ownedPhoto.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: ownedThumbnail.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: unownedJPEG.path))
+    }
+
     func testRestoreSurvivesAnApplicationContainerPathChange() async throws {
         let firstRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -283,6 +396,31 @@ private final class ProtectedWriteRecorder: @unchecked Sendable {
     func write(data: Data, url: URL, options: Data.WritingOptions) throws {
         lock.withLock {
             writes.append(Write(url: url, options: options))
+        }
+        try data.write(to: url, options: options)
+    }
+}
+
+private final class FileBackedWriteFailer: @unchecked Sendable {
+    enum InjectedError: Error {
+        case writeFailed
+    }
+
+    private let lock = NSLock()
+    private let failingWriteNumber: Int
+    private var writeCount = 0
+
+    init(failingWriteNumber: Int) {
+        self.failingWriteNumber = failingWriteNumber
+    }
+
+    func write(data: Data, url: URL, options: Data.WritingOptions) throws {
+        let shouldFail = lock.withLock {
+            writeCount += 1
+            return writeCount == failingWriteNumber
+        }
+        if shouldFail {
+            throw InjectedError.writeFailed
         }
         try data.write(to: url, options: options)
     }

@@ -273,6 +273,7 @@ enum CaptureDraftStoreError: Error {
     case couldNotEncodeImage
     case transferReceiptMismatch
     case invalidManifest
+    case partialStageCleanupFailed
 }
 
 actor LocalCaptureDraftStore: CaptureDraftStoring {
@@ -316,7 +317,11 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
     }
 
     func load() async throws -> StagedCapturePhoto? {
+        guard fileManager.fileExists(atPath: rootDirectory.path) else {
+            return nil
+        }
         guard fileManager.fileExists(atPath: manifestURL.path) else {
+            try removeSupersededImages(keeping: [])
             return nil
         }
         let staged = try decoder.decode(
@@ -332,6 +337,9 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             storedURL: staged.thumbnailURL,
             expectedPrefix: "thumbnail",
             draftID: staged.id
+        )
+        try removeSupersededImages(
+            keeping: [currentPhotoURL, currentThumbnailURL]
         )
         guard now().timeIntervalSince(staged.createdAt) < Self.recoveryWindow else {
             purgeOwnedDraft(
@@ -390,19 +398,31 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         let nextThumbnailURL = rootDirectory.appendingPathComponent(
             "thumbnail-\(id.uuidString).jpg"
         )
-        try writeData(fullData, nextPhotoURL, Self.writingOptions)
-        try writeData(thumbnailData, nextThumbnailURL, Self.writingOptions)
+        do {
+            try writeData(fullData, nextPhotoURL, Self.writingOptions)
+            try writeData(thumbnailData, nextThumbnailURL, Self.writingOptions)
 
-        let staged = StagedCapturePhoto(
-            id: id,
-            photoURL: nextPhotoURL,
-            thumbnailURL: nextThumbnailURL,
-            createdAt: now(),
-            libraryTransferReceipt: libraryTransferReceipt
-        )
-        try writeData(encoder.encode(staged), manifestURL, Self.writingOptions)
-        try? removeSupersededImages(keeping: [nextPhotoURL, nextThumbnailURL])
-        return staged
+            let staged = StagedCapturePhoto(
+                id: id,
+                photoURL: nextPhotoURL,
+                thumbnailURL: nextThumbnailURL,
+                createdAt: now(),
+                libraryTransferReceipt: libraryTransferReceipt
+            )
+            try writeData(encoder.encode(staged), manifestURL, Self.writingOptions)
+            try? removeSupersededImages(keeping: [nextPhotoURL, nextThumbnailURL])
+            return staged
+        } catch {
+            let stagingError = error
+            do {
+                try removePartialStageArtifacts(
+                    [nextPhotoURL, nextThumbnailURL]
+                )
+            } catch {
+                throw CaptureDraftStoreError.partialStageCleanupFailed
+            }
+            throw stagingError
+        }
     }
 
     func discard() async throws {
@@ -454,9 +474,40 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             at: rootDirectory,
             includingPropertiesForKeys: nil
         )
-        for url in contents where url.pathExtension == "jpg" && !currentURLs.contains(url) {
+        let standardizedCurrentURLs = Set(currentURLs.map(\.standardizedFileURL))
+        for url in contents where isOwnedArtifact(url)
+            && !standardizedCurrentURLs.contains(url.standardizedFileURL) {
             try fileManager.removeItem(at: url)
         }
+    }
+
+    private func removePartialStageArtifacts(_ urls: Set<URL>) throws {
+        var firstCleanupError: Error?
+        for url in urls where fileManager.fileExists(atPath: url.path) {
+            do {
+                try fileManager.removeItem(at: url)
+            } catch {
+                if firstCleanupError == nil {
+                    firstCleanupError = error
+                }
+            }
+        }
+        if let firstCleanupError {
+            throw firstCleanupError
+        }
+    }
+
+    private func isOwnedArtifact(_ url: URL) -> Bool {
+        let standardizedURL = url.standardizedFileURL
+        guard standardizedURL.deletingLastPathComponent() == rootDirectory.standardizedFileURL,
+              standardizedURL.pathExtension == "jpg" else {
+            return false
+        }
+        let basename = standardizedURL.deletingPathExtension().lastPathComponent
+        for prefix in ["photo-", "thumbnail-"] where basename.hasPrefix(prefix) {
+            return UUID(uuidString: String(basename.dropFirst(prefix.count))) != nil
+        }
+        return false
     }
 
     private func makeThumbnail(
