@@ -149,7 +149,10 @@ private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
     )
 
     func load() async throws -> StagedCapturePhoto? { staged }
-    func stage(imageData: Data) async throws -> StagedCapturePhoto { staged }
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto { staged }
     func discard() async throws {}
 }
 #endif

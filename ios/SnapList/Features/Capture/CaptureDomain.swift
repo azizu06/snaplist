@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CryptoKit
 import Foundation
 import ImageIO
 import Observation
@@ -125,11 +126,111 @@ struct CaptureFrame {
     let orientation: CGImagePropertyOrientation
 }
 
+struct LibraryPhotoTransferReceipt: Codable, Equatable {
+    let sourcePhotoFingerprints: [String]
+    let sourceIndex: Int
+    let transferredDigest: String
+
+    init(
+        sourcePhotoFingerprints: [String],
+        sourceIndex: Int,
+        transferredDigest: String? = nil
+    ) {
+        self.sourcePhotoFingerprints = sourcePhotoFingerprints
+        self.sourceIndex = sourceIndex
+        self.transferredDigest = transferredDigest
+            ?? sourcePhotoFingerprints[safe: sourceIndex]
+            ?? ""
+    }
+
+    var fingerprint: String {
+        transferredDigest
+    }
+
+    var sourcePhotoCount: Int {
+        sourcePhotoFingerprints.count
+    }
+
+    var remainingPhotoFingerprints: [String] {
+        guard sourcePhotoFingerprints.indices.contains(sourceIndex) else {
+            return sourcePhotoFingerprints
+        }
+        var fingerprints = sourcePhotoFingerprints
+        fingerprints.remove(at: sourceIndex)
+        return fingerprints
+    }
+
+    func matchesTransferredPhoto(_ imageData: Data) -> Bool {
+        guard sourcePhotoFingerprints.indices.contains(sourceIndex),
+              sourcePhotoFingerprints[sourceIndex] == transferredDigest else {
+            return false
+        }
+        return LocalPhotoFingerprint.digest(of: imageData) == transferredDigest
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourcePhotoFingerprints
+        case sourceIndex
+        case transferredDigest
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sourcePhotoFingerprints = try container.decode(
+            [String].self,
+            forKey: .sourcePhotoFingerprints
+        )
+        let sourceIndex = try container.decode(Int.self, forKey: .sourceIndex)
+        self.init(
+            sourcePhotoFingerprints: sourcePhotoFingerprints,
+            sourceIndex: sourceIndex,
+            transferredDigest: try container.decodeIfPresent(
+                String.self,
+                forKey: .transferredDigest
+            )
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sourcePhotoFingerprints, forKey: .sourcePhotoFingerprints)
+        try container.encode(sourceIndex, forKey: .sourceIndex)
+        try container.encode(transferredDigest, forKey: .transferredDigest)
+    }
+}
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
+enum LocalPhotoFingerprint {
+    static func digest(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 struct StagedCapturePhoto: Codable, Equatable, Identifiable {
     let id: UUID
     let photoURL: URL
     let thumbnailURL: URL
     let createdAt: Date
+    let libraryTransferReceipt: LibraryPhotoTransferReceipt?
+
+    init(
+        id: UUID,
+        photoURL: URL,
+        thumbnailURL: URL,
+        createdAt: Date,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt? = nil
+    ) {
+        self.id = id
+        self.photoURL = photoURL
+        self.thumbnailURL = thumbnailURL
+        self.createdAt = createdAt
+        self.libraryTransferReceipt = libraryTransferReceipt
+    }
 }
 
 protocol CaptureCamera: AnyObject {
@@ -154,13 +255,23 @@ protocol FramingEvaluating {
 
 protocol CaptureDraftStoring {
     func load() async throws -> StagedCapturePhoto?
-    func stage(imageData: Data) async throws -> StagedCapturePhoto
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto
     func discard() async throws
+}
+
+extension CaptureDraftStoring {
+    func stage(imageData: Data) async throws -> StagedCapturePhoto {
+        try await stage(imageData: imageData, libraryTransferReceipt: nil)
+    }
 }
 
 enum CaptureDraftStoreError: Error {
     case invalidImage
     case couldNotEncodeImage
+    case transferReceiptMismatch
 }
 
 actor LocalCaptureDraftStore: CaptureDraftStoring {
@@ -234,11 +345,19 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             id: staged.id,
             photoURL: currentPhotoURL,
             thumbnailURL: currentThumbnailURL,
-            createdAt: staged.createdAt
+            createdAt: staged.createdAt,
+            libraryTransferReceipt: staged.libraryTransferReceipt
         )
     }
 
-    func stage(imageData: Data) async throws -> StagedCapturePhoto {
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto {
+        if let libraryTransferReceipt,
+           !libraryTransferReceipt.matchesTransferredPhoto(imageData) {
+            throw CaptureDraftStoreError.transferReceiptMismatch
+        }
         guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
               CGImageSourceGetCount(source) > 0 else {
             throw CaptureDraftStoreError.invalidImage
@@ -271,7 +390,8 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             id: id,
             photoURL: nextPhotoURL,
             thumbnailURL: nextThumbnailURL,
-            createdAt: now()
+            createdAt: now(),
+            libraryTransferReceipt: libraryTransferReceipt
         )
         try writeData(encoder.encode(staged), manifestURL, Self.writingOptions)
         try? removeSupersededImages(keeping: [nextPhotoURL, nextThumbnailURL])
@@ -461,9 +581,20 @@ final class CaptureFlowModel {
     }
 
     @discardableResult
-    func stageLibraryPhoto(_ imageData: Data) async -> Bool {
+    func stageLibraryPhoto(
+        _ imageData: Data,
+        transferReceipt: LibraryPhotoTransferReceipt? = nil
+    ) async -> Bool {
+        if let transferReceipt,
+           !transferReceipt.matchesTransferredPhoto(imageData) {
+            phase = .failed
+            return false
+        }
         do {
-            stagedPhoto = try await store.stage(imageData: imageData)
+            stagedPhoto = try await store.stage(
+                imageData: imageData,
+                libraryTransferReceipt: transferReceipt
+            )
             camera.stop()
             resumeAfterBackground = false
             phase = .captured

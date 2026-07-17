@@ -57,23 +57,39 @@ protocol StagedLibraryPhotoPersisting: AnyObject {
     @discardableResult
     func replace(with photos: [Data]) throws -> Int
     func load() throws -> [Data]
-    func consume() throws
+    @discardableResult
+    func consume(
+        transferReceipt: LibraryPhotoTransferReceipt
+    ) throws -> StagedLibraryPhotoConsumeOutcome
     func clear()
+}
+
+enum StagedLibraryPhotoStoreError: Error {
+    case transferReceiptMismatch
+}
+
+enum StagedLibraryPhotoConsumeOutcome: Equatable {
+    case consumed(remainingCount: Int)
+    case cleanupNeeded
+    case retryNeeded
 }
 
 final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
     static let fileProtection = FileProtectionType.complete
     static let writingOptions: Data.WritingOptions = [.atomic, .completeFileProtection]
     private static let pendingPrefix = ".OnboardingStagedPhotos-"
+    private static let cleanupNeededFilename = ".cleanup-needed.json"
 
     private let fileManager: FileManager
     private let directoryURL: URL
     private let consumeMoveItem: (URL, URL) throws -> Void
+    private let consumeReplaceItem: (URL, URL) throws -> Void
 
     init(
         fileManager: FileManager = .default,
         directoryURL: URL? = nil,
-        consumeMoveItem: ((URL, URL) throws -> Void)? = nil
+        consumeMoveItem: ((URL, URL) throws -> Void)? = nil,
+        consumeReplaceItem: ((URL, URL) throws -> Void)? = nil
     ) {
         self.fileManager = fileManager
         self.directoryURL = directoryURL
@@ -81,6 +97,9 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
                 .appendingPathComponent("SnapList/OnboardingStagedPhotos", isDirectory: true)
         self.consumeMoveItem = consumeMoveItem ?? { sourceURL, destinationURL in
             try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        }
+        self.consumeReplaceItem = consumeReplaceItem ?? { originalURL, replacementURL in
+            _ = try fileManager.replaceItemAt(originalURL, withItemAt: replacementURL)
         }
     }
 
@@ -120,10 +139,7 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
             }
 
             if fileManager.fileExists(atPath: directoryURL.path) {
-                _ = try fileManager.replaceItemAt(
-                    directoryURL,
-                    withItemAt: pendingURL
-                )
+                try consumeReplaceItem(directoryURL, pendingURL)
             } else {
                 try fileManager.moveItem(at: pendingURL, to: directoryURL)
             }
@@ -137,7 +153,13 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
     func load() throws -> [Data] {
         removePendingDirectories()
         guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
-        return try fileManager.contentsOfDirectory(
+        try reconcilePendingCleanupIfNeeded()
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return [] }
+        return try loadRawPhotos()
+    }
+
+    private func loadRawPhotos() throws -> [Data] {
+        try fileManager.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
@@ -148,7 +170,89 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
         .map { try Data(contentsOf: $0) }
     }
 
-    func consume() throws {
+    @discardableResult
+    func consume(
+        transferReceipt: LibraryPhotoTransferReceipt
+    ) throws -> StagedLibraryPhotoConsumeOutcome {
+        guard transferReceipt.sourcePhotoFingerprints.indices.contains(
+            transferReceipt.sourceIndex
+        ), transferReceipt.sourcePhotoFingerprints[transferReceipt.sourceIndex]
+            == transferReceipt.transferredDigest
+        else {
+            throw StagedLibraryPhotoStoreError.transferReceiptMismatch
+        }
+        let photos = try load()
+        let fingerprints = photos.map(LocalPhotoFingerprint.digest)
+        if fingerprints == transferReceipt.remainingPhotoFingerprints {
+            return .consumed(remainingCount: photos.count)
+        }
+        if !fingerprints.contains(transferReceipt.transferredDigest) {
+            return .consumed(remainingCount: photos.count)
+        }
+        guard fingerprints == transferReceipt.sourcePhotoFingerprints else {
+            try persistCleanupNeeded(transferReceipt)
+            return .cleanupNeeded
+        }
+
+        var remainingPhotos = photos
+        remainingPhotos.remove(at: transferReceipt.sourceIndex)
+        guard !remainingPhotos.isEmpty else {
+            try consumeAll()
+            return .consumed(remainingCount: 0)
+        }
+        return .consumed(remainingCount: try replace(with: remainingPhotos))
+    }
+
+    private var cleanupNeededURL: URL {
+        directoryURL.appendingPathComponent(Self.cleanupNeededFilename)
+    }
+
+    private func persistCleanupNeeded(_ receipt: LibraryPhotoTransferReceipt) throws {
+        guard fileManager.fileExists(atPath: directoryURL.path) else {
+            throw StagedLibraryPhotoStoreError.transferReceiptMismatch
+        }
+        try JSONEncoder().encode(receipt).write(
+            to: cleanupNeededURL,
+            options: Self.writingOptions
+        )
+    }
+
+    private func reconcilePendingCleanupIfNeeded() throws {
+        guard fileManager.fileExists(atPath: cleanupNeededURL.path) else { return }
+        let receipt = try JSONDecoder().decode(
+            LibraryPhotoTransferReceipt.self,
+            from: Data(contentsOf: cleanupNeededURL)
+        )
+        guard receipt.sourcePhotoFingerprints.indices.contains(receipt.sourceIndex),
+              receipt.sourcePhotoFingerprints[receipt.sourceIndex]
+                == receipt.transferredDigest else {
+            throw StagedLibraryPhotoStoreError.transferReceiptMismatch
+        }
+
+        var photos = try loadRawPhotos()
+        let fingerprints = photos.map(LocalPhotoFingerprint.digest)
+        if fingerprints == receipt.remainingPhotoFingerprints {
+            try fileManager.removeItem(at: cleanupNeededURL)
+            return
+        }
+        if !fingerprints.contains(receipt.transferredDigest) {
+            try fileManager.removeItem(at: cleanupNeededURL)
+            return
+        }
+        guard photos.indices.contains(receipt.sourceIndex),
+              fingerprints[receipt.sourceIndex] == receipt.transferredDigest else {
+            throw StagedLibraryPhotoStoreError.transferReceiptMismatch
+        }
+
+        photos.remove(at: receipt.sourceIndex)
+        if photos.isEmpty {
+            try consumeAll()
+        } else {
+            _ = try replace(with: photos)
+        }
+    }
+
+    private func consumeAll() throws {
         removePendingDirectories()
         guard fileManager.fileExists(atPath: directoryURL.path) else { return }
 
@@ -161,7 +265,7 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
     }
 
     func clear() {
-        try? consume()
+        try? consumeAll()
         removePendingDirectories()
     }
 
@@ -180,23 +284,69 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
 
 final class InMemoryStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
     private var photos: [Data] = []
+    private var cleanupNeededReceipt: LibraryPhotoTransferReceipt?
 
     @discardableResult
     func replace(with photos: [Data]) throws -> Int {
         self.photos = Array(photos.prefix(4))
+        cleanupNeededReceipt = nil
         return self.photos.count
     }
 
     func load() throws -> [Data] {
-        photos
+        try reconcilePendingCleanupIfNeeded()
+        return photos
     }
 
-    func consume() throws {
-        photos = []
+    @discardableResult
+    func consume(
+        transferReceipt: LibraryPhotoTransferReceipt
+    ) throws -> StagedLibraryPhotoConsumeOutcome {
+        guard transferReceipt.sourcePhotoFingerprints.indices.contains(
+            transferReceipt.sourceIndex
+        ), transferReceipt.sourcePhotoFingerprints[transferReceipt.sourceIndex]
+            == transferReceipt.transferredDigest
+        else {
+            throw StagedLibraryPhotoStoreError.transferReceiptMismatch
+        }
+        try reconcilePendingCleanupIfNeeded()
+        let fingerprints = photos.map(LocalPhotoFingerprint.digest)
+        if fingerprints == transferReceipt.remainingPhotoFingerprints {
+            return .consumed(remainingCount: photos.count)
+        }
+        if !fingerprints.contains(transferReceipt.transferredDigest) {
+            return .consumed(remainingCount: photos.count)
+        }
+        guard fingerprints == transferReceipt.sourcePhotoFingerprints else {
+            cleanupNeededReceipt = transferReceipt
+            return .cleanupNeeded
+        }
+        photos.remove(at: transferReceipt.sourceIndex)
+        return .consumed(remainingCount: photos.count)
     }
 
     func clear() {
         photos = []
+        cleanupNeededReceipt = nil
+    }
+
+    private func reconcilePendingCleanupIfNeeded() throws {
+        guard let receipt = cleanupNeededReceipt else { return }
+        let fingerprints = photos.map(LocalPhotoFingerprint.digest)
+        if fingerprints == receipt.remainingPhotoFingerprints {
+            cleanupNeededReceipt = nil
+            return
+        }
+        if !fingerprints.contains(receipt.transferredDigest) {
+            cleanupNeededReceipt = nil
+            return
+        }
+        guard photos.indices.contains(receipt.sourceIndex),
+              fingerprints[receipt.sourceIndex] == receipt.transferredDigest else {
+            throw StagedLibraryPhotoStoreError.transferReceiptMismatch
+        }
+        photos.remove(at: receipt.sourceIndex)
+        cleanupNeededReceipt = nil
     }
 }
 

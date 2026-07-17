@@ -164,20 +164,31 @@ enum AppCaptureHandoffCoordinator {
               router.presentedSheet == nil,
               router.presentedFullScreen == nil else { return }
 
-        if case .library = context, captureFlow.stagedPhoto != nil {
+        if case .library = context,
+           let transferReceipt = captureFlow.stagedPhoto?.libraryTransferReceipt {
             // A prior source-cleanup failure keeps the durable capture authoritative.
-            // Retry only the idempotent source consume; never stage the photo again.
-            _ = onboardingModel.consumeStagedLibraryPhotosAfterSuccessfulCapture()
+            // Retry only the exact, idempotent source consume; never stage the photo again.
+            switch onboardingModel.consumeStagedLibraryPhotoAfterSuccessfulCapture(
+                transferReceipt: transferReceipt
+            ) {
+            case .consumed, .cleanupNeeded, .retryNeeded:
+                break
+            }
         }
 
         if case .library = context,
            captureFlow.stagedPhoto == nil,
-           let photoData = onboardingModel.firstStagedLibraryPhotoForCapture() {
-            let didStageCapture = await captureFlow.stageLibraryPhoto(photoData)
+           let transfer = onboardingModel.firstStagedLibraryPhotoForCapture() {
+            let didStageCapture = await captureFlow.stageLibraryPhoto(
+                transfer.imageData,
+                transferReceipt: transfer.receipt
+            )
             if didStageCapture {
-                let didConsumeSource = onboardingModel
-                    .consumeStagedLibraryPhotosAfterSuccessfulCapture()
-                if !didConsumeSource {
+                let sourceConsumeOutcome = onboardingModel
+                    .consumeStagedLibraryPhotoAfterSuccessfulCapture(
+                        transferReceipt: transfer.receipt
+                    )
+                if sourceConsumeOutcome == .retryNeeded {
                     let didRollBackCapture = await captureFlow
                         .rollBackLibraryTransferAfterSourceConsumptionFailure()
                     if !didRollBackCapture {

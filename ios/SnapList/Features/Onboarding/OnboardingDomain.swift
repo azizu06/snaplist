@@ -48,6 +48,11 @@ enum CaptureEntryContext: Equatable {
     case library(stagedPhotoCount: Int)
 }
 
+struct StagedLibraryPhotoTransfer: Equatable {
+    let imageData: Data
+    let receipt: LibraryPhotoTransferReceipt
+}
+
 struct OnboardingFlowState: Codable, Equatable {
     var screen: OnboardingScreen
     var overlay: OnboardingOverlay?
@@ -261,25 +266,39 @@ final class OnboardingFlowModel {
         update(screen: .captureBoundary)
     }
 
-    func firstStagedLibraryPhotoForCapture() -> Data? {
+    func firstStagedLibraryPhotoForCapture() -> StagedLibraryPhotoTransfer? {
         guard case .library = captureEntryContext else { return nil }
         do {
-            return try stagedLibraryPhotos.load().first
+            let photos = try stagedLibraryPhotos.load()
+            guard let firstPhoto = photos.first else { return nil }
+            return StagedLibraryPhotoTransfer(
+                imageData: firstPhoto,
+                receipt: LibraryPhotoTransferReceipt(
+                    sourcePhotoFingerprints: photos.map(LocalPhotoFingerprint.digest),
+                    sourceIndex: 0
+                )
+            )
         } catch {
             return nil
         }
     }
 
     @discardableResult
-    func consumeStagedLibraryPhotosAfterSuccessfulCapture() -> Bool {
+    func consumeStagedLibraryPhotoAfterSuccessfulCapture(
+        transferReceipt: LibraryPhotoTransferReceipt
+    ) -> StagedLibraryPhotoConsumeOutcome {
         guard state.screen == .captureBoundary,
-              case .library = captureEntryContext else { return false }
+              case .library = captureEntryContext else { return .retryNeeded }
         do {
-            try stagedLibraryPhotos.consume()
-            update(stagedPhotoCount: 0)
-            return true
+            let outcome = try stagedLibraryPhotos.consume(
+                transferReceipt: transferReceipt
+            )
+            if case let .consumed(remainingCount) = outcome {
+                update(stagedPhotoCount: remainingCount)
+            }
+            return outcome
         } catch {
-            return false
+            return .retryNeeded
         }
     }
 
@@ -324,7 +343,12 @@ final class OnboardingFlowModel {
             return true
         }
 
-        let photos = (try? stagedLibraryPhotos.load()) ?? []
+        let photos: [Data]
+        do {
+            photos = try stagedLibraryPhotos.load()
+        } catch {
+            return false
+        }
         guard !photos.isEmpty else {
             if requiresStagedPhotos {
                 update(screen: .photoPrimer, stagedPhotoCount: 0)
