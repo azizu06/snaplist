@@ -31,8 +31,10 @@ paid Actor-start request itself is never retried. These safety
 environment values can tighten but not raise the in-code ceilings. SnapList does
 not launch a second paid run after failure: it falls through. Successful empty
 results are cached because repeating a paid no-result run is not useful; cache
-misses for the same identity are coalesced, and age decay/staleness are reapplied
-on every cache read.
+misses for the same identity are coalesced across request-scoped providers sharing
+one cache object in the same runtime, and age decay/staleness are reapplied on every
+cache read. Cross-runtime distributed coalescing must be validated with the chosen
+shared-cache deployment before production activation.
 
 Production activation is not part of Issue #200. Leave the flag off until the
 owner approves a separate budget and validates current Actor schema/build/pricing

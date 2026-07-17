@@ -62,8 +62,10 @@ see [CONTRACT.md](./CONTRACT.md) and [contract-results.json](./contract-results.
   provider and then the existing web/depreciation/LLM fallbacks.
 - Deterministic cache tests show two sequential identical pricing requests cause
   one Actor invocation (50% invocation avoidance), including successful empty
-  results; two concurrent identical misses are also coalesced into one run. This
-  is a zero-network behavior proof, not a claim about observed production hit rate.
+  results; two concurrent request-scoped providers sharing the same production
+  cache object in one runtime are also coalesced into one run. Cross-runtime
+  distributed coalescing remains part of the shared-cache activation gate. This is
+  a zero-network behavior proof, not a claim about observed production hit rate.
 - Cache reads never bypass staleness filtering or recency/age-decay. Cache outages
   are fail-open and diagnostics contain bounded reasons only.
 

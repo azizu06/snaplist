@@ -37,6 +37,34 @@ export interface ApifySoldComp extends EbaySoldComp {
   priceDisclosure?: "displayed-sold-price" | "asking-price-not-accepted-amount";
 }
 
+type ApifySingleFlightRegistry = Map<
+  string,
+  Promise<ApifySoldComp[] | null>
+>;
+
+/**
+ * `createDefaultPricer` is request-scoped, but its cache object is shared by the
+ * composition root. Key single-flight work by that cache identity so concurrent
+ * request-scoped providers in one runtime cannot duplicate a paid Actor start.
+ * Entries remove themselves on settlement; the weak key does not retain caches.
+ */
+const APIFY_SINGLE_FLIGHTS_BY_CACHE = new WeakMap<
+  TtlCache<ApifySoldComp[]>,
+  ApifySingleFlightRegistry
+>();
+
+function singleFlightRegistry(
+  cache: TtlCache<ApifySoldComp[]> | undefined,
+): ApifySingleFlightRegistry {
+  if (!cache) return new Map();
+  let registry = APIFY_SINGLE_FLIGHTS_BY_CACHE.get(cache);
+  if (!registry) {
+    registry = new Map();
+    APIFY_SINGLE_FLIGHTS_BY_CACHE.set(cache, registry);
+  }
+  return registry;
+}
+
 export interface ApifySoldActorInput {
   keywords: string[];
   count: number;
@@ -349,7 +377,7 @@ export function createApifySoldPricingProvider(
   const now = options.now;
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
-  const inFlight = new Map<string, Promise<ApifySoldComp[] | null>>();
+  const inFlight = singleFlightRegistry(cache);
   let consecutiveFailures = 0;
   let circuitOpenUntil = 0;
 

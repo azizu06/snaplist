@@ -346,6 +346,43 @@ describe("createApifySoldPricingProvider", () => {
     expect(runActor).toHaveBeenCalledTimes(1);
   });
 
+  it("coalesces concurrent misses across provider instances that share the production cache", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runActor = vi.fn(async () => {
+      await gate;
+      return {
+        status: "SUCCEEDED" as const,
+        items: [
+          rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+          rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        ],
+      };
+    });
+    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const firstProvider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      runActor,
+      cache,
+    });
+    const secondProvider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      runActor,
+      cache,
+    });
+
+    const first = firstProvider.price(SIGNAL);
+    const second = secondProvider.price(SIGNAL);
+    release();
+    await Promise.all([first, second]);
+
+    expect(runActor).toHaveBeenCalledTimes(1);
+  });
+
   it("reapplies staleness on cached rows instead of treating the cache as authority", async () => {
     let now = Date.parse("2026-07-16T12:00:00.000Z");
     const runActor = successfulRun([
