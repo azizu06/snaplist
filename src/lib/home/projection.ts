@@ -106,6 +106,7 @@ interface HomeListingRow extends DashboardListingSource {
 }
 
 interface HomePredictionRow {
+  id: string;
   user_id: string;
   item_id: string;
   price: unknown;
@@ -364,9 +365,9 @@ export function createSupabaseHomeProjectionReader(
           readAllPages<HomePredictionRow>((from, to) =>
             client
               .from("prediction_logs")
-              .select("user_id,item_id,price,created_at")
+              .select("id,user_id,item_id,price,created_at")
               .order("created_at", { ascending: false })
-              .order("item_id", { ascending: true })
+              .order("id", { ascending: false })
               .range(from, to),
           ),
         ]);

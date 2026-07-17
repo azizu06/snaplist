@@ -80,6 +80,7 @@ describe("native Seller Home projection", () => {
       ],
       predictions: [
         {
+          id: "20800000-0000-4000-8000-000000000046",
           user_id: "user_native",
           item_id: itemID,
           price: 205,
@@ -267,6 +268,89 @@ describe("native Seller Home projection", () => {
       ]),
     );
   });
+
+  it("paginates prediction logs in a unique newest-first order", async () => {
+    const queryCalls: string[] = [];
+    const predictionPageIDs: string[] = [];
+    const targetItemID = "20800000-0000-4000-8004-999999999999";
+    const timestamp = "2026-07-17T13:00:00.000Z";
+    const predictions = Array.from({ length: 99 }, (_, index) => ({
+      id: `20800000-0000-4000-8003-${String(index + 1).padStart(12, "0")}`,
+      user_id: "user_native",
+      item_id: `20800000-0000-4000-8004-${String(index + 1).padStart(12, "0")}`,
+      price: index + 1,
+      created_at: timestamp,
+    })).concat([
+      {
+        id: "20800000-0000-4000-8003-999999999998",
+        user_id: "user_native",
+        item_id: targetItemID,
+        price: 100,
+        created_at: timestamp,
+      },
+      {
+        id: "20800000-0000-4000-8003-999999999999",
+        user_id: "user_native",
+        item_id: targetItemID,
+        price: 200,
+        created_at: timestamp,
+      },
+    ]);
+    const client = makeProjectionClient({
+      predictions,
+      predictionPageIDs,
+      queryCalls,
+      items: [
+        {
+          id: targetItemID,
+          user_id: "user_native",
+          attributes: { brand: "Boundary", model: "price" },
+          photos: [],
+          price_override: null,
+          cost_basis: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+      ],
+      listings: [
+        {
+          id: "20800000-0000-4000-8005-999999999999",
+          user_id: "user_native",
+          item_id: targetItemID,
+          title: "Boundary price",
+          status: "published",
+          created_at: timestamp,
+          updated_at: timestamp,
+          listed_price: null,
+        },
+      ],
+      activeCount: 1,
+    });
+    const reader = createSupabaseHomeProjectionReader(() => client as never);
+
+    const projection = await reader.forSeller({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+
+    expect.soft(
+      queryCalls.filter((call) => call.startsWith("prediction_logs:")),
+    ).toEqual([
+      "prediction_logs:select:id,user_id,item_id,price,created_at",
+      "prediction_logs:order:created_at:desc",
+      "prediction_logs:order:id:desc",
+      "prediction_logs:range:0-99",
+      "prediction_logs:select:id,user_id,item_id,price,created_at",
+      "prediction_logs:order:created_at:desc",
+      "prediction_logs:order:id:desc",
+      "prediction_logs:range:100-199",
+    ]);
+    expect.soft(predictionPageIDs).toHaveLength(predictions.length);
+    expect.soft(new Set(predictionPageIDs).size).toBe(predictions.length);
+    expect(projection.listings.find((listing) => listing.id === targetItemID)?.price).toBe(
+      "$200",
+    );
+  });
 });
 
 type QueryResult = { data: unknown[] | null; error: null; count?: number | null };
@@ -301,6 +385,8 @@ function makeProjectionClient(input: {
   pipelineRuns?: () => FakeQuery;
   listings?: unknown[];
   items?: unknown[];
+  predictions?: unknown[];
+  predictionPageIDs?: string[];
   activeCount?: number;
   draftCount?: number;
   queryCalls?: string[];
@@ -374,6 +460,55 @@ function makeProjectionClient(input: {
         query.range = async (from, to) => {
           input.queryCalls?.push(`items:range:${from}-${to}`);
           return range(from, to);
+        };
+        return query;
+      }
+      if (table === "prediction_logs") {
+        type Prediction = {
+          id: string;
+          item_id: string;
+          created_at: string;
+        };
+        const orders: Array<{ column: string; ascending: boolean }> = [];
+        const query = makeQuery({ data: input.predictions ?? [], error: null });
+        query.select = (columns) => {
+          input.queryCalls?.push(`prediction_logs:select:${columns}`);
+          return query;
+        };
+        query.order = (column, options) => {
+          const ascending = (options as { ascending?: boolean } | undefined)?.ascending;
+          orders.push({ column, ascending: ascending !== false });
+          input.queryCalls?.push(
+            `prediction_logs:order:${column}:${ascending === false ? "desc" : "asc"}`,
+          );
+          return query;
+        };
+        query.range = async (from, to) => {
+          input.queryCalls?.push(`prediction_logs:range:${from}-${to}`);
+          const compare = (left: Prediction, right: Prediction) => {
+            for (const order of orders) {
+              const leftValue = left[order.column as keyof Prediction];
+              const rightValue = right[order.column as keyof Prediction];
+              const comparison = leftValue.localeCompare(rightValue);
+              if (comparison !== 0) return order.ascending ? comparison : -comparison;
+            }
+            return 0;
+          };
+          const ordered = [...(input.predictions ?? [])] as Prediction[];
+          ordered.sort(compare);
+          if (from > 0 && !orders.some((order) => order.column === "id")) {
+            for (let start = 0; start < ordered.length; ) {
+              let end = start + 1;
+              while (end < ordered.length && compare(ordered[start], ordered[end]) === 0) {
+                end += 1;
+              }
+              ordered.splice(start, end - start, ...ordered.slice(start, end).reverse());
+              start = end;
+            }
+          }
+          const page = ordered.slice(from, to + 1);
+          input.predictionPageIDs?.push(...page.map((prediction) => prediction.id));
+          return { data: page, error: null };
         };
         return query;
       }
