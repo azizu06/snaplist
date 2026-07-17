@@ -68,3 +68,9 @@ asset-intake/
 # Impeccable project context (per-developer design register; not shipped)
 PRODUCT.md
 DESIGN.md
+
+# Xcode local state and generated fidelity output
+ios/**/xcuserdata/
+ios/DerivedData/
+ios/Artifacts/
+*.xcuserstate

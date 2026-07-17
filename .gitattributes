@@ -1,0 +1,2 @@
+# Preserve canonical package Markdown hard breaks byte-for-byte.
+ios/DesignContracts/Resolved/V1PlusRunRev/README-FIRST.md whitespace=-trailing-space

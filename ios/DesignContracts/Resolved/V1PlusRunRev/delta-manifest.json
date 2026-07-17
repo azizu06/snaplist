@@ -1,0 +1,116 @@
+{
+  "package": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "version": "run-rev-delta-v1.1",
+  "date": "2026-07-16",
+  "base_package": "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
+  "status": "approved implementation delta",
+  "approved_added_parent_ids": [
+    "RUN-01",
+    "RUN-02",
+    "RUN-03",
+    "RUN-04",
+    "RUN-05",
+    "RUN-06",
+    "RUN-07",
+    "RUN-08",
+    "REV-01",
+    "REV-02",
+    "REV-07",
+    "REV-08"
+  ],
+  "approved_added_frame_ids": [
+    "RUN-01",
+    "RUN-02",
+    "RUN-03",
+    "RUN-04",
+    "RUN-05",
+    "RUN-06",
+    "RUN-07",
+    "RUN-08",
+    "REV-01",
+    "REV-02a",
+    "REV-02b",
+    "REV-02c",
+    "REV-02d",
+    "REV-02d-retry",
+    "REV-02e",
+    "REV-07",
+    "REV-08"
+  ],
+  "candidate_unchanged": [
+    "CAP-03a",
+    "CAP-03b",
+    "CAP-03c",
+    "CAP-03d",
+    "CAP-03e",
+    "CAP-04"
+  ],
+  "withheld": [
+    "CAP-05"
+  ],
+  "github": {
+    "epic": 204,
+    "existing_children": {
+      "foundation_fidelity_harness": 205,
+      "onboarding_permission": 206,
+      "capture_launcher_guided_camera": 207,
+      "seller_home": 208,
+      "pricing_evidence": 209
+    },
+    "inventory_reconciliation": 167,
+    "backend_dependency": 161,
+    "delta_issue_routing": [
+      {
+        "delta": "RUN-01–08",
+        "unblocks": "#211 Implement approved Durable Runs + Recovery states in native SwiftUI",
+        "dependencies": [
+          205,
+          161
+        ]
+      },
+      {
+        "delta": "REV-01/02/07/08",
+        "unblocks": "#212 Implement approved Identity Confirmation + Guided Correction states in native SwiftUI",
+        "dependencies": [
+          205,
+          174,
+          211
+        ]
+      }
+    ],
+    "note": "This package does not create issues or promote #206–#209; the orchestrator owns routing."
+  },
+  "live_claude_urls": {
+    "run": "https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=Durable+Runs+%2B+Recovery+-+Hi-Fi.dc.html&present=1",
+    "rev": "https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=Identity+%2B+Guided+Correction+-+Hi-Fi.dc.html&present=1"
+  },
+  "known_golden_exceptions": [
+    {
+      "id": "action-blue-source-discrepancy",
+      "resolved_for_implementation": true,
+      "implementation_token": "#3665F3",
+      "source_exception": "Pricing reference still renders #0031E9; retain only as visual-diff evidence."
+    }
+  ],
+  "replaces": {
+    "package": "snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16.zip",
+    "sha256": "d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001",
+    "reason": "ADR-0008 canonical customer-facing plan name correction: Seller Pro → SnapList Pro in RUN-08 and RUN annotation/copy contracts."
+  },
+  "corrections": [
+    {
+      "scope": "RUN-08 and RUN allowance annotation",
+      "before": [
+        "Waiting · Pro",
+        "Seller Pro"
+      ],
+      "after": [
+        "Waiting · SnapList Pro",
+        "SnapList Pro"
+      ],
+      "layout_changed": false,
+      "state_ids_changed": false,
+      "approval_status_changed": false
+    }
+  ]
+}

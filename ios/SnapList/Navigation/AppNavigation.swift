@@ -1,0 +1,148 @@
+import Observation
+import SwiftUI
+
+enum PrimaryTab: String, CaseIterable, Identifiable {
+    case home
+    case listings
+    case inbox
+    case insights
+
+    var id: String { rawValue }
+
+    var title: String {
+        rawValue.capitalized
+    }
+
+    var systemImage: String {
+        switch self {
+        case .home: "house"
+        case .listings: "list.bullet.rectangle"
+        case .inbox: "envelope"
+        case .insights: "chart.line.uptrend.xyaxis"
+        }
+    }
+}
+
+enum DockDestination: String, CaseIterable, Identifiable {
+    case home
+    case listings
+    case capture
+    case inbox
+    case insights
+
+    var id: String { rawValue }
+
+    var title: String { rawValue.capitalized }
+
+    var systemImage: String {
+        switch self {
+        case .home: "house"
+        case .listings: "list.bullet.rectangle"
+        case .capture: "camera"
+        case .inbox: "envelope"
+        case .insights: "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    var tab: PrimaryTab? {
+        switch self {
+        case .home: .home
+        case .listings: .listings
+        case .capture: nil
+        case .inbox: .inbox
+        case .insights: .insights
+        }
+    }
+}
+
+enum FutureBoundary: String, Hashable {
+    case account
+    case activity
+    case run
+    case draft
+}
+
+enum AppRoute: Hashable {
+    case account
+    case activity
+    case future(FutureBoundary)
+}
+
+enum AppSheet: String, Identifiable {
+    case capture
+
+    var id: String { rawValue }
+}
+
+@MainActor
+@Observable
+final class AppRouter {
+    var selectedTab: PrimaryTab
+    var presentedSheet: AppSheet?
+
+    private var homePath: [AppRoute] = []
+    private var listingsPath: [AppRoute] = []
+    private var inboxPath: [AppRoute] = []
+    private var insightsPath: [AppRoute] = []
+
+    init(
+        initialTab: PrimaryTab = .home,
+        initialRoute: AppRoute? = nil,
+        initialSheet: AppSheet? = nil
+    ) {
+        selectedTab = initialTab
+        presentedSheet = initialSheet
+        if let initialRoute {
+            setPath([initialRoute], for: initialTab)
+        }
+    }
+
+    func pathBinding(for tab: PrimaryTab) -> Binding<[AppRoute]> {
+        Binding(
+            get: { [weak self] in self?.path(for: tab) ?? [] },
+            set: { [weak self] in self?.setPath($0, for: tab) }
+        )
+    }
+
+    func select(_ destination: DockDestination) {
+        if destination == .capture {
+            presentedSheet = .capture
+        } else if let tab = destination.tab {
+            selectedTab = tab
+        }
+    }
+
+    func navigate(to route: AppRoute) {
+        var current = path(for: selectedTab)
+        current.append(route)
+        setPath(current, for: selectedTab)
+    }
+
+    func reset(tab: PrimaryTab) {
+        setPath([], for: tab)
+    }
+
+    private func path(for tab: PrimaryTab) -> [AppRoute] {
+        switch tab {
+        case .home: homePath
+        case .listings: listingsPath
+        case .inbox: inboxPath
+        case .insights: insightsPath
+        }
+    }
+
+    private func setPath(_ path: [AppRoute], for tab: PrimaryTab) {
+        switch tab {
+        case .home: homePath = path
+        case .listings: listingsPath = path
+        case .inbox: inboxPath = path
+        case .insights: insightsPath = path
+        }
+    }
+}
+
+enum DockVisibilityPolicy {
+    static func shouldShow(isKeyboardVisible: Bool) -> Bool {
+        !isKeyboardVisible
+    }
+}

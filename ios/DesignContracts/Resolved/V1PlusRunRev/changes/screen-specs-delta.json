@@ -1,0 +1,902 @@
+{
+  "version": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "base": "snaplist-screen-specs.json",
+  "added": [
+    {
+      "id": "RUN-01",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Runs/activity list",
+      "fixture": "Seven durable seller-facing states",
+      "entry_routes": [
+        "HOME View all",
+        "contextual Home run history"
+      ],
+      "exit_routes": [
+        "row → matching run detail or seller consequence",
+        "Back → preserved Home"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Runs",
+        "Queued",
+        "Uploading",
+        "Finding sold comps",
+        "Draft ready",
+        "Needs review",
+        "Couldn’t finish",
+        "Canceled",
+        "Runs continue on SnapList’s servers even if you close the app. You’ll get a notification when one needs you or is ready."
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Rows render database truth; no skeleton may imply a false stage.",
+        "offline": "Show last confirmed update and refresh affordance.",
+        "error": "Failed row routes to RUN-05.",
+        "denied": "Not applicable."
+      },
+      "voiceover_order": [
+        "Back",
+        "Runs title",
+        "filters",
+        "run rows in visual order: item, status, update, consequence/action"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-02",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Active run detail",
+      "fixture": "Canon AE-1; Processing; Finding recent sold comps",
+      "entry_routes": [
+        "RUN-01 processing row",
+        "RUN-03 compact Home surface",
+        "processing notification deep link"
+      ],
+      "exit_routes": [
+        "All runs → RUN-01",
+        "Cancel this run → RUN-07 confirmation",
+        "Back → source screen"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Working on your item",
+        "Finding recent sold comps",
+        "You can leave — we’ll keep working",
+        "Notifications on — we’ll ping you when it’s ready",
+        "Cancel this run"
+      ],
+      "assets": [
+        "assets/pose-01-analyzing.png"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Use truthful current stage or generic checking state; never percent/ETA.",
+        "offline": "Last confirmed stage remains visible; refresh existing run.",
+        "error": "Exhausted failure routes to RUN-05; transient retries do not notify repeatedly.",
+        "denied": "Notification denial shows system status plus Settings route without blocking the run."
+      },
+      "voiceover_order": [
+        "Back/All runs",
+        "title",
+        "item and photo context",
+        "current status/stage",
+        "completed/current/upcoming stages",
+        "leave reassurance",
+        "notification state",
+        "Cancel this run"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-03",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Minimized run on Home",
+      "fixture": "One item in progress; Finding recent sold comps",
+      "entry_routes": [
+        "Home while a durable run exists"
+      ],
+      "exit_routes": [
+        "compact surface → same RUN-02"
+      ],
+      "presentation": "embedded Home surface",
+      "copy": [
+        "1 item in progress",
+        "Finding recent sold comps",
+        "You can keep browsing — this runs in the background and we’ll notify you when it’s ready."
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Status comes from durable server truth.",
+        "offline": "Retain last confirmed stage and let RUN-02 refresh.",
+        "error": "Change consequence copy and route to RUN-05.",
+        "denied": "Notification status is handled in RUN-02/Account, not as a Home blocker."
+      },
+      "voiceover_order": [
+        "Home header",
+        "attention content",
+        "in-progress item, stage, reassurance",
+        "ready-to-finish content",
+        "dock"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-04",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Interrupted upload",
+      "fixture": "Four photos local; two uploaded; offline",
+      "entry_routes": [
+        "restored interrupted upload",
+        "RUN-01 uploading row"
+      ],
+      "exit_routes": [
+        "Resume upload → same run",
+        "Review photos → preserved photo set",
+        "Cancel → RUN-07 semantics"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Upload paused",
+        "You went offline",
+        "Your photos are safe on this device",
+        "Saved on this device",
+        "All 4 photos",
+        "Uploaded to SnapList",
+        "2 of 4 · resumes on reconnect",
+        "Resume upload",
+        "Review photos",
+        "Cancel"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Per-photo local/uploaded truth is authoritative.",
+        "offline": "Automatic resume on reconnect; manual Resume upload may recheck the same run.",
+        "error": "Preserve local photos and show actionable failure.",
+        "denied": "Photo-library denial returns to capture recovery; do not discard staged photos."
+      },
+      "voiceover_order": [
+        "Back",
+        "Upload paused",
+        "offline explanation",
+        "local-safe count",
+        "uploaded count",
+        "allowance truth",
+        "Resume upload",
+        "Review photos",
+        "Cancel"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-05",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Processing failure",
+      "fixture": "Sold-listings data unavailable; photos preserved; retry safe",
+      "entry_routes": [
+        "RUN-01 failed row",
+        "failure notification deep link",
+        "RUN-02 exhausted failure"
+      ],
+      "exit_routes": [
+        "Try again → same logical run",
+        "Get help → support",
+        "Cancel → cancel confirmation"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Couldn’t finish this run",
+        "Research didn’t complete",
+        "We hit a snag finding comps",
+        "Trying again is free",
+        "Try again",
+        "Get help",
+        "Cancel"
+      ],
+      "assets": [
+        "assets/pose-03-retry-review.png"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Retry reuses the same logical run and shows a truthful stage.",
+        "offline": "Do not retry until connectivity is available; keep photos safe.",
+        "error": "Failure reason and retryability come from server truth.",
+        "denied": "Authenticated action failure leaves state unchanged and explains sign-in/session recovery."
+      },
+      "voiceover_order": [
+        "Back",
+        "failure title",
+        "plain-language reason",
+        "preserved-work truth",
+        "free-retry truth",
+        "Try again",
+        "Get help",
+        "Cancel"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-06",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Checking existing run",
+      "fixture": "Realtime unavailable or completion ambiguous",
+      "entry_routes": [
+        "app restoration with ambiguous local state",
+        "Realtime-unavailable fallback"
+      ],
+      "exit_routes": [
+        "Refresh status → fetch same run",
+        "Leave, notify me → preserved source screen",
+        "Get help → support"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Checking your run",
+        "Making sure we don’t start twice",
+        "We’re confirming the run you already started — not beginning a new one.",
+        "Status unconfirmed — verifying now",
+        "Refresh status",
+        "Leave, notify me",
+        "Get help"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Show last confirmed stage and checking truth; no timeout promise.",
+        "offline": "Refresh remains safe and must never create another run.",
+        "error": "Keep last confirmed state and help route.",
+        "denied": "Tenant/auth failure reveals no foreign run and requires safe session recovery."
+      },
+      "voiceover_order": [
+        "Back",
+        "checking title",
+        "item/photo context",
+        "duplicate-prevention explanation",
+        "last confirmed state",
+        "unconfirmed state",
+        "preservation truth",
+        "Refresh status",
+        "Leave, notify me",
+        "Get help"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-07",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Cancel confirmation",
+      "fixture": "Cancel before usable draft",
+      "entry_routes": [
+        "RUN-02 Cancel this run",
+        "RUN-04/RUN-05 Cancel"
+      ],
+      "exit_routes": [
+        "Keep working → unchanged source run",
+        "Cancel run → Canceled"
+      ],
+      "presentation": "confirmation sheet/alert over RUN-02",
+      "copy": [
+        "Cancel this run?",
+        "SnapList stops working on this item now.",
+        "Your photos stay saved — nothing is deleted.",
+        "Your free item comes back — we haven’t made a usable draft yet, so it isn’t used.",
+        "Keep working",
+        "Cancel run"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Disable repeated confirmation while authenticated cancel is pending.",
+        "offline": "Do not claim canceled until server confirms; retain original state.",
+        "error": "Dismiss pending state and explain that the run is still active.",
+        "denied": "Ownership/auth failure does not mutate the run."
+      },
+      "voiceover_order": [
+        "Cancel title",
+        "consequence list",
+        "Keep working",
+        "Cancel run"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "RUN-08",
+      "family": "durable_runs",
+      "status": "approved",
+      "device": "default",
+      "title": "Haul progress",
+      "fixture": "Five staged items; 2 ready, 1 working, 1 needs help, 1 waiting",
+      "entry_routes": [
+        "haul background surface",
+        "haul notification/deep link"
+      ],
+      "exit_routes": [
+        "item row → corresponding result/run",
+        "Review → item draft",
+        "Retry 1 item → only failed item",
+        "See plan options → allowance route with haul preserved",
+        "Leave, notify me → source screen"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Haul · 5 items",
+        "2 Ready",
+        "1 Working",
+        "1 Needs you",
+        "1 Waiting",
+        "Each item is its own run — some can finish while others wait.",
+        "Your first item is on us",
+        "The rest stay staged and safe",
+        "See plan options",
+        "Retry 1 item",
+        "Leave, notify me"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Per-item durable state; aggregate counts derive from rows.",
+        "offline": "Preserve staged items and completed results; refresh same item runs.",
+        "error": "Retry only failed items; never duplicate completed items.",
+        "denied": "Allowance route preserves all staged items; no item is silently started/discarded."
+      },
+      "voiceover_order": [
+        "Back",
+        "haul title",
+        "aggregate counts",
+        "background-work explanation",
+        "item rows in order",
+        "allowance boundary",
+        "See plan options",
+        "Retry failed item",
+        "Leave, notify me"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-01",
+      "parent_id": "REV-01",
+      "family": "identity_correction",
+      "status": "approved",
+      "device": "default",
+      "title": "Identity confirmation",
+      "fixture": "Canon AE-1; model needs checking",
+      "entry_routes": [
+        "usable draft result"
+      ],
+      "exit_routes": [
+        "Yes, this is the item → next review step",
+        "Not this item → REV-02a",
+        "Edit details manually → manual editor"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Is this right?",
+        "Some details need checking",
+        "Confirm the model — your price evidence and item specifics depend on it.",
+        "Not found",
+        "Edit details manually",
+        "Yes, this is the item",
+        "Not this item"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Render stored usable draft; do not replace it with a blocking spinner.",
+        "offline": "Manual confirmation/editing remains available for cached draft; correction apply waits for server.",
+        "error": "Keep original usable draft.",
+        "denied": "No signup/paywall appears; guest entitlement is device/item scoped."
+      },
+      "voiceover_order": [
+        "Back",
+        "title and saved state",
+        "photo/read region",
+        "evidence quality",
+        "identity fields",
+        "uncertainty consequence",
+        "manual edit",
+        "Yes",
+        "Not this item"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-02a",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "status": "approved_variant",
+      "device": "default",
+      "title": "Correction entry / allowance",
+      "fixture": "One guided correction available",
+      "entry_routes": [
+        "REV-01 Not this item",
+        "REV-08 Tell us the item"
+      ],
+      "exit_routes": [
+        "Start guided correction → REV-02b",
+        "Keep current result → original draft"
+      ],
+      "presentation": "native push/sheet",
+      "copy": [
+        "Fix the item",
+        "One guided identity correction is included for this item.",
+        "What may update",
+        "What stays exactly as-is",
+        "Start guided correction",
+        "Keep current result"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Read correction eligibility from durable item truth.",
+        "offline": "Allow reading the explanation; applying requires verified eligibility.",
+        "error": "Keep current result and manual editing.",
+        "denied": "If already used or photo fingerprint differs, route to manual edit/new-run explanation."
+      },
+      "voiceover_order": [
+        "Back",
+        "title",
+        "one-time allowance",
+        "may-update list",
+        "protected list",
+        "technical-retry truth",
+        "Start",
+        "Keep current result"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-02b",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "status": "approved_variant",
+      "device": "default",
+      "title": "Tell us what is wrong",
+      "fixture": "Same Canon photo set; closest matches",
+      "entry_routes": [
+        "REV-02a Start"
+      ],
+      "exit_routes": [
+        "select identity → REV-02c",
+        "Back → REV-02a"
+      ],
+      "presentation": "native push with keyboard/search",
+      "copy": [
+        "What’s the correct item?",
+        "The detail we read",
+        "Top plate · tap to view",
+        "Closest matches",
+        "Canon AE-1 Program",
+        "Review the change"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Search suggestions may load, but seller can enter identity manually.",
+        "offline": "Preserve query and original result; do not spend correction.",
+        "error": "Preserve input and allow retry/manual edit.",
+        "denied": "No second correction or new-photo reanalysis is offered here."
+      },
+      "voiceover_order": [
+        "Back",
+        "title",
+        "interpreted photo region",
+        "search/input",
+        "closest matches",
+        "selected identity",
+        "Review the change"
+      ],
+      "keyboard_safety": "Keep selected identity and CTA reachable when keyboard is shown.",
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-02c",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "status": "approved_variant",
+      "device": "default",
+      "title": "Impact review and seller-title choice",
+      "fixture": "AE-1 → AE-1 Program; seller title edited",
+      "entry_routes": [
+        "REV-02b selected identity"
+      ],
+      "exit_routes": [
+        "Apply guided correction → REV-02d",
+        "Cancel → original draft",
+        "Back → REV-02b"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Review the change",
+        "SnapList will refresh these",
+        "You edited the title",
+        "Keep my title",
+        "Replace with a new title",
+        "Apply guided correction",
+        "Cancel"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "No apply until server confirms eligibility and explicit seller-edit choices.",
+        "offline": "Keep selection; do not consume correction.",
+        "error": "Return to review with original draft intact.",
+        "denied": "Fingerprint/allowance mismatch blocks AI apply and offers manual edit/new run."
+      },
+      "voiceover_order": [
+        "Back",
+        "before identity",
+        "after identity",
+        "regeneration set",
+        "seller-edit warning",
+        "Keep title",
+        "Replace title",
+        "Apply",
+        "Cancel"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-02d",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "status": "approved_variant",
+      "device": "default",
+      "title": "Correction in progress",
+      "fixture": "Refreshing identity-dependent fields on same photo set",
+      "entry_routes": [
+        "REV-02c Apply"
+      ],
+      "exit_routes": [
+        "Leave, notify me → source screen",
+        "completion notification → REV-02e"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Updating for the AE-1 Program",
+        "Refreshing the title, item specifics, and price evidence from your existing photos.",
+        "You can leave — we’ll notify you when it’s ready",
+        "Leave, notify me"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Truthful stage only; no percent or ETA.",
+        "offline": "Same durable correction operation resumes; never start another correction.",
+        "error": "Show REV-02d technical retry note; original draft stays usable.",
+        "denied": "Ownership/auth failure preserves original draft and correction availability unless a success already committed."
+      },
+      "voiceover_order": [
+        "Back/close",
+        "updating title",
+        "actual regeneration scope",
+        "leave reassurance",
+        "technical retry note when present",
+        "Leave, notify me"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-02d-retry",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "status": "approved_variant",
+      "device": "default",
+      "title": "Technical retry",
+      "fixture": "Automatic retry after technical failure",
+      "entry_routes": [
+        "REV-02d transient failure"
+      ],
+      "exit_routes": [
+        "same correction resumes",
+        "Leave, notify me"
+      ],
+      "presentation": "in-place state",
+      "copy": [
+        "Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe."
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Retry same operation idempotently.",
+        "offline": "Wait/reconnect; no additional allowance use.",
+        "error": "Keep original usable draft and correction eligibility truthful.",
+        "denied": "No state change without authenticated server confirmation."
+      },
+      "voiceover_order": [
+        "updating title",
+        "scope",
+        "retry reassurance",
+        "leave reassurance",
+        "Leave, notify me"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-02e",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "status": "approved_variant",
+      "device": "default",
+      "title": "Correction complete",
+      "fixture": "Keep-title default; Replace-title tested variant",
+      "entry_routes": [
+        "successful correction operation",
+        "correction-ready notification deep link"
+      ],
+      "exit_routes": [
+        "Continue to pricing → pricing",
+        "Edit identity manually → manual editor"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "Identity updated",
+        "Guided correction used",
+        "Canon AE-1 → AE-1 Program",
+        "Title · kept",
+        "Canon AE-1 35mm — tested, works.",
+        "Item specifics · refreshed",
+        "Price evidence · refreshed",
+        "Most sell for $95–$140",
+        "Continue to pricing",
+        "Edit identity manually"
+      ],
+      "interactive_variant": {
+        "replace_title": "Canon AE-1 Program 35mm SLR Film Camera — Tested",
+        "title_label": "refreshed",
+        "summary": "SnapList wrote a new title because the seller chose replacement."
+      },
+      "loading_offline_error_denied": {
+        "loading": "Load committed before/after result; original remains auditable.",
+        "offline": "Cached result remains viewable; manual edits can queue safely.",
+        "error": "Never fall back to offering a second guided correction.",
+        "denied": "Manual editing remains available; no signup/paywall."
+      },
+      "voiceover_order": [
+        "Back",
+        "Identity updated",
+        "used status",
+        "before/after identity",
+        "title outcome",
+        "refreshed fields",
+        "protected fields summary",
+        "Continue to pricing",
+        "Edit manually"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-07",
+      "parent_id": "REV-07",
+      "family": "identity_correction",
+      "status": "approved",
+      "device": "default",
+      "title": "One field needs confirmation",
+      "fixture": "Canon AE-1 Program; lens inclusion unclear",
+      "entry_routes": [
+        "usable draft with one unresolved field"
+      ],
+      "exit_routes": [
+        "Included/Body only → saved field",
+        "Edit identity or details → manual editor",
+        "Set your own price → manual price",
+        "Continue to pricing → pricing"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "One thing to confirm",
+        "Confirm the lens included",
+        "Included",
+        "Body only",
+        "Edit identity or details",
+        "Set your own price",
+        "Manual edits don’t use a run or your guided correction.",
+        "Continue to pricing"
+      ],
+      "loading_offline_error_denied": {
+        "loading": "Show stored draft and unresolved field.",
+        "offline": "Manual choice persists locally then syncs.",
+        "error": "Do not lose the seller’s selection.",
+        "denied": "No account/paywall gate."
+      },
+      "voiceover_order": [
+        "Back",
+        "title/saved state",
+        "item summary",
+        "match quality",
+        "field consequence",
+        "Included",
+        "Body only",
+        "manual edit",
+        "manual price",
+        "Continue"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    },
+    {
+      "id": "REV-08",
+      "parent_id": "REV-08",
+      "family": "identity_correction",
+      "status": "approved",
+      "device": "default",
+      "title": "Low-evidence useful draft",
+      "fixture": "Film camera; exact brand/model/lens uncertain",
+      "entry_routes": [
+        "usable low-evidence result"
+      ],
+      "exit_routes": [
+        "Tell us the item → REV-02a if available",
+        "Edit details manually → manual editor",
+        "Improve photos → disclosure sheet",
+        "Use this draft as-is → review"
+      ],
+      "presentation": "native push",
+      "copy": [
+        "We’re not fully sure",
+        "Limited evidence",
+        "What we know",
+        "What’s uncertain",
+        "Tell us the item",
+        "Edit details manually",
+        "Improve photos",
+        "Retake the top plate — starts a new run",
+        "Use this draft as-is"
+      ],
+      "assets": [
+        "assets/pose-01-uncertain.png"
+      ],
+      "sheet": {
+        "title": "Two ways to improve photos",
+        "options": [
+          "Add or replace photos — free",
+          "Re-analyze a new photo set — new run",
+          "Replace photos myself",
+          "Not now"
+        ]
+      },
+      "loading_offline_error_denied": {
+        "loading": "Keep honest known/unknown draft visible.",
+        "offline": "Manual edits/photo replacement remain possible without AI reanalysis.",
+        "error": "Never invent identity or collapse to a dead end.",
+        "denied": "New-photo AI reanalysis requires a new eligible run; manual paths stay open."
+      },
+      "voiceover_order": [
+        "Back",
+        "title/saved state",
+        "Limited evidence",
+        "Scout explanation",
+        "known facts",
+        "uncertain facts",
+        "Tell us the item",
+        "manual edit",
+        "Improve photos",
+        "Use as-is"
+      ],
+      "minimum_target_pt": [
+        44,
+        44
+      ],
+      "minimum_app_text_pt": 12,
+      "status_rule": "Pair icon with seller-facing words; never rely on color alone.",
+      "dynamic_type": "Reflow rows/cards vertically; preserve full consequence and action copy; keep the primary action reachable above the safe area.",
+      "reduced_motion": "Replace nonessential translation/indeterminate movement with in-place or opacity changes; state and progress meaning remain present in words."
+    }
+  ],
+  "changed": [],
+  "removed": [],
+  "approved_parent_ids": [
+    "RUN-01",
+    "RUN-02",
+    "RUN-03",
+    "RUN-04",
+    "RUN-05",
+    "RUN-06",
+    "RUN-07",
+    "RUN-08",
+    "REV-01",
+    "REV-02",
+    "REV-07",
+    "REV-08"
+  ]
+}

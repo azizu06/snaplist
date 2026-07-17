@@ -1,0 +1,162 @@
+{
+  "version": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "base": "snaplist-interaction-routes.json",
+  "added": [
+    {
+      "from": "HOME-01",
+      "trigger": "View all runs",
+      "to": "RUN-01",
+      "kind": "native push",
+      "mutation": "none"
+    },
+    {
+      "from": "HOME-01",
+      "trigger": "in-progress run surface",
+      "to": "RUN-02",
+      "kind": "native push",
+      "mutation": "none; preserve stable run identity"
+    },
+    {
+      "from": "RUN-01",
+      "trigger": "run row",
+      "to": "matching RUN detail or seller consequence",
+      "kind": "native push",
+      "mutation": "none"
+    },
+    {
+      "from": "RUN-03",
+      "trigger": "compact run surface",
+      "to": "same RUN-02",
+      "kind": "native push",
+      "mutation": "none"
+    },
+    {
+      "from": "RUN-04",
+      "trigger": "Resume upload",
+      "to": "same RUN-04/RUN-02",
+      "kind": "authenticated server action",
+      "mutation": "resume existing run only"
+    },
+    {
+      "from": "RUN-05",
+      "trigger": "Try again",
+      "to": "same logical run",
+      "kind": "authenticated idempotent server action",
+      "mutation": "retry legal failed state; no new allowance item"
+    },
+    {
+      "from": "RUN-06",
+      "trigger": "Refresh status",
+      "to": "same run resolved state",
+      "kind": "server refresh",
+      "mutation": "none; never create a second run"
+    },
+    {
+      "from": "RUN-02/RUN-04/RUN-05",
+      "trigger": "Cancel",
+      "to": "RUN-07",
+      "kind": "confirmation",
+      "mutation": "none until confirmation"
+    },
+    {
+      "from": "RUN-07",
+      "trigger": "Keep working",
+      "to": "source run unchanged",
+      "kind": "dismiss",
+      "mutation": "none"
+    },
+    {
+      "from": "RUN-07",
+      "trigger": "Cancel run",
+      "to": "RUN-01 canceled row",
+      "kind": "authenticated idempotent server action",
+      "mutation": "legal cancel transition; preserve referenced assets"
+    },
+    {
+      "from": "listing_ready notification",
+      "trigger": "open",
+      "to": "normal item review/listing surface",
+      "kind": "tenant-scoped deep link",
+      "mutation": "none"
+    },
+    {
+      "from": "exhausted failure notification",
+      "trigger": "open",
+      "to": "RUN-05",
+      "kind": "tenant-scoped deep link",
+      "mutation": "none"
+    },
+    {
+      "from": "REV-01",
+      "trigger": "Not this item",
+      "to": "REV-02a",
+      "kind": "native push",
+      "mutation": "none"
+    },
+    {
+      "from": "REV-01/REV-07/REV-08",
+      "trigger": "manual edit",
+      "to": "manual editor",
+      "kind": "native push/sheet",
+      "mutation": "no AI item or correction consumed"
+    },
+    {
+      "from": "REV-02a",
+      "trigger": "Start guided correction",
+      "to": "REV-02b",
+      "kind": "native push",
+      "mutation": "none; correction not spent"
+    },
+    {
+      "from": "REV-02b",
+      "trigger": "Review the change",
+      "to": "REV-02c",
+      "kind": "native push",
+      "mutation": "store proposed identity only"
+    },
+    {
+      "from": "REV-02c",
+      "trigger": "Apply guided correction",
+      "to": "REV-02d",
+      "kind": "authenticated idempotent server action",
+      "mutation": "reserve/apply one correction only after fingerprint and seller-edit choices validate"
+    },
+    {
+      "from": "REV-02d",
+      "trigger": "technical retry",
+      "to": "same REV-02d operation",
+      "kind": "automatic idempotent retry",
+      "mutation": "allowance unchanged; original draft preserved"
+    },
+    {
+      "from": "REV-02d",
+      "trigger": "success",
+      "to": "REV-02e",
+      "kind": "durable completion",
+      "mutation": "correction remaining 1→0 exactly once"
+    },
+    {
+      "from": "REV-02e",
+      "trigger": "Continue to pricing",
+      "to": "S1/S3 resolved from refreshed price truth",
+      "kind": "native push",
+      "mutation": "none"
+    },
+    {
+      "from": "REV-08",
+      "trigger": "Improve photos",
+      "to": "improve-photos disclosure",
+      "kind": "sheet",
+      "mutation": "none"
+    },
+    {
+      "from": "improve-photos disclosure",
+      "trigger": "Replace photos myself",
+      "to": "manual photo editor",
+      "kind": "native picker",
+      "mutation": "listing photos change; no AI reanalysis"
+    }
+  ],
+  "changed": [],
+  "removed": []
+}

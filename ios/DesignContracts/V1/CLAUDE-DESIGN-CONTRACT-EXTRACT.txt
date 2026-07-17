@@ -1,0 +1,181 @@
+SnapList Implementation Fidelity Contract
+Approved Families · v1 · 2026-07-16
+Engineering handoff derived from the current approved design sources in this project. It exists so a separate native SwiftUI implementation agent can reproduce the approved screens with high fidelity while knowing which details are visual truth, interaction truth, accessibility requirement, or temporary review content. The Claude Design HTML/CSS is reference code, not production SwiftUI — measurements describe intended geometry, not a DOM to port. Every numeric value here was read from the rendered source or its literal CSS/logic; anything that could not be measured is marked UNMEASURED rather than guessed.
+APPROVED
+independently reviewed & implementation-frozen · 25 golden states
+FINAL ROUND
+candidate only, not frozen · 6 Photo Review states (appendix)
+CONTENTS
+1 Foundations
+2 Source map
+3 Components
+4 Screens
+5 Interactions
+6 Accessibility
+7 Assets
+8 Visual QA
+9 SwiftUI
+10 Sequence
+Candidate appendix
+⚠ One measured token deviation to reconcile
+The locked action color is #3665F3 (used in Seller Home, Capture, Onboarding). Price Screen Live currently renders action blue as #0031E9 plus a matching badge fill #EDF1FD. This is recorded as a per-screen override in the token export. Implementation should reconcile Price to the locked #3665F3 unless Aziz explicitly approves the deeper blue.
+1 · Foundations
+App tokens only. Board/annotation styles (this document's own chrome) are excluded and must never ship as app tokens. Full values in snaplist-design-tokens.json.
+COLOR & SEMANTIC ROLES
+Action / selection
+#3665F3
+LOCKED · links, primary CTA, selected tab, capture tile
+Price action (deviation)
+#0031E9
+Price Screen only · reconcile to #3665F3
+Ink / primary
+#16181B
+Titles, primary body
+Secondary text
+#55585C
+Subtitles, supporting copy
+Tertiary / meta
+#8A8D92
+Timestamps, source labels
+Canvas
+#FFFFFF
+Default surface
+Grouping fill
+#F7F7F7
+Thumbnails, quiet groups
+Hairline
+#ECEDEF
+Card borders · dividers #F1F2F4
+Success (durable only)
+#1B7A43
+Published/paid/shipped — never camera guidance
+Caution (amber)
+#9A6A1B
+Fill #FBF3E7 · genuine warnings only
+Blue chip fill
+#E4ECFF
+RECOMMENDED / info tags · primer bubble #EEF3FE
+In-progress card
+#F7F9FC / #E3E8F2
+Run surface fill / border
+Destructive
+UNMEASURED
+No approved delete-confirm color yet; define at build
+TYPE — SF PRO (-APPLE-SYSTEM), TABULAR-NUMS FOR FIGURES
+Display title
+28/700/-.7 · lh1.15
+Onboarding headline
+27/700/-.6 · lh1.2
+Section header
+19/700/-.3
+Card title
+18/700
+Row title
+15/600/-.2
+Body
+15/400 · lh1.5 · #55585C
+Status text
+13/400-600
+Meta / dock label / badge (floor)
+12/400-700 · min
+SnapList
+Wordmark · Instrument Sans 23/700 (30 on launch)
+Wordmark is the only non-SF face. 12px is the absolute in-app floor including dock labels (raised from 10.5 during review) and badges.
+SPACING · RADII · STROKE
+Spacing scale (px): 2 · 3 · 4 · 6 · 8 · 10 · 12 · 14 · 16 · 20 · 22 · 24 · 26. Screen gutter 20. Dock side inset 14.
+Radii (px): pill/chip 999 · small tile 9–12 · thumb 12 · card 16–18 · capture tile 15 · CTA 27 · sheet 26 · phone bezel 52 · icon badge 8.
+Stroke: hairline 1px #ECEDEF · divider 1px #F1F2F4 · selected tab 1.5px #3665F3.
+SHADOW · MATERIAL · BLUR
+Primary CTA: 0 8px 20px rgba(54,101,243,.36).
+Capture tile: 0 5px 14px rgba(54,101,243,.36).
+Floating dock: fill rgba(250,250,251,.82), blur(22px) saturate(1.4), border 1px rgba(22,24,27,.08), shadow 0 8px 28px rgba(16,24,40,.14).
+Permission alert: rgba(250,250,251,.94), blur(28px) saturate(1.5).
+Phone bezel (board only): 0 30px 80px rgba(16,24,40,.28) + ring.
+ICON · TARGET · DEVICE
+Icon sizes: dock 24 · status/row 14–22 · chevron 9×16. Touch target floor: 44×44pt everywhere. Device: 393×852 (iPhone 15/16 class) · Price frame 402×874. Status bar 54h. Home indicator 134×5, 8 from bottom. Safe-area top ~54, bottom ~34.
+2 · Source-artifact map
+Exact source of truth for every state, captured 2026-07-16. Onboarding renders from a shared component; the other families are single-file state machines. Full copy in snaplist-copy-catalog.json.
+FAMILY
+STATES
+SOURCE ARTIFACT / COMPONENT
+STATUS
+Welcome + Permission
+ONB-00, 01, 05, 06, 07, permission, 08, settings, 09-camera, 09-library, sign-in (11)
+Accountless Welcome + Photo Permission - Hi-Fi.dc.html → OnbScreen.dc.html
+APPROVED
+Capture
+CAP-01, 02a, 02b1, 02b2, 02c, 03-handoff (6)
+Capture Entry + Guided Camera - Hi-Fi.dc.html
+APPROVED
+Pricing
+S1, S1b, S2, S3 (4)
+Price Screen Live.dc.html (mounted in Price Screen - Market Band.dc.html)
+APPROVED
+Seller Home
+HOME-01, 02, 03, 04 (4)
+Seller Home Live.dc.html (states also in Seller Home - Hi-Fi.dc.html)
+APPROVED
+Photo Review
+CAP-03a/b/c/d/e, CAP-04 (6)
+Photo Review + Guidance - Hi-Fi.dc.html
+CANDIDATE
+3 · Component inventory
+Anatomy, variants, states, and measured metrics. Exhaustive machine copy in snaplist-component-contract.json.
+Floating dock (app shell)
+Anatomy: 5 slots — Home · Listings · central Capture tile · Inbox · Insights. Metrics: inset L/R 14, bottom 12, height 66, radius 26; fill rgba(250,250,251,.82) blur(22)saturate(1.4); border 1px rgba(22,24,27,.08); shadow 0 8px 28px rgba(16,24,40,.14). Icons 24; labels 12. Capture tile 52×44, r15, #3665F3, shadow 0 5px 14px rgba(54,101,243,.36), white 25px camera glyph. States: selected (Home #3665F3, aria-current=page) vs quiet (#8A8D92). Hidden when keyboard up. Home indicator 134×5 below. No Runs / You tabs.
+Top header
+Anatomy: wordmark left (Instrument Sans 23/700); right cluster = bell + profile avatar. Metrics: bell & avatar 44×44 circular; bell badge top-right 18×18 r9 #3665F3 / dot 8×8. Status bar 54h, time 15/600, pad 0 34 6 38. Behavior: bell → Activity center; avatar → Account/Settings. Both keyboard-focusable named controls.
+Buttons
+Primary: h54, r27, #3665F3, white 16/700, shadow 0 8px 20px rgba(54,101,243,.36); active scale .99. Secondary: h50, r25, 1px #D3D6DB, white fill, ink 15.5/600. Tertiary: text-only #3665F3 in ≥44 hit region. Row pill: min-height 44, 13/600 (solid = primary, hairline = secondary). All ≥44×44.
+Seller row / list item
+Anatomy: thumbnail 56×56 r12 → 2-line text (title 15/600, status 13, meta 12/#8A8D92) → trailing action pill or chevron. Divider 1px #F1F2F4 inset 82. Card wrap 1px #ECEDEF r16. Variants: attention (reason + action), ready-to-finish, recent listing (price + lifecycle). Status = icon + words, never colour alone.
+Chips & status labels
+Pill: r999, 12/600, pad 4×10. Fills: info/RECOMMENDED #E4ECFF·#3665F3; evidence-strong #EDF1FD·#0031E9; caution #FDF3E4/#FBF3E7·#9A6A1B; neutral #F2F3F5·#55585C. Filter chips (HOME-04): All/Active/Drafts/Sold/Needs attention, ≥44 target, selected = filled + aria-pressed (not colour-only).
+Sheets & permission alert
+Bottom sheet: r26 top corners, grabber 38×5, close 44×44, shadow 0 -14px 44px rgba(16,18,20,.22); scrim rgba(16,18,20,.42). Used by CAP-01 launcher, marketplace, sign-in, add-cost, set-price. Native permission alert: 272 wide, r14, material rgba(250,250,251,.94) blur28; two 48h actions (Don't Allow / Allow, #3665F3, Allow 600). Truthful — no counterfeit grant.
+Pricing chart & evidence
+Chart: SVG line + area, viewBox h150 (plot y 22→126); axis labels 12px #6B6E73 tabular; suggested price = dashed line + #EDF1FD/#0031E9 label; live scrub marker + boxed callout. Every plotted point = one real sold listing (Strong 12 / Limited 3 — count always equals stated sold count). Time filters 30D/60D/90D/All recompute subset. Comp row: thumb 42×42 r9, title 13.5, meta 12/#85888D, price 15/600 tabular. Evidence badge blue (strong) / amber (limited) — never success green.
+Camera guidance & Scout
+Viewfinder: edge-to-edge cover scene; adaptive framing corners; one restrained blue material feedback pill (icon + words: "Move closer" / "Whole item is in frame") — no amber/green. Accepted count "1 of 4 photos". Scout: transparent PNG, free-standing beside a separate bubble — never in a card, never recoloured/cropped/rotated. Sizes: 184 (ONB-01), 152 (ONB-08), 140 (ONB-09), 104 (app icon), 82 (ONB-07 / CAP-02), 72 (Price S3). Appears only in onboarding, camera coaching, uncertainty/retry, limited-evidence.
+Empty & attention / run states
+Empty (HOME-02): character-independent — promise headline + 3-step explanation + primary "List your first item"; no Scout. Attention (HOME-03): up to 6 reason+action rows, bell badge 6. In-progress run surface: #F7F9FC / #E3E8F2 r16, thumbnail + truthful stage ("Finding recent sold comps") + "You can leave" — no % or ETA. Tap → run detail.
+4 · Screen specs — 25 approved golden states
+Each 2× golden PNG is captured from the latest approved source render. Frame, regions, exact strings, assets, actions, and reduced-motion per state live in snaplist-screen-specs.json. Reduced Motion (all families): opacity/cross-fade only — no slide/rise/scale; composition unchanged.
+A · Accountless Welcome + Photo Permission — 11 states · 393×852
+B · Capture Entry + Guided Camera — 6 states · 393×852
+C · Price Screen — Market Band — 4 states · 402×874
+D · Seller Home — 4 states · 393×852
+5 · Interaction route matrix
+Every approved prototype path with trigger, precondition, result/mutation, reversible escape, and transition kind. Machine copy in snaplist-interaction-routes.json.
+FAMILY
+TRIGGER → PRECONDITION
+RESULT / MUTATION · PERSISTENCE
+REVERSIBLE ESCAPE
+KIND
+6 · Accessibility contract
+Targets & text
+All named controls ≥ 44×44pt (searchbox raised to 44). All in-app text ≥ 12px incl. dock labels & badges. Metadata 12–13. Support Dynamic Type by scaling from these base sizes; rows reflow, never truncate meaning.
+VoiceOver names / order
+Bell "Open activity"; avatar "Open account and settings"; capture "Capture a new item"; dock destinations named with aria-current=page on Home; filter chips named + aria-pressed; searchbox role searchbox labeled; comp rows expose the same sale as the chart point. Reading order top→bottom.
+Non-colour status
+Every status pairs icon + words (sold, question, publish issue, evidence strength, framing cue). Selection = shape/label/pressed, not hue. Contrast: ink/secondary on white ≥ 4.5:1; blue #3665F3 on white for ≥14px bold / large.
+Reduced Motion
+Honour accessibilityReduceMotion: replace slide/rise/scale/bounce with opacity cross-fade or instant change. Composition never changes (Scout stays free-standing beside its bubble). Sheets appear without the spring.
+Focus restoration
+Dismissing a sheet/alert returns focus to the opening control. Board-only HOME switches reset phone scroll to top and clear transient keyboard/query/overlay. Settings hand-off returns to ONB-08 without faking a grant.
+Permission / sheet dismissal
+Camera alert: Allow → proceed; Don't Allow → calm recovery (Settings + library), never a dead end. Sheets dismiss via close, grabber tap, scrim tap; swipe-down where native. All escapes preserve state.
+7 · Asset manifest
+Approved Scout poses (intrinsic dims measured), temporary review photography, icon intent, and reference provenance. Machine copy in snaplist-asset-manifest.json.
+Scout · coaching-and-result
+pose-01-coaching-photo.png
+443×388 · ratio 1.14 · transparent
+Allowed: ONB-01 hero (184), ONB-07 & CAP-02 helper (82), ONB-09 handoff (140), app-icon mark (104). Free-standing only.
+Scout · uncertainty-and-retry
+pose-01-uncertain.png
+467×384 · ratio 1.22 · transparent
+Allowed: ONB-08 denied recovery (152) and Price S3 limited evidence (72). Never on routine screens.
+Temporary product photography
+All item/comp images are temporary Unsplash review content, never production assets and never reused Mobbin reference pixels. Home: Sony WH-1000XM4, Keychron K4, Nike Dunk, IKEA lamp. Price: Patagonia ¼-zip (Strong), ceramic vase (Limited). Capture/Photo Review: coherent watch / sneaker scenes. Swap for cleared shots before ship.
+Icon intent
+All glyphs are simple 1.7–1.9px stroke line icons — map to SF Symbols where equivalent (house, list.bullet, camera, envelope, chart.line.uptrend.xyaxis, bell, gearshape, chevron.right, bolt, arrow.triangle.2.circlepath). Capture camera glyph is custom-consistent. No icon carries meaning by colour alone.
