@@ -24,16 +24,19 @@ export interface ResolveNewAiItemRunPolicyOptions {
 }
 
 /**
- * Decide whether this tenant may start a new complete provider-backed AI item.
+ * Legacy read-only policy snapshot retained for #166 compatibility tests.
  *
- * Until #168 owns atomic credit reservation/settlement, a generated listing
+ * A generated listing
  * (`run_id` present) is the narrow legacy evidence that one prior run reached a
  * usable draft: the synchronous path writes its prediction before the listing,
  * while the durable worker commits both coherently. Failed/partial items have no
  * generated listing and therefore do not consume the included first run here.
  *
- * #168 can replace this evidence read with its reservation authority without
- * changing either entry point or the server-owned entitlement source.
+ * #168 removed this read from every live provider-backed entry point because it
+ * cannot authorize concurrent starts. Only the database ledger may authorize a
+ * new run; do not add new runtime callers.
+ *
+ * @deprecated Use durable staging and its atomic AI-item credit reservation.
  */
 export async function resolveNewAiItemRunPolicy(
   userId: string,

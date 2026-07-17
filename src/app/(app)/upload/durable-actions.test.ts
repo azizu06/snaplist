@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   getUserId: vi.fn(),
   getAutopilotEnabled: vi.fn(),
   parseCostBasis: vi.fn(() => 12.5),
-  resolveNewAiItemRunPolicy: vi.fn(),
   tierLimits: vi.fn(() => ({ itemsPerDay: 15, meteredPerMinute: 20 })),
   createStore: vi.fn(),
   stageUploadEntries: vi.fn(),
@@ -22,9 +21,6 @@ vi.mock("@/lib/settings/user-settings", () => ({
   getAutopilotEnabled: mocks.getAutopilotEnabled,
 }));
 vi.mock("@/lib/pipeline/autopilot", () => ({ parseCostBasis: mocks.parseCostBasis }));
-vi.mock("@/lib/billing", () => ({
-  resolveNewAiItemRunPolicy: mocks.resolveNewAiItemRunPolicy,
-}));
 vi.mock("@/lib/abuse", () => ({ tierLimits: mocks.tierLimits }));
 vi.mock("@/lib/pipeline-staging/internal", () => ({
   createInternalPipelineStagingStore: mocks.createStore,
@@ -59,12 +55,6 @@ describe("enqueueUpload", () => {
     mocks.createClient.mockResolvedValue(supabase);
     mocks.getUserId.mockResolvedValue("user_123");
     mocks.getAutopilotEnabled.mockResolvedValue(false);
-    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
-      allowed: true,
-      reason: "included-first-run",
-      entitlement: "free",
-      hasCompletedAiItemRun: false,
-    });
     mocks.createStore.mockReturnValue(store);
     store.findReplay.mockResolvedValue([]);
     mocks.stageUploadEntries.mockResolvedValue([
@@ -91,9 +81,6 @@ describe("enqueueUpload", () => {
       "REDIRECT:/review/22222222-2222-4222-8222-222222222222?new=1",
     );
 
-    expect(mocks.resolveNewAiItemRunPolicy).toHaveBeenCalledWith("user_123", {
-      client: supabase,
-    });
     expect(mocks.tierLimits).toHaveBeenCalledWith("free");
     expect(mocks.stageUploadEntries).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -145,16 +132,14 @@ describe("enqueueUpload", () => {
       })],
     }));
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
-    expect(mocks.resolveNewAiItemRunPolicy).not.toHaveBeenCalled();
   });
 
-  it("preserves the merged SnapList Pro gate before a new durable run", async () => {
-    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
-      allowed: false,
-      reason: "snaplist-pro-required",
-      entitlement: "free",
-      hasCompletedAiItemRun: true,
-    });
+  it("maps the atomic ledger's Pro-required rejection", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: snaplist-pro-required",
+      ),
+    );
 
     await expect(enqueueUpload(uploadForm())).rejects.toThrow(
       /SnapList\+Pro\+is\+required/i,
@@ -163,26 +148,37 @@ describe("enqueueUpload", () => {
       "batch=11111111-1111-4111-8111-111111111111",
     ));
 
-    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
-    expect(storage.from).not.toHaveBeenCalled();
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when the merged new-run policy is unavailable", async () => {
-    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
-      allowed: false,
-      reason: "policy-unavailable",
-      entitlement: "free",
-      hasCompletedAiItemRun: null,
-    });
+  it("fails closed when the verified StoreKit period is unavailable", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: storekit-entitlement-unavailable",
+      ),
+    );
 
     await expect(enqueueUpload(uploadForm())).rejects.toThrow(
-      /couldn%27t\+verify\+whether\+this\+item\+can\+start/i,
+      /couldn%27t\+verify\+an\+active\+subscription\+period/i,
     );
     expect(mocks.redirect).toHaveBeenCalledWith(expect.stringContaining(
       "batch=11111111-1111-4111-8111-111111111111",
     ));
 
-    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
+  });
+
+  it("reports an exhausted monthly allowance separately from abuse capacity", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: monthly-allowance-reached",
+      ),
+    );
+
+    await expect(enqueueUpload(uploadForm())).rejects.toThrow(
+      /subscription\+period%27s\+AI-item\+allowance/i,
+    );
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
   });
 
   it("does not run the request-bound model pipeline", async () => {

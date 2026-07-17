@@ -21,6 +21,12 @@ const mocks = vi.hoisted(() => ({
   rateLimitAllows: vi.fn(async () => true),
   recordPipelineRunAndMaybeAlert: vi.fn(async () => undefined),
   repriceWithSpecs: vi.fn(),
+  rpc: vi.fn(
+    async (): Promise<{
+      data: unknown;
+      error: { message: string } | null;
+    }> => ({ data: true, error: null }),
+  ),
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
@@ -55,6 +61,7 @@ describe("regenerateCorrectedIdentity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getUserId.mockResolvedValue("user-1");
+    mocks.createClient.mockResolvedValue({ rpc: mocks.rpc });
     mocks.rateLimitAllows.mockResolvedValue(true);
     mocks.regenerate.mockImplementation(async (_store, _input, deps) => {
       await deps.beforeModelWork();
@@ -87,6 +94,17 @@ describe("regenerateCorrectedIdentity", () => {
     );
 
     expect(mocks.recordPipelineRunAndMaybeAlert).toHaveBeenCalledTimes(1);
+    expect(mocks.createStore).toHaveBeenCalledWith(
+      expect.objectContaining({ rpc: mocks.rpc }),
+      { useCreditLedger: true },
+    );
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "authorize_ai_item_guided_correction",
+      {
+        p_item_id: "item-1",
+        p_expected_review_revision: "00000000-0000-4000-8000-000000000001",
+      },
+    );
     expect(mocks.regenerate).toHaveBeenCalledTimes(1);
     expect(mocks.regenerate).toHaveBeenCalledWith(
       expect.anything(),
@@ -94,8 +112,22 @@ describe("regenerateCorrectedIdentity", () => {
         itemId: "item-1",
         expectedReviewRevision: "00000000-0000-4000-8000-000000000001",
       }),
-      { beforeModelWork: mocks.recordPipelineRunAndMaybeAlert },
+      { beforeModelWork: expect.any(Function) },
     );
+  });
+
+  it("does not start provider work when the included correction is unavailable", async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "The included guided correction is unavailable." },
+    });
+
+    await expect(regenerateCorrectedIdentity(correctionForm())).rejects.toThrow(
+      /REDIRECT:/,
+    );
+
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+    expect(mocks.recordPipelineRunAndMaybeAlert).not.toHaveBeenCalled();
   });
 
   it("does not count a regeneration rejected during preflight", async () => {

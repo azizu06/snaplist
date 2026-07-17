@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { tierLimits } from "@/lib/abuse";
 import { getUserId } from "@/lib/auth";
-import { resolveNewAiItemRunPolicy } from "@/lib/billing";
 import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
 import { parseCostBasis } from "@/lib/pipeline/autopilot";
 import { getAutopilotEnabled } from "@/lib/settings/user-settings";
@@ -97,39 +96,8 @@ export async function POST(request: Request) {
       }, { status: 200 });
     }
 
-    const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
-      client: supabase,
-    });
-    if (!itemRunPolicy.allowed) {
-      if (itemRunPolicy.reason === "policy-unavailable") {
-        return NextResponse.json(
-          {
-            error: "We couldn't verify whether this item can start. Please try again.",
-            kind: "policy-unavailable",
-          },
-          { status: 503 },
-        );
-      }
-      return NextResponse.json(
-        {
-          error: "SnapList Pro is required to start another new item.",
-          kind: "quota",
-          reason: "snaplist-pro-required",
-        },
-        { status: 403 },
-      );
-    }
-    if (itemRunPolicy.entitlement !== "paid" && entries.length > 1) {
-      return NextResponse.json(
-        {
-          error: "SnapList Pro is required to start another new item.",
-          kind: "quota",
-          reason: "snaplist-pro-required",
-        },
-        { status: 403 },
-      );
-    }
-
+    // Subscription allowance is reserved inside the atomic staging transaction.
+    // These limits are separately labeled daily/minute abuse guards.
     const limits = tierLimits("free");
 
     const runs = await stageUploadEntries(
@@ -185,6 +153,36 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "You are starting listings too quickly. Wait a minute and try again.", kind: "rate-limit" },
         { status: 429 },
+      );
+    }
+    if (detail.includes("snaplist-pro-required")) {
+      return NextResponse.json(
+        {
+          error: "SnapList Pro is required to start another new item.",
+          kind: "quota",
+          reason: "snaplist-pro-required",
+        },
+        { status: 403 },
+      );
+    }
+    if (detail.includes("monthly-allowance-reached")) {
+      return NextResponse.json(
+        {
+          error: "You've used this subscription period's AI-item allowance.",
+          kind: "quota",
+          reason: "monthly-allowance-reached",
+        },
+        { status: 403 },
+      );
+    }
+    if (detail.includes("storekit-entitlement-unavailable")) {
+      return NextResponse.json(
+        {
+          error: "We couldn't verify an active subscription period for this batch.",
+          kind: "entitlement",
+          reason: "storekit-entitlement-unavailable",
+        },
+        { status: 403 },
       );
     }
     return NextResponse.json(

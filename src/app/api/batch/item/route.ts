@@ -1,243 +1,26 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
-import { initialListingStatus, runPipelineAndPersist } from "@/lib/pipeline";
-import { createVisionPipeline } from "@/lib/vision";
-import { getAutopilotEnabled } from "@/lib/settings/user-settings";
-import { logServerError, serverErrorJson } from "@/lib/api/errors";
-import {
-  checkDailyItemQuota,
-  enforceRateLimit,
-  recordPipelineRunAndMaybeAlert,
-  refundDailyItem,
-  tierLimits,
-} from "@/lib/abuse";
-import { resolveNewAiItemRunPolicy } from "@/lib/billing";
-import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
 
 /**
- * POST /api/batch/item — run ONE item of a bulk/haul batch (issue #100)
- * through the EXISTING single-item pipeline spine. This is the upload server
- * action's flow re-exposed as JSON (the batch triage list needs per-item
- * outcomes, not redirects); every guardrail from that path applies unchanged
- * and in the same order:
+ * Retired request-bound batch pipeline.
  *
- *   auth → operational per-minute rate limit → photo validation → #153 new-run
- *   policy → operational per-user/day capacity guard → user-scoped storage upload →
- *   global OpenAI budget counter → `runPipelineAndPersist` (items row +
- *   prediction_logs row + listings row under RLS).
- *
- * The batch client calls this once per item with SMALL bounded concurrency,
- * so these per-run limits stay authoritative for the whole haul. Responses
- * carry a machine-readable `kind` for the two throttle cases so the
- * orchestrator can distinguish "stop dispatching, the day's quota is gone"
- * (`quota`) from "back off and retry" (`rate-limit`).
+ * A synchronous per-item request cannot own the #168 logical-run reservation
+ * across crash recovery and redelivery. Current clients must stage the whole
+ * batch through /api/batch/enqueue, whose database transaction reserves credits
+ * and creates durable pipeline runs before any provider-backed worker attempt.
  */
-
-// Same vision-supported set the single-item upload accepts (HEIC would store
-// then fail at extraction).
-const ACCEPTED = new Set(["image/png", "image/jpeg", "image/webp"]);
-const MAX_PHOTOS = 4;
-
-export async function POST(request: Request) {
-  const supabase = await createClient();
+export async function POST() {
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Per-minute metered limit — shares the same `user:<id>` bucket as every
-  // other metered surface, so a batch can't out-run the single-item path.
-  const limited = await enforceRateLimit(request, userId);
-  if (limited) {
-    // Re-shape with `kind` so the orchestrator can back off + retry instead of
-    // treating the throttle as a hard failure. Status/headers are preserved.
-    const body = (await limited.json()) as { error?: string };
-    return NextResponse.json(
-      { ...body, kind: "rate-limit" },
-      { status: limited.status, headers: limited.headers },
-    );
-  }
-
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return NextResponse.json({ error: "Invalid form body" }, { status: 400 });
-  }
-  const photos = form
-    .getAll("photo")
-    .filter((f): f is File => f instanceof File && f.size > 0);
-  if (photos.length === 0) {
-    return NextResponse.json(
-      { error: "Each item needs at least one photo." },
-      { status: 400 },
-    );
-  }
-  if (photos.length > MAX_PHOTOS) {
-    return NextResponse.json(
-      { error: `Up to ${MAX_PHOTOS} photos per item.` },
-      { status: 400 },
-    );
-  }
-  for (const photo of photos) {
-    if (!ACCEPTED.has(photo.type)) {
-      return NextResponse.json(
-        {
-          error:
-            "Unsupported file type. Use PNG, JPEG, or WEBP (convert HEIC photos first).",
-        },
-        { status: 400 },
-      );
-    }
-  }
-
-  // #153: batch capture is not itself a paid capability. Each new item start
-  // consumes the same RLS-scoped server policy as single-item capture before
-  // any storage or provider work.
-  const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
-    client: supabase,
-  });
-  if (!itemRunPolicy.allowed) {
-    if (itemRunPolicy.reason === "policy-unavailable") {
-      return NextResponse.json(
-        {
-          error: "We couldn't verify whether this item can start. Please try again.",
-          kind: "policy-unavailable",
-        },
-        { status: 503 },
-      );
-    }
-    return NextResponse.json(
-      {
-        error: "SnapList Pro is required to start another new item.",
-        // The existing batch orchestrator treats `quota` as its terminal
-        // stop-dispatching class. Preserve the precise policy reason separately
-        // so this cannot be mistaken for a native credit balance.
-        kind: "quota",
-        reason: "snaplist-pro-required",
-      },
-      { status: 403 },
-    );
-  }
-
-  // Legacy daily capacity remains an operational guardrail, not a tier-based
-  // allowance or customer-visible credit balance.
-  const quota = await checkDailyItemQuota(userId);
-  if (!quota.allowed) {
-    return NextResponse.json(
-      {
-        error: "Capacity limit reached. Please try again later.",
-        kind: "quota",
-      },
-      { status: 429 },
-    );
-  }
-
-  // Keep the existing Upstash guardrail intact, then mirror this accepted
-  // legacy request into the durable Postgres ledger. The durable enqueue RPC
-  // and this route now serialize and count one another without turning the
-  // queue payload or browser into quota authority.
-  let usageStore: ReturnType<typeof createInternalPipelineStagingStore>;
-  const usageReservationId = crypto.randomUUID();
-  try {
-    usageStore = createInternalPipelineStagingStore();
-    await usageStore.reserveLegacyUsage({
-      reservationId: usageReservationId,
-      userId,
-      dailyLimit: quota.limit,
-      perMinuteLimit: tierLimits("free").meteredPerMinute,
-    });
-  } catch (error) {
-    await refundDailyItem(userId);
-    const detail = error instanceof Error ? error.message.toLowerCase() : "";
-    if (detail.includes("daily capacity")) {
-      return NextResponse.json(
-        {
-          error: "Capacity limit reached. Please try again later.",
-          kind: "quota",
-        },
-        { status: 429 },
-      );
-    }
-    if (detail.includes("minute capacity") || detail.includes("per-minute")) {
-      return NextResponse.json(
-        {
-          error: "Too many requests. Please slow down and try again shortly.",
-          kind: "rate-limit",
-        },
-        { status: 429, headers: { "Retry-After": "60" } },
-      );
-    }
-    return serverErrorJson(
-      "batch.item.reserve",
-      error,
-      "We couldn't reserve capacity for this item. Please try again.",
-    );
-  }
-
-  // User-scoped object paths: first segment MUST be the user's id (storage policy).
-  const paths: string[] = [];
-  for (const photo of photos) {
-    const ext = photo.name.split(".").pop() ?? "bin";
-    const path = `${userId}/${Date.now()}-${crypto.randomUUID()}.${ext}`;
-    const { error: uploadErr } = await supabase.storage
-      .from("photos")
-      .upload(path, photo, { contentType: photo.type, upsert: false });
-    if (uploadErr) {
-      logServerError("batch.item.store", uploadErr);
-      // Give back the daily slot — nothing persisted — and drop any photos
-      // already stored for this failed item (best-effort, own objects only).
-      try {
-        await usageStore.releaseLegacyDailyReservation(usageReservationId);
-      } catch (releaseError) {
-        logServerError("batch.item.reserve.release", releaseError);
-      }
-      await refundDailyItem(userId);
-      if (paths.length > 0) await supabase.storage.from("photos").remove(paths);
-      return NextResponse.json(
-        { error: "Upload failed. Please retry this item." },
-        { status: 500 },
-      );
-    }
-    paths.push(path);
-  }
-
-  try {
-    const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
-
-    // Global daily OpenAI budget counter (warns, doesn't block) — one tick per
-    // model-backed run, same as the single-item path.
-    await recordPipelineRunAndMaybeAlert();
-
-    const pipeline = createVisionPipeline({ supabase });
-    const res = await runPipelineAndPersist(
-      supabase,
-      { userId, photos: paths, autopilotEnabled },
-      pipeline,
-    );
-    return NextResponse.json({
-      itemId: res.itemId,
-      listingId: res.listingId,
-      // The confidence-gated disposition this run persisted (same derivation
-      // `runPipelineAndPersist` used) so the triage row is correct immediately.
-      listingStatus: initialListingStatus(res.result.confidence),
-    });
-  } catch (err) {
-    // Pipeline errors stay server-side; the client gets a generic, retryable
-    // message (CWE-209, #57). The item row was cleaned up inside
-    // runPipelineAndPersist; refund the slot and drop the stored photos.
-    try {
-      await usageStore.releaseLegacyDailyReservation(usageReservationId);
-    } catch (releaseError) {
-      logServerError("batch.item.reserve.release", releaseError);
-    }
-    await refundDailyItem(userId);
-    await supabase.storage.from("photos").remove(paths);
-    return serverErrorJson(
-      "batch.item.process",
-      err,
-      "We couldn't process this item. Please retry it.",
-    );
-  }
+  return NextResponse.json(
+    {
+      error: "This legacy batch endpoint has been retired. Start the batch again.",
+      kind: "gone",
+      replacement: "/api/batch/enqueue",
+    },
+    { status: 410 },
+  );
 }
