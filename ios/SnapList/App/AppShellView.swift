@@ -167,7 +167,10 @@ enum AppCaptureHandoffCoordinator {
         if case .library = context,
            captureFlow.stagedPhoto == nil,
            let photoData = onboardingModel.firstStagedLibraryPhotoForCapture() {
-            await captureFlow.stageLibraryPhoto(photoData)
+            let didStageCapture = await captureFlow.stageLibraryPhoto(photoData)
+            if didStageCapture {
+                onboardingModel.consumeStagedLibraryPhotosAfterSuccessfulCapture()
+            }
             guard onboardingModel.state.screen == .captureBoundary else { return }
         }
 

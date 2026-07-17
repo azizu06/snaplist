@@ -57,6 +57,7 @@ protocol StagedLibraryPhotoPersisting: AnyObject {
     @discardableResult
     func replace(with photos: [Data]) throws -> Int
     func load() throws -> [Data]
+    func consume() throws
     func clear()
 }
 
@@ -142,8 +143,20 @@ final class FileSystemStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
         .map { try Data(contentsOf: $0) }
     }
 
+    func consume() throws {
+        removePendingDirectories()
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+
+        let consumedURL = directoryURL.deletingLastPathComponent().appendingPathComponent(
+            "\(Self.pendingPrefix)consumed-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.moveItem(at: directoryURL, to: consumedURL)
+        try? fileManager.removeItem(at: consumedURL)
+    }
+
     func clear() {
-        try? fileManager.removeItem(at: directoryURL)
+        try? consume()
         removePendingDirectories()
     }
 
@@ -171,6 +184,10 @@ final class InMemoryStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
 
     func load() throws -> [Data] {
         photos
+    }
+
+    func consume() throws {
+        photos = []
     }
 
     func clear() {

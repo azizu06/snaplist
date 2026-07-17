@@ -270,6 +270,19 @@ final class OnboardingFlowModel {
         }
     }
 
+    @discardableResult
+    func consumeStagedLibraryPhotosAfterSuccessfulCapture() -> Bool {
+        guard state.screen == .captureBoundary,
+              case .library = captureEntryContext else { return false }
+        do {
+            try stagedLibraryPhotos.consume()
+            update(stagedPhotoCount: 0)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func goBack() {
         switch state.screen {
         case .allowance:

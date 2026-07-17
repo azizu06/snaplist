@@ -449,14 +449,17 @@ final class CaptureFlowModel {
         }
     }
 
-    func stageLibraryPhoto(_ imageData: Data) async {
+    @discardableResult
+    func stageLibraryPhoto(_ imageData: Data) async -> Bool {
         do {
             stagedPhoto = try await store.stage(imageData: imageData)
             camera.stop()
             resumeAfterBackground = false
             phase = .captured
+            return true
         } catch {
             phase = .failed
+            return false
         }
     }
 
