@@ -6,10 +6,15 @@ import {
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
+import {
+  acquireExclusiveTestResource,
+  type ExclusiveTestResourceLease,
+} from "@/test/exclusive-resource-lock";
 
 const URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321";
 const ANON = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DELETION_QUEUE_HOOK_TIMEOUT_MS = 70_000;
 let reachable = false;
 let admin: SupabaseClient;
 let a: ClerkTestUser;
@@ -17,6 +22,7 @@ let b: ClerkTestUser;
 let aServer: SupabaseClient;
 let bServer: SupabaseClient;
 let bStoragePath: string | null = null;
+let deletionQueueLease: ExclusiveTestResourceLease | undefined;
 
 beforeAll(async () => {
   if (!ANON || !SERVICE) return;
@@ -25,6 +31,9 @@ beforeAll(async () => {
     reachable = health.ok;
   } catch { return; }
   if (!reachable) return;
+  deletionQueueLease = await acquireExclusiveTestResource(
+    `local-db:message-photo-object-deletion-queue:${URL}`,
+  );
   admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
   [a, b] = await Promise.all([
     provisionClerkTestUser(URL, ANON, "attachment_a"),
@@ -42,12 +51,16 @@ beforeAll(async () => {
     accessToken: async () => bJwt,
     auth: { persistSession: false, autoRefreshToken: false },
   });
-});
+}, DELETION_QUEUE_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
-  if (reachable) {
-    if (bStoragePath) await admin.storage.from("message-photos").remove([bStoragePath]);
-    await cleanupClerkTestUsers(admin, [a.id, b.id]);
+  try {
+    if (reachable) {
+      if (bStoragePath) await admin.storage.from("message-photos").remove([bStoragePath]);
+      await cleanupClerkTestUsers(admin, [a.id, b.id]);
+    }
+  } finally {
+    await deletionQueueLease?.release();
   }
 });
 
