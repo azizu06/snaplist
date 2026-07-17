@@ -6,6 +6,7 @@ import { CommandPalette, type PaletteHit } from "./command-palette";
 import { NotificationBell } from "./notification-bell";
 import { ThemeTopbarToggle } from "./theme-toggle";
 import type { NotificationView } from "@/lib/notifications";
+import type { PipelineProgressRun } from "@/lib/pipeline-progress";
 import { LogoMark } from "./logo";
 
 /**
@@ -24,6 +25,7 @@ export function AppShell({
   user,
   userId,
   notifications = [],
+  pipelineRuns = [],
   searchFixtures,
   children,
 }: {
@@ -31,6 +33,7 @@ export function AppShell({
   user: ProfileUser | null;
   userId: string | null;
   notifications?: NotificationView[];
+  pipelineRuns?: PipelineProgressRun[];
   searchFixtures?: PaletteHit[];
   children: React.ReactNode;
 }) {
@@ -93,7 +96,11 @@ export function AppShell({
                 so the cluster reads evenly spaced rather than crowding the photo. */}
             {signedIn ? (
               <div className="flex items-center justify-end gap-1.5 sm:gap-1">
-                <NotificationBell userId={userId} initial={notifications} />
+                <NotificationBell
+                  userId={userId}
+                  initial={notifications}
+                  initialRuns={pipelineRuns}
+                />
                 <ThemeTopbarToggle />
                 {user ? (
                   <span aria-hidden className="mx-1 h-5 w-px bg-border sm:mx-1.5" />

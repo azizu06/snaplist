@@ -56,3 +56,20 @@ describe("dashboard row navigation", () => {
     });
   });
 });
+
+describe("dashboard durable activity slot", () => {
+  it("shows saved run status without replacing the established empty state", () => {
+    const html = renderToStaticMarkup(
+      <DashboardView
+        rows={[]}
+        counts={{ draft: 0, attention: 0, live: 0 }}
+        filter="all"
+        activitySlot={<section data-testid="pipeline-activity">Queued</section>}
+      />,
+    );
+
+    expect(html).toContain('data-testid="pipeline-activity"');
+    expect(html).toContain("Queued");
+    expect(html).toContain("List your first item");
+  });
+});

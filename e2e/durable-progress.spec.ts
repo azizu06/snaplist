@@ -159,6 +159,12 @@ test("single run stays recoverable through slow work, refresh, and every termina
     const fixtureRun = page.getByTestId("run-row");
     await expect(fixtureRun).toHaveAttribute("data-run-status", fixture.status);
     await expect(fixtureRun).toContainText(fixture.label);
+    if (fixture.status === "failed") {
+      await expect(fixtureRun.getByRole("button", { name: "Try again" })).toBeVisible();
+      await expect(fixtureRun).toContainText("Live updates unavailable");
+      await fixtureRun.getByRole("button", { name: /refresh status/i }).click();
+      await expect(page.getByText("Status checked")).toBeVisible();
+    }
   }
 
   await expectThemeAndMotion(page, testInfo);

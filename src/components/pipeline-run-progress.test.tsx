@@ -63,6 +63,38 @@ describe("PipelineProgressCard", () => {
     expect(html).toContain("Review draft");
     expect(html).toContain('href="/review/item-1"');
   });
+
+  it("offers cancellation only while work is active", () => {
+    const html = renderToStaticMarkup(
+      <PipelineProgressCard
+        run={RUN}
+        connection="live"
+        onCancelRun={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Cancel processing");
+    expect(html).not.toContain("Try again");
+  });
+
+  it("offers a safe retry path after terminal failure", () => {
+    const html = renderToStaticMarkup(
+      <PipelineProgressCard
+        run={{
+          ...RUN,
+          status: "failed",
+          safe_failure_message:
+            "Price research stopped before the draft was ready. Your photos are still saved.",
+        }}
+        connection="failed"
+        onRetryRun={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Try again");
+    expect(html).toContain("Your photos are still saved");
+    expect(html).not.toContain("Cancel processing");
+  });
 });
 
 describe("isPipelineProgressUpdateStale", () => {

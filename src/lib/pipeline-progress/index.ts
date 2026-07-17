@@ -10,6 +10,7 @@ export {
   type PipelineProgressView,
 } from "./status";
 export { PIPELINE_PROGRESS_SELECT, pipelineProgressRunSchema } from "./row";
+export { isPipelineProgressUpdateStale } from "./reconcile";
 export {
   buildPipelineRecoveryHref,
   persistPipelineRecoveryHandle,

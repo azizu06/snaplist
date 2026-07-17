@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUserId } from "@/lib/auth";
 import { loadDashboardRows } from "@/lib/dashboard/rows";
-import { DashboardView, type DashboardRow } from "./dashboard-view";
+import { DashboardView } from "./dashboard-view";
 // NOT from dashboard-view: that file is "use client", and a runtime value
 // imported across the client boundary arrives as a reference proxy, not the
 // array (the post-#52 production outage).
@@ -17,6 +17,8 @@ import { listPendingRepriceSuggestions } from "@/lib/reprice";
 import { getRepriceSettings } from "@/lib/settings/user-settings";
 import { RepricePanel } from "./reprice-panel";
 import { applyReprice, dismissReprice, setAutoReprice } from "./reprice-actions";
+import { listRecentPipelineRuns } from "@/lib/pipeline-recovery/runs";
+import { DashboardPipelineRuns } from "./pipeline-runs";
 
 /**
  * /dashboard — the seller dashboard (issue #49: the marketing landing now
@@ -37,7 +39,10 @@ export default async function Dashboard({
   const userId = await getUserId();
   if (!userId) redirect("/login?next=/dashboard");
 
-  const rows: DashboardRow[] = await loadDashboardRows(supabase);
+  const [rows, recentRuns] = await Promise.all([
+    loadDashboardRows(supabase),
+    listRecentPipelineRuns(supabase, 5),
+  ]);
 
   const counts = {
     draft: rows.filter((r) => r.status === "draft").length,
@@ -82,6 +87,7 @@ export default async function Dashboard({
       unarchiveAction={unarchiveListings}
       deleteAction={deleteItems}
       bulkUpdateAction={bulkUpdateListings}
+      activitySlot={<DashboardPipelineRuns userId={userId} runs={recentRuns} />}
       repriceSlot={repriceSlot}
     />
   );
