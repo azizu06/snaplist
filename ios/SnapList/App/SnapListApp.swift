@@ -6,6 +6,7 @@ struct SnapListApp: App {
     @State private var router: AppRouter
     @State private var onboardingModel: OnboardingFlowModel
     @State private var captureFlow: CaptureFlowModel
+    @State private var homeStore: HomeStore
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
 
@@ -47,6 +48,11 @@ struct SnapListApp: App {
                 store: dependencies.captureDraftStore
             )
         )
+        _homeStore = State(
+            initialValue: HomeStore(
+                repository: HomeRepositoryFactory.make(configuration: configuration)
+            )
+        )
     }
 
     var body: some Scene {
@@ -55,11 +61,15 @@ struct SnapListApp: App {
                 router: router,
                 onboardingModel: onboardingModel,
                 captureFlow: captureFlow,
+                homeStore: homeStore,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)
                 .task {
-                    router.handleCaptureRestoration(await captureFlow.restore())
+                    async let restoration = captureFlow.restore()
+                    async let homeLoad: Void = homeStore.load()
+                    router.handleCaptureRestoration(await restoration)
+                    await homeLoad
                 }
         }
     }

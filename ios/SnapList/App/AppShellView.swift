@@ -6,9 +6,11 @@ struct AppShellView: View {
     @Bindable var router: AppRouter
     @Bindable var onboardingModel: OnboardingFlowModel
     @Bindable var captureFlow: CaptureFlowModel
+    @Bindable var homeStore: HomeStore
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
 
@@ -24,6 +26,8 @@ struct AppShellView: View {
 #if DEBUG
                 if visualState.ownerIssue == 207 {
                     CaptureVisualStateView(state: visualState)
+                } else if visualState.ownerIssue == 208 {
+                    shell
                 } else {
                     VisualStateBoundaryPlaceholder(state: visualState)
                 }
@@ -50,12 +54,31 @@ struct AppShellView: View {
         TabView(selection: $router.selectedTab) {
             ForEach(PrimaryTab.allCases) { tab in
                 NavigationStack(path: router.pathBinding(for: tab)) {
-                    FoundationPlaceholderView(
-                        tab: tab,
-                        configuration: configuration,
-                        openActivity: { router.navigate(to: .activity) },
-                        openAccount: { router.navigate(to: .account) }
-                    )
+                    Group {
+                        if tab == .home {
+#if DEBUG
+                            if configuration.keyboardProbe {
+                                FoundationPlaceholderView(
+                                    tab: tab,
+                                    configuration: configuration,
+                                    openActivity: { router.navigate(to: .activity) },
+                                    openAccount: { router.navigate(to: .account) }
+                                )
+                            } else {
+                                homeFeature
+                            }
+#else
+                            homeFeature
+#endif
+                        } else {
+                            FoundationPlaceholderView(
+                                tab: tab,
+                                configuration: configuration,
+                                openActivity: { router.navigate(to: .activity) },
+                                openAccount: { router.navigate(to: .account) }
+                            )
+                        }
+                    }
                     .navigationDestination(for: AppRoute.self) { route in
                         destination(for: route)
                     }
@@ -111,6 +134,29 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                homeStore.resumeUpdates()
+            case .background:
+                homeStore.suspendUpdates()
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private var homeFeature: some View {
+        HomeFeatureView(
+            store: homeStore,
+            visualState: configuration.visualState,
+            openActivity: { router.navigate(to: .activity) },
+            openAccount: { router.navigate(to: .account) },
+            openCapture: { router.select(.capture) },
+            openRoute: { router.navigate(to: .home($0)) }
+        )
     }
 
     @ViewBuilder
@@ -120,6 +166,13 @@ struct AppShellView: View {
             FoundationDestinationView(destination: .account)
         case .activity:
             FoundationDestinationView(destination: .activity)
+        case .home(let route):
+            switch route {
+            case .run:
+                FoundationDestinationView(destination: .run)
+            default:
+                HomeRouteBoundaryView(route: route)
+            }
         case .future(let boundary):
             FoundationDestinationView(destination: boundary)
         }
@@ -229,6 +282,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
     }
 }
 
+#if DEBUG
 #Preview("Foundation shell") {
     let dependencies = AppDependencies.make(configuration: .preview)
     AppShellView(
@@ -244,6 +298,8 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             evaluator: dependencies.framingEvaluator,
             store: dependencies.captureDraftStore
         ),
+        homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
         configuration: .preview
     )
 }
+#endif

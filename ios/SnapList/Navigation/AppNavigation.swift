@@ -62,10 +62,33 @@ enum FutureBoundary: String, Hashable {
     case draft
 }
 
+enum HomeRoute: Hashable {
+    case run(UUID)
+    case order(UUID)
+    case conversation(UUID)
+    case publishIssue(UUID)
+    case draft(UUID)
+    case listing(UUID)
+    case listings(HomeFilter)
+    case orders
+}
+
 enum AppRoute: Hashable {
     case account
     case activity
+    case home(HomeRoute)
     case future(FutureBoundary)
+}
+
+extension HomeAttentionDestination {
+    var route: HomeRoute {
+        switch self {
+        case .order(let id): .order(id)
+        case .conversation(let id): .conversation(id)
+        case .publishIssue(let id): .publishIssue(id)
+        case .draft(let id): .draft(id)
+        }
+    }
 }
 
 enum AppSheet: String, Identifiable {
