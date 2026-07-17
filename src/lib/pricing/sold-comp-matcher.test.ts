@@ -23,6 +23,8 @@ describe("normalizeSoldCompCondition", () => {
     ["Brand New", "new"],
     ["New with tags", "new"],
     ["Open box", "open-box"],
+    ["Seller Refurbished", "refurbished"],
+    ["Certified Refurbished", "refurbished"],
     ["Like New", "like-new"],
     ["Pre-Owned", "used-good"],
     ["Very Good", "used-good"],
@@ -88,6 +90,25 @@ describe("classifySoldComp", () => {
       signal,
     );
 
+    expect(match.classification).toBe("corroboration");
+    expect(match.reasons).toContain("condition-distant");
+  });
+
+  it("does not anchor refurbished evidence for a known-used seller item", () => {
+    const signal: ItemSignal = {
+      brand: "Apple",
+      model: "iPhone 14 Pro",
+      specs: ["256GB"],
+      condition: "used",
+      conditionKnown: true,
+    };
+
+    const match = classifySoldComp(
+      candidate("Apple iPhone 14 Pro 256GB", "Certified Refurbished"),
+      signal,
+    );
+
+    expect(match.compCondition).toBe("refurbished");
     expect(match.classification).toBe("corroboration");
     expect(match.reasons).toContain("condition-distant");
   });

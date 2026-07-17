@@ -2,6 +2,7 @@ import type { ItemSignal } from "./types";
 
 export type SoldCompCondition =
   | "new"
+  | "refurbished"
   | "open-box"
   | "like-new"
   | "used-good"
@@ -158,6 +159,7 @@ export function normalizeSoldCompCondition(value?: string | null): SoldCompCondi
   if (/\b(for parts|parts only|not working|broken|faulty|repair|as is)\b/.test(condition)) {
     return "parts";
   }
+  if (/\b(refurbished|remanufactured)\b/.test(condition)) return "refurbished";
   if (/\b(open box|open package)\b/.test(condition)) return "open-box";
   if (/\b(like new|near mint|mint condition)\b/.test(condition)) return "like-new";
   if (
