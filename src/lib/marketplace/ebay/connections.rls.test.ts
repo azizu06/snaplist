@@ -2,6 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  acquireExclusiveTestResource,
+  type ExclusiveTestResourceLease,
+} from "@/test/exclusive-resource-lock";
+import {
   cleanupClerkTestUsers,
   mintUserJwt,
   provisionClerkTestUser,
@@ -32,6 +36,7 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DELETION_QUEUE_HOOK_TIMEOUT_MS = 70_000;
 
 /** Test-only encryption key — passed explicitly, never via process.env. */
 const TEST_ENV = {
@@ -74,6 +79,7 @@ let userA: ClerkTestUser;
 let userB: ClerkTestUser;
 let userAServer: SupabaseClient;
 let userBServer: SupabaseClient;
+let deletionQueueLease: ExclusiveTestResourceLease | undefined;
 
 async function createTenantWriteClient(userId: string): Promise<SupabaseClient> {
   const jwt = await mintUserJwt(userId);
@@ -87,6 +93,9 @@ beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
 
+  deletionQueueLease = await acquireExclusiveTestResource(
+    `local-db:message-photo-object-deletion-queue:${SUPABASE_URL}`,
+  );
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -98,11 +107,15 @@ beforeAll(async () => {
     createTenantWriteClient(userA.id),
     createTenantWriteClient(userB.id),
   ]);
-});
+}, DELETION_QUEUE_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
-  if (!reachable || !admin) return;
-  await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+  try {
+    if (!reachable || !admin) return;
+    await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
+  } finally {
+    await deletionQueueLease?.release();
+  }
 });
 
 describe("ebay_connections (DB-gated)", () => {
