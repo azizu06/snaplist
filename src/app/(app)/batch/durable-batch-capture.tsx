@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PipelineRunProgress } from "@/components/pipeline-run-progress";
 import { Banner } from "@/components/ui/banner";
-import type { PipelineProgressRun } from "@/lib/pipeline-progress";
+import {
+  persistPipelineRecoveryHandle,
+  type PipelineProgressRun,
+} from "@/lib/pipeline-progress";
 import { appendAcceptedPhotos, MAX_PHOTOS } from "../upload/upload-draft-context";
 import { PhotoInputActions } from "../upload/photo-input-actions";
 
@@ -94,6 +97,7 @@ export function DurableBatchCapture({
     });
 
     try {
+      persistPipelineRecoveryHandle(window.history, "/batch", initialBatchId);
       const response = await fetch("/api/batch/enqueue", { method: "POST", body: form });
       const body = (await response.json()) as {
         error?: string;

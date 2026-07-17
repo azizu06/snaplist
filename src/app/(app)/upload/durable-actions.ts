@@ -12,8 +12,10 @@ import { getAutopilotEnabled } from "@/lib/settings/user-settings";
 import { createClient } from "@/lib/supabase/server";
 import { stageUploadEntries } from "@/lib/upload-staging";
 
-function redirectUploadError(message: string): never {
-  redirect(`/upload?error=${encodeURIComponent(message)}`);
+function redirectUploadError(message: string, batchId?: string): never {
+  const params = new URLSearchParams({ error: message });
+  if (batchId) params.set("batch", batchId);
+  redirect(`/upload?${params.toString()}`);
 }
 
 export async function enqueueUpload(formData: FormData): Promise<void> {
@@ -25,15 +27,20 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     .getAll("photo")
     .filter((value): value is File => value instanceof File && value.size > 0);
   const idempotencyKey = String(formData.get("idempotencyKey") ?? "").trim();
-  if (!idempotencyKey) redirectUploadError("Please try that upload again.");
   const batchId = z.string().uuid().safeParse(formData.get("batchId"));
   if (!batchId.success) redirectUploadError("Please try that upload again.");
+  if (!idempotencyKey) {
+    redirectUploadError("Please try that upload again.", batchId.data);
+  }
 
   let costBasis: number | null;
   try {
     costBasis = parseCostBasis(formData.get("costBasis"));
   } catch {
-    redirectUploadError("What did you pay must be a plain dollar amount or left blank.");
+    redirectUploadError(
+      "What did you pay must be a plain dollar amount or left blank.",
+      batchId.data,
+    );
   }
 
   const autopilotEnabled = await getAutopilotEnabled(supabase, userId);
@@ -60,9 +67,13 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
       if (itemRunPolicy.reason === "policy-unavailable") {
         redirectUploadError(
           "We couldn't verify whether this item can start. Please try again.",
+          batchId.data,
         );
       }
-      redirectUploadError("SnapList Pro is required to start another new item.");
+      redirectUploadError(
+        "SnapList Pro is required to start another new item.",
+        batchId.data,
+      );
     }
 
     // #155 keeps these daily/minute values as operational guardrails rather
@@ -112,11 +123,17 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     reportServerError("upload.enqueue", error);
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (message.includes("daily capacity")) {
-      redirectUploadError("Capacity limit reached. Try again tomorrow.");
+      redirectUploadError("Capacity limit reached. Try again tomorrow.", batchId.data);
     }
     if (message.includes("per-minute") || message.includes("minute capacity")) {
-      redirectUploadError("You are starting listings too quickly. Wait a minute and try again.");
+      redirectUploadError(
+        "You are starting listings too quickly. Wait a minute and try again.",
+        batchId.data,
+      );
     }
-    redirectUploadError("We couldn't save this listing for processing. Please try again.");
+    redirectUploadError(
+      "We couldn't save this listing for processing. Please try again.",
+      batchId.data,
+    );
   }
 }

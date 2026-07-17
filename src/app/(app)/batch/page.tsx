@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getUserId } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
+  buildPipelineRecoveryHref,
   PIPELINE_PROGRESS_SELECT,
   pipelineProgressRunSchema,
 } from "@/lib/pipeline-progress";
@@ -18,10 +19,13 @@ export default async function BatchPage({
 }: {
   searchParams: Promise<{ batch?: string }>;
 }) {
-  const userId = await getUserId();
-  if (!userId) redirect("/login?next=/batch");
   const requestedBatchId = (await searchParams).batch;
   const parsedBatchId = z.string().uuid().safeParse(requestedBatchId);
+  const recoveryHref = parsedBatchId.success
+    ? buildPipelineRecoveryHref("/batch", parsedBatchId.data)
+    : "/batch";
+  const userId = await getUserId();
+  if (!userId) redirect(`/login?next=${encodeURIComponent(recoveryHref)}`);
   const batchId = parsedBatchId.success ? parsedBatchId.data : crypto.randomUUID();
   const supabase = await createClient();
   const { data, error } = await supabase

@@ -129,5 +129,8 @@ describe("single upload retry identity", () => {
     expect($('input[name="idempotencyKey"]').attr("value")).toBe(
       "single:00000000-0000-4000-8000-000000000159",
     );
+    expect($("form").attr("data-recovery-href")).toBe(
+      "/upload?batch=00000000-0000-4000-8000-000000000159",
+    );
   });
 });

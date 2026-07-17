@@ -109,6 +109,11 @@ export async function stageUploadEntries(
       entries: stagedEntries,
     });
   } catch (error) {
+    const losingIdempotentRace =
+      error instanceof Error &&
+      error.message.includes(
+        "Pipeline idempotency key conflicts with staged input",
+      );
     let cleanupConfirmed = !stagingAttempted;
     if (stagingAttempted) {
       try {
@@ -123,7 +128,17 @@ export async function stageUploadEntries(
             costBasis: entry.costBasis,
           })),
         });
-        if (replay.length > 0) return replay;
+        if (replay.length > 0) {
+          if (losingIdempotentRace && uploadedPaths.length > 0) {
+            try {
+              await dependencies.remove(uploadedPaths);
+            } catch {
+              // The winner remains authoritative. Retention can retry cleanup
+              // of this losing request's unreferenced paths.
+            }
+          }
+          return replay;
+        }
         cleanupConfirmed = true;
       } catch {
         // The producer outcome is still ambiguous. Keep the private objects so

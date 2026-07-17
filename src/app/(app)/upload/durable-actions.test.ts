@@ -157,8 +157,11 @@ describe("enqueueUpload", () => {
     });
 
     await expect(enqueueUpload(uploadForm())).rejects.toThrow(
-      /SnapList%20Pro%20is%20required/i,
+      /SnapList\+Pro\+is\+required/i,
     );
+    expect(mocks.redirect).toHaveBeenCalledWith(expect.stringContaining(
+      "batch=11111111-1111-4111-8111-111111111111",
+    ));
 
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
     expect(storage.from).not.toHaveBeenCalled();
@@ -173,8 +176,11 @@ describe("enqueueUpload", () => {
     });
 
     await expect(enqueueUpload(uploadForm())).rejects.toThrow(
-      /couldn't%20verify%20whether%20this%20item%20can%20start/i,
+      /couldn%27t\+verify\+whether\+this\+item\+can\+start/i,
     );
+    expect(mocks.redirect).toHaveBeenCalledWith(expect.stringContaining(
+      "batch=11111111-1111-4111-8111-111111111111",
+    ));
 
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
   });

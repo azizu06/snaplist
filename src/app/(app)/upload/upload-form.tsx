@@ -7,6 +7,7 @@ import ClickSpark from "@/components/bits/ClickSpark";
 import { Banner } from "@/components/ui/banner";
 import { PhotoCarousel } from "@/components/ui/photo-carousel";
 import { Spinner } from "@/components/ui/spinner";
+import { persistPipelineRecoveryHandle } from "@/lib/pipeline-progress";
 import { ACCEPT, MAX_PHOTOS, useUploadDraft } from "./upload-draft-context";
 import { CostBasisCard } from "./cost-basis-card";
 import { PhotoInputActions } from "./photo-input-actions";
@@ -483,13 +484,16 @@ function FormBody({
 
 export function UploadForm({
   action,
+  recoveryBatchId,
 }: {
   action: (formData: FormData) => Promise<void>;
+  recoveryBatchId?: string;
 }) {
   // Photos live in the (app)-layout draft context so they survive navigating
   // away and back (they used to reset to zero). This component owns only the
   // view index and the hidden input the form actually submits.
   const { captureId, files, previews, addFiles, removeAt } = useUploadDraft();
+  const batchId = recoveryBatchId ?? captureId;
   const [current, setCurrent] = useState(0);
   const submitRef = useRef<HTMLInputElement | null>(null);
 
@@ -516,9 +520,15 @@ export function UploadForm({
   }, [files]);
 
   return (
-    <form action={action}>
-      <input type="hidden" name="batchId" value={captureId} />
-      <input type="hidden" name="idempotencyKey" value={`single:${captureId}`} />
+    <form
+      action={action}
+      data-recovery-href={`/upload?batch=${batchId}`}
+      onSubmit={() =>
+        persistPipelineRecoveryHandle(window.history, "/upload", batchId)
+      }
+    >
+      <input type="hidden" name="batchId" value={batchId} />
+      <input type="hidden" name="idempotencyKey" value={`single:${batchId}`} />
       <input
         ref={submitRef}
         type="file"
@@ -547,9 +557,11 @@ export function UploadForm({
 export function UploadView({
   action,
   actionError,
+  recoveryBatchId,
 }: {
   action: (formData: FormData) => Promise<void>;
   actionError: string | null;
+  recoveryBatchId?: string;
 }) {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
@@ -576,7 +588,7 @@ export function UploadView({
         </Banner>
       ) : null}
 
-      <UploadForm action={action} />
+      <UploadForm action={action} recoveryBatchId={recoveryBatchId} />
     </main>
   );
 }

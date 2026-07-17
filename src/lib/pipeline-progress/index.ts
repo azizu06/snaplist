@@ -10,3 +10,9 @@ export {
   type PipelineProgressView,
 } from "./status";
 export { PIPELINE_PROGRESS_SELECT, pipelineProgressRunSchema } from "./row";
+export {
+  buildPipelineRecoveryHref,
+  persistPipelineRecoveryHandle,
+  type PipelineRecoveryHistory,
+  type PipelineRecoveryPath,
+} from "./recovery";
