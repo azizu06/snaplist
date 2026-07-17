@@ -72,6 +72,19 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
   STRIPE_PRICE_PRO: z.string().min(1).optional(),
 
+  // Native SnapList Pro lifecycle (#173). RevenueCat manages StoreKit purchase
+  // state; the verified server bridge maps events into the #168 quota ledger.
+  // All values are optional so local/offline builds are truthfully unconfigured.
+  // The iOS SDK key is public but stays server-provided instead of source-coded.
+  REVENUECAT_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
+  REVENUECAT_WEBHOOK_AUTHORIZATION: z.string().min(1).optional(),
+  REVENUECAT_APP_ID: z.string().min(1).optional(),
+  REVENUECAT_ENTITLEMENT_ID: z.string().min(1).optional(),
+  REVENUECAT_MONTHLY_PRODUCT_ID: z.string().min(1).optional(),
+  REVENUECAT_IOS_PUBLIC_SDK_KEY: z.string().min(1).optional(),
+  REVENUECAT_OFFERING_ID: z.string().min(1).optional(),
+  SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: z.string().min(1).optional(),
+
   // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
   // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
   // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier

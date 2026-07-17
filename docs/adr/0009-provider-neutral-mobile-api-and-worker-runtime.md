@@ -109,13 +109,15 @@ The OpenAPI 3.1 contract fixes these transport invariants:
 - a separate internal worker identity unavailable to SwiftUI;
 - eBay OAuth state/code exchange and provider tokens remain server-side; SwiftUI receives only an
   opaque completion/deep-link result;
-- StoreKit server notifications carry Apple-signed payloads to the #173-owned verification seam;
-  device claims never grant or reset entitlement.
+- RevenueCat webhooks carry StoreKit lifecycle into the #173-owned authenticated, replay-protected
+  verification seam. The server-owned Clerk/App User ID binding and #168 ledger remain authoritative;
+  RevenueCat CustomerInfo and device claims never grant or reset entitlement. A future direct Apple
+  signed-transaction verifier may feed the same narrow ledger seam without changing quota policy.
 
 Most v1 operations are deliberately marked `contract-only` with `x-owner-issue`. Issue #195 proves
 transport and composition; it does not implement eBay OAuth (#17), staging (#159),
-retry/cancel/notifications (#161), scheduling/retention/health (#162), credits (#168), StoreKit
-(#173), or App Attest (#174). Body-bearing 2xx responses use typed `data` + `meta.requestId`
+retry/cancel/notifications (#161), scheduling/retention/health (#162), credits (#168), native billing
+outside the #173 bridge, or App Attest (#174). Body-bearing 2xx responses use typed `data` + `meta.requestId`
 envelopes; the eBay callback remains an explicit 303 redirect boundary.
 
 ### 4. Migration is a separate, review-gated change

@@ -3,6 +3,8 @@ import Foundation
 protocol MobileAPIClient {
     func getHealth() async throws -> HealthEnvelope
     func getSession(bearerToken: String) async throws -> SessionEnvelope
+    func getRevenueCatConfiguration(bearerToken: String) async throws -> RevenueCatConfigurationEnvelope
+    func getAiItemEntitlement(bearerToken: String) async throws -> AiItemEntitlementEnvelope
 }
 
 protocol ContractOnlyFixtureProviding {
@@ -26,20 +28,37 @@ struct URLSessionMobileAPIClient: MobileAPIClient {
     }
 
     func getHealth() async throws -> HealthEnvelope {
-        try await send(path: "/v1/health", bearerToken: nil)
+        try await send(path: "/v1/health", method: "GET", bearerToken: nil)
     }
 
     func getSession(bearerToken: String) async throws -> SessionEnvelope {
-        try await send(path: "/v1/session", bearerToken: bearerToken)
+        try await send(path: "/v1/session", method: "GET", bearerToken: bearerToken)
+    }
+
+    func getRevenueCatConfiguration(bearerToken: String) async throws -> RevenueCatConfigurationEnvelope {
+        try await send(
+            path: "/v1/billing/revenuecat/identity",
+            method: "POST",
+            bearerToken: bearerToken
+        )
+    }
+
+    func getAiItemEntitlement(bearerToken: String) async throws -> AiItemEntitlementEnvelope {
+        try await send(
+            path: "/v1/entitlements/ai-items",
+            method: "GET",
+            bearerToken: bearerToken
+        )
     }
 
     private func send<Response: Decodable>(
         path: String,
+        method: String,
         bearerToken: String?
     ) async throws -> Response {
         let url = baseURL.appending(path: path)
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let bearerToken {
             request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
@@ -71,6 +90,38 @@ struct ZeroNetworkMobileAPIClient: MobileAPIClient, ContractOnlyFixtureProviding
         )
     }
 
+    func getRevenueCatConfiguration(bearerToken: String) async throws -> RevenueCatConfigurationEnvelope {
+        RevenueCatConfigurationEnvelope(
+            data: .init(
+                configured: false,
+                appUserId: "fixture-clerk-user",
+                publicSdkKey: nil,
+                entitlementId: nil,
+                monthlyProductId: nil,
+                offeringId: nil,
+                transitionState: nil,
+                legacyStripeStatus: nil
+            ),
+            meta: .init(requestId: "fixture-revenuecat-configuration")
+        )
+    }
+
+    func getAiItemEntitlement(bearerToken: String) async throws -> AiItemEntitlementEnvelope {
+        AiItemEntitlementEnvelope(
+            data: .init(
+                billingSource: .included,
+                status: .included,
+                remainingItems: 1,
+                periodStart: nil,
+                periodEnd: nil,
+                gracePeriodEnd: nil,
+                transitionState: .notRequired,
+                legacyStripeStatus: nil
+            ),
+            meta: .init(requestId: "fixture-ai-item-entitlement")
+        )
+    }
+
     func fixture(for operation: ContractOnlyOperation) -> ContractOnlyFixture {
         .metadata(for: operation)
     }
@@ -86,6 +137,7 @@ struct AppDependencies {
     let captureCamera: any CaptureCamera
     let framingEvaluator: any FramingEvaluating
     let captureDraftStore: any CaptureDraftStoring
+    let subscriptionClient: any SubscriptionClient
 
     static func make(configuration: LaunchConfiguration) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
@@ -107,7 +159,8 @@ struct AppDependencies {
                 guestAllowance: DeferredGuestAllowanceCapability(),
                 captureCamera: captureCamera,
                 framingEvaluator: VisionObjectFramingEvaluator(),
-                captureDraftStore: captureDraftStore
+                captureDraftStore: captureDraftStore,
+                subscriptionClient: FixtureSubscriptionClient()
             )
         }
 
@@ -124,7 +177,8 @@ struct AppDependencies {
             guestAllowance: DeferredGuestAllowanceCapability(),
             captureCamera: captureCamera,
             framingEvaluator: VisionObjectFramingEvaluator(),
-            captureDraftStore: captureDraftStore
+            captureDraftStore: captureDraftStore,
+            subscriptionClient: RevenueCatSubscriptionClient()
         )
     }
 

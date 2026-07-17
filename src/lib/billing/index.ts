@@ -48,3 +48,19 @@ export {
   type StripeSubscription,
   type StripeWebhookEvent,
 } from "./adapter";
+export {
+  handleRevenueCatWebhook,
+  parseAndVerifyRevenueCatWebhook,
+  resolveRevenueCatServerConfig,
+  type RevenueCatEntitlementStore,
+  type RevenueCatServerConfig,
+  type RevenueCatWebhookConfig,
+  type VerifiedStoreKitPeriod,
+} from "./revenuecat";
+export {
+  createSupabaseNativeSubscriptionBridge,
+  createSupabaseRevenueCatEntitlementStore,
+  type NativeRevenueCatConfiguration,
+  type NativeSubscriptionBridge,
+  type VerifiedAiItemEntitlement,
+} from "./revenuecat-store";

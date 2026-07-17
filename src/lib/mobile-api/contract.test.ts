@@ -42,7 +42,8 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(contract.components.schemas).toHaveProperty("ErrorEnvelope");
     expect(contract.paths).toHaveProperty("/v1/items/runs");
     expect(contract.paths).toHaveProperty("/v1/ebay/oauth/callback");
-    expect(contract.paths).toHaveProperty("/v1/webhooks/storekit");
+    expect(contract.paths).toHaveProperty("/v1/webhooks/revenuecat");
+    expect(contract.paths).toHaveProperty("/v1/billing/revenuecat/identity");
     expect(JSON.stringify(contract.paths["/v1/items/runs"])).toContain(
       "#/components/parameters/IdempotencyKey",
     );
@@ -105,6 +106,7 @@ describe("SwiftUI mobile HTTP contract", () => {
         const content = response.content as
           | Record<string, { schema?: { $ref?: string } }>
           | undefined;
+        if (!content) continue;
         const schemaRef = content?.["application/json"]?.schema?.$ref;
         expect(
           schemaRef,

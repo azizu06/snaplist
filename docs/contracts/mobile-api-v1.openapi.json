@@ -84,12 +84,21 @@
         "responses": { "200": { "description": "Legal cancellation transition applied", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "409": { "$ref": "#/components/responses/InvalidRequest" } }
       }
     },
+    "/v1/billing/revenuecat/identity": {
+      "post": {
+        "operationId": "bindRevenueCatIdentity",
+        "x-owner-issue": 173,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": { "200": { "description": "Server-bound RevenueCat configuration for the verified Clerk principal; no request user id is accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RevenueCatConfigurationEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
     "/v1/entitlements/ai-items": {
       "get": {
         "operationId": "getAiItemEntitlement",
         "x-owner-issue": 168,
         "x-related-owner-issues": [173],
-        "x-implementation-status": "contract-only",
+        "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
         "responses": { "200": { "description": "Server-authoritative allowance period and remaining items", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AiItemEntitlementEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
       }
@@ -117,13 +126,17 @@
         "responses": { "303": { "description": "Redirects to an app universal link carrying only an opaque completion result" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
       }
     },
-    "/v1/webhooks/storekit": {
+    "/v1/webhooks/revenuecat": {
       "post": {
-        "operationId": "receiveStoreKitNotification",
+        "operationId": "receiveRevenueCatWebhook",
         "x-owner-issue": 173,
-        "x-implementation-status": "contract-only",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["signedPayload"], "properties": { "signedPayload": { "type": "string", "description": "Apple-signed notification; unverified client claims never grant entitlement" } } } } } },
-        "responses": { "204": { "description": "Verified or idempotently ignored" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
+        "x-implementation-status": "implemented",
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Operator-configured exact secret value" },
+          { "name": "X-RevenueCat-Webhook-Signature", "in": "header", "required": true, "schema": { "type": "string" }, "description": "HMAC timestamp and digest over the raw JSON body" }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "description": "RevenueCat lifecycle event; verified before tenant mapping or parsing" } } } },
+        "responses": { "200": { "description": "Verified and applied, reconciled, duplicated, or intentionally ignored" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
       }
     },
     "/internal/v1/pipeline/consume": {
@@ -156,7 +169,8 @@
       "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "GuestAttestationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["attestationId", "status"], "properties": { "attestationId": { "type": "string", "format": "uuid" }, "status": { "const": "pending_verification" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
-      "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["status", "remainingItems", "periodStart", "periodEnd"], "properties": { "status": { "type": "string", "enum": ["active", "grace", "expired"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": "string", "format": "date-time" }, "periodEnd": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "RevenueCatConfigurationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["configured", "appUserId"], "properties": { "configured": { "type": "boolean" }, "appUserId": { "type": "string" }, "publicSdkKey": { "type": "string" }, "entitlementId": { "type": "string" }, "monthlyProductId": { "type": "string" }, "offeringId": { "type": "string" }, "transitionState": { "type": "string", "enum": ["not_required", "required", "reconciled"] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["billingSource", "status", "remainingItems", "periodStart", "periodEnd", "gracePeriodEnd", "transitionState", "legacyStripeStatus"], "properties": { "billingSource": { "type": "string", "enum": ["included", "storekit", "none"] }, "status": { "type": "string", "enum": ["included", "active", "grace", "billing_retry", "expired", "revoked", "refunded", "ambiguous", "unconfigured"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": ["string", "null"], "format": "date-time" }, "periodEnd": { "type": ["string", "null"], "format": "date-time" }, "gracePeriodEnd": { "type": ["string", "null"], "format": "date-time" }, "transitionState": { "type": ["string", "null"], "enum": ["not_required", "required", "reconciled", null] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "EbayOauthSessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["sessionId", "authorizationUrl", "expiresAt"], "properties": { "sessionId": { "type": "string", "format": "uuid" }, "authorizationUrl": { "type": "string", "format": "uri" }, "expiresAt": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "ResponseMeta": { "type": "object", "required": ["requestId"], "properties": { "requestId": { "type": "string" } } },
       "CreateRunRequest": { "type": "object", "required": ["photoObjectPaths", "photoSetFingerprint"], "properties": { "photoObjectPaths": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string" } }, "photoSetFingerprint": { "type": "string" }, "costBasis": { "type": ["number", "null"], "minimum": 0 } }, "additionalProperties": false },
