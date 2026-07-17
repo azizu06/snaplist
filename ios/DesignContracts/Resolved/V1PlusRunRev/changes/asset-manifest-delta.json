@@ -1,0 +1,63 @@
+{
+  "version": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "base": "snaplist-asset-manifest.json",
+  "added": [
+    {
+      "file": "assets/pose-01-analyzing.png",
+      "intrinsic": {
+        "width": 400,
+        "height": 386,
+        "ratio": 1.04
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "RUN-02",
+          "size_pt": 76,
+          "role": "active processing reassurance"
+        }
+      ]
+    },
+    {
+      "file": "assets/pose-03-retry-review.png",
+      "intrinsic": {
+        "width": 240,
+        "height": 202,
+        "ratio": 1.19
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "RUN-05",
+          "size_pt": 150,
+          "role": "actionable failure/retry"
+        }
+      ]
+    },
+    {
+      "file": "assets/pose-01-uncertain.png",
+      "intrinsic": {
+        "width": 467,
+        "height": 384,
+        "ratio": 1.22
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "REV-08",
+          "size_pt": 78,
+          "role": "low-evidence uncertainty"
+        }
+      ]
+    }
+  ],
+  "changed": {
+    "temporary_product_photography": {
+      "add_fixtures": [
+        "RUN camera/keyboard/fleece/sneakers/bag/lamp thumbnails",
+        "REV Canon film camera"
+      ]
+    }
+  },
+  "removed": []
+}

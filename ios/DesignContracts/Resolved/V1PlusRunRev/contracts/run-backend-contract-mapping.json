@@ -1,0 +1,122 @@
+{
+  "source_issue": {
+    "number": 161,
+    "title": "Durable pipeline recovery UX: notifications, dashboard status, retry, and cancel",
+    "url": "https://github.com/azizu06/snaplist/issues/161"
+  },
+  "implementation_boundary": "Map to the canonical durable-run schema delivered by backend owners; the UI contract must not invent database enum names.",
+  "seller_status_mapping": [
+    {
+      "visual": "Queued",
+      "durable_predicate": "run accepted and not yet started",
+      "next_action": "none/open detail"
+    },
+    {
+      "visual": "Uploading",
+      "durable_predicate": "source photos are not all durably uploaded",
+      "required_fields": [
+        "localPhotoCount",
+        "uploadedPhotoCount"
+      ],
+      "next_action": "resume/review/cancel where legal"
+    },
+    {
+      "visual": "Processing",
+      "durable_predicate": "run active, including retrying",
+      "required_fields": [
+        "actualStageWhenKnown",
+        "lastMeaningfulUpdateAt"
+      ],
+      "next_action": "open/cancel where legal"
+    },
+    {
+      "visual": "Ready",
+      "durable_predicate": "usable draft exists",
+      "next_action": "open normal review/listing surface"
+    },
+    {
+      "visual": "Needs review",
+      "durable_predicate": "usable work exists and seller input is required",
+      "required_fields": [
+        "reason",
+        "destination"
+      ],
+      "next_action": "open exact required input"
+    },
+    {
+      "visual": "Failed",
+      "durable_predicate": "attempts exhausted or actionable failure",
+      "required_fields": [
+        "safeReason",
+        "retryable",
+        "preservedWork"
+      ],
+      "next_action": "retry/help/cancel where legal"
+    },
+    {
+      "visual": "Canceled",
+      "durable_predicate": "authenticated cancellation committed",
+      "next_action": "none/history"
+    }
+  ],
+  "allowance": {
+    "reserve": "when a complete AI run starts",
+    "settle": "only when a usable draft exists",
+    "restore": "failure or seller-confirmed cancellation before usable draft",
+    "free": [
+      "automatic retry",
+      "crash recovery",
+      "included guided identity correction"
+    ],
+    "forbidden": [
+      "daily cap",
+      "hard-coded monthly amount",
+      "price",
+      "unlimited claim"
+    ]
+  },
+  "issue_161_behavior": {
+    "notifications": [
+      {
+        "event": "listing_ready",
+        "cardinality": "exactly once per tenant-scoped successful run",
+        "destination": "normal item review/listing surface"
+      },
+      {
+        "event": "safe_failure",
+        "cardinality": "exactly once when exhausted",
+        "destination": "RUN-05 retry path"
+      },
+      {
+        "event": "transient_retry",
+        "cardinality": "no seller notification spam"
+      }
+    ],
+    "retry": "Authenticated, tenant-owned, legal transition, idempotent, same logical run.",
+    "cancel": "Authenticated, tenant-owned, legal transition, idempotent; never delete a successful listing or photos referenced by a listing; abandoned-only cleanup is explicit.",
+    "realtime": "Tenant-safe updates. When unavailable, refresh from server truth into RUN-06 without creating a duplicate run.",
+    "deep_links": [
+      "existing run detail",
+      "normal review/listing surface",
+      "failed-run retry",
+      "exact seller-input destination"
+    ],
+    "tests": [
+      "exact-once notifications",
+      "retry/cancel transitions",
+      "Realtime dedupe",
+      "Realtime-unavailable refresh",
+      "two-tenant isolation",
+      "light/dark/reduced motion",
+      "mobile/desktop refresh recovery"
+    ]
+  },
+  "no_fabrication": [
+    "percentage",
+    "ETA",
+    "stage not supplied by server",
+    "success before usable draft",
+    "duplicate run",
+    "duplicate listing"
+  ]
+}

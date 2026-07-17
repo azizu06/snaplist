@@ -1,0 +1,115 @@
+{
+  "meta": {
+    "project": "SnapList iOS",
+    "version": "approved-families-v1",
+    "date": "2026-07-16",
+    "system": "White Seller Utility",
+    "units": "CSS px in Claude reference; map 1:1 to iOS points at the canonical device size unless native system chrome requires otherwise",
+    "board_styles_are_app_tokens": false
+  },
+  "colors": {
+    "action": "#3665F3",
+    "action_roles": ["link", "primaryCTA", "selectedTab", "captureTile", "selection"],
+    "price_source_deviation": "#0031E9",
+    "price_source_deviation_badge_fill": "#EDF1FD",
+    "price_implementation_resolution": "Use #3665F3; keep the source deviation only as visual-diff evidence until the design is reconciled.",
+    "ink_primary": "#16181B",
+    "text_secondary": "#55585C",
+    "text_tertiary": "#8A8D92",
+    "canvas": "#FFFFFF",
+    "grouping_fill": "#F7F7F7",
+    "hairline": "#ECEDEF",
+    "divider": "#F1F2F4",
+    "success_durable": "#1B7A43",
+    "success_rule": "Use only for durable published, paid, shipped, or accepted truth; never ordinary camera coaching.",
+    "caution": "#9A6A1B",
+    "caution_fill": "#FBF3E7",
+    "info_chip_fill": "#E4ECFF",
+    "primer_bubble_fill": "#EEF3FE",
+    "in_progress_fill": "#F7F9FC",
+    "in_progress_border": "#E3E8F2",
+    "destructive": null,
+    "destructive_note": "UNMEASURED: no approved destructive color exists in these frozen families. Use the platform destructive semantic only when a later approved flow requires it."
+  },
+  "typography": {
+    "primary_family": "SF Pro / -apple-system",
+    "figure_variant": "tabular-nums",
+    "wordmark_family": "Instrument Sans",
+    "styles": {
+      "display_title": {"size": 28, "weight": 700, "tracking": -0.7, "line_height_multiplier": 1.15},
+      "onboarding_headline": {"size": 27, "weight": 700, "tracking": -0.6, "line_height_multiplier": 1.2},
+      "section_header": {"size": 19, "weight": 700, "tracking": -0.3},
+      "card_title": {"size": 18, "weight": 700},
+      "row_title": {"size": 15, "weight": 600, "tracking": -0.2},
+      "body": {"size": 15, "weight": 400, "line_height_multiplier": 1.5, "color": "#55585C"},
+      "status": {"size": 13, "weight_range": [400, 600]},
+      "meta": {"size": 12, "weight_range": [400, 700]},
+      "wordmark": {"size": 23, "launch_size": 30, "weight": 700}
+    },
+    "minimum_app_text": 12
+  },
+  "spacing": {
+    "scale": [2, 3, 4, 6, 8, 10, 12, 14, 16, 20, 22, 24, 26],
+    "screen_gutter": 20,
+    "dock_side_inset": 14,
+    "dock_bottom_inset": 12
+  },
+  "radii": {
+    "pill": 999,
+    "small_tile_range": [9, 12],
+    "thumbnail": 12,
+    "card_range": [16, 18],
+    "capture_tile": 15,
+    "primary_cta": 27,
+    "sheet_top": 26,
+    "phone_bezel_board_only": 52,
+    "icon_badge": 8
+  },
+  "strokes": {
+    "hairline": {"width": 1, "color": "#ECEDEF"},
+    "divider": {"width": 1, "color": "#F1F2F4"},
+    "selected_tab": {"width": 1.5, "color": "#3665F3"}
+  },
+  "shadows_and_materials": {
+    "primary_cta": "0 8px 20px rgba(54,101,243,0.36)",
+    "capture_tile": "0 5px 14px rgba(54,101,243,0.36)",
+    "floating_dock": {
+      "fill": "rgba(250,250,251,0.82)",
+      "blur_px": 22,
+      "saturation": 1.4,
+      "border": "1px rgba(22,24,27,0.08)",
+      "shadow": "0 8px 28px rgba(16,24,40,0.14)"
+    },
+    "permission_alert": {
+      "fill": "rgba(250,250,251,0.94)",
+      "blur_px": 28,
+      "saturation": 1.5
+    },
+    "bottom_sheet": {
+      "shadow": "0 -14px 44px rgba(16,18,20,0.22)",
+      "scrim": "rgba(16,18,20,0.42)"
+    }
+  },
+  "icons_and_targets": {
+    "dock_icon": 24,
+    "status_icon_range": [14, 22],
+    "chevron": {"width": 9, "height": 16},
+    "minimum_touch_target": {"width": 44, "height": 44}
+  },
+  "device": {
+    "default_frame": {"width": 393, "height": 852},
+    "price_frame": {"width": 402, "height": 874},
+    "status_bar_height": 54,
+    "home_indicator": {"width": 134, "height": 5, "bottom": 8},
+    "safe_area_top_approx": 54,
+    "safe_area_bottom_approx": 34
+  },
+  "dock": {
+    "destinations": ["Home", "Listings", "Capture", "Inbox", "Insights"],
+    "height": 66,
+    "radius": 26,
+    "capture_tile": {"width": 52, "height": 44, "radius": 15, "glyph_size": 25},
+    "label_size": 12,
+    "hidden_when_keyboard_visible": true
+  }
+}

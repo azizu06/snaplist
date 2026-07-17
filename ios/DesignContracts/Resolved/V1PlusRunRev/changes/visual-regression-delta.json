@@ -1,0 +1,198 @@
+{
+  "version": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "base": "snaplist-visual-regression-manifest.json",
+  "added_approved": [
+    {
+      "id": "RUN-01",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Seven durable seller-facing states",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-02",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Canon AE-1; Processing; Finding recent sold comps",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-03",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "One item in progress; Finding recent sold comps",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-04",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Four photos local; two uploaded; offline",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-05",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Sold-listings data unavailable; photos preserved; retry safe",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-06",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Realtime unavailable or completion ambiguous",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-07",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Cancel before usable draft",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "RUN-08",
+      "family": "durable_runs",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Five staged items; 2 ready, 1 working, 1 needs help, 1 waiting",
+      "reference": "references/durable-runs-recovery-board.jpg + durable-runs-recovery-reference.html"
+    },
+    {
+      "id": "REV-01",
+      "parent_id": "REV-01",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Canon AE-1; model needs checking",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-02a",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "One guided correction available",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-02b",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Same Canon photo set; closest matches",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-02c",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "AE-1 → AE-1 Program; seller title edited",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-02d",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Refreshing identity-dependent fields on same photo set",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-02d-retry",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Automatic retry after technical failure",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-02e",
+      "parent_id": "REV-02",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Keep-title default; Replace-title tested variant",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-07",
+      "parent_id": "REV-07",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Canon AE-1 Program; lens inclusion unclear",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    },
+    {
+      "id": "REV-08",
+      "parent_id": "REV-08",
+      "family": "identity_correction",
+      "viewport": [
+        393,
+        852
+      ],
+      "fixture": "Film camera; exact brand/model/lens uncertain",
+      "reference": "references/identity-guided-correction-board.jpg + identity-guided-correction-reference.html"
+    }
+  ],
+  "candidate_unchanged": [
+    "CAP-03a",
+    "CAP-03b",
+    "CAP-03c",
+    "CAP-03d",
+    "CAP-03e",
+    "CAP-04"
+  ],
+  "withheld": [
+    "CAP-05"
+  ],
+  "changed": {},
+  "removed": []
+}

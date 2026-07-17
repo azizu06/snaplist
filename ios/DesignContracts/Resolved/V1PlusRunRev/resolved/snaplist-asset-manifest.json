@@ -1,0 +1,198 @@
+{
+  "version": "approved-families-v1-plus-run-rev-delta-v1.1",
+  "scout": [
+    {
+      "file": "assets/pose-01-coaching-photo.png",
+      "source_name": "pose-01-coaching-photo.png",
+      "intrinsic": {
+        "width": 443,
+        "height": 388,
+        "ratio": 1.14
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "ONB-01",
+          "size": 184,
+          "role": "outcome hero"
+        },
+        {
+          "state": "ONB-07",
+          "size": 82,
+          "role": "photo helper"
+        },
+        {
+          "state": "CAP-02",
+          "size": 82,
+          "role": "camera coaching"
+        },
+        {
+          "state": "ONB-09",
+          "size": 140,
+          "role": "capture handoff"
+        },
+        {
+          "state": "ONB-00",
+          "size": 104,
+          "role": "app icon mark"
+        }
+      ]
+    },
+    {
+      "file": "assets/pose-01-uncertain.png",
+      "source_name": "pose-01-uncertain.png",
+      "intrinsic": {
+        "width": 467,
+        "height": 384,
+        "ratio": 1.22
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "ONB-08",
+          "size": 152,
+          "role": "permission recovery"
+        },
+        {
+          "state": "S3",
+          "size": 72,
+          "role": "limited-evidence uncertainty"
+        }
+      ]
+    },
+    {
+      "file": "assets/pose-03-review-photo.png",
+      "source_name": "pose-03-review-photo.png",
+      "alpha": true,
+      "status": "bundled for the wider approved mascot system; use only when a later approved state explicitly calls for it"
+    },
+    {
+      "file": "assets/pose-01-analyzing.png",
+      "intrinsic": {
+        "width": 400,
+        "height": 386,
+        "ratio": 1.04
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "RUN-02",
+          "size_pt": 76,
+          "role": "active processing reassurance"
+        }
+      ]
+    },
+    {
+      "file": "assets/pose-03-retry-review.png",
+      "intrinsic": {
+        "width": 240,
+        "height": 202,
+        "ratio": 1.19
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "RUN-05",
+          "size_pt": 150,
+          "role": "actionable failure/retry"
+        }
+      ]
+    },
+    {
+      "file": "assets/pose-01-uncertain.png",
+      "intrinsic": {
+        "width": 467,
+        "height": 384,
+        "ratio": 1.22
+      },
+      "alpha": true,
+      "allowed": [
+        {
+          "state": "REV-08",
+          "size_pt": 78,
+          "role": "low-evidence uncertainty"
+        }
+      ]
+    }
+  ],
+  "scout_rules": [
+    "Preserve original alpha, colors, silhouette, and intrinsic ratio.",
+    "Never redraw, regenerate, recolor, crop, rotate, mask, or add a rectangular background.",
+    "Place free-standing beside separate copy, never inside a generic card or status row.",
+    "Do not place Scout in the dock, routine Seller Home, ordinary success, or routine photo review."
+  ],
+  "temporary_product_photography": {
+    "status": "review-only",
+    "rule": "Replace with cleared production photography before shipping.",
+    "never_reuse_mobbin_pixels": true,
+    "fixtures": {
+      "home": [
+        "Sony WH-1000XM4",
+        "Keychron K4",
+        "Nike Dunk",
+        "IKEA lamp"
+      ],
+      "pricing": [
+        "Patagonia Better Sweater ¼-Zip",
+        "hand-painted ceramic vase"
+      ],
+      "capture": [
+        "complete smartwatch/watch scene"
+      ],
+      "photo_review_candidate": [
+        "coherent sneaker angles"
+      ],
+      "durable_runs": [
+        "Canon AE-1",
+        "Keychron K4",
+        "Patagonia fleece",
+        "Nike Dunk",
+        "Coach bag",
+        "IKEA lamp",
+        "Canvas tote"
+      ],
+      "identity_correction": [
+        "Canon film camera carried from RUN family"
+      ]
+    }
+  },
+  "icon_intent": {
+    "stroke_range": [
+      1.7,
+      1.9
+    ],
+    "sf_symbol_candidates": [
+      "house",
+      "list.bullet",
+      "camera",
+      "envelope",
+      "chart.line.uptrend.xyaxis",
+      "bell",
+      "gearshape",
+      "chevron.right",
+      "bolt",
+      "arrow.triangle.2.circlepath"
+    ],
+    "rule": "Use a native SF Symbol when it preserves the approved meaning and weight; keep the central Capture glyph custom-consistent if the native symbol cannot match."
+  },
+  "reference_contract": {
+    "purpose": "structural evidence only",
+    "taken_or_adapted": [
+      "hierarchy",
+      "row rhythm",
+      "background-work reassurance",
+      "market-evidence explanation",
+      "permission timing"
+    ],
+    "not_copied": [
+      "photography",
+      "branding",
+      "wording",
+      "navigation",
+      "colors",
+      "illustrations",
+      "ranking claims",
+      "fabricated progress"
+    ]
+  }
+}

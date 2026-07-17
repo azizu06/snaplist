@@ -1,0 +1,115 @@
+{
+  "version": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "base": "snaplist-component-contract.json",
+  "added": {
+    "run_status_row": {
+      "anatomy": [
+        "thumbnail",
+        "item title",
+        "status icon+word",
+        "last meaningful update",
+        "seller consequence/action"
+      ],
+      "minimum_target": [
+        44,
+        44
+      ],
+      "forbidden": [
+        "percentage",
+        "ETA",
+        "raw backend enum",
+        "color-only status"
+      ]
+    },
+    "active_run_detail": {
+      "required": [
+        "source photos",
+        "durable status",
+        "actual stage when known",
+        "leave reassurance",
+        "notification state",
+        "cancel route"
+      ],
+      "mascot": "RUN-02 only"
+    },
+    "compact_run_surface": {
+      "host": "approved Seller Home",
+      "route": "same RUN-02",
+      "forbidden": [
+        "floating chat head",
+        "mascot",
+        "sixth dock destination"
+      ]
+    },
+    "recovery_card": {
+      "variants": [
+        "offline upload",
+        "processing failure",
+        "ambiguous status"
+      ],
+      "rule": "Preserve safe work and bind actions to the existing run."
+    },
+    "cancel_confirmation": {
+      "consequences": [
+        "stop current run",
+        "preserve referenced photos/draft",
+        "restore reserved item only before usable draft"
+      ],
+      "escape": "Keep working",
+      "destructive_color": "native platform semantic; V1 has no measured destructive token"
+    },
+    "haul_progress": {
+      "required": [
+        "per-item durable status",
+        "aggregate counts derived from rows",
+        "partial success",
+        "preserved allowance interruption"
+      ]
+    },
+    "identity_evidence_card": {
+      "fields": [
+        "category",
+        "brand",
+        "model",
+        "variant/size/color",
+        "condition separately"
+      ],
+      "evidence_labels": [
+        "Strong match",
+        "Some details need checking",
+        "Limited evidence"
+      ],
+      "unknown_labels": [
+        "Not found",
+        "Needs checking"
+      ]
+    },
+    "guided_correction_stepper": {
+      "states": [
+        "available",
+        "input",
+        "impact review",
+        "applying",
+        "used"
+      ],
+      "required": [
+        "same-photo-set proof",
+        "explicit seller-edit preserve/replace",
+        "original draft preservation"
+      ]
+    },
+    "seller_edit_choice": {
+      "choices": [
+        "Keep my title",
+        "Replace with a new title"
+      ],
+      "rule": "No apply until every seller-edited dependent field has an explicit choice."
+    },
+    "improve_photos_disclosure": {
+      "manual": "Add/replace listing photos without AI reanalysis",
+      "ai": "New photo-set reanalysis is a new complete run"
+    }
+  },
+  "changed": {},
+  "removed": []
+}

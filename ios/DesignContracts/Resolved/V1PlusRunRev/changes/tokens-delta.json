@@ -1,0 +1,15 @@
+{
+  "version": "snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16",
+  "base": "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
+  "added": {
+    "semantic_roles": {
+      "destructive_confirmation": "native iOS destructive semantic only",
+      "run_checking_fill": "reuse in_progress_fill",
+      "run_failure": "icon + words; do not create an unapproved permanent red palette",
+      "evidence_caution": "reuse caution/caution_fill"
+    }
+  },
+  "changed": {},
+  "removed": [],
+  "note": "No global geometry or brand-color token changed."
+}

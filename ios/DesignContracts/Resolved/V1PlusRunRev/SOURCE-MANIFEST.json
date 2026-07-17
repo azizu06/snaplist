@@ -1,0 +1,43 @@
+{
+  "version": "v1-plus-run-rev-resolved-v1.1-2026-07-16",
+  "source": {
+    "basePackagePath": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
+    "basePackageSHA256": "13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415",
+    "deltaPackagePath": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",
+    "deltaPackageSHA256": "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
+    "verifiedAt": "2026-07-16",
+    "mobileAPIContractPath": "docs/contracts/mobile-api-v1.openapi.json"
+  },
+  "scope": {
+    "approvedStateCount": 42,
+    "approvedOwnerIssues": [206, 207, 208, 209, 211, 212],
+    "candidateOnlyStateIDs": ["CAP-03a", "CAP-03b", "CAP-03c", "CAP-03d", "CAP-03e", "CAP-04"],
+    "withheldStateIDs": ["CAP-05"],
+    "issue205Boundary": "Only the generic registry, tokens, assets, fixture routing, and comparison harness are implemented here. RUN and REV screens remain owned by #211 and #212."
+  },
+  "restrictions": {
+    "temporaryProductPhotography": "review-only and excluded from this vendored tree; never ship it as an app asset",
+    "referenceEvidence": "not vendored; structural evidence only and never reusable pixels",
+    "htmlReferenceCode": "not vendored and must not be ported mechanically to SwiftUI",
+    "scout": "preserve original alpha, colors, silhouette, and intrinsic ratio; never redraw, regenerate, recolor, crop, rotate, mask, or box",
+    "actionBlue": "#3665F3",
+    "destructive": "native platform destructive role only; no permanent design token",
+    "runFailure": "icon plus words; do not introduce permanent red",
+    "cap03Cap04": "candidate-only",
+    "cap05": "withheld"
+  },
+  "resolvedFiles": [
+    {"path":"resolved/snaplist-design-tokens.json","sha256":"cdccb1f2f4dc429d1d3278d0cd8426376e5569692c1620bf70eae1a5a08c6ca2","status":"approved-resolved-contract"},
+    {"path":"resolved/snaplist-component-contract.json","sha256":"0d37f7dde61f7e926c59f653be5441a7b712ac5a05f07df9524fe669be2ae312","status":"approved-resolved-contract"},
+    {"path":"resolved/snaplist-screen-specs.json","sha256":"31ed85960f2a5a4f3676f8f6cf8690c4fb12a91cc859b13aa406f585261bcf58","status":"approved-with-explicit-candidate-and-withheld-boundaries"},
+    {"path":"resolved/snaplist-copy-catalog.json","sha256":"a35af849ab21ce71abc4302560717c85eca3ab1c3377afe4e52f6d34b2f537d3","status":"approved-resolved-contract"},
+    {"path":"resolved/snaplist-interaction-routes.json","sha256":"2c4b212a5d59eded7cd84c76a44132ec0dbf774336628e4781c7404116422db3","status":"approved-resolved-contract"},
+    {"path":"resolved/snaplist-asset-manifest.json","sha256":"699e0533db9d725e6bd4b6d0adf502542ce9f2cc062acf76d3aaa571ef2bf24b","status":"approved-resolved-contract"},
+    {"path":"resolved/snaplist-visual-regression-manifest.json","sha256":"da829ace87e79ee15a7037470eced3dcd4df14a1bdf08208366e1ed9e8c7994f","status":"approved-resolved-contract"}
+  ],
+  "approvedAssets": [
+    {"path":"assets/pose-01-analyzing.png","sha256":"54d5d81e1a4c7a56d71034d32fe3cac789edf777330153c498d8206c2131b610","status":"approved-transparent-scout-run-02"},
+    {"path":"assets/pose-01-uncertain.png","sha256":"97842333f24334530240466e2b8cf0ccf64b7f36918ef0c152db237b87e4e03c","status":"approved-transparent-scout-rev-08"},
+    {"path":"assets/pose-03-retry-review.png","sha256":"7ba319434cb24dba213e3a642139d3834e34c617df53d1f63943a25fee36323a","status":"approved-transparent-scout-run-05"}
+  ]
+}

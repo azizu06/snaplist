@@ -1,0 +1,135 @@
+{
+  "parent_states": [
+    "REV-01",
+    "REV-02",
+    "REV-07",
+    "REV-08"
+  ],
+  "correction_state_machine": {
+    "states": [
+      "available",
+      "input",
+      "impact_review",
+      "applying",
+      "used"
+    ],
+    "transitions": [
+      {
+        "from": "available",
+        "to": "input",
+        "consumes": false
+      },
+      {
+        "from": "input",
+        "to": "impact_review",
+        "consumes": false
+      },
+      {
+        "from": "impact_review",
+        "to": "applying",
+        "consumes": false,
+        "guard": "same fingerprint + remaining=1 + explicit seller-edit decisions"
+      },
+      {
+        "from": "applying",
+        "to": "applying",
+        "consumes": false,
+        "reason": "technical retry"
+      },
+      {
+        "from": "applying",
+        "to": "used",
+        "consumes": true,
+        "reason": "successful correction commit only"
+      }
+    ],
+    "cancel_rule": "Cancel before success preserves original usable draft and remaining=1.",
+    "terminal_rule": "used exposes manual editing only; never a second automatic guided correction."
+  },
+  "immutable_photo_set_fingerprint": {
+    "algorithm": "SHA-256 of the UTF-8 join of sorted lowercase SHA-256 content digests for every original source photo, separated by newline.",
+    "order_semantics": "Reordering or changing cover position does not change the fingerprint; add/remove/replace/content mutation does.",
+    "capture": "Persist the fingerprint on the original usable draft and correction eligibility record.",
+    "apply_guard": "Server recomputes the current photo-set fingerprint and requires exact equality before applying the included correction.",
+    "mismatch": "Keep the original draft and manual editing; explain that AI re-analysis of a changed photo set is a new complete run."
+  },
+  "regeneration_boundary": {
+    "may_regenerate": [
+      "attributes.category",
+      "attributes.brand",
+      "attributes.model",
+      "attributes.variant/specs",
+      "listing.title when seller chooses replace",
+      "listing.fields/item specifics",
+      "listing.description",
+      "price result/evidence"
+    ],
+    "must_preserve": [
+      "source photos",
+      "seller-entered cost",
+      "unrelated manual edits",
+      "seller title when Keep is chosen",
+      "original usable draft audit snapshot"
+    ],
+    "manual_continuation": "Unlimited manual identity, listing, price, and photo edits remain available without consuming another AI run or correction.",
+    "new_photo_set": "Manual photo replacement does not run AI. AI re-analysis of changed photos is a new complete run."
+  },
+  "seller_title_preservation": {
+    "original": "Canon AE-1 35mm — tested, works.",
+    "keep_result": {
+      "title": "Canon AE-1 35mm — tested, works.",
+      "label": "kept",
+      "summary": "Your saved title wording was kept, as you chose."
+    },
+    "replace_result": {
+      "title": "Canon AE-1 Program 35mm SLR Film Camera — Tested",
+      "label": "refreshed",
+      "summary": "SnapList wrote a new title because the seller chose replacement."
+    }
+  },
+  "backend_truth_consumed": {
+    "identity": [
+      "attributes.category",
+      "attributes.brand",
+      "attributes.model",
+      "attributes.condition",
+      "attributes.specs",
+      "identification.label",
+      "identification.confident",
+      "identification.reason",
+      "identification.candidates"
+    ],
+    "pricing": {
+      "canonical_current_code_contract": [
+        "price.suggested",
+        "price.range.min",
+        "price.range.max",
+        "price.sources[].url",
+        "price.sources[].title",
+        "price.sources[].kind",
+        "price.tier",
+        "price.compAgreement"
+      ],
+      "design_derived_fields": [
+        "evidenceQualityLabel derived from signals; never show raw confidence",
+        "soldCount derived from sold-comp sources",
+        "windowDays from dated retained comps",
+        "median/range from robust retained comp set",
+        "selected comp price/date/condition/citation",
+        "estimated payout only when verified fee inputs exist"
+      ],
+      "invariants": [
+        "suggested lies within range",
+        "all non-LLM-only tiers cite sources",
+        "sold comps are not asking prices",
+        "outliers/stale comps follow canonical pricing pipeline",
+        "seller can override price"
+      ]
+    },
+    "source_files_read_only": [
+      "src/lib/pricing/types.ts",
+      "src/lib/pipeline/types.ts",
+      "docs/adr/0001-ebay-public-sold-comps-pricing.md"
+    ]
+  }
+}
