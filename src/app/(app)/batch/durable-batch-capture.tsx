@@ -128,6 +128,7 @@ export function DurableBatchCapture({
           attempt_count: run.attemptCount,
           max_attempts: run.maxAttempts,
           safe_failure_message: run.safeFailureMessage,
+          retention_cleaned_at: null,
           updated_at: run.updatedAt,
         })),
       );

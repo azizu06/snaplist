@@ -26,6 +26,7 @@ export interface PipelineProgressRun {
   attempt_count: number;
   max_attempts: number;
   safe_failure_message: string | null;
+  retention_cleaned_at: string | null;
   updated_at: string;
 }
 
@@ -66,6 +67,17 @@ export function isPipelineProgressTerminal(status: PipelineProgressStatus): bool
 }
 
 export function pipelineProgressView(run: PipelineProgressRun): PipelineProgressView {
+  if (
+    run.retention_cleaned_at !== null
+    && (run.status === "failed" || run.status === "canceled")
+  ) {
+    return {
+      label: "Expired",
+      detail: "This saved run has expired. Start a new capture to try again.",
+      tone: "neutral",
+      pulse: false,
+    };
+  }
   if (run.status === "succeeded") {
     return {
       label: "Ready for review",

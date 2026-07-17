@@ -49,6 +49,7 @@ const PREVIEW_PIPELINE_RUNS: PipelineProgressRun[] = [
     attempt_count: 2,
     max_attempts: 3,
     safe_failure_message: "SnapList will retry this listing.",
+    retention_cleaned_at: null,
     updated_at: "2026-07-17T00:00:00.000Z",
   },
 ];

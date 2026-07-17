@@ -15,6 +15,7 @@ const BASE: PipelineProgressRun = {
   attempt_count: 0,
   max_attempts: 3,
   safe_failure_message: null,
+  retention_cleaned_at: null,
   updated_at: "2026-07-15T12:00:00.000Z",
 };
 
@@ -48,6 +49,19 @@ describe("pipeline progress copy", () => {
     expect(
       pipelineProgressView({ ...BASE, status: "succeeded", stage: "completed" }).detail,
     ).toMatch(/review it before anything posts/i);
+  });
+
+  it("makes a retention-cleaned terminal run explicitly non-retryable", () => {
+    const view = pipelineProgressView({
+      ...BASE,
+      status: "failed",
+      retention_cleaned_at: "2026-07-16T12:00:00.000Z",
+    });
+
+    expect(view).toMatchObject({
+      label: "Expired",
+      detail: "This saved run has expired. Start a new capture to try again.",
+    });
   });
 });
 

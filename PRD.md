@@ -320,6 +320,15 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   capability. Worker reads and writes remain RLS-scoped or use audited run-derived RPCs that never
   trust a tenant id from a message/caller and cannot cross the stored run → item → listing ownership
   relationships. A generic service-role domain client is prohibited. See ADR-0007.
+- **Operations are bounded and inactive by default.** The provider-neutral worker and maintenance
+  HTTP seams fail closed without a bearer secret; no migration activates hosted Cron. The owner-only
+  Supabase Cron + pg_net template reads its origin and secret from Vault. V1 scheduled requests claim
+  one message with a 300-second worker lease, use three attempts with bounded backoff, hourly retention, and structured
+  queue/run/cleanup health. Successful listing photos are retained; abandoned captures become
+  accounting tombstones only after 30 days; exact Storage cleanup jobs retry five times before a
+  visible dead letter. Retention-cleaned failed/canceled runs cannot be replayed without their photos;
+  the retry seam fails closed and directs the seller to a new capture. See
+  `docs/runbooks/durable-pipeline-operations.md`.
 
 ### Listing generation (per-platform)
 - **One Zod-validated attribute core → many surface renderings** via per-platform prompt + template.

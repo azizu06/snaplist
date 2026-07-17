@@ -28,6 +28,7 @@ function run(
     max_attempts: 3,
     safe_failure_message:
       status === "failed" ? "Listing preparation stopped." : null,
+    retention_cleaned_at: null,
     updated_at: `2026-07-17T00:00:0${index}.000Z`,
   };
 }

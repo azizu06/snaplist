@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PipelineResult } from "@/lib/pipeline";
+import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
 import type { PipelineQueue } from "./queue";
 import type { PipelineWorkerCheckpoint } from "./checkpoint";
@@ -35,10 +36,18 @@ export class PipelineWorkerFailure extends Error {
 
 const optionsSchema = z
   .object({
-    batchSize: z.number().int().min(1).max(10).default(5),
-    visibilityTimeoutSeconds: z.number().int().min(1).max(3_600).default(300),
-    retryBaseSeconds: z.number().int().min(1).max(3_600).default(30),
-    retryMaxSeconds: z.number().int().min(1).max(3_600).default(900),
+    batchSize: z.number().int().min(1).max(10).default(
+      PIPELINE_OPERATIONS_POLICY.worker.batchSize,
+    ),
+    visibilityTimeoutSeconds: z.number().int().min(1).max(3_600).default(
+      PIPELINE_OPERATIONS_POLICY.worker.visibilityTimeoutSeconds,
+    ),
+    retryBaseSeconds: z.number().int().min(1).max(3_600).default(
+      PIPELINE_OPERATIONS_POLICY.worker.retryBaseSeconds,
+    ),
+    retryMaxSeconds: z.number().int().min(1).max(3_600).default(
+      PIPELINE_OPERATIONS_POLICY.worker.retryMaxSeconds,
+    ),
   })
   .strict();
 

@@ -1,7 +1,7 @@
 # Durable listing-pipeline architecture
 
-> **Ratified target:** ADR-0007 and epic #157. Issues #158 and #160 provide the queue foundation and
-> protected worker; upload and batch keep their current behavior until issue #159 integrates staging.
+> **Ratified target:** ADR-0007 and epic #157. Issues #158–#162 provide the queue foundation,
+> durable producer/worker/recovery flow, and inactive-by-default operational contract.
 
 ## Responsibility split
 
@@ -107,6 +107,37 @@ Transient failures persist safe text and exponential backoff before deferring th
 Validation errors and exhausted attempts become terminal failures. The worker deletes a message only
 after atomic draft completion or a durable terminal outcome. Successful completion retains exactly
 one pre-staged item, one listing, and one prediction log per run.
+
+## Scheduler, retention, and health
+
+The application exposes scheduler-neutral, bearer-protected worker and maintenance routes. No
+migration activates them. The owner-only template uses Supabase Cron + pg_net with an origin and
+bearer secret read from Vault; the same HTTP contract can be invoked by another scheduler without
+changing queue or worker behavior.
+
+Each scheduled worker request claims one message with a 300-second visibility/lease window, retries at
+30 seconds with bounded exponential backoff, and uses three attempts by default. A one-minute cadence
+plus five-minute request ceiling bounds scheduled overlap at five independent requests; each claimed
+run receives its full visibility window, while PGMQ visibility and per-run fencing remain the real
+duplicate-delivery defense. The transport-neutral consumer still supports explicit bounded batches for
+offline partial-completion acceptance.
+
+Hourly maintenance performs a short, concurrency-fenced Postgres preparation followed by leased
+Storage cleanup outside the transaction. Staging paths are deleted only when no item references them.
+Abandoned failed/canceled captures are tombstoned only after every terminal attempt is 30 days old and
+no listing or active/successful run protects the item. Retention locks and re-checks the item’s run rows,
+then marks them non-retryable in the same transaction that queues photo cleanup, so a concurrent seller
+retry either wins and protects the photos or waits and fails closed. Successful listing photos are never
+cleanup candidates. Terminal run identities
+remain for notifications and credit accounting while checkpoint/capture metadata is pruned. A
+tombstoned failed/canceled run is explicitly non-retryable: the authenticated retry RPC fails closed,
+and seller-facing progress directs the seller to start a new capture instead of enqueueing a run whose
+photos no longer exist.
+
+The maintenance response and structured log expose PGMQ depth/oldest age, retrying and terminal runs,
+expired worker leases, cleanup backlog/dead letters, and the last cleanup outcome. See
+`docs/runbooks/durable-pipeline-operations.md` for exact policy, local operation, Free-plan accounting,
+queue drain, replay, rollback, and owner-only hosted activation.
 
 ## Issue #159 integration contract
 

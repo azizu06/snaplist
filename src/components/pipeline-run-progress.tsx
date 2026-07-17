@@ -60,6 +60,9 @@ export function PipelineProgressCard({
   const view = pipelineProgressView(run);
   const steps = pipelineProgressSteps(run);
   const terminal = isPipelineProgressTerminal(run.status);
+  const retryExpired =
+    run.retention_cleaned_at !== null
+    && (run.status === "failed" || run.status === "canceled");
 
   return (
     <section
@@ -162,7 +165,9 @@ export function PipelineProgressCard({
               {refreshing ? "Refreshing" : "Refresh status"}
             </button>
           ) : null}
-          {(run.status === "failed" || run.status === "canceled") && onRetryRun ? (
+          {(run.status === "failed" || run.status === "canceled")
+          && !retryExpired
+          && onRetryRun ? (
             <button
               type="button"
               onClick={onRetryRun}
@@ -171,6 +176,14 @@ export function PipelineProgressCard({
             >
               {actionPending ? "Starting" : "Try again"}
             </button>
+          ) : null}
+          {retryExpired ? (
+            <Link
+              href="/upload"
+              className="rounded-md bg-primary px-3 py-1.5 text-[12.5px] font-semibold text-primary-fg transition-colors hover:bg-primary-hover motion-reduce:transition-none"
+            >
+              Start new capture
+            </Link>
           ) : null}
           {(run.status === "queued" || run.status === "running" || run.status === "retrying") && onCancelRun ? (
             <button

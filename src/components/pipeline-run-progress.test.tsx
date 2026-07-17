@@ -16,6 +16,7 @@ const RUN: PipelineProgressRun = {
   attempt_count: 1,
   max_attempts: 3,
   safe_failure_message: null,
+  retention_cleaned_at: null,
   updated_at: "2026-07-15T12:00:00.000Z",
 };
 
@@ -94,6 +95,28 @@ describe("PipelineProgressCard", () => {
     expect(html).toContain("Try again");
     expect(html).toContain("Your photos are still saved");
     expect(html).not.toContain("Cancel processing");
+  });
+
+  it("directs an expired terminal run to recapture instead of retrying", () => {
+    const html = renderToStaticMarkup(
+      <PipelineProgressCard
+        run={{
+          ...RUN,
+          status: "failed",
+          safe_failure_message:
+            "Price research stopped before the draft was ready. Your photos are still saved.",
+          retention_cleaned_at: "2026-07-16T12:00:00.000Z",
+        }}
+        connection="live"
+        onRetryRun={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Expired");
+    expect(html).toContain("Start new capture");
+    expect(html).toContain('href="/upload"');
+    expect(html).not.toContain("Try again");
+    expect(html).not.toContain("Your photos are still saved");
   });
 });
 

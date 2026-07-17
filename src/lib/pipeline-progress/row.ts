@@ -11,8 +11,9 @@ export const pipelineProgressRunSchema = z.object({
   attempt_count: z.number().int().min(0),
   max_attempts: z.number().int().positive(),
   safe_failure_message: z.string().min(1).max(500).nullable(),
+  retention_cleaned_at: z.string().min(1).nullable(),
   updated_at: z.string().min(1),
 }) satisfies z.ZodType<PipelineProgressRun>;
 
 export const PIPELINE_PROGRESS_SELECT =
-  "id,user_id,item_id,listing_id,status,stage,attempt_count,max_attempts,safe_failure_message,updated_at";
+  "id,user_id,item_id,listing_id,status,stage,attempt_count,max_attempts,safe_failure_message,retention_cleaned_at,updated_at";
