@@ -381,7 +381,17 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 - **Lightweight-but-real eval harness** over a fixed gold set (~30–50 hero-domain items): ID field accuracy, pricing-within-band (median error + % within band), **confidence calibration** (reliability bucketing), and **listing quality** via a *validated* LLM-judge rubric. Script first; CI later (Phase 4). Gold set doubles as demo set and overlaps the seed corpus.
 
 ### Deploy
-- **Vercel** (Next.js App Router + TypeScript). Docker/CI/observability layered in Phase 4 as Boot.dev coursework lands.
+- **Split marketing from trusted native compute.** Keep the public marketing site on Vercel. The
+  development target is $0 local Supabase plus the provider-neutral local Node API/worker. Issue #195
+  proves health/session/internal-consume composition and durable worker behavior; the enqueue/RLS v1
+  API remains contract-only under #159. After the owning API/auth issues land, a remote pre-revenue
+  test may use Supabase Free plus an optional sleeping Render Free API while the Node worker runs only
+  during supervised local sessions; queued work honestly waits while that worker is offline. Railway
+  is the deferred paid target only after external TestFlight needs reliable unattended processing, a
+  measured free-host limit blocks validation, or first revenue/payment activation justifies an
+  owner-approved commitment. Supabase continues to own Postgres, Storage, Realtime, and PGMQ. This
+  decision does not authorize provider setup, billing, deployment, DNS, hosted Cron, credentials, or
+  hosted-data mutation.
 
 ## Testing Decisions
 
