@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createSupabaseNativeSubscriptionBridge } from "@/lib/billing/revenuecat-store";
 import { createMobileApiHandler } from "./app";
 
 const summary = {
@@ -156,6 +157,58 @@ describe("mobile API v1 provider-neutral handler", () => {
         gracePeriodEnd: "2026-08-08T00:00:00.000Z",
         transitionState: "reconciled",
         legacyStripeStatus: "active",
+      },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("returns an included allowance without leaking unbounded database timestamps", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          billing_source: "included",
+          status: "included",
+          remaining_items: 0,
+          period_start: "-infinity",
+          period_end: "infinity",
+          grace_period_end: null,
+          transition_state: "not_required",
+          legacy_stripe_status: null,
+        },
+      ],
+      error: null,
+    });
+    const subscriptionBridge = createSupabaseNativeSubscriptionBridge(
+      { rpc } as never,
+      {
+        signingSecret: "offline-webhook-secret",
+        authorization: "Bearer offline",
+        appId: "app_test",
+        entitlementId: "pro",
+        monthlyProductId: "snaplist-pro-fixture",
+        monthlyAllowance: 24,
+      },
+    );
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_native" }),
+      subscriptionBridge,
+    })(
+      new Request("http://localhost/v1/entitlements/ai-items", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        billingSource: "included",
+        status: "included",
+        remainingItems: 0,
+        periodStart: null,
+        periodEnd: null,
+        gracePeriodEnd: null,
+        transitionState: "not_required",
+        legacyStripeStatus: null,
       },
       meta: { requestId: "req_test" },
     });

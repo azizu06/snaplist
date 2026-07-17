@@ -6,7 +6,10 @@ import {
   resolveRevenueCatServerConfig,
   type RevenueCatEntitlementStore,
 } from "./revenuecat";
-import { createSupabaseRevenueCatEntitlementStore } from "./revenuecat-store";
+import {
+  createSupabaseNativeSubscriptionBridge,
+  createSupabaseRevenueCatEntitlementStore,
+} from "./revenuecat-store";
 
 const secret = "offline-webhook-secret";
 const now = new Date("2026-07-17T12:00:00.000Z");
@@ -189,6 +192,43 @@ describe("RevenueCat persistence composition", () => {
       p_original_app_user_id: "user_123",
       p_original_transaction_id: "original-1",
       p_revenuecat_app_user_id: "user_123",
+    });
+  });
+
+  it("normalizes the included allowance's unbounded timestamps for the mobile contract", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: [
+        {
+          billing_source: "included",
+          status: "included",
+          remaining_items: 0,
+          period_start: "-infinity",
+          period_end: "infinity",
+          grace_period_end: null,
+          transition_state: "not_required",
+          legacy_stripe_status: null,
+        },
+      ],
+      error: null,
+    });
+    const bridge = createSupabaseNativeSubscriptionBridge({ rpc } as never, {
+      signingSecret: secret,
+      authorization: "Bearer offline",
+      appId: "app_test",
+      entitlementId: "pro",
+      monthlyProductId: "snaplist-pro-fixture",
+      monthlyAllowance: 24,
+    });
+
+    await expect(bridge.entitlementFor("user_123")).resolves.toEqual({
+      billingSource: "included",
+      status: "included",
+      remainingItems: 0,
+      periodStart: null,
+      periodEnd: null,
+      gracePeriodEnd: null,
+      transitionState: "not_required",
+      legacyStripeStatus: null,
     });
   });
 });

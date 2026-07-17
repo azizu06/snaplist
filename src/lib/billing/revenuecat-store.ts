@@ -48,6 +48,12 @@ function rowFrom(data: unknown): Record<string, unknown> | null {
   return row && typeof row === "object" ? (row as Record<string, unknown>) : null;
 }
 
+function finiteTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "infinity" || normalized === "-infinity" ? null : value;
+}
+
 export function createSupabaseRevenueCatEntitlementStore(
   admin: SupabaseClient,
 ): RevenueCatEntitlementStore {
@@ -168,10 +174,9 @@ export function createSupabaseNativeSubscriptionBridge(
         billingSource: row.billing_source as VerifiedAiItemEntitlement["billingSource"],
         status: row.status as VerifiedAiItemEntitlement["status"],
         remainingItems: Number(row.remaining_items),
-        periodStart: typeof row.period_start === "string" ? row.period_start : null,
-        periodEnd: typeof row.period_end === "string" ? row.period_end : null,
-        gracePeriodEnd:
-          typeof row.grace_period_end === "string" ? row.grace_period_end : null,
+        periodStart: finiteTimestamp(row.period_start),
+        periodEnd: finiteTimestamp(row.period_end),
+        gracePeriodEnd: finiteTimestamp(row.grace_period_end),
         transitionState:
           typeof row.transition_state === "string"
             ? (row.transition_state as VerifiedAiItemEntitlement["transitionState"])
