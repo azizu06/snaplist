@@ -25,6 +25,19 @@
         }
       }
     },
+    "/v1/home": {
+      "get": {
+        "operationId": "getHome",
+        "x-owner-issue": 208,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Tenant-scoped Seller Home projection from durable server truth", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HomeEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "description": "The read-only Home projection is temporarily unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
     "/v1/guest/attestations": {
       "post": {
         "operationId": "verifyGuestAttestation",
@@ -151,7 +164,7 @@
   },
   "components": {
     "securitySchemes": {
-      "ClerkBearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "Server verifies Clerk issuer, audience, signature, expiry, and sub. The same token is forwarded only to an RLS-scoped Supabase client." },
+      "ClerkBearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "Server verifies Clerk issuer, signature, expiry, and subject, and enforces configured authorized-party validation when an azp claim is present. The same token is forwarded only to an RLS-scoped Supabase client." },
       "GuestBearer": { "type": "http", "scheme": "bearer", "description": "Opaque, short-lived guest capability minted only after App Attest verification." },
       "InternalBearer": { "type": "http", "scheme": "bearer", "description": "Scheduler/worker secret or stronger platform identity; never available to SwiftUI." }
     },
@@ -168,6 +181,14 @@
       "ErrorEnvelope": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["unauthorized", "forbidden", "invalid_request", "not_found", "method_not_allowed", "conflict", "rate_limited", "internal_error"] }, "message": { "type": "string" }, "requestId": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } } } },
       "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "HomeEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/HomeProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "HomeProjection": { "type": "object", "additionalProperties": false, "required": ["revision", "sellerState", "unreadNotificationCount", "summary", "attention", "currentRun", "readyToFinish", "listings", "recentSearches"], "properties": { "revision": { "type": "integer", "minimum": 0 }, "sellerState": { "type": "string", "enum": ["active", "newSeller"] }, "unreadNotificationCount": { "type": "integer", "minimum": 0 }, "summary": { "$ref": "#/components/schemas/HomeSummary" }, "attention": { "type": "array", "items": { "$ref": "#/components/schemas/HomeAttentionTask" } }, "currentRun": { "oneOf": [{ "$ref": "#/components/schemas/HomeCurrentRun" }, { "type": "null" }] }, "readyToFinish": { "type": "array", "items": { "$ref": "#/components/schemas/HomeFinishItem" } }, "listings": { "type": "array", "items": { "$ref": "#/components/schemas/HomeListing" } }, "recentSearches": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },
+      "HomeSummary": { "type": "object", "additionalProperties": false, "required": ["active", "drafts", "orders"], "properties": { "active": { "type": "integer", "minimum": 0 }, "drafts": { "type": "integer", "minimum": 0 }, "orders": { "type": ["integer", "null"], "minimum": 0 } } },
+      "HomeAttentionTask": { "type": "object", "additionalProperties": false, "required": ["id", "itemTitle", "kind", "status", "detail", "actionLabel", "destination"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemTitle": { "type": "string", "minLength": 1 }, "kind": { "type": "string", "enum": ["shipping", "message", "offer", "warning", "pricing"] }, "status": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "actionLabel": { "type": "string", "minLength": 1 }, "destination": { "$ref": "#/components/schemas/HomeDestination" } } },
+      "HomeDestination": { "type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": { "kind": { "type": "string", "enum": ["order", "conversation", "publishIssue", "draft"] }, "id": { "type": "string", "format": "uuid" } } },
+      "HomeCurrentRun": { "type": "object", "additionalProperties": false, "required": ["id", "itemTitle", "stageLabel", "reassurance", "progress"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemTitle": { "type": "string", "minLength": 1 }, "stageLabel": { "type": "string", "minLength": 1 }, "reassurance": { "type": "string", "minLength": 1 }, "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 1 } } },
+      "HomeFinishItem": { "type": "object", "additionalProperties": false, "required": ["id", "title", "detail"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 } } },
+      "HomeListing": { "type": "object", "additionalProperties": false, "required": ["id", "title", "lifecycle", "statusLabel", "detail", "price"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "lifecycle": { "type": "string", "enum": ["active", "draft", "sold", "needsAttention"] }, "statusLabel": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "price": { "type": ["string", "null"] } } },
       "GuestAttestationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["attestationId", "status"], "properties": { "attestationId": { "type": "string", "format": "uuid" }, "status": { "const": "pending_verification" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "RevenueCatConfigurationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["configured", "appUserId"], "properties": { "configured": { "type": "boolean" }, "appUserId": { "type": "string" }, "publicSdkKey": { "type": "string" }, "entitlementId": { "type": "string" }, "monthlyProductId": { "type": "string" }, "offeringId": { "type": "string" }, "transitionState": { "type": "string", "enum": ["not_required", "required", "reconciled"] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["billingSource", "status", "remainingItems", "periodStart", "periodEnd", "gracePeriodEnd", "transitionState", "legacyStripeStatus"], "properties": { "billingSource": { "type": "string", "enum": ["included", "storekit", "none"] }, "status": { "type": "string", "enum": ["included", "active", "grace", "billing_retry", "expired", "revoked", "refunded", "ambiguous", "unconfigured"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": ["string", "null"], "format": "date-time" }, "periodEnd": { "type": ["string", "null"], "format": "date-time" }, "gracePeriodEnd": { "type": ["string", "null"], "format": "date-time" }, "transitionState": { "type": ["string", "null"], "enum": ["not_required", "required", "reconciled", null] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },

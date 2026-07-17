@@ -121,6 +121,136 @@ final class HomeFeatureTests: XCTestCase {
         XCTAssertEqual(store.freshness, .unavailable)
     }
 
+    func testStandardSnapListAppCompositionReachesAuthenticatedHomeRoute() async throws {
+        let session = makeHomeURLSession { request in
+            XCTAssertEqual(request.url?.path, "/v1/home")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer signed-jwt")
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(Self.releaseHomeEnvelope.utf8)
+            )
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            homeAuthentication: ClerkHomeAuthentication(
+                session: TestClerkSessionToken(token: "signed-jwt")
+            ),
+            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
+            homeURLSession: session
+        )
+
+        await app.homeStore.load()
+        app.homeStore.stopUpdates()
+
+        XCTAssertEqual(app.homeStore.loadState, .loaded)
+        XCTAssertEqual(app.homeStore.model?.revision, 41)
+        XCTAssertEqual(app.homeStore.model?.listings.first?.title, "Canon AE-1 film camera")
+    }
+
+    func testStandardSnapListAppCompositionKeepsServerFailureHonest() async {
+        let session = makeHomeURLSession { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 503,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"error":{"code":"internal_error","message":"Home is temporarily unavailable.","requestId":"req_home"}}"#.utf8)
+            )
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            homeAuthentication: ClerkHomeAuthentication(
+                session: TestClerkSessionToken(token: "signed-jwt")
+            ),
+            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
+            homeURLSession: session
+        )
+
+        await app.homeStore.load()
+
+        XCTAssertNil(app.homeStore.model)
+        XCTAssertEqual(app.homeStore.loadState, .failed(.temporarilyUnavailable))
+        XCTAssertEqual(app.homeStore.freshness, .serverRefresh)
+    }
+
+    func testReleaseAPIOriginUsesHTTPSInfoValueAndFailsClosedWithoutOne() {
+        XCTAssertNil(
+            HomeRepositoryFactory.resolveAPIOrigin(
+                environment: [:],
+                bundleValue: nil,
+                allowsLocalDevelopment: false
+            )
+        )
+        XCTAssertNil(
+            HomeRepositoryFactory.resolveAPIOrigin(
+                environment: ["SNAPLIST_API_ORIGIN": "http://127.0.0.1:3001"],
+                bundleValue: nil,
+                allowsLocalDevelopment: false
+            )
+        )
+        XCTAssertEqual(
+            HomeRepositoryFactory.resolveAPIOrigin(
+                environment: [:],
+                bundleValue: "https://api.snaplist.example",
+                allowsLocalDevelopment: false
+            ),
+            URL(string: "https://api.snaplist.example")
+        )
+    }
+
+    func testLocalhostAPIOriginRequiresExplicitLocalDevelopmentConfiguration() {
+        XCTAssertNil(
+            HomeRepositoryFactory.resolveAPIOrigin(
+                environment: [:],
+                bundleValue: nil,
+                allowsLocalDevelopment: true
+            )
+        )
+        XCTAssertEqual(
+            HomeRepositoryFactory.resolveAPIOrigin(
+                environment: ["SNAPLIST_API_ORIGIN": "http://127.0.0.1:3001"],
+                bundleValue: nil,
+                allowsLocalDevelopment: true
+            ),
+            URL(string: "http://127.0.0.1:3001")
+        )
+        XCTAssertNil(
+            HomeRepositoryFactory.resolveAPIOrigin(
+                environment: ["SNAPLIST_API_ORIGIN": "http://api.snaplist.example"],
+                bundleValue: nil,
+                allowsLocalDevelopment: true
+            )
+        )
+    }
+
+    func testStandardCompositionFailsClosedBeforeTransportWithoutConfiguredOrigin() async {
+        let session = makeHomeURLSession { _ in
+            XCTFail("A missing Release API origin must not attempt transport.")
+            throw HomeRepositoryError.operationUnavailable
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            homeAuthentication: ClerkHomeAuthentication(
+                session: TestClerkSessionToken(token: "signed-jwt")
+            ),
+            homeAPIOrigin: nil,
+            homeURLSession: session
+        )
+
+        await app.homeStore.load()
+
+        XCTAssertNil(app.homeStore.model)
+        XCTAssertEqual(app.homeStore.loadState, .failed(.operationUnavailable))
+    }
+
     func testHomeActionsRouteToTypedFutureDestinations() {
         let runID = UUID(uuidString: "20800000-0000-0000-0000-000000000010")!
         let orderID = UUID(uuidString: "20800000-0000-0000-0000-000000000011")!
@@ -162,6 +292,71 @@ final class HomeFeatureTests: XCTestCase {
         let didSatisfyPredicate = await predicate()
         XCTAssertTrue(didSatisfyPredicate, file: file, line: line)
     }
+
+    private func makeHomeURLSession(
+        handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> URLSession {
+        HomeURLProtocolStub.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HomeURLProtocolStub.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private static let releaseHomeEnvelope = #"""
+    {
+      "data": {
+        "revision": 41,
+        "sellerState": "active",
+        "unreadNotificationCount": 1,
+        "summary": { "active": 1, "drafts": 0, "orders": 0 },
+        "attention": [],
+        "currentRun": null,
+        "readyToFinish": [],
+        "listings": [
+          {
+            "id": "20800000-0000-4000-8000-000000000040",
+            "title": "Canon AE-1 film camera",
+            "lifecycle": "active",
+            "statusLabel": "Live",
+            "detail": "eBay · Listed",
+            "price": "$210"
+          }
+        ],
+        "recentSearches": []
+      },
+      "meta": { "requestId": "req_home_release" }
+    }
+    """#
+}
+
+private struct TestClerkSessionToken: ClerkSessionTokenProviding {
+    let token: String?
+
+    func sessionToken() async throws -> String? { token }
+}
+
+private final class HomeURLProtocolStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: HomeRepositoryError.operationUnavailable)
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
 
 private enum TestHomeRepositoryError: Error {

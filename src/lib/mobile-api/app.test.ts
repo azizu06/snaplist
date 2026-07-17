@@ -79,6 +79,73 @@ describe("mobile API v1 provider-neutral handler", () => {
     });
   });
 
+  it("returns the tenant-scoped Home projection for the verified native seller", async () => {
+    const homeProjection = {
+      forSeller: vi.fn().mockResolvedValue({
+        revision: 12,
+        sellerState: "active",
+        unreadNotificationCount: 1,
+        summary: { active: 1, drafts: 0, orders: 0 },
+        attention: [],
+        currentRun: null,
+        readyToFinish: [],
+        listings: [
+          {
+            id: "20800000-0000-4000-8000-000000000040",
+            title: "Canon AE-1 film camera",
+            lifecycle: "active",
+            statusLabel: "Live",
+            detail: "eBay · Listed",
+            price: "$210",
+          },
+        ],
+        recentSearches: [],
+      }),
+    };
+    const authenticate = vi.fn().mockResolvedValue({ userId: "user_native" });
+
+    const response = await handler({ authenticate, homeProjection })(
+      new Request("http://localhost/v1/home", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledWith("signed-jwt");
+    expect(homeProjection.forSeller).toHaveBeenCalledWith({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        revision: 12,
+        listings: [{ title: "Canon AE-1 film camera", lifecycle: "active" }],
+      },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("fails Home closed without auth or a readable server projection", async () => {
+    const homeProjection = { forSeller: vi.fn() };
+    const unauthenticated = await handler({ homeProjection })(
+      new Request("http://localhost/v1/home"),
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(homeProjection.forSeller).not.toHaveBeenCalled();
+
+    const unavailable = await handler({
+      homeProjection: {
+        forSeller: vi.fn().mockRejectedValue(new Error("database unavailable")),
+      },
+    })(
+      new Request("http://localhost/v1/home", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+    expect(unavailable.status).toBe(503);
+    expect(JSON.stringify(await unavailable.json())).not.toContain("database unavailable");
+  });
+
   it("binds RevenueCat only to the verified Clerk principal and ignores a body user id", async () => {
     const configurationFor = vi.fn().mockResolvedValue({
       configured: true,

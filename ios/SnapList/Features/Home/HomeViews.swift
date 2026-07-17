@@ -470,15 +470,18 @@ private struct HomeSummaryCards: View {
         HStack(spacing: 8) {
             card(value: summary.active, label: "Active") { openRoute(.listings(.active)) }
             card(value: summary.drafts, label: "Drafts") { openRoute(.listings(.drafts)) }
-            card(value: summary.orders, label: summary.orders == 1 ? "Order" : "Orders") { openRoute(.orders) }
+            card(value: summary.orders, label: summary.orders == 1 ? "Order" : "Orders") {
+                guard summary.orders != nil else { return }
+                openRoute(.orders)
+            }
         }
         .padding(.horizontal, SnapListMetrics.screenGutter)
     }
 
-    private func card(value: Int, label: String, action: @escaping () -> Void) -> some View {
+    private func card(value: Int?, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(value.formatted())
+                Text(value?.formatted() ?? "—")
                     .font(.system(size: 18, weight: .bold))
                     .monospacedDigit()
                 Text(label)
@@ -492,13 +495,14 @@ private struct HomeSummaryCards: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .disabled(value == nil)
         .background(.white)
         .clipShape(.rect(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(SnapListColorToken.hairline.color, lineWidth: 1)
         }
-        .accessibilityLabel("\(value) \(label)")
+        .accessibilityLabel(value.map { "\($0) \(label)" } ?? "\(label) unavailable")
     }
 }
 
@@ -640,8 +644,14 @@ private struct HomeCurrentRunCard: View {
                         .foregroundStyle(Color(hex: "#9AA0A8"))
                 }
 
-                ProgressView(value: run.progress ?? 0.35)
-                    .tint(SnapListColorToken.action.color)
+                if let progress = run.progress {
+                    ProgressView(value: progress)
+                        .tint(SnapListColorToken.action.color)
+                } else {
+                    ProgressView()
+                        .tint(SnapListColorToken.action.color)
+                        .accessibilityLabel("Current stage in progress")
+                }
 
                 Text(run.reassurance)
                     .snapListTypography(.metadata)

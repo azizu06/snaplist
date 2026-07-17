@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { homeProjectionSchema } from "@/lib/home/projection";
 import { pipelineConsumerSummarySchema } from "./worker-summary";
 
 export const MOBILE_API_VERSION = "v1" as const;
@@ -50,6 +51,10 @@ export const sessionEnvelopeSchema = z
     data: z.object({ userId: z.string().min(1) }).strict(),
     meta: apiMetaSchema,
   })
+  .strict();
+
+export const homeProjectionEnvelopeSchema = z
+  .object({ data: homeProjectionSchema, meta: apiMetaSchema })
   .strict();
 
 export const revenueCatConfigurationEnvelopeSchema = z

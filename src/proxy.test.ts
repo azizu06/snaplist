@@ -19,7 +19,7 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
   };
 });
 
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
 describe("auth proxy", () => {
   afterEach(() => {
@@ -44,5 +44,14 @@ describe("auth proxy", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-next")).toBe("1");
     expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("keeps only the self-authenticating Home route outside cookie middleware", () => {
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/v1/home")).toBe(false);
+    expect(matcher.test("/v1/home/")).toBe(false);
+    expect(matcher.test("/v1/home-other")).toBe(true);
+    expect(matcher.test("/dashboard")).toBe(true);
   });
 });

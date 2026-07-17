@@ -8,7 +8,7 @@ enum HomeSellerState: Hashable, Sendable {
 struct HomeSummary: Hashable, Sendable {
     let active: Int
     let drafts: Int
-    let orders: Int
+    let orders: Int?
 }
 
 enum HomeAttentionDestination: Hashable, Sendable {

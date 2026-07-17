@@ -44,7 +44,7 @@ enum HomeFixtures {
             itemTitle: "Canon film camera · updated just now",
             stageLabel: "Finding recent sold comps",
             reassurance: "You can leave — we’ll notify you when it’s ready.",
-            progress: 0.35
+            progress: nil
         ),
         readyToFinish: [
             HomeFinishItem(id: id(30), title: "Keychron K4 Keyboard", detail: "Draft · No price yet"),
@@ -74,7 +74,7 @@ enum HomeFixtures {
             itemTitle: "Sony lens · updated just now",
             stageLabel: "Writing your listing",
             reassurance: "You can leave — we’ll notify you when it’s ready.",
-            progress: 0.62
+            progress: nil
         ),
         readyToFinish: [],
         listings: []

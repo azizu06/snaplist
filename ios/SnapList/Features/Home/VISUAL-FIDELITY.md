@@ -21,9 +21,17 @@ Justified native deltas:
   Temporary review photography is intentionally absent from shipping assets.
 - Active Home states include a native 44-point search control so the approved
   HOME-04 listing search and filters are reachable outside visual fixtures.
+- HOME-01 and HOME-03 use a native indeterminate progress indicator alongside
+  the truthful durable stage. The golden's determinate bar is not retained
+  because `home_in_progress.forbidden` explicitly prohibits a percentage derived
+  from stage alone; the server now emits `progress: null` until measured progress
+  exists.
 - SwiftUI text metrics, native control focus, and accessibility touch targets
   introduce small line-wrap and spacing differences while preserving hierarchy.
 
 The canonical actuals, references, side-by-sides, and 50 percent overlays were
 generated under `/private/tmp/snaplist-issue208-visual/` for review evidence and
 are intentionally not bundled into the application.
+
+The 2026-07-17 re-audit recapture passed the same canonical four-state simulator
+test in `/private/tmp/SnapList-208-Audit-Home-UI-Visual-20260717.xcresult`.

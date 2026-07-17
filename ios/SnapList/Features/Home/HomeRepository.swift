@@ -11,8 +11,19 @@ protocol HomeRepository: Sendable {
     func updates() async -> AsyncThrowingStream<HomeModel, Error>
 }
 
+protocol HomeAuthenticationProviding: Sendable {
+    /// Returns a fresh opaque Clerk bearer. Authentication integrations own
+    /// refresh and storage; Home never persists or inspects the credential.
+    func bearerToken() async throws -> String
+}
+
 enum HomeRepositoryFactory {
-    static func make(configuration: LaunchConfiguration) -> any HomeRepository {
+    static func make(
+        configuration: LaunchConfiguration,
+        apiOrigin: URL? = defaultAPIOrigin,
+        authentication: any HomeAuthenticationProviding,
+        session: URLSession = .shared
+    ) -> any HomeRepository {
 #if DEBUG
         if configuration.usesZeroNetworkFixtures {
             return HomeFixtureRepository(
@@ -20,12 +31,270 @@ enum HomeRepositoryFactory {
             )
         }
 #endif
-        return UnavailableHomeRepository()
+        guard let apiOrigin else {
+            return UnavailableHomeRepository()
+        }
+        return AuthenticatedServerHomeRepository(
+            apiOrigin: apiOrigin,
+            authentication: authentication,
+            session: session
+        )
+    }
+
+    static var defaultAPIOrigin: URL? {
+        resolveAPIOrigin(
+            environment: ProcessInfo.processInfo.environment,
+            bundleValue: Bundle.main.object(forInfoDictionaryKey: "SnapListAPIOrigin") as? String,
+            allowsLocalDevelopment: allowsLocalDevelopment
+        )
+    }
+
+    static func resolveAPIOrigin(
+        environment: [String: String],
+        bundleValue: String?,
+        allowsLocalDevelopment: Bool
+    ) -> URL? {
+        let environmentValue = environment["SNAPLIST_API_ORIGIN"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let bundleValue = bundleValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let rawValue = [environmentValue, bundleValue]
+            .compactMap({ $0 })
+            .first(where: { !$0.isEmpty }),
+              let components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(),
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              components.path.isEmpty || components.path == "/",
+              let url = components.url else {
+            return nil
+        }
+        if scheme == "https" {
+            return url
+        }
+        let localHosts = ["localhost", "127.0.0.1", "::1"]
+        guard allowsLocalDevelopment, scheme == "http", localHosts.contains(host) else {
+            return nil
+        }
+        return url
+    }
+
+    private static var allowsLocalDevelopment: Bool {
+#if DEBUG
+        true
+#else
+        false
+#endif
     }
 }
 
 enum HomeRepositoryError: Error, Equatable {
     case operationUnavailable
+    case invalidResponse
+    case httpStatus(Int)
+}
+
+private struct AuthenticatedServerHomeRepository: HomeRepository {
+    let apiOrigin: URL
+    let authentication: any HomeAuthenticationProviding
+    let session: URLSession
+
+    func fetchHome() async throws -> HomeModel {
+        let token = try await authentication.bearerToken()
+        var request = URLRequest(url: apiOrigin.appending(path: "/v1/home"))
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else {
+            throw HomeRepositoryError.invalidResponse
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            if response.statusCode == 404 {
+                throw HomeRepositoryError.operationUnavailable
+            }
+            throw HomeRepositoryError.httpStatus(response.statusCode)
+        }
+        do {
+            return try JSONDecoder().decode(HomeEnvelope.self, from: data).data.model
+        } catch {
+            throw HomeRepositoryError.invalidResponse
+        }
+    }
+
+    func updates() async -> AsyncThrowingStream<HomeModel, Error> {
+        // #161's HTTP projection is the durable fallback. Realtime transport is
+        // intentionally injected later; a completed stream asks HomeStore to
+        // refresh this same authenticated server record with bounded backoff.
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+private struct HomeEnvelope: Decodable {
+    let data: HomeProjectionPayload
+}
+
+private struct HomeProjectionPayload: Decodable {
+    let revision: Int
+    let sellerState: SellerState
+    let unreadNotificationCount: Int
+    let summary: Summary
+    let attention: [Attention]
+    let currentRun: CurrentRun?
+    let readyToFinish: [FinishItem]
+    let listings: [Listing]
+    let recentSearches: [String]
+
+    enum SellerState: String, Decodable {
+        case active
+        case newSeller
+    }
+
+    struct Summary: Decodable {
+        let active: Int
+        let drafts: Int
+        let orders: Int?
+    }
+
+    struct Destination: Decodable {
+        enum Kind: String, Decodable {
+            case order
+            case conversation
+            case publishIssue
+            case draft
+        }
+
+        let kind: Kind
+        let id: UUID
+
+        var domain: HomeAttentionDestination {
+            switch kind {
+            case .order: .order(id)
+            case .conversation: .conversation(id)
+            case .publishIssue: .publishIssue(id)
+            case .draft: .draft(id)
+            }
+        }
+    }
+
+    struct Attention: Decodable {
+        enum Kind: String, Decodable {
+            case shipping
+            case message
+            case offer
+            case warning
+            case pricing
+
+            var domain: HomeAttentionKind {
+                switch self {
+                case .shipping: .shipping
+                case .message: .message
+                case .offer: .offer
+                case .warning: .warning
+                case .pricing: .pricing
+                }
+            }
+        }
+
+        let id: UUID
+        let itemTitle: String
+        let kind: Kind
+        let status: String
+        let detail: String
+        let actionLabel: String
+        let destination: Destination
+    }
+
+    struct CurrentRun: Decodable {
+        let id: UUID
+        let itemTitle: String
+        let stageLabel: String
+        let reassurance: String
+        let progress: Double?
+    }
+
+    struct FinishItem: Decodable {
+        let id: UUID
+        let title: String
+        let detail: String
+    }
+
+    struct Listing: Decodable {
+        enum Lifecycle: String, Decodable {
+            case active
+            case draft
+            case sold
+            case needsAttention
+
+            var domain: HomeListingLifecycle {
+                switch self {
+                case .active: .active
+                case .draft: .draft
+                case .sold: .sold
+                case .needsAttention: .needsAttention
+                }
+            }
+        }
+
+        let id: UUID
+        let title: String
+        let lifecycle: Lifecycle
+        let statusLabel: String
+        let detail: String
+        let price: String?
+    }
+
+    var model: HomeModel {
+        HomeModel(
+            revision: revision,
+            sellerState: sellerState == .active ? .active : .newSeller,
+            unreadNotificationCount: unreadNotificationCount,
+            summary: HomeSummary(
+                active: summary.active,
+                drafts: summary.drafts,
+                orders: summary.orders
+            ),
+            attention: attention.map {
+                HomeAttentionTask(
+                    id: $0.id,
+                    itemTitle: $0.itemTitle,
+                    kind: $0.kind.domain,
+                    status: $0.status,
+                    detail: $0.detail,
+                    actionLabel: $0.actionLabel,
+                    destination: $0.destination.domain
+                )
+            },
+            currentRun: currentRun.map {
+                HomeCurrentRun(
+                    id: $0.id,
+                    itemTitle: $0.itemTitle,
+                    stageLabel: $0.stageLabel,
+                    reassurance: $0.reassurance,
+                    progress: $0.progress
+                )
+            },
+            readyToFinish: readyToFinish.map {
+                HomeFinishItem(id: $0.id, title: $0.title, detail: $0.detail)
+            },
+            listings: listings.map {
+                HomeListing(
+                    id: $0.id,
+                    title: $0.title,
+                    lifecycle: $0.lifecycle.domain,
+                    statusLabel: $0.statusLabel,
+                    detail: $0.detail,
+                    price: $0.price
+                )
+            },
+            recentSearches: recentSearches
+        )
+    }
 }
 
 struct UnavailableHomeRepository: HomeRepository {

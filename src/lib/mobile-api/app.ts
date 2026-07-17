@@ -1,9 +1,11 @@
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
+import type { HomeProjectionReader } from "@/lib/home/projection";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
   healthEnvelopeSchema,
+  homeProjectionEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
@@ -18,13 +20,15 @@ export interface MobileApiPrincipal {
 
 export interface MobileApiDependencies {
   /**
-   * Verifies issuer, audience, signature, expiry, and subject for the opaque
+   * Verifies issuer, signature, expiry, subject, and any authorized-party claim for the opaque
    * Clerk bearer JWT before returning the RLS identity. Runtime adapters own
    * the concrete verifier; request bodies never supply a user id.
    */
   authenticate(token: string): Promise<MobileApiPrincipal>;
   worker: PipelineWorker;
   subscriptionBridge?: NativeSubscriptionBridge;
+  /** Read-only RLS projection for the native Seller Home. */
+  homeProjection?: HomeProjectionReader;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -123,6 +127,51 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/home`) {
+      if (request.method !== "GET") {
+        return errorResponse(requestId, 405, "method_not_allowed", "This method is not allowed.");
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      if (!dependencies.homeProjection) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Home is temporarily unavailable.",
+        );
+      }
+      try {
+        const projection = await dependencies.homeProjection.forSeller({
+          userId: principal.userId,
+          bearerToken: token,
+        });
+        return json(
+          homeProjectionEnvelopeSchema.parse({
+            data: projection,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.home", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Home is temporarily unavailable.",
         );
       }
     }
