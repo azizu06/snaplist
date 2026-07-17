@@ -37,32 +37,47 @@ export interface ApifySoldComp extends EbaySoldComp {
   priceDisclosure?: "displayed-sold-price" | "asking-price-not-accepted-amount";
 }
 
-type ApifySingleFlightRegistry = Map<
-  string,
-  Promise<ApifySoldComp[] | null>
->;
+interface ApifyCircuitState {
+  consecutiveFailures: number;
+  openUntil: number;
+}
+
+interface ApifyRuntimeState {
+  inFlight: Map<string, Promise<ApifySoldComp[] | null>>;
+  circuits: Map<string, ApifyCircuitState>;
+}
 
 /**
  * `createDefaultPricer` is request-scoped, but its cache object is shared by the
  * composition root. Key single-flight work by that cache identity so concurrent
- * request-scoped providers in one runtime cannot duplicate a paid Actor start.
- * Entries remove themselves on settlement; the weak key does not retain caches.
+ * request-scoped providers in one runtime cannot duplicate a paid Actor start or
+ * reset the failure breaker. Flight entries remove themselves on settlement;
+ * the weak key does not retain caches.
  */
-const APIFY_SINGLE_FLIGHTS_BY_CACHE = new WeakMap<
+const APIFY_RUNTIME_STATE_BY_CACHE = new WeakMap<
   TtlCache<ApifySoldComp[]>,
-  ApifySingleFlightRegistry
+  ApifyRuntimeState
 >();
 
-function singleFlightRegistry(
+function runtimeStateFor(
   cache: TtlCache<ApifySoldComp[]> | undefined,
-): ApifySingleFlightRegistry {
-  if (!cache) return new Map();
-  let registry = APIFY_SINGLE_FLIGHTS_BY_CACHE.get(cache);
-  if (!registry) {
-    registry = new Map();
-    APIFY_SINGLE_FLIGHTS_BY_CACHE.set(cache, registry);
+): ApifyRuntimeState {
+  if (!cache) return { inFlight: new Map(), circuits: new Map() };
+  let state = APIFY_RUNTIME_STATE_BY_CACHE.get(cache);
+  if (!state) {
+    state = { inFlight: new Map(), circuits: new Map() };
+    APIFY_RUNTIME_STATE_BY_CACHE.set(cache, state);
   }
-  return registry;
+  return state;
+}
+
+function circuitStateFor(state: ApifyRuntimeState, key: string): ApifyCircuitState {
+  let circuit = state.circuits.get(key);
+  if (!circuit) {
+    circuit = { consecutiveFailures: 0, openUntil: 0 };
+    state.circuits.set(key, circuit);
+  }
+  return circuit;
 }
 
 export interface ApifySoldActorInput {
@@ -377,9 +392,12 @@ export function createApifySoldPricingProvider(
   const now = options.now;
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
-  const inFlight = singleFlightRegistry(cache);
-  let consecutiveFailures = 0;
-  let circuitOpenUntil = 0;
+  const runtimeState = runtimeStateFor(cache);
+  const inFlight = runtimeState.inFlight;
+  const circuit = circuitStateFor(
+    runtimeState,
+    JSON.stringify({ actorId, actorBuild }),
+  );
 
   const queryFor = (signal: ItemSignal): string | null => buildSoldSearchQuery(signal);
 
@@ -430,10 +448,10 @@ export function createApifySoldPricingProvider(
   }
 
   function recordFailure(reason: string): void {
-    consecutiveFailures += 1;
+    circuit.consecutiveFailures += 1;
     emitDiagnostic("pricing.apify_sold.actor_failed", { reason });
-    if (consecutiveFailures >= circuitFailureThreshold) {
-      circuitOpenUntil = (now?.() ?? Date.now()) + circuitCooldownMs;
+    if (circuit.consecutiveFailures >= circuitFailureThreshold) {
+      circuit.openUntil = (now?.() ?? Date.now()) + circuitCooldownMs;
     }
   }
 
@@ -445,8 +463,8 @@ export function createApifySoldPricingProvider(
         return null;
       }
       const comps = normalizeApifySoldItems(result.items, maxResults);
-      consecutiveFailures = 0;
-      circuitOpenUntil = 0;
+      circuit.consecutiveFailures = 0;
+      circuit.openUntil = 0;
       await writeCache(key, comps);
       return comps;
     } catch {
@@ -461,9 +479,9 @@ export function createApifySoldPricingProvider(
     if (cached != null) return cached;
 
     const clock = now?.() ?? Date.now();
-    if (clock < circuitOpenUntil) {
+    if (clock < circuit.openUntil) {
       emitDiagnostic("pricing.apify_sold.circuit_open", {
-        retryAfterMs: Math.max(0, circuitOpenUntil - clock),
+        retryAfterMs: Math.max(0, circuit.openUntil - clock),
       });
       return null;
     }

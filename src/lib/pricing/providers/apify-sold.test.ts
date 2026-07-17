@@ -433,6 +433,38 @@ describe("createApifySoldPricingProvider", () => {
     expect(runActor).toHaveBeenCalledTimes(3);
   });
 
+  it("shares the failure circuit across request-scoped providers using one cache", async () => {
+    let now = 1_000;
+    const runActor = vi.fn(async () => {
+      throw new Error("actor unavailable");
+    });
+    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const providerForRequest = () =>
+      createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache,
+        now: () => now,
+        circuitFailureThreshold: 2,
+        circuitCooldownMs: 5_000,
+        emitDiagnostic: () => undefined,
+      });
+
+    await expect(providerForRequest().price(SIGNAL)).resolves.toBeNull();
+    await expect(
+      providerForRequest().price({ ...SIGNAL, model: "WH-1000XM5" }),
+    ).resolves.toBeNull();
+    await expect(
+      providerForRequest().price({ ...SIGNAL, model: "WH-1000XM3" }),
+    ).resolves.toBeNull();
+    expect(runActor).toHaveBeenCalledTimes(2);
+
+    now += 5_001;
+    await expect(providerForRequest().price(SIGNAL)).resolves.toBeNull();
+    expect(runActor).toHaveBeenCalledTimes(3);
+  });
+
   it("treats cache failures as misses/no-ops and still returns a usable result", async () => {
     const brokenCache: TtlCache<ApifySoldComp[]> = {
       get: async () => {

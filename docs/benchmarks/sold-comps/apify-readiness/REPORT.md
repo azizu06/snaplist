@@ -57,15 +57,17 @@ see [CONTRACT.md](./CONTRACT.md) and [contract-results.json](./contract-results.
   client wait, and two official-client post-run read retries. The paid Actor-start
   request has zero retries; SnapList never automatically relaunches a failed paid
   Actor run. `restartOnError` is false.
-- Three consecutive failures open the default 60-second circuit. Actor, dataset,
-  cache, timeout, and thin-evidence outcomes all decline into the public sold
-  provider and then the existing web/depreciation/LLM fallbacks.
+- Three consecutive failures across request-scoped providers sharing one cache in
+  the same runtime open the default 60-second circuit. Actor, dataset, cache,
+  timeout, and thin-evidence outcomes all decline into the public sold provider
+  and then the existing web/depreciation/LLM fallbacks.
 - Deterministic cache tests show two sequential identical pricing requests cause
   one Actor invocation (50% invocation avoidance), including successful empty
   results; two concurrent request-scoped providers sharing the same production
   cache object in one runtime are also coalesced into one run. Cross-runtime
-  distributed coalescing remains part of the shared-cache activation gate. This is
-  a zero-network behavior proof, not a claim about observed production hit rate.
+  distributed coalescing and breaker state remain part of the shared-cache
+  activation gate. This is a zero-network behavior proof, not a claim about
+  observed production hit rate.
 - Cache reads never bypass staleness filtering or recency/age-decay. Cache outages
   are fail-open and diagnostics contain bounded reasons only.
 
