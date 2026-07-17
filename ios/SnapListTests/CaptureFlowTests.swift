@@ -371,6 +371,53 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedSheet, .capture)
     }
 
+    func testDiscardFailurePreservesTheDurableCaptureAndOnboardingSource() async throws {
+        let photos = [Data([0x01]), Data([0x02])]
+        let stagedLibraryPhotos = FailingConsumeStagedLibraryPhotoStore(photos: photos)
+        let onboarding = OnboardingFlowModel(
+            state: .init(screen: .libraryHandoff, stagedPhotoCount: photos.count),
+            cameraAuthorization: FixtureCameraAuthorizationClient(status: .denied),
+            progressStore: InMemoryOnboardingProgressStore(),
+            stagedLibraryPhotos: stagedLibraryPhotos,
+            guestAllowance: DeferredGuestAllowanceCapability()
+        )
+        onboarding.continueToCaptureBoundary()
+        let captureStore = TestCaptureStore(discardError: TestCaptureError.failed)
+        let capture = makeModel(store: captureStore)
+        _ = await capture.restore()
+        let router = AppRouter()
+
+        await AppCaptureHandoffCoordinator.presentCaptureLauncher(
+            onboardingModel: onboarding,
+            captureFlow: capture,
+            router: router
+        )
+
+        let durablyStaged = try XCTUnwrap(capture.stagedPhoto)
+        XCTAssertEqual(captureStore.stageCount, 1)
+        XCTAssertEqual(captureStore.discardCount, 1)
+        XCTAssertEqual(capture.phase, .captured)
+        XCTAssertEqual(try stagedLibraryPhotos.load(), photos)
+        XCTAssertEqual(onboarding.state.stagedPhotoCount, photos.count)
+        XCTAssertEqual(onboarding.captureEntryContext, .library(stagedPhotoCount: photos.count))
+        XCTAssertEqual(router.presentedSheet, .capture)
+
+        let relaunchedCapture = makeModel(store: captureStore)
+        let restoration = await relaunchedCapture.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
+        let relaunchedRouter = AppRouter()
+        await AppCaptureHandoffCoordinator.presentCaptureLauncher(
+            onboardingModel: onboarding,
+            captureFlow: relaunchedCapture,
+            router: relaunchedRouter
+        )
+
+        XCTAssertEqual(captureStore.stageCount, 1)
+        XCTAssertEqual(relaunchedCapture.stagedPhoto, durablyStaged)
+        XCTAssertEqual(relaunchedRouter.presentedSheet, .capture)
+    }
+
     func testExpiredTransferredLibraryPhotoCannotRestageAfterRelaunch() async throws {
         let fileManager = FileManager.default
         let parent = fileManager.temporaryDirectory.appendingPathComponent(
@@ -599,6 +646,23 @@ private final class ConsumeMoveController {
     }
 }
 
+private final class FailingConsumeStagedLibraryPhotoStore: StagedLibraryPhotoPersisting {
+    private var photos: [Data]
+
+    init(photos: [Data]) {
+        self.photos = photos
+    }
+
+    func replace(with photos: [Data]) throws -> Int {
+        self.photos = photos
+        return photos.count
+    }
+
+    func load() throws -> [Data] { photos }
+    func consume() throws { throw TestCaptureError.failed }
+    func clear() { photos = [] }
+}
+
 private actor TestFramingEvaluator: FramingEvaluating {
     private var observations: [FramingObservation]
 
@@ -617,10 +681,16 @@ private final class TestCaptureStore: CaptureDraftStoring {
     var discardCount = 0
     var lastStagedImageData: Data?
     private let stageError: Error?
+    private let discardError: Error?
 
-    init(staged: StagedCapturePhoto? = nil, stageError: Error? = nil) {
+    init(
+        staged: StagedCapturePhoto? = nil,
+        stageError: Error? = nil,
+        discardError: Error? = nil
+    ) {
         self.staged = staged
         self.stageError = stageError
+        self.discardError = discardError
     }
 
     func load() async throws -> StagedCapturePhoto? { staged }
@@ -641,6 +711,7 @@ private final class TestCaptureStore: CaptureDraftStoring {
 
     func discard() async throws {
         discardCount += 1
+        if let discardError { throw discardError }
         staged = nil
     }
 }

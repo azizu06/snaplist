@@ -469,12 +469,18 @@ final class CaptureFlowModel {
         }
     }
 
-    func rollBackLibraryTransferAfterSourceConsumptionFailure() async {
-        try? await store.discard()
-        stagedPhoto = nil
-        camera.stop()
-        resumeAfterBackground = false
-        phase = .failed
+    func rollBackLibraryTransferAfterSourceConsumptionFailure() async -> Bool {
+        do {
+            try await store.discard()
+            stagedPhoto = nil
+            camera.stop()
+            resumeAfterBackground = false
+            phase = .failed
+            return true
+        } catch {
+            // The staged draft remains the durable recovery authority until discard succeeds.
+            return false
+        }
     }
 
     func continueToReviewHandoff() {

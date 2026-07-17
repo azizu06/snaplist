@@ -172,7 +172,13 @@ enum AppCaptureHandoffCoordinator {
                 let didConsumeSource = onboardingModel
                     .consumeStagedLibraryPhotosAfterSuccessfulCapture()
                 if !didConsumeSource {
-                    await captureFlow.rollBackLibraryTransferAfterSourceConsumptionFailure()
+                    let didRollBackCapture = await captureFlow
+                        .rollBackLibraryTransferAfterSourceConsumptionFailure()
+                    if !didRollBackCapture {
+                        router.selectedTab = .home
+                        router.presentedSheet = .capture
+                        return
+                    }
                 }
             }
             guard onboardingModel.state.screen == .captureBoundary else { return }
