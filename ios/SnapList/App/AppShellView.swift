@@ -4,6 +4,7 @@ import UIKit
 @MainActor
 struct AppShellView: View {
     @Bindable var router: AppRouter
+    @Bindable var onboardingModel: OnboardingFlowModel
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -11,7 +12,12 @@ struct AppShellView: View {
 
     var body: some View {
         Group {
-            if let visualState = configuration.visualState {
+            if configuration.usesOnboarding {
+                OnboardingFlowView(
+                    model: onboardingModel,
+                    configuration: configuration
+                )
+            } else if let visualState = configuration.visualState {
                 VisualStateBoundaryPlaceholder(state: visualState)
             } else {
                 shell
@@ -98,7 +104,15 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
 }
 
 #Preview("Foundation shell") {
-    AppShellView(router: AppRouter(), configuration: .preview)
+    AppShellView(
+        router: AppRouter(),
+        onboardingModel: OnboardingFlowModel(
+            cameraAuthorization: FixtureCameraAuthorizationClient(status: .authorized),
+            progressStore: InMemoryOnboardingProgressStore(),
+            guestAllowance: DeferredGuestAllowanceCapability()
+        ),
+        configuration: .preview
+    )
 }
 
 #Preview("Capture boundary") {
