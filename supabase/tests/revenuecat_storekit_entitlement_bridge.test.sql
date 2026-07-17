@@ -1,6 +1,6 @@
 begin;
 
-select plan(33);
+select plan(45);
 
 select ok(
   to_regclass('public.revenuecat_customer_bindings') is not null,
@@ -49,6 +49,20 @@ select ok(
     'execute'
   ),
   'sellers cannot call the verified provider event seam'
+);
+select has_trigger(
+  'public',
+  'subscriptions',
+  'subscriptions_enforce_revenuecat_stripe_conflict',
+  'Stripe lifecycle writes immediately enforce the non-stacking bridge'
+);
+select ok(
+  not has_function_privilege(
+    'service_role',
+    'private.enforce_revenuecat_stripe_conflict()',
+    'execute'
+  ),
+  'the Stripe conflict trigger is not a directly callable service capability'
 );
 
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
@@ -137,15 +151,74 @@ select throws_ok(
   'cross-account restore cannot claim another tenant original transaction'
 );
 select throws_ok(
+  $$ select * from public.resolve_revenuecat_customer('rc-user-b', 'rc-user-a', 'rc-original-b') $$,
+  '23514',
+  'RevenueCat original App User ID conflicts with the customer binding',
+  'a signed event cannot select a tenant when its original App User ID disagrees'
+);
+select throws_ok(
   $$
     select public.require_revenuecat_reconciliation(
-      'rc-user-b', 'rc-original-a', 'rc-cross-tenant-reconcile',
+      'rc-user-b', 'rc-user-b', 'rc-original-a', 'rc-cross-tenant-reconcile',
       'PRODUCT_CHANGE', '2026-08-02T00:00:00Z'
     )
   $$,
   '23514',
   'RevenueCat reconciliation identity crosses tenant bindings',
   'an ambiguous lifecycle event cannot reconcile across tenant identities'
+);
+select throws_ok(
+  $$
+    select public.require_revenuecat_reconciliation(
+      'rc-user-b', 'rc-user-a', 'rc-original-b', 'rc-original-user-mismatch',
+      'PRODUCT_CHANGE', '2026-08-02T00:00:00Z'
+    )
+  $$,
+  '23514',
+  'RevenueCat original App User ID conflicts with the customer binding',
+  'reconciliation cannot ignore a mismatched original App User ID'
+);
+
+select * from public.bind_revenuecat_customer('rc-user-late', 'rc-user-late');
+select * from public.resolve_revenuecat_customer(
+  'rc-user-late', 'rc-user-late', 'rc-original-late'
+);
+select public.record_verified_revenuecat_ai_item_period(
+  'rc-user-late', 'rc-user-late', 'rc-original-late:2026-07-01',
+  'rc-original-late', '2026-07-01T00:00:00Z', '2026-08-01T00:00:00Z',
+  'active', null, 2, 'rc-late-active', 'INITIAL_PURCHASE',
+  '2026-07-01T00:02:00Z'
+);
+select ok(
+  public.require_revenuecat_reconciliation(
+    'rc-user-late', 'rc-user-late', 'rc-original-late', 'rc-late-reconcile',
+    'PRODUCT_CHANGE', '2026-07-01T00:01:00Z'
+  ),
+  'a late ambiguous event is recorded for explicit reconciliation'
+);
+select is(
+  (select binding.transition_state from public.revenuecat_customer_bindings binding
+   where binding.user_id = 'rc-user-late'),
+  'required',
+  'late ambiguity blocks any entitlement advance until reconciliation'
+);
+select is(
+  (select period.state from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-late' and period.source = 'storekit'),
+  'active',
+  'late ambiguity preserves the last verified period remainder'
+);
+select throws_ok(
+  $$
+    select public.record_verified_revenuecat_ai_item_period(
+      'rc-user-late', 'rc-user-late', 'rc-original-late:2026-08-01',
+      'rc-original-late', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z',
+      'active', null, 2, 'rc-late-renewal', 'RENEWAL', '2026-08-01T00:01:00Z'
+    )
+  $$,
+  '23514',
+  'Billing-source reconciliation is required',
+  'an ambiguous event cannot advance the allowance to a new period'
 );
 
 select public.upsert_billing_subscription(
@@ -180,6 +253,17 @@ select throws_ok(
   'verified native events cannot stack with an unreconciled Stripe source'
 );
 select ok(
+  not public.reconcile_revenuecat_billing_source(
+    'rc-user-stripe', 'rc-original-stripe'
+  ),
+  'reconciliation cannot succeed while the verified Stripe mirror is current'
+);
+select public.upsert_billing_subscription(
+  'rc-user-stripe', 'cus_rc_stripe', 'sub_rc_stripe', 'canceled',
+  statement_timestamp() - interval '1 day', statement_timestamp() + interval '1 second'
+);
+select * from public.bind_revenuecat_customer('rc-user-stripe', 'rc-user-stripe');
+select ok(
   public.reconcile_revenuecat_billing_source(
     'rc-user-stripe', 'rc-original-stripe'
   ),
@@ -194,6 +278,22 @@ select ok(
   ),
   'verified native allowance starts only after explicit reconciliation'
 );
+select public.upsert_billing_subscription(
+  'rc-user-stripe', 'cus_rc_stripe', 'sub_rc_stripe', 'active',
+  statement_timestamp() + interval '30 days', statement_timestamp() + interval '2 seconds'
+);
+select is(
+  (select binding.transition_state from public.revenuecat_customer_bindings binding
+   where binding.user_id = 'rc-user-stripe'),
+  'required',
+  'a Stripe lifecycle update immediately re-enters conflict after reconciliation'
+);
+select is(
+  (select period.state from public.ai_item_allowance_periods period
+   where period.user_id = 'rc-user-stripe' and period.source = 'storekit'),
+  'ambiguous',
+  'later Stripe reactivation invalidates StoreKit reservation authority'
+);
 
 select * from public.bind_revenuecat_customer('rc-user-ledger', 'rc-user-ledger');
 select * from public.resolve_revenuecat_customer(
@@ -204,6 +304,13 @@ select public.record_verified_revenuecat_ai_item_period(
   'rc-original-ledger', '2026-07-01T00:00:00Z', '2026-08-01T00:00:00Z',
   'active', null, 2, 'rc-ledger-active', 'INITIAL_PURCHASE',
   '2026-07-01T00:01:00Z'
+);
+select ok(
+  public.require_revenuecat_reconciliation(
+    'rc-user-ledger', 'rc-user-ledger', 'rc-original-ledger',
+    'rc-ledger-ambiguous', 'PRODUCT_CHANGE', '2026-07-01T00:00:30Z'
+  ),
+  'ambiguous delivery preserves the verified ledger while blocking period advance'
 );
 create temp table rc_bridge_runs (
   sequence integer primary key,

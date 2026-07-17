@@ -82,7 +82,7 @@ exists for annual billing.
 | Billing issue without grace | Billing retry; no new reservation; its companion billing-error cancellation is ignored so delivery order cannot erase verified grace |
 | Expiration | Expired; no new reservation |
 | Developer revocation or support refund | Terminal revoked/refunded state |
-| Product change, subscription extension, refund reversal | Ambiguous and explicit reconciliation required; no credit minted |
+| Product change, subscription extension, refund reversal | Explicit reconciliation required; preserve the last verified period remainder but do not mint or advance credit |
 | Transfer event | Ignored because RevenueCat omits subscription/customer identity; provider restore behavior must stay **Keep with original App User ID** |
 | Duplicate or older event | Idempotently ignored; it cannot reset or reopen a period |
 | Unknown App User ID or original transaction mismatch | Fail closed; no tenant is selected from aliases or client data |
@@ -97,7 +97,10 @@ and sets `transition_state = required`. The bridge will not create StoreKit allo
 operator verifies that the Stripe source is no longer granting paid access and the App Store
 original transaction belongs to the same Clerk seller. Only then may the narrow service-role RPC
 `reconcile_revenuecat_billing_source(user_id, expected_original_transaction_id)` be invoked. Never
-call it from the client or infer equivalence from email, aliases, or RevenueCat CustomerInfo.
+call it from the client or infer equivalence from email, aliases, or RevenueCat CustomerInfo. The RPC
+refuses to reconcile while the verified Stripe mirror is still current. If Stripe later becomes
+current again, the subscription lifecycle write immediately restores `required`, marks the StoreKit
+period ambiguous, and blocks reservation authority until another explicit reconciliation.
 
 ## Disable / rollback
 

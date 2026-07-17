@@ -67,6 +67,10 @@ struct SubscriptionStatusView: View {
             .accessibilityIdentifier("subscription.verified.status")
         Text("\(entitlement.remainingItems) AI items remaining")
             .accessibilityIdentifier("subscription.verified.remaining")
+        if entitlement.transitionState == .required {
+            Text("Billing source verification required")
+                .accessibilityIdentifier("subscription.billing-source-verification")
+        }
         if let legacyStripeStatus = entitlement.legacyStripeStatus {
             Text("Legacy Stripe: \(legacyStripeStatus)")
                 .accessibilityIdentifier("subscription.legacy-stripe")

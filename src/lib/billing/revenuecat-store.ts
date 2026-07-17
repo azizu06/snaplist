@@ -101,6 +101,7 @@ export function createSupabaseRevenueCatEntitlementStore(
         p_event_created_at: input.eventCreatedAt,
         p_event_id: input.eventId,
         p_event_type: input.eventType,
+        p_original_app_user_id: input.identity.originalAppUserId,
         p_original_transaction_id: input.identity.originalTransactionId,
         p_revenuecat_app_user_id: input.identity.appUserId,
       });

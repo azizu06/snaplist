@@ -6,6 +6,7 @@ import {
   resolveRevenueCatServerConfig,
   type RevenueCatEntitlementStore,
 } from "./revenuecat";
+import { createSupabaseRevenueCatEntitlementStore } from "./revenuecat-store";
 
 const secret = "offline-webhook-secret";
 const now = new Date("2026-07-17T12:00:00.000Z");
@@ -161,6 +162,34 @@ describe("RevenueCat webhook authentication", () => {
         now,
       }),
     ).toThrow("timestamp");
+  });
+});
+
+describe("RevenueCat persistence composition", () => {
+  it("passes the signed original App User ID into reconciliation", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const entitlementStore = createSupabaseRevenueCatEntitlementStore({ rpc } as never);
+
+    await entitlementStore.requireReconciliation({
+      identity: {
+        appUserId: "user_123",
+        originalAppUserId: "user_123",
+        aliases: ["user_123"],
+        originalTransactionId: "original-1",
+      },
+      eventId: "event-product-change",
+      eventType: "PRODUCT_CHANGE",
+      eventCreatedAt: now.toISOString(),
+    });
+
+    expect(rpc).toHaveBeenCalledWith("require_revenuecat_reconciliation", {
+      p_event_created_at: now.toISOString(),
+      p_event_id: "event-product-change",
+      p_event_type: "PRODUCT_CHANGE",
+      p_original_app_user_id: "user_123",
+      p_original_transaction_id: "original-1",
+      p_revenuecat_app_user_id: "user_123",
+    });
   });
 });
 

@@ -133,10 +133,10 @@ begin
   on conflict (user_id) do update
     set legacy_stripe_status = excluded.legacy_stripe_status,
         transition_state = case
+          when excluded.transition_state = 'required' then 'required'
           when public.revenuecat_customer_bindings.transition_state = 'reconciled'
             then 'reconciled'
           when public.revenuecat_customer_bindings.transition_state = 'required'
-            or excluded.transition_state = 'required'
             then 'required'
           else 'not_required'
         end,
@@ -149,7 +149,7 @@ begin
   end if;
 
   if v_transition_state = 'required'
-    and coalesce(v_prior_transition, 'not_required') = 'not_required' then
+    and coalesce(v_prior_transition, 'not_required') <> 'required' then
     select * into v_period
     from public.ai_item_allowance_periods period
     where period.user_id = p_user_id
@@ -186,6 +186,75 @@ begin
 end;
 $$;
 
+create or replace function private.enforce_revenuecat_stripe_conflict()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_prior_transition text;
+  v_period public.ai_item_allowance_periods%rowtype;
+begin
+  perform pg_advisory_xact_lock(
+    hashtextextended('revenuecat-customer:' || new.user_id, 0)
+  );
+  select binding.transition_state into v_prior_transition
+  from public.revenuecat_customer_bindings binding
+  where binding.user_id = new.user_id
+  for update;
+  if not found then return new; end if;
+
+  update public.revenuecat_customer_bindings
+  set legacy_stripe_status = new.status,
+      transition_state = case
+        when new.status in ('active', 'trialing')
+          and new.current_period_end > statement_timestamp() then 'required'
+        else transition_state
+      end,
+      updated_at = statement_timestamp()
+  where user_id = new.user_id;
+
+  if new.status in ('active', 'trialing')
+    and new.current_period_end > statement_timestamp()
+    and v_prior_transition <> 'required' then
+    select * into v_period
+    from public.ai_item_allowance_periods period
+    where period.user_id = new.user_id
+      and period.source = 'storekit'
+      and period.state not in ('revoked', 'refunded', 'ambiguous')
+    order by period.period_start desc
+    limit 1
+    for update;
+    if found then
+      perform public.record_verified_storekit_ai_item_period(
+        new.user_id,
+        v_period.period_key,
+        v_period.original_transaction_id,
+        v_period.period_start,
+        v_period.expires_date,
+        'ambiguous',
+        null,
+        v_period.allowance,
+        'billing-source-conflict:' || md5(
+          new.user_id || ':' || new.stripe_observed_at::text
+        ),
+        greatest(
+          statement_timestamp(),
+          v_period.last_event_created_at + interval '1 microsecond'
+        )
+      );
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger subscriptions_enforce_revenuecat_stripe_conflict
+after insert or update of status, current_period_end, stripe_observed_at
+on public.subscriptions
+for each row execute function private.enforce_revenuecat_stripe_conflict();
+
 create or replace function public.resolve_revenuecat_customer(
   p_revenuecat_app_user_id text,
   p_original_app_user_id text,
@@ -206,6 +275,9 @@ begin
     or coalesce(char_length(p_original_app_user_id), 0) not between 1 and 255
     or coalesce(char_length(p_original_transaction_id), 0) not between 1 and 255 then
     raise exception using errcode = '22023', message = 'Invalid RevenueCat customer identity';
+  end if;
+  if p_original_app_user_id is distinct from p_revenuecat_app_user_id then
+    raise exception using errcode = '23514', message = 'RevenueCat original App User ID conflicts with the customer binding';
   end if;
 
   perform pg_advisory_xact_lock(
@@ -354,6 +426,7 @@ $$;
 
 create or replace function public.require_revenuecat_reconciliation(
   p_revenuecat_app_user_id text,
+  p_original_app_user_id text,
   p_original_transaction_id text,
   p_event_id text,
   p_event_type text,
@@ -370,18 +443,27 @@ declare
   v_transaction_binding public.revenuecat_customer_bindings%rowtype;
   v_app_found boolean;
   v_transaction_found boolean;
-  v_period public.ai_item_allowance_periods%rowtype;
   v_fingerprint text := md5(jsonb_build_object(
     'app_user_id', p_revenuecat_app_user_id,
+    'original_app_user_id', p_original_app_user_id,
     'original_transaction_id', p_original_transaction_id,
     'event_id', p_event_id,
     'event_type', p_event_type,
     'event_created_at', p_event_created_at
   )::text);
   v_existing private.revenuecat_webhook_events%rowtype;
+  v_effective_event_created_at timestamptz;
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
     raise exception using errcode = '42501', message = 'RevenueCat reconciliation authorization is required';
+  end if;
+  if coalesce(char_length(p_revenuecat_app_user_id), 0) not between 1 and 255
+    or coalesce(char_length(p_original_app_user_id), 0) not between 1 and 255
+    or coalesce(char_length(p_original_transaction_id), 0) not between 1 and 255 then
+    raise exception using errcode = '22023', message = 'Invalid RevenueCat reconciliation identity';
+  end if;
+  if p_original_app_user_id is distinct from p_revenuecat_app_user_id then
+    raise exception using errcode = '23514', message = 'RevenueCat original App User ID conflicts with the customer binding';
   end if;
   perform pg_advisory_xact_lock(
     hashtextextended('revenuecat-transaction:' || p_original_transaction_id, 0)
@@ -431,36 +513,26 @@ begin
   end;
 
   if v_user_id is not null then
+    v_effective_event_created_at := greatest(
+      p_event_created_at,
+      statement_timestamp(),
+      coalesce(
+        v_app_binding.last_event_created_at + interval '1 microsecond',
+        p_event_created_at
+      ),
+      coalesce(
+        v_transaction_binding.last_event_created_at + interval '1 microsecond',
+        p_event_created_at
+      )
+    );
     update public.revenuecat_customer_bindings
     set transition_state = 'required',
         lifecycle_state = 'ambiguous',
         last_event_id = p_event_id,
         last_event_type = p_event_type,
-        last_event_created_at = p_event_created_at,
+        last_event_created_at = v_effective_event_created_at,
         updated_at = statement_timestamp()
     where user_id = v_user_id;
-
-    select * into v_period
-    from public.ai_item_allowance_periods period
-    where period.user_id = v_user_id
-      and period.source = 'storekit'
-    order by period.period_start desc
-    limit 1
-    for update;
-    if found and v_period.state not in ('revoked', 'refunded') then
-      perform public.record_verified_storekit_ai_item_period(
-        v_user_id,
-        v_period.period_key,
-        v_period.original_transaction_id,
-        v_period.period_start,
-        v_period.expires_date,
-        'ambiguous',
-        null,
-        v_period.allowance,
-        p_event_id,
-        p_event_created_at
-      );
-    end if;
   end if;
 
   insert into private.revenuecat_webhook_events (
@@ -585,7 +657,6 @@ begin
     'storekit'::text,
     v_storekit.state,
     case
-      when v_binding.transition_state = 'required' then 0
       when v_storekit.state = 'active'
         and v_storekit.expires_date > statement_timestamp() then v_remaining
       when v_storekit.state = 'grace'
@@ -613,12 +684,26 @@ begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
     raise exception using errcode = '42501', message = 'Billing-source reconciliation authorization is required';
   end if;
+  if coalesce(char_length(p_user_id), 0) not between 1 and 255
+    or coalesce(char_length(p_expected_original_transaction_id), 0) not between 1 and 255 then
+    raise exception using errcode = '22023', message = 'Invalid billing-source reconciliation identity';
+  end if;
+  perform pg_advisory_xact_lock(
+    hashtextextended('revenuecat-customer:' || p_user_id, 0)
+  );
   update public.revenuecat_customer_bindings
   set transition_state = 'reconciled',
       updated_at = statement_timestamp()
   where user_id = p_user_id
     and original_transaction_id = p_expected_original_transaction_id
-    and transition_state = 'required';
+    and transition_state = 'required'
+    and not exists (
+      select 1
+      from public.subscriptions subscription
+      where subscription.user_id = p_user_id
+        and subscription.status in ('active', 'trialing')
+        and subscription.current_period_end > statement_timestamp()
+    );
   return found;
 end;
 $$;
@@ -632,8 +717,10 @@ revoke all on function public.record_verified_revenuecat_ai_item_period(
   integer, text, text, timestamptz
 ) from public, anon, authenticated;
 revoke all on function public.require_revenuecat_reconciliation(
-  text, text, text, text, timestamptz
+  text, text, text, text, text, timestamptz
 ) from public, anon, authenticated;
+revoke all on function private.enforce_revenuecat_stripe_conflict()
+  from public, anon, authenticated, service_role;
 revoke all on function public.reconcile_revenuecat_billing_source(text, text)
   from public, anon, authenticated;
 revoke all on function public.get_verified_ai_item_entitlement(text)
@@ -648,7 +735,7 @@ grant execute on function public.record_verified_revenuecat_ai_item_period(
   integer, text, text, timestamptz
 ) to service_role;
 grant execute on function public.require_revenuecat_reconciliation(
-  text, text, text, text, timestamptz
+  text, text, text, text, text, timestamptz
 ) to service_role;
 grant execute on function public.reconcile_revenuecat_billing_source(text, text)
   to service_role;
