@@ -5,25 +5,45 @@ import UIKit
 struct AppShellView: View {
     @Bindable var router: AppRouter
     @Bindable var onboardingModel: OnboardingFlowModel
+    @Bindable var captureFlow: CaptureFlowModel
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @State private var isKeyboardVisible = false
+    @State private var pendingCapturePresentation: PendingCapturePresentation?
 
     var body: some View {
         Group {
-            if configuration.usesOnboarding {
+            if shouldShowOnboarding {
                 OnboardingFlowView(
                     model: onboardingModel,
-                    configuration: configuration
+                    configuration: configuration,
+                    continueToCapture: onboardingModel.continueToCaptureBoundary
                 )
             } else if let visualState = configuration.visualState {
+#if DEBUG
+                if visualState.ownerIssue == 207 {
+                    CaptureVisualStateView(state: visualState)
+                } else {
+                    VisualStateBoundaryPlaceholder(state: visualState)
+                }
+#else
                 VisualStateBoundaryPlaceholder(state: visualState)
+#endif
             } else {
                 shell
             }
         }
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
+        .task(id: onboardingCaptureRouteID) {
+            guard configuration.usesOnboarding,
+                  captureFlow.hasCompletedRestoration else { return }
+            await AppCaptureHandoffCoordinator.presentCaptureLauncher(
+                onboardingModel: onboardingModel,
+                captureFlow: captureFlow,
+                router: router
+            )
+        }
     }
 
     private var shell: some View {
@@ -59,10 +79,30 @@ struct AppShellView: View {
             reduceMotion ? nil : .easeInOut(duration: 0.16),
             value: isKeyboardVisible
         )
-        .sheet(item: $router.presentedSheet) { sheet in
+        .sheet(
+            item: $router.presentedSheet,
+            onDismiss: presentPendingCaptureIfNeeded
+        ) { sheet in
             switch sheet {
             case .capture:
-                CaptureBoundarySheet()
+                CaptureLauncherSheet(
+                    flow: captureFlow,
+                    takeOneItem: {
+                        pendingCapturePresentation = .camera
+                        router.presentedSheet = nil
+                    },
+                    showCapturedPhoto: {
+                        pendingCapturePresentation = .stagedPhoto
+                    }
+                )
+            }
+        }
+        .fullScreenCover(item: $router.presentedFullScreen) { destination in
+            switch destination {
+            case .guidedCamera:
+                GuidedCameraView(flow: captureFlow) {
+                    router.presentedFullScreen = nil
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -88,6 +128,92 @@ struct AppShellView: View {
     private var reduceMotion: Bool {
         systemReduceMotion || configuration.forceReducedMotion
     }
+
+    private var shouldShowOnboarding: Bool {
+        configuration.usesOnboarding
+            && onboardingModel.state.screen != .captureBoundary
+            && captureFlow.stagedPhoto == nil
+    }
+
+    private var onboardingCaptureRouteID: OnboardingCaptureRouteID {
+        OnboardingCaptureRouteID(
+            screen: onboardingModel.state.screen,
+            hasCompletedRestoration: captureFlow.hasCompletedRestoration
+        )
+    }
+
+    private func presentPendingCaptureIfNeeded() {
+        guard let pendingCapturePresentation else { return }
+        self.pendingCapturePresentation = nil
+        router.presentedFullScreen = .guidedCamera
+        if pendingCapturePresentation == .camera {
+            Task { await captureFlow.startCamera() }
+        }
+    }
+}
+
+@MainActor
+enum AppCaptureHandoffCoordinator {
+    static func presentCaptureLauncher(
+        onboardingModel: OnboardingFlowModel,
+        captureFlow: CaptureFlowModel,
+        router: AppRouter
+    ) async {
+        guard onboardingModel.state.screen == .captureBoundary,
+              let context = onboardingModel.captureEntryContext,
+              router.presentedSheet == nil,
+              router.presentedFullScreen == nil else { return }
+
+        if case .library = context,
+           let transferReceipt = captureFlow.stagedPhoto?.libraryTransferReceipt {
+            // A prior source-cleanup failure keeps the durable capture authoritative.
+            // Retry only the exact, idempotent source consume; never stage the photo again.
+            switch onboardingModel.consumeStagedLibraryPhotoAfterSuccessfulCapture(
+                transferReceipt: transferReceipt
+            ) {
+            case .consumed, .cleanupNeeded, .retryNeeded:
+                break
+            }
+        }
+
+        if case .library = context,
+           captureFlow.stagedPhoto == nil,
+           let transfer = onboardingModel.firstStagedLibraryPhotoForCapture() {
+            let didStageCapture = await captureFlow.stageLibraryPhoto(
+                transfer.imageData,
+                transferReceipt: transfer.receipt
+            )
+            if didStageCapture {
+                let sourceConsumeOutcome = onboardingModel
+                    .consumeStagedLibraryPhotoAfterSuccessfulCapture(
+                        transferReceipt: transfer.receipt
+                    )
+                if sourceConsumeOutcome == .retryNeeded {
+                    let didRollBackCapture = await captureFlow
+                        .rollBackLibraryTransferAfterSourceConsumptionFailure()
+                    if !didRollBackCapture {
+                        router.selectedTab = .home
+                        router.presentedSheet = .capture
+                        return
+                    }
+                }
+            }
+            guard onboardingModel.state.screen == .captureBoundary else { return }
+        }
+
+        router.selectedTab = .home
+        router.presentedSheet = .capture
+    }
+}
+
+private struct OnboardingCaptureRouteID: Hashable {
+    let screen: OnboardingScreen
+    let hasCompletedRestoration: Bool
+}
+
+private enum PendingCapturePresentation {
+    case camera
+    case stagedPhoto
 }
 
 private struct OptionalDynamicTypeModifier: ViewModifier {
@@ -104,17 +230,20 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
 }
 
 #Preview("Foundation shell") {
+    let dependencies = AppDependencies.make(configuration: .preview)
     AppShellView(
         router: AppRouter(),
         onboardingModel: OnboardingFlowModel(
             cameraAuthorization: FixtureCameraAuthorizationClient(status: .authorized),
             progressStore: InMemoryOnboardingProgressStore(),
+            stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
             guestAllowance: DeferredGuestAllowanceCapability()
+        ),
+        captureFlow: CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
         ),
         configuration: .preview
     )
-}
-
-#Preview("Capture boundary") {
-    CaptureBoundarySheet()
 }

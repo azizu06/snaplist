@@ -3,6 +3,7 @@ import XCTest
 final class FidelityScreenshotTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
     }
 
     func testFoundationShellScreenshot() {
@@ -13,6 +14,7 @@ final class FidelityScreenshotTests: XCTestCase {
             "--reduced-motion"
         ]
         app.launch()
+        XCUIDevice.shared.orientation = .portrait
 
         XCTAssertTrue(app.buttons["dock.home"].waitForExistence(timeout: 3))
 

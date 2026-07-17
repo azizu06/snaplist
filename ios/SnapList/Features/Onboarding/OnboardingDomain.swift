@@ -48,6 +48,11 @@ enum CaptureEntryContext: Equatable {
     case library(stagedPhotoCount: Int)
 }
 
+struct StagedLibraryPhotoTransfer: Equatable {
+    let imageData: Data
+    let receipt: LibraryPhotoTransferReceipt
+}
+
 struct OnboardingFlowState: Codable, Equatable {
     var screen: OnboardingScreen
     var overlay: OnboardingOverlay?
@@ -261,6 +266,42 @@ final class OnboardingFlowModel {
         update(screen: .captureBoundary)
     }
 
+    func firstStagedLibraryPhotoForCapture() -> StagedLibraryPhotoTransfer? {
+        guard case .library = captureEntryContext else { return nil }
+        do {
+            let photos = try stagedLibraryPhotos.load()
+            guard let firstPhoto = photos.first else { return nil }
+            return StagedLibraryPhotoTransfer(
+                imageData: firstPhoto,
+                receipt: LibraryPhotoTransferReceipt(
+                    sourcePhotoFingerprints: photos.map(LocalPhotoFingerprint.digest),
+                    sourceIndex: 0
+                )
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    @discardableResult
+    func consumeStagedLibraryPhotoAfterSuccessfulCapture(
+        transferReceipt: LibraryPhotoTransferReceipt
+    ) -> StagedLibraryPhotoConsumeOutcome {
+        guard state.screen == .captureBoundary,
+              case .library = captureEntryContext else { return .retryNeeded }
+        do {
+            let outcome = try stagedLibraryPhotos.consume(
+                transferReceipt: transferReceipt
+            )
+            if case let .consumed(remainingCount) = outcome {
+                update(stagedPhotoCount: remainingCount)
+            }
+            return outcome
+        } catch {
+            return .retryNeeded
+        }
+    }
+
     func goBack() {
         switch state.screen {
         case .allowance:
@@ -302,7 +343,12 @@ final class OnboardingFlowModel {
             return true
         }
 
-        let photos = (try? stagedLibraryPhotos.load()) ?? []
+        let photos: [Data]
+        do {
+            photos = try stagedLibraryPhotos.load()
+        } catch {
+            return false
+        }
         guard !photos.isEmpty else {
             if requiresStagedPhotos {
                 update(screen: .photoPrimer, stagedPhotoCount: 0)

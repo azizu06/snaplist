@@ -113,6 +113,7 @@ struct LaunchConfiguration: Equatable {
     var cameraAuthorizationFixture: CameraAuthorizationStatus?
     var resetOnboardingProgress: Bool
     var stagedLibraryPhotoFixtureCount: Int?
+    var usesRestoredCaptureFixture: Bool
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -123,7 +124,8 @@ struct LaunchConfiguration: Equatable {
         usesZeroNetworkFixtures: false,
         cameraAuthorizationFixture: nil,
         resetOnboardingProgress: false,
-        stagedLibraryPhotoFixtureCount: nil
+        stagedLibraryPhotoFixtureCount: nil,
+        usesRestoredCaptureFixture: false
     )
 
     static let preview = LaunchConfiguration(
@@ -135,7 +137,8 @@ struct LaunchConfiguration: Equatable {
         usesZeroNetworkFixtures: true,
         cameraAuthorizationFixture: .authorized,
         resetOnboardingProgress: false,
-        stagedLibraryPhotoFixtureCount: nil
+        stagedLibraryPhotoFixtureCount: nil,
+        usesRestoredCaptureFixture: false
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -155,6 +158,9 @@ struct LaunchConfiguration: Equatable {
                     argument.dropFirst("--fixture-staged-library-photos=".count)
                 )
                 configuration.stagedLibraryPhotoFixtureCount = Int(value).map { min(max($0, 0), 4) }
+            } else if argument == "--restored-capture-fixture" {
+                configuration.usesRestoredCaptureFixture = true
+                configuration.usesZeroNetworkFixtures = true
             } else if argument.hasPrefix("--fixture=") {
                 let value = String(argument.dropFirst("--fixture=".count))
                 configuration.fixture = FoundationFixture(rawValue: value) ?? .home
@@ -174,7 +180,10 @@ struct LaunchConfiguration: Equatable {
     }
 
     var usesOnboarding: Bool {
-        fixture == .onboarding || visualState?.ownerIssue == 206
+        if let visualState {
+            return visualState.ownerIssue == 206
+        }
+        return fixture == .onboarding
     }
 
     var initialOnboardingState: OnboardingFlowState {

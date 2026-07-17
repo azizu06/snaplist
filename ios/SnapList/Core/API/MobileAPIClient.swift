@@ -83,6 +83,9 @@ struct AppDependencies {
     let onboardingProgressStore: any OnboardingProgressPersisting
     let stagedLibraryPhotos: any StagedLibraryPhotoPersisting
     let guestAllowance: any GuestAllowanceCapability
+    let captureCamera: any CaptureCamera
+    let framingEvaluator: any FramingEvaluating
+    let captureDraftStore: any CaptureDraftStoring
 
     static func make(configuration: LaunchConfiguration) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
@@ -91,7 +94,8 @@ struct AppDependencies {
         } else {
             cameraAuthorization = AVCameraAuthorizationClient()
         }
-
+        let captureDraftStore = makeCaptureDraftStore(configuration: configuration)
+        let captureCamera = makeCaptureCamera(configuration: configuration)
         if configuration.usesZeroNetworkFixtures {
             let client = ZeroNetworkMobileAPIClient()
             return AppDependencies(
@@ -100,7 +104,10 @@ struct AppDependencies {
                 cameraAuthorization: cameraAuthorization,
                 onboardingProgressStore: InMemoryOnboardingProgressStore(),
                 stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
-                guestAllowance: DeferredGuestAllowanceCapability()
+                guestAllowance: DeferredGuestAllowanceCapability(),
+                captureCamera: captureCamera,
+                framingEvaluator: VisionObjectFramingEvaluator(),
+                captureDraftStore: captureDraftStore
             )
         }
 
@@ -114,7 +121,50 @@ struct AppDependencies {
             cameraAuthorization: cameraAuthorization,
             onboardingProgressStore: UserDefaultsOnboardingProgressStore(),
             stagedLibraryPhotos: FileSystemStagedLibraryPhotoStore(),
-            guestAllowance: DeferredGuestAllowanceCapability()
+            guestAllowance: DeferredGuestAllowanceCapability(),
+            captureCamera: captureCamera,
+            framingEvaluator: VisionObjectFramingEvaluator(),
+            captureDraftStore: captureDraftStore
         )
     }
+
+    private static func makeCaptureCamera(
+        configuration: LaunchConfiguration
+    ) -> any CaptureCamera {
+#if DEBUG
+        if configuration.usesRestoredCaptureFixture {
+            return RestoredCaptureFixtureCamera()
+        }
+#endif
+        return AVFoundationCaptureCamera()
+    }
+
+    private static func makeCaptureDraftStore(
+        configuration: LaunchConfiguration
+    ) -> any CaptureDraftStoring {
+#if DEBUG
+        if configuration.usesRestoredCaptureFixture {
+            return RestoredCaptureFixtureStore()
+        }
+#endif
+        return LocalCaptureDraftStore()
+    }
 }
+
+#if DEBUG
+private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
+    private let staged = StagedCapturePhoto(
+        id: UUID(uuidString: "20720720-7207-4207-8207-207207207207")!,
+        photoURL: URL(fileURLWithPath: "/fixture/capture-photo.jpg"),
+        thumbnailURL: URL(fileURLWithPath: "/fixture/capture-thumbnail.jpg"),
+        createdAt: Date()
+    )
+
+    func load() async throws -> StagedCapturePhoto? { staged }
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto { staged }
+    func discard() async throws {}
+}
+#endif

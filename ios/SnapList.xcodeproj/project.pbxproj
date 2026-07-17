@@ -23,12 +23,18 @@
 		A0000000000000000000000E /* OnboardingCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000F /* OnboardingCapabilities.swift */; };
 		A0000000000000000000000F /* OnboardingDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000010 /* OnboardingDomain.swift */; };
 		A00000000000000000000010 /* OnboardingFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* OnboardingFlowView.swift */; };
+		A00000000000000000000011 /* CaptureDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* CaptureDomain.swift */; };
+		A00000000000000000000012 /* AVFoundationCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* AVFoundationCapture.swift */; };
+		A00000000000000000000013 /* CaptureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* CaptureViews.swift */; };
 		B00000000000000000000001 /* AccessibilityFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000011 /* AccessibilityFoundationTests.swift */; };
 		B00000000000000000000002 /* AppNavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000012 /* AppNavigationTests.swift */; };
 		B00000000000000000000003 /* MobileAPIContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000013 /* MobileAPIContractTests.swift */; };
 		B00000000000000000000004 /* VisualContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000014 /* VisualContractTests.swift */; };
 		B00000000000000000000005 /* DesignContracts in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000E /* DesignContracts */; };
 		B00000000000000000000006 /* OnboardingFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000017 /* OnboardingFlowTests.swift */; };
+		B00000000000000000000007 /* CaptureFramingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* CaptureFramingTests.swift */; };
+		B00000000000000000000008 /* CaptureDraftStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* CaptureDraftStoreTests.swift */; };
+		B00000000000000000000009 /* CaptureFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* CaptureFlowTests.swift */; };
 		C00000000000000000000001 /* FidelityScreenshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000015 /* FidelityScreenshotTests.swift */; };
 		C00000000000000000000002 /* SnapListUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000016 /* SnapListUITests.swift */; };
 /* End PBXBuildFile section */
@@ -75,6 +81,12 @@
 		F00000000000000000000016 /* SnapListUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapListUITests.swift; sourceTree = "<group>"; };
 		F00000000000000000000017 /* OnboardingFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000018 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
+		F00000000000000000000019 /* CaptureFramingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFramingTests.swift; sourceTree = "<group>"; };
+		F0000000000000000000001A /* CaptureDraftStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureDraftStoreTests.swift; sourceTree = "<group>"; };
+		F0000000000000000000001B /* CaptureFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFlowTests.swift; sourceTree = "<group>"; };
+		F0000000000000000000001C /* CaptureDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture/CaptureDomain.swift; sourceTree = "<group>"; };
+		F0000000000000000000001D /* AVFoundationCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture/AVFoundationCapture.swift; sourceTree = "<group>"; };
+		F0000000000000000000001E /* CaptureViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture/CaptureViews.swift; sourceTree = "<group>"; };
 		F00000000000000000000020 /* SnapList.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SnapList.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000021 /* SnapListTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SnapListTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000022 /* SnapListUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SnapListUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -135,10 +147,10 @@
 			path = DesignSystem;
 			sourceTree = "<group>";
 		};
-		200000000000000000000007 /* Features */ = {isa = PBXGroup; children = (F0000000000000000000000B, 20000000000000000000000C /* Onboarding */); path = Features; sourceTree = "<group>"; };
+		200000000000000000000007 /* Features */ = {isa = PBXGroup; children = (F0000000000000000000000B, 20000000000000000000000C /* Onboarding */, F0000000000000000000001C, F0000000000000000000001D, F0000000000000000000001E); path = Features; sourceTree = "<group>"; };
 		20000000000000000000000C /* Onboarding */ = {isa = PBXGroup; children = (F0000000000000000000000F, F00000000000000000000010, F00000000000000000000018); path = Onboarding; sourceTree = "<group>"; };
 		200000000000000000000008 /* Navigation */ = {isa = PBXGroup; children = (F0000000000000000000000C); path = Navigation; sourceTree = "<group>"; };
-		200000000000000000000009 /* SnapListTests */ = {isa = PBXGroup; children = (F00000000000000000000011, F00000000000000000000012, F00000000000000000000013, F00000000000000000000014, F00000000000000000000017); path = SnapListTests; sourceTree = "<group>"; };
+		200000000000000000000009 /* SnapListTests */ = {isa = PBXGroup; children = (F00000000000000000000011, F00000000000000000000012, F00000000000000000000013, F00000000000000000000014, F00000000000000000000017, F00000000000000000000019, F0000000000000000000001A, F0000000000000000000001B); path = SnapListTests; sourceTree = "<group>"; };
 		20000000000000000000000A /* SnapListUITests */ = {isa = PBXGroup; children = (F00000000000000000000015, F00000000000000000000016); path = SnapListUITests; sourceTree = "<group>"; };
 		20000000000000000000000B /* Products */ = {isa = PBXGroup; children = (F00000000000000000000020, F00000000000000000000021, F00000000000000000000022); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
@@ -212,8 +224,8 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		400000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000001, A00000000000000000000002, A00000000000000000000003, A00000000000000000000004, A00000000000000000000005, A00000000000000000000006, A00000000000000000000007, A00000000000000000000008, A00000000000000000000009, A0000000000000000000000A, A0000000000000000000000B, A0000000000000000000000C, A0000000000000000000000E, A0000000000000000000000F, A00000000000000000000010); runOnlyForDeploymentPostprocessing = 0; };
-		400000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B00000000000000000000001, B00000000000000000000002, B00000000000000000000003, B00000000000000000000004, B00000000000000000000006); runOnlyForDeploymentPostprocessing = 0; };
+		400000000000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000001, A00000000000000000000002, A00000000000000000000003, A00000000000000000000004, A00000000000000000000005, A00000000000000000000006, A00000000000000000000007, A00000000000000000000008, A00000000000000000000009, A0000000000000000000000A, A0000000000000000000000B, A0000000000000000000000C, A0000000000000000000000E, A0000000000000000000000F, A00000000000000000000010, A00000000000000000000011, A00000000000000000000012, A00000000000000000000013); runOnlyForDeploymentPostprocessing = 0; };
+		400000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B00000000000000000000001, B00000000000000000000002, B00000000000000000000003, B00000000000000000000004, B00000000000000000000006, B00000000000000000000007, B00000000000000000000008, B00000000000000000000009); runOnlyForDeploymentPostprocessing = 0; };
 		400000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000001, C00000000000000000000002); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 

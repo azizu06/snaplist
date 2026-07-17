@@ -74,11 +74,18 @@ enum AppSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
+enum AppFullScreen: String, Identifiable {
+    case guidedCamera
+
+    var id: String { rawValue }
+}
+
 @MainActor
 @Observable
 final class AppRouter {
     var selectedTab: PrimaryTab
     var presentedSheet: AppSheet?
+    var presentedFullScreen: AppFullScreen?
 
     private var homePath: [AppRoute] = []
     private var listingsPath: [AppRoute] = []
@@ -88,10 +95,12 @@ final class AppRouter {
     init(
         initialTab: PrimaryTab = .home,
         initialRoute: AppRoute? = nil,
-        initialSheet: AppSheet? = nil
+        initialSheet: AppSheet? = nil,
+        initialFullScreen: AppFullScreen? = nil
     ) {
         selectedTab = initialTab
         presentedSheet = initialSheet
+        presentedFullScreen = initialFullScreen
         if let initialRoute {
             setPath([initialRoute], for: initialTab)
         }
@@ -116,6 +125,12 @@ final class AppRouter {
         var current = path(for: selectedTab)
         current.append(route)
         setPath(current, for: selectedTab)
+    }
+
+    func handleCaptureRestoration(_ restoration: CaptureRestoration) {
+        guard restoration == .stagedPhoto else { return }
+        presentedFullScreen = nil
+        presentedSheet = .capture
     }
 
     func reset(tab: PrimaryTab) {
