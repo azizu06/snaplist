@@ -14,6 +14,10 @@ function loadModel() {
   );
 }
 
+function loadRawModel() {
+  return JSON.parse(readFileSync(modelPath, "utf8"));
+}
+
 describe("SnapList Pro unit-economics model", () => {
   it("validates the machine-readable contract and source references", () => {
     const model = loadModel();
@@ -24,6 +28,19 @@ describe("SnapList Pro unit-economics model", () => {
       firstSuccessfulListingFree: true,
       includedGuidedCorrection: 1,
       annualAllowanceReset: "monthly",
+      allowancePeriodAuthority: {
+        monthlyProduct: "verified-storekit-transaction-period",
+        annualProduct: "server-derived-monthly-subperiod",
+        annualAnchor: "verified-purchase-date",
+        annualCap: "verified-expires-date",
+        sourceIds: [
+          "adr-0008",
+          "apple-storekit-transaction",
+          "apple-subscription-billing",
+        ],
+        advancesDuringGrace: false,
+        clientClockAllowed: false,
+      },
       rollover: false,
       unlimited: false,
       productionCommitment: false,
@@ -38,6 +55,38 @@ describe("SnapList Pro unit-economics model", () => {
       for (const sourceId of entry.sourceIds) {
         expect(sourceIds.has(sourceId), `${entry.service}: ${sourceId}`).toBe(true);
       }
+    }
+  });
+
+  it("rejects duplicate or incomplete usage and scenario identifier sets", () => {
+    const duplicateUsage = loadRawModel();
+    duplicateUsage.usageCases[2].id = "expected";
+    const usageResult = unitEconomicsModelSchema.safeParse(duplicateUsage);
+
+    expect(usageResult.success).toBe(false);
+    if (!usageResult.success) {
+      expect(usageResult.error.issues).toContainEqual(
+        expect.objectContaining({
+          message:
+            "Usage cases must contain exactly one each of low, expected, and high",
+          path: ["usageCases"],
+        }),
+      );
+    }
+
+    const duplicateScenario = loadRawModel();
+    duplicateScenario.scenarios[2].id = "p90";
+    const scenarioResult = unitEconomicsModelSchema.safeParse(duplicateScenario);
+
+    expect(scenarioResult.success).toBe(false);
+    if (!scenarioResult.success) {
+      expect(scenarioResult.error.issues).toContainEqual(
+        expect.objectContaining({
+          message:
+            "Scenarios must contain exactly one each of median, p90, and stress",
+          path: ["scenarios"],
+        }),
+      );
     }
   });
 

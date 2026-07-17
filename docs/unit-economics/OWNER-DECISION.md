@@ -10,7 +10,9 @@
 
 ## Recommendation
 
-Carry **$9.99/month, $99.99/year (16.6% cadence discount), and 10 AI items per monthly StoreKit period** into TestFlight as the single provisional candidate. Annual subscribers receive the same 10-item monthly reset: no annual bucket, rollover, unlimited claim, or second correction credit.
+Carry **$9.99/month, $99.99/year (16.6% cadence discount), and 10 AI items per monthly allowance period** into TestFlight as the single provisional candidate. Annual subscribers receive the same 10-item monthly reset: no annual bucket, rollover, unlimited claim, or second correction credit.
+
+For the monthly product, that allowance period is the server-verified signed StoreKit transaction span. For the annual product, billing is cadence only: the server derives UTC calendar-month-anniversary subperiods inside the signed annual span, anchored to verified `purchaseDate`, capped at verified `expiresDate`, and keyed by `(originalTransactionId, transactionId, subperiodIndex)`. This is an internal credit window, not a fabricated Apple renewal. It cannot advance from client time, a duplicate callback, verified grace, or late/ambiguous entitlement state. #173 owns implementing this contract. See Apple's signed [transaction fields](https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload) and [subscription billing guidance](https://developer.apple.com/documentation/storekit/handling-subscriptions-billing).
 
 Confidence is **medium-low**. The midpoint looks healthy, but the assumed p90 at full allowance is just below the 30% monthly contribution-margin gate and the intentionally adverse stress bound is negative. That makes `$9.99 / $99.99 / 10` a telemetry hypothesis, not production copy, an App Store product, or an authorized provider-plan decision. The previously discussed **$10/month and $30/year are unapproved hypotheses**; $30/year is not supported by this model.
 
@@ -97,7 +99,7 @@ Use three sources of truth, joined by opaque `run_id`, `item_id`, entitlement pe
    - guest run started, durable draft viewed, correction opened/completed, paywall viewed, trial/purchase flow started, and publish intent;
    - do not send photos, listing text, raw model prompts, seller identifiers, or provider credentials.
 3. **RevenueCat/App Store — proceeds truth**
-   - product/cadence, purchase/renewal/refund date, verified entitlement period, grace/expiry, storefront/currency, gross proceeds, commission/tax/refund deductions when available, and MTR tier;
+   - product/cadence, signed purchase/renewal/refund date, verified entitlement span, derived allowance-period identity (including annual subperiod index), grace/expiry, storefront/currency, gross proceeds, commission/tax/refund deductions when available, and MTR tier;
    - #173 owns the bridge. This report defines required economics fields but implements no SDK, product, webhook, or account change.
 
 ## Launch-commitment gate

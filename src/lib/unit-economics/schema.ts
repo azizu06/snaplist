@@ -92,6 +92,27 @@ export const unitEconomicsModelSchema = z.object({
     firstConfirmedEbayPublishFree: z.literal(true),
     includedGuidedCorrection: z.literal(1),
     annualAllowanceReset: z.literal("monthly"),
+    allowancePeriodAuthority: z.object({
+      monthlyProduct: z.literal("verified-storekit-transaction-period"),
+      annualProduct: z.literal("server-derived-monthly-subperiod"),
+      annualAnchor: z.literal("verified-purchase-date"),
+      annualCap: z.literal("verified-expires-date"),
+      annualBoundaryRule: z.literal(
+        "utc-calendar-month-anniversary-end-of-month-clamped",
+      ),
+      annualPeriodIdentity: z.tuple([
+        z.literal("originalTransactionId"),
+        z.literal("transactionId"),
+        z.literal("subperiodIndex"),
+      ]),
+      sourceIds: z.tuple([
+        z.literal("adr-0008"),
+        z.literal("apple-storekit-transaction"),
+        z.literal("apple-subscription-billing"),
+      ]),
+      advancesDuringGrace: z.literal(false),
+      clientClockAllowed: z.literal(false),
+    }),
     rollover: z.literal(false),
     unlimited: z.literal(false),
     productionCommitment: z.literal(false),
@@ -168,6 +189,41 @@ export const unitEconomicsModelSchema = z.object({
   ),
 }).superRefine((model, context) => {
   const unique = (values: readonly string[]) => new Set(values).size === values.length;
+  const hasExactIds = (
+    values: readonly string[],
+    expected: readonly string[],
+  ) =>
+    unique(values) &&
+    values.length === expected.length &&
+    expected.every((id) => values.includes(id));
+
+  if (
+    !hasExactIds(model.usageCases.map((usageCase) => usageCase.id), [
+      "low",
+      "expected",
+      "high",
+    ])
+  ) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "Usage cases must contain exactly one each of low, expected, and high",
+      path: ["usageCases"],
+    });
+  }
+  if (
+    !hasExactIds(model.scenarios.map((scenario) => scenario.id), [
+      "median",
+      "p90",
+      "stress",
+    ])
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Scenarios must contain exactly one each of median, p90, and stress",
+      path: ["scenarios"],
+    });
+  }
   if (!unique(model.sources.map((source) => source.id))) {
     context.addIssue({
       code: "custom",
@@ -195,6 +251,15 @@ export const unitEconomicsModelSchema = z.object({
   }
 
   const sourceIds = new Set(model.sources.map((source) => source.id));
+  for (const sourceId of model.boundaries.allowancePeriodAuthority.sourceIds) {
+    if (!sourceIds.has(sourceId)) {
+      context.addIssue({
+        code: "custom",
+        message: `Unknown evidence source id: ${sourceId}`,
+        path: ["boundaries", "allowancePeriodAuthority", "sourceIds"],
+      });
+    }
+  }
   model.costInventory.forEach((entry, index) => {
     for (const sourceId of entry.sourceIds) {
       if (!sourceIds.has(sourceId)) {

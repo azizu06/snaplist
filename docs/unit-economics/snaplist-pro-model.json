@@ -9,6 +9,17 @@
     "firstConfirmedEbayPublishFree": true,
     "includedGuidedCorrection": 1,
     "annualAllowanceReset": "monthly",
+    "allowancePeriodAuthority": {
+      "monthlyProduct": "verified-storekit-transaction-period",
+      "annualProduct": "server-derived-monthly-subperiod",
+      "annualAnchor": "verified-purchase-date",
+      "annualCap": "verified-expires-date",
+      "annualBoundaryRule": "utc-calendar-month-anniversary-end-of-month-clamped",
+      "annualPeriodIdentity": ["originalTransactionId", "transactionId", "subperiodIndex"],
+      "sourceIds": ["adr-0008", "apple-storekit-transaction", "apple-subscription-billing"],
+      "advancesDuringGrace": false,
+      "clientClockAllowed": false
+    },
     "rollover": false,
     "unlimited": false,
     "productionCommitment": false
@@ -180,6 +191,8 @@
     { "id": "exa-pricing", "title": "Exa API pricing", "url": "https://exa.ai/pricing?tab=api", "observedAt": "2026-07-17", "kind": "official", "note": "20,000 free requests/month; Search $7/1,000 and Contents $1/1,000 pages after the free tier." },
     { "id": "apify-actor", "title": "Caffein eBay sold listings actor", "url": "https://apify.com/caffein.dev/ebay-sold-listings", "observedAt": "2026-07-17", "kind": "official", "note": "Current public card says from $2.50/1,000 results. The model intentionally uses #188's measured historical run cost instead of retrofitting it." },
     { "id": "scrapingbee-pricing", "title": "ScrapingBee pricing", "url": "https://www.scrapingbee.com/pricing/", "observedAt": "2026-07-17", "kind": "official", "note": "$49/month for 250,000 credits on the lowest public plan." },
+    { "id": "apple-storekit-transaction", "title": "Apple signed transaction fields", "url": "https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload", "observedAt": "2026-07-17", "kind": "official", "note": "Server-verifiable signed transaction payload supplies purchaseDate, expiresDate, originalTransactionId, and transactionId; these authoritative fields bound and identify allowance periods." },
+    { "id": "apple-subscription-billing", "title": "Apple subscription billing guidance", "url": "https://developer.apple.com/documentation/storekit/handling-subscriptions-billing", "observedAt": "2026-07-17", "kind": "official", "note": "Subscription access must use verified transaction periods rather than inferring an Apple billing period by adding a nominal duration; SnapList's annual monthly subperiod remains bounded by the signed span." },
     { "id": "apple-program", "title": "Apple Developer Program", "url": "https://developer.apple.com/programs/whats-included/", "observedAt": "2026-07-17", "kind": "official", "note": "$99/year membership; APNs and TestFlight are included capabilities, with no separate APNs marginal fee modeled." },
     { "id": "apple-small-business", "title": "App Store Small Business Program", "url": "https://developer.apple.com/news/?id=i7jzeefs", "observedAt": "2026-07-17", "kind": "official", "note": "15% commission for eligible enrolled developers up to the program threshold; enrollment is not assumed approved." },
     { "id": "apple-agreement", "title": "Apple Developer Program License Agreement", "url": "https://developer.apple.com/support/terms/apple-developer-program-license-agreement/", "observedAt": "2026-07-17", "kind": "official", "note": "Apple deducts commission and applicable taxes and accounts for refunds; exact proceeds require live App Store/RevenueCat evidence." },

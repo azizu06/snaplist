@@ -76,25 +76,36 @@ terminal-fallback output may qualify when it is honest, coherent, and fully edit
   a configurable monthly AI-item allowance. StoreKit supplies localized price and subscription
   state; the public item count stays unset until TestFlight measures median and p95 cost per usable
   item.
-- For an Apple-billed seller, “monthly” means the server-verified StoreKit subscription period
-  `[period_start, expires_date)`, not a calendar month and not 30 days from first use. The server
-  entitlement mirror derived from signed StoreKit transaction/renewal data is the reservation
-  authority; device state, device time, and an unverified client callback cannot reset credits.
-- A later verified renewal period advances the allowance exactly once by a monotonic period identity.
-  Late, duplicate, or out-of-order StoreKit events cannot reopen an earlier period or reset the same
-  period twice. A verified billing-grace state keeps the remaining allowance from the current period
-  but does not create a new period. Billing retry without verified grace, expiration, revocation, or
-  refund blocks new reservations; it does not revoke existing drafts or reverse settled credits.
-  If renewal state is late or ambiguous, the server fails closed to the last verified period and
-  remaining credits until a newer signed period is verified.
+- For a monthly Apple product, the allowance period is the server-verified StoreKit transaction span
+  `[purchaseDate, expiresDate)`. For an annual Apple product, annual billing is cadence only: the
+  server derives monthly allowance subperiods inside that same signed annual span. Subperiod zero is
+  anchored to signed `purchaseDate`; later boundaries use UTC calendar-month anniversaries with
+  end-of-month clamping and the final boundary is capped at signed `expiresDate`. This is a SnapList
+  credit-window derivation, not an invented StoreKit renewal or a claim about Apple's billing period.
+  See Apple's signed [transaction fields](https://developer.apple.com/documentation/appstoreserverapi/jwstransactiondecodedpayload)
+  and [subscription billing guidance](https://developer.apple.com/documentation/storekit/handling-subscriptions-billing).
+- The reservation authority is the server entitlement mirror derived from verified signed StoreKit
+  transaction/renewal data. A monthly period identity uses the verified transaction identity; an
+  annual subperiod identity is the tuple `(originalTransactionId, transactionId, subperiodIndex)`.
+  Device state, device time, and an unverified client callback cannot select or reset a period.
+- A verified active entitlement advances to a later allowance period exactly once by its monotonic
+  identity. A verified annual renewal supplies a new signed span and anchor; a lapse, resubscribe, or
+  cadence change takes effect only from the newly verified signed transaction. Late, duplicate, or
+  out-of-order StoreKit events cannot reopen an earlier period or reset one twice. A verified
+  billing-grace state keeps the remaining allowance from the last verified period and cannot advance
+  an annual subperiod. Billing retry without verified grace, expiration, revocation, or refund blocks
+  new reservations; it does not revoke existing drafts or reverse settled credits. If entitlement
+  state is late or ambiguous, the server fails closed to the last verified period and remainder until
+  a newer signed state is verified.
 - Legacy per-day item and per-minute request limits are separate abuse/capacity guardrails. They must
   not be labeled monthly credits or used as the native product promise.
 
 Required contract tests include same-run retries, queue redelivery, crash recovery, guided
 correction, manual edits, changed photo sets, cancel/fail before settlement, cancel/delete after
 settlement, guest-to-account claim, concurrent run-#2 reservation, mid-period signup, verified
-renewal, grace without reset, retry/expiration/revocation, late renewal, and duplicate/out-of-order
-StoreKit callbacks.
+monthly renewal, annual mid-subperiod access, end-of-month-clamped annual boundaries, verified annual
+renewal, grace without reset or annual-subperiod advance, retry/expiration/revocation, late renewal,
+cadence change, and duplicate/out-of-order StoreKit callbacks.
 
 ### 4. eBay authority and synchronization
 
