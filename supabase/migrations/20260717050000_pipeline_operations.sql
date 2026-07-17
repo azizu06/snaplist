@@ -12,6 +12,99 @@ alter table public.pipeline_runs
 comment on column public.pipeline_runs.retention_cleaned_at is
   'Operational checkpoint/capture metadata was pruned after terminal retention. The run identity remains as a durable accounting and notification anchor.';
 
+-- Once retention has removed a failed/canceled run's capture input and item
+-- photos, replay can no longer succeed. Keep the prior authenticated/RLS-aware
+-- retry contract, but fail closed with seller-safe recapture guidance.
+create or replace function public.retry_pipeline_run(p_run_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text;
+  v_run public.pipeline_runs%rowtype;
+  v_message_id bigint;
+begin
+  v_user_id := public.clerk_user_id();
+  if v_user_id is null then
+    raise exception using errcode = '42501', message = 'Pipeline run authentication is required';
+  end if;
+
+  select *
+  into v_run
+  from public.pipeline_runs
+  where id = p_run_id
+    and user_id = v_user_id
+  for update;
+
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Pipeline run not found';
+  end if;
+
+  if v_run.status = 'succeeded' or v_run.listing_id is not null then
+    raise exception using errcode = '55000', message = 'A ready listing cannot be retried';
+  end if;
+
+  if v_run.retention_cleaned_at is not null then
+    raise exception using
+      errcode = '55000',
+      message = 'This saved run has expired. Start a new capture.';
+  end if;
+
+  if v_run.status in ('queued', 'running', 'retrying') then
+    return jsonb_build_object(
+      'runId', v_run.id,
+      'itemId', v_run.item_id,
+      'status', v_run.status,
+      'queueMessageId', v_run.queue_message_id
+    );
+  end if;
+
+  if v_run.status not in ('failed', 'canceled') then
+    raise exception using errcode = '55000', message = 'This listing run cannot be retried';
+  end if;
+
+  update public.pipeline_runs
+  set status = 'queued',
+      stage = 'queued',
+      max_attempts = greatest(max_attempts, attempt_count + 3),
+      queue_message_id = null,
+      enqueued_at = null,
+      completed_at = null,
+      failure_code = null,
+      safe_failure_message = null,
+      lease_token = null,
+      lease_expires_at = null,
+      next_attempt_at = null
+  where id = v_run.id;
+
+  select *
+  into v_message_id
+  from pgmq.send(
+    'pipeline_jobs',
+    jsonb_build_object('run_id', v_run.id, 'schema_version', v_run.schema_version)
+  );
+
+  update public.pipeline_runs
+  set queue_message_id = v_message_id,
+      enqueued_at = statement_timestamp()
+  where id = v_run.id;
+
+  return jsonb_build_object(
+    'runId', v_run.id,
+    'itemId', v_run.item_id,
+    'status', 'queued',
+    'queueMessageId', v_message_id
+  );
+end;
+$$;
+
+revoke all on function public.retry_pipeline_run(uuid)
+  from public, anon, service_role;
+grant execute on function public.retry_pipeline_run(uuid)
+  to authenticated;
+
 -- Storage deletion is deliberately two phase. A short database transaction
 -- first removes an abandoned item reference or resolves an uncommitted staging
 -- intent, then persists the exact paths here. A separately leased TypeScript
@@ -242,6 +335,17 @@ begin
           identification = null,
           cost_basis = null
       where id = v_item.id;
+
+      update public.notifications notification
+      set body = 'This saved run has expired. Start a new capture to try again.'
+      where notification.item_id = v_item.id
+        and notification.kind = 'pipeline_failed'
+        and notification.source_pipeline_run_id in (
+          select run.id
+          from public.pipeline_runs run
+          where run.item_id = v_item.id
+            and run.status = 'failed'
+        );
       v_storage_jobs_queued := v_storage_jobs_queued + 1;
     end if;
   end loop;

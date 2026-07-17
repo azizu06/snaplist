@@ -76,4 +76,17 @@ describe("pipeline recovery server actions", () => {
       { runId: RUN_ID },
     );
   });
+
+  it("directs a stale retry request to recapture after retention cleanup", async () => {
+    rpc.mockResolvedValueOnce({
+      data: null,
+      error: { message: "This saved run has expired. Start a new capture." },
+    });
+
+    await expect(retryPipelineRun(RUN_ID)).resolves.toEqual({
+      ok: false,
+      error: "This saved run has expired. Start a new capture.",
+    });
+    expect(mocks.reportServerError).not.toHaveBeenCalled();
+  });
 });

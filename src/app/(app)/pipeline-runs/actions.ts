@@ -39,6 +39,12 @@ async function transitionPipelineRun(
   });
   const parsed = transitionResultSchema.safeParse(data);
   if (error || !parsed.success) {
+    if (
+      operation === "retry"
+      && error?.message === "This saved run has expired. Start a new capture."
+    ) {
+      return { ok: false, error: error.message };
+    }
     reportServerError(
       `pipelineRuns.${operation}`,
       new Error(error?.message ?? "Invalid pipeline transition response"),

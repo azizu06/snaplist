@@ -1,6 +1,6 @@
 begin;
 
-select plan(40);
+select plan(42);
 
 select extensions.has_column(
   'public', 'pipeline_runs', 'retention_cleaned_at',
@@ -211,6 +211,16 @@ select extensions.is(
   'an abandoned terminal item is reduced to an accounting tombstone'
 );
 select extensions.is(
+  (
+    select body
+    from public.notifications
+    where source_pipeline_run_id = '82000000-0000-4000-8000-000000000002'
+      and kind = 'pipeline_failed'
+  ),
+  'This saved run has expired. Start a new capture to try again.',
+  'retention replaces the stale saved-photo notification with recapture guidance'
+);
+select extensions.is(
   (select checkpoint from public.pipeline_runs where id = '82000000-0000-4000-8000-000000000002'),
   '{}'::jsonb,
   'failed terminal checkpoint metadata is pruned'
@@ -256,6 +266,20 @@ select extensions.is(
   0,
   'the successful photo never enters cleanup work'
 );
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"pipeline-operations-user","role":"authenticated"}',
+  true
+);
+select extensions.throws_ok(
+  $$select public.retry_pipeline_run('82000000-0000-4000-8000-000000000002')$$,
+  '55000',
+  'This saved run has expired. Start a new capture.',
+  'a retention-cleaned run cannot enqueue an impossible retry'
+);
+reset role;
 
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);

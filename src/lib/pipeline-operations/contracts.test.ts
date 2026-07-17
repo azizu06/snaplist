@@ -23,6 +23,9 @@ describe("pipeline operations database contract", () => {
     expect(migration).toMatch(/pgmq\.metrics\('pipeline_jobs'\)/i);
     expect(migration).toMatch(/status in \('succeeded', 'failed', 'canceled'\)/i);
     expect(migration).toMatch(/not exists[\s\S]+public\.listings/i);
+    expect(migration).toMatch(/create or replace function public\.retry_pipeline_run/i);
+    expect(migration).toMatch(/v_run\.retention_cleaned_at is not null/i);
+    expect(migration).toMatch(/This saved run has expired\. Start a new capture\./i);
   });
 
   it("ships only an inactive Vault + Cron + pg_net activation template", () => {

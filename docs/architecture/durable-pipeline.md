@@ -126,7 +126,10 @@ Hourly maintenance performs a short, concurrency-fenced Postgres preparation fol
 Storage cleanup outside the transaction. Staging paths are deleted only when no item references them.
 Abandoned failed/canceled captures are tombstoned after 30 days only when no listing or active/successful
 run protects the item. Successful listing photos are never cleanup candidates. Terminal run identities
-remain for notifications and credit accounting while checkpoint/capture metadata is pruned.
+remain for notifications and credit accounting while checkpoint/capture metadata is pruned. A
+tombstoned failed/canceled run is explicitly non-retryable: the authenticated retry RPC fails closed,
+and seller-facing progress directs the seller to start a new capture instead of enqueueing a run whose
+photos no longer exist.
 
 The maintenance response and structured log expose PGMQ depth/oldest age, retrying and terminal runs,
 expired worker leases, cleanup backlog/dead letters, and the last cleanup outcome. See

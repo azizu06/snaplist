@@ -34,7 +34,7 @@ partial-completion acceptance, but the scheduled production contract does not us
 | Data | Retention/action |
 | --- | --- |
 | Unresolved staging paths | eligible after 24 hours; every path referenced by an item is protected |
-| Failed/canceled abandoned capture | after 30 days, only when it has no listing and no active/successful sibling run; item/run ids remain accounting tombstones while seller metadata is pruned and photos are queued for deletion |
+| Failed/canceled abandoned capture | after 30 days, only when it has no listing and no active/successful sibling run; item/run ids remain accounting tombstones while seller metadata is pruned and photos are queued for deletion; the expired run cannot be retried and the UI directs the seller to recapture |
 | Successful terminal run | after 30 days, prune checkpoint/capture input only; preserve the run, listing, item, and photos |
 | Active PGMQ message paired to a terminal run | delete after 24 hours (crash-recovery sweep) |
 | PGMQ archive rows | delete after 7 days |

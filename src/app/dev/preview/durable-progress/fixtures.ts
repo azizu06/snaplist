@@ -47,6 +47,7 @@ function fixture(
     attempt_count: status === "queued" ? 0 : 1,
     max_attempts: 3,
     safe_failure_message: null,
+    retention_cleaned_at: null,
     updated_at: "2026-07-15T12:00:00.000Z",
     ...overrides,
   };
