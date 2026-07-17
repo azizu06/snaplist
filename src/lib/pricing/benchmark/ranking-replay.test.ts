@@ -84,8 +84,17 @@ describe("replaySoldCompRanking", () => {
     expect(formatSoldCompRankingReplay(summary)).not.toContain("iPhone");
   });
 
-  it("never treats a non-USD row as valid pricing evidence", () => {
-    const eur = { ...comp("eur", "Apple iPhone 14 Pro 256GB", "Like New", 700), currency: "EUR" };
+  it("never lets matching non-USD anchors make a query usable for pricing", () => {
+    const eurComps = [
+      {
+        ...comp("eur-1", "Apple iPhone 14 Pro 256GB", "Like New", 700),
+        currency: "EUR",
+      },
+      {
+        ...comp("eur-2", "Apple iPhone 14 Pro 256 GB", "Like New", 720),
+        currency: "EUR",
+      },
+    ];
     const query: ProviderQueryCapture = {
       provider: "caffein-apify",
       queryId: "Q05",
@@ -96,7 +105,7 @@ describe("replaySoldCompRanking", () => {
       creditsSpent: null,
       actualUsdSpent: 0.01,
       bestOfferPolicy: "labeled-and-excluded",
-      comps: [eur],
+      comps: eurComps,
     };
     const capture: BenchmarkCapture = {
       schemaVersion: 1,
@@ -110,16 +119,21 @@ describe("replaySoldCompRanking", () => {
       apifyPricingSnapshot: null,
       productResearch: { status: "operator-pending", queryIds: [] },
     };
-    const labels: BenchmarkCompLabel[] = [
-      { compId: "eur", relevant: true, variantCorrect: true, conditionCorrect: true },
-    ];
+    const labels: BenchmarkCompLabel[] = eurComps.map(({ id }) => ({
+      compId: id,
+      relevant: true,
+      variantCorrect: true,
+      conditionCorrect: true,
+    }));
 
     const summary = replaySoldCompRanking(capture, labels);
 
-    expect(summary.ranking.anchorRows).toBe(1);
+    expect(summary.ranking.anchorRows).toBe(2);
     expect(summary.ranking.validAnchorRows).toBe(0);
     expect(summary.ranking.validComparableRows).toBe(0);
     expect(summary.ranking.anchorPrecision).toBe(0);
     expect(summary.ranking.validAnchorRecall).toBeNull();
+    expect(summary.ranking.usablePricingQueries).toBe(0);
+    expect(summary.ranking.pricingQueryCoverage).toBe(0);
   });
 });

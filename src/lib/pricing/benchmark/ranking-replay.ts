@@ -33,13 +33,23 @@ export interface SoldCompRankingReplaySummary {
 const ratio = (numerator: number, denominator: number): number | null =>
   denominator === 0 ? null : numerator / denominator;
 
+/**
+ * Mirrors normalization's hard price constraints without reusing
+ * `usableForPricing`, which also carries the superseded binary relevance gate
+ * in saved Issue #188 captures.
+ */
+const hasUsablePricingAmount = (comp: BenchmarkComp): boolean =>
+  comp.currency === "USD" &&
+  Number.isFinite(comp.price) &&
+  comp.price > 0 &&
+  comp.priceDisclosure === "displayed-sold-price" &&
+  !comp.isBestOfferAccepted;
+
 const isValidComparable = (
   comp: BenchmarkComp,
   label: BenchmarkCompLabel,
 ): boolean =>
-  comp.currency === "USD" &&
-  comp.priceDisclosure === "displayed-sold-price" &&
-  !comp.isBestOfferAccepted &&
+  hasUsablePricingAmount(comp) &&
   label.relevant &&
   label.variantCorrect &&
   label.conditionCorrect;
@@ -75,7 +85,10 @@ export function replaySoldCompRanking(
     anchorRows += evidence.anchors.length;
     corroborationRows += evidence.corroboration.length;
     rejectedRows += evidence.rejected.length;
-    if (evidence.anchors.length >= 2) usablePricingQueries += 1;
+    const usablePricingAnchors = evidence.anchors.filter(({ comp }) =>
+      hasUsablePricingAmount(comp),
+    );
+    if (usablePricingAnchors.length >= 2) usablePricingQueries += 1;
 
     for (const comp of query.comps) {
       const label = labelById.get(comp.id);
