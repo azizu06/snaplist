@@ -5,7 +5,7 @@
  * moment the seller still remembers. OPTIONAL and fast: defaults blank
  * (blank persists NULL — an honest unknown, never a fake $0), and "0" is a
  * real value for a free find. The uncontrolled input submits with the upload
- * form (`name="costBasis"`); `uploadAndProcess` validates it with the shared
+ * form (`name="costBasis"`); durable enqueue validates it with the shared
  * `parseCostBasis` and stores it on the created item, where the review page,
  * dashboard margin column, and strategy selector pick it up.
  *

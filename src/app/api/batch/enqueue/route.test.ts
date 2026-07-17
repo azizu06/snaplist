@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getUserId: vi.fn(),
-  resolveNewAiItemRunPolicy: vi.fn(),
   tierLimits: vi.fn(() => ({ itemsPerDay: 15, meteredPerMinute: 20 })),
   getAutopilotEnabled: vi.fn(),
   createStore: vi.fn(),
@@ -14,9 +13,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 vi.mock("@/lib/auth", () => ({ getUserId: mocks.getUserId }));
-vi.mock("@/lib/billing", () => ({
-  resolveNewAiItemRunPolicy: mocks.resolveNewAiItemRunPolicy,
-}));
 vi.mock("@/lib/abuse", () => ({ tierLimits: mocks.tierLimits }));
 vi.mock("@/lib/settings/user-settings", () => ({ getAutopilotEnabled: mocks.getAutopilotEnabled }));
 vi.mock("@/lib/pipeline-staging/internal", () => ({ createInternalPipelineStagingStore: mocks.createStore }));
@@ -33,12 +29,6 @@ describe("POST /api/batch/enqueue", () => {
     vi.clearAllMocks();
     mocks.getUserId.mockResolvedValue("user_123");
     mocks.createClient.mockResolvedValue({ storage: { from: vi.fn() } });
-    mocks.resolveNewAiItemRunPolicy.mockResolvedValue({
-      allowed: true,
-      reason: "snaplist-pro",
-      entitlement: "paid",
-      hasCompletedAiItemRun: true,
-    });
     mocks.getAutopilotEnabled.mockResolvedValue(true);
     store.findReplay.mockResolvedValue([]);
     mocks.createStore.mockReturnValue(store);
@@ -75,9 +65,6 @@ describe("POST /api/batch/enqueue", () => {
     }));
 
     expect(response.status).toBe(202);
-    expect(mocks.resolveNewAiItemRunPolicy).toHaveBeenCalledWith("user_123", {
-      client: expect.any(Object),
-    });
     expect(mocks.stageUploadEntries).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user_123",
@@ -125,7 +112,6 @@ describe("POST /api/batch/enqueue", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
-    expect(mocks.resolveNewAiItemRunPolicy).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       runs: [{
         id: "33333333-3333-4333-8333-333333333333",
@@ -160,13 +146,12 @@ describe("POST /api/batch/enqueue", () => {
     expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
   });
 
-  it("preserves the merged Pro gate for a free seller's second durable run", async () => {
-    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
-      allowed: false,
-      reason: "snaplist-pro-required",
-      entitlement: "free",
-      hasCompletedAiItemRun: true,
-    });
+  it("maps the atomic ledger's Pro gate for a second durable run", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: snaplist-pro-required",
+      ),
+    );
     const form = new FormData();
     form.set("manifest", JSON.stringify({
       batchId: "11111111-1111-4111-8111-111111111111",
@@ -185,16 +170,15 @@ describe("POST /api/batch/enqueue", () => {
       kind: "quota",
       reason: "snaplist-pro-required",
     });
-    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
   });
 
-  it("allows only the included first item in a free durable batch", async () => {
-    mocks.resolveNewAiItemRunPolicy.mockResolvedValueOnce({
-      allowed: true,
-      reason: "included-first-run",
-      entitlement: "free",
-      hasCompletedAiItemRun: false,
-    });
+  it("lets the atomic ledger reject a free multi-item batch as one transaction", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: snaplist-pro-required",
+      ),
+    );
     const form = new FormData();
     form.set("manifest", JSON.stringify({
       batchId: "11111111-1111-4111-8111-111111111111",
@@ -216,6 +200,31 @@ describe("POST /api/batch/enqueue", () => {
       kind: "quota",
       reason: "snaplist-pro-required",
     });
-    expect(mocks.stageUploadEntries).not.toHaveBeenCalled();
+    expect(mocks.stageUploadEntries).toHaveBeenCalledOnce();
+  });
+
+  it("reports exhausted monthly allowance independently of rate limits", async () => {
+    mocks.stageUploadEntries.mockRejectedValueOnce(
+      new Error(
+        "Pipeline staging failed: AI item credit unavailable: monthly-allowance-reached",
+      ),
+    );
+    const form = new FormData();
+    form.set("manifest", JSON.stringify({
+      batchId: "11111111-1111-4111-8111-111111111111",
+      entries: [{ idempotencyKey: "item-1", costBasis: "5", photoCount: 1 }],
+    }));
+    form.append("photo:0", new File(["photo"], "item.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://snaplist.test/api/batch/enqueue", {
+      method: "POST",
+      body: form,
+    }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      kind: "quota",
+      reason: "monthly-allowance-reached",
+    });
   });
 });

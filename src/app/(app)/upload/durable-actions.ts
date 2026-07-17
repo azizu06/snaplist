@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { tierLimits } from "@/lib/abuse";
 import { getUserId } from "@/lib/auth";
-import { resolveNewAiItemRunPolicy } from "@/lib/billing";
 import { createInternalPipelineStagingStore } from "@/lib/pipeline-staging/internal";
 import { parseCostBasis } from "@/lib/pipeline/autopilot";
 import { reportServerError } from "@/lib/sentry";
@@ -60,25 +59,9 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     });
     if (replay[0]) redirect(`/review/${replay[0].item_id}?new=1`);
 
-    const itemRunPolicy = await resolveNewAiItemRunPolicy(userId, {
-      client: supabase,
-    });
-    if (!itemRunPolicy.allowed) {
-      if (itemRunPolicy.reason === "policy-unavailable") {
-        redirectUploadError(
-          "We couldn't verify whether this item can start. Please try again.",
-          batchId.data,
-        );
-      }
-      redirectUploadError(
-        "SnapList Pro is required to start another new item.",
-        batchId.data,
-      );
-    }
-
-    // #155 keeps these daily/minute values as operational guardrails rather
-    // than subscription allowance. SnapList Pro authorization is the separate
-    // server policy above.
+    // Daily/minute values remain operational abuse guards. The #168 credit
+    // reservation is made atomically by stage_pipeline_batch for each genuinely
+    // new logical run; a preflight read cannot safely authorize concurrent run #2.
     const limits = tierLimits("free");
 
     const [staged] = await stageUploadEntries(
@@ -130,6 +113,24 @@ export async function enqueueUpload(formData: FormData): Promise<void> {
     if (message.includes("per-minute") || message.includes("minute capacity")) {
       redirectUploadError(
         "You are starting listings too quickly. Wait a minute and try again.",
+        batchId.data,
+      );
+    }
+    if (message.includes("snaplist-pro-required")) {
+      redirectUploadError(
+        "SnapList Pro is required to start another new item.",
+        batchId.data,
+      );
+    }
+    if (message.includes("monthly-allowance-reached")) {
+      redirectUploadError(
+        "You've used this subscription period's AI-item allowance.",
+        batchId.data,
+      );
+    }
+    if (message.includes("storekit-entitlement-unavailable")) {
+      redirectUploadError(
+        "We couldn't verify an active subscription period for this item.",
         batchId.data,
       );
     }

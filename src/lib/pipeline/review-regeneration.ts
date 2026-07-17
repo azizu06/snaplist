@@ -371,6 +371,7 @@ export async function regenerateReviewListing(
 /** Authenticated Supabase adapter. RLS applies to reads; the commit is one RPC txn. */
 export function createSupabaseReviewRegenerationStore(
   supabase: SupabaseClient,
+  options: { useCreditLedger?: boolean } = {},
 ): ReviewRegenerationStore {
   return {
     async load(itemId) {
@@ -401,29 +402,34 @@ export function createSupabaseReviewRegenerationStore(
     },
 
     async commit(input) {
-      const { error } = await supabase.rpc("regenerate_review_listing", {
-        p_item_id: input.itemId,
-        p_listing_id: input.listingId,
-        p_run_id: input.runId,
-        p_expected_run_id: input.expectedRunId,
-        p_expected_review_revision: input.expectedReviewRevision,
-        p_attributes: input.attributes,
-        p_condition: input.condition,
-        p_identification: input.identification,
-        p_listing_title: input.listing.title,
-        p_listing_description: input.listing.description,
-        p_listing_copy: input.listing.fields,
-        p_price: input.prediction.price,
-        p_price_range: input.prediction.price_range,
-        p_confidence: input.prediction.confidence,
-        p_tier_fired: input.prediction.tier_fired,
-        p_model: input.prediction.model,
-        p_listing_model: input.prediction.listing_model,
-        p_pricing_model: input.prediction.pricing_model,
-        p_sources: input.prediction.sources,
-        p_autopilot_enabled: input.prediction.autopilot_enabled,
-        p_autopilot_eligible: input.prediction.autopilot_eligible,
-      });
+      const { error } = await supabase.rpc(
+        options.useCreditLedger
+          ? "regenerate_review_listing_with_credit"
+          : "regenerate_review_listing",
+        {
+          p_item_id: input.itemId,
+          p_listing_id: input.listingId,
+          p_run_id: input.runId,
+          p_expected_run_id: input.expectedRunId,
+          p_expected_review_revision: input.expectedReviewRevision,
+          p_attributes: input.attributes,
+          p_condition: input.condition,
+          p_identification: input.identification,
+          p_listing_title: input.listing.title,
+          p_listing_description: input.listing.description,
+          p_listing_copy: input.listing.fields,
+          p_price: input.prediction.price,
+          p_price_range: input.prediction.price_range,
+          p_confidence: input.prediction.confidence,
+          p_tier_fired: input.prediction.tier_fired,
+          p_model: input.prediction.model,
+          p_listing_model: input.prediction.listing_model,
+          p_pricing_model: input.prediction.pricing_model,
+          p_sources: input.prediction.sources,
+          p_autopilot_enabled: input.prediction.autopilot_enabled,
+          p_autopilot_eligible: input.prediction.autopilot_eligible,
+        },
+      );
       if (error) {
         throw new Error(`Failed to save regenerated listing: ${error.message}`);
       }
