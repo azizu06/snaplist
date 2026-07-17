@@ -1,8 +1,10 @@
 import XCTest
+import UIKit
 
 final class SnapListUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
     }
 
     func testPrimaryShellNavigationAndTypedDestinations() {
@@ -27,11 +29,126 @@ final class SnapListUITests: XCTestCase {
     func testCapturePresentsAndDismissesAnItemDrivenSheet() {
         let app = launch()
 
+        XCTAssertTrue(app.staticTexts["Home"].exists)
         app.buttons["dock.capture"].tap()
         XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 2))
+
+        for control in [
+            app.buttons["capture.close"],
+            app.buttons["capture.take-one-item"],
+            app.buttons["capture.choose-library"]
+        ] {
+            XCTAssertTrue(control.exists)
+            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+        }
+
         app.buttons["capture.close"].tap()
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 1))
         XCTAssertTrue(app.staticTexts["Home"].exists)
+    }
+
+    func testTakeOneItemUsesTheNativeCameraRecoveryAndKeepsLibraryEscapeReachable() {
+        let app = launch()
+
+        app.buttons["dock.capture"].tap()
+        XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
+        app.buttons["capture.take-one-item"].tap()
+
+        XCTAssertTrue(app.staticTexts["Camera isn’t available"].waitForExistence(timeout: 3))
+        addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
+        let library = app.buttons["camera.library-recovery"]
+        XCTAssertTrue(library.exists)
+        XCTAssertGreaterThanOrEqual(library.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(library.frame.height, 44)
+
+        library.tap()
+        XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 3))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.staticTexts["Camera isn’t available"].waitForExistence(timeout: 2))
+    }
+
+    func testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["capture.take-one-item"].exists)
+        XCTAssertFalse(app.buttons["capture.choose-library"].exists)
+        XCTAssertGreaterThanOrEqual(resume.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(resume.frame.height, 44)
+        resume.tap()
+
+        let photoCount = app.staticTexts["capture.photo-count"]
+        XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(photoCount.label, "1 of 4 photos")
+        XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
+        addScreenshot(named: "CAPTURE-RESTORED-DRAFT.png")
+
+        let continueButton = app.buttons["capture.continue"]
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(continueButton.exists)
+        XCTAssertGreaterThanOrEqual(continueButton.frame.minX, window.minX)
+        XCTAssertLessThanOrEqual(continueButton.frame.maxX, window.maxX)
+        XCTAssertGreaterThanOrEqual(continueButton.frame.height, 44)
+        continueButton.tap()
+        XCTAssertTrue(app.staticTexts["capture.handoff.title"].waitForExistence(timeout: 2))
+    }
+
+    func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
+        let expectedTextByState = [
+            ("CAP-01", "Add an item"),
+            ("CAP-02a", "Start with one clear photo."),
+            ("CAP-02b1", "Move closer"),
+            ("CAP-02b2", "Whole item is in frame"),
+            ("CAP-02c", "1 of 4 photos"),
+            ("CAP-03-handoff", "Photos ready to review")
+        ]
+
+        for (state, text) in expectedTextByState {
+            let app = launch(extraArguments: ["--visual-state=\(state)"])
+            XCTAssertTrue(
+                app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text))
+                    .firstMatch.waitForExistence(timeout: 2),
+                "Missing approved content for \(state)"
+            )
+            XCTAssertFalse(app.staticTexts["Review photos"].exists)
+            app.terminate()
+        }
+    }
+
+    func testCaptureLauncherSurvivesAccessibilityTypeAndReducedMotion() {
+        let app = launch(extraArguments: [
+            "--visual-state=CAP-01",
+            "--dynamic-type=accessibility3",
+            "--reduce-motion"
+        ])
+
+        XCTAssertTrue(app.staticTexts["Add an item"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Choose from library"].exists)
+        XCTAssertGreaterThan(app.staticTexts["Choose from library"].frame.maxY, 0)
+        XCTAssertLessThan(app.staticTexts["Choose from library"].frame.maxY, app.windows.firstMatch.frame.maxY)
+        addScreenshot(named: "CAP-01-AX3-REDUCED-MOTION.png")
+    }
+
+    func testCaptureGuidanceRespectsLandscapeSafeAreas() {
+        let app = launch(
+            extraArguments: ["--visual-state=CAP-02b2"],
+            orientation: .landscapeLeft
+        )
+
+        let guidance = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Whole item is in frame")
+        ).firstMatch
+        XCTAssertTrue(guidance.waitForExistence(timeout: 2))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(guidance.frame.minX, window.minX)
+        XCTAssertLessThanOrEqual(guidance.frame.maxX, window.maxX)
+        XCTAssertGreaterThanOrEqual(guidance.frame.minY, window.minY)
+        XCTAssertLessThanOrEqual(guidance.frame.maxY, window.maxY)
+        addScreenshot(named: "CAP-02b2-LANDSCAPE.png")
     }
 
     func testHeaderRoutesHaveVoiceOverLabelsAndFortyFourPointTargets() {
@@ -91,10 +208,18 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Rendering boundary reserved for issue #211."].exists)
     }
 
-    func testAccountlessFirstValueJourneyEndsAtCAP01Boundary() {
-        let app = launchOnboarding(
-            state: "ONB-01",
-            cameraStatus: "authorized"
+    func testFreshAccountlessJourneyEntersTheRealCaptureFlow() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--fixture=onboarding",
+            "--zero-network-fixtures",
+            "--reset-onboarding-progress",
+            "--camera-status=authorized"
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.buttons["button.primary.start-with-one-item"].waitForExistence(timeout: 3)
         )
 
         app.buttons["onboarding.sign-in"].tap()
@@ -115,11 +240,19 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Ready to capture"].waitForExistence(timeout: 2))
 
         app.buttons["button.primary.continue-to-capture"].tap()
-        XCTAssertTrue(app.staticTexts["CAP-01"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["Capture entry boundary"].exists)
+        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
+        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
+        XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
+        XCTAssertFalse(app.otherElements["boundary.CAP-01"].exists)
         XCTAssertFalse(app.staticTexts["Photo Review"].exists)
         XCTAssertFalse(app.staticTexts["Create account"].exists)
         XCTAssertFalse(app.staticTexts["SnapList Pro"].exists)
+
+        app.buttons["capture.take-one-item"].tap()
+        XCTAssertTrue(app.staticTexts["Camera isn’t available"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["camera.library-recovery"].exists)
     }
 
     func testCameraDeniedAndRestrictedUseLibraryRecovery() {
@@ -196,10 +329,11 @@ final class SnapListUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Photos ready"].waitForExistence(timeout: 3))
         app.buttons["button.primary.continue-to-capture"].tap()
-        XCTAssertTrue(app.staticTexts["CAP-01"].waitForExistence(timeout: 2))
-        XCTAssertTrue(
-            app.staticTexts["2 library photo selection(s) staged for issue #207."].exists
-        )
+        XCTAssertTrue(app.staticTexts["sheet.capture.title"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["capture.take-one-item"].exists)
+        XCTAssertTrue(app.buttons["capture.choose-library"].exists)
+        XCTAssertFalse(app.staticTexts["Capture entry boundary"].exists)
+        XCTAssertFalse(app.otherElements["boundary.CAP-01"].exists)
         XCTAssertFalse(app.staticTexts["Photo Review"].exists)
     }
 
@@ -300,10 +434,31 @@ final class SnapListUITests: XCTestCase {
         }
     }
 
-    private func launch(extraArguments: [String] = []) -> XCUIApplication {
+    private func launch(
+        extraArguments: [String] = [],
+        orientation: UIDeviceOrientation = .portrait
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--fixture=home", "--zero-network-fixtures"] + extraArguments
         app.launch()
+        guard orientation == .landscapeLeft || orientation == .landscapeRight else {
+            return app
+        }
+
+        XCUIDevice.shared.orientation = orientation
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 2))
+        let orientationPredicate = NSPredicate { _, _ in
+            let frame = window.frame
+            return frame.width > frame.height
+        }
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: orientationPredicate, object: nil)],
+                timeout: 2
+            ),
+            .completed
+        )
         return app
     }
 
@@ -328,5 +483,12 @@ final class SnapListUITests: XCTestCase {
         }
         app.launch()
         return app
+    }
+
+    private func addScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

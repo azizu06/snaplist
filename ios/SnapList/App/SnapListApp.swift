@@ -5,6 +5,7 @@ import SwiftUI
 struct SnapListApp: App {
     @State private var router: AppRouter
     @State private var onboardingModel: OnboardingFlowModel
+    @State private var captureFlow: CaptureFlowModel
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
 
@@ -39,6 +40,13 @@ struct SnapListApp: App {
             onboardingModel.restorePersistedProgress()
         }
         _onboardingModel = State(initialValue: onboardingModel)
+        _captureFlow = State(
+            initialValue: CaptureFlowModel(
+                camera: dependencies.captureCamera,
+                evaluator: dependencies.framingEvaluator,
+                store: dependencies.captureDraftStore
+            )
+        )
     }
 
     var body: some Scene {
@@ -46,9 +54,13 @@ struct SnapListApp: App {
             AppShellView(
                 router: router,
                 onboardingModel: onboardingModel,
+                captureFlow: captureFlow,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)
+                .task {
+                    router.handleCaptureRestoration(await captureFlow.restore())
+                }
         }
     }
 }

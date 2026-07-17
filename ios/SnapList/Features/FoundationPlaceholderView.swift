@@ -99,39 +99,3 @@ struct VisualStateBoundaryPlaceholder: View {
         .accessibilityIdentifier("visual-state.\(state.rawValue)")
     }
 }
-
-struct CaptureBoundarySheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        SnapListSheetContainer {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text("Capture")
-                        .snapListTypography(.sectionHeader)
-                        .accessibilityIdentifier("sheet.capture.title")
-                    Spacer()
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .frame(
-                                width: SnapListMetrics.minimumTouchTarget,
-                                height: SnapListMetrics.minimumTouchTarget
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Close capture")
-                    .accessibilityIdentifier("capture.close")
-                }
-
-                Text("The native capture launcher and guided camera are reserved for issue #207.")
-                    .snapListTypography(.body)
-                    .foregroundStyle(SnapListColorToken.textSecondary.color)
-
-                Spacer()
-            }
-            .padding(SnapListMetrics.screenGutter)
-        }
-    }
-}

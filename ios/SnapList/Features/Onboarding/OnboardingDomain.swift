@@ -261,6 +261,15 @@ final class OnboardingFlowModel {
         update(screen: .captureBoundary)
     }
 
+    func firstStagedLibraryPhotoForCapture() -> Data? {
+        guard case .library = captureEntryContext else { return nil }
+        do {
+            return try stagedLibraryPhotos.load().first
+        } catch {
+            return nil
+        }
+    }
+
     func goBack() {
         switch state.screen {
         case .allowance:

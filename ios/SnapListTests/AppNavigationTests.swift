@@ -48,6 +48,23 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertNil(barcode.visualState)
     }
 
+    func testRestoredCaptureFixtureIsExplicitAndZeroNetworkOnly() {
+        let configuration = LaunchConfiguration.parse(
+            arguments: ["--restored-capture-fixture"]
+        )
+
+        XCTAssertTrue(configuration.usesRestoredCaptureFixture)
+        XCTAssertTrue(configuration.usesZeroNetworkFixtures)
+    }
+
+    func testExplicitVisualStateUsesItsOwningFamilyOverTheDefaultOnboardingFixture() {
+        let onboarding = LaunchConfiguration.parse(arguments: ["--visual-state=ONB-01"])
+        let capture = LaunchConfiguration.parse(arguments: ["--visual-state=CAP-01"])
+
+        XCTAssertTrue(onboarding.usesOnboarding)
+        XCTAssertFalse(capture.usesOnboarding)
+    }
+
     @MainActor
     func testEveryFoundationFixtureProducesItsTypedInitialState() {
         for fixture in FoundationFixture.allCases {

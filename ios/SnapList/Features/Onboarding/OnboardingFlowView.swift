@@ -6,6 +6,7 @@ import UIKit
 struct OnboardingFlowView: View {
     @Bindable var model: OnboardingFlowModel
     let configuration: LaunchConfiguration
+    let continueToCapture: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -85,7 +86,7 @@ struct OnboardingFlowView: View {
         case .libraryHandoff:
             handoffScreen(source: .library(stagedPhotoCount: model.state.stagedPhotoCount))
         case .captureBoundary:
-            CaptureEntryBoundaryView(context: model.captureEntryContext)
+            EmptyView()
         }
     }
 
@@ -443,7 +444,7 @@ struct OnboardingFlowView: View {
                     title: "Continue to capture",
                     systemImage: "chevron.right",
                     reduceMotion: reduceMotion,
-                    action: model.continueToCaptureBoundary
+                    action: continueToCapture
                 )
                 .frame(maxWidth: 240)
                 .padding(.top, 30)
@@ -931,35 +932,6 @@ private struct MarketplaceRow: View {
     }
 }
 
-private struct CaptureEntryBoundaryView: View {
-    let context: CaptureEntryContext?
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Text("CAP-01")
-                .snapListTypography(.displayTitle)
-            Text("Capture entry boundary")
-                .snapListTypography(.body)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-            Text(contextDescription)
-                .snapListTypography(.metadata)
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SnapListColorToken.canvas.color)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("boundary.CAP-01")
-    }
-
-    private var contextDescription: String {
-        switch context {
-        case .camera: "Camera entry selected. Owned by issue #207."
-        case .library(let count): "\(count) library photo selection(s) staged for issue #207."
-        case nil: "No capture entry context."
-        }
-    }
-}
-
 private extension String {
     var accessibilitySlug: String {
         lowercased()
@@ -976,7 +948,8 @@ private extension String {
             progressStore: InMemoryOnboardingProgressStore(),
             guestAllowance: DeferredGuestAllowanceCapability()
         ),
-        configuration: .preview
+        configuration: .preview,
+        continueToCapture: {}
     )
 }
 
@@ -988,6 +961,7 @@ private extension String {
             progressStore: InMemoryOnboardingProgressStore(),
             guestAllowance: DeferredGuestAllowanceCapability()
         ),
-        configuration: .preview
+        configuration: .preview,
+        continueToCapture: {}
     )
 }
