@@ -25,8 +25,9 @@
   },
   "approved_deltas": [
     {
-      "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16.zip",
-      "sha256": "d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001",
+      "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",
+      "version": "run-rev-delta-v1.1",
+      "sha256": "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
       "exact_base": "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
       "internal_checksums_verified": true,
       "approved_frame_ids": [
@@ -52,19 +53,7 @@
       "withheld_unchanged": ["CAP-05"]
     }
   ],
-  "known_contract_conflicts": [
-    {
-      "id": "run-08-paid-plan-customer-name",
-      "source_locations": [
-        "changes/copy-catalog-delta.json",
-        "contracts/exact-copy-catalog.json",
-        "resolved/snaplist-copy-catalog.json"
-      ],
-      "package_issue": "RUN-08 exact copy uses the pre-ADR customer plan name.",
-      "required_customer_copy": "SnapList Pro",
-      "disposition": "repo_product_contract_override_required_before_implementation"
-    }
-  ],
+  "known_contract_conflicts": [],
   "status_definitions": {
     "implementation_frozen": "Visually approved and authorized for implementation only by its owning issue and declared dependencies.",
     "implementation_frozen_parent": "Approved parent contract whose renderable variants are individually listed as implementation-frozen.",

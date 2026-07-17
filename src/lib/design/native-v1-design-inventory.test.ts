@@ -20,6 +20,7 @@ type NativeDesignInventory = {
   };
   approved_deltas: Array<{
     path: string;
+    version: string;
     sha256: string;
     exact_base: string;
     internal_checksums_verified: boolean;
@@ -27,13 +28,7 @@ type NativeDesignInventory = {
     candidate_unchanged: string[];
     withheld_unchanged: string[];
   }>;
-  known_contract_conflicts: Array<{
-    id: string;
-    source_locations: string[];
-    package_issue: string;
-    required_customer_copy: string;
-    disposition: string;
-  }>;
+  known_contract_conflicts: unknown[];
   implementation_epic: Record<string, string>;
   product_contract: Record<string, unknown>;
   visual_contract: Record<string, unknown>;
@@ -125,8 +120,9 @@ describe("native V1 design inventory contract", () => {
     });
     expect(inventory.approved_deltas).toEqual([
       {
-        path: "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16.zip",
-        sha256: "d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001",
+        path: "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",
+        version: "run-rev-delta-v1.1",
+        sha256: "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
         exact_base: "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
         internal_checksums_verified: true,
         approved_frame_ids: [
@@ -152,19 +148,7 @@ describe("native V1 design inventory contract", () => {
         withheld_unchanged: ["CAP-05"],
       },
     ]);
-    expect(inventory.known_contract_conflicts).toEqual([
-      {
-        id: "run-08-paid-plan-customer-name",
-        source_locations: [
-          "changes/copy-catalog-delta.json",
-          "contracts/exact-copy-catalog.json",
-          "resolved/snaplist-copy-catalog.json",
-        ],
-        package_issue: "RUN-08 exact copy uses the pre-ADR customer plan name.",
-        required_customer_copy: "SnapList Pro",
-        disposition: "repo_product_contract_override_required_before_implementation",
-      },
-    ]);
+    expect(inventory.known_contract_conflicts).toEqual([]);
     expect(inventory.implementation_epic).toEqual({
       epic: "https://github.com/azizu06/snaplist/issues/204",
       foundation: "https://github.com/azizu06/snaplist/issues/205",
@@ -216,6 +200,8 @@ describe("native V1 design inventory contract", () => {
     ].join("\n");
     const forbiddenClaims = [
       /Seller Pro/i,
+      /snaplist-implementation-fidelity-delta-run-rev-v1-2026-07-16\.zip/i,
+      /d6468601ac3ad584caaf69b9bf27d64d1b5d2d8eb575f26576babed30e13e001/i,
       /\b\d+\s+items?\s+(?:per|a)\s+day\b/i,
       /capacity[- ]only/i,
       /Runs tab/i,
