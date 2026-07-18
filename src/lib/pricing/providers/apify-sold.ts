@@ -291,6 +291,36 @@ export function normalizeApifySoldItems(
   return normalized;
 }
 
+function revalidateCachedApifySoldItems(
+  cached: ApifySoldComp[] | null,
+  maxResults: number,
+): ApifySoldComp[] | null {
+  if (!Array.isArray(cached)) return null;
+  // Preserve the successful empty-response negative cache so a known-empty
+  // Actor run does not incur another paid start within the TTL.
+  if (cached.length === 0) return [];
+  const normalized = normalizeApifySoldItems(
+    cached.map((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return value;
+      }
+      const comp = value as unknown as Record<string, unknown>;
+      return {
+        url: comp.url,
+        title: comp.title,
+        soldPrice: comp.price,
+        soldCurrency: "USD",
+        condition: comp.condition,
+        endedAt: comp.soldAt,
+        isBestOfferAccepted: comp.isBestOfferAccepted,
+        priceDisclosure: comp.priceDisclosure,
+      };
+    }),
+    maxResults,
+  );
+  return normalized.length >= EBAY_SOLD_MIN_COMPS ? normalized : null;
+}
+
 /** Official SDK runner. It is constructed inertly and performs no request until called. */
 export function createDefaultApifySoldActorRunner(token: string): RunApifySoldActor {
   return async (request) => {
@@ -454,7 +484,7 @@ export function createApifySoldPricingProvider(
   async function readCache(key: string): Promise<ApifySoldComp[] | null> {
     if (!cache) return null;
     try {
-      return await cache.get(key);
+      return revalidateCachedApifySoldItems(await cache.get(key), maxResults);
     } catch {
       emitDiagnostic("pricing.apify_sold.cache_error", { op: "get", reason: "unavailable" });
       return null;

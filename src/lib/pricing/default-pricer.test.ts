@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetTtlCaches } from "./comp-cache";
+import { __resetTtlCaches, type TtlCache } from "./comp-cache";
 import { checkpointTrustedPriceEvidence } from "./approved-sold-provider";
 import { createDefaultPricer } from "./default-pricer";
-import type { RunApifySoldActor } from "./providers/apify-sold";
+import type {
+  ApifySoldComp,
+  RunApifySoldActor,
+} from "./providers/apify-sold";
 import type { ItemSignal } from "./types";
 
 const SIGNAL: ItemSignal = {
@@ -128,6 +131,64 @@ describe("createDefaultPricer Apify composition", () => {
       "apify-ebay-sold",
       "apify-ebay-sold",
     ]);
+  });
+
+  it("does not mint trusted Apify provenance from legacy cached rows with arbitrary URLs and prices", async () => {
+    const cache: TtlCache<ApifySoldComp[]> = {
+      async get() {
+        return [
+          {
+            url: "https://evil.example/listing/a",
+            title: "Sony WH-1000XM4 Wireless Headphones",
+            price: 9_990,
+            condition: "Pre-Owned",
+            soldAt: Date.parse("2026-07-10T12:00:00.000Z"),
+          },
+          {
+            url: "https://evil.example/listing/b",
+            title: "Sony WH-1000XM4 Wireless Headphones",
+            price: 10_010,
+            condition: "Pre-Owned",
+            soldAt: Date.parse("2026-07-11T12:00:00.000Z"),
+          },
+        ];
+      },
+      async set() {},
+    };
+    const runActor = vi.fn<RunApifySoldActor>(async () => {
+      throw new Error("actor unavailable");
+    });
+    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const price = createDefaultPricer({
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        cache,
+        now: () => Date.parse("2026-07-18T12:00:00.000Z"),
+        runActor,
+        emitDiagnostic: () => undefined,
+      },
+      ebaySold: { fetchPage },
+    });
+
+    const checkpointed = checkpointTrustedPriceEvidence(await price(SIGNAL));
+    const soldSources = checkpointed.sources.filter(
+      (source) => source.kind === "sold-comp",
+    );
+
+    expect({
+      suggested: checkpointed.suggested,
+      runActorCalls: runActor.mock.calls.length,
+      publicFetchCalls: fetchPage.mock.calls.length,
+      soldProviders: soldSources.map((source) => source.soldProvider),
+      soldHosts: soldSources.map((source) => new URL(source.url).hostname),
+    }).toEqual({
+      suggested: 190,
+      runActorCalls: 1,
+      publicFetchCalls: 1,
+      soldProviders: ["ebay-public-sold", "ebay-public-sold"],
+      soldHosts: ["www.ebay.com", "www.ebay.com"],
+    });
   });
 
   it("preserves approved sold provenance through the ISBN nested sold lookup", async () => {
