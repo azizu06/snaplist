@@ -4,6 +4,7 @@ import type {
   PriceSource,
   PricingProvider,
 } from "../types";
+import { inheritTrustedSoldEvidence } from "../approved-sold-provider";
 import {
   canonicalizeCondition,
   isPricedItemCondition,
@@ -357,14 +358,14 @@ function buildSoldGroundedResult(
   hit: ResolvedHit,
   sold: PriceResult,
 ): PriceResult {
-  return {
+  return inheritTrustedSoldEvidence({
     suggested: sold.suggested,
     range: sold.range,
     confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
     sources: [...hit.sources, ...sold.sources],
     tier: "isbn-lookup",
     ...(sold.compAgreement != null ? { compAgreement: sold.compAgreement } : {}),
-  };
+  }, sold);
 }
 
 // ---------------------------------------------------------------------------

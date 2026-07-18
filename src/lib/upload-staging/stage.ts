@@ -142,13 +142,14 @@ export async function stageUploadEntries(
   let cleanupIntentRecorded = false;
   let stagingAttempted = false;
 
-  const notifyUploadProgress = async (
+  const notifyUploadProgress = (
     facts: UploadedPhotoProgressFacts,
-  ): Promise<void> => {
+  ): void => {
     try {
-      await dependencies.onUploadProgress?.(
+      const observation = dependencies.onUploadProgress?.(
         createUploadProgressSnapshot(facts),
       );
+      void Promise.resolve(observation).catch(() => undefined);
     } catch {
       // Optional UI guidance observes upload truth; it never owns producer
       // success, cleanup, or the durable staging transaction.
@@ -175,7 +176,7 @@ export async function stageUploadEntries(
     cleanupIntentRecorded = true;
 
     for (const [entryIndex, entry] of input.entries.entries()) {
-      await notifyUploadProgress({
+      notifyUploadProgress({
         uploadSessionId: cleanupId,
         entryIndex,
         uploadedPhotoCount: 0,
@@ -187,7 +188,7 @@ export async function stageUploadEntries(
       await dependencies.upload(path, photo);
       uploadedPaths.push(path);
       uploadedPhotoCounts[entryIndex] += 1;
-      await notifyUploadProgress({
+      notifyUploadProgress({
         uploadSessionId: cleanupId,
         entryIndex,
         uploadedPhotoCount: uploadedPhotoCounts[entryIndex],

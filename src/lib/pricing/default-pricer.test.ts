@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetTtlCaches } from "./comp-cache";
+import { checkpointTrustedPriceEvidence } from "./approved-sold-provider";
 import { createDefaultPricer } from "./default-pricer";
 import type { RunApifySoldActor } from "./providers/apify-sold";
 import type { ItemSignal } from "./types";
@@ -93,6 +94,107 @@ describe("createDefaultPricer Apify composition", () => {
     expect(result.suggested).toBe(185);
     expect(runActor).toHaveBeenCalledTimes(1);
     expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("preserves approved sold provenance through the production ordered provider", async () => {
+    const price = createDefaultPricer({
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        now: () => Date.parse("2026-07-18T12:00:00.000Z"),
+        runActor: async () => ({
+          status: "SUCCEEDED",
+          items: [
+            ...apifyItems(),
+            {
+              ...apifyItems()[0],
+              url: "https://www.ebay.com/itm/apify-c",
+              endedAt: "2026-07-12T12:00:00.000Z",
+              soldPrice: "180",
+            },
+          ],
+        }),
+      },
+      ebaySold: { fetchPage: async () => PUBLIC_SOLD_HTML },
+    });
+
+    const result = await price(SIGNAL);
+
+    const checkpointed = checkpointTrustedPriceEvidence(result);
+    expect(checkpointed.sources.filter((source) => source.kind === "sold-comp"))
+      .toHaveLength(3);
+    expect(checkpointed.sources.map((source) => source.soldProvider)).toEqual([
+      "apify-ebay-sold",
+      "apify-ebay-sold",
+      "apify-ebay-sold",
+    ]);
+  });
+
+  it("preserves approved sold provenance through the ISBN nested sold lookup", async () => {
+    const isbn = "9780140328721";
+    const price = createDefaultPricer({
+      isbn: {
+        fetchJson: async (url) =>
+          url.includes("openlibrary.org")
+            ? {
+                title: "Fantastic Mr Fox",
+                isbn_13: [isbn],
+                key: "/books/OL7353617M",
+              }
+            : {
+                totalItems: 1,
+                items: [{
+                  id: "GB_VOL_1",
+                  volumeInfo: {
+                    title: "Fantastic Mr Fox",
+                    industryIdentifiers: [{ type: "ISBN_13", identifier: isbn }],
+                    infoLink: "https://books.google.com/books?id=GB_VOL_1",
+                  },
+                  saleInfo: {
+                    saleability: "FOR_SALE",
+                    retailPrice: { amount: 8, currencyCode: "USD" },
+                  },
+                }],
+              },
+      },
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        now: () => Date.parse("2026-07-18T12:00:00.000Z"),
+        runActor: async () => ({
+          status: "SUCCEEDED",
+          items: [5, 6, 7].map((soldPrice, index) => ({
+            url: `https://www.ebay.com/itm/book-${index}`,
+            title: "Fantastic Mr Fox Roald Dahl Paperback",
+            condition: "Pre-Owned",
+            endedAt: `2026-07-${10 + index}T12:00:00.000Z`,
+            soldPrice,
+            soldCurrency: "USD",
+          })),
+        }),
+      },
+      ebaySold: { fetchPage: async () => PUBLIC_SOLD_HTML },
+    });
+
+    const result = await price({
+      isbn,
+      resolvedName: "Fantastic Mr Fox",
+      category: "books",
+      condition: "good",
+      conditionKnown: true,
+    });
+
+    expect(result.tier).toBe("isbn-lookup");
+    const checkpointed = checkpointTrustedPriceEvidence(result);
+    expect(
+      checkpointed.sources
+        .filter((source) => source.kind === "sold-comp")
+        .map((source) => source.soldProvider),
+    ).toEqual([
+      "apify-ebay-sold",
+      "apify-ebay-sold",
+      "apify-ebay-sold",
+    ]);
   });
 
   it("falls through from Actor failure to the public sold provider without blocking listing pricing", async () => {

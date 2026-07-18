@@ -1,6 +1,54 @@
 import { isApifyEbaySoldProvider } from "./providers/apify-sold";
 import { isEbayPublicSoldProvider } from "./providers/ebay-sold";
-import type { PriceResult, PricingProvider, SoldEvidenceProvider } from "./types";
+import {
+  priceResultSchema,
+  type PriceResult,
+  type PricingProvider,
+  type SoldEvidenceProvider,
+} from "./types";
+
+const trustedSoldEvidenceResults = new WeakMap<object, PriceResult>();
+
+function durableSnapshot(result: PriceResult): PriceResult {
+  return priceResultSchema.parse(JSON.parse(JSON.stringify(result)));
+}
+
+function rememberTrustedResult(result: PriceResult): void {
+  trustedSoldEvidenceResults.set(result, durableSnapshot(result));
+}
+
+/** Cross the persisted JSON shape while retaining private server-side authority. */
+export function checkpointTrustedPriceEvidence(
+  recommendation: PriceResult,
+): PriceResult {
+  const trusted = trustedSoldEvidenceResults.get(recommendation);
+  if (!trusted) {
+    throw new Error("Price evidence checkpoint requires a trusted routed result.");
+  }
+  const checkpoint = durableSnapshot(trusted);
+  rememberTrustedResult(checkpoint);
+  return checkpoint;
+}
+
+/** Immutable trusted projection used by Scout fact derivation. */
+export function trustedPriceEvidenceSnapshot(
+  recommendation: unknown,
+): PriceResult | null {
+  if (typeof recommendation !== "object" || recommendation === null) return null;
+  const trusted = trustedSoldEvidenceResults.get(recommendation);
+  return trusted ? durableSnapshot(trusted) : null;
+}
+
+/** Carry private authority across a deterministic result transformation. */
+export function inheritTrustedSoldEvidence(
+  transformed: PriceResult,
+  source: PriceResult,
+): PriceResult {
+  if (trustedSoldEvidenceResults.has(source)) {
+    rememberTrustedResult(transformed);
+  }
+  return transformed;
+}
 
 function approvedProvenance(
   provider: PricingProvider,
@@ -18,8 +66,9 @@ export function canonicalizeRoutedSoldEvidence(
   provider: PricingProvider,
   result: PriceResult,
 ): PriceResult {
+  if (trustedSoldEvidenceResults.has(result)) return result;
   const provenance = approvedProvenance(provider);
-  return {
+  const canonical = {
     ...result,
     sources: result.sources.map((source) => {
       const facts = { ...source };
@@ -29,4 +78,6 @@ export function canonicalizeRoutedSoldEvidence(
         : facts;
     }),
   };
+  if (provenance) rememberTrustedResult(canonical);
+  return canonical;
 }

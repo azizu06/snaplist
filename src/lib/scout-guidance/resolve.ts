@@ -16,6 +16,7 @@ import {
   priceResultSchema,
   type PriceResult,
 } from "@/lib/pricing";
+import { trustedPriceEvidenceSnapshot } from "@/lib/pricing/approved-sold-provider";
 import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
@@ -55,7 +56,8 @@ export class ScoutGuidanceFactError extends Error {
       | "untrusted-capture-session"
       | "untrusted-upload-progress"
       | "untrusted-price-recommendation"
-      | "missing-item-display-name",
+      | "missing-item-display-name"
+      | "unsafe-item-display-name",
     message: string,
   ) {
     super(message);
@@ -77,8 +79,13 @@ type ScoutGuidanceSubstitutionKey =
 export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
   reference: string;
-  value: string | number;
+  value: string | number | UploadProgressValue;
   [verifiedFactType]: true;
+}>;
+
+type UploadProgressValue = Readonly<{
+  uploadedPhotoCount: number;
+  plannedPhotoCount: number | null;
 }>;
 
 const uuidSchema = z.string().uuid();
@@ -88,17 +95,28 @@ const durableItemRecordSchema = z.object({
   attributes: z.unknown(),
 });
 const durableItemAttributesSchema = z.object({
-  title: z.string().optional(),
   brand: z.string().optional(),
   model: z.string().optional(),
   category: z.string().optional(),
 });
+const scoutItemDisplayNameSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .refine((value) => value === value.trim())
+  .regex(/^[\p{L}\p{N}][\p{L}\p{M}\p{N} ./'’&()+#-]*$/u)
+  .refine(
+    (value) =>
+      !/\b(?:not\s+just|ignore|prompt|assistant|system|unlock|seamless|effortless|powerful)\b/i.test(
+        value,
+      ),
+  );
 
 function verifiedFact(
   key: ScoutGuidanceSubstitutionKey,
   source: ScoutGuidanceTrustedSource,
   reference: string,
-  value: string | number,
+  value: string | number | UploadProgressValue,
   group?: object,
 ): VerifiedScoutGuidanceFact {
   const fact = Object.freeze({
@@ -139,21 +157,30 @@ export function verifiedItemDisplayNameFromDurableRecord(
   const attributes = durableItemAttributesSchema.parse(
     durableRecord.attributes ?? {},
   );
-  const value =
-    attributes.title ||
+  // `title` is free-form generated/listing copy. Scout substitutions stay on
+  // the narrower structured-fact seam so #243 can own seller-copy policy
+  // without generated prose leaking into this deterministic catalog.
+  const candidate =
     [attributes.brand, attributes.model].filter(Boolean).join(" ") ||
     attributes.category;
-  if (!value) {
+  if (!candidate) {
     throw new ScoutGuidanceFactError(
       "missing-item-display-name",
       "The durable item has no approved display-name fact for this template.",
+    );
+  }
+  const value = scoutItemDisplayNameSchema.safeParse(candidate);
+  if (!value.success) {
+    throw new ScoutGuidanceFactError(
+      "unsafe-item-display-name",
+      "The durable item name is outside Scout's bounded substitution grammar.",
     );
   }
   return verifiedFact(
     "itemDisplayName",
     "durable-item-record",
     `item:${durableRecord.id}:review-revision:${durableRecord.review_revision}`,
-    value,
+    value.data,
   );
 }
 
@@ -179,7 +206,8 @@ export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonl
   soldCompCount: VerifiedScoutGuidanceFact;
   windowDays: VerifiedScoutGuidanceFact;
 }> {
-  const recommendation = priceResultSchema.safeParse(recommendationInput);
+  const trustedSnapshot = trustedPriceEvidenceSnapshot(recommendationInput);
+  const recommendation = priceResultSchema.safeParse(trustedSnapshot);
   const soldSources = recommendation.success
     ? recommendation.data.sources.filter((source) => source.kind === "sold-comp")
     : [];
@@ -241,18 +269,28 @@ export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonl
 export function formatUploadProgressSummary(input: {
   uploadedPhotoCount: number;
   plannedPhotoCount: number | null;
-}): string {
+}, localizedCopy: Record<string, string> = guidanceCatalog.locales[
+  guidanceCatalog.defaultLocale
+]): string {
   const uploaded = z.number().int().min(0).max(4).parse(input.uploadedPhotoCount);
   const planned = z.number().int().min(1).max(4).nullable().parse(
     input.plannedPhotoCount,
   );
-  return (
+  const key =
     planned === null
       ? uploaded === 0
-        ? "No photos uploaded. Try again."
-        : `${uploaded} ${uploaded === 1 ? "photo" : "photos"} uploaded. Try again.`
-      : `${uploaded} of ${planned} photos uploaded. Try again.`
-  );
+        ? "format.upload-progress.unknown-zero"
+        : uploaded === 1
+          ? "format.upload-progress.unknown-one"
+          : "format.upload-progress.unknown-other"
+      : planned === 1
+        ? "format.upload-progress.known-one"
+        : "format.upload-progress.known-other";
+  const template = localizedCopy[key];
+  if (!template) throw new Error(`Locale is missing copy key ${key}.`);
+  return template
+    .replaceAll("{uploadedPhotoCount}", String(uploaded))
+    .replaceAll("{plannedPhotoCount}", String(planned));
 }
 
 export function verifiedUploadProgress(
@@ -265,12 +303,14 @@ export function verifiedUploadProgress(
       "Upload facts must come from the producer-owned per-photo attempt snapshot.",
     );
   }
-  const summary = formatUploadProgressSummary(input);
   return verifiedFact(
     "uploadProgressSummary",
     "upload-progress",
     `upload-session:${uuidSchema.parse(input.uploadSessionId)}:entry:${input.entryIndex}`,
-    summary,
+    Object.freeze({
+      uploadedPhotoCount: input.uploadedPhotoCount,
+      plannedPhotoCount: input.plannedPhotoCount,
+    }),
   );
 }
 
@@ -311,7 +351,7 @@ function validatedSubstitutions(
   state: ScoutGuidanceState,
   definition: ScoutGuidanceDefinition,
   provided: Record<string, VerifiedScoutGuidanceFact>,
-): Record<string, string> {
+): Record<string, string | UploadProgressValue> {
   const allowedKeys = new Set(definition.substitutions.map((rule) => rule.key));
   let relatedFactGroup: object | undefined;
   const unexpectedKey = Object.keys(provided).find((key) => !allowedKeys.has(key));
@@ -397,6 +437,24 @@ function validatedSubstitutions(
         );
       }
       if (
+        rule.valueType === "upload-progress" &&
+        (!isUploadProgressValue(substitution.value) ||
+          substitution.value.uploadedPhotoCount < 0 ||
+          substitution.value.uploadedPhotoCount > 4 ||
+          (substitution.value.plannedPhotoCount !== null &&
+            (substitution.value.plannedPhotoCount < 1 ||
+              substitution.value.plannedPhotoCount > 4 ||
+              substitution.value.uploadedPhotoCount >
+                substitution.value.plannedPhotoCount)))
+      ) {
+        throw new ScoutGuidanceContractError(
+          "invalid-substitution",
+          state,
+          rule.key,
+          `Substitution ${rule.key} is outside its approved bounds.`,
+        );
+      }
+      if (
         rule.referencePattern &&
         (!substitution.reference ||
           !new RegExp(rule.referencePattern).test(substitution.reference))
@@ -408,22 +466,41 @@ function validatedSubstitutions(
           `Substitution ${rule.key} is missing verified provenance.`,
         );
       }
-      return [rule.key, String(substitution.value)];
+      const renderedValue: string | UploadProgressValue =
+        rule.valueType === "upload-progress" &&
+        isUploadProgressValue(substitution.value)
+          ? substitution.value
+          : String(substitution.value);
+      return [rule.key, renderedValue] as const;
     }),
   );
 }
 
 function renderTemplate(
   template: string,
-  substitutions: Record<string, string>,
+  substitutions: Record<string, string | UploadProgressValue>,
+  localizedCopy: Record<string, string>,
 ): string {
   return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (_, key: string) => {
     const value = substitutions[key];
     if (value === undefined) {
       throw new Error(`Template requested missing substitution ${key}.`);
     }
-    return value;
+    return typeof value === "object"
+      ? formatUploadProgressSummary(value, localizedCopy)
+      : value;
   });
+}
+
+function isUploadProgressValue(value: unknown): value is UploadProgressValue {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "uploadedPhotoCount" in value &&
+    Number.isInteger(value.uploadedPhotoCount) &&
+    "plannedPhotoCount" in value &&
+    (value.plannedPhotoCount === null || Number.isInteger(value.plannedPhotoCount))
+  );
 }
 
 function resolveLocale(requestedLocale: string): {
@@ -481,7 +558,8 @@ export function resolveScoutGuidance(
     definition,
     request.substitutions,
   );
-  const copy = (key: string) => renderTemplate(locale[key], substitutions);
+  const copy = (key: string) =>
+    renderTemplate(locale[key], substitutions, locale);
 
   return {
     contractVersion: SCOUT_GUIDANCE_CONTRACT_VERSION,

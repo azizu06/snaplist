@@ -142,12 +142,11 @@ describe("durable upload staging", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it("awaits and contains an asynchronously rejected upload-progress observer", async () => {
+  it("contains an asynchronously rejected observer without delaying staging", async () => {
     let rejectObserver!: (error: Error) => void;
     const observerGate = new Promise<void>((_resolve, reject) => {
       rejectObserver = reject;
     });
-    void observerGate.catch(() => undefined);
     const committed = [{
       batch_id: "11111111-1111-4111-8111-111111111111",
       batch_position: 0,
@@ -195,14 +194,54 @@ describe("durable upload staging", () => {
       },
     );
 
-    await new Promise<void>((resolveTurn) => setTimeout(resolveTurn, 0));
-    const stagedBeforeObserverSettled = stageAndEnqueue.mock.calls.length > 0;
-    rejectObserver(new Error("async Scout observer failed"));
-
     await expect(staging).resolves.toEqual(committed);
-    expect(stagedBeforeObserverSettled).toBe(false);
     expect(stageAndEnqueue).toHaveBeenCalledOnce();
     expect(remove).not.toHaveBeenCalled();
+    rejectObserver(new Error("async Scout observer failed"));
+    await Promise.resolve();
+  });
+
+  it("does not let a never-settling upload-progress observer block staging", async () => {
+    let releaseObserver!: () => void;
+    const observer = new Promise<void>((resolveObserver) => {
+      releaseObserver = resolveObserver;
+    });
+    const upload = vi.fn(async () => undefined);
+    const stageAndEnqueue = vi.fn(async () => []);
+    const staging = stageUploadEntries(
+      {
+        batchId: "11111111-1111-4111-8111-111111111111",
+        userId: "user_123",
+        dailyLimit: 15,
+        perMinuteLimit: 20,
+        entries: [{
+          idempotencyKey: "never-settling-observer",
+          source: "single",
+          autopilotEnabled: false,
+          costBasis: null,
+          photos: [photo("front.jpg")],
+        }],
+      },
+      {
+        upload,
+        onUploadProgress: () => observer,
+        remove: vi.fn(async () => undefined),
+        recordCleanupIntent: vi.fn(async () => undefined),
+        resolveCleanupIntent: vi.fn(async () => undefined),
+        findReplay: vi.fn(async () => []),
+        stageAndEnqueue,
+      },
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    try {
+      expect(upload).toHaveBeenCalledOnce();
+      expect(stageAndEnqueue).toHaveBeenCalledOnce();
+    } finally {
+      releaseObserver();
+      await staging;
+    }
   });
 
   it("removes every uploaded private object when transactional staging fails", async () => {

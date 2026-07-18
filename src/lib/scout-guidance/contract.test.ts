@@ -8,6 +8,7 @@ import {
   type AppendAcceptedPhotosResult,
 } from "@/lib/capture-progress";
 import {
+  checkpointTrustedPriceEvidence,
   createApifySoldPricingProvider,
   PriceRouter,
   type PriceResult,
@@ -111,13 +112,14 @@ async function routedPriceRecommendation(
       })),
     }),
   });
-  return new PriceRouter([provider]).price({
+  const recommendation = await new PriceRouter([provider]).price({
     brand: "Canon",
     model: "AE-1",
     category: "electronics",
     condition: "good",
     conditionKnown: true,
   });
+  return checkpointTrustedPriceEvidence(recommendation);
 }
 
 async function loadVerifiedItemFact(
@@ -127,7 +129,7 @@ async function loadVerifiedItemFact(
     item: {
       id: ITEM_ID,
       photos: [],
-      attributes: { title: displayName },
+      attributes: { brand: displayName },
       condition: null,
       identification: null,
       price_override: null,
@@ -367,6 +369,25 @@ describe("Scout guidance catalog contract", () => {
           expect.objectContaining({
             message:
               "Locale es copy key capture.photo-count.title contains malformed template braces.",
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("requires complete upload-progress plural formats in every locale", () => {
+    const missingFormat = structuredClone(catalog);
+    delete missingFormat.locales.es["format.upload-progress.known-one"];
+
+    const result = scoutGuidanceCatalogSchema.safeParse(missingFormat);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message:
+              "Locale es is missing copy key format.upload-progress.known-one.",
           }),
         ]),
       );

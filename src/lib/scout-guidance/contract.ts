@@ -13,7 +13,7 @@ export const scoutGuidanceTrustedSourceSchema = z.enum([
 const substitutionRuleSchema = z
   .object({
     key: z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/),
-    valueType: z.enum(["integer", "text"]),
+    valueType: z.enum(["integer", "text", "upload-progress"]),
     trustedSources: z.array(scoutGuidanceTrustedSourceSchema).min(1),
     minimum: z.number().int().optional(),
     maximum: z.number().int().optional(),
@@ -127,6 +127,14 @@ function canonicalLocaleTag(locale: string): string | null {
   }
 }
 
+const uploadProgressFormatKeys = [
+  "format.upload-progress.known-one",
+  "format.upload-progress.known-other",
+  "format.upload-progress.unknown-zero",
+  "format.upload-progress.unknown-one",
+  "format.upload-progress.unknown-other",
+] as const;
+
 export const scoutGuidanceCatalogSchema = z
   .object({
     contractVersion: z.literal(SCOUT_GUIDANCE_CONTRACT_VERSION),
@@ -181,6 +189,55 @@ export const scoutGuidanceCatalogSchema = z
         message: "The default locale must exist in the locale catalog.",
       });
       return;
+    }
+
+    for (const copyKey of uploadProgressFormatKeys) {
+      const defaultTemplate = defaultCopy[copyKey];
+      if (!defaultTemplate) {
+        context.addIssue({
+          code: "custom",
+          path: ["locales", catalog.defaultLocale],
+          message: `Locale ${catalog.defaultLocale} is missing copy key ${copyKey}.`,
+        });
+        continue;
+      }
+      const expected = parseTemplate(defaultTemplate);
+      if (expected.malformedBraces) {
+        context.addIssue({
+          code: "custom",
+          path: ["locales", catalog.defaultLocale, copyKey],
+          message: `Locale ${catalog.defaultLocale} copy key ${copyKey} contains malformed template braces.`,
+        });
+      }
+      for (const [locale, localizedCopy] of Object.entries(catalog.locales)) {
+        const localizedTemplate = localizedCopy[copyKey];
+        if (!localizedTemplate) {
+          context.addIssue({
+            code: "custom",
+            path: ["locales", locale],
+            message: `Locale ${locale} is missing copy key ${copyKey}.`,
+          });
+          continue;
+        }
+        const parsed = parseTemplate(localizedTemplate);
+        if (parsed.malformedBraces) {
+          context.addIssue({
+            code: "custom",
+            path: ["locales", locale, copyKey],
+            message: `Locale ${locale} copy key ${copyKey} contains malformed template braces.`,
+          });
+          continue;
+        }
+        if (!sameVariables(parsed.variables, expected.variables)) {
+          const expectedVariables =
+            [...new Set(expected.variables)].join(", ") || "(none)";
+          context.addIssue({
+            code: "custom",
+            path: ["locales", locale, copyKey],
+            message: `Locale ${locale} template ${copyKey} must use exactly approved variables: ${expectedVariables}.`,
+          });
+        }
+      }
     }
 
     for (const [state, definition] of Object.entries(catalog.states)) {

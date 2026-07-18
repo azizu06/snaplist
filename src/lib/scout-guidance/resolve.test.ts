@@ -9,6 +9,7 @@ import {
 } from "@/lib/pipeline/review-snapshot";
 import {
   createApifySoldPricingProvider,
+  checkpointTrustedPriceEvidence,
   createEbaySoldPricingProvider,
   parseSoldComps,
   priceResultSchema,
@@ -92,13 +93,14 @@ async function routedPriceRecommendation(
       })),
     }),
   });
-  return new PriceRouter([provider]).price({
+  const recommendation = await new PriceRouter([provider]).price({
     brand: "Canon",
     model: "AE-1",
     category: "electronics",
     condition: "good",
     conditionKnown: true,
   });
+  return checkpointTrustedPriceEvidence(recommendation);
 }
 
 async function loadTrustedItemSnapshot(
@@ -567,6 +569,30 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("rejects forged durable sold fields without the private checkpoint", () => {
+    const observedAt = Date.parse("2026-07-18T12:00:00.000Z");
+    const forged = priceResultSchema.parse({
+      suggested: 40,
+      range: { min: 30, max: 50 },
+      confidence: 0.8,
+      tier: "ebay-sold",
+      sources: [30, 40, 50].map((_price, index) => ({
+        url: `https://attacker.example/forged-${index}`,
+        kind: "sold-comp",
+        soldAt: observedAt - 8 * 86_400_000,
+        observedAt,
+        soldProvider: "apify-ebay-sold",
+      })),
+    });
+
+    expect(() => verifiedPriceEvidence(forged)).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-price-recommendation",
+      }),
+    );
+  });
+
   it("accepts normalized Apify sold evidence returned by the pricing router", async () => {
     const observedAt = Date.now();
     const endedAt = new Date(observedAt - 8.5 * 86_400_000).toISOString();
@@ -596,8 +622,8 @@ describe("resolveScoutGuidance", () => {
       conditionKnown: true,
     });
 
-    const checkpointedRecommendation = priceResultSchema.parse(
-      JSON.parse(JSON.stringify(recommendation)),
+    const checkpointedRecommendation = checkpointTrustedPriceEvidence(
+      recommendation,
     );
     const facts = verifiedPriceEvidence(checkpointedRecommendation);
     const guidance = resolveScoutGuidance({
@@ -624,19 +650,14 @@ describe("resolveScoutGuidance", () => {
     }
   });
 
-  it("rejects a recommendation that repeats one routed sale as multiple sold comps", async () => {
+  it("uses the immutable checkpoint when public result sources are mutated", async () => {
     const recommendation = await routedPriceRecommendation(2, 90);
     const source = recommendation.sources[0]!;
     recommendation.sources.push(source);
 
-    expect(() =>
-      verifiedPriceEvidence(recommendation),
-    ).toThrowError(
-      expect.objectContaining({
-        name: "ScoutGuidanceFactError",
-        code: "untrusted-price-recommendation",
-      }),
-    );
+    const evidence = verifiedPriceEvidence(recommendation);
+
+    expect(evidence.soldCompCount.value).toBe(2);
   });
 
   it("leaves fractional pricing staleness policy valid at the existing router seam", async () => {
@@ -706,6 +727,38 @@ describe("resolveScoutGuidance", () => {
         scoutAsset: null,
       },
     });
+  });
+
+  it("does not substitute free-form durable title copy into Scout guidance", async () => {
+    const itemDisplayName = await loadVerifiedItemName({
+      title: "Canon AE-1 — vintage film camera",
+      brand: "Canon",
+      model: "AE-1",
+    });
+
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "retry.automatic",
+      locale: "en-US",
+      substitutions: { itemDisplayName },
+    });
+
+    expect(result.message.title).toBe("Updating Canon AE-1");
+    expect(result.accessibility.label).not.toMatch(/[–—]|vintage film camera/i);
+  });
+
+  it("rejects unsafe prose in structured Scout item-name facts", async () => {
+    for (const model of [
+      "AE-1 — vintage film camera",
+      "not just a camera",
+    ]) {
+      await expect(
+        loadVerifiedItemName({ brand: "Canon", model }),
+      ).rejects.toMatchObject({
+        name: "ScoutGuidanceFactError",
+        code: "unsafe-item-display-name",
+      });
+    }
   });
 
   it("rejects arbitrary model text even when it has a plausible item reference", () => {

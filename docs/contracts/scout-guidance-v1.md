@@ -17,16 +17,18 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 - source-specific constructors derive provenance and validate real UUID identifiers;
 - runtime trust for capture, upload, and durable item facts is private object identity, so copying or spreading a fact never
   copies its authority;
-- sold-count and day-window facts accept only persisted recommendations whose unique dated sold
-  citations carry one router-stamped approved-provider provenance and a shared observation time;
-  Scout derives both values after the pricing schema and JSON boundary without adding a policy field;
+- sold-count and day-window facts accept only the immutable private checkpoint carried from an
+  approved sold-provider route; persisted public source fields alone never grant authority. The
+  ordered production wrapper and ISBN transformation preserve that private authority while Scout
+  derives both values from unique dated citations with one shared observation time;
 - upload-count facts come from producer-owned attempt snapshots, and the completed count advances
   only after Storage succeeds; observer failures cannot
   change upload/staging outcomes, and paused copy describes only what finished in that attempt. It does
   not imply device durability or reconnect resumption;
 - the durable-item constructor accepts only the exact snapshot object returned by the existing
-  tenant-scoped review RPC loader and derives the display name from the private item projection
-  captured at load time, so later caller mutation cannot relabel it;
+  tenant-scoped review RPC loader and derives the display name from bounded structured brand/model
+  facts, then category. It never substitutes the free-form title, and unsafe structured prose fails
+  closed; later caller mutation cannot relabel the private item projection captured at load time;
 - a durable item without an approved display-name fact fails closed; V1 has no generic item-name
   template;
 - integers still declare minimum and maximum bounds;
@@ -41,10 +43,11 @@ States whose package entries omit visible copy, plus safety corrections where fr
 proven runtime state, use the explicit machine-readable repo override at
 `docs/design/scout-guidance-copy-overrides.v1.json`, never an implementation-source text search.
 
-The checked-in catalog currently ships approved `en-US` copy. Locale lookup tries the canonical
-requested locale, then its language tag, then `en-US`. New translations must provide the complete
-dictionary, use the exact approved placeholder set for each copy key, and contain balanced template
-braces; they do not change state selection or authorize new guide moments.
+The checked-in catalog currently ships `en-US` and `es` copy. Locale lookup tries the canonical
+requested locale, then its language tag, then `en-US`. Every translation must provide the complete
+state dictionary and upload-progress plural formats, use the exact approved placeholder set for
+each copy key, and contain balanced template braces; translations do not change state selection or
+authorize new guide moments.
 
 ## Runtime composition
 
