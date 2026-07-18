@@ -1,8 +1,9 @@
 # Scout guidance contract V1
 
-`scout-guidance-v1.json` is the provider-neutral launch catalog for Scout guidance. Product code
-resolves a semantic state through `resolveScoutGuidance`; it does not ask a model to write guide
-copy. The catalog is subordinate to `PRD.md`, ADR-0008, and the approved native V1 design inventory.
+`src/lib/scout-guidance/catalog.v1.json` is the provider-neutral launch catalog for Scout guidance.
+Product code resolves a semantic state through `resolveScoutGuidance`; it does not ask a model to
+write guide copy. The catalog is subordinate to `PRD.md`, ADR-0008, and the approved native V1
+design inventory.
 
 ## Request and result
 
@@ -11,16 +12,23 @@ only the substitutions declared for that state. The result contains deterministi
 one deterministic accessibility label, the resolved locale and fallback chain, and guide metadata.
 The same request always produces the same result.
 
-Substitutions are narrow facts, not prose extensions:
+Substitutions are opaque verified facts, not caller-labelled objects or prose extensions:
 
-- integers declare minimum and maximum bounds;
-- text declares a maximum length, a trusted source, and a durable provenance reference;
+- source-specific constructors derive provenance and validate real UUID identifiers;
+- the durable-item constructor derives the display name from an already tenant-scoped item row;
+- integers still declare minimum and maximum bounds;
+- text still declares a maximum length and a durable provenance reference;
 - undeclared, missing, out-of-bounds, or untrusted substitutions fail closed;
 - `model-output` is not a trusted source and free-form model text is never accepted.
 
+`approved-copy-provenance.v1.json` maps every semantic state to its frozen native state IDs, exact
+templates, canonical resolved copy, and checked-in design authority. Contract tests verify all
+source fragments verbatim; accessibility labels compose those approved phrases with verified facts.
+
 The checked-in catalog currently ships approved `en-US` copy. Locale lookup tries the canonical
-requested locale, then its language tag, then `en-US`. New translations add locale dictionaries;
-they do not change state selection or authorize new guide moments.
+requested locale, then its language tag, then `en-US`. New translations must provide the complete
+dictionary, use the exact approved placeholder set for each copy key, and contain balanced template
+braces; they do not change state selection or authorize new guide moments.
 
 ## Presentation boundary
 

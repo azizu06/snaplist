@@ -222,7 +222,7 @@
           "valueType": "text",
           "trustedSources": ["durable-item-record"],
           "maximumLength": 80,
-          "referencePattern": "^item:[0-9a-fA-F-]{36}:revision:[1-9][0-9]*$"
+          "referencePattern": "^item:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}:review-revision:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
         }
       ],
       "copyKeys": {
@@ -385,7 +385,7 @@
           "valueType": "text",
           "trustedSources": ["durable-item-record"],
           "maximumLength": 80,
-          "referencePattern": "^item:[0-9a-fA-F-]{36}:revision:[1-9][0-9]*$"
+          "referencePattern": "^item:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}:review-revision:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
         }
       ],
       "copyKeys": {
@@ -458,13 +458,13 @@
       "processing.finding-sold-comps.accessibilityLabel": "Working on your item. {itemDisplayName}. Finding recent sold comps. You can leave — we’ll keep working.",
       "uncertainty.limited-price-evidence.title": "Limited evidence",
       "uncertainty.limited-price-evidence.body": "{soldCompCount} sold · {windowDays} days",
-      "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} sold in {windowDays} days.",
+      "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days",
       "uncertainty.identity.title": "We’re not fully sure",
       "uncertainty.identity.body": "Limited evidence",
       "uncertainty.identity.accessibilityLabel": "We’re not fully sure. Limited evidence.",
       "recovery.upload-paused.title": "Upload paused",
       "recovery.upload-paused.body": "Your photos are safe on this device",
-      "recovery.upload-paused.accessibilityLabel": "Upload paused. {uploadedPhotoCount} of 4 photos uploaded to SnapList; resumes on reconnect. Your photos are safe on this device.",
+      "recovery.upload-paused.accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 4 · resumes on reconnect. Your photos are safe on this device.",
       "recovery.processing-failed.title": "Couldn’t finish this run",
       "recovery.processing-failed.body": "We hit a snag finding comps",
       "recovery.processing-failed.accessibilityLabel": "Couldn’t finish this run. We hit a snag finding comps. Trying again is free.",

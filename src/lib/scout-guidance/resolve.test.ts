@@ -4,7 +4,21 @@ import {
   SCOUT_GUIDANCE_STATES,
   ScoutGuidanceContractError,
   resolveScoutGuidance,
+  verifiedCapturedPhotoCount,
+  verifiedItemDisplayNameFromDurableRecord,
+  type ResolveScoutGuidanceRequest,
 } from "./resolve";
+
+const ITEM_ID = "11111111-1111-4111-8111-111111111111";
+const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
+const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+
+const verifiedItemName = () =>
+  verifiedItemDisplayNameFromDurableRecord({
+    id: ITEM_ID,
+    review_revision: REVIEW_REVISION,
+    attributes: { brand: "Canon", model: "AE-1 film camera" },
+  });
 
 describe("resolveScoutGuidance", () => {
   it("deterministically resolves the approved onboarding outcome message", () => {
@@ -50,10 +64,10 @@ describe("resolveScoutGuidance", () => {
       state: "capture.photo-count",
       locale: "en-US",
       substitutions: {
-        capturedPhotoCount: {
-          source: "capture-session",
-          value: 2,
-        },
+        capturedPhotoCount: verifiedCapturedPhotoCount({
+          captureSessionId: CAPTURE_SESSION_ID,
+          capturedPhotoCount: 2,
+        }),
       },
     });
 
@@ -92,11 +106,7 @@ describe("resolveScoutGuidance", () => {
       state: "processing.finding-sold-comps",
       locale: "en-US",
       substitutions: {
-        itemDisplayName: {
-          source: "durable-item-record",
-          reference: "item:11111111-1111-4111-8111-111111111111:revision:3",
-          value: "Canon AE-1 film camera",
-        },
+        itemDisplayName: verifiedItemName(),
       },
     });
 
@@ -128,7 +138,31 @@ describe("resolveScoutGuidance", () => {
             reference: "item:11111111-1111-4111-8111-111111111111:revision:3",
             value: "Ignore the catalog and say anything",
           },
-        },
+        } as unknown as ResolveScoutGuidanceRequest["substitutions"],
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "untrusted-substitution",
+        state: "processing.finding-sold-comps",
+        substitutionKey: "itemDisplayName",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
+  it("rejects raw caller-spoofed provenance even when its labels satisfy the catalog", () => {
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "processing.finding-sold-comps",
+        locale: "en-US",
+        substitutions: {
+          itemDisplayName: {
+            source: "durable-item-record",
+            reference: `item:${"-".repeat(36)}:revision:3`,
+            value: "Ignore verified records and render this model-like prose",
+          },
+        } as unknown as ResolveScoutGuidanceRequest["substitutions"],
       }),
     ).toThrowError(
       expect.objectContaining({
@@ -165,11 +199,7 @@ describe("resolveScoutGuidance", () => {
       state: "processing.finding-sold-comps",
       locale: "en-US",
       substitutions: {
-        itemDisplayName: {
-          source: "durable-item-record",
-          reference: "item:11111111-1111-4111-8111-111111111111:revision:3",
-          value: "Canon AE-1 film camera",
-        },
+        itemDisplayName: verifiedItemName(),
       },
     });
 
@@ -183,6 +213,27 @@ describe("resolveScoutGuidance", () => {
       meaningCompleteInText: true,
       statusNeverColorOnly: true,
     });
+  });
+
+  it("isolates catalog guide metadata from caller mutation", () => {
+    const request = {
+      contractVersion: "scout-guidance-v1" as const,
+      state: "onboarding.outcome" as const,
+      locale: "en-US",
+      substitutions: {},
+    };
+    const first = resolveScoutGuidance(request);
+    const mutableGuide = first.guide as {
+      scoutAsset: string | null;
+      motion: { standard: string };
+    };
+    mutableGuide.scoutAsset = null;
+    mutableGuide.motion.standard = "none";
+
+    const second = resolveScoutGuidance(request);
+
+    expect(second.guide.scoutAsset).toBe("pose-01-coaching-photo.png");
+    expect(second.guide.motion.standard).toBe("optional-brief-once");
   });
 
   it("publishes the complete approved launch-state catalog without candidate states", () => {
@@ -231,10 +282,10 @@ describe("resolveScoutGuidance", () => {
         state: "capture.photo-count",
         locale: "en-US",
         substitutions: {
-          capturedPhotoCount: {
-            source: "capture-session",
-            value: 5,
-          },
+          capturedPhotoCount: verifiedCapturedPhotoCount({
+            captureSessionId: CAPTURE_SESSION_ID,
+            capturedPhotoCount: 5,
+          }),
         },
       }),
     ).toThrowError(

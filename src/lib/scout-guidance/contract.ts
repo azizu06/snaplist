@@ -94,8 +94,30 @@ export const scoutGuidanceStateSchema = z
   })
   .strict();
 
-const templateVariables = (template: string): string[] =>
-  Array.from(template.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g), (match) => match[1]);
+function parseTemplate(template: string): {
+  variables: string[];
+  malformedBraces: boolean;
+} {
+  const variables = Array.from(
+    template.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g),
+    (match) => match[1],
+  );
+  return {
+    variables,
+    malformedBraces: /[{}]/.test(
+      template.replace(/\{[A-Za-z][A-Za-z0-9]*\}/g, ""),
+    ),
+  };
+}
+
+function sameVariables(actual: string[], expected: string[]): boolean {
+  const actualSet = new Set(actual);
+  const expectedSet = new Set(expected);
+  return (
+    actualSet.size === expectedSet.size &&
+    [...actualSet].every((variable) => expectedSet.has(variable))
+  );
+}
 
 export const scoutGuidanceCatalogSchema = z
   .object({
@@ -134,18 +156,6 @@ export const scoutGuidanceCatalogSchema = z
         definition.copyKeys.accessibilityLabel,
       ];
 
-      for (const [locale, localizedCopy] of Object.entries(catalog.locales)) {
-        for (const copyKey of copyKeys) {
-          if (!localizedCopy[copyKey]) {
-            context.addIssue({
-              code: "custom",
-              path: ["locales", locale],
-              message: `Locale ${locale} is missing copy key ${copyKey}.`,
-            });
-          }
-        }
-      }
-
       for (const copyKey of copyKeys) {
         const template = defaultCopy[copyKey];
         if (!template) {
@@ -156,13 +166,56 @@ export const scoutGuidanceCatalogSchema = z
           });
           continue;
         }
-        for (const variable of templateVariables(template)) {
+        const defaultTemplate = parseTemplate(template);
+        if (defaultTemplate.malformedBraces) {
+          context.addIssue({
+            code: "custom",
+            path: ["locales", catalog.defaultLocale, copyKey],
+            message: `Locale ${catalog.defaultLocale} copy key ${copyKey} contains malformed template braces.`,
+          });
+        }
+        for (const variable of defaultTemplate.variables) {
           usedVariables.add(variable);
           if (!allowedVariables.has(variable)) {
             context.addIssue({
               code: "custom",
               path: ["locales", catalog.defaultLocale, copyKey],
               message: `Template variable ${variable} is not approved for ${state}.`,
+            });
+          }
+        }
+
+        for (const [locale, localizedCopy] of Object.entries(catalog.locales)) {
+          const localizedTemplate = localizedCopy[copyKey];
+          if (!localizedTemplate) {
+            context.addIssue({
+              code: "custom",
+              path: ["locales", locale],
+              message: `Locale ${locale} is missing copy key ${copyKey}.`,
+            });
+            continue;
+          }
+          const parsedTemplate = parseTemplate(localizedTemplate);
+          if (parsedTemplate.malformedBraces) {
+            context.addIssue({
+              code: "custom",
+              path: ["locales", locale, copyKey],
+              message: `Locale ${locale} copy key ${copyKey} contains malformed template braces.`,
+            });
+            continue;
+          }
+          if (
+            !sameVariables(
+              parsedTemplate.variables,
+              defaultTemplate.variables,
+            )
+          ) {
+            const expectedVariables =
+              [...new Set(defaultTemplate.variables)].join(", ") || "(none)";
+            context.addIssue({
+              code: "custom",
+              path: ["locales", locale, copyKey],
+              message: `Locale ${locale} template ${copyKey} must use exactly approved variables: ${expectedVariables}.`,
             });
           }
         }

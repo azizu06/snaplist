@@ -1,4 +1,5 @@
-import catalog from "../../../docs/contracts/scout-guidance-v1.json";
+import catalog from "./catalog.v1.json";
+import { z } from "zod";
 import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
@@ -29,11 +30,116 @@ export class ScoutGuidanceContractError extends Error {
   }
 }
 
-type ScoutGuidanceSubstitution = {
+const verifiedFactMarker: unique symbol = Symbol("verified-scout-guidance-fact");
+
+export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
-  reference?: string;
+  reference: string;
   value: string | number;
-};
+  [verifiedFactMarker]: true;
+}>;
+
+const uuidSchema = z.string().uuid();
+const durableItemRecordSchema = z.object({
+  id: uuidSchema,
+  review_revision: uuidSchema,
+  attributes: z.unknown(),
+});
+const durableItemAttributesSchema = z.object({
+  title: z.string().optional(),
+  brand: z.string().optional(),
+  model: z.string().optional(),
+  category: z.string().optional(),
+});
+
+function verifiedFact(
+  source: ScoutGuidanceTrustedSource,
+  reference: string,
+  value: string | number,
+): VerifiedScoutGuidanceFact {
+  return Object.freeze({
+    source,
+    reference,
+    value,
+    [verifiedFactMarker]: true as const,
+  });
+}
+
+function isVerifiedFact(value: unknown): value is VerifiedScoutGuidanceFact {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    verifiedFactMarker in value &&
+    value[verifiedFactMarker] === true
+  );
+}
+
+/**
+ * Construct the only item-name fact accepted by Scout guidance from an already
+ * tenant-scoped durable item row. The display name and provenance are derived;
+ * call sites cannot label arbitrary prose as a durable record fact.
+ */
+export function verifiedItemDisplayNameFromDurableRecord(record: {
+  id: string;
+  review_revision: string;
+  attributes: unknown;
+}): VerifiedScoutGuidanceFact {
+  const durableRecord = durableItemRecordSchema.parse(record);
+  const attributes = durableItemAttributesSchema.parse(
+    durableRecord.attributes ?? {},
+  );
+  const value =
+    attributes.title ||
+    [attributes.brand, attributes.model].filter(Boolean).join(" ") ||
+    attributes.category ||
+    "Your item";
+  return verifiedFact(
+    "durable-item-record",
+    `item:${durableRecord.id}:review-revision:${durableRecord.review_revision}`,
+    value,
+  );
+}
+
+export function verifiedCapturedPhotoCount(input: {
+  captureSessionId: string;
+  capturedPhotoCount: number;
+}): VerifiedScoutGuidanceFact {
+  return verifiedFact(
+    "capture-session",
+    `capture-session:${uuidSchema.parse(input.captureSessionId)}`,
+    input.capturedPhotoCount,
+  );
+}
+
+export function verifiedPriceEvidence(input: {
+  recommendationId: string;
+  soldCompCount: number;
+  windowDays: number;
+}): Readonly<{
+  soldCompCount: VerifiedScoutGuidanceFact;
+  windowDays: VerifiedScoutGuidanceFact;
+}> {
+  const reference = `price-recommendation:${uuidSchema.parse(input.recommendationId)}`;
+  return Object.freeze({
+    soldCompCount: verifiedFact(
+      "price-recommendation",
+      reference,
+      input.soldCompCount,
+    ),
+    windowDays: verifiedFact("price-recommendation", reference, input.windowDays),
+  });
+}
+
+export function verifiedUploadedPhotoCount(input: {
+  runId: string;
+  uploadedPhotoCount: number;
+}): VerifiedScoutGuidanceFact {
+  return verifiedFact(
+    "durable-run",
+    `run:${uuidSchema.parse(input.runId)}`,
+    input.uploadedPhotoCount,
+  );
+}
 
 const guidanceCatalog = scoutGuidanceCatalogSchema.parse(catalog);
 
@@ -45,7 +151,7 @@ export type ResolveScoutGuidanceRequest = {
   contractVersion: typeof SCOUT_GUIDANCE_CONTRACT_VERSION;
   state: ScoutGuidanceState;
   locale: string;
-  substitutions: Record<string, ScoutGuidanceSubstitution>;
+  substitutions: Record<string, VerifiedScoutGuidanceFact>;
 };
 
 export type ResolvedScoutGuidance = {
@@ -71,7 +177,7 @@ export type ResolvedScoutGuidance = {
 function validatedSubstitutions(
   state: ScoutGuidanceState,
   definition: ScoutGuidanceDefinition,
-  provided: Record<string, ScoutGuidanceSubstitution>,
+  provided: Record<string, VerifiedScoutGuidanceFact>,
 ): Record<string, string> {
   const allowedKeys = new Set(definition.substitutions.map((rule) => rule.key));
   const unexpectedKey = Object.keys(provided).find((key) => !allowedKeys.has(key));
@@ -88,6 +194,14 @@ function validatedSubstitutions(
           state,
           rule.key,
           `Missing required substitution ${rule.key}.`,
+        );
+      }
+      if (!isVerifiedFact(substitution)) {
+        throw new ScoutGuidanceContractError(
+          "untrusted-substitution",
+          state,
+          rule.key,
+          `Substitution ${rule.key} was not constructed at a verified fact boundary.`,
         );
       }
       if (!rule.trustedSources.includes(substitution.source)) {
@@ -229,6 +343,9 @@ export function resolveScoutGuidance(
       label: copy(definition.copyKeys.accessibilityLabel),
       ...guidanceCatalog.accessibilityPolicy,
     },
-    guide: definition.guide,
+    guide: {
+      ...definition.guide,
+      motion: { ...definition.guide.motion },
+    },
   };
 }
