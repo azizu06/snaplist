@@ -1,0 +1,482 @@
+{
+  "contractVersion": "scout-guidance-v1",
+  "defaultLocale": "en-US",
+  "accessibilityPolicy": {
+    "scoutAssetDecorative": true,
+    "meaningCompleteInText": true,
+    "statusNeverColorOnly": true
+  },
+  "states": {
+    "onboarding.outcome": {
+      "family": "onboarding",
+      "approvedStateIds": ["ONB-01"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "onboarding.outcome.title",
+        "body": "onboarding.outcome.body",
+        "accessibilityLabel": "onboarding.outcome.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "explain-first-value",
+        "scoutAsset": "pose-01-coaching-photo.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "onboarding.photo-primer": {
+      "family": "onboarding",
+      "approvedStateIds": ["ONB-07"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "onboarding.photo-primer.title",
+        "body": null,
+        "accessibilityLabel": "onboarding.photo-primer.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "prepare-first-photo",
+        "scoutAsset": "pose-01-coaching-photo.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "onboarding.camera-denied": {
+      "family": "onboarding",
+      "approvedStateIds": ["ONB-08"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "onboarding.camera-denied.title",
+        "body": "onboarding.camera-denied.body",
+        "accessibilityLabel": "onboarding.camera-denied.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "explain-permission-recovery",
+        "scoutAsset": "pose-01-uncertain.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "onboarding.camera-ready": {
+      "family": "onboarding",
+      "approvedStateIds": ["ONB-09-camera"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "onboarding.camera-ready.title",
+        "body": "onboarding.camera-ready.body",
+        "accessibilityLabel": "onboarding.camera-ready.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "confirm-camera-handoff",
+        "scoutAsset": "pose-01-coaching-photo.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "onboarding.library-ready": {
+      "family": "onboarding",
+      "approvedStateIds": ["ONB-09-library"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "onboarding.library-ready.title",
+        "body": "onboarding.library-ready.body",
+        "accessibilityLabel": "onboarding.library-ready.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "confirm-library-handoff",
+        "scoutAsset": "pose-01-coaching-photo.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "capture.initial-coaching": {
+      "family": "capture",
+      "approvedStateIds": ["CAP-02a"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "capture.initial-coaching.title",
+        "body": null,
+        "accessibilityLabel": "capture.initial-coaching.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "prepare-camera-framing",
+        "scoutAsset": "pose-01-coaching-photo.png",
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "capture.move-closer": {
+      "family": "capture",
+      "approvedStateIds": ["CAP-02b1"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "capture.move-closer.title",
+        "body": null,
+        "accessibilityLabel": "capture.move-closer.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "coach-camera-framing",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "capture.framing-accepted": {
+      "family": "capture",
+      "approvedStateIds": ["CAP-02b2"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "capture.framing-accepted.title",
+        "body": null,
+        "accessibilityLabel": "capture.framing-accepted.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "confirm-camera-framing",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "capture.photo-count": {
+      "family": "capture",
+      "approvedStateIds": ["CAP-02c"],
+      "substitutions": [
+        {
+          "key": "capturedPhotoCount",
+          "valueType": "integer",
+          "trustedSources": ["capture-session"],
+          "minimum": 1,
+          "maximum": 4
+        }
+      ],
+      "copyKeys": {
+        "title": "capture.photo-count.title",
+        "body": null,
+        "accessibilityLabel": "capture.photo-count.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "confirm-capture-count",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "processing.finding-sold-comps": {
+      "family": "processing",
+      "approvedStateIds": ["RUN-02"],
+      "substitutions": [
+        {
+          "key": "itemDisplayName",
+          "valueType": "text",
+          "trustedSources": ["durable-item-record"],
+          "maximumLength": 80,
+          "referencePattern": "^item:[0-9a-fA-F-]{36}:revision:[1-9][0-9]*$"
+        }
+      ],
+      "copyKeys": {
+        "title": "processing.finding-sold-comps.title",
+        "body": "processing.finding-sold-comps.body",
+        "accessibilityLabel": "processing.finding-sold-comps.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "reassure-active-processing",
+        "scoutAsset": "pose-01-analyzing.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "uncertainty.limited-price-evidence": {
+      "family": "uncertainty",
+      "approvedStateIds": ["S3"],
+      "substitutions": [
+        {
+          "key": "soldCompCount",
+          "valueType": "integer",
+          "trustedSources": ["price-recommendation"],
+          "minimum": 1,
+          "maximum": 99
+        },
+        {
+          "key": "windowDays",
+          "valueType": "integer",
+          "trustedSources": ["price-recommendation"],
+          "minimum": 1,
+          "maximum": 365
+        }
+      ],
+      "copyKeys": {
+        "title": "uncertainty.limited-price-evidence.title",
+        "body": "uncertainty.limited-price-evidence.body",
+        "accessibilityLabel": "uncertainty.limited-price-evidence.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "explain-limited-price-evidence",
+        "scoutAsset": "pose-01-uncertain.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "uncertainty.identity": {
+      "family": "uncertainty",
+      "approvedStateIds": ["REV-08"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "uncertainty.identity.title",
+        "body": "uncertainty.identity.body",
+        "accessibilityLabel": "uncertainty.identity.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "explain-identity-uncertainty",
+        "scoutAsset": "pose-01-uncertain.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "recovery.upload-paused": {
+      "family": "recovery",
+      "approvedStateIds": ["RUN-04"],
+      "substitutions": [
+        {
+          "key": "uploadedPhotoCount",
+          "valueType": "integer",
+          "trustedSources": ["durable-run"],
+          "minimum": 0,
+          "maximum": 4
+        }
+      ],
+      "copyKeys": {
+        "title": "recovery.upload-paused.title",
+        "body": "recovery.upload-paused.body",
+        "accessibilityLabel": "recovery.upload-paused.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "explain-preserved-upload",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "recovery.processing-failed": {
+      "family": "recovery",
+      "approvedStateIds": ["RUN-05"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "recovery.processing-failed.title",
+        "body": "recovery.processing-failed.body",
+        "accessibilityLabel": "recovery.processing-failed.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "offer-same-run-retry",
+        "scoutAsset": "pose-03-retry-review.png",
+        "motion": {
+          "standard": "optional-brief-once",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "recovery.status-unconfirmed": {
+      "family": "recovery",
+      "approvedStateIds": ["RUN-06"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "recovery.status-unconfirmed.title",
+        "body": "recovery.status-unconfirmed.body",
+        "accessibilityLabel": "recovery.status-unconfirmed.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "prevent-duplicate-run",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "retry.automatic": {
+      "family": "retry",
+      "approvedStateIds": ["REV-02d-retry"],
+      "substitutions": [
+        {
+          "key": "itemDisplayName",
+          "valueType": "text",
+          "trustedSources": ["durable-item-record"],
+          "maximumLength": 80,
+          "referencePattern": "^item:[0-9a-fA-F-]{36}:revision:[1-9][0-9]*$"
+        }
+      ],
+      "copyKeys": {
+        "title": "retry.automatic.title",
+        "body": "retry.automatic.body",
+        "accessibilityLabel": "retry.automatic.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "explain-safe-technical-retry",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    },
+    "empty.home": {
+      "family": "empty",
+      "approvedStateIds": ["HOME-02"],
+      "substitutions": [],
+      "copyKeys": {
+        "title": "empty.home.title",
+        "body": "empty.home.body",
+        "accessibilityLabel": "empty.home.accessibilityLabel"
+      },
+      "guide": {
+        "optional": true,
+        "persistent": false,
+        "blocksPrimaryAction": false,
+        "functionalPurpose": "route-to-first-capture",
+        "scoutAsset": null,
+        "motion": {
+          "standard": "none",
+          "reducedMotion": "static",
+          "loops": false
+        }
+      }
+    }
+  },
+  "locales": {
+    "en-US": {
+      "onboarding.outcome.title": "Photograph an item. Get real comps and a listing you control.",
+      "onboarding.outcome.body": "See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
+      "onboarding.outcome.accessibilityLabel": "Photograph an item. Get real comps and a listing you control. See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
+      "onboarding.photo-primer.title": "One clear photo is all I need to start.",
+      "onboarding.photo-primer.accessibilityLabel": "One clear photo is all I need to start.",
+      "onboarding.camera-denied.title": "Camera access is off",
+      "onboarding.camera-denied.body": "Enable it in Settings, or pick a photo from your library instead — either way works.",
+      "onboarding.camera-denied.accessibilityLabel": "Camera access is off. Enable it in Settings, or pick a photo from your library instead — either way works.",
+      "onboarding.camera-ready.title": "Ready to capture",
+      "onboarding.camera-ready.body": "Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it.",
+      "onboarding.camera-ready.accessibilityLabel": "Ready to capture. Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it.",
+      "onboarding.library-ready.title": "Photos ready",
+      "onboarding.library-ready.body": "Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose.",
+      "onboarding.library-ready.accessibilityLabel": "Photos ready. Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose.",
+      "capture.initial-coaching.title": "Start with one clear photo. Add angles, labels, or damage for a stronger match.",
+      "capture.initial-coaching.accessibilityLabel": "Start with one clear photo. Add angles, labels, or damage for a stronger match.",
+      "capture.move-closer.title": "Move closer",
+      "capture.move-closer.accessibilityLabel": "Move closer",
+      "capture.framing-accepted.title": "Whole item is in frame",
+      "capture.framing-accepted.accessibilityLabel": "Whole item is in frame",
+      "capture.photo-count.title": "{capturedPhotoCount} of 4 photos",
+      "capture.photo-count.accessibilityLabel": "{capturedPhotoCount} of 4 photos",
+      "processing.finding-sold-comps.title": "Working on your item",
+      "processing.finding-sold-comps.body": "Finding recent sold comps",
+      "processing.finding-sold-comps.accessibilityLabel": "Working on your item. {itemDisplayName}. Finding recent sold comps. You can leave — we’ll keep working.",
+      "uncertainty.limited-price-evidence.title": "Limited evidence",
+      "uncertainty.limited-price-evidence.body": "{soldCompCount} sold · {windowDays} days",
+      "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} sold in {windowDays} days.",
+      "uncertainty.identity.title": "We’re not fully sure",
+      "uncertainty.identity.body": "Limited evidence",
+      "uncertainty.identity.accessibilityLabel": "We’re not fully sure. Limited evidence.",
+      "recovery.upload-paused.title": "Upload paused",
+      "recovery.upload-paused.body": "Your photos are safe on this device",
+      "recovery.upload-paused.accessibilityLabel": "Upload paused. {uploadedPhotoCount} of 4 photos uploaded to SnapList; resumes on reconnect. Your photos are safe on this device.",
+      "recovery.processing-failed.title": "Couldn’t finish this run",
+      "recovery.processing-failed.body": "We hit a snag finding comps",
+      "recovery.processing-failed.accessibilityLabel": "Couldn’t finish this run. We hit a snag finding comps. Trying again is free.",
+      "recovery.status-unconfirmed.title": "Checking your run",
+      "recovery.status-unconfirmed.body": "We’re confirming the run you already started — not beginning a new one.",
+      "recovery.status-unconfirmed.accessibilityLabel": "Checking your run. We’re confirming the run you already started — not beginning a new one. Status unconfirmed — verifying now.",
+      "retry.automatic.title": "Updating for the {itemDisplayName}",
+      "retry.automatic.body": "Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe.",
+      "retry.automatic.accessibilityLabel": "Updating for the {itemDisplayName}. Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe.",
+      "empty.home.title": "Photograph an item. Get real comps and a listing you control.",
+      "empty.home.body": "Your first item is on us — no account needed to try it.",
+      "empty.home.accessibilityLabel": "Photograph an item. Get real comps and a listing you control. Your first item is on us — no account needed to try it."
+    }
+  }
+}
