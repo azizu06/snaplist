@@ -29,11 +29,50 @@ function jsonbWhitespaceBytes(value: unknown): number {
   return 0;
 }
 
+function postgresJsonbNumberText(value: number): string {
+  const serialized = JSON.stringify(value);
+  const match = serialized.match(
+    /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/,
+  );
+  if (!match) return serialized;
+
+  const [, sign, integer, fraction = "", rawExponent] = match;
+  const digits = `${integer}${fraction}`;
+  const decimalIndex = integer.length + Number(rawExponent);
+  if (decimalIndex <= 0) {
+    return `${sign}0.${"0".repeat(-decimalIndex)}${digits}`;
+  }
+  if (decimalIndex >= digits.length) {
+    return `${sign}${digits}${"0".repeat(decimalIndex - digits.length)}`;
+  }
+  return `${sign}${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function jsonbNumericExpansionBytes(value: unknown): number {
+  if (typeof value === "number") {
+    return postgresJsonbNumberText(value).length - JSON.stringify(value).length;
+  }
+  if (Array.isArray(value)) {
+    return value.reduce(
+      (total, entry) => total + jsonbNumericExpansionBytes(entry),
+      0,
+    );
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).reduce(
+      (total, entry) => total + jsonbNumericExpansionBytes(entry),
+      0,
+    );
+  }
+  return 0;
+}
+
 /** Match PostgreSQL `octet_length(jsonb::text)` before attempting the RPC. */
 export function pipelineCheckpointJsonbByteLength(value: unknown): number {
   return (
     new TextEncoder().encode(JSON.stringify(value)).byteLength +
-    jsonbWhitespaceBytes(value)
+    jsonbWhitespaceBytes(value) +
+    jsonbNumericExpansionBytes(value)
   );
 }
 

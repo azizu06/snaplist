@@ -94,7 +94,8 @@ export type SoldEvidenceProvider = z.infer<typeof soldEvidenceProviderSchema>;
 export const PRICE_SOURCE_URL_MAX_LENGTH = 2_048;
 export const PRICE_SOURCE_TITLE_MAX_LENGTH = 256;
 export const PRICE_SOURCE_KIND_MAX_LENGTH = 64;
-export const PRICE_RESULT_MAX_SOURCES = 25;
+/** Matches the established public eBay sold-page retrieval ceiling. */
+export const PRICE_RESULT_MAX_SOURCES = 60;
 
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({

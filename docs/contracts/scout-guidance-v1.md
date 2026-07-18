@@ -23,9 +23,11 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
   service-role-written `pipeline_runs.checkpoint`. A server-runtime-only loader reads the row through
   the caller's tenant/RLS client, verifies the projection against the saved price, and re-enrolls
   authority after JSON persistence or process restart. Raw checkpoint JSON and tenant-writable
-  prediction-log source fields never grant authority. Pricing sources are bounded at the router,
-  and the worker rejects checkpoints above the database's 262,144-byte JSONB-text ceiling before
-  attempting the RPC. The ordered production wrapper and ISBN transformation preserve authority
+  prediction-log source fields never grant authority. Pricing sources are bounded at the router to
+  the public eBay provider's 60-result ceiling, and the worker rejects checkpoints above the
+  database's 262,144-byte JSONB-text ceiling before attempting the RPC. Its byte calculation expands
+  exponent-form numbers to PostgreSQL's JSONB decimal representation. The ordered production
+  wrapper and ISBN transformation preserve authority
   while Scout derives both values from unique dated citations with one shared observation time;
 - upload-count facts come from producer-owned attempt snapshots, and the completed count advances
   only after Storage succeeds; observer failures cannot

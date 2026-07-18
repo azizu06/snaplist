@@ -943,6 +943,30 @@ describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
     expect(result.sources.every((s) => s.kind === "sold-comp")).toBe(true);
   });
 
+  it("routes the public provider's established evidence volume", async () => {
+    const html = srp(
+      Array.from({ length: 26 }, (_unused, index) =>
+        soldCard(
+          `https://www.ebay.com/itm/volume-${index}`,
+          150 + (index % 3),
+          5,
+        ),
+      ),
+    );
+    const ebaySold = createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(html),
+      now: () => NOW,
+    });
+
+    const result = await new PriceRouter([ebaySold]).price(BRANDED_SIGNAL);
+
+    expect(result).toMatchObject({ tier: "ebay-sold" });
+    expect(result.sources).toHaveLength(26);
+    expect(result.sources.every((source) => source.kind === "sold-comp")).toBe(
+      true,
+    );
+  });
+
   it("falls through to the web tier when the scrape is blocked", async () => {
     const ebaySold = createEbaySoldPricingProvider({ fetchPage: blockedFetch() });
     const router = new PriceRouter([declineIsbn, ebaySold, brandedStub]);
