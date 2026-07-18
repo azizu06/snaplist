@@ -9,6 +9,45 @@ import { durablePriceEvidenceSchema } from "@/lib/pricing/approved-sold-provider
 
 export const PIPELINE_CHECKPOINT_MAX_JSONB_BYTES = 262_144;
 
+function isPostgresJsonbSafeString(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit === 0) return false;
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function postgresUnsafeJsonStringPath(
+  value: unknown,
+  path: Array<string | number> = [],
+): Array<string | number> | null {
+  if (typeof value === "string") {
+    return isPostgresJsonbSafeString(value) ? null : path;
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const unsafe = postgresUnsafeJsonStringPath(value[index], [...path, index]);
+      if (unsafe) return unsafe;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      if (!isPostgresJsonbSafeString(key)) return [...path, key];
+      const unsafe = postgresUnsafeJsonStringPath(entry, [...path, key]);
+      if (unsafe) return unsafe;
+    }
+  }
+  return null;
+}
+
 function jsonbWhitespaceBytes(value: unknown): number {
   if (Array.isArray(value)) {
     return (
@@ -101,6 +140,15 @@ export const pipelineWorkerCheckpointSchema = z
   })
   .strict()
   .superRefine((checkpoint, context) => {
+    const unsafeStringPath = postgresUnsafeJsonStringPath(checkpoint);
+    if (unsafeStringPath) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Pipeline checkpoint contains text PostgreSQL JSONB cannot encode",
+        path: unsafeStringPath,
+      });
+    }
     if (
       pipelineCheckpointJsonbByteLength(checkpoint) >
       PIPELINE_CHECKPOINT_MAX_JSONB_BYTES

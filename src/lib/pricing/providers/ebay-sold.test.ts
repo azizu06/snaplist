@@ -1132,6 +1132,40 @@ describe("parseSoldComps — sale-date capture (#59)", () => {
 });
 
 describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
+  it("treats cached rows without canonical eBay item URLs as a miss", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      async get() {
+        return [
+          {
+            url: "https://evil.example/comp-1",
+            title: "Sony WH-1000XM4 Headphones",
+            price: 170,
+          },
+          {
+            url: "https://evil.example/comp-2",
+            title: "Sony WH-1000XM4 Headphones",
+            price: 180,
+          },
+        ];
+      },
+      async set() {},
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    const result = await new PriceRouter([provider]).price(BRANDED_SIGNAL);
+
+    expect(fetchPage.urls).toHaveLength(1);
+    expect(
+      result.sources.every((source) => {
+        const url = new URL(source.url);
+        return isAllowedEbayHost(url.hostname) &&
+          url.pathname.startsWith("/itm/") &&
+          source.soldProvider === "ebay-public-sold";
+      }),
+    ).toBe(true);
+  });
+
   it("cache-miss → fetch; cache-hit within TTL → reuse (no second fetch)", async () => {
     const fetchPage = fakeFetch(FIXTURE_HTML);
     const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);

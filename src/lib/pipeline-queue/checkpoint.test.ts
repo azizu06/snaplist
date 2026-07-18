@@ -132,4 +132,56 @@ describe("pipeline worker checkpoint contract", () => {
       );
     }
   });
+
+  it("rejects PostgreSQL-unsafe text anywhere in the checkpoint", () => {
+    const generated = {
+      copy: {
+        platform: "ebay",
+        title: "Listing title",
+        description: "Listing description",
+        fields: {},
+      },
+      model: "listing-model",
+    };
+    const invalidCheckpoints = [
+      {
+        identified: {
+          attributes: { title: "unsafe\u0000attribute" },
+          model: "vision-model",
+        },
+      },
+      {
+        identified: {
+          attributes: {},
+          model: "unsafe\ud83dmodel",
+        },
+      },
+      {
+        identified: { attributes: {}, model: "vision-model" },
+        generated: {
+          ...generated,
+          copy: {
+            ...generated.copy,
+            fields: { nested: ["unsafe\ud83dvalue"] },
+          },
+        },
+      },
+      {
+        identified: { attributes: {}, model: "vision-model" },
+        generated: {
+          ...generated,
+          copy: {
+            ...generated.copy,
+            fields: { ["unsafe\u0000key"]: "value" },
+          },
+        },
+      },
+    ];
+
+    for (const checkpoint of invalidCheckpoints) {
+      expect(pipelineWorkerCheckpointSchema.safeParse(checkpoint).success).toBe(
+        false,
+      );
+    }
+  });
 });

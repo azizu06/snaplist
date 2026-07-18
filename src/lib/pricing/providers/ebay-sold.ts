@@ -271,6 +271,62 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
   return u;
 }
 
+function canonicalEbayItemUrl(
+  rawUrl: string,
+  baseUrl?: string,
+): string | null {
+  try {
+    const resolved = baseUrl ? new URL(rawUrl, baseUrl).toString() : rawUrl;
+    const itemUrl = assertSafeEbayUrl(resolved);
+    return itemUrl.pathname.toLowerCase().startsWith("/itm/")
+      ? itemUrl.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function revalidateCachedSoldComps(
+  cached: EbaySoldComp[] | null,
+): EbaySoldComp[] | null {
+  if (!Array.isArray(cached)) return null;
+  const valid = cached.flatMap((comp) => {
+    if (
+      !comp ||
+      typeof comp !== "object" ||
+      typeof comp.url !== "string" ||
+      typeof comp.price !== "number" ||
+      !Number.isFinite(comp.price) ||
+      comp.price <= 0
+    ) {
+      return [];
+    }
+    const url = canonicalEbayItemUrl(comp.url);
+    if (!url) return [];
+    const source = normalizeExternalPriceSource({
+      url,
+      ...(typeof comp.title === "string" ? { title: comp.title } : {}),
+      kind: "sold-comp",
+      ...(typeof comp.soldAt === "number" &&
+      Number.isFinite(comp.soldAt) &&
+      comp.soldAt >= 0
+        ? { soldAt: comp.soldAt }
+        : {}),
+    });
+    if (!source) return [];
+    return [{
+      url: source.url,
+      title: source.title,
+      price: comp.price,
+      ...(typeof comp.condition === "string"
+        ? { condition: comp.condition }
+        : {}),
+      ...(source.soldAt !== undefined ? { soldAt: source.soldAt } : {}),
+    }];
+  });
+  return valid.length >= EBAY_SOLD_MIN_COMPS ? valid : null;
+}
+
 // ---------------------------------------------------------------------------
 // Query formulation + parsing — deterministic, pure, total
 // ---------------------------------------------------------------------------
@@ -521,14 +577,8 @@ export function parseSoldComps(
 
       const href = card.find(sel.link).first().attr("href");
       if (!href) return;
-      let resolvedUrl: string;
-      try {
-        const itemUrl = assertSafeEbayUrl(new URL(href, baseUrl).toString());
-        if (!itemUrl.pathname.toLowerCase().startsWith("/itm/")) return;
-        resolvedUrl = itemUrl.toString();
-      } catch {
-        return;
-      }
+      const resolvedUrl = canonicalEbayItemUrl(href, baseUrl);
+      if (!resolvedUrl) return;
       const source = normalizeExternalPriceSource({
         url: resolvedUrl,
         title,
@@ -1104,7 +1154,7 @@ export function createEbaySoldPricingProvider(
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
-          comps = await cache.get(url);
+          comps = revalidateCachedSoldComps(await cache.get(url));
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
             op: "get",
