@@ -1,6 +1,10 @@
 import catalog from "./catalog.v1.json";
 import { z } from "zod";
 import {
+  loadedReviewSnapshotItem,
+  type ReviewSnapshot,
+} from "@/lib/pipeline/review-snapshot";
+import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
   type ScoutGuidanceDefinition,
@@ -30,13 +34,27 @@ export class ScoutGuidanceContractError extends Error {
   }
 }
 
-const verifiedFactMarker: unique symbol = Symbol("verified-scout-guidance-fact");
+export class ScoutGuidanceFactError extends Error {
+  readonly name = "ScoutGuidanceFactError";
+
+  constructor(
+    readonly code:
+      | "untrusted-durable-item-record"
+      | "missing-item-display-name",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+declare const verifiedFactType: unique symbol;
+const verifiedFacts = new WeakSet<object>();
 
 export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
   reference: string;
   value: string | number;
-  [verifiedFactMarker]: true;
+  [verifiedFactType]: true;
 }>;
 
 const uuidSchema = z.string().uuid();
@@ -57,42 +75,52 @@ function verifiedFact(
   reference: string,
   value: string | number,
 ): VerifiedScoutGuidanceFact {
-  return Object.freeze({
+  const fact = Object.freeze({
     source,
     reference,
     value,
-    [verifiedFactMarker]: true as const,
-  });
+  }) as VerifiedScoutGuidanceFact;
+  verifiedFacts.add(fact);
+  return fact;
 }
 
 function isVerifiedFact(value: unknown): value is VerifiedScoutGuidanceFact {
   return (
     typeof value === "object" &&
     value !== null &&
-    verifiedFactMarker in value &&
-    value[verifiedFactMarker] === true
+    verifiedFacts.has(value)
   );
 }
 
 /**
- * Construct the only item-name fact accepted by Scout guidance from an already
- * tenant-scoped durable item row. The display name and provenance are derived;
- * call sites cannot label arbitrary prose as a durable record fact.
+ * Construct the only item-name fact accepted by Scout guidance from the exact
+ * object returned by the tenant-scoped review snapshot RPC seam. Object
+ * identity is checked before the display name and provenance are derived.
  */
-export function verifiedItemDisplayNameFromDurableRecord(record: {
-  id: string;
-  review_revision: string;
-  attributes: unknown;
-}): VerifiedScoutGuidanceFact {
-  const durableRecord = durableItemRecordSchema.parse(record);
+export function verifiedItemDisplayNameFromDurableRecord(
+  snapshot: ReviewSnapshot,
+): VerifiedScoutGuidanceFact {
+  const loadedItem = loadedReviewSnapshotItem(snapshot);
+  if (!loadedItem) {
+    throw new ScoutGuidanceFactError(
+      "untrusted-durable-item-record",
+      "Durable item facts must come from the tenant-scoped review snapshot loader.",
+    );
+  }
+  const durableRecord = durableItemRecordSchema.parse(loadedItem);
   const attributes = durableItemAttributesSchema.parse(
     durableRecord.attributes ?? {},
   );
   const value =
     attributes.title ||
     [attributes.brand, attributes.model].filter(Boolean).join(" ") ||
-    attributes.category ||
-    "Your item";
+    attributes.category;
+  if (!value) {
+    throw new ScoutGuidanceFactError(
+      "missing-item-display-name",
+      "The durable item has no approved display-name fact for this template.",
+    );
+  }
   return verifiedFact(
     "durable-item-record",
     `item:${durableRecord.id}:review-revision:${durableRecord.review_revision}`,
@@ -291,7 +319,9 @@ function resolveLocale(requestedLocale: string): {
     guidanceCatalog.defaultLocale,
   ].filter((locale, index, locales) => locale && locales.indexOf(locale) === index);
   const resolvedLocale =
-    fallbackChain.find((locale) => guidanceCatalog.locales[locale]) ??
+    fallbackChain.find((locale) =>
+      Object.hasOwn(guidanceCatalog.locales, locale),
+    ) ??
     guidanceCatalog.defaultLocale;
 
   return { resolvedLocale, fallbackChain };
@@ -309,8 +339,7 @@ export function resolveScoutGuidance(
       request.contractVersion,
     );
   }
-  const definition = guidanceCatalog.states[request.state];
-  if (!definition) {
+  if (!Object.hasOwn(guidanceCatalog.states, request.state)) {
     throw new ScoutGuidanceContractError(
       "unsupported-state",
       request.state,
@@ -318,6 +347,7 @@ export function resolveScoutGuidance(
       `Unsupported Scout guidance state ${request.state}.`,
     );
   }
+  const definition = guidanceCatalog.states[request.state];
   const localeResolution = resolveLocale(request.locale);
   const locale = guidanceCatalog.locales[localeResolution.resolvedLocale];
   const substitutions = validatedSubstitutions(

@@ -15,7 +15,13 @@ The same request always produces the same result.
 Substitutions are opaque verified facts, not caller-labelled objects or prose extensions:
 
 - source-specific constructors derive provenance and validate real UUID identifiers;
-- the durable-item constructor derives the display name from an already tenant-scoped item row;
+- runtime trust is private object identity in a `WeakSet`, so copying or spreading a fact never
+  copies its authority;
+- the durable-item constructor accepts only the exact snapshot object returned by the existing
+  tenant-scoped review RPC loader and derives the display name from the private item projection
+  captured at load time, so later caller mutation cannot relabel it;
+- a durable item without an approved display-name fact fails closed; V1 has no generic item-name
+  template;
 - integers still declare minimum and maximum bounds;
 - text still declares a maximum length and a durable provenance reference;
 - undeclared, missing, out-of-bounds, or untrusted substitutions fail closed;
@@ -24,11 +30,23 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 `approved-copy-provenance.v1.json` maps every semantic state to its frozen native state IDs, exact
 templates, canonical resolved copy, and checked-in design authority. Contract tests verify all
 source fragments verbatim; accessibility labels compose those approved phrases with verified facts.
+The two approved states whose package entries omit visible copy use the explicit machine-readable
+repo override at `docs/design/scout-guidance-copy-overrides.v1.json`, never an implementation-source
+text search.
 
 The checked-in catalog currently ships approved `en-US` copy. Locale lookup tries the canonical
 requested locale, then its language tag, then `en-US`. New translations must provide the complete
 dictionary, use the exact approved placeholder set for each copy key, and contain balanced template
 braces; they do not change state selection or authorize new guide moments.
+
+## Runtime composition
+
+The `/api/health` route resolves one static V1 state through the public Scout barrel, so production
+composition includes and validates the catalog without adding a UI or model call. Docker builds
+then boot the exact pruned `.next/standalone` server with non-secret local auth placeholders and
+verify that health response through `pnpm verify:standalone-scout`. A successful image build
+therefore proves the runner artifact contains and executes the resolver and catalog, not merely
+that `next build` completed.
 
 ## Presentation boundary
 

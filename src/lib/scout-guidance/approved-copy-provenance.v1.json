@@ -38,8 +38,9 @@
         "accessibilityLabel": "One clear photo is all I need to start."
       },
       "sources": [{
-        "kind": "source-text",
-        "path": "ios/SnapList/Features/Onboarding/OnboardingDomain.swift",
+        "kind": "json-state-copy",
+        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "stateId": "ONB-07",
         "fragments": ["One clear photo is all I need to start."]
       }]
     },
@@ -126,8 +127,9 @@
         "accessibilityLabel": "Start with one clear photo. Add angles, labels, or damage for a stronger match."
       },
       "sources": [{
-        "kind": "source-text",
-        "path": "ios/SnapList/Features/Capture/CaptureViews.swift",
+        "kind": "json-state-copy",
+        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "stateId": "CAP-02a",
         "fragments": ["Start with one clear photo. Add angles, labels, or damage for a stronger match."]
       }]
     },

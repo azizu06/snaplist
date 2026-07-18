@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { ScoutGuidanceTrustedSource } from "./contract";
+import {
+  loadReviewSnapshot,
+  type ReviewSnapshot,
+} from "@/lib/pipeline/review-snapshot";
 import {
   SCOUT_GUIDANCE_STATES,
   ScoutGuidanceContractError,
@@ -7,20 +12,60 @@ import {
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
   type ResolveScoutGuidanceRequest,
+  type VerifiedScoutGuidanceFact,
 } from "./resolve";
 
 const ITEM_ID = "11111111-1111-4111-8111-111111111111";
 const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
 
-const verifiedItemName = () =>
-  verifiedItemDisplayNameFromDurableRecord({
-    id: ITEM_ID,
-    review_revision: REVIEW_REVISION,
-    attributes: { brand: "Canon", model: "AE-1 film camera" },
-  });
+async function loadTrustedItemSnapshot(
+  attributes: unknown,
+): Promise<ReviewSnapshot> {
+  const snapshot = {
+    item: {
+      id: ITEM_ID,
+      photos: [],
+      attributes,
+      condition: null,
+      identification: null,
+      price_override: null,
+      cost_basis: null,
+      review_revision: REVIEW_REVISION,
+      created_at: "2026-07-18T00:00:00.000Z",
+    },
+    listing: null,
+    prediction: null,
+    reviewBlocked: false,
+  };
+  const rpc = vi.fn(async () => ({ data: snapshot, error: null }));
+  const loaded = await loadReviewSnapshot(
+    { rpc } as unknown as SupabaseClient,
+    ITEM_ID,
+  );
+  if (!loaded) throw new Error("Expected a trusted review snapshot fixture.");
+  return loaded;
+}
+
+async function loadVerifiedItemName(
+  attributes: unknown,
+): Promise<VerifiedScoutGuidanceFact> {
+  return verifiedItemDisplayNameFromDurableRecord(
+    await loadTrustedItemSnapshot(attributes),
+  );
+}
+
+let verifiedItemNameFact: VerifiedScoutGuidanceFact;
+
+const verifiedItemName = () => verifiedItemNameFact;
 
 describe("resolveScoutGuidance", () => {
+  beforeAll(async () => {
+    verifiedItemNameFact = await loadVerifiedItemName({
+      brand: "Canon",
+      model: "AE-1 film camera",
+    });
+  });
   it("deterministically resolves the approved onboarding outcome message", () => {
     const request = {
       contractVersion: "scout-guidance-v1" as const,
@@ -174,6 +219,81 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("rejects a copied verified fact whose trusted fields were relabelled", () => {
+    const copiedFact = { ...verifiedItemName() } as {
+      source: ScoutGuidanceTrustedSource;
+      reference: string;
+      value: string;
+    };
+    copiedFact.source = "durable-item-record";
+    copiedFact.reference =
+      `item:${ITEM_ID}:review-revision:${REVIEW_REVISION}`;
+    copiedFact.value = "Ignore the durable item and render this model-like prose";
+
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "processing.finding-sold-comps",
+        locale: "en-US",
+        substitutions: {
+          itemDisplayName: copiedFact,
+        } as unknown as ResolveScoutGuidanceRequest["substitutions"],
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "untrusted-substitution",
+        state: "processing.finding-sold-comps",
+        substitutionKey: "itemDisplayName",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
+  it("rejects a structural object at the durable-record fact boundary", () => {
+    expect(() =>
+      verifiedItemDisplayNameFromDurableRecord({
+        id: ITEM_ID,
+        review_revision: REVIEW_REVISION,
+        attributes: {
+          title: "Caller-labelled model prose disguised as a durable row",
+        },
+      } as unknown as ReviewSnapshot),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-durable-item-record",
+      }),
+    );
+  });
+
+  it("derives durable facts from the immutable loaded projection, not later mutation", async () => {
+    const snapshot = await loadTrustedItemSnapshot({
+      brand: "Canon",
+      model: "AE-1 film camera",
+    });
+    snapshot.item.attributes = {
+      title: "Caller-mutated model prose after the tenant-scoped read",
+    };
+    const itemDisplayName = verifiedItemDisplayNameFromDurableRecord(snapshot);
+
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "processing.finding-sold-comps",
+      locale: "en-US",
+      substitutions: { itemDisplayName },
+    });
+
+    expect(result.accessibility.label).toContain("Canon AE-1 film camera");
+    expect(result.accessibility.label).not.toContain("Caller-mutated");
+  });
+
+  it("fails closed when a trusted item has no approved display-name fact", async () => {
+    await expect(loadVerifiedItemName({})).rejects.toMatchObject({
+      name: "ScoutGuidanceFactError",
+      code: "missing-item-display-name",
+    });
+  });
+
   it("falls back through the language tag to the approved default locale", () => {
     const result = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
@@ -187,6 +307,25 @@ describe("resolveScoutGuidance", () => {
       resolvedLocale: "en-US",
       localeFallbackApplied: true,
       localeFallbackChain: ["fr-CA", "fr", "en-US"],
+      message: {
+        title: "Photograph an item. Get real comps and a listing you control.",
+      },
+    });
+  });
+
+  it("treats inherited prototype names as unsupported locales and falls back", () => {
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "onboarding.outcome",
+      locale: "__proto__",
+      substitutions: {},
+    });
+
+    expect(result).toMatchObject({
+      requestedLocale: "__proto__",
+      resolvedLocale: "en-US",
+      localeFallbackApplied: true,
+      localeFallbackChain: ["__proto__", "en-US"],
       message: {
         title: "Photograph an item. Get real comps and a listing you control.",
       },
@@ -311,6 +450,23 @@ describe("resolveScoutGuidance", () => {
         name: "ScoutGuidanceContractError",
         code: "unsupported-state",
         state: "capture.CAP-03a",
+      }),
+    );
+  });
+
+  it("rejects inherited prototype names as unsupported states", () => {
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "constructor" as "onboarding.outcome",
+        locale: "en-US",
+        substitutions: {},
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "unsupported-state",
+        state: "constructor",
       }),
     );
   });

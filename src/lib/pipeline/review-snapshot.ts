@@ -46,6 +46,25 @@ export interface ReviewSnapshot {
   reviewBlocked: boolean;
 }
 
+const loadedReviewSnapshotItems = new WeakMap<object, ReviewSnapshotItem>();
+
+/** True only for snapshots returned by the tenant-scoped snapshot RPC seam. */
+export function isLoadedReviewSnapshot(value: unknown): value is ReviewSnapshot {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    loadedReviewSnapshotItems.has(value)
+  );
+}
+
+/** Immutable-at-load item projection for trusted downstream fact derivation. */
+export function loadedReviewSnapshotItem(
+  value: unknown,
+): ReviewSnapshotItem | null {
+  if (!isLoadedReviewSnapshot(value)) return null;
+  return structuredClone(loadedReviewSnapshotItems.get(value)!);
+}
+
 /** Load one RLS-scoped review projection in a single database statement. */
 export async function loadReviewSnapshot(
   supabase: SupabaseClient,
@@ -60,10 +79,15 @@ export async function loadReviewSnapshot(
     typeof data !== "object" ||
     Array.isArray(data) ||
     !("item" in data) ||
+    typeof data.item !== "object" ||
+    data.item === null ||
+    Array.isArray(data.item) ||
     !("reviewBlocked" in data) ||
     typeof data.reviewBlocked !== "boolean"
   ) {
     throw new Error("Failed to load review: invalid snapshot.");
   }
-  return data as unknown as ReviewSnapshot;
+  const snapshot = data as unknown as ReviewSnapshot;
+  loadedReviewSnapshotItems.set(snapshot, structuredClone(snapshot.item));
+  return snapshot;
 }

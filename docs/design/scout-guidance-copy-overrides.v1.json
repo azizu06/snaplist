@@ -1,0 +1,13 @@
+{
+  "version": "scout-guidance-copy-overrides-v1",
+  "status": "approved-repo-override",
+  "scope": "Exact frozen native copy for approved V1 states whose design package state records omit visible copy.",
+  "strings_by_state": {
+    "ONB-07": [
+      "One clear photo is all I need to start."
+    ],
+    "CAP-02a": [
+      "Start with one clear photo. Add angles, labels, or damage for a stronger match."
+    ]
+  }
+}

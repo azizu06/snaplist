@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
 import { scoutGuidanceCatalogSchema } from "./contract";
 import {
   resolveScoutGuidance,
@@ -9,6 +11,7 @@ import {
   verifiedPriceEvidence,
   verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
+  type VerifiedScoutGuidanceFact,
 } from "./resolve";
 
 const ITEM_ID = "11111111-1111-4111-8111-111111111111";
@@ -16,6 +19,35 @@ const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
 const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
 const RUN_ID = "55555555-5555-4555-8555-555555555555";
+const verifiedItemFacts = new Map<string, VerifiedScoutGuidanceFact>();
+
+async function loadVerifiedItemFact(
+  displayName: string,
+): Promise<VerifiedScoutGuidanceFact> {
+  const snapshot = {
+    item: {
+      id: ITEM_ID,
+      photos: [],
+      attributes: { title: displayName },
+      condition: null,
+      identification: null,
+      price_override: null,
+      cost_basis: null,
+      review_revision: REVIEW_REVISION,
+      created_at: "2026-07-18T00:00:00.000Z",
+    },
+    listing: null,
+    prediction: null,
+    reviewBlocked: false,
+  };
+  const rpc = vi.fn(async () => ({ data: snapshot, error: null }));
+  const loaded = await loadReviewSnapshot(
+    { rpc } as unknown as SupabaseClient,
+    ITEM_ID,
+  );
+  if (!loaded) throw new Error("Expected a trusted review snapshot fixture.");
+  return verifiedItemDisplayNameFromDurableRecord(loaded);
+}
 
 function verifiedSubstitutionsFor(
   state: string,
@@ -30,14 +62,12 @@ function verifiedSubstitutionsFor(
         }),
       };
     case "processing.finding-sold-comps":
-    case "retry.automatic":
+    case "retry.automatic": {
+      const displayName = values.itemDisplayName ?? "Verified item";
       return {
-        itemDisplayName: verifiedItemDisplayNameFromDurableRecord({
-          id: ITEM_ID,
-          review_revision: REVIEW_REVISION,
-          attributes: { title: values.itemDisplayName ?? "Verified item" },
-        }),
+        itemDisplayName: verifiedItemFacts.get(displayName)!,
       };
+    }
     case "uncertainty.limited-price-evidence":
       return verifiedPriceEvidence({
         recommendationId: RECOMMENDATION_ID,
@@ -78,6 +108,16 @@ const assetManifests = [
 );
 
 describe("Scout guidance catalog contract", () => {
+  beforeAll(async () => {
+    for (const displayName of [
+      "Verified item",
+      "Canon AE-1 film camera",
+      "AE-1 Program",
+    ]) {
+      verifiedItemFacts.set(displayName, await loadVerifiedItemFact(displayName));
+    }
+  });
+
   it("validates the checked-in provider-neutral V1 catalog", () => {
     expect(scoutGuidanceCatalogSchema.parse(catalog)).toEqual(catalog);
   });
@@ -212,6 +252,45 @@ describe("Scout guidance catalog contract", () => {
         ).toBe(true);
       }
     }
+  });
+
+  it("uses machine-readable approved design copy for every semantic state", () => {
+    const provenance = JSON.parse(
+      readFileSync(
+        resolve("src/lib/scout-guidance/approved-copy-provenance.v1.json"),
+        "utf8",
+      ),
+    ) as {
+      states: Record<string, { sources: Array<{ kind: string }> }>;
+    };
+
+    const nonMachineReadableSources = Object.entries(provenance.states).flatMap(
+      ([state, definition]) =>
+        definition.sources
+          .filter((source) => source.kind === "source-text")
+          .map(() => state),
+    );
+
+    expect(nonMachineReadableSources).toEqual([]);
+
+    const approvedOverride = JSON.parse(
+      readFileSync(
+        resolve("docs/design/scout-guidance-copy-overrides.v1.json"),
+        "utf8",
+      ),
+    ) as {
+      version: string;
+      status: string;
+      strings_by_state: Record<string, string[]>;
+    };
+    expect(approvedOverride).toMatchObject({
+      version: "scout-guidance-copy-overrides-v1",
+      status: "approved-repo-override",
+    });
+    expect(Object.keys(approvedOverride.strings_by_state)).toEqual([
+      "ONB-07",
+      "CAP-02a",
+    ]);
   });
 
   it("matches the authoritative semantic-state and exact-copy provenance fixture", () => {

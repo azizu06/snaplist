@@ -28,6 +28,9 @@ COPY . .
 # the Vercel path keeps the default output).
 ENV BUILD_STANDALONE=1 NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
+# Boot the exact pruned runtime that the runner stage copies and prove the
+# provider-neutral Scout catalog is bundled and resolves through /api/health.
+RUN pnpm verify:standalone-scout
 
 # --- runner: minimal non-root runtime with only the standalone server ---
 FROM node:22-alpine AS runner
