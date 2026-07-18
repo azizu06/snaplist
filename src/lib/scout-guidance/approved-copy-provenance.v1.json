@@ -262,24 +262,27 @@
       "approvedStateIds": ["RUN-04"],
       "templates": {
         "title": "Upload paused",
-        "body": "Your photos are safe on this device",
-        "accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 4 · resumes on reconnect. Your photos are safe on this device."
+        "body": "{uploadedPhotoCount} of 4 photos finished uploading before this attempt stopped",
+        "accessibilityLabel": "Upload paused. {uploadedPhotoCount} of 4 photos finished uploading before this attempt stopped."
       },
       "canonicalSubstitutions": {"uploadedPhotoCount": "2"},
       "expected": {
         "title": "Upload paused",
-        "body": "Your photos are safe on this device",
-        "accessibilityLabel": "Upload paused. Uploaded to SnapList. 2 of 4 · resumes on reconnect. Your photos are safe on this device."
+        "body": "2 of 4 photos finished uploading before this attempt stopped",
+        "accessibilityLabel": "Upload paused. 2 of 4 photos finished uploading before this attempt stopped."
       },
       "sources": [{
         "kind": "json-state-copy",
         "path": "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-copy-catalog.json",
         "stateId": "RUN-04",
+        "fragments": ["Upload paused"]
+      }, {
+        "kind": "json-state-copy",
+        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "stateId": "RUN-04",
         "fragments": [
-          "Upload paused",
-          "Uploaded to SnapList",
-          "2 of 4 · resumes on reconnect",
-          "Your photos are safe on this device"
+          "2 of 4 photos finished uploading before this attempt stopped",
+          "Upload paused. 2 of 4 photos finished uploading before this attempt stopped."
         ]
       }]
     },

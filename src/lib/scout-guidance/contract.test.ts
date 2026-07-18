@@ -8,8 +8,10 @@ import {
   type AppendAcceptedPhotosResult,
 } from "@/lib/capture-progress";
 import {
-  parseSoldComps,
+  PriceRouter,
   synthesizeSoldResult,
+  type PriceResult,
+  type PricingProvider,
 } from "@/lib/pricing";
 import {
   stageUploadEntries,
@@ -23,7 +25,6 @@ import {
   verifiedPriceEvidence,
   verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
-  type VerifiedPriceEvidenceInput,
   type VerifiedScoutGuidanceFact,
 } from "./resolve";
 
@@ -34,7 +35,7 @@ const RUN_ID = "55555555-5555-4555-8555-555555555555";
 const verifiedItemFacts = new Map<string, VerifiedScoutGuidanceFact>();
 const captureProgress = new Map<number, AppendAcceptedPhotosResult>();
 const uploadProgress = new Map<number, UploadProgressSnapshot>();
-const priceEvidence = new Map<string, VerifiedPriceEvidenceInput>();
+const priceEvidence = new Map<string, PriceResult>();
 
 const photo = (index: number) =>
   new File([String(index)], `${index}.jpg`, { type: "image/jpeg" });
@@ -84,35 +85,25 @@ async function collectUploadProgress(photoCount: number): Promise<void> {
   );
 }
 
-function trustedPriceEvidence(
+async function routedPriceRecommendation(
   soldCompCount: number,
   windowDays: number,
-): VerifiedPriceEvidenceInput {
-  const soldDate = new Date().toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-  const cards = Array.from({ length: soldCompCount }, (_, index) => `
-    <li class="s-item">
-      <a class="s-item__link" href="https://www.ebay.com/itm/${200000 + index}">
-        <div class="s-item__title">Canon AE-1 camera ${index}</div>
-      </a>
-      <span class="s-item__price">$40.00</span>
-      <div class="s-item__caption">Sold ${soldDate}</div>
-    </li>
-  `).join("");
-  const retrievedSoldComps = parseSoldComps(
-    `<ul class="srp-results">${cards}</ul>`,
-    "https://www.ebay.com",
-    soldCompCount,
-  );
-  return {
-    recommendation: synthesizeSoldResult(retrievedSoldComps),
-    retrievedSoldComps,
-    windowDays,
+): Promise<PriceResult> {
+  const soldAt = Date.now() - (windowDays - 0.5) * 86_400_000;
+  const provider: PricingProvider = {
+    tier: "ebay-sold",
+    async price() {
+      return synthesizeSoldResult(
+        Array.from({ length: soldCompCount }, (_, index) => ({
+          url: `https://www.ebay.com/itm/contract-${soldCompCount}-${index}`,
+          title: `Canon AE-1 camera ${index}`,
+          price: 40,
+          soldAt,
+        })),
+      );
+    },
   };
+  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
 }
 
 async function loadVerifiedItemFact(
@@ -213,7 +204,7 @@ describe("Scout guidance catalog contract", () => {
     for (const [soldCompCount, windowDays] of [[1, 1], [3, 90]]) {
       priceEvidence.set(
         `${soldCompCount}:${windowDays}`,
-        trustedPriceEvidence(soldCompCount, windowDays),
+        await routedPriceRecommendation(soldCompCount, windowDays),
       );
     }
   });
@@ -447,6 +438,7 @@ describe("Scout guidance catalog contract", () => {
     expect(Object.keys(approvedOverride.strings_by_state)).toEqual([
       "ONB-07",
       "CAP-02a",
+      "RUN-04",
     ]);
   });
 

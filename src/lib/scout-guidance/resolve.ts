@@ -13,11 +13,10 @@ import {
   type UploadProgressSnapshot,
 } from "@/lib/upload-staging";
 import {
-  parsedEbaySoldComp,
   priceResultSchema,
-  type EbaySoldComp,
   type PriceResult,
 } from "@/lib/pricing";
+import { routedSoldCompEvidence } from "@/lib/pricing/routed-evidence";
 import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
@@ -177,52 +176,49 @@ export function verifiedCapturedPhotoCount(
   );
 }
 
-export interface VerifiedPriceEvidenceInput {
-  recommendation: PriceResult;
-  retrievedSoldComps: readonly EbaySoldComp[];
-  windowDays: number;
-}
-
-export function verifiedPriceEvidence(input: VerifiedPriceEvidenceInput): Readonly<{
+export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonly<{
   soldCompCount: VerifiedScoutGuidanceFact;
   windowDays: VerifiedScoutGuidanceFact;
 }> {
-  const recommendation = priceResultSchema.safeParse(input?.recommendation);
-  const windowDays = z.number().int().min(1).max(365).safeParse(input?.windowDays);
+  const recommendation = priceResultSchema.safeParse(recommendationInput);
   const soldSources = recommendation.success
     ? recommendation.data.sources.filter((source) => source.kind === "sold-comp")
     : [];
-  const parsedCompsByUrl = new Map(
-    (input?.retrievedSoldComps ?? [])
-      .map(parsedEbaySoldComp)
-      .filter((comp): comp is EbaySoldComp => comp !== null)
-      .map((comp) => [comp.url, comp] as const),
+  const routedEvidence = routedSoldCompEvidence(recommendationInput);
+  const routedCompsByUrl = new Map(
+    (routedEvidence?.comps ?? []).map((comp) => [comp.url, comp] as const),
   );
-  const now = Date.now();
-  const oldestAllowed = windowDays.success
-    ? now - windowDays.data * 86_400_000
-    : Number.NaN;
+  const observedAt = routedEvidence?.observedAt ?? Number.NaN;
   const uniqueSoldSourceCount = new Set(
     soldSources.map((source) => source.url),
   ).size;
-  const countedComps = soldSources.map((source) => parsedCompsByUrl.get(source.url));
+  const countedComps = soldSources.map((source) => routedCompsByUrl.get(source.url));
+  const oldestSoldAt = Math.min(
+    ...countedComps.map((comp) => comp?.soldAt ?? Number.NaN),
+  );
+  const windowDays = Math.max(
+    1,
+    Math.ceil((observedAt - oldestSoldAt) / 86_400_000),
+  );
   if (
     !recommendation.success ||
-    !windowDays.success ||
+    routedEvidence === null ||
     soldSources.length === 0 ||
     uniqueSoldSourceCount !== soldSources.length ||
+    routedEvidence.comps.length !== soldSources.length ||
+    !Number.isInteger(windowDays) ||
+    windowDays > 365 ||
     countedComps.some(
       (comp) =>
         !comp ||
         comp.soldAt === undefined ||
         !Number.isFinite(comp.soldAt) ||
-        comp.soldAt > now ||
-        comp.soldAt < oldestAllowed,
+        comp.soldAt > observedAt,
     )
   ) {
     throw new ScoutGuidanceFactError(
       "untrusted-price-recommendation",
-      "Price facts require parsed, dated sold comps inside the claimed evidence window.",
+      "Price facts require routed, dated sold comps for the exact recommendation.",
     );
   }
   const reference = `price-recommendation:${crypto.randomUUID()}`;
@@ -239,7 +235,7 @@ export function verifiedPriceEvidence(input: VerifiedPriceEvidenceInput): Readon
       "windowDays",
       "price-recommendation",
       reference,
-      windowDays.data,
+      windowDays,
       group,
     ),
   });

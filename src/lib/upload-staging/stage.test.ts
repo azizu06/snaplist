@@ -90,6 +90,58 @@ describe("durable upload staging", () => {
     expect(result).toHaveLength(1);
   });
 
+  it("keeps optional upload-progress observers from changing the producer outcome", async () => {
+    const committed = [{
+      batch_id: "11111111-1111-4111-8111-111111111111",
+      batch_position: 0,
+      idempotency_key: "single-1",
+      item_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "33333333-3333-4333-8333-333333333333",
+      queue_message_id: "42",
+      listing_id: null,
+      status: "queued" as const,
+      stage: "queued" as const,
+      attempt_count: 0,
+      max_attempts: 3,
+      safe_failure_message: null,
+      updated_at: "2026-07-15T12:00:00.000Z",
+    }];
+    const stageAndEnqueue = vi.fn(async () => committed);
+    const remove = vi.fn(async () => undefined);
+
+    await expect(
+      stageUploadEntries(
+        {
+          batchId: committed[0].batch_id,
+          userId: "user_123",
+          dailyLimit: 15,
+          perMinuteLimit: 20,
+          entries: [{
+            idempotencyKey: committed[0].idempotency_key,
+            source: "single",
+            autopilotEnabled: false,
+            costBasis: null,
+            photos: [photo("front.jpg")],
+          }],
+        },
+        {
+          upload: vi.fn(async () => undefined),
+          onUploadProgress() {
+            throw new Error("optional Scout observer failed");
+          },
+          remove,
+          recordCleanupIntent: vi.fn(async () => undefined),
+          resolveCleanupIntent: vi.fn(async () => undefined),
+          findReplay: vi.fn(async () => []),
+          stageAndEnqueue,
+        },
+      ),
+    ).resolves.toEqual(committed);
+
+    expect(stageAndEnqueue).toHaveBeenCalledOnce();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("removes every uploaded private object when transactional staging fails", async () => {
     const remove = vi.fn(async (paths: string[]) => {
       void paths;

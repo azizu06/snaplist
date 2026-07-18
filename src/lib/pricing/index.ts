@@ -56,7 +56,6 @@ export {
   buildSoldSearchQuery,
   buildSoldSearchUrl,
   parseSoldComps,
-  parsedEbaySoldComp,
   parsePrice,
   filterRelevantComps,
   synthesizeSoldResult,

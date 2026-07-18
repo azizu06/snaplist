@@ -17,6 +17,12 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 - source-specific constructors derive provenance and validate real UUID identifiers;
 - runtime trust is private object identity in a `WeakSet`, so copying or spreading a fact never
   copies its authority;
+- sold-count and day-window facts accept only the exact recommendation returned by `PriceRouter`;
+  sold providers attach private provider-neutral comp evidence, the router promotes it, and Scout
+  derives both values from the exact unique dated citations without adding a pricing policy field;
+- upload-count facts come from post-Storage, per-photo progress snapshots; observer failures cannot
+  change upload/staging outcomes, and paused copy describes only what finished in that attempt—not
+  device durability or reconnect resumption;
 - the durable-item constructor accepts only the exact snapshot object returned by the existing
   tenant-scoped review RPC loader and derives the display name from the private item projection
   captured at load time, so later caller mutation cannot relabel it;
@@ -30,9 +36,9 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 `approved-copy-provenance.v1.json` maps every semantic state to its frozen native state IDs, exact
 templates, canonical resolved copy, and checked-in design authority. Contract tests verify all
 source fragments verbatim; accessibility labels compose those approved phrases with verified facts.
-The two approved states whose package entries omit visible copy use the explicit machine-readable
-repo override at `docs/design/scout-guidance-copy-overrides.v1.json`, never an implementation-source
-text search.
+States whose package entries omit visible copy, plus safety corrections where frozen wording exceeds
+proven runtime state, use the explicit machine-readable repo override at
+`docs/design/scout-guidance-copy-overrides.v1.json`, never an implementation-source text search.
 
 The checked-in catalog currently ships approved `en-US` copy. Locale lookup tries the canonical
 requested locale, then its language tag, then `en-US`. New translations must provide the complete

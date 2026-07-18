@@ -1,4 +1,5 @@
 import type { ItemSignal, PriceResult, PricingProvider } from "./types";
+import { enrollRoutedSoldEvidence } from "./routed-evidence";
 
 /**
  * The pricing router (PRD: "Pricing is a routing pipeline behind a PricingProvider
@@ -44,6 +45,7 @@ export class PriceRouter {
             `PricingProvider for tier "${provider.tier}" returned a result tagged "${result.tier}"`,
           );
         }
+        enrollRoutedSoldEvidence(result);
         return result;
       }
     }

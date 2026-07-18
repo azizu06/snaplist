@@ -20,6 +20,7 @@ import {
   resolveEbaySoldEgressConfig,
 } from "../ebay-sold-egress";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
+import { enrollProviderSoldEvidence } from "../routed-evidence";
 
 /**
  * Tier "ebay-sold" — a scraper over eBay's PUBLIC sold-listings pages (issue #56).
@@ -80,15 +81,6 @@ export interface EbaySoldComp {
    * unparseable — an undated comp is treated as neutral (never expired, full weight).
    */
   soldAt?: number;
-}
-
-const parsedEbaySoldComps = new WeakMap<object, EbaySoldComp>();
-
-/** Immutable-at-parse projection for a sold-page comp. */
-export function parsedEbaySoldComp(value: unknown): EbaySoldComp | null {
-  if (typeof value !== "object" || value === null) return null;
-  const comp = parsedEbaySoldComps.get(value);
-  return comp ? { ...comp } : null;
 }
 
 export interface EbaySoldPricingProviderOptions {
@@ -536,7 +528,6 @@ export function parseSoldComps(
         ...(condition ? { condition } : {}),
         ...(soldAt != null ? { soldAt } : {}),
       };
-      parsedEbaySoldComps.set(comp, { ...comp });
       comps.push(comp);
     });
     return capped;
@@ -881,7 +872,7 @@ export function synthesizeSoldResult(
     kind: "sold-comp",
   }));
 
-  return {
+  const result: PriceResult = {
     suggested: round2(suggested),
     range: { min: round2(min), max: round2(max) },
     confidence,
@@ -891,6 +882,8 @@ export function synthesizeSoldResult(
     // the sold-comp label into the ready-to-publish confidence band.
     compAgreement: agreement,
   };
+  enrollProviderSoldEvidence(result, core);
+  return result;
 }
 
 // ---------------------------------------------------------------------------

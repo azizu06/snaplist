@@ -164,13 +164,18 @@ export async function stageUploadEntries(
       await dependencies.upload(path, photo);
       uploadedPaths.push(path);
       uploadedPhotoCounts[entryIndex] += 1;
-      dependencies.onUploadProgress?.(
-        createUploadProgressSnapshot({
-          uploadSessionId: cleanupId,
-          entryIndex,
-          uploadedPhotoCount: uploadedPhotoCounts[entryIndex],
-        }),
-      );
+      try {
+        dependencies.onUploadProgress?.(
+          createUploadProgressSnapshot({
+            uploadSessionId: cleanupId,
+            entryIndex,
+            uploadedPhotoCount: uploadedPhotoCounts[entryIndex],
+          }),
+        );
+      } catch {
+        // Optional UI guidance observes upload truth; it never owns producer
+        // success, cleanup, or the durable staging transaction.
+      }
     }
 
     stagingAttempted = true;
