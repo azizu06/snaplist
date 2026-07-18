@@ -11,6 +11,7 @@ import {
   createApifySoldPricingProvider,
   checkpointTrustedPriceEvidence,
   createEbaySoldPricingProvider,
+  loadTrustedPriceEvidenceFromPipelineRun,
   parseSoldComps,
   priceResultSchema,
   PriceRouter,
@@ -593,6 +594,55 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("reloads trusted sold evidence only from the server-owned pipeline checkpoint", async () => {
+    const recommendation = await routedPriceRecommendation(2, 9);
+    const persistedCheckpoint = JSON.parse(JSON.stringify({
+      priced: recommendation,
+      priceEvidence: checkpointTrustedPriceEvidence(recommendation),
+    }));
+    for (const publicJson of [
+      persistedCheckpoint.priced,
+      persistedCheckpoint.priceEvidence,
+    ]) {
+      expect(() => verifiedPriceEvidence(publicJson)).toThrowError(
+        expect.objectContaining({ code: "untrusted-price-recommendation" }),
+      );
+    }
+
+    const maybeSingle = vi.fn(async () => ({
+      data: { checkpoint: persistedCheckpoint },
+      error: null,
+    }));
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const reloaded = await loadTrustedPriceEvidenceFromPipelineRun(
+      { from } as unknown as SupabaseClient,
+      RUN_ID,
+    );
+
+    expect(from).toHaveBeenCalledWith("pipeline_runs");
+    expect(select).toHaveBeenCalledWith("checkpoint");
+    expect(eq).toHaveBeenCalledWith("id", RUN_ID);
+    expect(verifiedPriceEvidence(reloaded!).soldCompCount.value).toBe(2);
+  });
+
+  it("refuses to enroll durable price authority in a browser runtime", async () => {
+    const from = vi.fn();
+    vi.stubGlobal("window", {});
+    try {
+      await expect(
+        loadTrustedPriceEvidenceFromPipelineRun(
+          { from } as unknown as SupabaseClient,
+          RUN_ID,
+        ),
+      ).rejects.toThrow("only be loaded on the server");
+      expect(from).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("accepts normalized Apify sold evidence returned by the pricing router", async () => {
     const observedAt = Date.now();
     const endedAt = new Date(observedAt - 8.5 * 86_400_000).toISOString();
@@ -634,6 +684,22 @@ describe("resolveScoutGuidance", () => {
     });
 
     expect(guidance.message.body).toBe("3 sold · 9 days");
+  });
+
+  it("uses locale-correct singular price-evidence units in Spanish", async () => {
+    const guidance = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "uncertainty.limited-price-evidence",
+      locale: "es",
+      substitutions: verifiedPriceEvidence(
+        await routedPriceRecommendation(2, 1),
+      ),
+    });
+
+    expect(guidance.message.body).toBe("2 vendidos · 1 día");
+    expect(guidance.accessibility.label).toBe(
+      "Evidencia limitada. 2 vendidos · 1 día",
+    );
   });
 
   it("rejects routed sold evidence when a counted comp is undated or too old for bounded copy", async () => {

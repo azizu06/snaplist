@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -375,43 +376,56 @@ describe("Scout guidance catalog contract", () => {
     }
   });
 
-  it("requires complete upload-progress plural formats in every locale", () => {
-    const missingFormat = structuredClone(catalog);
-    delete missingFormat.locales.es["format.upload-progress.known-one"];
+  it("requires complete localized plural formats in every locale", () => {
+    for (const missingKey of [
+      "format.upload-progress.known-one",
+      "format.window-days.one",
+    ]) {
+      const missingFormat = structuredClone(catalog);
+      delete missingFormat.locales.es[missingKey];
 
-    const result = scoutGuidanceCatalogSchema.safeParse(missingFormat);
+      const result = scoutGuidanceCatalogSchema.safeParse(missingFormat);
 
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            message:
-              "Locale es is missing copy key format.upload-progress.known-one.",
-          }),
-        ]),
-      );
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              message: `Locale es is missing copy key ${missingKey}.`,
+            }),
+          ]),
+        );
+      }
     }
   });
 
-  it("keeps customer-visible Scout copy direct, calm, and free of synthetic phrasing", () => {
-    const customerCopy = Object.values(catalog.locales["en-US"]);
+  it("audits every shipped locale for direct, calm Scout copy", () => {
     const bannedPhrasing = [
       /[—–]/,
       /\b(?:I|me|my)\b/,
+      /\b(?:yo|mi)\b/i,
       /\beither way works\b/i,
       /\bhit a snag\b/i,
       /\bnot (?:just|beginning)\b/i,
+      /\bno solo\b/i,
       /\bon us\b/i,
       /\boriginal draft is safe\b/i,
       /\b(?:unlock|seamless|effortless|powerful)\b/i,
+      /\b(?:desbloquea|sin esfuerzo)\b/i,
     ];
 
-    for (const copy of customerCopy) {
-      for (const pattern of bannedPhrasing) {
-        expect(copy, `${copy} violates ${pattern}`).not.toMatch(pattern);
+    const auditedLocales: string[] = [];
+    for (const [locale, dictionary] of Object.entries(
+      catalog.locales as Record<string, Record<string, string>>,
+    )) {
+      auditedLocales.push(locale);
+      for (const copy of Object.values(dictionary)) {
+        for (const pattern of bannedPhrasing) {
+          expect(copy, `${locale}: ${copy} violates ${pattern}`).not.toMatch(pattern);
+        }
       }
     }
+    expect(auditedLocales).toEqual(Object.keys(catalog.locales));
   });
 
   it("references only implementation-frozen states and approved Scout placements", () => {
@@ -505,6 +519,44 @@ describe("Scout guidance catalog contract", () => {
       "REV-02d-retry",
       "HOME-02",
     ]);
+  });
+
+  it("has independent exact-copy provenance for every shipped locale", () => {
+    const provenance = JSON.parse(
+      readFileSync(
+        resolve("src/lib/scout-guidance/approved-copy-provenance.v1.json"),
+        "utf8",
+      ),
+    ) as {
+      locales: Record<string, { path: string; locale: string }>;
+    };
+
+    expect(Object.keys(provenance.locales)).toEqual(Object.keys(catalog.locales));
+    for (const [locale, source] of Object.entries(provenance.locales)) {
+      const authority = JSON.parse(
+        readFileSync(resolve(source.path), "utf8"),
+      ) as {
+        version: string;
+        status: string;
+        locales: Record<string, { sha256: string }>;
+      };
+      const canonicalCopy = JSON.stringify(
+        Object.fromEntries(
+          Object.entries(catalog.locales[locale]).sort(([left], [right]) =>
+            left < right ? -1 : left > right ? 1 : 0,
+          ),
+        ),
+      );
+      expect(source.locale).toBe(locale);
+      expect(authority).toMatchObject({
+        version: "scout-guidance-locales-v1",
+        status: "approved-repo-localization",
+      });
+      expect(
+        createHash("sha256").update(canonicalCopy).digest("hex"),
+        locale,
+      ).toBe(authority.locales[locale]?.sha256);
+    }
   });
 
   it("matches the authoritative semantic-state and exact-copy provenance fixture", () => {

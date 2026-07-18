@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PriceResult } from "@/lib/pricing";
+import {
+  createApifySoldPricingProvider,
+  PriceRouter,
+  type PriceResult,
+} from "@/lib/pricing";
 import type { VisionPipelineStages } from "@/lib/vision";
 import {
   createDurableVisionPipelineProcessor,
@@ -84,6 +88,46 @@ function stages(): VisionPipelineStages & Record<string, ReturnType<typeof vi.fn
 }
 
 describe("durable vision pipeline processor", () => {
+  it("persists approved sold authority in the server-owned pricing checkpoint", async () => {
+    const observedAt = Date.parse("2026-07-18T12:00:00.000Z");
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "test-only-token",
+      now: () => observedAt,
+      runActor: async () => ({
+        status: "SUCCEEDED",
+        items: [140, 150, 160].map((soldPrice, index) => ({
+          url: `https://www.ebay.com/itm/durable-${index}`,
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          condition: "Pre-Owned",
+          endedAt: "2026-07-10T12:00:00.000Z",
+          soldPrice,
+          soldCurrency: "USD",
+        })),
+      }),
+    });
+    const routed = await new PriceRouter([provider]).price({
+      brand: "Sony",
+      model: "WH-1000XM4",
+      category: "electronics",
+      condition: "good",
+      conditionKnown: true,
+    });
+    const pipeline = stages();
+    vi.mocked(pipeline.price).mockResolvedValue(routed);
+    const saved: Array<[string, PipelineWorkerCheckpoint]> = [];
+
+    await createDurableVisionPipelineProcessor(pipeline).process({
+      context: workerContext({ identified: IDENTIFIED }),
+      onCheckpoint: async (stage, checkpoint) => {
+        saved.push([stage, JSON.parse(JSON.stringify(checkpoint))]);
+      },
+    });
+
+    const pricingCheckpoint = saved.find(([stage]) => stage === "pricing")?.[1];
+    expect(pricingCheckpoint?.priceEvidence).toEqual(pricingCheckpoint?.priced);
+  });
+
   it("resumes after persisted identify and price stages without repeating provider work", async () => {
     const pipeline = stages();
     const saved: Array<[string, PipelineWorkerCheckpoint]> = [];

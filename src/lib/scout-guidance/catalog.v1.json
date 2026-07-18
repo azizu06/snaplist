@@ -448,8 +448,8 @@
       "processing.finding-sold-comps.body": "Finding recent sold comps",
       "processing.finding-sold-comps.accessibilityLabel": "Working on your item. Finding recent sold comps. You can leave. Processing will continue.",
       "uncertainty.limited-price-evidence.title": "Limited evidence",
-      "uncertainty.limited-price-evidence.body": "{soldCompCount} sold · {windowDays} days",
-      "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days",
+      "uncertainty.limited-price-evidence.body": "{soldCompCount} · {windowDays}",
+      "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} · {windowDays}",
       "uncertainty.identity.title": "We’re not fully sure",
       "uncertainty.identity.body": "Limited evidence",
       "uncertainty.identity.accessibilityLabel": "We’re not fully sure. Limited evidence.",
@@ -472,7 +472,11 @@
       "format.upload-progress.known-other": "{uploadedPhotoCount} of {plannedPhotoCount} photos uploaded. Try again.",
       "format.upload-progress.unknown-zero": "No photos uploaded. Try again.",
       "format.upload-progress.unknown-one": "{uploadedPhotoCount} photo uploaded. Try again.",
-      "format.upload-progress.unknown-other": "{uploadedPhotoCount} photos uploaded. Try again."
+      "format.upload-progress.unknown-other": "{uploadedPhotoCount} photos uploaded. Try again.",
+      "format.sold-comp-count.one": "{soldCompCount} sold",
+      "format.sold-comp-count.other": "{soldCompCount} sold",
+      "format.window-days.one": "{windowDays} day",
+      "format.window-days.other": "{windowDays} days"
     },
     "es": {
       "onboarding.outcome.title": "Fotografía un artículo para consultar ventas comparables y preparar un anuncio.",
@@ -501,8 +505,8 @@
       "processing.finding-sold-comps.body": "Buscando ventas comparables recientes",
       "processing.finding-sold-comps.accessibilityLabel": "Trabajando en tu artículo. Buscando ventas comparables recientes. Puedes salir. El proceso continuará.",
       "uncertainty.limited-price-evidence.title": "Evidencia limitada",
-      "uncertainty.limited-price-evidence.body": "{soldCompCount} vendidos · {windowDays} días",
-      "uncertainty.limited-price-evidence.accessibilityLabel": "Evidencia limitada. {soldCompCount} vendidos · {windowDays} días",
+      "uncertainty.limited-price-evidence.body": "{soldCompCount} · {windowDays}",
+      "uncertainty.limited-price-evidence.accessibilityLabel": "Evidencia limitada. {soldCompCount} · {windowDays}",
       "uncertainty.identity.title": "La identificación no es segura",
       "uncertainty.identity.body": "Evidencia limitada",
       "uncertainty.identity.accessibilityLabel": "La identificación no es segura. Evidencia limitada.",
@@ -525,7 +529,11 @@
       "format.upload-progress.known-other": "{uploadedPhotoCount} de {plannedPhotoCount} fotos subidas. Inténtalo de nuevo.",
       "format.upload-progress.unknown-zero": "No se subieron fotos. Inténtalo de nuevo.",
       "format.upload-progress.unknown-one": "{uploadedPhotoCount} foto subida. Inténtalo de nuevo.",
-      "format.upload-progress.unknown-other": "{uploadedPhotoCount} fotos subidas. Inténtalo de nuevo."
+      "format.upload-progress.unknown-other": "{uploadedPhotoCount} fotos subidas. Inténtalo de nuevo.",
+      "format.sold-comp-count.one": "{soldCompCount} vendido",
+      "format.sold-comp-count.other": "{soldCompCount} vendidos",
+      "format.window-days.one": "{windowDays} día",
+      "format.window-days.other": "{windowDays} días"
     }
   }
 }

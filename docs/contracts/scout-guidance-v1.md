@@ -17,9 +17,12 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 - source-specific constructors derive provenance and validate real UUID identifiers;
 - runtime trust for capture, upload, and durable item facts is private object identity, so copying or spreading a fact never
   copies its authority;
-- sold-count and day-window facts accept only the immutable private checkpoint carried from an
-  approved sold-provider route; persisted public source fields alone never grant authority. The
-  ordered production wrapper and ISBN transformation preserve that private authority while Scout
+- sold-count and day-window facts accept only the immutable snapshot carried from an approved
+  sold-provider route. The durable worker duplicates that exact snapshot into its lease-fenced,
+  service-role-written `pipeline_runs.checkpoint`; a server-runtime-only loader reads it through the
+  caller's tenant/RLS client and re-enrolls authority after JSON persistence or process restart.
+  Raw checkpoint JSON and tenant-writable prediction-log source fields never grant authority. The
+  ordered production wrapper and ISBN transformation preserve the original authority while Scout
   derives both values from unique dated citations with one shared observation time;
 - upload-count facts come from producer-owned attempt snapshots, and the completed count advances
   only after Storage succeeds; observer failures cannot
@@ -45,9 +48,11 @@ proven runtime state, use the explicit machine-readable repo override at
 
 The checked-in catalog currently ships `en-US` and `es` copy. Locale lookup tries the canonical
 requested locale, then its language tag, then `en-US`. Every translation must provide the complete
-state dictionary and upload-progress plural formats, use the exact approved placeholder set for
-each copy key, and contain balanced template braces; translations do not change state selection or
-authorize new guide moments.
+state dictionary and plural formats, use the exact approved placeholder set for each copy key, and
+contain balanced template braces. `docs/design/scout-guidance-locales.v1.json` records the approved
+exact-copy digest for every shipped locale, including auxiliary formats, and contract tests audit
+each locale's copy quality. Translations do not change state selection or authorize new guide
+moments.
 
 ## Runtime composition
 

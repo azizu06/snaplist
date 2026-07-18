@@ -127,12 +127,16 @@ function canonicalLocaleTag(locale: string): string | null {
   }
 }
 
-const uploadProgressFormatKeys = [
+const localizedFormatKeys = [
   "format.upload-progress.known-one",
   "format.upload-progress.known-other",
   "format.upload-progress.unknown-zero",
   "format.upload-progress.unknown-one",
   "format.upload-progress.unknown-other",
+  "format.sold-comp-count.one",
+  "format.sold-comp-count.other",
+  "format.window-days.one",
+  "format.window-days.other",
 ] as const;
 
 export const scoutGuidanceCatalogSchema = z
@@ -191,7 +195,7 @@ export const scoutGuidanceCatalogSchema = z
       return;
     }
 
-    for (const copyKey of uploadProgressFormatKeys) {
+    for (const copyKey of localizedFormatKeys) {
       const defaultTemplate = defaultCopy[copyKey];
       if (!defaultTemplate) {
         context.addIssue({

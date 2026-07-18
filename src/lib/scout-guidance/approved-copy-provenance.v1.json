@@ -1,5 +1,15 @@
 {
   "contractVersion": "scout-guidance-v1",
+  "locales": {
+    "en-US": {
+      "path": "docs/design/scout-guidance-locales.v1.json",
+      "locale": "en-US"
+    },
+    "es": {
+      "path": "docs/design/scout-guidance-locales.v1.json",
+      "locale": "es"
+    }
+  },
   "states": {
     "onboarding.outcome": {
       "approvedStateIds": ["ONB-01"],
@@ -225,8 +235,8 @@
       "approvedStateIds": ["S3"],
       "templates": {
         "title": "Limited evidence",
-        "body": "{soldCompCount} sold · {windowDays} days",
-        "accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days"
+        "body": "{soldCompCount} · {windowDays}",
+        "accessibilityLabel": "Limited evidence. {soldCompCount} · {windowDays}"
       },
       "canonicalSubstitutions": {"soldCompCount": "3", "windowDays": "90"},
       "expected": {

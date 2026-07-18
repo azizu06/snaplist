@@ -14,7 +14,10 @@ export {
   type PricingProvider,
 } from "./types";
 export { PriceRouter } from "./router";
-export { checkpointTrustedPriceEvidence } from "./approved-sold-provider";
+export {
+  checkpointTrustedPriceEvidence,
+  loadTrustedPriceEvidenceFromPipelineRun,
+} from "./approved-sold-provider";
 export {
   classifySoldComp,
   normalizeComparableText,

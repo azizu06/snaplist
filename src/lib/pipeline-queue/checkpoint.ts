@@ -25,6 +25,8 @@ export const pipelineWorkerCheckpointSchema = z
   .object({
     identified: identifiedPipelineStageSchema.optional(),
     priced: priceResultSchema.optional(),
+    /** Service-role-written duplicate consumed only by the RLS loader; raw JSON stays untrusted. */
+    priceEvidence: priceResultSchema.optional(),
     generated: generatedPipelineStageSchema.optional(),
   })
   .strict()
@@ -41,6 +43,25 @@ export const pipelineWorkerCheckpointSchema = z
         code: "custom",
         message: "A generation checkpoint requires an identification checkpoint",
         path: ["generated"],
+      });
+    }
+    if (checkpoint.priceEvidence && !checkpoint.priced) {
+      context.addIssue({
+        code: "custom",
+        message: "A price-evidence checkpoint requires a pricing checkpoint",
+        path: ["priceEvidence"],
+      });
+    }
+    if (
+      checkpoint.priceEvidence &&
+      checkpoint.priced &&
+      JSON.stringify(checkpoint.priceEvidence) !==
+        JSON.stringify(checkpoint.priced)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Price evidence must match the persisted pricing checkpoint",
+        path: ["priceEvidence"],
       });
     }
   });

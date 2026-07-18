@@ -87,6 +87,7 @@ type UploadProgressValue = Readonly<{
   uploadedPhotoCount: number;
   plannedPhotoCount: number | null;
 }>;
+type RenderedSubstitutionValue = string | number | UploadProgressValue;
 
 const uuidSchema = z.string().uuid();
 const durableItemRecordSchema = z.object({
@@ -351,7 +352,7 @@ function validatedSubstitutions(
   state: ScoutGuidanceState,
   definition: ScoutGuidanceDefinition,
   provided: Record<string, VerifiedScoutGuidanceFact>,
-): Record<string, string | UploadProgressValue> {
+): Record<string, RenderedSubstitutionValue> {
   const allowedKeys = new Set(definition.substitutions.map((rule) => rule.key));
   let relatedFactGroup: object | undefined;
   const unexpectedKey = Object.keys(provided).find((key) => !allowedKeys.has(key));
@@ -466,11 +467,14 @@ function validatedSubstitutions(
           `Substitution ${rule.key} is missing verified provenance.`,
         );
       }
-      const renderedValue: string | UploadProgressValue =
+      const renderedValue: RenderedSubstitutionValue =
         rule.valueType === "upload-progress" &&
         isUploadProgressValue(substitution.value)
           ? substitution.value
-          : String(substitution.value);
+          : rule.valueType === "integer" &&
+              typeof substitution.value === "number"
+            ? substitution.value
+            : String(substitution.value);
       return [rule.key, renderedValue] as const;
     }),
   );
@@ -478,18 +482,47 @@ function validatedSubstitutions(
 
 function renderTemplate(
   template: string,
-  substitutions: Record<string, string | UploadProgressValue>,
+  substitutions: Record<string, RenderedSubstitutionValue>,
   localizedCopy: Record<string, string>,
+  resolvedLocale: string,
 ): string {
   return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (_, key: string) => {
     const value = substitutions[key];
     if (value === undefined) {
       throw new Error(`Template requested missing substitution ${key}.`);
     }
-    return typeof value === "object"
-      ? formatUploadProgressSummary(value, localizedCopy)
-      : value;
+    if (typeof value === "object") {
+      return formatUploadProgressSummary(value, localizedCopy);
+    }
+    if (
+      typeof value === "number" &&
+      (key === "soldCompCount" || key === "windowDays")
+    ) {
+      return formatPriceEvidenceUnit(
+        key,
+        value,
+        localizedCopy,
+        resolvedLocale,
+      );
+    }
+    return String(value);
   });
+}
+
+function formatPriceEvidenceUnit(
+  key: "soldCompCount" | "windowDays",
+  value: number,
+  localizedCopy: Record<string, string>,
+  resolvedLocale: string,
+): string {
+  const unit = key === "soldCompCount" ? "sold-comp-count" : "window-days";
+  const plural = new Intl.PluralRules(resolvedLocale).select(value);
+  const template =
+    localizedCopy[
+      `format.${unit}.${plural === "one" ? "one" : "other"}`
+    ];
+  if (!template) throw new Error(`Locale is missing ${unit} plural copy.`);
+  return template.replaceAll(`{${key}}`, String(value));
 }
 
 function isUploadProgressValue(value: unknown): value is UploadProgressValue {
@@ -559,7 +592,12 @@ export function resolveScoutGuidance(
     request.substitutions,
   );
   const copy = (key: string) =>
-    renderTemplate(locale[key], substitutions, locale);
+    renderTemplate(
+      locale[key],
+      substitutions,
+      locale,
+      localeResolution.resolvedLocale,
+    );
 
   return {
     contractVersion: SCOUT_GUIDANCE_CONTRACT_VERSION,

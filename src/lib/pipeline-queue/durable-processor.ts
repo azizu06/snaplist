@@ -1,4 +1,7 @@
 import type { PipelineResult } from "@/lib/pipeline";
+import {
+  checkpointTrustedPriceEvidenceIfAvailable,
+} from "@/lib/pricing/approved-sold-provider";
 import type { VisionPipelineStages } from "@/lib/vision";
 import {
   pipelineWorkerCheckpointSchema,
@@ -62,7 +65,12 @@ export function createDurableVisionPipelineProcessor(
         const priced = await stages.price({
           attributes: identified.attributes,
         });
-        checkpoint = pipelineWorkerCheckpointSchema.parse({ ...checkpoint, priced });
+        const priceEvidence = checkpointTrustedPriceEvidenceIfAvailable(priced);
+        checkpoint = pipelineWorkerCheckpointSchema.parse({
+          ...checkpoint,
+          priced,
+          ...(priceEvidence ? { priceEvidence } : {}),
+        });
         await onCheckpoint("pricing", checkpoint);
       }
       const priced = checkpoint.priced;
