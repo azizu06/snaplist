@@ -1,8 +1,12 @@
-import type {
-  ItemSignal,
-  PriceResult,
-  PriceSource,
-  PricingProvider,
+import {
+  PRICE_RESULT_MAX_SOURCES,
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  PRICE_SOURCE_URL_MAX_LENGTH,
+  priceSourceSchema,
+  type ItemSignal,
+  type PriceResult,
+  type PriceSource,
+  type PricingProvider,
 } from "../types";
 import { inheritTrustedSoldEvidence } from "../approved-sold-provider";
 import {
@@ -185,6 +189,36 @@ interface ResolvedHit {
   cleanHit: boolean;
 }
 
+function boundedCatalogSource(args: {
+  preferredUrl?: string;
+  fallbackUrl: string;
+  title?: string;
+  fallbackTitle: string;
+}): PriceSource | undefined {
+  // A citation URL must stay intact to remain checkable. If external metadata
+  // supplies an oversized URL, use the provider's canonical record URL; if
+  // even that cannot satisfy the shared contract, omit this source and let the
+  // provider decline rather than aborting the whole pricing route.
+  const url = [args.preferredUrl, args.fallbackUrl].find(
+    (candidate): candidate is string =>
+      typeof candidate === "string" &&
+      candidate.length > 0 &&
+      candidate.length <= PRICE_SOURCE_URL_MAX_LENGTH,
+  );
+  if (!url) return undefined;
+
+  const title = (args.title ?? args.fallbackTitle).slice(
+    0,
+    PRICE_SOURCE_TITLE_MAX_LENGTH,
+  );
+  const parsed = priceSourceSchema.safeParse({
+    url,
+    title,
+    kind: "isbn-lookup",
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** Resolve the Open Library edition record into a citation + title. */
 function readOpenLibrary(
   isbn: string,
@@ -192,19 +226,22 @@ function readOpenLibrary(
 ): { source?: PriceSource; title?: string } {
   if (!isObject(body)) return {};
   const edition = body as OpenLibraryEdition;
-  const title = typeof edition.title === "string" ? edition.title : undefined;
+  const title =
+    typeof edition.title === "string"
+      ? edition.title.slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH)
+      : undefined;
   // Prefer the canonical work key as the citation URL; fall back to the ISBN page.
-  const url =
-    typeof edition.key === "string"
-      ? `https://openlibrary.org${edition.key}`
-      : openLibraryUrl(isbn).replace(/\.json$/, "");
   return {
     title,
-    source: {
-      url,
-      title: title ?? `Open Library record for ISBN ${isbn}`,
-      kind: "isbn-lookup",
-    },
+    source: boundedCatalogSource({
+      preferredUrl:
+        typeof edition.key === "string"
+          ? `https://openlibrary.org${edition.key}`
+          : undefined,
+      fallbackUrl: openLibraryUrl(isbn).replace(/\.json$/, ""),
+      title,
+      fallbackTitle: `Open Library record for ISBN ${isbn}`,
+    }),
   };
 }
 
@@ -226,7 +263,10 @@ function readGoogleBooks(
   const volume = items[0];
   const info = volume.volumeInfo ?? {};
   const sale = volume.saleInfo ?? {};
-  const title = typeof info.title === "string" ? info.title : undefined;
+  const title =
+    typeof info.title === "string"
+      ? info.title.slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH)
+      : undefined;
 
   // Prefer retail (actual sale price), then list price. Only USD anchors are used
   // so we never mix currencies into a USD band.
@@ -241,20 +281,19 @@ function readGoogleBooks(
         ? list
         : undefined;
 
-  const url =
-    typeof info.infoLink === "string" && info.infoLink.length > 0
-      ? info.infoLink
-      : `https://books.google.com/books?q=isbn:${isbn}`;
-
   return {
     matched: true,
     title,
     anchorPrice,
-    source: {
-      url,
-      title: title ?? `Google Books record for ISBN ${isbn}`,
-      kind: "isbn-lookup",
-    },
+    source: boundedCatalogSource({
+      preferredUrl:
+        typeof info.infoLink === "string" && info.infoLink.length > 0
+          ? info.infoLink
+          : undefined,
+      fallbackUrl: `https://books.google.com/books?q=isbn:${encodeURIComponent(isbn)}`,
+      title,
+      fallbackTitle: `Google Books record for ISBN ${isbn}`,
+    }),
   };
 }
 
@@ -280,7 +319,7 @@ async function resolveHit(
 
   const title = gb.title ?? ol.title;
   // A "clean hit" = both APIs identified the same edition (strongest signal).
-  const cleanHit = Boolean(ol.source) && gb.matched;
+  const cleanHit = Boolean(ol.source) && Boolean(gb.source);
 
   return {
     sources,
@@ -358,14 +397,27 @@ function buildSoldGroundedResult(
   hit: ResolvedHit,
   sold: PriceResult,
 ): PriceResult {
-  return inheritTrustedSoldEvidence({
-    suggested: sold.suggested,
-    range: sold.range,
-    confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
-    sources: [...hit.sources, ...sold.sources],
-    tier: "isbn-lookup",
-    ...(sold.compAgreement != null ? { compAgreement: sold.compAgreement } : {}),
-  }, sold);
+  // Catalog citations carry the structured ISBN identity that makes this tier
+  // truthful, so reserve their slots first. A sold provider may legitimately
+  // fill the shared ceiling on its own; retain its earliest citations in
+  // provider order instead of returning an invalid over-cap result.
+  const soldSourceSlots = Math.max(
+    0,
+    PRICE_RESULT_MAX_SOURCES - hit.sources.length,
+  );
+  return inheritTrustedSoldEvidence(
+    {
+      suggested: sold.suggested,
+      range: sold.range,
+      confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
+      sources: [...hit.sources, ...sold.sources.slice(0, soldSourceSlots)],
+      tier: "isbn-lookup",
+      ...(sold.compAgreement != null
+        ? { compAgreement: sold.compAgreement }
+        : {}),
+    },
+    sold,
+  );
 }
 
 // ---------------------------------------------------------------------------

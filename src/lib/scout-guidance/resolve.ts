@@ -539,6 +539,7 @@ function isUploadProgressValue(value: unknown): value is UploadProgressValue {
 function resolveLocale(requestedLocale: string): {
   resolvedLocale: string;
   fallbackChain: string[];
+  fallbackApplied: boolean;
 } {
   let canonicalLocale: string;
   let language: string | null = null;
@@ -560,7 +561,14 @@ function resolveLocale(requestedLocale: string): {
     ) ??
     guidanceCatalog.defaultLocale;
 
-  return { resolvedLocale, fallbackChain };
+  return {
+    resolvedLocale,
+    fallbackChain,
+    // Compare against the canonical request itself, not the filtered chain:
+    // an empty invalid request is removed from that chain before the default
+    // locale is appended, but resolving it to en-US is still a real fallback.
+    fallbackApplied: canonicalLocale !== resolvedLocale,
+  };
 }
 
 export function resolveScoutGuidance(
@@ -604,8 +612,7 @@ export function resolveScoutGuidance(
     state: request.state,
     requestedLocale: request.locale,
     resolvedLocale: localeResolution.resolvedLocale,
-    localeFallbackApplied:
-      localeResolution.fallbackChain[0] !== localeResolution.resolvedLocale,
+    localeFallbackApplied: localeResolution.fallbackApplied,
     localeFallbackChain: localeResolution.fallbackChain,
     message: {
       title: copy(definition.copyKeys.title),

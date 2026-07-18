@@ -998,6 +998,22 @@ describe("resolveScoutGuidance", () => {
     });
   });
 
+  it("reports fallback when an empty requested locale resolves to the default", () => {
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "onboarding.outcome",
+      locale: "",
+      substitutions: {},
+    });
+
+    expect(result).toMatchObject({
+      requestedLocale: "",
+      resolvedLocale: "en-US",
+      localeFallbackApplied: true,
+      localeFallbackChain: ["en-US"],
+    });
+  });
+
   it("treats inherited prototype names as unsupported locales and falls back", () => {
     const result = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",

@@ -5,7 +5,14 @@ import {
   type FetchJson,
 } from "./isbn";
 import { PriceRouter } from "../router";
-import { priceResultSchema, type ItemSignal, type PriceResult } from "../types";
+import {
+  PRICE_RESULT_MAX_SOURCES,
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  PRICE_SOURCE_URL_MAX_LENGTH,
+  priceResultSchema,
+  type ItemSignal,
+  type PriceResult,
+} from "../types";
 
 /**
  * The ISBN provider is tier 1 (`isbn-lookup`) — true structured lookup via
@@ -110,6 +117,49 @@ describe("ISBN pricing provider", () => {
     expect(sourceUrls.some((u) => u.includes("google"))).toBe(true);
     // Sources carry a human-readable title (the resolved book title).
     expect(result!.sources.every((s) => (s.title ?? "").length > 0)).toBe(true);
+  });
+
+  it("bounds external catalog citation metadata before the shared router validates it", async () => {
+    const oversizedTitle = "T".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH + 1);
+    const oversizedUrlSuffix = "u".repeat(PRICE_SOURCE_URL_MAX_LENGTH);
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson({
+        openLibrary: {
+          ...openLibraryEdition,
+          title: oversizedTitle,
+          key: `/books/${oversizedUrlSuffix}`,
+        },
+        googleBooks: {
+          ...googleBooksVolumes,
+          items: [
+            {
+              ...googleBooksVolumes.items[0],
+              volumeInfo: {
+                ...googleBooksVolumes.items[0].volumeInfo,
+                title: oversizedTitle,
+                infoLink: `https://books.google.com/books?id=${oversizedUrlSuffix}`,
+              },
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = await new PriceRouter([provider]).price({ isbn: ISBN });
+
+    expect(result.sources).toHaveLength(2);
+    expect(result.sources.every((source) => source.url.length <= PRICE_SOURCE_URL_MAX_LENGTH)).toBe(
+      true,
+    );
+    expect(
+      result.sources.every(
+        (source) => (source.title?.length ?? 0) <= PRICE_SOURCE_TITLE_MAX_LENGTH,
+      ),
+    ).toBe(true);
+    expect(result.sources.map((source) => source.url)).toEqual([
+      `https://openlibrary.org/isbn/${ISBN}`,
+      `https://books.google.com/books?q=isbn:${ISBN}`,
+    ]);
   });
 
   it("suggests a used price below retail, inside the band", async () => {
@@ -306,6 +356,35 @@ describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
     // top `isbn` (0.95) confidence tier (confidence/from-price.ts: hasSoldComp).
     expect(result!.sources.some((s) => s.kind === "isbn-lookup")).toBe(true);
     expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(true);
+  });
+
+  it("reserves source slots for catalog identity when sold evidence already fills the shared cap", async () => {
+    const soldSources = Array.from(
+      { length: PRICE_RESULT_MAX_SOURCES },
+      (_, index) => ({
+        url: `https://www.ebay.com/itm/sold-${index + 1}`,
+        title: `Fantastic Mr Fox sold comp ${index + 1}`,
+        kind: "sold-comp",
+      }),
+    );
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson(),
+      soldLookup: vi.fn(async () => soldResult({ sources: soldSources })),
+    });
+
+    // Exercise the highest shared seam: the router validates every provider
+    // result against the common PriceResult contract before returning it.
+    const result = await new PriceRouter([provider]).price({ isbn: ISBN });
+
+    expect(result.sources).toHaveLength(PRICE_RESULT_MAX_SOURCES);
+    expect(result.sources.filter((source) => source.kind === "isbn-lookup")).toHaveLength(2);
+    expect(result.sources.filter((source) => source.kind === "sold-comp")).toHaveLength(
+      PRICE_RESULT_MAX_SOURCES - 2,
+    );
+    expect(result.sources[0].url).toContain("openlibrary.org");
+    expect(result.sources[1].url).toContain("google");
+    expect(result.sources[2].url).toBe("https://www.ebay.com/itm/sold-1");
+    expect(result.sources.at(-1)?.url).toBe("https://www.ebay.com/itm/sold-58");
   });
 
   it("calls soldLookup with the signal, but only after a catalog identity resolves", async () => {

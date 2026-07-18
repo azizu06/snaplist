@@ -15,7 +15,13 @@ import {
   type WebComp,
 } from "./web-search";
 import { PriceRouter } from "../router";
-import { priceResultSchema, type ItemSignal, type PriceResult } from "../types";
+import {
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  PRICE_SOURCE_URL_MAX_LENGTH,
+  priceResultSchema,
+  type ItemSignal,
+  type PriceResult,
+} from "../types";
 
 /**
  * Tiers 2 + 3 — the web-search pricing agent (issue #10). Every test runs
@@ -495,6 +501,43 @@ describe("branded-web pricing agent", () => {
     // Only 1 verifiable comp survives (< MIN_USEFUL_COMPS) → decline.
     expect(MIN_USEFUL_COMPS).toBeGreaterThan(1);
     expect(result).toBeNull();
+  });
+
+  it("rejects oversized external URLs and bounds titles before router validation", async () => {
+    const oversizedUrl = `https://example.com/${"u".repeat(PRICE_SOURCE_URL_MAX_LENGTH)}`;
+    const oversizedTitle = "T".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH + 1);
+    const results = [
+      { url: oversizedUrl, title: "oversized external result" },
+      ...cannedResults("q1"),
+    ];
+    const provider = createBrandedWebPricingProvider({
+      searchClient: fakeSearch([results]),
+      extractComps: fakeExtractor([
+        [
+          { url: oversizedUrl, title: "must be rejected", price: 170, kind: "sold" },
+          {
+            url: "https://www.ebay.com/itm/q1-1",
+            title: oversizedTitle,
+            price: 178,
+            kind: "sold",
+          },
+          {
+            url: "https://www.ebay.com/itm/q1-2",
+            title: "SOLD 2",
+            price: 185.5,
+            kind: "sold",
+          },
+        ],
+      ]),
+    });
+
+    const result = await new PriceRouter([provider]).price(BRANDED_SIGNAL);
+
+    expect(result.sources.map((source) => source.url)).toEqual([
+      "https://www.ebay.com/itm/q1-1",
+      "https://www.ebay.com/itm/q1-2",
+    ]);
+    expect(result.sources[0].title).toHaveLength(PRICE_SOURCE_TITLE_MAX_LENGTH);
   });
 
   it("declines (null) when no useful comps are found, so the router falls through", async () => {
