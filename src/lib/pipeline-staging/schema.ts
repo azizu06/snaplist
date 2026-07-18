@@ -124,7 +124,6 @@ export const pipelineReplayBatchInputSchema = z
 
 export type PipelineStageBatchInput = z.infer<typeof pipelineStageBatchInputSchema>;
 export type PipelineStageBatchResult = z.infer<typeof pipelineStageBatchResultSchema>;
-export type PipelineStageResult = PipelineStageBatchResult[number];
 export type PipelineReplayBatchInput = z.infer<typeof pipelineReplayBatchInputSchema>;
 export type PipelineStagingCleanupIntentInput = z.infer<
   typeof pipelineStagingCleanupIntentInputSchema

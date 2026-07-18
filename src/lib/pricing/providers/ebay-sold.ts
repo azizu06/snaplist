@@ -82,6 +82,15 @@ export interface EbaySoldComp {
   soldAt?: number;
 }
 
+const parsedEbaySoldComps = new WeakMap<object, EbaySoldComp>();
+
+/** Immutable-at-parse projection for a sold-page comp. */
+export function parsedEbaySoldComp(value: unknown): EbaySoldComp | null {
+  if (typeof value !== "object" || value === null) return null;
+  const comp = parsedEbaySoldComps.get(value);
+  return comp ? { ...comp } : null;
+}
+
 export interface EbaySoldPricingProviderOptions {
   /** Explicit kill-switch state; defaults to `EBAY_SOLD_ENABLED` env config. */
   enabled?: boolean;
@@ -520,13 +529,15 @@ export function parseSoldComps(
 
       const soldAt = parseSoldDate(captionText);
 
-      comps.push({
+      const comp: EbaySoldComp = {
         url,
         title,
         price,
         ...(condition ? { condition } : {}),
         ...(soldAt != null ? { soldAt } : {}),
-      });
+      };
+      parsedEbaySoldComps.set(comp, { ...comp });
+      comps.push(comp);
     });
     return capped;
   };
@@ -812,8 +823,6 @@ export interface SoldSynthesisOptions {
   halfLifeDays?: number;
   /** Optional relevance/condition weight from the provider-neutral matcher. */
   evidenceWeight?: (comp: EbaySoldComp) => number;
-  /** Actual sold-search lookback that produced these comps. */
-  evidenceWindowDays?: number;
 }
 
 /**
@@ -881,9 +890,6 @@ export function synthesizeSoldResult(
     // The judged tightness rides downstream so a scattered sold set cannot ride
     // the sold-comp label into the ready-to-publish confidence band.
     compAgreement: agreement,
-    ...(opts.evidenceWindowDays !== undefined
-      ? { evidenceWindowDays: opts.evidenceWindowDays }
-      : {}),
   };
 }
 
@@ -1114,7 +1120,6 @@ export function createEbaySoldPricingProvider(
         {
           ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
           evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,
-          evidenceWindowDays: staleDays,
         },
       );
     },

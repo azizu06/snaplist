@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { ScoutGuidanceTrustedSource } from "./contract";
 import {
@@ -6,14 +8,18 @@ import {
   type ReviewSnapshot,
 } from "@/lib/pipeline/review-snapshot";
 import {
-  createSupabasePipelineStagingStore,
-  type PipelineStageResult,
-} from "@/lib/pipeline-staging";
-import {
+  createEbaySoldPricingProvider,
+  parseSoldComps,
   PriceRouter,
-  type PriceResult,
-  type PricingProvider,
+  synthesizeSoldResult,
 } from "@/lib/pricing";
+import { appendAcceptedPhotos } from "@/app/(app)/upload/upload-draft-context";
+import type { AppendAcceptedPhotosResult } from "@/lib/capture-progress";
+import {
+  stageUploadEntries,
+  type UploadProgressSnapshot,
+  type UploadStagingDependencies,
+} from "@/lib/upload-staging";
 import {
   SCOUT_GUIDANCE_STATES,
   ScoutGuidanceContractError,
@@ -23,6 +29,7 @@ import {
   verifiedPriceEvidence,
   verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
+  type VerifiedPriceEvidenceInput,
   type VerifiedScoutGuidanceFact,
 } from "./resolve";
 
@@ -32,65 +39,34 @@ const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
 const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
 const RUN_ID = "55555555-5555-4555-8555-555555555555";
 
-async function stageTrustedCapture(photoCount: number): Promise<PipelineStageResult> {
-  const result = {
-    batch_id: CAPTURE_SESSION_ID,
-    batch_position: 0,
-    idempotency_key: "capture-1",
-    item_id: ITEM_ID,
-    run_id: RUN_ID,
-    queue_message_id: "1",
-    listing_id: null,
-    status: "queued",
-    stage: "queued",
-    attempt_count: 0,
-    max_attempts: 3,
-    safe_failure_message: null,
-    updated_at: "2026-07-18T00:00:00.000Z",
-  };
-  const rpc = vi.fn(async () => ({ data: [result], error: null }));
-  const store = createSupabasePipelineStagingStore({ rpc });
-  const [staged] = await store.stageAndEnqueue({
-    batchId: CAPTURE_SESSION_ID,
-    userId: "user_test",
-    dailyLimit: 10,
-    perMinuteLimit: 5,
-    entries: [{
-      idempotencyKey: "capture-1",
-      source: "single",
-      autopilotEnabled: false,
-      photoPaths: Array.from(
-        { length: photoCount },
-        (_, index) => `user_test/pipeline-staging/${CAPTURE_SESSION_ID}/${index}.jpg`,
-      ),
-      costBasis: null,
-    }],
-  });
-  if (!staged) throw new Error("Expected a trusted staged capture fixture.");
-  return staged;
-}
-
-async function routeTrustedPriceEvidence(
+function trustedPriceEvidence(
   soldCompCount: number,
   windowDays: number,
-): Promise<PriceResult> {
-  const provider: PricingProvider = {
-    tier: "ebay-sold",
-    async price() {
-      return {
-        suggested: 40,
-        range: { min: 30, max: 50 },
-        confidence: 0.5,
-        sources: Array.from({ length: soldCompCount }, (_, index) => ({
-          url: `https://example.test/sold/${index}`,
-          kind: "sold-comp",
-        })),
-        tier: "ebay-sold",
-        evidenceWindowDays: windowDays,
-      };
-    },
+  soldCaption?: string,
+): VerifiedPriceEvidenceInput {
+  const soldDate = new Date().toLocaleDateString(
+    "en-US",
+    { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" },
+  );
+  const cards = Array.from({ length: soldCompCount }, (_, index) => `
+    <li class="s-item">
+      <a class="s-item__link" href="https://www.ebay.com/itm/${100000 + index}">
+        <div class="s-item__title">Canon AE-1 camera ${index}</div>
+      </a>
+      <span class="s-item__price">$40.00</span>
+      <div class="s-item__caption">${soldCaption ?? `Sold ${soldDate}`}</div>
+    </li>
+  `).join("");
+  const retrievedSoldComps = parseSoldComps(
+    `<ul class="srp-results">${cards}</ul>`,
+    "https://www.ebay.com",
+    soldCompCount,
+  );
+  return {
+    recommendation: synthesizeSoldResult(retrievedSoldComps),
+    retrievedSoldComps,
+    windowDays,
   };
-  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
 }
 
 async function loadTrustedItemSnapshot(
@@ -177,8 +153,12 @@ describe("resolveScoutGuidance", () => {
     });
   });
 
-  it("formats a capture count only from the bounded verified capture fact", async () => {
-    const capture = await stageTrustedCapture(2);
+  it("formats accepted capture progress before upload staging begins", () => {
+    const stageAndEnqueue = vi.fn();
+    const capture = appendAcceptedPhotos([], [
+      new File(["front"], "front.jpg", { type: "image/jpeg" }),
+      new File(["back"], "back.jpg", { type: "image/jpeg" }),
+    ]);
     const result = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
       state: "capture.photo-count",
@@ -197,6 +177,7 @@ describe("resolveScoutGuidance", () => {
         label: "2 of 4 photos",
       },
     });
+    expect(stageAndEnqueue).not.toHaveBeenCalled();
   });
 
   it("rejects a caller-constructed object at the capture-session fact boundary", () => {
@@ -204,7 +185,7 @@ describe("resolveScoutGuidance", () => {
       verifiedCapturedPhotoCount({
         captureSessionId: CAPTURE_SESSION_ID,
         capturedPhotoCount: 2,
-      } as unknown as PipelineStageResult),
+      } as unknown as AppendAcceptedPhotosResult),
     ).toThrowError(
       expect.objectContaining({
         name: "ScoutGuidanceFactError",
@@ -213,23 +194,105 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
-  it("rejects a caller-constructed object at the durable-run fact boundary", () => {
+  it("rejects a caller-constructed object at the upload-progress fact boundary", () => {
     expect(() =>
       verifiedUploadedPhotoCount({
         runId: RUN_ID,
         uploadedPhotoCount: 2,
-      } as unknown as PipelineStageResult),
+      } as unknown as UploadProgressSnapshot),
     ).toThrowError(
       expect.objectContaining({
         name: "ScoutGuidanceFactError",
-        code: "untrusted-durable-run",
+        code: "untrusted-upload-progress",
       }),
     );
   });
 
+  it("formats per-photo upload progress before the durable run is staged", async () => {
+    const events: string[] = [];
+    const resolvedLabels: string[] = [];
+    const dependencies = {
+      async upload(_path: string, photo: File) {
+        events.push(`upload:${photo.name}`);
+      },
+      async remove() {},
+      async recordCleanupIntent() {},
+      async resolveCleanupIntent() {},
+      async findReplay() {
+        return [];
+      },
+      async stageAndEnqueue() {
+        events.push("stage");
+        return [{
+          batch_id: CAPTURE_SESSION_ID,
+          batch_position: 0,
+          idempotency_key: "capture-1",
+          item_id: ITEM_ID,
+          run_id: RUN_ID,
+          queue_message_id: "1",
+          listing_id: null,
+          status: "queued" as const,
+          stage: "queued" as const,
+          attempt_count: 0,
+          max_attempts: 3,
+          safe_failure_message: null,
+          updated_at: "2026-07-18T00:00:00.000Z",
+        }];
+      },
+      onUploadProgress(
+        snapshot: Parameters<typeof verifiedUploadedPhotoCount>[0],
+      ) {
+        events.push("progress");
+        resolvedLabels.push(
+          resolveScoutGuidance({
+            contractVersion: "scout-guidance-v1",
+            state: "recovery.upload-paused",
+            locale: "en-US",
+            substitutions: {
+              uploadedPhotoCount: verifiedUploadedPhotoCount(snapshot),
+            },
+          }).accessibility.label,
+        );
+      },
+    } satisfies UploadStagingDependencies & {
+      onUploadProgress(
+        snapshot: Parameters<typeof verifiedUploadedPhotoCount>[0],
+      ): void;
+    };
+
+    await stageUploadEntries(
+      {
+        batchId: CAPTURE_SESSION_ID,
+        userId: "user_test",
+        dailyLimit: 10,
+        perMinuteLimit: 5,
+        entries: [{
+          idempotencyKey: "capture-1",
+          source: "single",
+          autopilotEnabled: false,
+          costBasis: null,
+          photos: [
+            new File(["front"], "front.jpg", { type: "image/jpeg" }),
+            new File(["back"], "back.jpg", { type: "image/jpeg" }),
+          ],
+        }],
+      },
+      dependencies,
+    );
+
+    expect(events).toEqual([
+      "upload:front.jpg",
+      "progress",
+      "upload:back.jpg",
+      "progress",
+      "stage",
+    ]);
+    expect(resolvedLabels.at(-1)).toContain("2 of 4");
+  });
+
   it("rejects verified price facts swapped into a different substitution key", async () => {
     const evidence = verifiedPriceEvidence(
-      await routeTrustedPriceEvidence(3, 90),
+      trustedPriceEvidence(3, 90),
     );
 
     expect(() =>
@@ -252,19 +315,121 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("rejects related price facts mixed across recommendation bundles", async () => {
+    const first = verifiedPriceEvidence(
+      trustedPriceEvidence(3, 90),
+    );
+    const second = verifiedPriceEvidence(
+      trustedPriceEvidence(4, 90),
+    );
+
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "uncertainty.limited-price-evidence",
+        locale: "en-US",
+        substitutions: {
+          soldCompCount: first.soldCompCount,
+          windowDays: second.windowDays,
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "untrusted-substitution",
+        state: "uncertainty.limited-price-evidence",
+        substitutionKey: "windowDays",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
   it("rejects caller-labelled counts at the price-recommendation fact boundary", () => {
     expect(() =>
       verifiedPriceEvidence({
         recommendationId: RECOMMENDATION_ID,
         soldCompCount: 90,
         windowDays: 3,
-      } as unknown as PriceResult),
+      } as unknown as VerifiedPriceEvidenceInput),
     ).toThrowError(
       expect.objectContaining({
         name: "ScoutGuidanceFactError",
         code: "untrusted-price-recommendation",
       }),
     );
+  });
+
+  it("fails closed when a PriceResult does not prove every comp is inside its claimed window", async () => {
+    const recommendation = trustedPriceEvidence(3, 90).recommendation;
+
+    expect(() =>
+      verifiedPriceEvidence(
+        recommendation as unknown as Parameters<typeof verifiedPriceEvidence>[0],
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-price-recommendation",
+      }),
+    );
+  });
+
+  it("rejects parsed sold evidence when a counted comp is undated or outside the claimed window", () => {
+    for (const evidence of [
+      trustedPriceEvidence(3, 90, "Sold"),
+      trustedPriceEvidence(3, 90, "Sold Jan 1, 2020"),
+    ]) {
+      expect(() => verifiedPriceEvidence(evidence)).toThrowError(
+        expect.objectContaining({
+          name: "ScoutGuidanceFactError",
+          code: "untrusted-price-recommendation",
+        }),
+      );
+    }
+  });
+
+  it("rejects a recommendation that repeats one parsed sale as multiple sold comps", () => {
+    const evidence = trustedPriceEvidence(1, 90);
+    const source = evidence.recommendation.sources[0]!;
+
+    expect(() =>
+      verifiedPriceEvidence({
+        ...evidence,
+        recommendation: {
+          ...evidence.recommendation,
+          sources: [source, source],
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-price-recommendation",
+      }),
+    );
+  });
+
+  it("leaves fractional pricing staleness policy valid at the existing router seam", async () => {
+    const html = readFileSync(
+      resolve("src/lib/pricing/providers/fixtures/ebay-sold.sample.html"),
+      "utf8",
+    );
+    const router = new PriceRouter([
+      createEbaySoldPricingProvider({
+        enabled: true,
+        fetchPage: async () => html,
+        now: () => Date.parse("2026-07-18T00:00:00.000Z"),
+        staleDays: 180.5,
+      }),
+    ]);
+
+    await expect(
+      router.price({
+        brand: "Sony",
+        model: "WH-1000XM4",
+        category: "electronics",
+        condition: "good",
+        conditionKnown: true,
+      }),
+    ).resolves.toMatchObject({ tier: "ebay-sold" });
   });
 
   it("rejects a missing required substitution with a stable contract error", () => {
@@ -556,7 +721,7 @@ describe("resolveScoutGuidance", () => {
 
   it("rejects verified facts outside the template's approved bounds", async () => {
     const evidence = verifiedPriceEvidence(
-      await routeTrustedPriceEvidence(100, 90),
+      trustedPriceEvidence(100, 90),
     );
     expect(() =>
       resolveScoutGuidance({

@@ -13,11 +13,7 @@ export {
   type PriceResult,
   type PricingProvider,
 } from "./types";
-export {
-  PriceRouter,
-  routedPriceRecommendationEvidence,
-  type RoutedPriceRecommendationEvidence,
-} from "./router";
+export { PriceRouter } from "./router";
 export {
   classifySoldComp,
   normalizeComparableText,
@@ -60,6 +56,7 @@ export {
   buildSoldSearchQuery,
   buildSoldSearchUrl,
   parseSoldComps,
+  parsedEbaySoldComp,
   parsePrice,
   filterRelevantComps,
   synthesizeSoldResult,

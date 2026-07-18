@@ -4,14 +4,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
 import {
-  createSupabasePipelineStagingStore,
-  type PipelineStageResult,
-} from "@/lib/pipeline-staging";
+  appendAcceptedPhotos,
+  type AppendAcceptedPhotosResult,
+} from "@/lib/capture-progress";
 import {
-  PriceRouter,
-  type PriceResult,
-  type PricingProvider,
+  parseSoldComps,
+  synthesizeSoldResult,
 } from "@/lib/pricing";
+import {
+  stageUploadEntries,
+  type UploadProgressSnapshot,
+} from "@/lib/upload-staging";
 import { scoutGuidanceCatalogSchema } from "./contract";
 import {
   resolveScoutGuidance,
@@ -20,6 +23,7 @@ import {
   verifiedPriceEvidence,
   verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
+  type VerifiedPriceEvidenceInput,
   type VerifiedScoutGuidanceFact,
 } from "./resolve";
 
@@ -28,28 +32,16 @@ const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "55555555-5555-4555-8555-555555555555";
 const verifiedItemFacts = new Map<string, VerifiedScoutGuidanceFact>();
-const stagedRunFacts = new Map<number, PipelineStageResult>();
-const routedPriceFacts = new Map<string, PriceResult>();
+const captureProgress = new Map<number, AppendAcceptedPhotosResult>();
+const uploadProgress = new Map<number, UploadProgressSnapshot>();
+const priceEvidence = new Map<string, VerifiedPriceEvidenceInput>();
 
-async function stageTrustedRun(photoCount: number): Promise<PipelineStageResult> {
-  const result = {
-    batch_id: CAPTURE_SESSION_ID,
-    batch_position: 0,
-    idempotency_key: `capture-${photoCount}`,
-    item_id: ITEM_ID,
-    run_id: RUN_ID,
-    queue_message_id: "1",
-    listing_id: null,
-    status: "queued",
-    stage: "queued",
-    attempt_count: 0,
-    max_attempts: 3,
-    safe_failure_message: null,
-    updated_at: "2026-07-18T00:00:00.000Z",
-  };
-  const rpc = vi.fn(async () => ({ data: [result], error: null }));
-  const [staged] = await createSupabasePipelineStagingStore({ rpc })
-    .stageAndEnqueue({
+const photo = (index: number) =>
+  new File([String(index)], `${index}.jpg`, { type: "image/jpeg" });
+
+async function collectUploadProgress(photoCount: number): Promise<void> {
+  await stageUploadEntries(
+    {
       batchId: CAPTURE_SESSION_ID,
       userId: "user_test",
       dailyLimit: 10,
@@ -58,39 +50,69 @@ async function stageTrustedRun(photoCount: number): Promise<PipelineStageResult>
         idempotencyKey: `capture-${photoCount}`,
         source: "single",
         autopilotEnabled: false,
-        photoPaths: Array.from(
-          { length: photoCount },
-          (_, index) =>
-            `user_test/pipeline-staging/${CAPTURE_SESSION_ID}/${index}.jpg`,
-        ),
         costBasis: null,
+        photos: Array.from({ length: photoCount }, (_, index) => photo(index)),
       }],
-    });
-  if (!staged) throw new Error("Expected a trusted staged run fixture.");
-  return staged;
+    },
+    {
+      async upload() {},
+      onUploadProgress(snapshot) {
+        uploadProgress.set(uploadProgress.size + 1, snapshot);
+      },
+      async remove() {},
+      async recordCleanupIntent() {},
+      async resolveCleanupIntent() {},
+      async findReplay() { return []; },
+      async stageAndEnqueue() {
+        return [{
+          batch_id: CAPTURE_SESSION_ID,
+          batch_position: 0,
+          idempotency_key: `capture-${photoCount}`,
+          item_id: ITEM_ID,
+          run_id: RUN_ID,
+          queue_message_id: "1",
+          listing_id: null,
+          status: "queued" as const,
+          stage: "queued" as const,
+          attempt_count: 0,
+          max_attempts: 3,
+          safe_failure_message: null,
+          updated_at: "2026-07-18T00:00:00.000Z",
+        }];
+      },
+    },
+  );
 }
 
-async function routeTrustedPrice(
+function trustedPriceEvidence(
   soldCompCount: number,
   windowDays: number,
-): Promise<PriceResult> {
-  const provider: PricingProvider = {
-    tier: "ebay-sold",
-    async price() {
-      return {
-        suggested: 40,
-        range: { min: 30, max: 50 },
-        confidence: 0.5,
-        sources: Array.from({ length: soldCompCount }, (_, index) => ({
-          url: `https://example.test/sold/${index}`,
-          kind: "sold-comp",
-        })),
-        tier: "ebay-sold",
-        evidenceWindowDays: windowDays,
-      };
-    },
+): VerifiedPriceEvidenceInput {
+  const soldDate = new Date().toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const cards = Array.from({ length: soldCompCount }, (_, index) => `
+    <li class="s-item">
+      <a class="s-item__link" href="https://www.ebay.com/itm/${200000 + index}">
+        <div class="s-item__title">Canon AE-1 camera ${index}</div>
+      </a>
+      <span class="s-item__price">$40.00</span>
+      <div class="s-item__caption">Sold ${soldDate}</div>
+    </li>
+  `).join("");
+  const retrievedSoldComps = parseSoldComps(
+    `<ul class="srp-results">${cards}</ul>`,
+    "https://www.ebay.com",
+    soldCompCount,
+  );
+  return {
+    recommendation: synthesizeSoldResult(retrievedSoldComps),
+    retrievedSoldComps,
+    windowDays,
   };
-  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
 }
 
 async function loadVerifiedItemFact(
@@ -129,7 +151,7 @@ function verifiedSubstitutionsFor(
     case "capture.photo-count":
       return {
         capturedPhotoCount: verifiedCapturedPhotoCount(
-          stagedRunFacts.get(Number(values.capturedPhotoCount ?? 1))!,
+          captureProgress.get(Number(values.capturedPhotoCount ?? 1))!,
         ),
       };
     case "processing.finding-sold-comps":
@@ -141,14 +163,14 @@ function verifiedSubstitutionsFor(
     }
     case "uncertainty.limited-price-evidence":
       return verifiedPriceEvidence(
-        routedPriceFacts.get(
+        priceEvidence.get(
           `${Number(values.soldCompCount ?? 1)}:${Number(values.windowDays ?? 1)}`,
         )!,
       );
     case "recovery.upload-paused":
       return {
         uploadedPhotoCount: verifiedUploadedPhotoCount(
-          stagedRunFacts.get(Number(values.uploadedPhotoCount ?? 2))!,
+          uploadProgress.get(Number(values.uploadedPhotoCount ?? 2))!,
         ),
       };
     default:
@@ -186,13 +208,12 @@ describe("Scout guidance catalog contract", () => {
     ]) {
       verifiedItemFacts.set(displayName, await loadVerifiedItemFact(displayName));
     }
-    for (const count of [1, 2]) {
-      stagedRunFacts.set(count, await stageTrustedRun(count));
-    }
+    captureProgress.set(1, appendAcceptedPhotos([], [photo(1)]));
+    await collectUploadProgress(2);
     for (const [soldCompCount, windowDays] of [[1, 1], [3, 90]]) {
-      routedPriceFacts.set(
+      priceEvidence.set(
         `${soldCompCount}:${windowDays}`,
-        await routeTrustedPrice(soldCompCount, windowDays),
+        trustedPriceEvidence(soldCompCount, windowDays),
       );
     }
   });

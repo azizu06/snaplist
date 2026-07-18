@@ -28,6 +28,7 @@ export interface StageUploadEntriesInput {
 
 export interface UploadStagingDependencies {
   upload(path: string, photo: File): Promise<void>;
+  onUploadProgress?(snapshot: UploadProgressSnapshot): void;
   remove(paths: string[]): Promise<void>;
   findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
@@ -38,6 +39,37 @@ export interface UploadStagingDependencies {
     photoPaths: string[];
   }): Promise<boolean | void>;
   resolveCleanupIntent(cleanupId: string): Promise<boolean | void>;
+}
+
+declare const uploadProgressSnapshotType: unique symbol;
+
+export type UploadProgressSnapshot = Readonly<{
+  [uploadProgressSnapshotType]: true;
+}>;
+
+export interface UploadedPhotoProgressFacts {
+  uploadSessionId: string;
+  entryIndex: number;
+  uploadedPhotoCount: number;
+}
+
+const uploadedPhotoProgress = new WeakMap<object, UploadedPhotoProgressFacts>();
+
+function createUploadProgressSnapshot(
+  facts: UploadedPhotoProgressFacts,
+): UploadProgressSnapshot {
+  const snapshot = Object.freeze({}) as UploadProgressSnapshot;
+  uploadedPhotoProgress.set(snapshot, { ...facts });
+  return snapshot;
+}
+
+/** Facts emitted only after one private Storage upload has succeeded. */
+export function uploadedPhotoProgressFacts(
+  value: unknown,
+): UploadedPhotoProgressFacts | null {
+  if (typeof value !== "object" || value === null) return null;
+  const facts = uploadedPhotoProgress.get(value);
+  return facts ? { ...facts } : null;
 }
 
 function extensionFor(photo: File): string {
@@ -80,7 +112,7 @@ export async function stageUploadEntries(
   input.entries.forEach(validateEntry);
 
   const cleanupId = crypto.randomUUID();
-  const uploads: Array<{ path: string; photo: File }> = [];
+  const uploads: Array<{ path: string; photo: File; entryIndex: number }> = [];
   const stagedEntries: PipelineStageBatchInput["entries"] = input.entries.map(
     (entry, entryIndex) => {
       const photoPaths = entry.photos.map((photo, photoIndex) => {
@@ -91,7 +123,7 @@ export async function stageUploadEntries(
           String(entryIndex),
           `${photoIndex}-${crypto.randomUUID()}.${extensionFor(photo)}`,
         ].join("/");
-        uploads.push({ path, photo });
+        uploads.push({ path, photo, entryIndex });
         return path;
       });
       return {
@@ -105,6 +137,7 @@ export async function stageUploadEntries(
   );
   const plannedPaths = uploads.map(({ path }) => path);
   const uploadedPaths: string[] = [];
+  const uploadedPhotoCounts = input.entries.map(() => 0);
   let cleanupIntentRecorded = false;
   let stagingAttempted = false;
 
@@ -127,9 +160,17 @@ export async function stageUploadEntries(
     });
     cleanupIntentRecorded = true;
 
-    for (const { path, photo } of uploads) {
+    for (const { path, photo, entryIndex } of uploads) {
       await dependencies.upload(path, photo);
       uploadedPaths.push(path);
+      uploadedPhotoCounts[entryIndex] += 1;
+      dependencies.onUploadProgress?.(
+        createUploadProgressSnapshot({
+          uploadSessionId: cleanupId,
+          entryIndex,
+          uploadedPhotoCount: uploadedPhotoCounts[entryIndex],
+        }),
+      );
     }
 
     stagingAttempted = true;

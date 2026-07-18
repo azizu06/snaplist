@@ -138,8 +138,6 @@ export const priceResultSchema = z
      * Tiers with no comp set leave it unset.
      */
     compAgreement: z.number().min(0).max(1).optional(),
-    /** Actual sold-search lookback used by the provider, when sold evidence fired. */
-    evidenceWindowDays: z.number().int().positive().optional(),
   })
   .refine((r) => r.range.min <= r.range.max, {
     message: "range.min must be <= range.max",
@@ -154,16 +152,7 @@ export const priceResultSchema = z
     // high-confidence ISBN/web result with no sources violates the pricing contract.
     message: "sources must be non-empty for every tier except llm-only",
     path: ["sources"],
-  })
-  .refine(
-    (r) =>
-      r.evidenceWindowDays === undefined ||
-      r.sources.some((source) => source.kind === "sold-comp"),
-    {
-      message: "evidenceWindowDays requires at least one sold-comp source",
-      path: ["evidenceWindowDays"],
-    },
-  );
+  });
 
 export type PriceResult = z.infer<typeof priceResultSchema>;
 

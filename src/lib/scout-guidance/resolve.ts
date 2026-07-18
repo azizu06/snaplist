@@ -5,11 +5,17 @@ import {
   type ReviewSnapshot,
 } from "@/lib/pipeline/review-snapshot";
 import {
-  stagedPipelineRunFacts,
-  type PipelineStageResult,
-} from "@/lib/pipeline-staging";
+  acceptedCaptureProgressFacts,
+  type AppendAcceptedPhotosResult,
+} from "@/lib/capture-progress";
 import {
-  routedPriceRecommendationEvidence,
+  uploadedPhotoProgressFacts,
+  type UploadProgressSnapshot,
+} from "@/lib/upload-staging";
+import {
+  parsedEbaySoldComp,
+  priceResultSchema,
+  type EbaySoldComp,
   type PriceResult,
 } from "@/lib/pricing";
 import {
@@ -49,7 +55,7 @@ export class ScoutGuidanceFactError extends Error {
     readonly code:
       | "untrusted-durable-item-record"
       | "untrusted-capture-session"
-      | "untrusted-durable-run"
+      | "untrusted-upload-progress"
       | "untrusted-price-recommendation"
       | "missing-item-display-name",
     message: string,
@@ -61,6 +67,7 @@ export class ScoutGuidanceFactError extends Error {
 declare const verifiedFactType: unique symbol;
 const verifiedFacts = new WeakSet<object>();
 const verifiedFactKeys = new WeakMap<object, ScoutGuidanceSubstitutionKey>();
+const verifiedFactGroups = new WeakMap<object, object>();
 
 type ScoutGuidanceSubstitutionKey =
   | "capturedPhotoCount"
@@ -94,6 +101,7 @@ function verifiedFact(
   source: ScoutGuidanceTrustedSource,
   reference: string,
   value: string | number,
+  group?: object,
 ): VerifiedScoutGuidanceFact {
   const fact = Object.freeze({
     source,
@@ -102,6 +110,7 @@ function verifiedFact(
   }) as VerifiedScoutGuidanceFact;
   verifiedFacts.add(fact);
   verifiedFactKeys.set(fact, key);
+  if (group) verifiedFactGroups.set(fact, group);
   return fact;
 }
 
@@ -151,13 +160,13 @@ export function verifiedItemDisplayNameFromDurableRecord(
 }
 
 export function verifiedCapturedPhotoCount(
-  result: PipelineStageResult,
+  result: AppendAcceptedPhotosResult,
 ): VerifiedScoutGuidanceFact {
-  const input = stagedPipelineRunFacts(result);
+  const input = acceptedCaptureProgressFacts(result);
   if (!input) {
     throw new ScoutGuidanceFactError(
       "untrusted-capture-session",
-      "Capture facts must come from the validated pipeline staging seam.",
+      "Capture facts must come from the accepted-photo progress seam.",
     );
   }
   return verifiedFact(
@@ -168,48 +177,88 @@ export function verifiedCapturedPhotoCount(
   );
 }
 
-export function verifiedPriceEvidence(result: PriceResult): Readonly<{
+export interface VerifiedPriceEvidenceInput {
+  recommendation: PriceResult;
+  retrievedSoldComps: readonly EbaySoldComp[];
+  windowDays: number;
+}
+
+export function verifiedPriceEvidence(input: VerifiedPriceEvidenceInput): Readonly<{
   soldCompCount: VerifiedScoutGuidanceFact;
   windowDays: VerifiedScoutGuidanceFact;
 }> {
-  const input = routedPriceRecommendationEvidence(result);
-  if (!input) {
+  const recommendation = priceResultSchema.safeParse(input?.recommendation);
+  const windowDays = z.number().int().min(1).max(365).safeParse(input?.windowDays);
+  const soldSources = recommendation.success
+    ? recommendation.data.sources.filter((source) => source.kind === "sold-comp")
+    : [];
+  const parsedCompsByUrl = new Map(
+    (input?.retrievedSoldComps ?? [])
+      .map(parsedEbaySoldComp)
+      .filter((comp): comp is EbaySoldComp => comp !== null)
+      .map((comp) => [comp.url, comp] as const),
+  );
+  const now = Date.now();
+  const oldestAllowed = windowDays.success
+    ? now - windowDays.data * 86_400_000
+    : Number.NaN;
+  const uniqueSoldSourceCount = new Set(
+    soldSources.map((source) => source.url),
+  ).size;
+  const countedComps = soldSources.map((source) => parsedCompsByUrl.get(source.url));
+  if (
+    !recommendation.success ||
+    !windowDays.success ||
+    soldSources.length === 0 ||
+    uniqueSoldSourceCount !== soldSources.length ||
+    countedComps.some(
+      (comp) =>
+        !comp ||
+        comp.soldAt === undefined ||
+        !Number.isFinite(comp.soldAt) ||
+        comp.soldAt > now ||
+        comp.soldAt < oldestAllowed,
+    )
+  ) {
     throw new ScoutGuidanceFactError(
       "untrusted-price-recommendation",
-      "Price facts must come from the validated pricing router seam.",
+      "Price facts require parsed, dated sold comps inside the claimed evidence window.",
     );
   }
-  const reference = `price-recommendation:${uuidSchema.parse(input.recommendationId)}`;
+  const reference = `price-recommendation:${crypto.randomUUID()}`;
+  const group = Object.freeze({});
   return Object.freeze({
     soldCompCount: verifiedFact(
       "soldCompCount",
       "price-recommendation",
       reference,
-      input.soldCompCount,
+      soldSources.length,
+      group,
     ),
     windowDays: verifiedFact(
       "windowDays",
       "price-recommendation",
       reference,
-      input.windowDays,
+      windowDays.data,
+      group,
     ),
   });
 }
 
 export function verifiedUploadedPhotoCount(
-  result: PipelineStageResult,
+  result: UploadProgressSnapshot,
 ): VerifiedScoutGuidanceFact {
-  const input = stagedPipelineRunFacts(result);
+  const input = uploadedPhotoProgressFacts(result);
   if (!input) {
     throw new ScoutGuidanceFactError(
-      "untrusted-durable-run",
-      "Run facts must come from the validated durable staging seam.",
+      "untrusted-upload-progress",
+      "Upload facts must come from successful per-photo Storage progress.",
     );
   }
   return verifiedFact(
     "uploadedPhotoCount",
-    "durable-run",
-    `run:${uuidSchema.parse(input.runId)}`,
+    "upload-progress",
+    `upload-session:${uuidSchema.parse(input.uploadSessionId)}:entry:${input.entryIndex}`,
     input.uploadedPhotoCount,
   );
 }
@@ -253,6 +302,7 @@ function validatedSubstitutions(
   provided: Record<string, VerifiedScoutGuidanceFact>,
 ): Record<string, string> {
   const allowedKeys = new Set(definition.substitutions.map((rule) => rule.key));
+  let relatedFactGroup: object | undefined;
   const unexpectedKey = Object.keys(provided).find((key) => !allowedKeys.has(key));
   if (unexpectedKey) {
     throw new Error(`Substitution ${unexpectedKey} is not allowed for this guidance state.`);
@@ -284,6 +334,18 @@ function validatedSubstitutions(
           rule.key,
           `Substitution ${rule.key} was verified for a different semantic key.`,
         );
+      }
+      if (definition.substitutions.length > 1) {
+        const factGroup = verifiedFactGroups.get(substitution);
+        if (!factGroup || (relatedFactGroup && factGroup !== relatedFactGroup)) {
+          throw new ScoutGuidanceContractError(
+            "untrusted-substitution",
+            state,
+            rule.key,
+            `Substitution ${rule.key} was verified for a different related-fact bundle.`,
+          );
+        }
+        relatedFactGroup = factGroup;
       }
       if (!rule.trustedSources.includes(substitution.source)) {
         throw new ScoutGuidanceContractError(

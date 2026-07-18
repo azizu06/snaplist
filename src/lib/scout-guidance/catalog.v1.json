@@ -309,7 +309,7 @@
         {
           "key": "uploadedPhotoCount",
           "valueType": "integer",
-          "trustedSources": ["durable-run"],
+          "trustedSources": ["upload-progress"],
           "minimum": 0,
           "maximum": 4
         }

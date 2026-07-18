@@ -1,29 +1,4 @@
-import {
-  priceResultSchema,
-  type ItemSignal,
-  type PriceResult,
-  type PricingProvider,
-} from "./types";
-
-export interface RoutedPriceRecommendationEvidence {
-  recommendationId: string;
-  soldCompCount: number;
-  windowDays: number;
-}
-
-const routedRecommendationEvidence = new WeakMap<
-  object,
-  RoutedPriceRecommendationEvidence
->();
-
-/** Immutable evidence enrolled only for results returned by the pricing router. */
-export function routedPriceRecommendationEvidence(
-  value: unknown,
-): RoutedPriceRecommendationEvidence | null {
-  if (typeof value !== "object" || value === null) return null;
-  const evidence = routedRecommendationEvidence.get(value);
-  return evidence ? { ...evidence } : null;
-}
+import type { ItemSignal, PriceResult, PricingProvider } from "./types";
 
 /**
  * The pricing router (PRD: "Pricing is a routing pipeline behind a PricingProvider
@@ -62,24 +37,14 @@ export class PriceRouter {
 
       const result = await provider.price(signal);
       if (result !== null) {
-        const validated = priceResultSchema.parse(result);
         // A provider must stamp its own tier; a mismatch would corrupt downstream
         // logging/confidence ("which tier fired"), so fail loud rather than trust it.
-        if (validated.tier !== provider.tier) {
+        if (result.tier !== provider.tier) {
           throw new Error(
-            `PricingProvider for tier "${provider.tier}" returned a result tagged "${validated.tier}"`,
+            `PricingProvider for tier "${provider.tier}" returned a result tagged "${result.tier}"`,
           );
         }
-        if (validated.evidenceWindowDays !== undefined) {
-          routedRecommendationEvidence.set(validated, {
-            recommendationId: crypto.randomUUID(),
-            soldCompCount: validated.sources.filter(
-              (source) => source.kind === "sold-comp",
-            ).length,
-            windowDays: validated.evidenceWindowDays,
-          });
-        }
-        return validated;
+        return result;
       }
     }
 

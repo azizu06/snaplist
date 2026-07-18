@@ -364,9 +364,6 @@ function buildSoldGroundedResult(
     sources: [...hit.sources, ...sold.sources],
     tier: "isbn-lookup",
     ...(sold.compAgreement != null ? { compAgreement: sold.compAgreement } : {}),
-    ...(sold.evidenceWindowDays != null
-      ? { evidenceWindowDays: sold.evidenceWindowDays }
-      : {}),
   };
 }
 

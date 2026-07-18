@@ -6,7 +6,7 @@ export const scoutGuidanceTrustedSourceSchema = z.enum([
   "capture-session",
   "durable-item-record",
   "price-recommendation",
-  "durable-run",
+  "upload-progress",
   "seller-confirmed-item",
 ]);
 
