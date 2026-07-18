@@ -85,6 +85,12 @@ export interface ItemSignal {
   specs?: string[];
 }
 
+export const soldEvidenceProviderSchema = z.enum([
+  "ebay-public-sold",
+  "apify-ebay-sold",
+]);
+export type SoldEvidenceProvider = z.infer<typeof soldEvidenceProviderSchema>;
+
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({
   /** Canonical link to the comp or lookup record. Required — a source must be checkable. */
@@ -93,6 +99,12 @@ export const priceSourceSchema = z.object({
   title: z.string().optional(),
   /** What kind of source this is, e.g. "isbn-lookup" | "sold-comp" | "asking-comp". */
   kind: z.string().optional(),
+  /** Completed-sale timestamp retained through prediction-log JSON persistence. */
+  soldAt: z.number().nonnegative().optional(),
+  /** Observation timestamp used to derive an honest bounded evidence window. */
+  observedAt: z.number().nonnegative().optional(),
+  /** Router-stamped durable provenance for an approved sold provider. */
+  soldProvider: soldEvidenceProviderSchema.optional(),
 });
 
 export type PriceSource = z.infer<typeof priceSourceSchema>;

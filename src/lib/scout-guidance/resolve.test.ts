@@ -11,6 +11,7 @@ import {
   createApifySoldPricingProvider,
   createEbaySoldPricingProvider,
   parseSoldComps,
+  priceResultSchema,
   PriceRouter,
   synthesizeSoldResult,
   type PriceResult,
@@ -30,7 +31,7 @@ import {
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
   verifiedPriceEvidence,
-  verifiedUploadedPhotoCount,
+  verifiedUploadProgress,
   type ResolveScoutGuidanceRequest,
   type VerifiedScoutGuidanceFact,
 } from "./resolve";
@@ -71,20 +72,33 @@ async function routedPriceRecommendation(
   windowDays: number,
   soldAt: number | null = Date.now() - (windowDays - 0.5) * 86_400_000,
 ): Promise<PriceResult> {
-  const provider: PricingProvider = {
-    tier: "ebay-sold",
-    async price() {
-      return synthesizeSoldResult(
-        Array.from({ length: soldCompCount }, (_, index) => ({
-          url: `https://www.ebay.com/itm/routed-${soldCompCount}-${index}`,
-          title: `Canon AE-1 camera ${index}`,
-          price: 40,
-          ...(soldAt !== null ? { soldAt } : {}),
-        })),
-      );
-    },
-  };
-  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
+  const observedAt = Date.now();
+  const provider = createApifySoldPricingProvider({
+    enabled: true,
+    token: "test-only-token",
+    now: () => observedAt,
+    staleDays: 10_000,
+    runActor: async () => ({
+      status: "SUCCEEDED",
+      items: Array.from({ length: soldCompCount }, (_, index) => ({
+        url: `https://www.ebay.com/itm/routed-${soldCompCount}-${index}`,
+        title: "Canon AE-1 35mm Film Camera",
+        condition: "Pre-Owned",
+        ...(soldAt !== null ? { endedAt: new Date(soldAt).toISOString() } : {}),
+        soldPrice: 40,
+        soldCurrency: "USD",
+        listingType: "buy_it_now",
+        isBestOfferAccepted: false,
+      })),
+    }),
+  });
+  return new PriceRouter([provider]).price({
+    brand: "Canon",
+    model: "AE-1",
+    category: "electronics",
+    condition: "good",
+    conditionKnown: true,
+  });
 }
 
 async function loadTrustedItemSnapshot(
@@ -153,13 +167,13 @@ describe("resolveScoutGuidance", () => {
       resolvedLocale: "en-US",
       localeFallbackApplied: false,
       message: {
-        title: "Photograph an item. Get real comps and a listing you control.",
+        title: "Photograph an item to check sold comps and prepare a listing.",
         body:
-          "See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
+          "Review the price evidence and listing before you publish. No account needed to start.",
       },
       accessibility: {
         label:
-          "Photograph an item. Get real comps and a listing you control. See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
+          "Photograph an item to check sold comps and prepare a listing. Review the price evidence and listing before you publish. No account needed to start.",
         scoutAssetDecorative: true,
       },
       guide: {
@@ -198,6 +212,19 @@ describe("resolveScoutGuidance", () => {
     expect(stageAndEnqueue).not.toHaveBeenCalled();
   });
 
+  it("resolves first-run sold-comp processing before an item record exists", () => {
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "processing.finding-sold-comps",
+      locale: "en-US",
+      substitutions: {},
+    });
+
+    expect(result.accessibility.label).toBe(
+      "Working on your item. Finding recent sold comps. You can leave. Processing will continue.",
+    );
+  });
+
   it("rejects a caller-constructed object at the capture-session fact boundary", () => {
     expect(() =>
       verifiedCapturedPhotoCount({
@@ -214,7 +241,7 @@ describe("resolveScoutGuidance", () => {
 
   it("rejects a caller-constructed object at the upload-progress fact boundary", () => {
     expect(() =>
-      verifiedUploadedPhotoCount({
+      verifiedUploadProgress({
         runId: RUN_ID,
         uploadedPhotoCount: 2,
       } as unknown as UploadProgressSnapshot),
@@ -258,7 +285,7 @@ describe("resolveScoutGuidance", () => {
         }];
       },
       onUploadProgress(
-        snapshot: Parameters<typeof verifiedUploadedPhotoCount>[0],
+        snapshot: Parameters<typeof verifiedUploadProgress>[0],
       ) {
         events.push("progress");
         resolvedLabels.push(
@@ -267,14 +294,14 @@ describe("resolveScoutGuidance", () => {
             state: "recovery.upload-paused",
             locale: "en-US",
             substitutions: {
-              uploadedPhotoCount: verifiedUploadedPhotoCount(snapshot),
+              uploadProgressSummary: verifiedUploadProgress(snapshot),
             },
           }).accessibility.label,
         );
       },
     } satisfies UploadStagingDependencies & {
       onUploadProgress(
-        snapshot: Parameters<typeof verifiedUploadedPhotoCount>[0],
+        snapshot: Parameters<typeof verifiedUploadProgress>[0],
       ): void;
     };
 
@@ -299,13 +326,14 @@ describe("resolveScoutGuidance", () => {
     );
 
     expect(events).toEqual([
+      "progress",
       "upload:front.jpg",
       "progress",
       "upload:back.jpg",
       "progress",
       "stage",
     ]);
-    expect(resolvedLabels.at(-1)).toContain("2 of 4");
+    expect(resolvedLabels.at(-1)).toContain("2 of 2");
   });
 
   it("limits interrupted-upload copy to photos completed before cleanup", async () => {
@@ -354,19 +382,64 @@ describe("resolveScoutGuidance", () => {
       state: "recovery.upload-paused",
       locale: "en-US",
       substitutions: {
-        uploadedPhotoCount: verifiedUploadedPhotoCount(progress!),
+        uploadProgressSummary: verifiedUploadProgress(progress!),
       },
     });
 
     expect(guidance.message.body).toBe(
-      "1 of 4 photos finished uploading before this attempt stopped",
+      "1 of 2 photos uploaded. Try again.",
     );
     expect(guidance.accessibility.label).toBe(
-      "Upload paused. 1 of 4 photos finished uploading before this attempt stopped.",
+      "Upload stopped. 1 of 2 photos uploaded. Try again.",
     );
     expect(guidance.accessibility.label).not.toMatch(
       /safe|device|reconnect|resume/i,
     );
+  });
+
+  it("represents a first-photo failure with zero progress and the planned total", async () => {
+    let progress: UploadProgressSnapshot | undefined;
+
+    await expect(
+      stageUploadEntries(
+        {
+          batchId: CAPTURE_SESSION_ID,
+          userId: "user_test",
+          dailyLimit: 10,
+          perMinuteLimit: 5,
+          entries: [{
+            idempotencyKey: "first-photo-failure",
+            source: "single",
+            autopilotEnabled: false,
+            costBasis: null,
+            photos: [
+              new File(["front"], "front.jpg", { type: "image/jpeg" }),
+              new File(["back"], "back.jpg", { type: "image/jpeg" }),
+            ],
+          }],
+        },
+        {
+          async upload() { throw new Error("offline"); },
+          onUploadProgress(snapshot) { progress = snapshot; },
+          async remove() {},
+          async recordCleanupIntent() {},
+          async resolveCleanupIntent() {},
+          async findReplay() { return []; },
+          async stageAndEnqueue() { return []; },
+        },
+      ),
+    ).rejects.toThrow("offline");
+
+    const guidance = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "recovery.upload-paused",
+      locale: "en-US",
+      substitutions: {
+        uploadProgressSummary: verifiedUploadProgress(progress!),
+      },
+    });
+
+    expect(guidance.message.body).toBe("0 of 2 photos uploaded. Try again.");
   });
 
   it("rejects verified price facts swapped into a different substitution key", async () => {
@@ -463,6 +536,37 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("rejects fabricated sold evidence routed through an injected provider", async () => {
+    const observedAt = Date.now();
+    const injectedProvider: PricingProvider = {
+      tier: "ebay-sold",
+      async price() {
+        return synthesizeSoldResult(
+          [30, 40, 50].map((price, index) => ({
+            url: `https://fabricated.example/sold-${index}`,
+            price,
+            soldAt: observedAt - 30 * 86_400_000,
+          })),
+          { now: observedAt },
+        );
+      },
+    };
+    const fabricated = await new PriceRouter([injectedProvider]).price({
+      brand: "Fabricated",
+      model: "Evidence",
+    });
+    const checkpointed = priceResultSchema.parse(
+      JSON.parse(JSON.stringify(fabricated)),
+    );
+
+    expect(() => verifiedPriceEvidence(checkpointed)).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-price-recommendation",
+      }),
+    );
+  });
+
   it("accepts normalized Apify sold evidence returned by the pricing router", async () => {
     const observedAt = Date.now();
     const endedAt = new Date(observedAt - 8.5 * 86_400_000).toISOString();
@@ -492,7 +596,10 @@ describe("resolveScoutGuidance", () => {
       conditionKnown: true,
     });
 
-    const facts = verifiedPriceEvidence(recommendation);
+    const checkpointedRecommendation = priceResultSchema.parse(
+      JSON.parse(JSON.stringify(recommendation)),
+    );
+    const facts = verifiedPriceEvidence(checkpointedRecommendation);
     const guidance = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
       state: "uncertainty.limited-price-evidence",
@@ -518,7 +625,7 @@ describe("resolveScoutGuidance", () => {
   });
 
   it("rejects a recommendation that repeats one routed sale as multiple sold comps", async () => {
-    const recommendation = await routedPriceRecommendation(1, 90);
+    const recommendation = await routedPriceRecommendation(2, 90);
     const source = recommendation.sources[0]!;
     recommendation.sources.push(source);
 
@@ -575,10 +682,10 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
-  it("uses a verified durable item name only in the approved processing guidance", () => {
+  it("uses a verified durable item name only in approved retry guidance", () => {
     const result = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
-      state: "processing.finding-sold-comps",
+      state: "retry.automatic",
       locale: "en-US",
       substitutions: {
         itemDisplayName: verifiedItemName(),
@@ -587,16 +694,16 @@ describe("resolveScoutGuidance", () => {
 
     expect(result).toMatchObject({
       message: {
-        title: "Working on your item",
-        body: "Finding recent sold comps",
+        title: "Updating Canon AE-1 film camera",
+        body: "SnapList retried the last attempt. Your guided correction is still available.",
       },
       accessibility: {
         label:
-          "Working on your item. Canon AE-1 film camera. Finding recent sold comps. You can leave — we’ll keep working.",
+          "Updating Canon AE-1 film camera. SnapList retried the last attempt. Your guided correction is still available.",
       },
       guide: {
-        functionalPurpose: "reassure-active-processing",
-        scoutAsset: "pose-01-analyzing.png",
+        functionalPurpose: "explain-safe-technical-retry",
+        scoutAsset: null,
       },
     });
   });
@@ -605,7 +712,7 @@ describe("resolveScoutGuidance", () => {
     expect(() =>
       resolveScoutGuidance({
         contractVersion: "scout-guidance-v1",
-        state: "processing.finding-sold-comps",
+        state: "retry.automatic",
         locale: "en-US",
         substitutions: {
           itemDisplayName: {
@@ -619,7 +726,7 @@ describe("resolveScoutGuidance", () => {
       expect.objectContaining({
         name: "ScoutGuidanceContractError",
         code: "untrusted-substitution",
-        state: "processing.finding-sold-comps",
+        state: "retry.automatic",
         substitutionKey: "itemDisplayName",
       }) satisfies Partial<ScoutGuidanceContractError>,
     );
@@ -629,7 +736,7 @@ describe("resolveScoutGuidance", () => {
     expect(() =>
       resolveScoutGuidance({
         contractVersion: "scout-guidance-v1",
-        state: "processing.finding-sold-comps",
+        state: "retry.automatic",
         locale: "en-US",
         substitutions: {
           itemDisplayName: {
@@ -643,7 +750,7 @@ describe("resolveScoutGuidance", () => {
       expect.objectContaining({
         name: "ScoutGuidanceContractError",
         code: "untrusted-substitution",
-        state: "processing.finding-sold-comps",
+        state: "retry.automatic",
         substitutionKey: "itemDisplayName",
       }) satisfies Partial<ScoutGuidanceContractError>,
     );
@@ -663,7 +770,7 @@ describe("resolveScoutGuidance", () => {
     expect(() =>
       resolveScoutGuidance({
         contractVersion: "scout-guidance-v1",
-        state: "processing.finding-sold-comps",
+        state: "retry.automatic",
         locale: "en-US",
         substitutions: {
           itemDisplayName: copiedFact,
@@ -673,7 +780,7 @@ describe("resolveScoutGuidance", () => {
       expect.objectContaining({
         name: "ScoutGuidanceContractError",
         code: "untrusted-substitution",
-        state: "processing.finding-sold-comps",
+        state: "retry.automatic",
         substitutionKey: "itemDisplayName",
       }) satisfies Partial<ScoutGuidanceContractError>,
     );
@@ -708,7 +815,7 @@ describe("resolveScoutGuidance", () => {
 
     const result = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
-      state: "processing.finding-sold-comps",
+      state: "retry.automatic",
       locale: "en-US",
       substitutions: { itemDisplayName },
     });
@@ -738,7 +845,7 @@ describe("resolveScoutGuidance", () => {
       localeFallbackApplied: true,
       localeFallbackChain: ["fr-CA", "fr", "en-US"],
       message: {
-        title: "Photograph an item. Get real comps and a listing you control.",
+        title: "Photograph an item to check sold comps and prepare a listing.",
       },
     });
   });
@@ -757,7 +864,7 @@ describe("resolveScoutGuidance", () => {
       localeFallbackApplied: true,
       localeFallbackChain: ["__proto__", "en-US"],
       message: {
-        title: "Photograph an item. Get real comps and a listing you control.",
+        title: "Photograph an item to check sold comps and prepare a listing.",
       },
     });
   });
@@ -767,9 +874,7 @@ describe("resolveScoutGuidance", () => {
       contractVersion: "scout-guidance-v1",
       state: "processing.finding-sold-comps",
       locale: "en-US",
-      substitutions: {
-        itemDisplayName: verifiedItemName(),
-      },
+      substitutions: {},
     });
 
     expect(result.guide.motion).toEqual({
@@ -844,23 +949,13 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
-  it("rejects verified facts outside the template's approved bounds", async () => {
-    const evidence = verifiedPriceEvidence(
-      await routedPriceRecommendation(100, 90),
-    );
-    expect(() =>
-      resolveScoutGuidance({
-        contractVersion: "scout-guidance-v1",
-        state: "uncertainty.limited-price-evidence",
-        locale: "en-US",
-        substitutions: evidence,
-      }),
-    ).toThrowError(
+  it("rejects routed evidence outside Scout's approved 365-day window", async () => {
+    await expect(async () =>
+      verifiedPriceEvidence(await routedPriceRecommendation(3, 400)),
+    ).rejects.toThrowError(
       expect.objectContaining({
-        name: "ScoutGuidanceContractError",
-        code: "invalid-substitution",
-        state: "uncertainty.limited-price-evidence",
-        substitutionKey: "soldCompCount",
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-price-recommendation",
       }),
     );
   });

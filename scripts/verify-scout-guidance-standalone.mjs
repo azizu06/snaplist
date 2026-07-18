@@ -45,7 +45,7 @@ try {
         scoutGuidance?.version === "scout-guidance-v1" &&
         scoutGuidance?.state === "onboarding.outcome" &&
         scoutGuidance?.title ===
-          "Photograph an item. Get real comps and a listing you control."
+          "Photograph an item to check sold comps and prepare a listing."
       ) {
         verified = true;
         break;

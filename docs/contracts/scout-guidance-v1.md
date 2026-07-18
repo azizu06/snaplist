@@ -15,14 +15,15 @@ The same request always produces the same result.
 Substitutions are opaque verified facts, not caller-labelled objects or prose extensions:
 
 - source-specific constructors derive provenance and validate real UUID identifiers;
-- runtime trust is private object identity in a `WeakSet`, so copying or spreading a fact never
+- runtime trust for capture, upload, and durable item facts is private object identity, so copying or spreading a fact never
   copies its authority;
-- sold-count and day-window facts accept only the exact recommendation returned by `PriceRouter`;
-  sold providers attach private provider-neutral comp evidence, the router promotes it, and Scout
-  derives both values from the exact unique dated citations without adding a pricing policy field;
-- upload-count facts come from post-Storage, per-photo progress snapshots; observer failures cannot
-  change upload/staging outcomes, and paused copy describes only what finished in that attempt—not
-  device durability or reconnect resumption;
+- sold-count and day-window facts accept only persisted recommendations whose unique dated sold
+  citations carry one router-stamped approved-provider provenance and a shared observation time;
+  Scout derives both values after the pricing schema and JSON boundary without adding a policy field;
+- upload-count facts come from producer-owned attempt snapshots, and the completed count advances
+  only after Storage succeeds; observer failures cannot
+  change upload/staging outcomes, and paused copy describes only what finished in that attempt. It does
+  not imply device durability or reconnect resumption;
 - the durable-item constructor accepts only the exact snapshot object returned by the existing
   tenant-scoped review RPC loader and derives the display name from the private item projection
   captured at load time, so later caller mutation cannot relabel it;

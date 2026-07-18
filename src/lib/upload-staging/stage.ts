@@ -28,7 +28,7 @@ export interface StageUploadEntriesInput {
 
 export interface UploadStagingDependencies {
   upload(path: string, photo: File): Promise<void>;
-  onUploadProgress?(snapshot: UploadProgressSnapshot): void;
+  onUploadProgress?(snapshot: UploadProgressSnapshot): void | Promise<void>;
   remove(paths: string[]): Promise<void>;
   findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
@@ -51,6 +51,7 @@ export interface UploadedPhotoProgressFacts {
   uploadSessionId: string;
   entryIndex: number;
   uploadedPhotoCount: number;
+  plannedPhotoCount: number | null;
 }
 
 const uploadedPhotoProgress = new WeakMap<object, UploadedPhotoProgressFacts>();
@@ -63,7 +64,7 @@ function createUploadProgressSnapshot(
   return snapshot;
 }
 
-/** Facts emitted only after one private Storage upload has succeeded. */
+/** Producer-owned attempt facts; the completed count advances only after Storage succeeds. */
 export function uploadedPhotoProgressFacts(
   value: unknown,
 ): UploadedPhotoProgressFacts | null {
@@ -141,6 +142,19 @@ export async function stageUploadEntries(
   let cleanupIntentRecorded = false;
   let stagingAttempted = false;
 
+  const notifyUploadProgress = async (
+    facts: UploadedPhotoProgressFacts,
+  ): Promise<void> => {
+    try {
+      await dependencies.onUploadProgress?.(
+        createUploadProgressSnapshot(facts),
+      );
+    } catch {
+      // Optional UI guidance observes upload truth; it never owns producer
+      // success, cleanup, or the durable staging transaction.
+    }
+  };
+
   const resolveCleanupIntent = async (): Promise<void> => {
     if (!cleanupIntentRecorded) return;
     try {
@@ -160,22 +174,25 @@ export async function stageUploadEntries(
     });
     cleanupIntentRecorded = true;
 
+    for (const [entryIndex, entry] of input.entries.entries()) {
+      await notifyUploadProgress({
+        uploadSessionId: cleanupId,
+        entryIndex,
+        uploadedPhotoCount: 0,
+        plannedPhotoCount: entry.photos.length,
+      });
+    }
+
     for (const { path, photo, entryIndex } of uploads) {
       await dependencies.upload(path, photo);
       uploadedPaths.push(path);
       uploadedPhotoCounts[entryIndex] += 1;
-      try {
-        dependencies.onUploadProgress?.(
-          createUploadProgressSnapshot({
-            uploadSessionId: cleanupId,
-            entryIndex,
-            uploadedPhotoCount: uploadedPhotoCounts[entryIndex],
-          }),
-        );
-      } catch {
-        // Optional UI guidance observes upload truth; it never owns producer
-        // success, cleanup, or the durable staging transaction.
-      }
+      await notifyUploadProgress({
+        uploadSessionId: cleanupId,
+        entryIndex,
+        uploadedPhotoCount: uploadedPhotoCounts[entryIndex],
+        plannedPhotoCount: input.entries[entryIndex]?.photos.length ?? null,
+      });
     }
 
     stagingAttempted = true;

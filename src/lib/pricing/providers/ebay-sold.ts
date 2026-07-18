@@ -20,7 +20,6 @@ import {
   resolveEbaySoldEgressConfig,
 } from "../ebay-sold-egress";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
-import { enrollProviderSoldEvidence } from "../routed-evidence";
 
 /**
  * Tier "ebay-sold" — a scraper over eBay's PUBLIC sold-listings pages (issue #56).
@@ -119,6 +118,15 @@ export interface EbaySoldPricingProviderOptions {
   staleDays?: number;
   /** Recency half-life in days; defaults to `EBAY_SOLD_HALFLIFE_DAYS` env or 45. */
   halfLifeDays?: number;
+}
+
+const ebayPublicSoldProviders = new WeakSet<object>();
+
+/** Read-only constructor identity check used by the pricing router. */
+export function isEbayPublicSoldProvider(
+  provider: PricingProvider,
+): boolean {
+  return ebayPublicSoldProviders.has(provider);
 }
 
 // ---------------------------------------------------------------------------
@@ -810,6 +818,8 @@ export function coreComps(
 export interface SoldSynthesisOptions {
   /** Reference "now" (epoch ms). When set, the suggested price is recency-weighted. */
   now?: number;
+  /** Durable timestamp for when these citations were observed. */
+  observedAt?: number;
   /** Recency half-life in days; defaults to the freshness module default. */
   halfLifeDays?: number;
   /** Optional relevance/condition weight from the provider-neutral matcher. */
@@ -870,6 +880,12 @@ export function synthesizeSoldResult(
     url: c.url,
     title: c.title,
     kind: "sold-comp",
+    ...(c.soldAt !== undefined ? { soldAt: c.soldAt } : {}),
+    ...(opts.observedAt !== undefined
+      ? { observedAt: opts.observedAt }
+      : opts.now !== undefined
+        ? { observedAt: opts.now }
+        : {}),
   }));
 
   const result: PriceResult = {
@@ -882,7 +898,6 @@ export function synthesizeSoldResult(
     // the sold-comp label into the ready-to-publish confidence band.
     compAgreement: agreement,
   };
-  enrollProviderSoldEvidence(result, core);
   return result;
 }
 
@@ -1046,7 +1061,7 @@ export function createEbaySoldPricingProvider(
     return comps;
   }
 
-  return {
+  const provider: PricingProvider = {
     tier: "ebay-sold",
     canHandle: identifiable,
     async price(signal: ItemSignal): Promise<PriceResult | null> {
@@ -1105,6 +1120,7 @@ export function createEbaySoldPricingProvider(
       // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
       // then recency-weight the suggested price toward more recent sales.
       const tNow = now?.();
+      const observedAt = tNow ?? Date.now();
       const fresh =
         tNow != null ? selectFreshComps(relevant, tNow, staleDays) : relevant;
       if (fresh.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
@@ -1112,9 +1128,12 @@ export function createEbaySoldPricingProvider(
         fresh,
         {
           ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
+          observedAt,
           evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,
         },
       );
     },
   };
+  ebayPublicSoldProviders.add(provider);
+  return provider;
 }

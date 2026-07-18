@@ -12,7 +12,7 @@ describe("GET /api/health", () => {
         scoutGuidance: {
           version: "scout-guidance-v1",
           state: "onboarding.outcome",
-          title: "Photograph an item. Get real comps and a listing you control.",
+          title: "Photograph an item to check sold comps and prepare a listing.",
         },
       },
     });

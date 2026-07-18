@@ -136,6 +136,15 @@ export interface ApifySoldPricingProviderOptions {
   emitDiagnostic?: (event: string, fields: LogFields) => void;
 }
 
+const apifyEbaySoldProviders = new WeakSet<object>();
+
+/** Read-only constructor identity check used by the pricing router. */
+export function isApifyEbaySoldProvider(
+  provider: PricingProvider,
+): boolean {
+  return apifyEbaySoldProviders.has(provider);
+}
+
 function positiveNumber(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -495,7 +504,7 @@ export function createApifySoldPricingProvider(
     return pending;
   }
 
-  return {
+  const provider: PricingProvider = {
     tier: "ebay-sold",
     canHandle(signal) {
       return active && queryFor(signal) != null;
@@ -510,14 +519,18 @@ export function createApifySoldPricingProvider(
       const evidence = selectSoldCompEvidence(comps, signal);
       const weights = new Map(evidence.anchors.map(({ comp, score }) => [comp, score]));
       const clock = now?.();
+      const observedAt = clock ?? Date.now();
       const anchors = evidence.anchors.map(({ comp }) => comp);
       const fresh = clock == null ? anchors : selectFreshComps(anchors, clock, staleDays);
       if (fresh.length < EBAY_SOLD_MIN_COMPS) return null;
 
       return synthesizeSoldResult(fresh, {
         ...(clock != null ? { now: clock, halfLifeDays } : {}),
+        observedAt,
         evidenceWeight: (comp) => weights.get(comp as ApifySoldComp) ?? 1,
       });
     },
   };
+  apifyEbaySoldProviders.add(provider);
+  return provider;
 }

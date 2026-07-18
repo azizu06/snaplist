@@ -216,15 +216,7 @@
     "processing.finding-sold-comps": {
       "family": "processing",
       "approvedStateIds": ["RUN-02"],
-      "substitutions": [
-        {
-          "key": "itemDisplayName",
-          "valueType": "text",
-          "trustedSources": ["durable-item-record"],
-          "maximumLength": 80,
-          "referencePattern": "^item:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}:review-revision:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
-        }
-      ],
+      "substitutions": [],
       "copyKeys": {
         "title": "processing.finding-sold-comps.title",
         "body": "processing.finding-sold-comps.body",
@@ -307,11 +299,11 @@
       "approvedStateIds": ["RUN-04"],
       "substitutions": [
         {
-          "key": "uploadedPhotoCount",
-          "valueType": "integer",
+          "key": "uploadProgressSummary",
+          "valueType": "text",
           "trustedSources": ["upload-progress"],
-          "minimum": 0,
-          "maximum": 4
+          "maximumLength": 80,
+          "referencePattern": "^upload-session:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}:entry:[0-9]+$"
         }
       ],
       "copyKeys": {
@@ -431,22 +423,22 @@
   },
   "locales": {
     "en-US": {
-      "onboarding.outcome.title": "Photograph an item. Get real comps and a listing you control.",
-      "onboarding.outcome.body": "See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
-      "onboarding.outcome.accessibilityLabel": "Photograph an item. Get real comps and a listing you control. See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
-      "onboarding.photo-primer.title": "One clear photo is all I need to start.",
-      "onboarding.photo-primer.accessibilityLabel": "One clear photo is all I need to start.",
+      "onboarding.outcome.title": "Photograph an item to check sold comps and prepare a listing.",
+      "onboarding.outcome.body": "Review the price evidence and listing before you publish. No account needed to start.",
+      "onboarding.outcome.accessibilityLabel": "Photograph an item to check sold comps and prepare a listing. Review the price evidence and listing before you publish. No account needed to start.",
+      "onboarding.photo-primer.title": "Start with one clear photo.",
+      "onboarding.photo-primer.accessibilityLabel": "Start with one clear photo.",
       "onboarding.camera-denied.title": "Camera access is off",
-      "onboarding.camera-denied.body": "Enable it in Settings, or pick a photo from your library instead — either way works.",
-      "onboarding.camera-denied.accessibilityLabel": "Camera access is off. Enable it in Settings, or pick a photo from your library instead — either way works.",
+      "onboarding.camera-denied.body": "Enable camera access in Settings, or choose a photo from your library.",
+      "onboarding.camera-denied.accessibilityLabel": "Camera access is off. Enable camera access in Settings, or choose a photo from your library.",
       "onboarding.camera-ready.title": "Ready to capture",
-      "onboarding.camera-ready.body": "Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it.",
-      "onboarding.camera-ready.accessibilityLabel": "Ready to capture. Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it.",
+      "onboarding.camera-ready.body": "Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm.",
+      "onboarding.camera-ready.accessibilityLabel": "Ready to capture. Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm.",
       "onboarding.library-ready.title": "Photos ready",
-      "onboarding.library-ready.body": "Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose.",
-      "onboarding.library-ready.accessibilityLabel": "Photos ready. Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose.",
-      "capture.initial-coaching.title": "Start with one clear photo. Add angles, labels, or damage for a stronger match.",
-      "capture.initial-coaching.accessibilityLabel": "Start with one clear photo. Add angles, labels, or damage for a stronger match.",
+      "onboarding.library-ready.body": "Choose your item photos. Analysis starts only after you confirm.",
+      "onboarding.library-ready.accessibilityLabel": "Photos ready. Choose your item photos. Analysis starts only after you confirm.",
+      "capture.initial-coaching.title": "Start with one clear photo. Add another view if it shows a label or damage.",
+      "capture.initial-coaching.accessibilityLabel": "Start with one clear photo. Add another view if it shows a label or damage.",
       "capture.move-closer.title": "Move closer",
       "capture.move-closer.accessibilityLabel": "Move closer",
       "capture.framing-accepted.title": "Whole item is in frame",
@@ -455,28 +447,28 @@
       "capture.photo-count.accessibilityLabel": "{capturedPhotoCount} of 4 photos",
       "processing.finding-sold-comps.title": "Working on your item",
       "processing.finding-sold-comps.body": "Finding recent sold comps",
-      "processing.finding-sold-comps.accessibilityLabel": "Working on your item. {itemDisplayName}. Finding recent sold comps. You can leave — we’ll keep working.",
+      "processing.finding-sold-comps.accessibilityLabel": "Working on your item. Finding recent sold comps. You can leave. Processing will continue.",
       "uncertainty.limited-price-evidence.title": "Limited evidence",
       "uncertainty.limited-price-evidence.body": "{soldCompCount} sold · {windowDays} days",
       "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days",
       "uncertainty.identity.title": "We’re not fully sure",
       "uncertainty.identity.body": "Limited evidence",
       "uncertainty.identity.accessibilityLabel": "We’re not fully sure. Limited evidence.",
-      "recovery.upload-paused.title": "Upload paused",
-      "recovery.upload-paused.body": "{uploadedPhotoCount} of 4 photos finished uploading before this attempt stopped",
-      "recovery.upload-paused.accessibilityLabel": "Upload paused. {uploadedPhotoCount} of 4 photos finished uploading before this attempt stopped.",
+      "recovery.upload-paused.title": "Upload stopped",
+      "recovery.upload-paused.body": "{uploadProgressSummary}",
+      "recovery.upload-paused.accessibilityLabel": "Upload stopped. {uploadProgressSummary}",
       "recovery.processing-failed.title": "Couldn’t finish this run",
-      "recovery.processing-failed.body": "We hit a snag finding comps",
-      "recovery.processing-failed.accessibilityLabel": "Couldn’t finish this run. We hit a snag finding comps. Trying again is free.",
+      "recovery.processing-failed.body": "We could not find enough pricing evidence.",
+      "recovery.processing-failed.accessibilityLabel": "Couldn’t finish this run. We could not find enough pricing evidence. Try again for free.",
       "recovery.status-unconfirmed.title": "Checking your run",
-      "recovery.status-unconfirmed.body": "We’re confirming the run you already started — not beginning a new one.",
-      "recovery.status-unconfirmed.accessibilityLabel": "Checking your run. We’re confirming the run you already started — not beginning a new one. Status unconfirmed — verifying now.",
-      "retry.automatic.title": "Updating for the {itemDisplayName}",
-      "retry.automatic.body": "Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe.",
-      "retry.automatic.accessibilityLabel": "Updating for the {itemDisplayName}. Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe.",
-      "empty.home.title": "Photograph an item. Get real comps and a listing you control.",
-      "empty.home.body": "Your first item is on us — no account needed to try it.",
-      "empty.home.accessibilityLabel": "Photograph an item. Get real comps and a listing you control. Your first item is on us — no account needed to try it."
+      "recovery.status-unconfirmed.body": "Confirming the status of your existing run.",
+      "recovery.status-unconfirmed.accessibilityLabel": "Checking your run. Confirming the status of your existing run. No new run has started.",
+      "retry.automatic.title": "Updating {itemDisplayName}",
+      "retry.automatic.body": "SnapList retried the last attempt. Your guided correction is still available.",
+      "retry.automatic.accessibilityLabel": "Updating {itemDisplayName}. SnapList retried the last attempt. Your guided correction is still available.",
+      "empty.home.title": "Start with a photo",
+      "empty.home.body": "Check sold comps and review the listing before you publish. No account needed.",
+      "empty.home.accessibilityLabel": "Start with a photo. Check sold comps and review the listing before you publish. No account needed."
     }
   }
 }

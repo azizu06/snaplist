@@ -142,6 +142,69 @@ describe("durable upload staging", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
+  it("awaits and contains an asynchronously rejected upload-progress observer", async () => {
+    let rejectObserver!: (error: Error) => void;
+    const observerGate = new Promise<void>((_resolve, reject) => {
+      rejectObserver = reject;
+    });
+    void observerGate.catch(() => undefined);
+    const committed = [{
+      batch_id: "11111111-1111-4111-8111-111111111111",
+      batch_position: 0,
+      idempotency_key: "single-async-observer",
+      item_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "33333333-3333-4333-8333-333333333333",
+      queue_message_id: "42",
+      listing_id: null,
+      status: "queued" as const,
+      stage: "queued" as const,
+      attempt_count: 0,
+      max_attempts: 3,
+      safe_failure_message: null,
+      updated_at: "2026-07-15T12:00:00.000Z",
+    }];
+    const stageAndEnqueue = vi.fn(async () => committed);
+    const remove = vi.fn(async () => undefined);
+    let observerCalls = 0;
+
+    const staging = stageUploadEntries(
+      {
+        batchId: committed[0].batch_id,
+        userId: "user_123",
+        dailyLimit: 15,
+        perMinuteLimit: 20,
+        entries: [{
+          idempotencyKey: committed[0].idempotency_key,
+          source: "single",
+          autopilotEnabled: false,
+          costBasis: null,
+          photos: [photo("front.jpg")],
+        }],
+      },
+      {
+        upload: vi.fn(async () => undefined),
+        onUploadProgress() {
+          observerCalls += 1;
+          return observerCalls === 1 ? observerGate : Promise.resolve();
+        },
+        remove,
+        recordCleanupIntent: vi.fn(async () => undefined),
+        resolveCleanupIntent: vi.fn(async () => undefined),
+        findReplay: vi.fn(async () => []),
+        stageAndEnqueue,
+      },
+    );
+
+    await new Promise<void>((resolveTurn) => setTimeout(resolveTurn, 0));
+    const stagedBeforeObserverSettled = stageAndEnqueue.mock.calls.length > 0;
+    rejectObserver(new Error("async Scout observer failed"));
+
+    await expect(staging).resolves.toEqual(committed);
+    expect(stagedBeforeObserverSettled).toBe(false);
+    expect(stageAndEnqueue).toHaveBeenCalledOnce();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("removes every uploaded private object when transactional staging fails", async () => {
     const remove = vi.fn(async (paths: string[]) => {
       void paths;

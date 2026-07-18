@@ -16,7 +16,6 @@ import {
   priceResultSchema,
   type PriceResult,
 } from "@/lib/pricing";
-import { routedSoldCompEvidence } from "@/lib/pricing/routed-evidence";
 import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
@@ -73,7 +72,7 @@ type ScoutGuidanceSubstitutionKey =
   | "itemDisplayName"
   | "soldCompCount"
   | "windowDays"
-  | "uploadedPhotoCount";
+  | "uploadProgressSummary";
 
 export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
@@ -184,17 +183,15 @@ export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonl
   const soldSources = recommendation.success
     ? recommendation.data.sources.filter((source) => source.kind === "sold-comp")
     : [];
-  const routedEvidence = routedSoldCompEvidence(recommendationInput);
-  const routedCompsByUrl = new Map(
-    (routedEvidence?.comps ?? []).map((comp) => [comp.url, comp] as const),
-  );
-  const observedAt = routedEvidence?.observedAt ?? Number.NaN;
   const uniqueSoldSourceCount = new Set(
     soldSources.map((source) => source.url),
   ).size;
-  const countedComps = soldSources.map((source) => routedCompsByUrl.get(source.url));
+  const soldProviders = new Set(
+    soldSources.map((source) => source.soldProvider),
+  );
+  const observedAt = soldSources[0]?.observedAt ?? Number.NaN;
   const oldestSoldAt = Math.min(
-    ...countedComps.map((comp) => comp?.soldAt ?? Number.NaN),
+    ...soldSources.map((source) => source.soldAt ?? Number.NaN),
   );
   const windowDays = Math.max(
     1,
@@ -202,23 +199,23 @@ export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonl
   );
   if (
     !recommendation.success ||
-    routedEvidence === null ||
     soldSources.length === 0 ||
     uniqueSoldSourceCount !== soldSources.length ||
-    routedEvidence.comps.length !== soldSources.length ||
+    soldProviders.size !== 1 ||
+    soldProviders.has(undefined) ||
     !Number.isInteger(windowDays) ||
     windowDays > 365 ||
-    countedComps.some(
-      (comp) =>
-        !comp ||
-        comp.soldAt === undefined ||
-        !Number.isFinite(comp.soldAt) ||
-        comp.soldAt > observedAt,
+    soldSources.some(
+      (source) =>
+        source.soldAt === undefined ||
+        !Number.isFinite(source.soldAt) ||
+        source.observedAt !== observedAt ||
+        source.soldAt > observedAt,
     )
   ) {
     throw new ScoutGuidanceFactError(
       "untrusted-price-recommendation",
-      "Price facts require routed, dated sold comps for the exact recommendation.",
+      "Price facts require persisted, dated sold comps for the exact recommendation.",
     );
   }
   const reference = `price-recommendation:${crypto.randomUUID()}`;
@@ -241,21 +238,39 @@ export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonl
   });
 }
 
-export function verifiedUploadedPhotoCount(
+export function formatUploadProgressSummary(input: {
+  uploadedPhotoCount: number;
+  plannedPhotoCount: number | null;
+}): string {
+  const uploaded = z.number().int().min(0).max(4).parse(input.uploadedPhotoCount);
+  const planned = z.number().int().min(1).max(4).nullable().parse(
+    input.plannedPhotoCount,
+  );
+  return (
+    planned === null
+      ? uploaded === 0
+        ? "No photos uploaded. Try again."
+        : `${uploaded} ${uploaded === 1 ? "photo" : "photos"} uploaded. Try again.`
+      : `${uploaded} of ${planned} photos uploaded. Try again.`
+  );
+}
+
+export function verifiedUploadProgress(
   result: UploadProgressSnapshot,
 ): VerifiedScoutGuidanceFact {
   const input = uploadedPhotoProgressFacts(result);
   if (!input) {
     throw new ScoutGuidanceFactError(
       "untrusted-upload-progress",
-      "Upload facts must come from successful per-photo Storage progress.",
+      "Upload facts must come from the producer-owned per-photo attempt snapshot.",
     );
   }
+  const summary = formatUploadProgressSummary(input);
   return verifiedFact(
-    "uploadedPhotoCount",
+    "uploadProgressSummary",
     "upload-progress",
     `upload-session:${uuidSchema.parse(input.uploadSessionId)}:entry:${input.entryIndex}`,
-    input.uploadedPhotoCount,
+    summary,
   );
 }
 

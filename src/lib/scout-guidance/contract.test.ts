@@ -8,10 +8,9 @@ import {
   type AppendAcceptedPhotosResult,
 } from "@/lib/capture-progress";
 import {
+  createApifySoldPricingProvider,
   PriceRouter,
-  synthesizeSoldResult,
   type PriceResult,
-  type PricingProvider,
 } from "@/lib/pricing";
 import {
   stageUploadEntries,
@@ -23,7 +22,7 @@ import {
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
   verifiedPriceEvidence,
-  verifiedUploadedPhotoCount,
+  verifiedUploadProgress,
   type ResolveScoutGuidanceRequest,
   type VerifiedScoutGuidanceFact,
 } from "./resolve";
@@ -58,7 +57,7 @@ async function collectUploadProgress(photoCount: number): Promise<void> {
     {
       async upload() {},
       onUploadProgress(snapshot) {
-        uploadProgress.set(uploadProgress.size + 1, snapshot);
+        uploadProgress.set(photoCount, snapshot);
       },
       async remove() {},
       async recordCleanupIntent() {},
@@ -89,21 +88,36 @@ async function routedPriceRecommendation(
   soldCompCount: number,
   windowDays: number,
 ): Promise<PriceResult> {
-  const soldAt = Date.now() - (windowDays - 0.5) * 86_400_000;
-  const provider: PricingProvider = {
-    tier: "ebay-sold",
-    async price() {
-      return synthesizeSoldResult(
-        Array.from({ length: soldCompCount }, (_, index) => ({
-          url: `https://www.ebay.com/itm/contract-${soldCompCount}-${index}`,
-          title: `Canon AE-1 camera ${index}`,
-          price: 40,
-          soldAt,
-        })),
-      );
-    },
-  };
-  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
+  const observedAt = Date.now();
+  const endedAt = new Date(
+    observedAt - (windowDays - 0.5) * 86_400_000,
+  ).toISOString();
+  const provider = createApifySoldPricingProvider({
+    enabled: true,
+    token: "test-only-token",
+    now: () => observedAt,
+    staleDays: 366,
+    runActor: async () => ({
+      status: "SUCCEEDED",
+      items: Array.from({ length: soldCompCount }, (_, index) => ({
+        url: `https://www.ebay.com/itm/contract-${soldCompCount}-${index}`,
+        title: "Canon AE-1 35mm Film Camera",
+        condition: "Pre-Owned",
+        endedAt,
+        soldPrice: 40,
+        soldCurrency: "USD",
+        listingType: "buy_it_now",
+        isBestOfferAccepted: false,
+      })),
+    }),
+  });
+  return new PriceRouter([provider]).price({
+    brand: "Canon",
+    model: "AE-1",
+    category: "electronics",
+    condition: "good",
+    conditionKnown: true,
+  });
 }
 
 async function loadVerifiedItemFact(
@@ -146,6 +160,7 @@ function verifiedSubstitutionsFor(
         ),
       };
     case "processing.finding-sold-comps":
+      return {};
     case "retry.automatic": {
       const displayName = values.itemDisplayName ?? "Verified item";
       return {
@@ -155,13 +170,13 @@ function verifiedSubstitutionsFor(
     case "uncertainty.limited-price-evidence":
       return verifiedPriceEvidence(
         priceEvidence.get(
-          `${Number(values.soldCompCount ?? 1)}:${Number(values.windowDays ?? 1)}`,
+          `${Number(values.soldCompCount ?? 2)}:${Number(values.windowDays ?? 1)}`,
         )!,
       );
     case "recovery.upload-paused":
       return {
-        uploadedPhotoCount: verifiedUploadedPhotoCount(
-          uploadProgress.get(Number(values.uploadedPhotoCount ?? 2))!,
+        uploadProgressSummary: verifiedUploadProgress(
+          uploadProgress.get(2)!,
         ),
       };
     default:
@@ -201,7 +216,7 @@ describe("Scout guidance catalog contract", () => {
     }
     captureProgress.set(1, appendAcceptedPhotos([], [photo(1)]));
     await collectUploadProgress(2);
-    for (const [soldCompCount, windowDays] of [[1, 1], [3, 90]]) {
+    for (const [soldCompCount, windowDays] of [[2, 1], [3, 90]]) {
       priceEvidence.set(
         `${soldCompCount}:${windowDays}`,
         await routedPriceRecommendation(soldCompCount, windowDays),
@@ -358,6 +373,26 @@ describe("Scout guidance catalog contract", () => {
     }
   });
 
+  it("keeps customer-visible Scout copy direct, calm, and free of synthetic phrasing", () => {
+    const customerCopy = Object.values(catalog.locales["en-US"]);
+    const bannedPhrasing = [
+      /[—–]/,
+      /\b(?:I|me|my)\b/,
+      /\beither way works\b/i,
+      /\bhit a snag\b/i,
+      /\bnot (?:just|beginning)\b/i,
+      /\bon us\b/i,
+      /\boriginal draft is safe\b/i,
+      /\b(?:unlock|seamless|effortless|powerful)\b/i,
+    ];
+
+    for (const copy of customerCopy) {
+      for (const pattern of bannedPhrasing) {
+        expect(copy, `${copy} violates ${pattern}`).not.toMatch(pattern);
+      }
+    }
+  });
+
   it("references only implementation-frozen states and approved Scout placements", () => {
     const frozenStateIds = new Set(
       inventory.states
@@ -436,9 +471,18 @@ describe("Scout guidance catalog contract", () => {
       status: "approved-repo-override",
     });
     expect(Object.keys(approvedOverride.strings_by_state)).toEqual([
+      "ONB-01",
       "ONB-07",
+      "ONB-08",
+      "ONB-09-camera",
+      "ONB-09-library",
       "CAP-02a",
+      "RUN-02",
       "RUN-04",
+      "RUN-05",
+      "RUN-06",
+      "REV-02d-retry",
+      "HOME-02",
     ]);
   });
 
