@@ -50,6 +50,36 @@ describe("PriceResult contract", () => {
     expect(() => priceResultSchema.parse(noUrl)).toThrow();
   });
 
+  it("requires every citation URL to be absolute HTTP(S)", () => {
+    for (const url of [
+      "https://example.com/item/1",
+      "http://example.com/item/1",
+    ]) {
+      expect(
+        priceResultSchema.safeParse({
+          ...valid,
+          sources: [{ url }],
+        }).success,
+      ).toBe(true);
+    }
+
+    for (const url of [
+      "/item/1",
+      "//example.com/item/1",
+      "not a URL",
+      "javascript:alert(1)",
+      "data:text/plain,hidden",
+      "ftp://example.com/item/1",
+    ]) {
+      expect(
+        priceResultSchema.safeParse({
+          ...valid,
+          sources: [{ url }],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("bounds citation strings and source count at the pricing contract", () => {
     const source = {
       url: `https://example.com/${"u".repeat(
@@ -96,6 +126,23 @@ describe("PriceResult contract", () => {
       { url: `https://example.com/${loneHighSurrogate}` },
       { url: "https://example.com", title: loneHighSurrogate },
       { url: "https://example.com", kind: loneHighSurrogate },
+    ]) {
+      expect(
+        priceResultSchema.safeParse({
+          ...valid,
+          sources: [malformedSource],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects U+0000 source text that PostgreSQL JSONB cannot encode", () => {
+    const nul = "\u0000";
+    expect(JSON.stringify({ value: nul })).toContain("\\u0000");
+
+    for (const malformedSource of [
+      { url: "https://example.com", title: `hidden${nul}title` },
+      { url: "https://example.com", kind: `sold${nul}comp` },
     ]) {
       expect(
         priceResultSchema.safeParse({

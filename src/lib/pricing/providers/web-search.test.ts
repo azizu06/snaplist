@@ -508,6 +508,8 @@ describe("branded-web pricing agent", () => {
     const oversizedTitle = "T".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH + 1);
     const results = [
       { url: oversizedUrl, title: "oversized external result" },
+      { url: "javascript:alert(1)", title: "non-web result" },
+      { url: "/relative-result", title: "relative result" },
       ...cannedResults("q1"),
     ];
     const provider = createBrandedWebPricingProvider({
@@ -515,6 +517,18 @@ describe("branded-web pricing agent", () => {
       extractComps: fakeExtractor([
         [
           { url: oversizedUrl, title: "must be rejected", price: 170, kind: "sold" },
+          {
+            url: "javascript:alert(1)",
+            title: "must be rejected",
+            price: 171,
+            kind: "sold",
+          },
+          {
+            url: "/relative-result",
+            title: "must be rejected",
+            price: 172,
+            kind: "sold",
+          },
           {
             url: "https://www.ebay.com/itm/q1-1",
             title: oversizedTitle,

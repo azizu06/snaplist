@@ -523,7 +523,9 @@ export function parseSoldComps(
       if (!href) return;
       let resolvedUrl: string;
       try {
-        resolvedUrl = new URL(href, baseUrl).toString();
+        const itemUrl = assertSafeEbayUrl(new URL(href, baseUrl).toString());
+        if (!itemUrl.pathname.toLowerCase().startsWith("/itm/")) return;
+        resolvedUrl = itemUrl.toString();
       } catch {
         return;
       }

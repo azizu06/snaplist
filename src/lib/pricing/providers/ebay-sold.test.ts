@@ -1008,6 +1008,37 @@ describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
     );
   });
 
+  it("never grants public-eBay provenance to off-host or non-item card URLs", async () => {
+    const card = (href: string, price: number) => `
+      <li class="s-item">
+        <a class="s-item__link" href="${href}">
+          <div class="s-item__title">Sony WH-1000XM4 Headphones</div>
+        </a>
+        <span class="s-item__price">$${price.toFixed(2)}</span>
+        <div class="s-item__caption"><span>Sold Jun 1, 2026</span></div>
+        <div class="s-item__subtitle"><span class="SECONDARY_INFO">Pre-Owned</span></div>
+      </li>`;
+    const html = `<ul class="srp-results">
+      ${card("https://evil.example/comp", 148)}
+      ${card("https://www.ebay.com/help", 149)}
+      ${card("https://www.ebay.com/itm/trusted-1", 150)}
+      ${card("/itm/trusted-2", 151)}
+    </ul>`;
+    const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(html) });
+
+    const result = await new PriceRouter([provider]).price(BRANDED_SIGNAL);
+
+    expect(result.sources.map((source) => source.url)).toEqual([
+      "https://www.ebay.com/itm/trusted-1",
+      "https://www.ebay.com/itm/trusted-2",
+    ]);
+    expect(
+      result.sources.every(
+        (source) => source.soldProvider === "ebay-public-sold",
+      ),
+    ).toBe(true);
+  });
+
   it("clamps caller maxResults to the shared source ceiling", async () => {
     const cards = Array.from(
       { length: PRICE_RESULT_MAX_SOURCES + 5 },

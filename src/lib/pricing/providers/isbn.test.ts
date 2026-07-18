@@ -162,6 +162,47 @@ describe("ISBN pricing provider", () => {
     ]);
   });
 
+  it("uses canonical catalog fallbacks for provider-invalid metadata URLs", async () => {
+    for (const metadata of [
+      {
+        key: "@evil.example/path",
+        infoLink: "https://evil.example/google-book",
+      },
+      {
+        key: "/authors/not-an-edition",
+        infoLink: "https://books.google.com/not-a-books-record",
+      },
+    ]) {
+      const provider = createIsbnPricingProvider({
+        fetchJson: fakeFetchJson({
+          openLibrary: {
+            ...openLibraryEdition,
+            key: metadata.key,
+          },
+          googleBooks: {
+            ...googleBooksVolumes,
+            items: [
+              {
+                ...googleBooksVolumes.items[0],
+                volumeInfo: {
+                  ...googleBooksVolumes.items[0].volumeInfo,
+                  infoLink: metadata.infoLink,
+                },
+              },
+            ],
+          },
+        }),
+      });
+
+      const result = await new PriceRouter([provider]).price({ isbn: ISBN });
+
+      expect(result.sources.map((source) => source.url)).toEqual([
+        `https://openlibrary.org/isbn/${ISBN}`,
+        `https://books.google.com/books?q=isbn:${ISBN}`,
+      ]);
+    }
+  });
+
   it("bounds catalog titles without splitting a Unicode surrogate pair", async () => {
     const boundaryTitle = `${"A".repeat(
       PRICE_SOURCE_TITLE_MAX_LENGTH - 1,
@@ -191,6 +232,35 @@ describe("ISBN pricing provider", () => {
       "A".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH - 1),
     ]);
     expect(JSON.stringify(result.sources)).not.toContain("\\ud83d");
+  });
+
+  it("repairs U+0000 in external catalog labels before checkpoint persistence", async () => {
+    const nulTitle = "Fantastic\u0000Mr Fox";
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson({
+        openLibrary: { ...openLibraryEdition, title: nulTitle },
+        googleBooks: {
+          ...googleBooksVolumes,
+          items: [
+            {
+              ...googleBooksVolumes.items[0],
+              volumeInfo: {
+                ...googleBooksVolumes.items[0].volumeInfo,
+                title: nulTitle,
+              },
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = await new PriceRouter([provider]).price({ isbn: ISBN });
+
+    expect(result.sources.map((source) => source.title)).toEqual([
+      "Fantastic�Mr Fox",
+      "Fantastic�Mr Fox",
+    ]);
+    expect(JSON.stringify(result.sources)).not.toContain("\\u0000");
   });
 
   it("suggests a used price below retail, inside the band", async () => {

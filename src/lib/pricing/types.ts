@@ -111,11 +111,28 @@ function isWellFormedUnicode(value: string): boolean {
   return true;
 }
 
+function isAbsoluteHttpUrl(value: string): boolean {
+  if (!/^https?:\/\//i.test(value)) return false;
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function excludesPostgresUnsupportedNul(value: string): boolean {
+  return !value.includes("\u0000");
+}
+
 /**
  * Bound a string by UTF-16 storage length without cutting a Unicode code point.
- * Malformed input code units become U+FFFD, matching JavaScript's standard
- * well-formed-string repair, so persisted JSON can never contain an unpaired
- * surrogate that PostgreSQL rejects.
+ * Malformed input code units and PostgreSQL-incompatible U+0000 become U+FFFD,
+ * matching JavaScript's well-formed-string repair semantics while ensuring
+ * persisted JSON never carries text PostgreSQL rejects.
  */
 export function boundWellFormedString(
   value: string,
@@ -126,7 +143,9 @@ export function boundWellFormedString(
   for (let index = 0; index < value.length; index += 1) {
     const codeUnit = value.charCodeAt(index);
     let codePoint: string;
-    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+    if (codeUnit === 0) {
+      codePoint = "\ufffd";
+    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
       if (next >= 0xdc00 && next <= 0xdfff) {
         codePoint = value.slice(index, index + 2);
@@ -149,15 +168,31 @@ const wellFormedSourceUrlSchema = z
   .string()
   .min(1)
   .max(PRICE_SOURCE_URL_MAX_LENGTH)
-  .refine(isWellFormedUnicode, "Source URL must contain well-formed Unicode.");
+  .refine(isWellFormedUnicode, "Source URL must contain well-formed Unicode.")
+  .refine(
+    excludesPostgresUnsupportedNul,
+    "Source URL must not contain U+0000.",
+  )
+  .refine(
+    isAbsoluteHttpUrl,
+    "Source URL must be an absolute HTTP(S) URL.",
+  );
 const wellFormedSourceTitleSchema = z
   .string()
   .max(PRICE_SOURCE_TITLE_MAX_LENGTH)
-  .refine(isWellFormedUnicode, "Source title must contain well-formed Unicode.");
+  .refine(isWellFormedUnicode, "Source title must contain well-formed Unicode.")
+  .refine(
+    excludesPostgresUnsupportedNul,
+    "Source title must not contain U+0000.",
+  );
 const wellFormedSourceKindSchema = z
   .string()
   .max(PRICE_SOURCE_KIND_MAX_LENGTH)
-  .refine(isWellFormedUnicode, "Source kind must contain well-formed Unicode.");
+  .refine(isWellFormedUnicode, "Source kind must contain well-formed Unicode.")
+  .refine(
+    excludesPostgresUnsupportedNul,
+    "Source kind must not contain U+0000.",
+  );
 
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({

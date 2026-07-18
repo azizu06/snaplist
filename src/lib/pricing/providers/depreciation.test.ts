@@ -234,10 +234,14 @@ describe("anti-hallucination (post-hoc URL allowlist)", () => {
     const provider = makeProvider(
       [[
         { url: oversizedUrl, title: "reject this URL", price: 90 },
+        { url: "javascript:alert(1)", title: "reject this URL", price: 91 },
+        { url: "/relative-result", title: "reject this URL", price: 92 },
         { url: validUrl, title: oversizedTitle, price: 100 },
       ]],
       fakeSearch([[
         { url: oversizedUrl },
+        { url: "javascript:alert(1)" },
+        { url: "/relative-result" },
         { url: validUrl },
       ]]),
     );

@@ -136,6 +136,39 @@ function googleBooksUrl(isbn: string): string {
   return `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
 }
 
+function openLibraryCitationUrl(key: unknown): string | undefined {
+  if (typeof key !== "string" || !key.startsWith("/books/")) return undefined;
+  try {
+    const url = new URL(key, "https://openlibrary.org");
+    return url.origin === "https://openlibrary.org" &&
+      url.pathname.startsWith("/books/")
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function googleBooksCitationUrl(infoLink: unknown): string | undefined {
+  if (typeof infoLink !== "string" || infoLink.length === 0) return undefined;
+  try {
+    const url = new URL(infoLink);
+    const providerOrigin =
+      url.origin === "https://books.google.com" ||
+      url.origin === "http://books.google.com";
+    const providerPath =
+      url.pathname === "/books" || url.pathname.startsWith("/books/");
+    return providerOrigin &&
+      !url.username &&
+      !url.password &&
+      providerPath
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Minimal shapes of the API responses we read (defensive — only what we use)
 // ---------------------------------------------------------------------------
@@ -215,10 +248,7 @@ function readOpenLibrary(
   const title = typeof edition.title === "string" ? edition.title : undefined;
   // Prefer the canonical work key as the citation URL; fall back to the ISBN page.
   const source = boundedCatalogSource({
-    preferredUrl:
-      typeof edition.key === "string"
-        ? `https://openlibrary.org${edition.key}`
-        : undefined,
+    preferredUrl: openLibraryCitationUrl(edition.key),
     fallbackUrl: openLibraryUrl(isbn).replace(/\.json$/, ""),
     title,
     fallbackTitle: `Open Library record for ISBN ${isbn}`,
@@ -263,10 +293,7 @@ function readGoogleBooks(
         : undefined;
 
   const source = boundedCatalogSource({
-    preferredUrl:
-      typeof info.infoLink === "string" && info.infoLink.length > 0
-        ? info.infoLink
-        : undefined,
+    preferredUrl: googleBooksCitationUrl(info.infoLink),
     fallbackUrl: `https://books.google.com/books?q=isbn:${encodeURIComponent(isbn)}`,
     title,
     fallbackTitle: `Google Books record for ISBN ${isbn}`,
