@@ -119,6 +119,14 @@ function sameVariables(actual: string[], expected: string[]): boolean {
   );
 }
 
+function canonicalLocaleTag(locale: string): string | null {
+  try {
+    return Intl.getCanonicalLocales(locale)[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const scoutGuidanceCatalogSchema = z
   .object({
     contractVersion: z.literal(SCOUT_GUIDANCE_CONTRACT_VERSION),
@@ -135,6 +143,36 @@ export const scoutGuidanceCatalogSchema = z
   })
   .strict()
   .superRefine((catalog, context) => {
+    const canonicalDefaultLocale = canonicalLocaleTag(catalog.defaultLocale);
+    if (canonicalDefaultLocale === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["defaultLocale"],
+        message: `Default locale ${catalog.defaultLocale} must be a valid BCP 47 language tag.`,
+      });
+    } else if (canonicalDefaultLocale !== catalog.defaultLocale) {
+      context.addIssue({
+        code: "custom",
+        path: ["defaultLocale"],
+        message: `Default locale ${catalog.defaultLocale} must use canonical form ${canonicalDefaultLocale}.`,
+      });
+    }
+    for (const locale of Object.keys(catalog.locales)) {
+      const canonicalLocale = canonicalLocaleTag(locale);
+      if (canonicalLocale === null) {
+        context.addIssue({
+          code: "custom",
+          path: ["locales", locale],
+          message: `Locale key ${locale} must be a valid BCP 47 language tag.`,
+        });
+      } else if (canonicalLocale !== locale) {
+        context.addIssue({
+          code: "custom",
+          path: ["locales", locale],
+          message: `Locale key ${locale} must use canonical form ${canonicalLocale}.`,
+        });
+      }
+    }
     const defaultCopy = catalog.locales[catalog.defaultLocale];
     if (!defaultCopy) {
       context.addIssue({

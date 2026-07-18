@@ -812,6 +812,8 @@ export interface SoldSynthesisOptions {
   halfLifeDays?: number;
   /** Optional relevance/condition weight from the provider-neutral matcher. */
   evidenceWeight?: (comp: EbaySoldComp) => number;
+  /** Actual sold-search lookback that produced these comps. */
+  evidenceWindowDays?: number;
 }
 
 /**
@@ -879,6 +881,9 @@ export function synthesizeSoldResult(
     // The judged tightness rides downstream so a scattered sold set cannot ride
     // the sold-comp label into the ready-to-publish confidence band.
     compAgreement: agreement,
+    ...(opts.evidenceWindowDays !== undefined
+      ? { evidenceWindowDays: opts.evidenceWindowDays }
+      : {}),
   };
 }
 
@@ -1109,6 +1114,7 @@ export function createEbaySoldPricingProvider(
         {
           ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
           evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,
+          evidenceWindowDays: staleDays,
         },
       );
     },

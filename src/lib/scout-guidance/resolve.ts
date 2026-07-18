@@ -5,6 +5,14 @@ import {
   type ReviewSnapshot,
 } from "@/lib/pipeline/review-snapshot";
 import {
+  stagedPipelineRunFacts,
+  type PipelineStageResult,
+} from "@/lib/pipeline-staging";
+import {
+  routedPriceRecommendationEvidence,
+  type PriceResult,
+} from "@/lib/pricing";
+import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
   type ScoutGuidanceDefinition,
@@ -40,6 +48,9 @@ export class ScoutGuidanceFactError extends Error {
   constructor(
     readonly code:
       | "untrusted-durable-item-record"
+      | "untrusted-capture-session"
+      | "untrusted-durable-run"
+      | "untrusted-price-recommendation"
       | "missing-item-display-name",
     message: string,
   ) {
@@ -49,6 +60,14 @@ export class ScoutGuidanceFactError extends Error {
 
 declare const verifiedFactType: unique symbol;
 const verifiedFacts = new WeakSet<object>();
+const verifiedFactKeys = new WeakMap<object, ScoutGuidanceSubstitutionKey>();
+
+type ScoutGuidanceSubstitutionKey =
+  | "capturedPhotoCount"
+  | "itemDisplayName"
+  | "soldCompCount"
+  | "windowDays"
+  | "uploadedPhotoCount";
 
 export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
@@ -71,6 +90,7 @@ const durableItemAttributesSchema = z.object({
 });
 
 function verifiedFact(
+  key: ScoutGuidanceSubstitutionKey,
   source: ScoutGuidanceTrustedSource,
   reference: string,
   value: string | number,
@@ -81,6 +101,7 @@ function verifiedFact(
     value,
   }) as VerifiedScoutGuidanceFact;
   verifiedFacts.add(fact);
+  verifiedFactKeys.set(fact, key);
   return fact;
 }
 
@@ -122,47 +143,71 @@ export function verifiedItemDisplayNameFromDurableRecord(
     );
   }
   return verifiedFact(
+    "itemDisplayName",
     "durable-item-record",
     `item:${durableRecord.id}:review-revision:${durableRecord.review_revision}`,
     value,
   );
 }
 
-export function verifiedCapturedPhotoCount(input: {
-  captureSessionId: string;
-  capturedPhotoCount: number;
-}): VerifiedScoutGuidanceFact {
+export function verifiedCapturedPhotoCount(
+  result: PipelineStageResult,
+): VerifiedScoutGuidanceFact {
+  const input = stagedPipelineRunFacts(result);
+  if (!input) {
+    throw new ScoutGuidanceFactError(
+      "untrusted-capture-session",
+      "Capture facts must come from the validated pipeline staging seam.",
+    );
+  }
   return verifiedFact(
+    "capturedPhotoCount",
     "capture-session",
     `capture-session:${uuidSchema.parse(input.captureSessionId)}`,
     input.capturedPhotoCount,
   );
 }
 
-export function verifiedPriceEvidence(input: {
-  recommendationId: string;
-  soldCompCount: number;
-  windowDays: number;
-}): Readonly<{
+export function verifiedPriceEvidence(result: PriceResult): Readonly<{
   soldCompCount: VerifiedScoutGuidanceFact;
   windowDays: VerifiedScoutGuidanceFact;
 }> {
+  const input = routedPriceRecommendationEvidence(result);
+  if (!input) {
+    throw new ScoutGuidanceFactError(
+      "untrusted-price-recommendation",
+      "Price facts must come from the validated pricing router seam.",
+    );
+  }
   const reference = `price-recommendation:${uuidSchema.parse(input.recommendationId)}`;
   return Object.freeze({
     soldCompCount: verifiedFact(
+      "soldCompCount",
       "price-recommendation",
       reference,
       input.soldCompCount,
     ),
-    windowDays: verifiedFact("price-recommendation", reference, input.windowDays),
+    windowDays: verifiedFact(
+      "windowDays",
+      "price-recommendation",
+      reference,
+      input.windowDays,
+    ),
   });
 }
 
-export function verifiedUploadedPhotoCount(input: {
-  runId: string;
-  uploadedPhotoCount: number;
-}): VerifiedScoutGuidanceFact {
+export function verifiedUploadedPhotoCount(
+  result: PipelineStageResult,
+): VerifiedScoutGuidanceFact {
+  const input = stagedPipelineRunFacts(result);
+  if (!input) {
+    throw new ScoutGuidanceFactError(
+      "untrusted-durable-run",
+      "Run facts must come from the validated durable staging seam.",
+    );
+  }
   return verifiedFact(
+    "uploadedPhotoCount",
     "durable-run",
     `run:${uuidSchema.parse(input.runId)}`,
     input.uploadedPhotoCount,
@@ -230,6 +275,14 @@ function validatedSubstitutions(
           state,
           rule.key,
           `Substitution ${rule.key} was not constructed at a verified fact boundary.`,
+        );
+      }
+      if (verifiedFactKeys.get(substitution) !== rule.key) {
+        throw new ScoutGuidanceContractError(
+          "untrusted-substitution",
+          state,
+          rule.key,
+          `Substitution ${rule.key} was verified for a different semantic key.`,
         );
       }
       if (!rule.trustedSources.includes(substitution.source)) {

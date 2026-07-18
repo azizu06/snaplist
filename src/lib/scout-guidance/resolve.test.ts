@@ -6,11 +6,22 @@ import {
   type ReviewSnapshot,
 } from "@/lib/pipeline/review-snapshot";
 import {
+  createSupabasePipelineStagingStore,
+  type PipelineStageResult,
+} from "@/lib/pipeline-staging";
+import {
+  PriceRouter,
+  type PriceResult,
+  type PricingProvider,
+} from "@/lib/pricing";
+import {
   SCOUT_GUIDANCE_STATES,
   ScoutGuidanceContractError,
   resolveScoutGuidance,
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
+  verifiedPriceEvidence,
+  verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
   type VerifiedScoutGuidanceFact,
 } from "./resolve";
@@ -18,6 +29,69 @@ import {
 const ITEM_ID = "11111111-1111-4111-8111-111111111111";
 const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
+const RUN_ID = "55555555-5555-4555-8555-555555555555";
+
+async function stageTrustedCapture(photoCount: number): Promise<PipelineStageResult> {
+  const result = {
+    batch_id: CAPTURE_SESSION_ID,
+    batch_position: 0,
+    idempotency_key: "capture-1",
+    item_id: ITEM_ID,
+    run_id: RUN_ID,
+    queue_message_id: "1",
+    listing_id: null,
+    status: "queued",
+    stage: "queued",
+    attempt_count: 0,
+    max_attempts: 3,
+    safe_failure_message: null,
+    updated_at: "2026-07-18T00:00:00.000Z",
+  };
+  const rpc = vi.fn(async () => ({ data: [result], error: null }));
+  const store = createSupabasePipelineStagingStore({ rpc });
+  const [staged] = await store.stageAndEnqueue({
+    batchId: CAPTURE_SESSION_ID,
+    userId: "user_test",
+    dailyLimit: 10,
+    perMinuteLimit: 5,
+    entries: [{
+      idempotencyKey: "capture-1",
+      source: "single",
+      autopilotEnabled: false,
+      photoPaths: Array.from(
+        { length: photoCount },
+        (_, index) => `user_test/pipeline-staging/${CAPTURE_SESSION_ID}/${index}.jpg`,
+      ),
+      costBasis: null,
+    }],
+  });
+  if (!staged) throw new Error("Expected a trusted staged capture fixture.");
+  return staged;
+}
+
+async function routeTrustedPriceEvidence(
+  soldCompCount: number,
+  windowDays: number,
+): Promise<PriceResult> {
+  const provider: PricingProvider = {
+    tier: "ebay-sold",
+    async price() {
+      return {
+        suggested: 40,
+        range: { min: 30, max: 50 },
+        confidence: 0.5,
+        sources: Array.from({ length: soldCompCount }, (_, index) => ({
+          url: `https://example.test/sold/${index}`,
+          kind: "sold-comp",
+        })),
+        tier: "ebay-sold",
+        evidenceWindowDays: windowDays,
+      };
+    },
+  };
+  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
+}
 
 async function loadTrustedItemSnapshot(
   attributes: unknown,
@@ -103,16 +177,14 @@ describe("resolveScoutGuidance", () => {
     });
   });
 
-  it("formats a capture count only from the bounded verified capture fact", () => {
+  it("formats a capture count only from the bounded verified capture fact", async () => {
+    const capture = await stageTrustedCapture(2);
     const result = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
       state: "capture.photo-count",
       locale: "en-US",
       substitutions: {
-        capturedPhotoCount: verifiedCapturedPhotoCount({
-          captureSessionId: CAPTURE_SESSION_ID,
-          capturedPhotoCount: 2,
-        }),
+        capturedPhotoCount: verifiedCapturedPhotoCount(capture),
       },
     });
 
@@ -125,6 +197,74 @@ describe("resolveScoutGuidance", () => {
         label: "2 of 4 photos",
       },
     });
+  });
+
+  it("rejects a caller-constructed object at the capture-session fact boundary", () => {
+    expect(() =>
+      verifiedCapturedPhotoCount({
+        captureSessionId: CAPTURE_SESSION_ID,
+        capturedPhotoCount: 2,
+      } as unknown as PipelineStageResult),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-capture-session",
+      }),
+    );
+  });
+
+  it("rejects a caller-constructed object at the durable-run fact boundary", () => {
+    expect(() =>
+      verifiedUploadedPhotoCount({
+        runId: RUN_ID,
+        uploadedPhotoCount: 2,
+      } as unknown as PipelineStageResult),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-durable-run",
+      }),
+    );
+  });
+
+  it("rejects verified price facts swapped into a different substitution key", async () => {
+    const evidence = verifiedPriceEvidence(
+      await routeTrustedPriceEvidence(3, 90),
+    );
+
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "uncertainty.limited-price-evidence",
+        locale: "en-US",
+        substitutions: {
+          soldCompCount: evidence.windowDays,
+          windowDays: evidence.soldCompCount,
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "untrusted-substitution",
+        state: "uncertainty.limited-price-evidence",
+        substitutionKey: "soldCompCount",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
+  it("rejects caller-labelled counts at the price-recommendation fact boundary", () => {
+    expect(() =>
+      verifiedPriceEvidence({
+        recommendationId: RECOMMENDATION_ID,
+        soldCompCount: 90,
+        windowDays: 3,
+      } as unknown as PriceResult),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceFactError",
+        code: "untrusted-price-recommendation",
+      }),
+    );
   });
 
   it("rejects a missing required substitution with a stable contract error", () => {
@@ -414,25 +554,23 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
-  it("rejects verified facts outside the template's approved bounds", () => {
+  it("rejects verified facts outside the template's approved bounds", async () => {
+    const evidence = verifiedPriceEvidence(
+      await routeTrustedPriceEvidence(100, 90),
+    );
     expect(() =>
       resolveScoutGuidance({
         contractVersion: "scout-guidance-v1",
-        state: "capture.photo-count",
+        state: "uncertainty.limited-price-evidence",
         locale: "en-US",
-        substitutions: {
-          capturedPhotoCount: verifiedCapturedPhotoCount({
-            captureSessionId: CAPTURE_SESSION_ID,
-            capturedPhotoCount: 5,
-          }),
-        },
+        substitutions: evidence,
       }),
     ).toThrowError(
       expect.objectContaining({
         name: "ScoutGuidanceContractError",
         code: "invalid-substitution",
-        state: "capture.photo-count",
-        substitutionKey: "capturedPhotoCount",
+        state: "uncertainty.limited-price-evidence",
+        substitutionKey: "soldCompCount",
       }),
     );
   });

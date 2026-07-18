@@ -7,8 +7,42 @@ import {
   type PipelineReplayBatchInput,
   type PipelineStageBatchInput,
   type PipelineStageBatchResult,
+  type PipelineStageResult,
   type PipelineStagingCleanupIntentInput,
 } from "./schema";
+
+export interface StagedPipelineRunFacts {
+  captureSessionId: string;
+  capturedPhotoCount: number;
+  runId: string;
+  uploadedPhotoCount: number;
+}
+
+const stagedPipelineRunFactsByResult = new WeakMap<
+  object,
+  StagedPipelineRunFacts
+>();
+
+/** Immutable facts enrolled only after the staging RPC returned a valid run. */
+export function stagedPipelineRunFacts(
+  value: unknown,
+): StagedPipelineRunFacts | null {
+  if (typeof value !== "object" || value === null) return null;
+  const facts = stagedPipelineRunFactsByResult.get(value);
+  return facts ? { ...facts } : null;
+}
+
+function enrollStagedPipelineRunFacts(
+  result: PipelineStageResult,
+  photoCount: number,
+): void {
+  stagedPipelineRunFactsByResult.set(result, {
+    captureSessionId: result.batch_id,
+    capturedPhotoCount: photoCount,
+    runId: result.run_id,
+    uploadedPhotoCount: photoCount,
+  });
+}
 
 type PipelineStagingRpcName =
   | "find_pipeline_batch_replay"
@@ -77,7 +111,16 @@ export function createSupabasePipelineStagingStore(
         })),
         p_user_id: input.userId,
       });
-      return pipelineStageBatchResultSchema.parse(rpcData("replay lookup", result));
+      const staged = pipelineStageBatchResultSchema.parse(
+        rpcData("replay lookup", result),
+      );
+      for (const row of staged) {
+        const entry = input.entries.find(
+          (candidate) => candidate.idempotencyKey === row.idempotency_key,
+        );
+        if (entry) enrollStagedPipelineRunFacts(row, entry.photoCount);
+      }
+      return staged;
     },
 
     async stageAndEnqueue(rawInput) {
@@ -95,7 +138,16 @@ export function createSupabasePipelineStagingStore(
         p_per_minute_limit: input.perMinuteLimit,
         p_user_id: input.userId,
       });
-      return pipelineStageBatchResultSchema.parse(rpcData("staging", result));
+      const staged = pipelineStageBatchResultSchema.parse(
+        rpcData("staging", result),
+      );
+      for (const row of staged) {
+        const entry = input.entries.find(
+          (candidate) => candidate.idempotencyKey === row.idempotency_key,
+        );
+        if (entry) enrollStagedPipelineRunFacts(row, entry.photoPaths.length);
+      }
+      return staged;
     },
 
     async releaseDailyReservation(runId) {

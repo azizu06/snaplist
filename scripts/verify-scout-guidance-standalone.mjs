@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { resolve } from "node:path";
 
-const standaloneRoot = resolve(".next/standalone");
+const standaloneRoot = resolve(
+  process.env.SCOUT_STANDALONE_ROOT ?? ".next/standalone",
+);
 const port = String(31_000 + (process.pid % 1_000));
 let output = "";
 const server = spawn(process.execPath, ["server.js"], {

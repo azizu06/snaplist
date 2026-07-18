@@ -3,6 +3,15 @@ import { resolve } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
+import {
+  createSupabasePipelineStagingStore,
+  type PipelineStageResult,
+} from "@/lib/pipeline-staging";
+import {
+  PriceRouter,
+  type PriceResult,
+  type PricingProvider,
+} from "@/lib/pricing";
 import { scoutGuidanceCatalogSchema } from "./contract";
 import {
   resolveScoutGuidance,
@@ -17,9 +26,72 @@ import {
 const ITEM_ID = "11111111-1111-4111-8111-111111111111";
 const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
-const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
 const RUN_ID = "55555555-5555-4555-8555-555555555555";
 const verifiedItemFacts = new Map<string, VerifiedScoutGuidanceFact>();
+const stagedRunFacts = new Map<number, PipelineStageResult>();
+const routedPriceFacts = new Map<string, PriceResult>();
+
+async function stageTrustedRun(photoCount: number): Promise<PipelineStageResult> {
+  const result = {
+    batch_id: CAPTURE_SESSION_ID,
+    batch_position: 0,
+    idempotency_key: `capture-${photoCount}`,
+    item_id: ITEM_ID,
+    run_id: RUN_ID,
+    queue_message_id: "1",
+    listing_id: null,
+    status: "queued",
+    stage: "queued",
+    attempt_count: 0,
+    max_attempts: 3,
+    safe_failure_message: null,
+    updated_at: "2026-07-18T00:00:00.000Z",
+  };
+  const rpc = vi.fn(async () => ({ data: [result], error: null }));
+  const [staged] = await createSupabasePipelineStagingStore({ rpc })
+    .stageAndEnqueue({
+      batchId: CAPTURE_SESSION_ID,
+      userId: "user_test",
+      dailyLimit: 10,
+      perMinuteLimit: 5,
+      entries: [{
+        idempotencyKey: `capture-${photoCount}`,
+        source: "single",
+        autopilotEnabled: false,
+        photoPaths: Array.from(
+          { length: photoCount },
+          (_, index) =>
+            `user_test/pipeline-staging/${CAPTURE_SESSION_ID}/${index}.jpg`,
+        ),
+        costBasis: null,
+      }],
+    });
+  if (!staged) throw new Error("Expected a trusted staged run fixture.");
+  return staged;
+}
+
+async function routeTrustedPrice(
+  soldCompCount: number,
+  windowDays: number,
+): Promise<PriceResult> {
+  const provider: PricingProvider = {
+    tier: "ebay-sold",
+    async price() {
+      return {
+        suggested: 40,
+        range: { min: 30, max: 50 },
+        confidence: 0.5,
+        sources: Array.from({ length: soldCompCount }, (_, index) => ({
+          url: `https://example.test/sold/${index}`,
+          kind: "sold-comp",
+        })),
+        tier: "ebay-sold",
+        evidenceWindowDays: windowDays,
+      };
+    },
+  };
+  return new PriceRouter([provider]).price({ brand: "Canon", model: "AE-1" });
+}
 
 async function loadVerifiedItemFact(
   displayName: string,
@@ -56,10 +128,9 @@ function verifiedSubstitutionsFor(
   switch (state) {
     case "capture.photo-count":
       return {
-        capturedPhotoCount: verifiedCapturedPhotoCount({
-          captureSessionId: CAPTURE_SESSION_ID,
-          capturedPhotoCount: Number(values.capturedPhotoCount ?? 1),
-        }),
+        capturedPhotoCount: verifiedCapturedPhotoCount(
+          stagedRunFacts.get(Number(values.capturedPhotoCount ?? 1))!,
+        ),
       };
     case "processing.finding-sold-comps":
     case "retry.automatic": {
@@ -69,17 +140,16 @@ function verifiedSubstitutionsFor(
       };
     }
     case "uncertainty.limited-price-evidence":
-      return verifiedPriceEvidence({
-        recommendationId: RECOMMENDATION_ID,
-        soldCompCount: Number(values.soldCompCount ?? 1),
-        windowDays: Number(values.windowDays ?? 1),
-      });
+      return verifiedPriceEvidence(
+        routedPriceFacts.get(
+          `${Number(values.soldCompCount ?? 1)}:${Number(values.windowDays ?? 1)}`,
+        )!,
+      );
     case "recovery.upload-paused":
       return {
-        uploadedPhotoCount: verifiedUploadedPhotoCount({
-          runId: RUN_ID,
-          uploadedPhotoCount: Number(values.uploadedPhotoCount ?? 0),
-        }),
+        uploadedPhotoCount: verifiedUploadedPhotoCount(
+          stagedRunFacts.get(Number(values.uploadedPhotoCount ?? 2))!,
+        ),
       };
     default:
       return {};
@@ -116,10 +186,76 @@ describe("Scout guidance catalog contract", () => {
     ]) {
       verifiedItemFacts.set(displayName, await loadVerifiedItemFact(displayName));
     }
+    for (const count of [1, 2]) {
+      stagedRunFacts.set(count, await stageTrustedRun(count));
+    }
+    for (const [soldCompCount, windowDays] of [[1, 1], [3, 90]]) {
+      routedPriceFacts.set(
+        `${soldCompCount}:${windowDays}`,
+        await routeTrustedPrice(soldCompCount, windowDays),
+      );
+    }
   });
 
   it("validates the checked-in provider-neutral V1 catalog", () => {
     expect(scoutGuidanceCatalogSchema.parse(catalog)).toEqual(catalog);
+  });
+
+  it("rejects invalid BCP 47 locale keys and defaultLocale values", () => {
+    const invalid = structuredClone(catalog);
+    invalid.defaultLocale = "pt_BR";
+    invalid.locales.pt_BR = invalid.locales["en-US"];
+    delete invalid.locales["en-US"];
+
+    const result = scoutGuidanceCatalogSchema.safeParse(invalid);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["defaultLocale"],
+            message: "Default locale pt_BR must be a valid BCP 47 language tag.",
+          }),
+          expect.objectContaining({
+            path: ["locales", "pt_BR"],
+            message: "Locale key pt_BR must be a valid BCP 47 language tag.",
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("rejects locale aliases until keys and defaultLocale use canonical form", () => {
+    const aliased = structuredClone(catalog);
+    aliased.defaultLocale = "iw";
+    aliased.locales.iw = aliased.locales["en-US"];
+    delete aliased.locales["en-US"];
+
+    const result = scoutGuidanceCatalogSchema.safeParse(aliased);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["defaultLocale"],
+            message: "Default locale iw must use canonical form he.",
+          }),
+          expect.objectContaining({
+            path: ["locales", "iw"],
+            message: "Locale key iw must use canonical form he.",
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("accepts canonical BCP 47 locale keys", () => {
+    const canonical = structuredClone(catalog);
+    canonical.locales["pt-BR"] = structuredClone(catalog.locales["en-US"]);
+
+    expect(scoutGuidanceCatalogSchema.safeParse(canonical).success).toBe(true);
   });
 
   it("rejects substitution permissions that no localized template uses", () => {

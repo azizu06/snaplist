@@ -13,7 +13,11 @@ export {
   type PriceResult,
   type PricingProvider,
 } from "./types";
-export { PriceRouter } from "./router";
+export {
+  PriceRouter,
+  routedPriceRecommendationEvidence,
+  type RoutedPriceRecommendationEvidence,
+} from "./router";
 export {
   classifySoldComp,
   normalizeComparableText,

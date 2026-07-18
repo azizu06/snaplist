@@ -517,6 +517,7 @@ export function createApifySoldPricingProvider(
       return synthesizeSoldResult(fresh, {
         ...(clock != null ? { now: clock, halfLifeDays } : {}),
         evidenceWeight: (comp) => weights.get(comp as ApifySoldComp) ?? 1,
+        evidenceWindowDays: daysToScrape,
       });
     },
   };
