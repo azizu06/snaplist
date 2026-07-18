@@ -4,6 +4,7 @@ import {
   createSupabasePipelineWorkerStore,
   type PipelineWorkerRpcClient,
 } from "./worker-store";
+import { PIPELINE_CHECKPOINT_MAX_JSONB_BYTES } from "./checkpoint";
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const ITEM_ID = "22222222-2222-4222-8222-222222222222";
@@ -116,6 +117,29 @@ describe("run-scoped pipeline worker store", () => {
       listing: { status: "draft" },
       prediction: { model: "vision-model", listing_model: "listing-model" },
     });
+  });
+
+  it("rejects an oversized checkpoint before calling the database RPC", async () => {
+    const client = rpcClient({ checkpoint_pipeline_run: true });
+    const store = createSupabasePipelineWorkerStore(client);
+
+    await expect(
+      store.checkpoint({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        stage: "identifying",
+        checkpoint: {
+          identified: {
+            attributes: {
+              title: "x".repeat(PIPELINE_CHECKPOINT_MAX_JSONB_BYTES),
+            },
+            model: "vision-model",
+          },
+        },
+        leaseSeconds: 300,
+      }),
+    ).rejects.toThrow("Pipeline checkpoint exceeds the database byte limit");
+    expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it("uses lease-fenced failure and message-rejection RPCs", async () => {

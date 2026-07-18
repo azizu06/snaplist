@@ -1,10 +1,18 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import {
   createApifySoldPricingProvider,
+  loadTrustedPriceEvidenceFromPipelineRun,
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
   PriceRouter,
   type PriceResult,
 } from "@/lib/pricing";
+import { verifiedPriceEvidence } from "@/lib/scout-guidance";
 import type { VisionPipelineStages } from "@/lib/vision";
+import {
+  PIPELINE_CHECKPOINT_MAX_JSONB_BYTES,
+  pipelineCheckpointJsonbByteLength,
+} from "./checkpoint";
 import {
   createDurableVisionPipelineProcessor,
   type PipelineWorkerCheckpoint,
@@ -98,7 +106,7 @@ describe("durable vision pipeline processor", () => {
         status: "SUCCEEDED",
         items: [140, 150, 160].map((soldPrice, index) => ({
           url: `https://www.ebay.com/itm/durable-${index}`,
-          title: "Sony WH-1000XM4 Wireless Headphones",
+          title: `Sony WH-1000XM4 Wireless Headphones ${"x".repeat(45_000)}`,
           condition: "Pre-Owned",
           endedAt: "2026-07-10T12:00:00.000Z",
           soldPrice,
@@ -125,7 +133,45 @@ describe("durable vision pipeline processor", () => {
     });
 
     const pricingCheckpoint = saved.find(([stage]) => stage === "pricing")?.[1];
-    expect(pricingCheckpoint?.priceEvidence).toEqual(pricingCheckpoint?.priced);
+    expect(pricingCheckpoint?.priceEvidence).toEqual({
+      version: 1,
+      soldCompCount: 3,
+      oldestSoldAt: Date.parse("2026-07-10T12:00:00.000Z"),
+      observedAt,
+      soldProvider: "apify-ebay-sold",
+    });
+    expect(pricingCheckpoint?.priceEvidence).not.toEqual(
+      pricingCheckpoint?.priced,
+    );
+    expect(
+      pricingCheckpoint?.priced?.sources.every(
+        (source) =>
+          (source.title?.length ?? 0) <= PRICE_SOURCE_TITLE_MAX_LENGTH,
+      ),
+    ).toBe(true);
+    expect(
+      pipelineCheckpointJsonbByteLength(pricingCheckpoint),
+    ).toBeLessThanOrEqual(PIPELINE_CHECKPOINT_MAX_JSONB_BYTES);
+
+    const persistedCheckpoint = JSON.parse(JSON.stringify(pricingCheckpoint));
+    const reloaded = await loadTrustedPriceEvidenceFromPipelineRun(
+      {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: { checkpoint: persistedCheckpoint },
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      } as unknown as SupabaseClient,
+      RUN_ID,
+    );
+    const facts = verifiedPriceEvidence(reloaded!);
+    expect(facts.soldCompCount.value).toBe(3);
+    expect(facts.windowDays.value).toBe(8);
   });
 
   it("resumes after persisted identify and price stages without repeating provider work", async () => {

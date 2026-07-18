@@ -18,12 +18,15 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 - runtime trust for capture, upload, and durable item facts is private object identity, so copying or spreading a fact never
   copies its authority;
 - sold-count and day-window facts accept only the immutable snapshot carried from an approved
-  sold-provider route. The durable worker duplicates that exact snapshot into its lease-fenced,
-  service-role-written `pipeline_runs.checkpoint`; a server-runtime-only loader reads it through the
-  caller's tenant/RLS client and re-enrolls authority after JSON persistence or process restart.
-  Raw checkpoint JSON and tenant-writable prediction-log source fields never grant authority. The
-  ordered production wrapper and ISBN transformation preserve the original authority while Scout
-  derives both values from unique dated citations with one shared observation time;
+  sold-provider route. The durable worker writes one full pricing result plus a compact projection
+  of its approved provider, sold count, and evidence timestamps into the lease-fenced,
+  service-role-written `pipeline_runs.checkpoint`. A server-runtime-only loader reads the row through
+  the caller's tenant/RLS client, verifies the projection against the saved price, and re-enrolls
+  authority after JSON persistence or process restart. Raw checkpoint JSON and tenant-writable
+  prediction-log source fields never grant authority. Pricing sources are bounded at the router,
+  and the worker rejects checkpoints above the database's 262,144-byte JSONB-text ceiling before
+  attempting the RPC. The ordered production wrapper and ISBN transformation preserve authority
+  while Scout derives both values from unique dated citations with one shared observation time;
 - upload-count facts come from producer-owned attempt snapshots, and the completed count advances
   only after Storage succeeds; observer failures cannot
   change upload/staging outcomes, and paused copy describes only what finished in that attempt. It does

@@ -3,17 +3,31 @@ import { z } from "zod";
 import { isApifyEbaySoldProvider } from "./providers/apify-sold";
 import { isEbayPublicSoldProvider } from "./providers/ebay-sold";
 import {
+  PRICE_RESULT_MAX_SOURCES,
   priceResultSchema,
+  soldEvidenceProviderSchema,
   type PriceResult,
   type PricingProvider,
   type SoldEvidenceProvider,
 } from "./types";
 
 const trustedSoldEvidenceResults = new WeakMap<object, PriceResult>();
+export const durablePriceEvidenceSchema = z
+  .object({
+    version: z.literal(1),
+    soldCompCount: z.number().int().min(1).max(PRICE_RESULT_MAX_SOURCES),
+    oldestSoldAt: z.number().nonnegative(),
+    observedAt: z.number().nonnegative(),
+    soldProvider: soldEvidenceProviderSchema,
+  })
+  .strict();
+export type DurablePriceEvidence = z.infer<
+  typeof durablePriceEvidenceSchema
+>;
 const persistedPriceEvidenceSchema = z
   .object({
     priced: priceResultSchema,
-    priceEvidence: priceResultSchema,
+    priceEvidence: durablePriceEvidenceSchema,
   })
   .passthrough();
 
@@ -25,33 +39,65 @@ function rememberTrustedResult(result: PriceResult): void {
   trustedSoldEvidenceResults.set(result, durableSnapshot(result));
 }
 
-function sameDurableResult(left: PriceResult, right: PriceResult): boolean {
-  return (
-    JSON.stringify(durableSnapshot(left)) ===
-    JSON.stringify(durableSnapshot(right))
+function durablePriceEvidence(
+  recommendation: PriceResult,
+): DurablePriceEvidence | null {
+  const soldSources = recommendation.sources.filter(
+    (source) => source.kind === "sold-comp",
   );
+  const soldProviders = new Set(
+    soldSources.map((source) => source.soldProvider),
+  );
+  const observedAt = soldSources[0]?.observedAt;
+  const oldestSoldAt = Math.min(
+    ...soldSources.map((source) => source.soldAt ?? Number.NaN),
+  );
+  if (
+    soldSources.length === 0 ||
+    new Set(soldSources.map((source) => source.url)).size !==
+      soldSources.length ||
+    soldProviders.size !== 1 ||
+    soldProviders.has(undefined) ||
+    observedAt === undefined ||
+    !Number.isFinite(oldestSoldAt) ||
+    soldSources.some(
+      (source) =>
+        source.soldAt === undefined ||
+        source.observedAt !== observedAt ||
+        source.soldAt > observedAt,
+    )
+  ) {
+    return null;
+  }
+  return durablePriceEvidenceSchema.parse({
+    version: 1,
+    soldCompCount: soldSources.length,
+    oldestSoldAt,
+    observedAt,
+    soldProvider: soldSources[0]?.soldProvider,
+  });
 }
 
-/** Create the exact duplicate written into the server-owned pipeline checkpoint. */
+/** Clone a currently trusted result while retaining process-local authority. */
 export function checkpointTrustedPriceEvidence(
   recommendation: PriceResult,
 ): PriceResult {
-  const checkpoint = checkpointTrustedPriceEvidenceIfAvailable(recommendation);
-  if (!checkpoint) {
+  const trusted = trustedSoldEvidenceResults.get(recommendation);
+  if (!trusted) {
     throw new Error("Price evidence checkpoint requires a trusted routed result.");
   }
-  return checkpoint;
-}
-
-/** Producer seam: non-sold tiers simply have no Scout price-evidence checkpoint. */
-export function checkpointTrustedPriceEvidenceIfAvailable(
-  recommendation: PriceResult,
-): PriceResult | null {
-  const trusted = trustedSoldEvidenceResults.get(recommendation);
-  if (!trusted) return null;
   const checkpoint = durableSnapshot(trusted);
   rememberTrustedResult(checkpoint);
   return checkpoint;
+}
+
+/** Persist only the bounded Scout facts produced by an approved sold route. */
+export function checkpointTrustedPriceEvidenceIfAvailable(
+  recommendation: PriceResult,
+): DurablePriceEvidence | null {
+  const trusted = trustedSoldEvidenceResults.get(recommendation);
+  if (!trusted) return null;
+  return durablePriceEvidence(trusted);
 }
 
 /**
@@ -77,16 +123,18 @@ export async function loadTrustedPriceEvidenceFromPipelineRun(
   }
   if (!data) return null;
   const persisted = persistedPriceEvidenceSchema.safeParse(data.checkpoint);
+  if (!persisted.success) {
+    return null;
+  }
+  const expectedEvidence = durablePriceEvidence(persisted.data.priced);
   if (
-    !persisted.success ||
-    !sameDurableResult(
-      persisted.data.priced,
-      persisted.data.priceEvidence,
-    )
+    !expectedEvidence ||
+    JSON.stringify(expectedEvidence) !==
+      JSON.stringify(persisted.data.priceEvidence)
   ) {
     return null;
   }
-  const recommendation = durableSnapshot(persisted.data.priceEvidence);
+  const recommendation = durableSnapshot(persisted.data.priced);
   rememberTrustedResult(recommendation);
   return recommendation;
 }

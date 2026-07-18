@@ -6,7 +6,13 @@ import {
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
-import type { ItemSignal, PriceResult, PricingProvider } from "../types";
+import {
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  PRICE_SOURCE_URL_MAX_LENGTH,
+  type ItemSignal,
+  type PriceResult,
+  type PricingProvider,
+} from "../types";
 import { logEvent, type LogFields } from "../../observability";
 import {
   assertSafeEbayUrl,
@@ -197,7 +203,8 @@ function canonicalEbayItemUrl(value: unknown): string | null {
     url.password = "";
     url.search = "";
     url.hash = "";
-    return url.toString();
+    const canonical = url.toString();
+    return canonical.length <= PRICE_SOURCE_URL_MAX_LENGTH ? canonical : null;
   } catch {
     return null;
   }
@@ -240,7 +247,10 @@ export function normalizeApifySoldItems(
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const raw = value as Record<string, unknown>;
     const url = canonicalEbayItemUrl(raw.url);
-    const title = typeof raw.title === "string" ? raw.title.trim() : "";
+    const title =
+      typeof raw.title === "string"
+        ? raw.title.trim().slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH)
+        : "";
     const price = finitePositive(raw.soldPrice);
     const currency =
       typeof raw.soldCurrency === "string" ? raw.soldCurrency.trim().toUpperCase() : "";

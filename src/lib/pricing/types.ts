@@ -91,14 +91,19 @@ export const soldEvidenceProviderSchema = z.enum([
 ]);
 export type SoldEvidenceProvider = z.infer<typeof soldEvidenceProviderSchema>;
 
+export const PRICE_SOURCE_URL_MAX_LENGTH = 2_048;
+export const PRICE_SOURCE_TITLE_MAX_LENGTH = 256;
+export const PRICE_SOURCE_KIND_MAX_LENGTH = 64;
+export const PRICE_RESULT_MAX_SOURCES = 25;
+
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({
   /** Canonical link to the comp or lookup record. Required — a source must be checkable. */
-  url: z.string().min(1),
+  url: z.string().min(1).max(PRICE_SOURCE_URL_MAX_LENGTH),
   /** Human-readable label (listing/page title). */
-  title: z.string().optional(),
+  title: z.string().max(PRICE_SOURCE_TITLE_MAX_LENGTH).optional(),
   /** What kind of source this is, e.g. "isbn-lookup" | "sold-comp" | "asking-comp". */
-  kind: z.string().optional(),
+  kind: z.string().max(PRICE_SOURCE_KIND_MAX_LENGTH).optional(),
   /** Completed-sale timestamp retained through prediction-log JSON persistence. */
   soldAt: z.number().nonnegative().optional(),
   /** Observation timestamp used to derive an honest bounded evidence window. */
@@ -131,7 +136,7 @@ export const priceResultSchema = z
      */
     confidence: z.number().min(0).max(1),
     /** Cited comps / lookup records. May be empty for the LLM-only fallback. */
-    sources: z.array(priceSourceSchema),
+    sources: z.array(priceSourceSchema).max(PRICE_RESULT_MAX_SOURCES),
     /** Which tier produced this — a logged, confidence-bearing fact. */
     tier: pricingTierSchema,
     /**

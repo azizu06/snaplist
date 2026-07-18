@@ -19,6 +19,7 @@ import {
   type PriceResult,
   type PricingProvider,
 } from "@/lib/pricing";
+import { checkpointTrustedPriceEvidenceIfAvailable } from "@/lib/pricing/approved-sold-provider";
 import { appendAcceptedPhotos } from "@/app/(app)/upload/upload-draft-context";
 import type { AppendAcceptedPhotosResult } from "@/lib/capture-progress";
 import {
@@ -598,13 +599,15 @@ describe("resolveScoutGuidance", () => {
     const recommendation = await routedPriceRecommendation(2, 9);
     const persistedCheckpoint = JSON.parse(JSON.stringify({
       priced: recommendation,
-      priceEvidence: checkpointTrustedPriceEvidence(recommendation),
+      priceEvidence: checkpointTrustedPriceEvidenceIfAvailable(recommendation),
     }));
     for (const publicJson of [
       persistedCheckpoint.priced,
       persistedCheckpoint.priceEvidence,
     ]) {
-      expect(() => verifiedPriceEvidence(publicJson)).toThrowError(
+      expect(() =>
+        verifiedPriceEvidence(publicJson as PriceResult),
+      ).toThrowError(
         expect.objectContaining({ code: "untrusted-price-recommendation" }),
       );
     }
@@ -624,7 +627,33 @@ describe("resolveScoutGuidance", () => {
     expect(from).toHaveBeenCalledWith("pipeline_runs");
     expect(select).toHaveBeenCalledWith("checkpoint");
     expect(eq).toHaveBeenCalledWith("id", RUN_ID);
-    expect(verifiedPriceEvidence(reloaded!).soldCompCount.value).toBe(2);
+    const facts = verifiedPriceEvidence(reloaded!);
+    expect(facts.soldCompCount.value).toBe(2);
+    expect(facts.windowDays.value).toBe(9);
+  });
+
+  it("rejects a compact evidence projection that does not match the saved price", async () => {
+    const recommendation = await routedPriceRecommendation(2, 9);
+    const priceEvidence = checkpointTrustedPriceEvidenceIfAvailable(recommendation);
+    const maybeSingle = vi.fn(async () => ({
+      data: {
+        checkpoint: {
+          priced: JSON.parse(JSON.stringify(recommendation)),
+          priceEvidence: { ...priceEvidence, soldCompCount: 3 },
+        },
+      },
+      error: null,
+    }));
+    const from = vi.fn(() => ({
+      select: () => ({ eq: () => ({ maybeSingle }) }),
+    }));
+
+    await expect(
+      loadTrustedPriceEvidenceFromPipelineRun(
+        { from } as unknown as SupabaseClient,
+        RUN_ID,
+      ),
+    ).resolves.toBeNull();
   });
 
   it("refuses to enroll durable price authority in a browser runtime", async () => {

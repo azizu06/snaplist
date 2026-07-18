@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { priceResultSchema, PRICING_TIERS, type PriceResult } from "./types";
+import {
+  PRICE_RESULT_MAX_SOURCES,
+  PRICE_SOURCE_KIND_MAX_LENGTH,
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  PRICE_SOURCE_URL_MAX_LENGTH,
+  priceResultSchema,
+  PRICING_TIERS,
+  type PriceResult,
+} from "./types";
 
 /**
  * The PriceResult contract is the data shape every PricingProvider returns and
@@ -40,6 +48,44 @@ describe("PriceResult contract", () => {
     expect(() => priceResultSchema.parse(sourced)).not.toThrow();
     const noUrl = { ...valid, sources: [{ title: "no url" }] };
     expect(() => priceResultSchema.parse(noUrl)).toThrow();
+  });
+
+  it("bounds citation strings and source count at the pricing contract", () => {
+    const source = {
+      url: `https://example.com/${"u".repeat(
+        PRICE_SOURCE_URL_MAX_LENGTH - "https://example.com/".length,
+      )}`,
+      title: "t".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH),
+      kind: "k".repeat(PRICE_SOURCE_KIND_MAX_LENGTH),
+    };
+    expect(
+      priceResultSchema.safeParse({
+        ...valid,
+        sources: Array.from(
+          { length: PRICE_RESULT_MAX_SOURCES },
+          (_unused, index) => ({ ...source, url: `${source.url.slice(0, -2)}${index}` }),
+        ),
+      }).success,
+    ).toBe(true);
+    for (const oversizedSource of [
+      { ...source, url: `${source.url}x` },
+      { ...source, title: `${source.title}x` },
+      { ...source, kind: `${source.kind}x` },
+    ]) {
+      expect(
+        priceResultSchema.safeParse({ ...valid, sources: [oversizedSource] })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      priceResultSchema.safeParse({
+        ...valid,
+        sources: Array.from(
+          { length: PRICE_RESULT_MAX_SOURCES + 1 },
+          () => source,
+        ),
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects an unknown tier identifier", () => {
