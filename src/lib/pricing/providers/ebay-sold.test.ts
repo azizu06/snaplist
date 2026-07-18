@@ -21,7 +21,14 @@ import {
 } from "./ebay-sold";
 import { createInMemoryTtlCache, type TtlCache } from "../comp-cache";
 import { PriceRouter } from "../router";
-import { priceResultSchema, type ItemSignal, type PricingProvider } from "../types";
+import {
+  PRICE_RESULT_MAX_SOURCES,
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  PRICE_SOURCE_URL_MAX_LENGTH,
+  priceResultSchema,
+  type ItemSignal,
+  type PricingProvider,
+} from "../types";
 import { TIGHT_AGREEMENT_MIN } from "./web-search";
 
 /**
@@ -965,6 +972,63 @@ describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
     expect(result.sources.every((source) => source.kind === "sold-comp")).toBe(
       true,
     );
+  });
+
+  it("fails soft on oversized public card citations before router validation", async () => {
+    const titlePrefix = "Sony WH-1000XM4 Headphones ";
+    const oversizedTitle = `${titlePrefix}${"T".repeat(317 - titlePrefix.length)}`;
+    const urlPrefix = "https://www.ebay.com/itm/";
+    const oversizedUrl = `${urlPrefix}${"u".repeat(
+      2_076 - urlPrefix.length,
+    )}`;
+    const card = (href: string, title: string, price: number) => `
+      <li class="s-item">
+        <a class="s-item__link" href="${href}"><div class="s-item__title">${title}</div></a>
+        <span class="s-item__price">$${price.toFixed(2)}</span>
+        <div class="s-item__caption"><span>Sold Jun 1, 2026</span></div>
+        <div class="s-item__subtitle"><span class="SECONDARY_INFO">Pre-Owned</span></div>
+      </li>`;
+    const html = `<ul class="srp-results">
+      ${card(oversizedUrl, titlePrefix, 149)}
+      ${card("https://www.ebay.com/itm/bounded-1", oversizedTitle, 150)}
+      ${card("https://www.ebay.com/itm/bounded-2", titlePrefix, 151)}
+    </ul>`;
+    const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(html) });
+
+    const result = await new PriceRouter([provider]).price(BRANDED_SIGNAL);
+
+    expect(oversizedUrl).toHaveLength(2_076);
+    expect(result.sources.map((source) => source.url)).toEqual([
+      "https://www.ebay.com/itm/bounded-1",
+      "https://www.ebay.com/itm/bounded-2",
+    ]);
+    expect(result.sources[0].title).toHaveLength(PRICE_SOURCE_TITLE_MAX_LENGTH);
+    expect(result.sources.every((source) => source.url.length <= PRICE_SOURCE_URL_MAX_LENGTH)).toBe(
+      true,
+    );
+  });
+
+  it("clamps caller maxResults to the shared source ceiling", async () => {
+    const cards = Array.from(
+      { length: PRICE_RESULT_MAX_SOURCES + 5 },
+      (_unused, index) => `
+        <li class="s-item">
+          <a class="s-item__link" href="https://www.ebay.com/itm/capped-${index}">
+            <div class="s-item__title">Sony WH-1000XM4 Headphones</div>
+          </a>
+          <span class="s-item__price">$${150 + (index % 3)}.00</span>
+          <div class="s-item__caption"><span>Sold Jun 1, 2026</span></div>
+          <div class="s-item__subtitle"><span class="SECONDARY_INFO">Pre-Owned</span></div>
+        </li>`,
+    );
+    const provider = createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(`<ul class="srp-results">${cards.join("")}</ul>`),
+      maxResults: PRICE_RESULT_MAX_SOURCES + 20,
+    });
+
+    const result = await new PriceRouter([provider]).price(BRANDED_SIGNAL);
+
+    expect(result.sources).toHaveLength(PRICE_RESULT_MAX_SOURCES);
   });
 
   it("falls through to the web tier when the scrape is blocked", async () => {

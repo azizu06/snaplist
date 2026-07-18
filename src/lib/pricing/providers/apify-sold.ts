@@ -7,8 +7,9 @@ import {
 } from "../freshness";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import {
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
   PRICE_SOURCE_URL_MAX_LENGTH,
+  PRICE_SOURCE_TITLE_MAX_LENGTH,
+  boundWellFormedString,
   type ItemSignal,
   type PriceResult,
   type PricingProvider,
@@ -249,7 +250,10 @@ export function normalizeApifySoldItems(
     const url = canonicalEbayItemUrl(raw.url);
     const title =
       typeof raw.title === "string"
-        ? raw.title.trim().slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH)
+        ? boundWellFormedString(
+            raw.title.trim(),
+            PRICE_SOURCE_TITLE_MAX_LENGTH,
+          )
         : "";
     const price = finitePositive(raw.soldPrice);
     const currency =

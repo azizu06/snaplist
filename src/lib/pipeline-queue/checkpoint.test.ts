@@ -98,4 +98,36 @@ describe("pipeline worker checkpoint contract", () => {
       false,
     );
   });
+
+  it("rejects a priced source surrogate that PostgreSQL JSONB cannot encode", () => {
+    const checkpoint = {
+      identified: {
+        attributes: {},
+        model: "m",
+      },
+      priced: {
+        suggested: 1,
+        range: { min: 1, max: 1 },
+        confidence: 0.8,
+        sources: [
+          {
+            url: "https://example.com/sold",
+            title: "\ud83d",
+            kind: "sold-comp",
+          },
+        ],
+        tier: "ebay-sold" as const,
+      },
+    };
+
+    // The byte counter alone sees JSON.stringify's escaped form as a small
+    // payload; the nested PriceSource contract must reject it before the
+    // RPC reaches PostgreSQL's stricter JSONB Unicode decoder.
+    expect(pipelineCheckpointJsonbByteLength(checkpoint)).toBeLessThan(
+      PIPELINE_CHECKPOINT_MAX_JSONB_BYTES,
+    );
+    expect(pipelineWorkerCheckpointSchema.safeParse(checkpoint).success).toBe(
+      false,
+    );
+  });
 });

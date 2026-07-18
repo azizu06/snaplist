@@ -97,14 +97,76 @@ export const PRICE_SOURCE_KIND_MAX_LENGTH = 64;
 /** Matches the established public eBay sold-page retrieval ceiling. */
 export const PRICE_RESULT_MAX_SOURCES = 60;
 
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Bound a string by UTF-16 storage length without cutting a Unicode code point.
+ * Malformed input code units become U+FFFD, matching JavaScript's standard
+ * well-formed-string repair, so persisted JSON can never contain an unpaired
+ * surrogate that PostgreSQL rejects.
+ */
+export function boundWellFormedString(
+  value: string,
+  maxLength: number,
+): string {
+  const limit = Math.max(0, Math.floor(maxLength));
+  let bounded = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    let codePoint: string;
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        codePoint = value.slice(index, index + 2);
+        index += 1;
+      } else {
+        codePoint = "\ufffd";
+      }
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      codePoint = "\ufffd";
+    } else {
+      codePoint = value[index];
+    }
+    if (bounded.length + codePoint.length > limit) break;
+    bounded += codePoint;
+  }
+  return bounded;
+}
+
+const wellFormedSourceUrlSchema = z
+  .string()
+  .min(1)
+  .max(PRICE_SOURCE_URL_MAX_LENGTH)
+  .refine(isWellFormedUnicode, "Source URL must contain well-formed Unicode.");
+const wellFormedSourceTitleSchema = z
+  .string()
+  .max(PRICE_SOURCE_TITLE_MAX_LENGTH)
+  .refine(isWellFormedUnicode, "Source title must contain well-formed Unicode.");
+const wellFormedSourceKindSchema = z
+  .string()
+  .max(PRICE_SOURCE_KIND_MAX_LENGTH)
+  .refine(isWellFormedUnicode, "Source kind must contain well-formed Unicode.");
+
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({
   /** Canonical link to the comp or lookup record. Required — a source must be checkable. */
-  url: z.string().min(1).max(PRICE_SOURCE_URL_MAX_LENGTH),
+  url: wellFormedSourceUrlSchema,
   /** Human-readable label (listing/page title). */
-  title: z.string().max(PRICE_SOURCE_TITLE_MAX_LENGTH).optional(),
+  title: wellFormedSourceTitleSchema.optional(),
   /** What kind of source this is, e.g. "isbn-lookup" | "sold-comp" | "asking-comp". */
-  kind: z.string().max(PRICE_SOURCE_KIND_MAX_LENGTH).optional(),
+  kind: wellFormedSourceKindSchema.optional(),
   /** Completed-sale timestamp retained through prediction-log JSON persistence. */
   soldAt: z.number().nonnegative().optional(),
   /** Observation timestamp used to derive an honest bounded evidence window. */
@@ -114,6 +176,38 @@ export const priceSourceSchema = z.object({
 });
 
 export type PriceSource = z.infer<typeof priceSourceSchema>;
+
+/**
+ * Normalize citation metadata received from an external provider without ever
+ * changing its primary URL. Oversized/invalid URLs are rejected (or replaced
+ * by an explicitly supplied canonical provider URL), while a human-readable
+ * title may be deterministically bounded because it is only a label.
+ */
+export function normalizeExternalPriceSource(
+  source: PriceSource,
+  options: { fallbackUrl?: string } = {},
+): PriceSource | null {
+  const url = [source.url, options.fallbackUrl].find(
+    (candidate): candidate is string =>
+      typeof candidate === "string" &&
+      priceSourceSchema.shape.url.safeParse(candidate).success,
+  );
+  if (!url) return null;
+
+  const normalized = priceSourceSchema.safeParse({
+    ...source,
+    url,
+    ...(source.title != null
+      ? {
+          title: boundWellFormedString(
+            source.title,
+            PRICE_SOURCE_TITLE_MAX_LENGTH,
+          ),
+        }
+      : {}),
+  });
+  return normalized.success ? normalized.data : null;
+}
 
 /**
  * A price recommendation. Always `{ suggested, range, confidence, sources[] }`

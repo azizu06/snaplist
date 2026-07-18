@@ -1,8 +1,6 @@
 import {
   PRICE_RESULT_MAX_SOURCES,
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
-  PRICE_SOURCE_URL_MAX_LENGTH,
-  priceSourceSchema,
+  normalizeExternalPriceSource,
   type ItemSignal,
   type PriceResult,
   type PriceSource,
@@ -195,28 +193,16 @@ function boundedCatalogSource(args: {
   title?: string;
   fallbackTitle: string;
 }): PriceSource | undefined {
-  // A citation URL must stay intact to remain checkable. If external metadata
-  // supplies an oversized URL, use the provider's canonical record URL; if
-  // even that cannot satisfy the shared contract, omit this source and let the
-  // provider decline rather than aborting the whole pricing route.
-  const url = [args.preferredUrl, args.fallbackUrl].find(
-    (candidate): candidate is string =>
-      typeof candidate === "string" &&
-      candidate.length > 0 &&
-      candidate.length <= PRICE_SOURCE_URL_MAX_LENGTH,
+  return (
+    normalizeExternalPriceSource(
+      {
+        url: args.preferredUrl ?? args.fallbackUrl,
+        title: args.title ?? args.fallbackTitle,
+        kind: "isbn-lookup",
+      },
+      { fallbackUrl: args.fallbackUrl },
+    ) ?? undefined
   );
-  if (!url) return undefined;
-
-  const title = (args.title ?? args.fallbackTitle).slice(
-    0,
-    PRICE_SOURCE_TITLE_MAX_LENGTH,
-  );
-  const parsed = priceSourceSchema.safeParse({
-    url,
-    title,
-    kind: "isbn-lookup",
-  });
-  return parsed.success ? parsed.data : undefined;
 }
 
 /** Resolve the Open Library edition record into a citation + title. */
@@ -226,22 +212,20 @@ function readOpenLibrary(
 ): { source?: PriceSource; title?: string } {
   if (!isObject(body)) return {};
   const edition = body as OpenLibraryEdition;
-  const title =
-    typeof edition.title === "string"
-      ? edition.title.slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH)
-      : undefined;
+  const title = typeof edition.title === "string" ? edition.title : undefined;
   // Prefer the canonical work key as the citation URL; fall back to the ISBN page.
-  return {
+  const source = boundedCatalogSource({
+    preferredUrl:
+      typeof edition.key === "string"
+        ? `https://openlibrary.org${edition.key}`
+        : undefined,
+    fallbackUrl: openLibraryUrl(isbn).replace(/\.json$/, ""),
     title,
-    source: boundedCatalogSource({
-      preferredUrl:
-        typeof edition.key === "string"
-          ? `https://openlibrary.org${edition.key}`
-          : undefined,
-      fallbackUrl: openLibraryUrl(isbn).replace(/\.json$/, ""),
-      title,
-      fallbackTitle: `Open Library record for ISBN ${isbn}`,
-    }),
+    fallbackTitle: `Open Library record for ISBN ${isbn}`,
+  });
+  return {
+    title: source?.title,
+    source,
   };
 }
 
@@ -263,10 +247,7 @@ function readGoogleBooks(
   const volume = items[0];
   const info = volume.volumeInfo ?? {};
   const sale = volume.saleInfo ?? {};
-  const title =
-    typeof info.title === "string"
-      ? info.title.slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH)
-      : undefined;
+  const title = typeof info.title === "string" ? info.title : undefined;
 
   // Prefer retail (actual sale price), then list price. Only USD anchors are used
   // so we never mix currencies into a USD band.
@@ -281,19 +262,20 @@ function readGoogleBooks(
         ? list
         : undefined;
 
+  const source = boundedCatalogSource({
+    preferredUrl:
+      typeof info.infoLink === "string" && info.infoLink.length > 0
+        ? info.infoLink
+        : undefined,
+    fallbackUrl: `https://books.google.com/books?q=isbn:${encodeURIComponent(isbn)}`,
+    title,
+    fallbackTitle: `Google Books record for ISBN ${isbn}`,
+  });
   return {
     matched: true,
-    title,
+    title: source?.title,
     anchorPrice,
-    source: boundedCatalogSource({
-      preferredUrl:
-        typeof info.infoLink === "string" && info.infoLink.length > 0
-          ? info.infoLink
-          : undefined,
-      fallbackUrl: `https://books.google.com/books?q=isbn:${encodeURIComponent(isbn)}`,
-      title,
-      fallbackTitle: `Google Books record for ISBN ${isbn}`,
-    }),
+    source,
   };
 }
 

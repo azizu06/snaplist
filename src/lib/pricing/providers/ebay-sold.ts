@@ -1,9 +1,11 @@
 import { load } from "cheerio";
-import type {
-  ItemSignal,
-  PriceResult,
-  PriceSource,
-  PricingProvider,
+import {
+  PRICE_RESULT_MAX_SOURCES,
+  normalizeExternalPriceSource,
+  type ItemSignal,
+  type PriceResult,
+  type PriceSource,
+  type PricingProvider,
 } from "../types";
 import { TIGHT_AGREEMENT_MIN, spreadToAgreement } from "./web-search";
 import {
@@ -141,9 +143,15 @@ export const EBAY_SOLD_USER_AGENT_DEFAULT =
 /** eBay shows up to this many results per page; one fetch is plenty of comps. */
 export const EBAY_SOLD_RESULTS_PER_PAGE = 120;
 /** Parse cap — a pathological page can't blow memory / downstream cost. */
-export const EBAY_SOLD_MAX_RESULTS = 60;
+export const EBAY_SOLD_MAX_RESULTS = PRICE_RESULT_MAX_SOURCES;
 /** Fewer than this many sold comps = "nothing useful" → decline. */
 export const EBAY_SOLD_MIN_COMPS = 2;
+
+function boundedSoldResultLimit(value: number): number {
+  return Number.isFinite(value)
+    ? Math.max(0, Math.min(Math.floor(value), PRICE_RESULT_MAX_SOURCES))
+    : EBAY_SOLD_MAX_RESULTS;
+}
 
 /**
  * Per-fetch timeout. A stalled eBay response (connection accepted, body never
@@ -464,6 +472,7 @@ export function parseSoldComps(
   baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
   max: number = EBAY_SOLD_MAX_RESULTS,
 ): EbaySoldComp[] {
+  const limit = boundedSoldResultLimit(max);
   const $ = load(html);
   const comps: EbaySoldComp[] = [];
   const seen = new Set<string>();
@@ -473,7 +482,7 @@ export function parseSoldComps(
   const harvest = (sel: CardSelectors): boolean => {
     let capped = false;
     $(sel.card).each((_i, el) => {
-      if (comps.length >= max) {
+      if (comps.length >= limit) {
         capped = true;
         return false; // hit the cap — stop iterating
       }
@@ -512,14 +521,19 @@ export function parseSoldComps(
 
       const href = card.find(sel.link).first().attr("href");
       if (!href) return;
-      let url: string;
+      let resolvedUrl: string;
       try {
-        url = new URL(href, baseUrl).toString();
+        resolvedUrl = new URL(href, baseUrl).toString();
       } catch {
         return;
       }
-      if (seen.has(url)) return;
-      seen.add(url);
+      const source = normalizeExternalPriceSource({
+        url: resolvedUrl,
+        title,
+        kind: "sold-comp",
+      });
+      if (source === null || seen.has(source.url)) return;
+      seen.add(source.url);
 
       // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
       // authoritative grade even when the title omits it (#56 review).
@@ -530,8 +544,8 @@ export function parseSoldComps(
       const soldAt = parseSoldDate(captionText);
 
       const comp: EbaySoldComp = {
-        url,
-        title,
+        url: source.url,
+        title: source.title,
         price,
         ...(condition ? { condition } : {}),
         ...(soldAt != null ? { soldAt } : {}),
@@ -989,7 +1003,9 @@ export function createEbaySoldPricingProvider(
 ): PricingProvider {
   const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
-  const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
+  const maxResults = boundedSoldResultLimit(
+    options.maxResults ?? EBAY_SOLD_MAX_RESULTS,
+  );
   const configuredEgress = options.fetchPage
     ? { mode: "injected" as const }
     : resolveEbaySoldEgressConfig();
@@ -1107,6 +1123,9 @@ export function createEbaySoldPricingProvider(
           }
         }
       }
+      // A cache may outlive a deployment or be injected by a caller; reapply
+      // the provider's shared evidence ceiling even when parsing was bypassed.
+      comps = comps.slice(0, maxResults);
 
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales

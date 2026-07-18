@@ -540,6 +540,36 @@ describe("branded-web pricing agent", () => {
     expect(result.sources[0].title).toHaveLength(PRICE_SOURCE_TITLE_MAX_LENGTH);
   });
 
+  it("bounds extracted titles without splitting a Unicode surrogate pair", async () => {
+    const boundaryTitle = `${"A".repeat(
+      PRICE_SOURCE_TITLE_MAX_LENGTH - 1,
+    )}😀B`;
+    const provider = createBrandedWebPricingProvider({
+      searchClient: fakeSearch(),
+      extractComps: fakeExtractor([[
+        {
+          url: "https://www.ebay.com/itm/q1-1",
+          title: boundaryTitle,
+          price: 178,
+          kind: "sold",
+        },
+        {
+          url: "https://www.ebay.com/itm/q1-2",
+          title: "SOLD 2",
+          price: 185.5,
+          kind: "sold",
+        },
+      ]]),
+    });
+
+    const result = await new PriceRouter([provider]).price(BRANDED_SIGNAL);
+
+    expect(result.sources[0].title).toBe(
+      "A".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH - 1),
+    );
+    expect(JSON.stringify(result.sources)).not.toContain("\\ud83d");
+  });
+
   it("declines (null) when no useful comps are found, so the router falls through", async () => {
     const webProvider = createBrandedWebPricingProvider({
       searchClient: fakeSearch(),

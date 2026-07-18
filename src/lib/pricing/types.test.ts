@@ -88,6 +88,24 @@ describe("PriceResult contract", () => {
     ).toBe(false);
   });
 
+  it("rejects malformed surrogate strings that PostgreSQL JSONB cannot encode", () => {
+    const loneHighSurrogate = "\ud83d";
+    expect(JSON.stringify({ value: loneHighSurrogate })).toContain("\\ud83d");
+
+    for (const malformedSource of [
+      { url: `https://example.com/${loneHighSurrogate}` },
+      { url: "https://example.com", title: loneHighSurrogate },
+      { url: "https://example.com", kind: loneHighSurrogate },
+    ]) {
+      expect(
+        priceResultSchema.safeParse({
+          ...valid,
+          sources: [malformedSource],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("rejects an unknown tier identifier", () => {
     expect(() => priceResultSchema.parse({ ...valid, tier: "not-a-tier" })).toThrow();
   });

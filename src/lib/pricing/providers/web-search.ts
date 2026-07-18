@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
-  PRICE_SOURCE_URL_MAX_LENGTH,
+  normalizeExternalPriceSource,
   type ItemSignal,
   type PriceResult,
   type PriceSource,
@@ -206,14 +205,15 @@ function normalizeExternalWebComp(comp: unknown): WebComp | null {
   // an oversized external citation independently so other valid comps can
   // still price the listing. Titles are labels, so deterministic truncation
   // preserves useful context while satisfying the shared source contract.
-  if (parsed.data.url.length > PRICE_SOURCE_URL_MAX_LENGTH) return null;
+  const source = normalizeExternalPriceSource({
+    url: parsed.data.url,
+    title: parsed.data.title,
+  });
+  if (source === null) return null;
   return {
     ...parsed.data,
-    ...(parsed.data.title != null
-      ? {
-          title: parsed.data.title.slice(0, PRICE_SOURCE_TITLE_MAX_LENGTH),
-        }
-      : {}),
+    url: source.url,
+    title: source.title,
   };
 }
 

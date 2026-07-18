@@ -162,6 +162,37 @@ describe("ISBN pricing provider", () => {
     ]);
   });
 
+  it("bounds catalog titles without splitting a Unicode surrogate pair", async () => {
+    const boundaryTitle = `${"A".repeat(
+      PRICE_SOURCE_TITLE_MAX_LENGTH - 1,
+    )}😀B`;
+    const provider = createIsbnPricingProvider({
+      fetchJson: fakeFetchJson({
+        openLibrary: { ...openLibraryEdition, title: boundaryTitle },
+        googleBooks: {
+          ...googleBooksVolumes,
+          items: [
+            {
+              ...googleBooksVolumes.items[0],
+              volumeInfo: {
+                ...googleBooksVolumes.items[0].volumeInfo,
+                title: boundaryTitle,
+              },
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = await new PriceRouter([provider]).price({ isbn: ISBN });
+
+    expect(result.sources.map((source) => source.title)).toEqual([
+      "A".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH - 1),
+      "A".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH - 1),
+    ]);
+    expect(JSON.stringify(result.sources)).not.toContain("\\ud83d");
+  });
+
   it("suggests a used price below retail, inside the band", async () => {
     const provider = createIsbnPricingProvider({ fetchJson: fakeFetchJson() });
     const result = await provider.price({ isbn: ISBN });
