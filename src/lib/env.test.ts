@@ -51,6 +51,17 @@ describe("parseEnv", () => {
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
   });
 
+  it("accepts the server-only listing-example experiment controls", () => {
+    const env = parseEnv({
+      ...valid,
+      LISTING_EXAMPLE_RETRIEVAL_ENABLED: "true",
+      LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS: "2000",
+    });
+
+    expect(env.LISTING_EXAMPLE_RETRIEVAL_ENABLED).toBe("true");
+    expect(env.LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS).toBe("2000");
+  });
+
   it("treats a missing or blank sold-comps proxy template as optional", () => {
     expect(parseEnv(valid).EBAY_SOLD_PROXY_TEMPLATE).toBeUndefined();
     expect(

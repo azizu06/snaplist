@@ -324,15 +324,90 @@ describe("listing/generate — no attributes invented beyond the validated core"
 });
 
 describe("listing/generate — grounded by injected few-shot retrieval", () => {
+  it("skips optional example retrieval by default and still generates the listing", async () => {
+    vi.stubEnv("LISTING_EXAMPLE_RETRIEVAL_ENABLED", "");
+    const retrieve = vi.fn(async () => EXEMPLARS);
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    try {
+      const result = await generateEbayListing({
+        attributes: CORE,
+        retrieve,
+        generate,
+      });
+
+      expect(retrieve).not.toHaveBeenCalled();
+      expect(calls[0].fewShot).toEqual({ matches: [], examples: [] });
+      expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("invokes the injected `retrieve` and passes the exemplars to the model", async () => {
     const retrieve = vi.fn(async () => EXEMPLARS);
     const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
-    await generateEbayListing({ attributes: CORE, retrieve, generate });
+    await generateEbayListing({
+      attributes: CORE,
+      retrieve,
+      generate,
+      listingExampleRetrieval: { enabled: true },
+    });
 
     expect(retrieve).toHaveBeenCalledOnce();
     expect(retrieve).toHaveBeenCalledWith(CORE);
     // The grounding exemplars actually reach the model call.
     expect(calls[0].fewShot.examples).toEqual(EXEMPLARS.examples);
+  });
+
+  it("fails open to no examples when enabled retrieval throws", async () => {
+    const retrieve = vi.fn(async (): Promise<FewShotExamples> => {
+      throw new Error("embedding provider unavailable");
+    });
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const result = await generateEbayListing({
+      attributes: CORE,
+      retrieve,
+      generate,
+      listingExampleRetrieval: { enabled: true },
+    });
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(calls[0].fewShot).toEqual({ matches: [], examples: [] });
+    expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
+  });
+
+  it("generates without examples when the enabled corpus is empty", async () => {
+    const retrieve = vi.fn(async () => fewShotOf());
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const result = await generateEbayListing({
+      attributes: CORE,
+      retrieve,
+      generate,
+      listingExampleRetrieval: { enabled: true },
+    });
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(calls[0].fewShot).toEqual({ matches: [], examples: [] });
+    expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
+  });
+
+  it("fails open to no examples when enabled retrieval times out", async () => {
+    const retrieve = vi.fn(() => new Promise<FewShotExamples>(() => {}));
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const result = await generateEbayListing({
+      attributes: CORE,
+      retrieve,
+      generate,
+      listingExampleRetrieval: { enabled: true, timeoutMs: 5 },
+    });
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(calls[0].fewShot).toEqual({ matches: [], examples: [] });
+    expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
   });
 
   it("prefers explicit `fewShot` over calling `retrieve`", async () => {

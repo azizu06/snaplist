@@ -26,5 +26,6 @@ export {
   type GenerateEbayListingInput,
   type GenerateEbayListingResult,
   type ListingGenerate,
+  type ListingExampleRetrievalOptions,
   type RetrieveFewShot,
 } from "./generate";
