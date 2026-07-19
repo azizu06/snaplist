@@ -1,6 +1,6 @@
 begin;
 
-select plan(63);
+select plan(64);
 
 select ok(
   to_regclass('private.guest_draft_recoveries') is not null,
@@ -31,7 +31,7 @@ select ok(
 select ok(
   has_function_privilege(
     'service_role',
-    'public.queue_guest_claim_copy_cleanup(uuid,text,text,uuid)',
+    'public.queue_guest_claim_copy_cleanup(uuid,text,text,uuid,uuid)',
     'execute'
   ),
   'service role may requeue only one exact guest claim-copy lease'
@@ -39,7 +39,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'authenticated',
-    'public.queue_guest_claim_copy_cleanup(uuid,text,text,uuid)',
+    'public.queue_guest_claim_copy_cleanup(uuid,text,text,uuid,uuid)',
     'execute'
   ),
   'authenticated callers cannot mint claim-copy cleanup authority'
@@ -608,11 +608,29 @@ where source_type = 'guest_claim_copy'
   );
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select throws_ok(
+  $$
+    select public.queue_guest_claim_copy_cleanup(
+      '70000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      'user_pgtap_claim',
+      '22222222-2222-4222-8222-222222222275',
+      (
+        select (payload->>'claimLeaseToken')::uuid
+        from guest_claim_results where label = 'begun'
+      )
+    )
+  $$,
+  'P0002',
+  'Guest recovery not found',
+  'copy cleanup cannot escape its bound idempotency identity'
+);
 select ok(
   public.queue_guest_claim_copy_cleanup(
     '70000000-0000-4000-8000-000000000001',
     repeat('a', 64),
     'user_pgtap_claim',
+    '11111111-1111-4111-8111-111111111175',
     (
       select (payload->>'claimLeaseToken')::uuid
       from guest_claim_results where label = 'begun'
@@ -735,6 +753,7 @@ select ok(
     '70000000-0000-4000-8000-000000000001',
     repeat('a', 64),
     'user_pgtap_claim',
+    '11111111-1111-4111-8111-111111111175',
     (
       select (payload->>'claimLeaseToken')::uuid
       from guest_claim_results where label = 'begun'

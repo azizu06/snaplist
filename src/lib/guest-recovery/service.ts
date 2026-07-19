@@ -215,6 +215,7 @@ export interface GuestClaimStore {
     claimLeaseToken: string;
   }): Promise<GuestRecoveryOutcome | { outcome: "released" }>;
   queueCopyCleanup(input: ClaimIdentity & {
+    idempotencyKey: string;
     claimLeaseToken: string;
   }): Promise<boolean>;
   resolveOutcome(input: ClaimIdentity): Promise<GuestRecoveryOutcome>;
@@ -309,6 +310,7 @@ export async function claimGuestRecovery(
   } catch {
     await dependencies.store.queueCopyCleanup({
       ...identity,
+      idempotencyKey,
       claimLeaseToken: start.claimLeaseToken,
     }).catch(() => false);
     const released = await dependencies.store.releaseClaim({
@@ -321,20 +323,21 @@ export async function claimGuestRecovery(
     throw new GuestClaimStorageError();
   }
 
+  let completed: GuestClaimTerminalOutcome;
   try {
-    const completed = guestClaimTerminalOutcomeSchema.parse(
+    completed = guestClaimTerminalOutcomeSchema.parse(
       await dependencies.store.completeClaim({
         ...identity,
         claimLeaseToken: start.claimLeaseToken,
         verifiedObjects,
       }),
     );
-    return completed;
   } catch {
     // Requeue this exact lease first. The database protects the winning lease,
     // while an obsolete writer can recreate only its own namespace.
     await dependencies.store.queueCopyCleanup({
       ...identity,
+      idempotencyKey,
       claimLeaseToken: start.claimLeaseToken,
     }).catch(() => false);
     const released = await dependencies.store.releaseClaim({
@@ -353,4 +356,14 @@ export async function claimGuestRecovery(
     }
     throw new GuestClaimStorageError();
   }
+
+  if (completed.outcome === "expired") {
+    const cleanupQueued = await dependencies.store.queueCopyCleanup({
+      ...identity,
+      idempotencyKey,
+      claimLeaseToken: start.claimLeaseToken,
+    }).catch(() => false);
+    if (!cleanupQueued) throw new GuestClaimStorageError();
+  }
+  return completed;
 }

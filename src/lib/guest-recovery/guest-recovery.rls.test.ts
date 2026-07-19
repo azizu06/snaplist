@@ -697,6 +697,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryId: fixture.recoveryId,
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: fixture.target.id,
+      idempotencyKey: fixture.claimIdempotencyKey,
       claimLeaseToken: plan.claimLeaseToken,
     })).resolves.toBe(true);
     await expect(claimStore().releaseClaim({
@@ -816,6 +817,121 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       source_count: 4,
       destination_count: 4,
     });
+  });
+
+  it("quiesces copied paths before returning an expired completion to real maintenance", async () => {
+    if (!reachable) return;
+    const fixture = await createFixture("completion_expired", {
+      photoContents: ["completion-expired-source"],
+    });
+    await register(fixture);
+    const storage = claimStorage();
+    let copiedLeaseToken: string | undefined;
+    let copiedPath: string | undefined;
+
+    const outcome = await claimGuestRecovery(
+      {
+        handoff: {
+          recoveryId: fixture.recoveryId,
+          guestUserId: fixture.guest.id,
+          recoveryTokenHash: fixture.recoveryTokenHash,
+        },
+        idempotencyKey: fixture.claimIdempotencyKey,
+        targetUserId: fixture.target.id,
+      },
+      {
+        store: claimStore(),
+        storage: {
+          async copyAndVerify(object) {
+            const verified = await storage.copyAndVerify(object);
+            copiedLeaseToken = object.destinationPath.split("/").at(-2);
+            copiedPath = object.destinationPath;
+            await database.query(
+              `update private.guest_draft_recoveries
+               set usable_draft_at = statement_timestamp() - interval '24 hours',
+                   expires_at = statement_timestamp()
+               where id = $1`,
+              [fixture.recoveryId],
+            );
+            return verified;
+          },
+        },
+      },
+    );
+
+    expect(outcome).toMatchObject({ outcome: "expired" });
+    if (!copiedLeaseToken || !copiedPath) throw new Error("missing copied lease");
+    const cleanup = await database.query(
+      `select state, guest_copy_writer_quiesced
+       from private.pipeline_storage_cleanup_jobs
+       where source_type = 'guest_claim_copy'
+         and source_id = $1`,
+      [copiedLeaseToken],
+    );
+    expect(cleanup.rows[0]).toMatchObject({
+      state: "pending",
+      guest_copy_writer_quiesced: true,
+    });
+
+    await database.query(
+      `update private.pipeline_storage_cleanup_jobs
+       set available_at = statement_timestamp()
+       where source_type = 'guest_claim_copy'
+         and source_id = $1`,
+      [copiedLeaseToken],
+    );
+    await runPipelineMaintenance({
+      store: createSupabasePipelineOperationsStore(admin as never),
+      photos: {
+        async remove(paths) {
+          const removed = await admin.storage.from("photos").remove(paths);
+          if (removed.error) throw new Error(removed.error.message);
+        },
+      },
+    });
+    await expect(
+      database.query(
+        `select state, guest_copy_writer_quiesced, resweep_requested,
+                guest_copy_final_sweep_armed
+         from private.pipeline_storage_cleanup_jobs
+         where source_type = 'guest_claim_copy'
+           and source_id = $1`,
+        [copiedLeaseToken],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{
+        state: "pending",
+        guest_copy_writer_quiesced: true,
+        resweep_requested: false,
+        guest_copy_final_sweep_armed: true,
+      }],
+    });
+    await database.query(
+      `update private.pipeline_storage_cleanup_jobs
+       set available_at = statement_timestamp()
+       where source_type = 'guest_claim_copy'
+         and source_id = $1`,
+      [copiedLeaseToken],
+    );
+    await runPipelineMaintenance({
+      store: createSupabasePipelineOperationsStore(admin as never),
+      photos: {
+        async remove(paths) {
+          const removed = await admin.storage.from("photos").remove(paths);
+          if (removed.error) throw new Error(removed.error.message);
+        },
+      },
+    });
+    await expect(
+      database.query(
+        `select count(*)::integer as count
+         from private.pipeline_storage_cleanup_jobs
+         where source_type = 'guest_claim_copy'
+           and source_id = $1`,
+        [copiedLeaseToken],
+      ),
+    ).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    expect((await admin.storage.from("photos").download(copiedPath)).error).not.toBeNull();
   });
 
   it("keeps the winning claim namespace alive when expiry and real maintenance run afterward", async () => {

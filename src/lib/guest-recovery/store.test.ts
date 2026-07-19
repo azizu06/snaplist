@@ -126,6 +126,7 @@ describe("guest claim fixed-RPC store", () => {
 
     expect(rpc).toHaveBeenCalledWith("queue_guest_claim_copy_cleanup", {
       p_claim_lease_token: "55555555-5555-4555-8555-555555555555",
+      p_idempotency_key: identity.idempotencyKey,
       p_recovery_id: identity.recoveryId,
       p_recovery_token_hash: identity.recoveryTokenHash,
       p_target_user_id: identity.targetUserId,

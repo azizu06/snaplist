@@ -134,7 +134,7 @@ describe("guest claim-or-expire database contract", () => {
     expect(migration).toMatch(/resweep_requested\s+boolean\s+not null/i);
     expect(migration).toMatch(/guest_copy_final_sweep_armed\s+boolean\s+not null/i);
     expect(functionBody("public.queue_guest_claim_copy_cleanup")).toMatch(
-      /private\.queue_guest_claim_copy_cleanup\([\s\S]+p_target_user_id[\s\S]+p_claim_lease_token/i,
+      /claim_idempotency_user_id\s*=\s*p_target_user_id[\s\S]+claim_idempotency_key\s*=\s*p_idempotency_key[\s\S]+private\.queue_guest_claim_copy_cleanup\([\s\S]+p_target_user_id[\s\S]+p_claim_lease_token/i,
     );
     expect(functionBody("private.queue_guest_claim_copy_cleanup")).toMatch(
       /state\s*=\s*'claimed'[\s\S]+claimed_lease_token\s*=\s*p_claim_lease_token[\s\S]+return false/i,

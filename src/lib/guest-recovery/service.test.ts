@@ -47,6 +47,14 @@ const terminal = {
   accountRecovery,
 };
 
+const expired = {
+  outcome: "expired" as const,
+  itemId: terminal.itemId,
+  runId: terminal.runId,
+  draftId: terminal.draftId,
+  purgeLocalRecovery: true as const,
+};
+
 const plan = {
   outcome: "copy_required" as const,
   claimLeaseToken: "55555555-5555-4555-8555-555555555555",
@@ -142,6 +150,46 @@ describe("guest claim-or-expire orchestrator", () => {
     });
   });
 
+  it("queues the exact expired completion lease before returning the terminal outcome", async () => {
+    let finishCleanup: ((queued: boolean) => void) | undefined;
+    const cleanupQueued = new Promise<boolean>((resolve) => {
+      finishCleanup = resolve;
+    });
+    const claimStore = store({
+      completeClaim: vi.fn().mockResolvedValue(expired),
+      queueCopyCleanup: vi.fn().mockReturnValue(cleanupQueued),
+    });
+    const privateStorage = storage();
+    const idempotencyKey = "66666666-6666-4666-8666-666666666666";
+    const settled = vi.fn();
+
+    const claim = claimGuestRecovery(
+      {
+        handoff,
+        targetUserId: "user_account",
+        idempotencyKey,
+      },
+      { store: claimStore, storage: privateStorage },
+    ).then((outcome) => {
+      settled(outcome);
+      return outcome;
+    });
+
+    await vi.waitFor(() => {
+      expect(claimStore.queueCopyCleanup).toHaveBeenCalledWith({
+        recoveryId: handoff.recoveryId,
+        recoveryTokenHash: handoff.recoveryTokenHash,
+        targetUserId: "user_account",
+        idempotencyKey,
+        claimLeaseToken: plan.claimLeaseToken,
+      });
+    });
+    expect(settled).not.toHaveBeenCalled();
+
+    finishCleanup?.(true);
+    await expect(claim).resolves.toEqual(expired);
+  });
+
   it("returns terminal retries without copying or remapping again", async () => {
     const claimStore = store({ beginClaim: vi.fn().mockResolvedValue(terminal) });
     const privateStorage = storage();
@@ -196,6 +244,7 @@ describe("guest claim-or-expire orchestrator", () => {
       recoveryId: handoff.recoveryId,
       recoveryTokenHash: handoff.recoveryTokenHash,
       targetUserId: "user_account",
+      idempotencyKey: "66666666-6666-4666-8666-666666666666",
       claimLeaseToken: plan.claimLeaseToken,
     });
     expect(privateStorage.remove).not.toHaveBeenCalled();
@@ -251,6 +300,7 @@ describe("guest claim-or-expire orchestrator", () => {
       recoveryId: handoff.recoveryId,
       recoveryTokenHash: handoff.recoveryTokenHash,
       targetUserId: "user_account",
+      idempotencyKey: "66666666-6666-4666-8666-666666666666",
       claimLeaseToken: plan.claimLeaseToken,
     });
     expect(claimStore.resolveOutcome).not.toHaveBeenCalled();
