@@ -92,6 +92,11 @@ const registeredExtlangPrefixesByPreferredValue = new Map(
     [...subtags].map((subtag) => [subtag, prefix] as const),
   ),
 );
+
+// Registry-derived aliases that remain after removing an extlang prefix. As
+// of the same registry snapshot, ajp is the only extlang Preferred-Value whose
+// corresponding primary language has a further Preferred-Value.
+const registeredExtlangChainedPreferredValues = new Map([["ajp", "apc"]]);
 const privateUseBcp47Pattern = /^x(?:-[A-Za-z0-9]{1,8})+$/i;
 
 function canonicalizeStructurallyValidBcp47(locale: string): string | null {
@@ -185,18 +190,24 @@ function canonicalizeRegisteredExtlang(locale: string): string {
     extlang &&
     registeredExtlangSubtagsByPrefix.get(language)?.has(extlang)
   ) {
-    return [extlang, ...suffix].join("-");
+    return [
+      registeredExtlangChainedPreferredValues.get(extlang) ?? extlang,
+      ...suffix,
+    ].join("-");
   }
   return locale;
 }
 
 function canonicalizeRegisteredExtlangPreferredValue(locale: string): string {
   const [preferredPrimaryLanguage, ...suffix] = locale.split("-");
+  const canonicalPrimaryLanguage =
+    registeredExtlangChainedPreferredValues.get(preferredPrimaryLanguage) ??
+    preferredPrimaryLanguage;
   const neutralLocale = ["und", ...suffix].join("-");
   try {
     const neutralCanonical = Intl.getCanonicalLocales(neutralLocale)[0];
     return neutralCanonical
-      ? [preferredPrimaryLanguage, ...neutralCanonical.split("-").slice(1)].join(
+      ? [canonicalPrimaryLanguage, ...neutralCanonical.split("-").slice(1)].join(
           "-",
         )
       : locale;

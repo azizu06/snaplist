@@ -439,6 +439,12 @@ describe("resolveScoutGuidance", () => {
       locale: "zh-cmn-Hans-CN",
       substitutions: {},
     });
+    const chainedPreferredValue = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "onboarding.outcome",
+      locale: "ar-ajp",
+      substitutions: {},
+    });
 
     expect(grandfathered.localeFallbackChain).toEqual(["tlh", "en-US"]);
     expect(privateUse.localeFallbackChain).toEqual(["x-scout", "en-US"]);
@@ -446,6 +452,10 @@ describe("resolveScoutGuidance", () => {
     expect(extendedLanguage.localeFallbackChain).toEqual([
       "cmn-Hans-CN",
       "cmn",
+      "en-US",
+    ]);
+    expect(chainedPreferredValue.localeFallbackChain).toEqual([
+      "apc",
       "en-US",
     ]);
   });

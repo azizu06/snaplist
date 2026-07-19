@@ -40,8 +40,9 @@ BCP-47 language tags. A request must contain a well-formed BCP-47 tag; invalid t
 `invalid-locale`, while valid tags are canonicalized before lookup. Registered grandfathered tags
 use their preferred modern tag when one exists, and canonical private-use tags remain valid even
 though they have no language fallback. Registered extended-language forms use the IANA registry's
-Preferred-Value mapping, removing the registered prefix so equivalent requests share one catalog
-key; for example, `zh-cmn-Hans-CN` becomes `cmn-Hans-CN`. Other well-formed extended-language,
+Preferred-Value mapping, remove the registered prefix, and follow a further Preferred-Value on the
+resulting primary language so equivalent requests share one catalog key; for example,
+`zh-cmn-Hans-CN` becomes `cmn-Hans-CN`. Other well-formed extended-language,
 script, region, variant, extension, and trailing private-use forms are validated against the RFC
 grammar even when the host `Intl` implementation cannot canonicalize them. Locale lookup then tries
 the canonical requested locale, its primary language tag when one exists, and finally `en-US`, in
