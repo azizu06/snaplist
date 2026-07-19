@@ -33,6 +33,10 @@ must record:
 - the Apple primitive evaluated, availability gate, honest fallback, and server/provider-truth
   boundary when a native capability applies.
 
+Start implementation only from `Lane = Ready`; never start an issue while it remains `Blocked`.
+When every recorded blocker closes, move the dependent issue from `Blocked` to `Ready`. Keep the
+lane aligned with reality through `Ready` → `In progress` → `In review` → `Done`.
+
 Use one issue, one branch, one isolated worktree, and one PR. Collision-check semantic ownership across
 open issues, branches, worktrees, and PR diffs before editing. A change crossing more than two major
 production surfaces or roughly 15 production files / 800 non-generated production lines triggers a
