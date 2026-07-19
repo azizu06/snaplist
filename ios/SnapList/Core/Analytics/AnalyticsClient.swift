@@ -23,15 +23,6 @@ protocol AnalyticsClient {
     func flush()
 }
 
-protocol AnalyticsTransport: AnyObject {
-    func setConsent(granted: Bool) throws
-    func revokeConsent() throws
-    func capture(_ payload: AnalyticsPayload) throws
-    func identify(clerkUserID: String) throws
-    func flush() throws
-    func reset() throws
-}
-
 protocol AnalyticsConsentStoring: AnyObject {
     var consent: AnalyticsConsent { get }
     func setConsent(_ consent: AnalyticsConsent)
@@ -79,127 +70,115 @@ struct NoOpAnalyticsClient: AnalyticsClient {
     func flush() {}
 }
 
-final class PostHogAnalyticsClient: AnalyticsClient, @unchecked Sendable {
+enum AnalyticsDebugRecord: Equatable, Sendable {
+    case payload(AnalyticsPayload)
+    case identify
+    case reset
+    case flush
+}
+
+protocol AnalyticsDebugSinking: AnyObject {
+    func record(_ record: AnalyticsDebugRecord) throws
+}
+
+final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     private let metadata: AnalyticsMetadata
     private let consentStore: any AnalyticsConsentStoring
     private let dedupeStore: any AnalyticsDedupeStoring
-    private let transportFactory: @Sendable () -> (any AnalyticsTransport)?
-    private let consentOrderingLock = NSLock()
+    private let identityStore: any AnalyticsIdentityStoring
+    private let sink: any AnalyticsDebugSinking
+    private let sanitizer = AnalyticsSanitizer()
     private let executor = DispatchQueue(
-        label: "com.snaplist.analytics.client",
+        label: "com.snaplist.analytics.debug",
         qos: .utility
     )
-    private let sanitizer = AnalyticsSanitizer()
-    private var currentConsent: AnalyticsConsent
-    private var transport: (any AnalyticsTransport)?
-    private var identifiedClerkUserID: String?
 
     init(
         metadata: AnalyticsMetadata,
         consentStore: any AnalyticsConsentStoring,
         dedupeStore: any AnalyticsDedupeStoring,
-        transportFactory: @escaping @Sendable () -> (any AnalyticsTransport)?
+        identityStore: any AnalyticsIdentityStoring,
+        sink: any AnalyticsDebugSinking
     ) {
         self.metadata = metadata
         self.consentStore = consentStore
         self.dedupeStore = dedupeStore
-        self.transportFactory = transportFactory
-        currentConsent = consentStore.consent
-        if currentConsent == .granted {
-            executor.async { [self] in
-                _ = activatedTransport()
-            }
-        }
+        self.identityStore = identityStore
+        self.sink = sink
+    }
+
+    convenience init(
+        metadata: AnalyticsMetadata,
+        consentStore: any AnalyticsConsentStoring,
+        dedupeStore: any AnalyticsDedupeStoring,
+        log: @escaping (String) -> Void = { print($0) }
+    ) {
+        self.init(
+            metadata: metadata,
+            consentStore: consentStore,
+            dedupeStore: dedupeStore,
+            identityStore: InMemoryAnalyticsIdentityStore(),
+            sink: ClosureAnalyticsDebugSink(log: log)
+        )
     }
 
     func capture(_ event: AnalyticsEvent) {
         executor.async { [self] in
-            guard currentConsent == .granted,
+            guard consentStore.consent == .granted,
                   !dedupeStore.contains(event.eventID),
-                  let payload = sanitizer.sanitize(event: event, metadata: metadata),
-                  let transport = activatedTransport() else {
+                  let payload = sanitizer.sanitize(event: event, metadata: metadata) else {
                 return
             }
-
             do {
-                try transport.capture(payload)
+                try sink.record(.payload(payload))
                 dedupeStore.insert(event.eventID)
             } catch {
-                // Analytics is best-effort and must never change a domain result.
+                // Debug analytics stays best-effort and cannot change a domain result.
             }
         }
     }
 
     func screen(_ screen: AnalyticsScreen) {
         executor.async { [self] in
-            guard currentConsent == .granted,
-                  let payload = sanitizer.sanitize(screen: screen, metadata: metadata),
-                  let transport = activatedTransport() else {
+            guard consentStore.consent == .granted,
+                  let payload = sanitizer.sanitize(screen: screen, metadata: metadata) else {
                 return
             }
-            try? transport.capture(payload)
+            try? sink.record(.payload(payload))
         }
     }
 
     func identify(clerkUserID: String) {
         executor.async { [self] in
-            guard currentConsent == .granted,
-                  identifiedClerkUserID == nil,
-                  Self.isValidClerkUserID(clerkUserID),
-                  let transport = activatedTransport() else {
+            guard consentStore.consent == .granted,
+                  identityStore.identity.clerkUserID == nil,
+                  AnalyticsIdentity.accepts(clerkUserID: clerkUserID) else {
                 return
             }
             do {
-                try transport.identify(clerkUserID: clerkUserID)
-                identifiedClerkUserID = clerkUserID
+                try sink.record(.identify)
+                identityStore.identify(clerkUserID: clerkUserID)
             } catch {
-                // Identity telemetry failure cannot affect account claim.
+                // Debug analytics stays best-effort and cannot change account claim.
             }
         }
     }
 
     func reset() {
         executor.async { [self] in
-            if currentConsent == .granted {
-                try? transport?.flush()
-            }
-            try? transport?.reset()
-            identifiedClerkUserID = nil
+            identityStore.reset()
+            try? sink.record(.reset)
         }
     }
 
     func setConsent(_ consent: AnalyticsConsent) {
-        consentOrderingLock.withLock {
-            // Persist and enqueue under one lock so concurrent callers cannot invert relaunch truth.
-            consentStore.setConsent(consent)
-            let transition = { [self] in
-                currentConsent = consent
-                switch consent {
-                case .granted:
-                    if let active = transport {
-                        try? active.setConsent(granted: true)
-                    } else {
-                        _ = activatedTransport()
-                    }
-                case .denied, .notDetermined:
-                    try? transport?.revokeConsent()
-                    transport = nil
-                    identifiedClerkUserID = nil
-                }
-            }
-            if consent == .granted {
-                executor.async(execute: transition)
-            } else {
-                // Revocation is the one synchronous boundary: delivery must be stopped before return.
-                executor.sync(execute: transition)
-            }
-        }
+        consentStore.setConsent(consent)
     }
 
     func flush() {
         executor.async { [self] in
-            guard currentConsent == .granted else { return }
-            try? transport?.flush()
+            guard consentStore.consent == .granted else { return }
+            try? sink.record(.flush)
         }
     }
 
@@ -217,18 +196,26 @@ final class PostHogAnalyticsClient: AnalyticsClient, @unchecked Sendable {
         }
         return lock.withLock { isIdle }
     }
+}
 
-    private func activatedTransport() -> (any AnalyticsTransport)? {
-        guard currentConsent == .granted else { return nil }
-        if transport == nil {
-            transport = transportFactory()
-            try? transport?.setConsent(granted: true)
-        }
-        return transport
+private final class ClosureAnalyticsDebugSink: AnalyticsDebugSinking {
+    private let log: (String) -> Void
+
+    init(log: @escaping (String) -> Void) {
+        self.log = log
     }
 
-    private static func isValidClerkUserID(_ value: String) -> Bool {
-        value.range(of: #"^user_[A-Za-z0-9]+$"#, options: .regularExpression) != nil
+    func record(_ record: AnalyticsDebugRecord) throws {
+        switch record {
+        case let .payload(payload):
+            log("analytics \(payload.name) keys=\(payload.properties.keys.sorted())")
+        case .identify:
+            log("analytics identify accepted")
+        case .reset:
+            log("analytics reset")
+        case .flush:
+            log("analytics flush")
+        }
     }
 }
 

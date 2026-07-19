@@ -7,9 +7,9 @@ struct AnalyticsSanitizer: Sendable {
     ) -> AnalyticsPayload? {
         guard isValidMetadata(metadata) else { return nil }
         return AnalyticsPayload(
-            name: "$screen",
+            name: "screen viewed",
             properties: [
-                "$screen_name": screen.rawValue,
+                "screen": screen.rawValue,
                 "environment": metadata.environment.rawValue,
                 "app_version": metadata.appVersion,
                 "app_build": metadata.build,
@@ -124,77 +124,6 @@ struct AnalyticsSanitizer: Sendable {
         ) != nil
     }
 
-    func sanitizeProviderEvent(
-        name: String,
-        distinctID: String,
-        properties: [String: Any],
-        metadata: AnalyticsMetadata
-    ) -> [String: Any]? {
-        let metadataProperties: [String: String] = [
-            "environment": metadata.environment.rawValue,
-            "app_version": metadata.appVersion,
-            "app_build": metadata.build,
-        ]
-        if name == "$identify" {
-            let allowedKeys = Set(["distinct_id"] + metadataProperties.keys)
-            guard properties.keys.allSatisfy({ $0.hasPrefix("$") || allowedKeys.contains($0) }) else {
-                return nil
-            }
-            guard distinctID.range(
-                of: #"^user_[A-Za-z0-9]+$"#,
-                options: .regularExpression
-            ) != nil,
-            let anonymousID = properties["$anon_distinct_id"] as? String,
-            UUID(uuidString: anonymousID) != nil else {
-                return nil
-            }
-            var sanitized: [String: Any] = metadataProperties
-            sanitized["distinct_id"] = distinctID
-            sanitized["$anon_distinct_id"] = anonymousID
-            sanitized["$process_person_profile"] = true
-            return sanitized
-        }
-
-        if name == "$screen" {
-            let allowedKeys = Set(metadataProperties.keys)
-            guard metadataProperties.allSatisfy({ properties[$0.key] as? String == $0.value }),
-                  properties.keys.allSatisfy({ $0.hasPrefix("$") || allowedKeys.contains($0) }) else {
-                return nil
-            }
-            guard let screenName = properties["$screen_name"] as? String,
-                  AnalyticsScreen(rawValue: screenName) != nil else {
-                return nil
-            }
-            var sanitized: [String: Any] = metadataProperties
-            sanitized["distinct_id"] = distinctID
-            sanitized["$screen_name"] = screenName
-            sanitized["$process_person_profile"] = properties["$process_person_profile"] as? Bool ?? false
-            return sanitized
-        }
-
-        guard let schema = EventSchema.approved[name] else { return nil }
-        let allowedKeys = Set(schema.keys + ["distinct_id"] + metadataProperties.keys)
-        guard metadataProperties.allSatisfy({ properties[$0.key] as? String == $0.value }),
-              properties.keys.allSatisfy({ $0.hasPrefix("$") || allowedKeys.contains($0) }) else {
-            return nil
-        }
-        var rawProperties: [String: AnalyticsPropertyValue] = [:]
-        for key in schema.keys {
-            guard let value = properties[key] as? String else { return nil }
-            rawProperties[key] = .string(value)
-        }
-        guard let payload = sanitize(
-            eventName: name,
-            properties: rawProperties,
-            metadata: metadata
-        ) else {
-            return nil
-        }
-        var sanitized: [String: Any] = payload.properties
-        sanitized["distinct_id"] = distinctID
-        sanitized["$process_person_profile"] = properties["$process_person_profile"] as? Bool ?? false
-        return sanitized
-    }
 }
 
 private struct EventSchema {
