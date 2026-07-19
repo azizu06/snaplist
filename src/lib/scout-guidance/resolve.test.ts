@@ -8,12 +8,28 @@ import {
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
   verifiedPriceEvidence,
+  verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
 } from "./resolve";
 
 const ITEM_ID = "11111111-1111-4111-8111-111111111111";
 const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+const RUN_ID = "55555555-5555-4555-8555-555555555555";
+const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
+const PHOTO_ID_1 = "66666666-6666-4666-8666-666666666661";
+const PHOTO_ID_2 = "66666666-6666-4666-8666-666666666662";
+
+function retainedSoldComps(count: number, windowDays: number) {
+  const latest = new Date("2026-07-19T00:00:00.000Z");
+  const earliest = new Date(
+    latest.getTime() - (windowDays - 1) * 86_400_000,
+  ).toISOString();
+  return Array.from({ length: count }, (_, index) => ({
+    id: `77777777-7777-4777-8777-${String(index + 1).padStart(12, "0")}`,
+    soldAt: index === 0 && count > 1 ? earliest : latest.toISOString(),
+  }));
+}
 
 const verifiedItemName = () =>
   verifiedItemDisplayNameFromDurableRecord({
@@ -67,8 +83,8 @@ describe("resolveScoutGuidance", () => {
       locale: "en-US",
       substitutions: {
         capturedPhotoCount: verifiedCapturedPhotoCount({
-          captureSessionId: CAPTURE_SESSION_ID,
-          capturedPhotoCount: 2,
+          id: CAPTURE_SESSION_ID,
+          photos: [{ id: PHOTO_ID_1 }, { id: PHOTO_ID_2 }],
         }),
       },
     });
@@ -82,6 +98,22 @@ describe("resolveScoutGuidance", () => {
         label: "2 of 4 photos",
       },
     });
+  });
+
+  it("derives the captured-photo fact from a capture-session projection", () => {
+    const capturedPhotoCount = verifiedCapturedPhotoCount({
+      id: CAPTURE_SESSION_ID,
+      photos: [{ id: PHOTO_ID_1 }, { id: PHOTO_ID_2 }],
+    });
+
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "capture.photo-count",
+      locale: "en-US",
+      substitutions: { capturedPhotoCount },
+    });
+
+    expect(result.message.title).toBe("2 of 4 photos");
   });
 
   it("rejects a missing required substitution with a stable contract error", () => {
@@ -188,8 +220,8 @@ describe("resolveScoutGuidance", () => {
 
   it("rejects a spread clone of an enrolled fact", () => {
     const enrolled = verifiedCapturedPhotoCount({
-      captureSessionId: CAPTURE_SESSION_ID,
-      capturedPhotoCount: 2,
+      id: CAPTURE_SESSION_ID,
+      photos: [{ id: PHOTO_ID_1 }, { id: PHOTO_ID_2 }],
     });
 
     expect(() =>
@@ -212,8 +244,8 @@ describe("resolveScoutGuidance", () => {
 
   it("keeps trust enrollment out of enumerable symbols and rejects equivalent replacements", () => {
     const enrolled = verifiedCapturedPhotoCount({
-      captureSessionId: CAPTURE_SESSION_ID,
-      capturedPhotoCount: 2,
+      id: CAPTURE_SESSION_ID,
+      photos: [{ id: PHOTO_ID_1 }, { id: PHOTO_ID_2 }],
     });
     const equivalentReplacement = Object.create(
       Object.getPrototypeOf(enrolled),
@@ -239,9 +271,8 @@ describe("resolveScoutGuidance", () => {
 
   it("rejects price facts swapped across their semantic keys", () => {
     const evidence = verifiedPriceEvidence({
-      recommendationId: "44444444-4444-4444-8444-444444444444",
-      soldCompCount: 3,
-      windowDays: 90,
+      id: RECOMMENDATION_ID,
+      retainedSoldComps: retainedSoldComps(3, 90),
     });
 
     expect(() =>
@@ -263,11 +294,58 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("derives sold-count and window facts from dated retained comps", () => {
+    const evidence = verifiedPriceEvidence({
+      id: "44444444-4444-4444-8444-444444444444",
+      retainedSoldComps: [
+        {
+          id: "77777777-7777-4777-8777-777777777771",
+          soldAt: "2026-04-21T00:00:00.000Z",
+        },
+        {
+          id: "77777777-7777-4777-8777-777777777772",
+          soldAt: "2026-06-01T00:00:00.000Z",
+        },
+        {
+          id: "77777777-7777-4777-8777-777777777773",
+          soldAt: "2026-07-19T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "uncertainty.limited-price-evidence",
+      locale: "en-US",
+      substitutions: evidence,
+    });
+
+    expect(result.message.body).toBe("3 sold · 90 days");
+  });
+
+  it("derives the uploaded-photo fact from durable run photo states", () => {
+    const uploadedPhotoCount = verifiedUploadedPhotoCount({
+      id: RUN_ID,
+      photos: [
+        { id: PHOTO_ID_1, status: "uploaded" },
+        { id: PHOTO_ID_2, status: "pending" },
+      ],
+    });
+
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "recovery.upload-paused",
+      locale: "en-US",
+      substitutions: { uploadedPhotoCount },
+    });
+
+    expect(result.accessibility.label).toContain("1 of 4");
+  });
+
   it("renders a one-day price evidence window with singular grammar", () => {
     const evidence = verifiedPriceEvidence({
-      recommendationId: "44444444-4444-4444-8444-444444444444",
-      soldCompCount: 1,
-      windowDays: 1,
+      id: RECOMMENDATION_ID,
+      retainedSoldComps: retainedSoldComps(1, 1),
     });
 
     const result = resolveScoutGuidance({
@@ -340,6 +418,25 @@ describe("resolveScoutGuidance", () => {
         code: "invalid-locale",
       }) satisfies Partial<ScoutGuidanceContractError>,
     );
+  });
+
+  it("canonicalizes grandfathered tags and deterministically falls back for private-use tags", () => {
+    const grandfathered = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "onboarding.outcome",
+      locale: "i-klingon",
+      substitutions: {},
+    });
+    const privateUse = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "onboarding.outcome",
+      locale: "x-scout",
+      substitutions: {},
+    });
+
+    expect(grandfathered.localeFallbackChain).toEqual(["tlh", "en-US"]);
+    expect(privateUse.localeFallbackChain).toEqual(["x-scout", "en-US"]);
+    expect(privateUse.resolvedLocale).toBe("en-US");
   });
 
   it("exposes static reduced-motion and text-complete accessibility metadata", () => {
@@ -425,24 +522,24 @@ describe("resolveScoutGuidance", () => {
   });
 
   it("rejects verified facts outside the template's approved bounds", () => {
+    const evidence = verifiedPriceEvidence({
+      id: RECOMMENDATION_ID,
+      retainedSoldComps: retainedSoldComps(2, 366),
+    });
+
     expect(() =>
       resolveScoutGuidance({
         contractVersion: "scout-guidance-v1",
-        state: "capture.photo-count",
+        state: "uncertainty.limited-price-evidence",
         locale: "en-US",
-        substitutions: {
-          capturedPhotoCount: verifiedCapturedPhotoCount({
-            captureSessionId: CAPTURE_SESSION_ID,
-            capturedPhotoCount: 5,
-          }),
-        },
+        substitutions: evidence,
       }),
     ).toThrowError(
       expect.objectContaining({
         name: "ScoutGuidanceContractError",
         code: "invalid-substitution",
-        state: "capture.photo-count",
-        substitutionKey: "capturedPhotoCount",
+        state: "uncertainty.limited-price-evidence",
+        substitutionKey: "windowDays",
       }),
     );
   });

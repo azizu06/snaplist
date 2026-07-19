@@ -55,6 +55,60 @@ export type VerifiedScoutGuidanceFact = Readonly<{
 const enrolledVerifiedFacts = new WeakMap<object, string>();
 
 const uuidSchema = z.string().uuid();
+const captureSessionProjectionSchema = z
+  .object({
+    id: uuidSchema,
+    photos: z.array(z.object({ id: uuidSchema }).strict()).min(1).max(4),
+  })
+  .strict()
+  .refine(
+    (session) =>
+      new Set(session.photos.map((photo) => photo.id)).size ===
+      session.photos.length,
+    "Capture-session photo identities must be unique.",
+  );
+const priceRecommendationProjectionSchema = z
+  .object({
+    id: uuidSchema,
+    retainedSoldComps: z
+      .array(
+        z
+          .object({
+            id: uuidSchema,
+            soldAt: z.string().datetime({ offset: true }),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(99),
+  })
+  .strict()
+  .refine(
+    (recommendation) =>
+      new Set(recommendation.retainedSoldComps.map((comp) => comp.id)).size ===
+      recommendation.retainedSoldComps.length,
+    "Retained sold-comp identities must be unique.",
+  );
+const durableRunProjectionSchema = z
+  .object({
+    id: uuidSchema,
+    photos: z
+      .array(
+        z
+          .object({
+            id: uuidSchema,
+            status: z.enum(["pending", "uploaded"]),
+          })
+          .strict(),
+      )
+      .max(4),
+  })
+  .strict()
+  .refine(
+    (run) =>
+      new Set(run.photos.map((photo) => photo.id)).size === run.photos.length,
+    "Durable-run photo identities must be unique.",
+  );
 const durableItemRecordSchema = z.object({
   id: uuidSchema,
   review_revision: uuidSchema,
@@ -135,52 +189,68 @@ export function verifiedItemDisplayNameFromDurableRecord(record: {
   );
 }
 
-export function verifiedCapturedPhotoCount(input: {
-  captureSessionId: string;
-  capturedPhotoCount: number;
+export function verifiedCapturedPhotoCount(projection: {
+  id: string;
+  photos: ReadonlyArray<{ id: string }>;
 }): VerifiedScoutGuidanceFact {
+  const session = captureSessionProjectionSchema.parse(projection);
   return verifiedFact(
     "capturedPhotoCount",
     "capture-session",
-    `capture-session:${uuidSchema.parse(input.captureSessionId)}`,
-    input.capturedPhotoCount,
+    `capture-session:${session.id}`,
+    session.photos.length,
   );
 }
 
-export function verifiedPriceEvidence(input: {
-  recommendationId: string;
-  soldCompCount: number;
-  windowDays: number;
+/** Derive price-evidence facts from the retained, dated sold-comp projection. */
+export function verifiedPriceEvidence(projection: {
+  id: string;
+  retainedSoldComps: ReadonlyArray<{ id: string; soldAt: string }>;
 }): Readonly<{
   soldCompCount: VerifiedScoutGuidanceFact;
   windowDays: VerifiedScoutGuidanceFact;
 }> {
-  const reference = `price-recommendation:${uuidSchema.parse(input.recommendationId)}`;
+  const recommendation = priceRecommendationProjectionSchema.parse(projection);
+  const soldDayIndexes = recommendation.retainedSoldComps.map((comp) => {
+    const soldAt = new Date(comp.soldAt);
+    return Date.UTC(
+      soldAt.getUTCFullYear(),
+      soldAt.getUTCMonth(),
+      soldAt.getUTCDate(),
+    ) / 86_400_000;
+  });
+  const windowDays = Math.max(...soldDayIndexes) - Math.min(...soldDayIndexes) + 1;
+  const reference = `price-recommendation:${recommendation.id}`;
   return Object.freeze({
     soldCompCount: verifiedFact(
       "soldCompCount",
       "price-recommendation",
       reference,
-      input.soldCompCount,
+      recommendation.retainedSoldComps.length,
     ),
     windowDays: verifiedFact(
       "windowDays",
       "price-recommendation",
       reference,
-      input.windowDays,
+      windowDays,
     ),
   });
 }
 
-export function verifiedUploadedPhotoCount(input: {
-  runId: string;
-  uploadedPhotoCount: number;
+/** Derive uploaded progress from durable per-photo run state. */
+export function verifiedUploadedPhotoCount(projection: {
+  id: string;
+  photos: ReadonlyArray<{
+    id: string;
+    status: "pending" | "uploaded";
+  }>;
 }): VerifiedScoutGuidanceFact {
+  const run = durableRunProjectionSchema.parse(projection);
   return verifiedFact(
     "uploadedPhotoCount",
     "durable-run",
-    `run:${uuidSchema.parse(input.runId)}`,
-    input.uploadedPhotoCount,
+    `run:${run.id}`,
+    run.photos.filter((photo) => photo.status === "uploaded").length,
   );
 }
 
@@ -327,7 +397,12 @@ function resolveLocale(canonicalLocale: string): {
   resolvedLocale: string;
   fallbackChain: string[];
 } {
-  const language = new Intl.Locale(canonicalLocale).language;
+  let language: string | null = null;
+  try {
+    language = new Intl.Locale(canonicalLocale).language;
+  } catch {
+    // Grandfathered/private-use BCP-47 tags have no reliable language fallback.
+  }
 
   const fallbackChain = [
     canonicalLocale,
@@ -351,7 +426,14 @@ function pluralizedCopyKey(
   const pluralCopyKeys = definition.pluralCopyKeys;
   if (!pluralCopyKeys) return fallbackCopyKey;
   const selectorValue = Number(substitutions[pluralCopyKeys.selector]);
-  const category = new Intl.PluralRules(locale).select(selectorValue);
+  let category: Intl.LDMLPluralRule;
+  try {
+    category = new Intl.PluralRules(locale).select(selectorValue);
+  } catch {
+    category = new Intl.PluralRules(guidanceCatalog.defaultLocale).select(
+      selectorValue,
+    );
+  }
   return pluralCopyKeys[slot]?.[category] ?? fallbackCopyKey;
 }
 

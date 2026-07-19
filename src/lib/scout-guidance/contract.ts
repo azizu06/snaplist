@@ -7,12 +7,44 @@ export const scoutGuidanceTrustedSourceSchema = z.enum([
   "durable-item-record",
   "price-recommendation",
   "durable-run",
-  "seller-confirmed-item",
 ]);
+
+const grandfatheredBcp47Tags = new Map<string, string>([
+  ["en-gb-oed", "en-GB-oxendict"],
+  ["i-ami", "ami"],
+  ["i-bnn", "bnn"],
+  ["i-default", "i-default"],
+  ["i-enochian", "i-enochian"],
+  ["i-hak", "hak"],
+  ["i-klingon", "tlh"],
+  ["i-lux", "lb"],
+  ["i-mingo", "i-mingo"],
+  ["i-navajo", "nv"],
+  ["i-pwn", "pwn"],
+  ["i-tao", "tao"],
+  ["i-tay", "tay"],
+  ["i-tsu", "tsu"],
+  ["sgn-be-fr", "sfb"],
+  ["sgn-be-nl", "vgt"],
+  ["sgn-ch-de", "sgg"],
+  ["art-lojban", "jbo"],
+  ["cel-gaulish", "cel-gaulish"],
+  ["no-bok", "nb"],
+  ["no-nyn", "nn"],
+  ["zh-guoyu", "cmn"],
+  ["zh-hakka", "hak"],
+  ["zh-min", "zh-min"],
+  ["zh-min-nan", "nan"],
+  ["zh-xiang", "hsn"],
+]);
+const privateUseBcp47Pattern = /^x(?:-[A-Za-z0-9]{1,8})+$/i;
 
 export function canonicalizeScoutGuidanceLocale(
   locale: string,
 ): string | null {
+  if (privateUseBcp47Pattern.test(locale)) return locale.toLowerCase();
+  const grandfathered = grandfatheredBcp47Tags.get(locale.toLowerCase());
+  if (grandfathered) return grandfathered;
   try {
     return Intl.getCanonicalLocales(locale)[0] ?? null;
   } catch {

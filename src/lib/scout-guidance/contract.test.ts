@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { scoutGuidanceCatalogSchema } from "./contract";
+import {
+  scoutGuidanceCatalogSchema,
+  scoutGuidanceTrustedSourceSchema,
+} from "./contract";
 import {
   resolveScoutGuidance,
   verifiedCapturedPhotoCount,
@@ -16,6 +19,22 @@ const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
 const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
 const RUN_ID = "55555555-5555-4555-8555-555555555555";
+const LATEST_SOLD_AT = new Date("2026-07-19T00:00:00.000Z");
+
+function fixtureId(prefix: string, index: number): string {
+  return `${prefix}-${prefix.slice(0, 4)}-4${prefix.slice(1, 4)}-8${prefix.slice(1, 4)}-${String(index).padStart(12, "0")}`;
+}
+
+function retainedSoldComps(count: number, windowDays: number) {
+  const earliestSoldAt = new Date(
+    LATEST_SOLD_AT.getTime() - (windowDays - 1) * 86_400_000,
+  ).toISOString();
+  return Array.from({ length: count }, (_, index) => ({
+    id: fixtureId("77777777", index + 1),
+    soldAt:
+      index === 0 && count > 1 ? earliestSoldAt : LATEST_SOLD_AT.toISOString(),
+  }));
+}
 
 function verifiedSubstitutionsFor(
   state: string,
@@ -23,10 +42,13 @@ function verifiedSubstitutionsFor(
 ): ResolveScoutGuidanceRequest["substitutions"] {
   switch (state) {
     case "capture.photo-count":
+      const capturedPhotoCount = Number(values.capturedPhotoCount ?? 1);
       return {
         capturedPhotoCount: verifiedCapturedPhotoCount({
-          captureSessionId: CAPTURE_SESSION_ID,
-          capturedPhotoCount: Number(values.capturedPhotoCount ?? 1),
+          id: CAPTURE_SESSION_ID,
+          photos: Array.from({ length: capturedPhotoCount }, (_, index) => ({
+            id: fixtureId("66666666", index + 1),
+          })),
         }),
       };
     case "processing.finding-sold-comps":
@@ -39,16 +61,21 @@ function verifiedSubstitutionsFor(
         }),
       };
     case "uncertainty.limited-price-evidence":
+      const soldCompCount = Number(values.soldCompCount ?? 1);
+      const windowDays = Number(values.windowDays ?? 1);
       return verifiedPriceEvidence({
-        recommendationId: RECOMMENDATION_ID,
-        soldCompCount: Number(values.soldCompCount ?? 1),
-        windowDays: Number(values.windowDays ?? 1),
+        id: RECOMMENDATION_ID,
+        retainedSoldComps: retainedSoldComps(soldCompCount, windowDays),
       });
     case "recovery.upload-paused":
+      const uploadedPhotoCount = Number(values.uploadedPhotoCount ?? 0);
       return {
         uploadedPhotoCount: verifiedUploadedPhotoCount({
-          runId: RUN_ID,
-          uploadedPhotoCount: Number(values.uploadedPhotoCount ?? 0),
+          id: RUN_ID,
+          photos: Array.from({ length: 4 }, (_, index) => ({
+            id: fixtureId("88888888", index + 1),
+            status: index < uploadedPhotoCount ? "uploaded" as const : "pending" as const,
+          })),
         }),
       };
     default:
@@ -90,12 +117,27 @@ describe("Scout guidance catalog contract", () => {
     expect(scoutGuidanceCatalogSchema.safeParse(invalid).success).toBe(false);
   });
 
+  it("accepts canonical BCP-47 private-use locale identifiers", () => {
+    const privateUse = structuredClone(catalog);
+    privateUse.defaultLocale = "x-scout";
+    privateUse.locales["x-scout"] = privateUse.locales["en-US"];
+
+    expect(scoutGuidanceCatalogSchema.safeParse(privateUse).success).toBe(true);
+  });
+
+  it("does not publish speculative seller-confirmed trust sources", () => {
+    expect(
+      scoutGuidanceTrustedSourceSchema.safeParse("seller-confirmed-item")
+        .success,
+    ).toBe(false);
+  });
+
   it("rejects substitution permissions that no localized template uses", () => {
     const widened = structuredClone(catalog);
     widened.states["onboarding.outcome"].substitutions.push({
       key: "arbitraryText",
       valueType: "text",
-      trustedSources: ["seller-confirmed-item"],
+      trustedSources: ["durable-item-record"],
       maximumLength: 80,
       referencePattern: "^item:",
     });

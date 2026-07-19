@@ -14,7 +14,10 @@ The same request always produces the same result.
 
 Substitutions are opaque verified facts, not caller-labelled objects or prose extensions:
 
-- source-specific constructors derive provenance and validate real UUID identifiers;
+- source-specific constructors parse strict source-owned projections, validate their UUID identities,
+  and derive values rather than accepting a caller-supplied count or time window: capture count comes
+  from unique session photos, sold count and inclusive UTC-day window come from dated retained comps,
+  and uploaded count comes from durable run photo states;
 - each constructor enrolls the exact frozen object identity in module-private runtime state and binds
   it to one semantic key; no marker property or enumerable symbol is exposed for object spread,
   descriptor copying, or a caller assertion to forge;
@@ -34,8 +37,10 @@ source fragments verbatim; accessibility labels compose those approved phrases w
 
 The checked-in catalog currently ships approved `en-US` copy. Catalog locale keys are canonical
 BCP-47 language tags. A request must contain a well-formed BCP-47 tag; invalid tags fail closed with
-`invalid-locale`, while valid tags are canonicalized before lookup. Locale lookup then tries the
-canonical requested locale, its language tag, and finally `en-US`, in that deterministic order.
+`invalid-locale`, while valid tags are canonicalized before lookup. Registered grandfathered tags
+use their preferred modern tag when one exists, and canonical private-use tags remain valid even
+though they have no language fallback. Locale lookup then tries the canonical requested locale, its
+language tag when one exists, and finally `en-US`, in that deterministic order.
 New translations must provide the complete dictionary, use the exact approved placeholder set for
 each copy key, and contain balanced template braces; they do not change state selection or authorize
 new guide moments.
