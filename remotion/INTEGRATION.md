@@ -69,9 +69,10 @@ correct theme and mobile source. Its loading, failure, and reduced-motion
 fallback is a responsive still from the same capture set, so those paths also
 show the real SnapList UI.
 
-`hero-demo` remains the existing vision showcase and is outside the issue #136
-tour/inbox replacement. Legacy Remotion compositions remain registered for
-reference but are not written by `demo:render-real-ui`.
+Only the real-UI compositions used by `demo:render-real-ui` remain registered.
+Superseded handcrafted showcase and stage compositions are intentionally not
+kept as reference code because their rendered outputs are not consumed by the
+application.
 
 ## Validation
 
