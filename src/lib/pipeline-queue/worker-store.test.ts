@@ -153,12 +153,6 @@ describe("run-scoped pipeline worker store", () => {
           suggested: 50,
           range: { min: 40, max: 60 },
           tier: "ebay-sold",
-          evidence: [
-            expect.objectContaining({
-              id: "sold-1",
-              priceDisclosure: "displayed-sold-price",
-            }),
-          ],
         },
         evidence: [
           expect.objectContaining({
@@ -174,9 +168,7 @@ describe("run-scoped pipeline worker store", () => {
         evidence: Array<{ id: string }>;
       };
     };
-    expect(persistence.pricing_snapshot.price_result.evidence?.map(({ id }) => id)).toEqual([
-      "sold-1",
-    ]);
+    expect(persistence.pricing_snapshot.price_result).not.toHaveProperty("evidence");
     expect(persistence.pricing_snapshot.evidence.map(({ id }) => id)).toEqual(["sold-1"]);
   });
 

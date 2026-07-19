@@ -8,7 +8,13 @@ import {
 export const PRICING_EVIDENCE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 export const PRICING_EVIDENCE_MAX_ROWS = 60;
 
-export const persistedPriceResultSchema = priceResultSchema;
+export const persistedPriceResultSchema = priceResultSchema.refine(
+  (result) => result.evidence === undefined,
+  {
+    message: "Persisted price results must use the snapshot evidence array.",
+    path: ["evidence"],
+  },
+);
 
 export const acceptedPricingEvidenceRecordSchema = pricingEvidenceRecordSchema
   .extend({
@@ -60,6 +66,8 @@ export function buildPricingEvidenceSnapshotInput(
   const acceptedEvidence = evidence.filter(
     (record) => record.priceDisclosure === "displayed-sold-price",
   );
+  const priceResult = { ...result.price };
+  delete priceResult.evidence;
   const title =
     result.identification?.label.trim() ||
     result.attributes.title?.trim() ||
@@ -72,10 +80,7 @@ export function buildPricingEvidenceSnapshotInput(
       title,
       ...(condition ? { condition } : {}),
     },
-    price_result: {
-      ...result.price,
-      evidence: acceptedEvidence,
-    },
+    price_result: priceResult,
     evidence: acceptedEvidence,
   });
 }

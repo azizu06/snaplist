@@ -30,6 +30,7 @@ describe("pricing-evidence snapshot migration", () => {
     expect(migration).toMatch(/sold-comparable/i);
     expect(migration).toMatch(/octet_length\(p_evidence::text\) > 131072/i);
     expect(migration).toMatch(/evidenceAsOf/i);
+    expect(migration).toMatch(/not \(price_result \? 'evidence'\)/i);
   });
 
   it("persists the snapshot inside the lease-fenced atomic completion RPC", () => {

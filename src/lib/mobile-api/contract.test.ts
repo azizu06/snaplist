@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import {
   apiErrorEnvelopeSchema,
   mobileRunSchema,
@@ -60,6 +62,24 @@ function primitiveSchemaAccepts(
     return schema.minimum == null || (value as number) >= schema.minimum;
   }
   return false;
+}
+
+function dereferenceContractSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(dereferenceContractSchema);
+  if (!value || typeof value !== "object") return value;
+  const schema = value as Record<string, unknown>;
+  if (typeof schema.$ref === "string") {
+    const name = schema.$ref.replace("#/components/schemas/", "");
+    return dereferenceContractSchema(contract.components.schemas[name]);
+  }
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => key !== "pattern" || typeof schema.format !== "string")
+      .map(([key, nested]) => [
+        key === "oneOf" ? "anyOf" : key,
+        dereferenceContractSchema(nested),
+      ]),
+  );
 }
 
 describe("SwiftUI mobile HTTP contract", () => {
@@ -133,6 +153,19 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(() => pricingEvidenceEnvelopeSchema.parse(fixture)).not.toThrow();
     expect(fixture.data.comparables).toHaveLength(2);
     expect(fixture.data.comparables[1]).not.toHaveProperty("soldAt");
+  });
+
+  it("keeps the item-pricing OpenAPI projection byte-for-byte aligned with runtime JSON Schema", () => {
+    const generatedRuntimeSchema = z.toJSONSchema(
+      pricingEvidenceProjectionSchema,
+    ) as Record<string, unknown>;
+    delete generatedRuntimeSchema.$schema;
+    const runtimeSchema = dereferenceContractSchema(generatedRuntimeSchema);
+    const openApiSchema = dereferenceContractSchema(
+      contract.components.schemas.PricingEvidenceProjection,
+    );
+
+    expect(openApiSchema).toEqual(runtimeSchema);
   });
 
   it("documents the standard Clerk token checks without inventing an audience", () => {

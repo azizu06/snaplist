@@ -3,12 +3,15 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { estimateFees } from "@/lib/pricing/fees";
 import {
   priceResultSchema,
-  pricingEvidenceRecordSchema,
 } from "@/lib/pricing/types";
+import {
+  acceptedPricingEvidenceRecordSchema,
+  persistedPriceResultSchema,
+} from "./snapshot";
 
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
-const evidenceAsOfSchema = pricingEvidenceRecordSchema.extend({
+const evidenceAsOfSchema = acceptedPricingEvidenceRecordSchema.extend({
   evidenceAsOf: isoDateTime,
 });
 
@@ -29,7 +32,7 @@ export const pricingEvidenceSnapshotRowSchema = z
         condition: z.string().min(1).max(120).optional(),
       })
       .strict(),
-    price_result: priceResultSchema,
+    price_result: persistedPriceResultSchema,
     evidence: z.array(evidenceAsOfSchema).max(60),
     evidence_as_of: isoDateTime,
     pipeline_runs: z
@@ -39,6 +42,14 @@ export const pricingEvidenceSnapshotRowSchema = z
         stage: z.literal("completed"),
         listing_id: uuid,
         completed_at: isoDateTime,
+      })
+      .strict(),
+    listings: z
+      .object({
+        id: uuid,
+        run_id: uuid,
+        item_id: uuid,
+        user_id: z.string().min(1),
       })
       .strict(),
   })
@@ -104,6 +115,10 @@ export function buildPricingEvidenceProjection(
     row.item_id !== input.itemId ||
     row.run_id !== row.pipeline_runs.id ||
     row.listing_id !== row.pipeline_runs.listing_id ||
+    row.listing_id !== row.listings.id ||
+    row.run_id !== row.listings.run_id ||
+    row.item_id !== row.listings.item_id ||
+    row.user_id !== row.listings.user_id ||
     evidenceAsOfMs !== completedAtMs
   ) {
     throw new PricingEvidenceSnapshotError(
@@ -180,7 +195,7 @@ export function createSupabasePricingEvidenceReader(
       const { data, error } = await client
         .from("pricing_evidence_snapshots")
         .select(
-          "run_id,user_id,item_id,prediction_id,listing_id,schema_version,item,price_result,evidence,evidence_as_of,pipeline_runs!inner(id,status,stage,listing_id,completed_at)",
+          "run_id,user_id,item_id,prediction_id,listing_id,schema_version,item,price_result,evidence,evidence_as_of,pipeline_runs!inner(id,status,stage,listing_id,completed_at),listings!inner(id,run_id,item_id,user_id)",
         )
         .eq("item_id", itemId)
         .eq("user_id", userId)

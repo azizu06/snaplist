@@ -101,6 +101,7 @@ create table public.pricing_evidence_snapshots (
   ),
   constraint pricing_evidence_snapshots_price_result_check check (
     jsonb_typeof(price_result) = 'object'
+    and not (price_result ? 'evidence')
     and octet_length(price_result::text) <= 65536
   ),
   constraint pricing_evidence_snapshots_evidence_check
@@ -196,6 +197,7 @@ begin
   if (v_snapshot->>'schema_version')::integer is distinct from 1
     or jsonb_typeof(v_snapshot->'item') is distinct from 'object'
     or jsonb_typeof(v_snapshot->'price_result') is distinct from 'object'
+    or v_snapshot->'price_result' ? 'evidence'
     or not private.pricing_evidence_rows_valid(v_snapshot->'evidence') then
     raise exception using errcode = '22023', message = 'Invalid pricing evidence snapshot';
   end if;
