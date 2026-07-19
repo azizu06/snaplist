@@ -292,6 +292,21 @@ export async function claimGuestRecovery(
     throw new GuestClaimInProgressError(start.retryAfterSeconds);
   }
 
+  const queueExactCopyCleanup = () => dependencies.store.queueCopyCleanup({
+    ...identity,
+    idempotencyKey,
+    claimLeaseToken: start.claimLeaseToken,
+  }).catch(() => false);
+  const requireQuiescedExpiry = (
+    outcome: GuestClaimTerminalOutcome,
+    cleanupQueued: boolean,
+  ) => {
+    if (outcome.outcome === "expired" && !cleanupQueued) {
+      throw new GuestClaimStorageError();
+    }
+    return outcome;
+  };
+
   const verifiedObjects: GuestClaimVerifiedObject[] = [];
   try {
     for (const object of start.objects) {
@@ -308,17 +323,13 @@ export async function claimGuestRecovery(
       verifiedObjects.push(verified);
     }
   } catch {
-    await dependencies.store.queueCopyCleanup({
-      ...identity,
-      idempotencyKey,
-      claimLeaseToken: start.claimLeaseToken,
-    }).catch(() => false);
+    const cleanupQueued = await queueExactCopyCleanup();
     const released = await dependencies.store.releaseClaim({
       ...identity,
       claimLeaseToken: start.claimLeaseToken,
     }).catch(() => null);
     if (released?.outcome === "claimed" || released?.outcome === "expired") {
-      return released;
+      return requireQuiescedExpiry(released, cleanupQueued);
     }
     throw new GuestClaimStorageError();
   }
@@ -335,35 +346,26 @@ export async function claimGuestRecovery(
   } catch {
     // Requeue this exact lease first. The database protects the winning lease,
     // while an obsolete writer can recreate only its own namespace.
-    await dependencies.store.queueCopyCleanup({
-      ...identity,
-      idempotencyKey,
-      claimLeaseToken: start.claimLeaseToken,
-    }).catch(() => false);
+    const cleanupQueued = await queueExactCopyCleanup();
     const released = await dependencies.store.releaseClaim({
       ...identity,
       claimLeaseToken: start.claimLeaseToken,
     }).catch(() => null);
     if (released?.outcome === "claimed" || released?.outcome === "expired") {
-      return released;
+      return requireQuiescedExpiry(released, cleanupQueued);
     }
 
     const resolved = guestRecoveryOutcomeSchema.parse(
       await dependencies.store.resolveOutcome(identity),
     );
     if (resolved.outcome === "claimed" || resolved.outcome === "expired") {
-      return resolved;
+      return requireQuiescedExpiry(resolved, cleanupQueued);
     }
     throw new GuestClaimStorageError();
   }
 
   if (completed.outcome === "expired") {
-    const cleanupQueued = await dependencies.store.queueCopyCleanup({
-      ...identity,
-      idempotencyKey,
-      claimLeaseToken: start.claimLeaseToken,
-    }).catch(() => false);
-    if (!cleanupQueued) throw new GuestClaimStorageError();
+    return requireQuiescedExpiry(completed, await queueExactCopyCleanup());
   }
   return completed;
 }

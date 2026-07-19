@@ -250,6 +250,27 @@ describe("guest claim-or-expire orchestrator", () => {
     expect(privateStorage.remove).not.toHaveBeenCalled();
   });
 
+  it("fails closed when failed-copy expiry cleanup cannot be confirmed", async () => {
+    const claimStore = store({
+      queueCopyCleanup: vi.fn().mockRejectedValue(new Error("cleanup unavailable")),
+      releaseClaim: vi.fn().mockResolvedValue(expired),
+    });
+    const privateStorage = storage({
+      copyAndVerify: vi.fn().mockRejectedValue(new Error("copy failed")),
+    });
+
+    await expect(
+      claimGuestRecovery(
+        {
+          handoff,
+          targetUserId: "user_account",
+          idempotencyKey: "66666666-6666-4666-8666-666666666666",
+        },
+        { store: claimStore, storage: privateStorage },
+      ),
+    ).rejects.toBeInstanceOf(GuestClaimStorageError);
+  });
+
   it("returns a concurrently completed claim instead of letting a stale failed request delete its photos", async () => {
     const claimStore = store({
       releaseClaim: vi.fn().mockResolvedValue(terminal),
@@ -305,4 +326,38 @@ describe("guest claim-or-expire orchestrator", () => {
     });
     expect(claimStore.resolveOutcome).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      "lease release",
+      vi.fn().mockResolvedValue(expired),
+      vi.fn().mockRejectedValue(new Error("must not resolve after terminal release")),
+    ],
+    [
+      "outcome resolution",
+      vi.fn().mockResolvedValue({ outcome: "released" }),
+      vi.fn().mockResolvedValue(expired),
+    ],
+  ])(
+    "fails closed when interrupted completion cleanup cannot be confirmed before %s observes expiry",
+    async (_path, releaseClaim, resolveOutcome) => {
+      const claimStore = store({
+        completeClaim: vi.fn().mockRejectedValue(new Error("response lost")),
+        queueCopyCleanup: vi.fn().mockRejectedValue(new Error("cleanup unavailable")),
+        releaseClaim,
+        resolveOutcome,
+      });
+
+      await expect(
+        claimGuestRecovery(
+          {
+            handoff,
+            targetUserId: "user_account",
+            idempotencyKey: "66666666-6666-4666-8666-666666666666",
+          },
+          { store: claimStore, storage: storage() },
+        ),
+      ).rejects.toBeInstanceOf(GuestClaimStorageError);
+    },
+  );
 });
