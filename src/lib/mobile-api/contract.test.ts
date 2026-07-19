@@ -3,13 +3,19 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { apiErrorEnvelopeSchema } from "./contract";
 
-const contract = JSON.parse(
-  readFileSync(resolve("docs/contracts/mobile-api-v1.openapi.json"), "utf8"),
-) as {
+const serverContractSource = readFileSync(
+  resolve("docs/contracts/mobile-api-v1.openapi.json"),
+  "utf8",
+);
+const nativeContractSource = readFileSync(
+  resolve("ios/DesignContracts/V1/mobile-api-v1.openapi.json"),
+  "utf8",
+);
+const contract = JSON.parse(serverContractSource) as {
   info: { version: string };
   paths: Record<string, Record<string, unknown>>;
   components: {
-    securitySchemes: Record<string, unknown>;
+    securitySchemes: Record<string, { description?: string }>;
     schemas: Record<string, Record<string, unknown>>;
   };
 };
@@ -29,6 +35,18 @@ function operations() {
   );
 }
 
+function primitiveSchemaAccepts(
+  schema: { type?: string | string[]; minimum?: number },
+  value: unknown,
+): boolean {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (value === null) return types.includes("null");
+  if (Number.isInteger(value) && types.includes("integer")) {
+    return schema.minimum == null || (value as number) >= schema.minimum;
+  }
+  return false;
+}
+
 describe("SwiftUI mobile HTTP contract", () => {
   it("is explicitly versioned and independent from Next.js route names", () => {
     expect(contract.info.version).toBe("1.0.0");
@@ -44,10 +62,51 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(contract.paths).toHaveProperty("/v1/ebay/oauth/callback");
     expect(contract.paths).toHaveProperty("/v1/webhooks/revenuecat");
     expect(contract.paths).toHaveProperty("/v1/billing/revenuecat/identity");
+    expect(contract.paths["/v1/home"].get).toMatchObject({
+      operationId: "getHome",
+      "x-owner-issue": 208,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+    });
+    expect(contract.components.schemas).toHaveProperty("HomeEnvelope");
     expect(JSON.stringify(contract.paths["/v1/items/runs"])).toContain(
       "#/components/parameters/IdempotencyKey",
     );
     expect(JSON.stringify(contract)).toContain("Idempotency-Key");
+  });
+
+  it("keeps both OpenAPI copies byte-identical and validates unavailable Home order truth", () => {
+    expect(nativeContractSource).toBe(serverContractSource);
+    const homeSummary = contract.components.schemas.HomeSummary as {
+      properties: {
+        orders: { type?: string | string[]; minimum?: number };
+      };
+    };
+    const response = { data: { summary: { active: 2, drafts: 1, orders: null } } };
+
+    expect(homeSummary.properties.orders).toEqual({
+      type: ["integer", "null"],
+      minimum: 0,
+    });
+    expect(
+      primitiveSchemaAccepts(
+        homeSummary.properties.orders,
+        response.data.summary.orders,
+      ),
+    ).toBe(true);
+    expect(primitiveSchemaAccepts(homeSummary.properties.orders, 0)).toBe(true);
+  });
+
+  it("documents the standard Clerk token checks without inventing an audience", () => {
+    const description =
+      contract.components.securitySchemes.ClerkBearer.description ?? "";
+
+    expect(description).toMatch(/issuer/i);
+    expect(description).toMatch(/signature/i);
+    expect(description).toMatch(/expiry/i);
+    expect(description).toMatch(/subject/i);
+    expect(description).toMatch(/authorized-part/i);
+    expect(description).not.toMatch(/audience/i);
   });
 
   it.each(["conflict", "rate_limited"])(

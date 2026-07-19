@@ -1,0 +1,428 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
+import {
+  assembleDashboardRows,
+  latestPricePerItem,
+  type DashboardItemSource,
+  type DashboardListingSource,
+} from "@/lib/dashboard/rows";
+import {
+  PIPELINE_PROGRESS_SELECT,
+  pipelineProgressRunSchema,
+  type PipelineProgressRun,
+} from "@/lib/pipeline-progress";
+
+const uuid = z.string().uuid();
+
+export const homeProjectionSchema = z
+  .object({
+    revision: z.number().int().nonnegative(),
+    sellerState: z.enum(["active", "newSeller"]),
+    unreadNotificationCount: z.number().int().nonnegative(),
+    summary: z
+      .object({
+        active: z.number().int().nonnegative(),
+        drafts: z.number().int().nonnegative(),
+        orders: z.number().int().nonnegative().nullable(),
+      })
+      .strict(),
+    attention: z.array(
+      z
+        .object({
+          id: uuid,
+          itemTitle: z.string().min(1),
+          kind: z.enum(["shipping", "message", "offer", "warning", "pricing"]),
+          status: z.string().min(1),
+          detail: z.string().min(1),
+          actionLabel: z.string().min(1),
+          destination: z
+            .object({
+              kind: z.enum(["order", "conversation", "publishIssue", "draft"]),
+              id: uuid,
+            })
+            .strict(),
+        })
+        .strict(),
+    ),
+    currentRun: z
+      .object({
+        id: uuid,
+        itemTitle: z.string().min(1),
+        stageLabel: z.string().min(1),
+        reassurance: z.string().min(1),
+        progress: z.number().min(0).max(1).nullable(),
+      })
+      .strict()
+      .nullable(),
+    readyToFinish: z.array(
+      z.object({ id: uuid, title: z.string().min(1), detail: z.string().min(1) }).strict(),
+    ),
+    listings: z.array(
+      z
+        .object({
+          id: uuid,
+          title: z.string().min(1),
+          lifecycle: z.enum(["active", "draft", "sold", "needsAttention"]),
+          statusLabel: z.string().min(1),
+          detail: z.string().min(1),
+          price: z.string().min(1).nullable(),
+        })
+        .strict(),
+    ),
+    recentSearches: z.array(z.string().min(1)),
+  })
+  .strict();
+
+export type HomeProjection = z.infer<typeof homeProjectionSchema>;
+
+export interface HomeProjectionReader {
+  forSeller(input: { userId: string; bearerToken: string }): Promise<HomeProjection>;
+}
+
+interface HomeNotificationRow {
+  id: string;
+  user_id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  item_id: string | null;
+  listing_id: string | null;
+  source_message_id: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+interface HomeItemRow extends DashboardItemSource {
+  id: string;
+  user_id: string;
+  updated_at: string;
+}
+
+interface HomeListingRow extends DashboardListingSource {
+  id: string;
+  user_id: string;
+  item_id: string;
+  updated_at: string;
+}
+
+interface HomePredictionRow {
+  id: string;
+  user_id: string;
+  item_id: string;
+  price: unknown;
+  created_at: string;
+}
+
+interface HomeProjectionRows {
+  notifications: HomeNotificationRow[];
+  unreadNotificationCount: number;
+  activeListingCount: number;
+  draftListingCount: number;
+  runs: PipelineProgressRun[];
+  listings: HomeListingRow[];
+  items: HomeItemRow[];
+  predictions: HomePredictionRow[];
+}
+
+function money(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value) || value <= 0) return null;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function listingPresentation(status: string): Pick<HomeProjection["listings"][number], "lifecycle" | "statusLabel" | "detail"> {
+  switch (status) {
+    case "published":
+      return { lifecycle: "active", statusLabel: "Live", detail: "eBay · Live" };
+    case "sold":
+      return { lifecycle: "sold", statusLabel: "Sold", detail: "eBay · Sold" };
+    case "failed":
+    case "draft_failed":
+      return {
+        lifecycle: "needsAttention",
+        statusLabel: "Needs attention",
+        detail: "Listing preparation needs review",
+      };
+    case "new":
+    case "queued":
+      return { lifecycle: "draft", statusLabel: "Preparing", detail: "SnapList · In progress" };
+    default:
+      return { lifecycle: "draft", statusLabel: "Draft", detail: "Draft · Finish details" };
+  }
+}
+
+function stagePresentation(stage: PipelineProgressRun["stage"]): string {
+  switch (stage) {
+    case "queued":
+      return "Waiting to start";
+    case "identifying":
+      return "Identifying your item";
+    case "pricing":
+      return "Finding recent sold comps";
+    case "generating":
+      return "Writing your listing";
+    case "persisting":
+      return "Saving your draft";
+    case "completed":
+      return "Draft ready";
+  }
+}
+
+function timestampRevision(rows: HomeProjectionRows): number {
+  const timestamps = [
+    ...rows.notifications.map((row) => row.created_at),
+    ...rows.runs.map((row) => row.updated_at),
+    ...rows.listings.flatMap((row) => [row.created_at as string, row.updated_at]),
+    ...rows.items.flatMap((row) => [row.created_at as string, row.updated_at]),
+    ...rows.predictions.map((row) => row.created_at),
+  ];
+  return timestamps.reduce((latest, value) => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
+  }, 0);
+}
+
+export function assembleHomeProjection(rows: HomeProjectionRows): HomeProjection {
+  const dashboardRows = assembleDashboardRows({
+    listings: rows.listings,
+    items: rows.items,
+    latestPrice: latestPricePerItem(rows.predictions),
+    thumbUrlFor: () => null,
+  });
+  const listings = dashboardRows
+    .filter((row) => row.status !== "archived")
+    .map((row) => ({
+      id: row.itemId,
+      title: row.title,
+      ...listingPresentation(row.status),
+      price: money(row.price),
+    }));
+  const activeRun = rows.runs.find((run) =>
+    ["queued", "running", "retrying"].includes(run.status),
+  );
+  const itemTitles = new Map(dashboardRows.map((row) => [row.itemId, row.title]));
+  const currentRun = activeRun
+    ? {
+        id: activeRun.id,
+        itemTitle: itemTitles.get(activeRun.item_id) ?? "Your item",
+        stageLabel: stagePresentation(activeRun.stage),
+        reassurance: "You can leave — we’ll notify you when it’s ready.",
+        progress: null,
+      }
+    : null;
+  const attention = rows.notifications.flatMap<HomeProjection["attention"][number]>((notification) => {
+    if (notification.kind === "buyer_message" && notification.source_message_id) {
+      return [
+        {
+          id: notification.id,
+          itemTitle: notification.title,
+          kind: "message" as const,
+          status: "Buyer asked a question",
+          detail: notification.body ?? "Open the buyer conversation to review the question.",
+          actionLabel: "Reply",
+          destination: {
+            kind: "conversation" as const,
+            id: notification.source_message_id,
+          },
+        },
+      ];
+    }
+    const destinationID = notification.listing_id ?? notification.item_id;
+    if (
+      !destinationID ||
+      (notification.kind !== "pipeline_failed" && notification.kind !== "listing_failed")
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: notification.id,
+        itemTitle: notification.title,
+        kind: "warning" as const,
+        status: "Needs review",
+        detail: notification.body ?? "Open this listing to review what happened.",
+        actionLabel: "Review",
+        destination: {
+          kind: notification.listing_id ? ("publishIssue" as const) : ("draft" as const),
+          id: destinationID,
+        },
+      },
+    ];
+  });
+  const readyToFinish = dashboardRows
+    .filter((row) => ["draft", "draft_failed", "failed"].includes(row.status))
+    .map((row) => ({ id: row.itemId, title: row.title, detail: listingPresentation(row.status).detail }));
+
+  return homeProjectionSchema.parse({
+    revision: timestampRevision(rows),
+    sellerState:
+      listings.length === 0 && rows.runs.length === 0 && rows.notifications.length === 0
+        ? "newSeller"
+        : "active",
+    unreadNotificationCount: rows.unreadNotificationCount,
+    summary: {
+      active: rows.activeListingCount,
+      drafts: rows.draftListingCount,
+      // No tenant-owned order projection exists yet. Unknown is honest; zero is not.
+      orders: null,
+    },
+    attention,
+    currentRun,
+    readyToFinish,
+    listings,
+    recentSearches: [],
+  });
+}
+
+function assertTenantRows(userId: string, rows: Array<{ user_id?: string }>): void {
+  if (rows.some((row) => row.user_id !== userId)) {
+    throw new Error("Home projection crossed the verified tenant boundary.");
+  }
+}
+
+async function readAllPages<Row>(
+  readPage: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: Row[] | null; error: unknown | null }>,
+): Promise<{ data: Row[]; error: unknown | null }> {
+  const pageSize = 100;
+  const data: Row[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const result = await readPage(from, from + pageSize - 1);
+    if (result.error) return { data, error: result.error };
+    const page = result.data ?? [];
+    data.push(...page);
+    if (page.length < pageSize) return { data, error: null };
+  }
+}
+
+export function createSupabaseHomeProjectionReader(
+  clientForBearer: (bearerToken: string) => SupabaseClient | Promise<SupabaseClient>,
+): HomeProjectionReader {
+  return {
+    async forSeller({ userId, bearerToken }) {
+      const client = await clientForBearer(bearerToken);
+      const [
+        notificationResult,
+        unreadNotificationResult,
+        runResult,
+        activeListingCountResult,
+        draftListingCountResult,
+        listingResult,
+        itemResult,
+        predictionResult,
+      ] =
+        await Promise.all([
+          client
+            .from("notifications")
+            .select("id,user_id,kind,title,body,item_id,listing_id,source_message_id,read_at,created_at")
+            .order("created_at", { ascending: false })
+            .limit(20),
+          client
+            .from("notifications")
+            .select("id", { count: "exact", head: true })
+            .is("read_at", null),
+          client
+            .from("pipeline_runs")
+            .select(PIPELINE_PROGRESS_SELECT)
+            .in("status", ["queued", "running", "retrying"])
+            .order("updated_at", { ascending: false })
+            .limit(8),
+          client
+            .from("listings")
+            .select("id", { count: "exact", head: true })
+            .eq("platform", "ebay")
+            .eq("status", "published")
+            .limit(1),
+          client
+            .from("listings")
+            .select("id", { count: "exact", head: true })
+            .eq("platform", "ebay")
+            .in("status", ["draft", "queued"])
+            .limit(1),
+          readAllPages<HomeListingRow>((from, to) =>
+            client
+              .from("listings")
+              .select("id,user_id,item_id,title,status,created_at,updated_at,listed_price")
+              .eq("platform", "ebay")
+              .order("created_at", { ascending: false })
+              .order("id", { ascending: false })
+              .range(from, to),
+          ),
+          readAllPages<HomeItemRow>((from, to) =>
+            client
+              .from("items")
+              .select("id,user_id,attributes,photos,price_override,cost_basis,created_at,updated_at")
+              .order("created_at", { ascending: false })
+              .order("id", { ascending: false })
+              .range(from, to),
+          ),
+          readAllPages<HomePredictionRow>((from, to) =>
+            client
+              .from("prediction_logs")
+              .select("id,user_id,item_id,price,created_at")
+              .order("created_at", { ascending: false })
+              .order("id", { ascending: false })
+              .range(from, to),
+          ),
+        ]);
+      const failed = [
+        notificationResult.error,
+        unreadNotificationResult.error,
+        runResult.error,
+        activeListingCountResult.error,
+        draftListingCountResult.error,
+        listingResult.error,
+        itemResult.error,
+        predictionResult.error,
+      ].find(Boolean);
+      if (failed) throw new Error("Home projection read failed.");
+      if (unreadNotificationResult.count == null) {
+        throw new Error("Home unread notification count was unavailable.");
+      }
+      if (activeListingCountResult.count == null || draftListingCountResult.count == null) {
+        throw new Error("Home listing summary counts were unavailable.");
+      }
+
+      const notifications = (notificationResult.data ?? []) as HomeNotificationRow[];
+      const runs = (runResult.data ?? []).map((row) => pipelineProgressRunSchema.parse(row));
+      const listings = (listingResult.data ?? []) as unknown as HomeListingRow[];
+      const items = (itemResult.data ?? []) as unknown as HomeItemRow[];
+      const predictions = (predictionResult.data ?? []) as HomePredictionRow[];
+      assertTenantRows(userId, [
+        ...notifications,
+        ...runs,
+        ...listings,
+        ...items,
+        ...predictions,
+      ]);
+      return assembleHomeProjection({
+        notifications,
+        unreadNotificationCount: unreadNotificationResult.count,
+        activeListingCount: activeListingCountResult.count,
+        draftListingCount: draftListingCountResult.count,
+        runs,
+        listings,
+        items,
+        predictions,
+      });
+    },
+  };
+}
+
+export function createConfiguredSupabaseHomeProjectionReader(input: {
+  supabaseURL: string;
+  anonKey: string;
+}): HomeProjectionReader {
+  return createSupabaseHomeProjectionReader((bearerToken) =>
+    createClient(input.supabaseURL, input.anonKey, {
+      accessToken: async () => bearerToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    }),
+  );
+}

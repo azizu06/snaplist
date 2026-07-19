@@ -6,13 +6,34 @@ struct SnapListApp: App {
     @State private var router: AppRouter
     @State private var onboardingModel: OnboardingFlowModel
     @State private var captureFlow: CaptureFlowModel
+    @State private(set) var homeStore: HomeStore
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
 
     init() {
-        let configuration = LaunchConfiguration.parse(
-            arguments: ProcessInfo.processInfo.arguments
+        self.init(
+            configuration: LaunchConfiguration.parse(
+                arguments: ProcessInfo.processInfo.arguments
+            ),
+            homeAuthentication: HomeAuthenticationComposition.make()
         )
+    }
+
+    init(homeAuthentication: any HomeAuthenticationProviding) {
+        self.init(
+            configuration: LaunchConfiguration.parse(
+                arguments: ProcessInfo.processInfo.arguments
+            ),
+            homeAuthentication: homeAuthentication
+        )
+    }
+
+    init(
+        configuration: LaunchConfiguration,
+        homeAuthentication: any HomeAuthenticationProviding,
+        homeAPIOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
+        homeURLSession: URLSession = .shared
+    ) {
         self.configuration = configuration
         self.dependencies = AppDependencies.make(configuration: configuration)
         _router = State(
@@ -47,6 +68,16 @@ struct SnapListApp: App {
                 store: dependencies.captureDraftStore
             )
         )
+        _homeStore = State(
+            initialValue: HomeStore(
+                repository: HomeRepositoryFactory.make(
+                    configuration: configuration,
+                    apiOrigin: homeAPIOrigin,
+                    authentication: homeAuthentication,
+                    session: homeURLSession
+                )
+            )
+        )
     }
 
     var body: some Scene {
@@ -55,11 +86,15 @@ struct SnapListApp: App {
                 router: router,
                 onboardingModel: onboardingModel,
                 captureFlow: captureFlow,
+                homeStore: homeStore,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)
                 .task {
-                    router.handleCaptureRestoration(await captureFlow.restore())
+                    async let restoration = captureFlow.restore()
+                    async let homeLoad: Void = homeStore.load()
+                    router.handleCaptureRestoration(await restoration)
+                    await homeLoad
                 }
         }
     }
