@@ -66,8 +66,8 @@ versioned contract.
 ## Current snapshot
 
 - Graphify: `graphifyy v0.8.33`
-- Tracked and represented scope: 320 files
-- Graph: 4,384 nodes and 8,696 edges. The generated report records the exact
+- Tracked and represented scope: 321 files
+- Graph: 4,390 nodes and 8,702 edges. The generated report records the exact
   deterministic-clustering community count for each run.
 - Generation command: `scripts/graphify-core-product.sh`
 

@@ -153,11 +153,13 @@ receive honest **assisted marketplace handoffs**.
   every authenticated delivery requires explicit seller approval.
 - **Inbox** — the seller's live view of simulated or imported buyer **messages**, fed
   DB→Supabase Realtime after **inbox sync**. The seller is the only SnapList user; buyers stay on eBay.
-- **Reference corpus** — the seeded set of example items/listings embedded in **pgvector**, used to
-  ground listing generation (few-shot) and to *corroborate* pricing. Never the price oracle.
+- **Reference corpus:** a retained, evaluation-only set of example listings embedded in
+  **pgvector**. Optional retrieval may provide listing style and structure hints only after the
+  paired evaluation gate passes. It is default-off, non-blocking, and never pricing, confidence,
+  factual, or seller-data authority.
 - **Freshness** — sold prices drift, so pricing is **live-fetched** at query time; a TTL
-  cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The
-  **reference corpus** never serves a stored price as current truth.
+  cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority.
+  Reference-corpus prices do not participate in pricing or confidence.
 - **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
   for every pipeline execution. Its price is the pipeline's recommendation, not a seller override or
   necessarily the outbound **effective price**. The **eval harness** depends on that distinction.

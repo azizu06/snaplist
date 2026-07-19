@@ -63,7 +63,7 @@ flowchart TD
         CONF["Confidence composite<br/>tier fired + comp agreement + ID completeness"]
         GATE{"Publish eligibility gate"}
         READY["Ready for manual publish"]
-        LISTING["Listing generation<br/>per-platform copy · RAG few-shot"]
+        LISTING["Listing generation<br/>validated facts · optional examples"]
     end
 
     VISION --> ROUTER
@@ -105,7 +105,7 @@ flowchart TD
 
     subgraph crosscut["Cross-cutting"]
         REG["LLM provider registry<br/>Gemini dev / OpenAI showcase"]
-        RAG["pgvector reference corpus<br/>grounds copy · corroborates price"]
+        RAG["pgvector reference corpus<br/>evaluation-only examples"]
         LOGS["prediction_logs<br/>attrs · price · tier · confidence per run"]
         EVAL["Eval harness<br/>ID accuracy · price band · calibration"]
         OBS["Observability<br/>structured JSON · /api/health"]
@@ -114,8 +114,7 @@ flowchart TD
     VISION -.->|resolveLanguageModel| REG
     LISTING -.-> REG
     QA -.-> REG
-    ROUTER -.->|corroboration| RAG
-    LISTING -.->|few-shot| RAG
+    LISTING -.->|legacy retrieval; target default-off| RAG
     CONF -.->|logs prediction| LOGS
     LISTING -.->|run events| OBS
     LOGS --> EVAL
@@ -135,9 +134,10 @@ RLS, imports supported buyer-photo metadata, renders it through an authenticated
 Realtime update the inbox. A grounded agent drafts one reply for seller approval; acknowledged
 text-and-photo replies and follow-ups go back through the eBay messaging adapter as one delivery
 attempt, while failed or ambiguous attempts stay visibly retryable. Cutting across all of it: a
-role-keyed LLM provider registry (Gemini in dev, OpenAI for the showcase), a pgvector reference
-corpus that grounds copy and corroborates price, per-run prediction logs feeding the eval harness,
-structured-JSON observability, and Clerk auth with Postgres RLS enforcing per-user isolation everywhere.
+role-keyed LLM provider registry (Gemini in dev, OpenAI for the showcase), an evaluation-only
+pgvector reference corpus with no pricing authority, per-run prediction logs feeding the eval
+harness, structured-JSON observability, and Clerk auth with Postgres RLS enforcing per-user
+isolation everywhere.
 
 The pre-publish correction loop replaces bounded identity facts (brand, model, category, condition,
 valid ISBN/UPC, and relevant specifications), then reruns pricing, confidence, and listing generation.
@@ -196,7 +196,7 @@ idea seen three ways. The map from skill to code:
 |---|---|
 | Multimodal vision extraction | `src/lib/vision` — one `generateObject` call over the photos → Zod-validated attributes + flagged identification |
 | Agents + tool calling | `src/lib/pricing/providers` (web-search pricing agent over Tavily/Exa) · `src/lib/inbox` (grounded buyer-Q&A reply agent) |
-| RAG + pgvector | `src/lib/rag` — seeded reference corpus, HNSW + cosine via the `match_reference_corpus` RPC; one retrieval feeds pricing corroboration **and** few-shot listing copy |
+| Optional listing-example retrieval | `src/lib/rag` - legacy retrieval currently runs before listing generation; ADR-0010 makes it default-off, fail-open, evaluation-gated, and never pricing authority |
 | Pricing as a routing pipeline | `src/lib/pricing/router.ts` — ISBN lookup → eBay sold comps → UPC-aided web → branded web → depreciation → LLM fallback, every result `{ suggested, range, confidence, sources[] }` |
 | Signal-based confidence (never LLM self-report) | `src/lib/confidence` — pure composite of tier fired + comp agreement + ID completeness; gates manual-publish eligibility |
 | Structured outputs | Zod everywhere a model speaks: `src/lib/pipeline/types.ts`, `src/lib/listing/schema.ts` — no ad-hoc JSON parsing |
@@ -264,15 +264,18 @@ status). Identifiers and signals only — never photo contents or listing copy. 
 `GET /api/health`. Every run's predictions are also persisted to `prediction_logs` for the eval
 harness — the durable observability layer.
 
-## Reference corpus (RAG / pgvector)
-SnapList ships a **seeded reference corpus** to avoid RAG cold-start (PRD "RAG (pgvector)"). It is
-**global, read-only reference data** — *not* per-user — so it lives in its own `reference_corpus`
-table (no `user_id`), distinct from the per-user `embeddings` table. RLS grants **read to all
-authenticated users and no write** to app roles; seeding is done with the service role. Retrieval
-(`src/lib/rag`) serves two consumers from one similarity query: **(a)** a pricing-corroboration
-signal (matched comps' median/range/dispersion) that feeds the confidence composite, and **(b)**
-few-shot example copy for the listing generator. Vector search uses pgvector HNSW + cosine via the
-`match_reference_corpus` RPC.
+## Reference corpus (optional evaluation material)
+SnapList retains a **seeded realistic-synthetic reference corpus** while it decides whether similar
+listing examples reduce seller edits. It is global, read-only evaluation material in the
+`reference_corpus` table, distinct from tenant-owned seller data. No private seller draft is written
+to it. RLS grants authenticated reads and no app-role writes; seeding uses the service role. Vector
+search uses pgvector HNSW + cosine through the `match_reference_corpus` RPC.
+
+The current server implementation retrieves examples before listing generation and can fail the run
+when retrieval fails. That is legacy behavior, not the native launch contract. ADR-0010 requires a
+separate runtime tracer bullet to make retrieval default-off and fail-open. Pricing and confidence
+never consume reference-corpus data. The corpus stays disabled after that change unless a disjoint,
+predefined on/off evaluation proves user value without increasing unsupported claims.
 
 Embedding generation is **pluggable**: real OpenAI `text-embedding-3-small` vectors when
 `OPENAI_API_KEY` is set at seed time, else deterministic offline-safe synthetic vectors (which is
@@ -291,7 +294,7 @@ Being able to state where the system's accuracy tops out is part of the showcase
   untrusted rows must survive the shared matcher and minimum-two-anchor gate. Either provider can
   fail or a query can be too thin; in those cases the router falls
   through to cited web search (often *asking* prices), depreciation, or the LLM-only floor. The
-  corpus-corroboration signal is built on synthetic comps. Treat every price as a *smart
+  reference corpus does not contribute to price or confidence. Treat every price as a *smart
   suggestion*, not an oracle. See the [operator smoke procedure](./docs/sold-comps-egress.md).
 - **The `llm-only` floor tier is a guess.** When no barcode, brand, or retail anchor resolves, the
   fallback is an LLM estimate — lowest confidence by construction, surfaced as such, and potentially
@@ -308,11 +311,12 @@ Being able to state where the system's accuracy tops out is part of the showcase
   candidates), not solved.
 
 ## Synthetic-data disclosures
-- **Reference corpus:** realistic-synthetic — hand-authored, hero-domain-weighted example items
-  with plausible used/resale prices and good listing copy, **not** scraped real listings or live
-  sold-price comps. The retrieval architecture is real; only the seed content is synthetic.
-- **Eval gold set + sample predictions:** hand-authored fixtures (overlapping the corpus via
-  `sourceRef`), labeled for development — see the accuracy-ceiling notes above.
+- **Reference corpus:** realistic-synthetic, hand-authored, hero-domain-weighted example items with
+  plausible used/resale prices and listing copy. They are not scraped real listings, live sold-price
+  comps, factual production authority, or seller data.
+- **Eval gold set + sample predictions:** hand-authored development fixtures. The existing set
+  overlaps the corpus through `sourceRef`, so it cannot be used for the RAG retention decision. That
+  decision requires a disjoint holdout with exact and near-duplicate exclusions.
 - **Buyer traffic can be simulated or imported from eBay Sandbox.** Both paths use the real grounded
   reply agent; only the authenticated eBay path can claim marketplace delivery. See the
   [two-user operator runbook](./docs/ebay-messaging-sandbox.md).

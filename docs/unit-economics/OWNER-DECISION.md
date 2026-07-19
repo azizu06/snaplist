@@ -30,6 +30,11 @@ The only provider cost measured on a representative fixed corpus is the #188 Caf
 
 All token counts, stage route shares, cache-hit rates, failure rates, correction rates, free-activation conversion burden, refund/tax rates, and per-attempt infrastructure values are **dated assumption ranges**. The runtime proof is also deliberately separated: its 25-run air-gapped result is an orchestration lower bound, while the provider-inclusive 120-second/10-active-CPU-second/512-MiB envelope is an assumption awaiting device and provider telemetry ([runtime proof](../architecture/mobile-runtime-hosting-proof.md)).
 
+The generated totals still include one embedding query per attempt because they model the current
+legacy retrieval-first runtime. ADR-0010 makes listing-example retrieval default-off for launch. The
+runtime hardening ticket must set this cost to zero and regenerate the model unless the later disjoint
+on/off evaluation authorizes retrieval.
+
 Current public rate cards are linked in the model beside every assumption. In particular, the showcase path uses the repo's GPT-5.5 default at the official [$5/M input, $0.50/M cached input, and $30/M output rates](https://developers.openai.com/api/docs/models/gpt-5.5); the development flip remains Gemini 2.5 Flash at its [current official rates](https://ai.google.dev/gemini-api/docs/pricing). The model does not silently substitute today's Apify card for #188's historical measured spend: the actor now advertises [from $2.50/1,000 results](https://apify.com/caffein.dev/ebay-sold-listings), while this version preserves the actual benchmark cost.
 
 ## Successful-listing COGS

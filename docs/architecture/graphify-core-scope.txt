@@ -12,6 +12,7 @@ docs/adr/0005-billing-direct-stripe-entitlement-mirror.md
 docs/adr/0007-durable-pipeline-supabase-queues.md
 docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md
 docs/adr/0009-provider-neutral-mobile-api-and-worker-runtime.md
+docs/adr/0010-evaluation-gated-listing-example-retrieval.md
 docs/agents/domain.md
 docs/agents/issue-tracker.md
 docs/agents/triage-labels.md
