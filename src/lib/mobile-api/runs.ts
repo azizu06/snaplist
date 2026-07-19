@@ -96,6 +96,17 @@ const reservationRowSchema = z
   .object({ state: z.enum(["reserved", "settled", "restored"]) })
   .strict();
 
+const mutationRejectionSchema = z
+  .object({
+    mobileRunOperationError: z
+      .object({
+        code: z.string().min(1),
+        message: z.string().min(1),
+      })
+      .strict(),
+  })
+  .strict();
+
 function requireData<T>(
   operation: string,
   result: MobileRunDataResult<T>,
@@ -196,6 +207,11 @@ function mutationFailure(error: MobileRunDataError): never {
   throw new MobileRunUnavailableError("Durable-run mutation failed");
 }
 
+function durableMutationFailure(data: unknown): void {
+  const rejection = mutationRejectionSchema.safeParse(data);
+  if (rejection.success) mutationFailure(rejection.data.mobileRunOperationError);
+}
+
 export function createMobileRunOperations(
   clientForBearer: (bearerToken: string) => MobileRunDataClient | Promise<MobileRunDataClient>,
 ): MobileRunOperations {
@@ -211,6 +227,7 @@ export function createMobileRunOperations(
       const client = await clientForBearer(input.bearerToken);
       const result = await client.retryRun(input.runId, input.idempotencyKey);
       if (result.error) mutationFailure(result.error);
+      durableMutationFailure(result.data);
       const run = await readCanonicalRun(client, input.runId, input.userId);
       if (!run) throw new MobileRunNotFoundError();
       return run;
@@ -221,6 +238,7 @@ export function createMobileRunOperations(
       const client = await clientForBearer(input.bearerToken);
       const result = await client.cancelRun(input.runId, input.idempotencyKey);
       if (result.error) mutationFailure(result.error);
+      durableMutationFailure(result.data);
       const run = await readCanonicalRun(client, input.runId, input.userId);
       if (!run) throw new MobileRunNotFoundError();
       return run;

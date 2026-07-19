@@ -297,6 +297,30 @@ describe("mobile durable-run operations", () => {
     ).rejects.toBeInstanceOf(ErrorType);
   });
 
+  it("maps a durable rejected-operation receipt without re-reading run state", async () => {
+    const client = dataClient({
+      retryRun: vi.fn().mockResolvedValue({
+        data: {
+          mobileRunOperationError: {
+            code: "55000",
+            message: "private database detail",
+          },
+        },
+        error: null,
+      }),
+    });
+
+    await expect(
+      createMobileRunOperations(async () => client).retry({
+        runId: RUN_ID,
+        userId: "user_native",
+        bearerToken: "signed-jwt",
+        idempotencyKey: "24100000-0000-4000-8000-000000000003",
+      }),
+    ).rejects.toBeInstanceOf(MobileRunConflictError);
+    expect(client.readRun).not.toHaveBeenCalled();
+  });
+
   it("fails closed when an adapter crosses the verified tenant boundary", async () => {
     const client = dataClient({
       readRun: vi.fn().mockResolvedValue({
