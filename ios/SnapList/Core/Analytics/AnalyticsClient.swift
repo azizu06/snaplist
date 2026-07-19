@@ -82,6 +82,7 @@ protocol AnalyticsDebugSinking: AnyObject {
 }
 
 private final class AnalyticsSerialExecutor: @unchecked Sendable {
+    private let consentTransitionDidSubmit: @Sendable (AnalyticsConsent) -> Void
     private let consentTransitionDidEnterSerializedBoundary: @Sendable (AnalyticsConsent) -> Void
     private let key = DispatchSpecificKey<Void>()
     private let queue = DispatchQueue(
@@ -90,8 +91,10 @@ private final class AnalyticsSerialExecutor: @unchecked Sendable {
     )
 
     init(
+        consentTransitionDidSubmit: @escaping @Sendable (AnalyticsConsent) -> Void,
         consentTransitionDidEnterSerializedBoundary: @escaping @Sendable (AnalyticsConsent) -> Void
     ) {
+        self.consentTransitionDidSubmit = consentTransitionDidSubmit
         self.consentTransitionDidEnterSerializedBoundary = consentTransitionDidEnterSerializedBoundary
         queue.setSpecific(key: key, value: ())
     }
@@ -100,19 +103,28 @@ private final class AnalyticsSerialExecutor: @unchecked Sendable {
         queue.async(execute: operation)
     }
 
+    func finishPendingWork() {
+        guard DispatchQueue.getSpecific(key: key) == nil else { return }
+        queue.sync {}
+    }
+
     func serializeConsentTransition(
         _ consent: AnalyticsConsent,
         operation: @escaping @Sendable () -> Void
     ) {
         if DispatchQueue.getSpecific(key: key) != nil {
+            consentTransitionDidSubmit(consent)
             consentTransitionDidEnterSerializedBoundary(consent)
             operation()
             return
         }
 
-        let workItem = DispatchWorkItem(block: operation)
+        let workItem = DispatchWorkItem { [consentTransitionDidEnterSerializedBoundary] in
+            consentTransitionDidEnterSerializedBoundary(consent)
+            operation()
+        }
         queue.async(execute: workItem)
-        consentTransitionDidEnterSerializedBoundary(consent)
+        consentTransitionDidSubmit(consent)
         workItem.wait()
     }
 }
@@ -132,6 +144,7 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
         dedupeStore: any AnalyticsDedupeStoring,
         identityStore: any AnalyticsIdentityStoring,
         sink: any AnalyticsDebugSinking,
+        consentTransitionDidSubmit: @escaping @Sendable (AnalyticsConsent) -> Void = { _ in },
         consentTransitionDidEnterSerializedBoundary: @escaping @Sendable (AnalyticsConsent) -> Void = { _ in }
     ) {
         self.metadata = metadata
@@ -140,6 +153,7 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
         self.identityStore = identityStore
         self.sink = sink
         executor = AnalyticsSerialExecutor(
+            consentTransitionDidSubmit: consentTransitionDidSubmit,
             consentTransitionDidEnterSerializedBoundary: consentTransitionDidEnterSerializedBoundary
         )
     }
@@ -221,13 +235,8 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
         }
     }
 
-    @discardableResult
-    func waitUntilIdleForTesting(timeout: TimeInterval = 2) -> Bool {
-        let idle = DispatchSemaphore(value: 0)
-        executor.async {
-            idle.signal()
-        }
-        return idle.wait(timeout: .now() + timeout) == .success
+    func finishPendingWorkForTesting() {
+        executor.finishPendingWork()
     }
 }
 
