@@ -401,7 +401,10 @@ function resolveLocale(canonicalLocale: string): {
   try {
     language = new Intl.Locale(canonicalLocale).language;
   } catch {
-    // Grandfathered/private-use BCP-47 tags have no reliable language fallback.
+    const primaryLanguage = canonicalLocale.split("-", 1)[0];
+    if (/^[A-Za-z]{2,8}$/.test(primaryLanguage)) {
+      language = primaryLanguage.toLowerCase();
+    }
   }
 
   const fallbackChain = [

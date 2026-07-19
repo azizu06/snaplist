@@ -110,19 +110,37 @@ describe("Scout guidance catalog contract", () => {
   });
 
   it("rejects non-BCP-47 locale identifiers", () => {
-    const invalid = structuredClone(catalog);
-    invalid.defaultLocale = "not a locale";
-    invalid.locales["not a locale"] = invalid.locales["en-US"];
+    for (const invalidLocale of [
+      "not a locale",
+      "en-a",
+      "de-1901-1901",
+      "en-a-abc-a-def",
+      "zh-aaa-bbb-ccc-ddd",
+    ]) {
+      const invalid = structuredClone(catalog);
+      invalid.defaultLocale = invalidLocale;
+      invalid.locales[invalidLocale] = invalid.locales["en-US"];
 
-    expect(scoutGuidanceCatalogSchema.safeParse(invalid).success).toBe(false);
+      expect(
+        scoutGuidanceCatalogSchema.safeParse(invalid).success,
+        invalidLocale,
+      ).toBe(false);
+    }
   });
 
   it("accepts canonical BCP-47 private-use locale identifiers", () => {
     const privateUse = structuredClone(catalog);
     privateUse.defaultLocale = "x-scout";
     privateUse.locales["x-scout"] = privateUse.locales["en-US"];
+    const extendedLanguage = structuredClone(catalog);
+    extendedLanguage.defaultLocale = "zh-cmn-Hans-CN";
+    extendedLanguage.locales["zh-cmn-Hans-CN"] =
+      extendedLanguage.locales["en-US"];
 
     expect(scoutGuidanceCatalogSchema.safeParse(privateUse).success).toBe(true);
+    expect(
+      scoutGuidanceCatalogSchema.safeParse(extendedLanguage).success,
+    ).toBe(true);
   });
 
   it("does not publish speculative seller-confirmed trust sources", () => {

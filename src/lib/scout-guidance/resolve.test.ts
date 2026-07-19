@@ -420,7 +420,7 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
-  it("canonicalizes grandfathered tags and deterministically falls back for private-use tags", () => {
+  it("canonicalizes grandfathered tags and falls back for private-use and extended-language tags", () => {
     const grandfathered = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
       state: "onboarding.outcome",
@@ -433,10 +433,21 @@ describe("resolveScoutGuidance", () => {
       locale: "x-scout",
       substitutions: {},
     });
+    const extendedLanguage = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "onboarding.outcome",
+      locale: "zh-cmn-hans-cn",
+      substitutions: {},
+    });
 
     expect(grandfathered.localeFallbackChain).toEqual(["tlh", "en-US"]);
     expect(privateUse.localeFallbackChain).toEqual(["x-scout", "en-US"]);
     expect(privateUse.resolvedLocale).toBe("en-US");
+    expect(extendedLanguage.localeFallbackChain).toEqual([
+      "zh-cmn-Hans-CN",
+      "zh",
+      "en-US",
+    ]);
   });
 
   it("exposes static reduced-motion and text-complete accessibility metadata", () => {

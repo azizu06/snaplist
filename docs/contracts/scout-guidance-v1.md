@@ -39,8 +39,10 @@ The checked-in catalog currently ships approved `en-US` copy. Catalog locale key
 BCP-47 language tags. A request must contain a well-formed BCP-47 tag; invalid tags fail closed with
 `invalid-locale`, while valid tags are canonicalized before lookup. Registered grandfathered tags
 use their preferred modern tag when one exists, and canonical private-use tags remain valid even
-though they have no language fallback. Locale lookup then tries the canonical requested locale, its
-language tag when one exists, and finally `en-US`, in that deterministic order.
+though they have no language fallback. Well-formed extended-language, script, region, variant,
+extension, and trailing private-use forms are validated against the RFC grammar even when the host
+`Intl` implementation cannot canonicalize them. Locale lookup then tries the canonical requested
+locale, its primary language tag when one exists, and finally `en-US`, in that deterministic order.
 New translations must provide the complete dictionary, use the exact approved placeholder set for
 each copy key, and contain balanced template braces; they do not change state selection or authorize
 new guide moments.

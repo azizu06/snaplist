@@ -39,6 +39,91 @@ const grandfatheredBcp47Tags = new Map<string, string>([
 ]);
 const privateUseBcp47Pattern = /^x(?:-[A-Za-z0-9]{1,8})+$/i;
 
+function canonicalizeStructurallyValidBcp47(locale: string): string | null {
+  const subtags = locale.split("-");
+  const language = subtags[0];
+  if (
+    !language ||
+    !/^[A-Za-z]+$/.test(language) ||
+    !(
+      (language.length >= 2 && language.length <= 3) ||
+      language.length === 4 ||
+      (language.length >= 5 && language.length <= 8)
+    )
+  ) {
+    return null;
+  }
+
+  const canonical = [language.toLowerCase()];
+  let index = 1;
+  if (language.length <= 3) {
+    let extlangCount = 0;
+    while (
+      extlangCount < 3 &&
+      /^[A-Za-z]{3}$/.test(subtags[index] ?? "")
+    ) {
+      canonical.push(subtags[index].toLowerCase());
+      index += 1;
+      extlangCount += 1;
+    }
+  }
+
+  if (/^[A-Za-z]{4}$/.test(subtags[index] ?? "")) {
+    const script = subtags[index].toLowerCase();
+    canonical.push(`${script[0].toUpperCase()}${script.slice(1)}`);
+    index += 1;
+  }
+  if (
+    /^[A-Za-z]{2}$/.test(subtags[index] ?? "") ||
+    /^\d{3}$/.test(subtags[index] ?? "")
+  ) {
+    canonical.push(subtags[index].toUpperCase());
+    index += 1;
+  }
+
+  const variants = new Set<string>();
+  while (
+    /^[A-Za-z0-9]{5,8}$/.test(subtags[index] ?? "") ||
+    /^\d[A-Za-z0-9]{3}$/.test(subtags[index] ?? "")
+  ) {
+    const variant = subtags[index].toLowerCase();
+    if (variants.has(variant)) return null;
+    variants.add(variant);
+    canonical.push(variant);
+    index += 1;
+  }
+
+  const extensionSingletons = new Set<string>();
+  while (/^[0-9A-WY-Za-wy-z]$/.test(subtags[index] ?? "")) {
+    const singleton = subtags[index].toLowerCase();
+    if (extensionSingletons.has(singleton)) return null;
+    extensionSingletons.add(singleton);
+    canonical.push(singleton);
+    index += 1;
+    let extensionLength = 0;
+    while (/^[A-Za-z0-9]{2,8}$/.test(subtags[index] ?? "")) {
+      canonical.push(subtags[index].toLowerCase());
+      index += 1;
+      extensionLength += 1;
+    }
+    if (extensionLength === 0) return null;
+  }
+
+  if ((subtags[index] ?? "").toLowerCase() === "x") {
+    canonical.push("x");
+    index += 1;
+    let privateUseLength = 0;
+    while (/^[A-Za-z0-9]{1,8}$/.test(subtags[index] ?? "")) {
+      canonical.push(subtags[index].toLowerCase());
+      index += 1;
+      privateUseLength += 1;
+    }
+    if (privateUseLength === 0) return null;
+  }
+
+  return index === subtags.length ? canonical.join("-") : null;
+}
+
 export function canonicalizeScoutGuidanceLocale(
   locale: string,
 ): string | null {
@@ -48,7 +133,7 @@ export function canonicalizeScoutGuidanceLocale(
   try {
     return Intl.getCanonicalLocales(locale)[0] ?? null;
   } catch {
-    return null;
+    return canonicalizeStructurallyValidBcp47(locale);
   }
 }
 
