@@ -81,32 +81,67 @@ protocol AnalyticsDebugSinking: AnyObject {
     func record(_ record: AnalyticsDebugRecord) throws
 }
 
+private final class AnalyticsSerialExecutor: @unchecked Sendable {
+    private let consentTransitionDidEnterSerializedBoundary: @Sendable (AnalyticsConsent) -> Void
+    private let key = DispatchSpecificKey<Void>()
+    private let queue = DispatchQueue(
+        label: "com.snaplist.analytics.debug",
+        qos: .utility
+    )
+
+    init(
+        consentTransitionDidEnterSerializedBoundary: @escaping @Sendable (AnalyticsConsent) -> Void
+    ) {
+        self.consentTransitionDidEnterSerializedBoundary = consentTransitionDidEnterSerializedBoundary
+        queue.setSpecific(key: key, value: ())
+    }
+
+    func async(_ operation: @escaping @Sendable () -> Void) {
+        queue.async(execute: operation)
+    }
+
+    func serializeConsentTransition(
+        _ consent: AnalyticsConsent,
+        operation: @escaping @Sendable () -> Void
+    ) {
+        if DispatchQueue.getSpecific(key: key) != nil {
+            consentTransitionDidEnterSerializedBoundary(consent)
+            operation()
+            return
+        }
+
+        let workItem = DispatchWorkItem(block: operation)
+        queue.async(execute: workItem)
+        consentTransitionDidEnterSerializedBoundary(consent)
+        workItem.wait()
+    }
+}
+
 final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     private let metadata: AnalyticsMetadata
     private let consentStore: any AnalyticsConsentStoring
     private let dedupeStore: any AnalyticsDedupeStoring
     private let identityStore: any AnalyticsIdentityStoring
     private let sink: any AnalyticsDebugSinking
+    private let executor: AnalyticsSerialExecutor
     private let sanitizer = AnalyticsSanitizer()
-    private let executorKey = DispatchSpecificKey<Void>()
-    private let executor = DispatchQueue(
-        label: "com.snaplist.analytics.debug",
-        qos: .utility
-    )
 
     init(
         metadata: AnalyticsMetadata,
         consentStore: any AnalyticsConsentStoring,
         dedupeStore: any AnalyticsDedupeStoring,
         identityStore: any AnalyticsIdentityStoring,
-        sink: any AnalyticsDebugSinking
+        sink: any AnalyticsDebugSinking,
+        consentTransitionDidEnterSerializedBoundary: @escaping @Sendable (AnalyticsConsent) -> Void = { _ in }
     ) {
         self.metadata = metadata
         self.consentStore = consentStore
         self.dedupeStore = dedupeStore
         self.identityStore = identityStore
         self.sink = sink
-        executor.setSpecific(key: executorKey, value: ())
+        executor = AnalyticsSerialExecutor(
+            consentTransitionDidEnterSerializedBoundary: consentTransitionDidEnterSerializedBoundary
+        )
     }
 
     convenience init(
@@ -174,12 +209,8 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     }
 
     func setConsent(_ consent: AnalyticsConsent) {
-        if DispatchQueue.getSpecific(key: executorKey) != nil {
+        executor.serializeConsentTransition(consent) { [self] in
             consentStore.setConsent(consent)
-        } else {
-            executor.sync { [self] in
-                consentStore.setConsent(consent)
-            }
         }
     }
 
@@ -192,17 +223,11 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
 
     @discardableResult
     func waitUntilIdleForTesting(timeout: TimeInterval = 2) -> Bool {
-        let lock = NSLock()
-        var isIdle = false
+        let idle = DispatchSemaphore(value: 0)
         executor.async {
-            lock.withLock { isIdle = true }
+            idle.signal()
         }
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if lock.withLock({ isIdle }) { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.005))
-        }
-        return lock.withLock { isIdle }
+        return idle.wait(timeout: .now() + timeout) == .success
     }
 }
 
