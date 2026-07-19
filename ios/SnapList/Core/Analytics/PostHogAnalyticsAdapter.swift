@@ -4,7 +4,8 @@ import PostHog
 enum PostHogAnalyticsConfiguration {
     static func makeConfig(
         route: AnalyticsProviderRoute,
-        metadata: AnalyticsMetadata
+        metadata: AnalyticsMetadata,
+        urlSessionConfiguration: URLSessionConfiguration? = nil
     ) -> PostHogConfig {
         precondition(route.environment == metadata.environment)
         let config = PostHogConfig(
@@ -33,6 +34,7 @@ enum PostHogAnalyticsConfiguration {
         config.rageClickConfig.enabled = false
         config.surveys = false
         config.debug = false
+        config.urlSessionConfiguration = urlSessionConfiguration
         config.reuseAnonymousId = false
         config.personProfiles = .identifiedOnly
         config.logs.setBeforeSend { _ in nil }
@@ -55,10 +57,18 @@ enum PostHogAnalyticsConfiguration {
 final class PostHogSDKTransport: AnalyticsTransport {
     private let sdk: PostHogSDK
 
-    init?(route: AnalyticsProviderRoute, metadata: AnalyticsMetadata) {
+    init?(
+        route: AnalyticsProviderRoute,
+        metadata: AnalyticsMetadata,
+        urlSessionConfiguration: URLSessionConfiguration? = nil
+    ) {
         guard route.environment == metadata.environment else { return nil }
         sdk = PostHogSDK.with(
-            PostHogAnalyticsConfiguration.makeConfig(route: route, metadata: metadata)
+            PostHogAnalyticsConfiguration.makeConfig(
+                route: route,
+                metadata: metadata,
+                urlSessionConfiguration: urlSessionConfiguration
+            )
         )
     }
 
@@ -84,6 +94,10 @@ final class PostHogSDKTransport: AnalyticsTransport {
 
     func reset() throws {
         sdk.reset()
+    }
+
+    func close() {
+        sdk.close()
     }
 }
 
@@ -128,7 +142,7 @@ final class DebugAnalyticsClient: AnalyticsClient {
             metadata: metadata,
             consentStore: consentStore,
             dedupeStore: dedupeStore,
-            transport: DebugAnalyticsTransport(log: log)
+            transportFactory: { DebugAnalyticsTransport(log: log) }
         )
     }
 
@@ -138,4 +152,9 @@ final class DebugAnalyticsClient: AnalyticsClient {
     func reset() { client.reset() }
     func setConsent(_ consent: AnalyticsConsent) { client.setConsent(consent) }
     func flush() { client.flush() }
+
+    @discardableResult
+    func waitUntilIdleForTesting(timeout: TimeInterval = 2) -> Bool {
+        client.waitUntilIdleForTesting(timeout: timeout)
+    }
 }

@@ -78,88 +78,139 @@ struct NoOpAnalyticsClient: AnalyticsClient {
     func flush() {}
 }
 
-final class PostHogAnalyticsClient: AnalyticsClient {
+final class PostHogAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     private let metadata: AnalyticsMetadata
     private let consentStore: any AnalyticsConsentStoring
     private let dedupeStore: any AnalyticsDedupeStoring
-    private let transport: any AnalyticsTransport
+    private let transportFactory: @Sendable () -> (any AnalyticsTransport)?
+    private let executor = DispatchQueue(
+        label: "com.snaplist.analytics.client",
+        qos: .utility
+    )
     private let sanitizer = AnalyticsSanitizer()
+    private var currentConsent: AnalyticsConsent
+    private var transport: (any AnalyticsTransport)?
     private var identifiedClerkUserID: String?
 
     init(
         metadata: AnalyticsMetadata,
         consentStore: any AnalyticsConsentStoring,
         dedupeStore: any AnalyticsDedupeStoring,
-        transport: any AnalyticsTransport
+        transportFactory: @escaping @Sendable () -> (any AnalyticsTransport)?
     ) {
         self.metadata = metadata
         self.consentStore = consentStore
         self.dedupeStore = dedupeStore
-        self.transport = transport
-        if consentStore.consent == .granted {
-            try? transport.setConsent(granted: true)
+        self.transportFactory = transportFactory
+        currentConsent = consentStore.consent
+        if currentConsent == .granted {
+            executor.async { [self] in
+                _ = activatedTransport()
+            }
         }
     }
 
     func capture(_ event: AnalyticsEvent) {
-        guard consentStore.consent == .granted,
-              !dedupeStore.contains(event.eventID),
-              let payload = sanitizer.sanitize(event: event, metadata: metadata) else {
-            return
-        }
+        executor.async { [self] in
+            guard currentConsent == .granted,
+                  !dedupeStore.contains(event.eventID),
+                  let payload = sanitizer.sanitize(event: event, metadata: metadata),
+                  let transport = activatedTransport() else {
+                return
+            }
 
-        do {
-            try transport.capture(payload)
-            dedupeStore.insert(event.eventID)
-        } catch {
-            // Analytics is best-effort and must never change a domain result.
+            do {
+                try transport.capture(payload)
+                dedupeStore.insert(event.eventID)
+            } catch {
+                // Analytics is best-effort and must never change a domain result.
+            }
         }
     }
 
     func screen(_ screen: AnalyticsScreen) {
-        guard consentStore.consent == .granted,
-              let payload = sanitizer.sanitize(screen: screen, metadata: metadata) else {
-            return
+        executor.async { [self] in
+            guard currentConsent == .granted,
+                  let payload = sanitizer.sanitize(screen: screen, metadata: metadata),
+                  let transport = activatedTransport() else {
+                return
+            }
+            try? transport.capture(payload)
         }
-        try? transport.capture(payload)
     }
 
     func identify(clerkUserID: String) {
-        guard consentStore.consent == .granted,
-              identifiedClerkUserID == nil,
-              Self.isValidClerkUserID(clerkUserID) else {
-            return
-        }
-        do {
-            try transport.identify(clerkUserID: clerkUserID)
-            identifiedClerkUserID = clerkUserID
-        } catch {
-            // Identity telemetry failure cannot affect account claim.
+        executor.async { [self] in
+            guard currentConsent == .granted,
+                  identifiedClerkUserID == nil,
+                  Self.isValidClerkUserID(clerkUserID),
+                  let transport = activatedTransport() else {
+                return
+            }
+            do {
+                try transport.identify(clerkUserID: clerkUserID)
+                identifiedClerkUserID = clerkUserID
+            } catch {
+                // Identity telemetry failure cannot affect account claim.
+            }
         }
     }
 
     func reset() {
-        if consentStore.consent == .granted {
-            try? transport.flush()
-        }
-        try? transport.reset()
-        identifiedClerkUserID = nil
-    }
-
-    func setConsent(_ consent: AnalyticsConsent) {
-        consentStore.setConsent(consent)
-        switch consent {
-        case .granted:
-            try? transport.setConsent(granted: true)
-        case .denied, .notDetermined:
-            try? transport.setConsent(granted: false)
+        executor.async { [self] in
+            if currentConsent == .granted {
+                try? transport?.flush()
+            }
+            try? transport?.reset()
             identifiedClerkUserID = nil
         }
     }
 
+    func setConsent(_ consent: AnalyticsConsent) {
+        // The user choice must survive an immediate relaunch even though all SDK work is deferred.
+        consentStore.setConsent(consent)
+        executor.async { [self] in
+            currentConsent = consent
+            switch consent {
+            case .granted:
+                _ = activatedTransport()
+            case .denied, .notDetermined:
+                try? transport?.setConsent(granted: false)
+                try? transport?.reset()
+                identifiedClerkUserID = nil
+            }
+        }
+    }
+
     func flush() {
-        guard consentStore.consent == .granted else { return }
-        try? transport.flush()
+        executor.async { [self] in
+            guard currentConsent == .granted else { return }
+            try? transport?.flush()
+        }
+    }
+
+    @discardableResult
+    func waitUntilIdleForTesting(timeout: TimeInterval = 2) -> Bool {
+        let lock = NSLock()
+        var isIdle = false
+        executor.async {
+            lock.withLock { isIdle = true }
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if lock.withLock({ isIdle }) { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.005))
+        }
+        return lock.withLock { isIdle }
+    }
+
+    private func activatedTransport() -> (any AnalyticsTransport)? {
+        guard currentConsent == .granted else { return nil }
+        if transport == nil {
+            transport = transportFactory()
+            try? transport?.setConsent(granted: true)
+        }
+        return transport
     }
 
     private static func isValidClerkUserID(_ value: String) -> Bool {
