@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { apiErrorEnvelopeSchema } from "./contract";
+import { apiErrorEnvelopeSchema, mobileRunSchema } from "./contract";
 
 const serverContractSource = readFileSync(
   resolve("docs/contracts/mobile-api-v1.openapi.json"),
@@ -21,7 +21,7 @@ const contract = JSON.parse(serverContractSource) as {
 };
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
-const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174, 175]);
+const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174, 175, 241]);
 
 function operations() {
   return Object.entries(contract.paths).flatMap(([path, pathItem]) =>
@@ -123,7 +123,7 @@ describe("SwiftUI mobile HTTP contract", () => {
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);
-    for (const issue of [17, 159, 161, 162, 168, 173, 174, 175]) {
+    for (const issue of [17, 159, 174]) {
       expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
     }
   });
@@ -158,6 +158,65 @@ describe("SwiftUI mobile HTTP contract", () => {
       required: expect.arrayContaining(["accountRecovery"]),
       properties: { outcome: { const: "claimed" } },
     });
+  });
+
+  it("marks the three #241 run operations implemented with the canonical DTO", () => {
+    for (const [path, method] of [
+      ["/v1/runs/{runId}", "get"],
+      ["/v1/runs/{runId}/retry", "post"],
+      ["/v1/runs/{runId}/cancel", "post"],
+    ] as const) {
+      expect(contract.paths[path][method]).toMatchObject({
+        "x-owner-issue": 241,
+        "x-implementation-status": "implemented",
+        security: [{ ClerkBearer: [] }],
+      });
+    }
+    expect(contract.components.schemas.PipelineRun).toMatchObject({
+      required: expect.arrayContaining([
+        "id",
+        "itemId",
+        "listingId",
+        "status",
+        "stage",
+        "attemptCount",
+        "maxAttempts",
+        "schemaVersion",
+        "timestamps",
+        "requiredInput",
+        "terminalOutcome",
+        "safeFailure",
+        "allowance",
+        "legalActions",
+        "lastMeaningfulUpdateAt",
+        "retentionCleanedAt",
+      ]),
+    });
+    expect(JSON.stringify(contract.components.schemas.PipelineRun)).not.toMatch(
+      /percentage|progress|eta/i,
+    );
+  });
+
+  it("keeps the implemented run OpenAPI schema aligned with runtime Zod", () => {
+    const openApiRun = contract.components.schemas.PipelineRun as {
+      additionalProperties: boolean;
+      required: string[];
+      properties: {
+        status: { enum: string[] };
+        stage: { enum: string[] };
+        allowance: { enum: string[] };
+      };
+    };
+    const zodRequired = Object.entries(mobileRunSchema.shape)
+      .filter(([, schema]) => !schema.safeParse(undefined).success)
+      .map(([name]) => name)
+      .sort();
+
+    expect(openApiRun.additionalProperties).toBe(false);
+    expect([...openApiRun.required].sort()).toEqual(zodRequired);
+    expect(openApiRun.properties.status.enum).toEqual(mobileRunSchema.shape.status.options);
+    expect(openApiRun.properties.stage.enum).toEqual(mobileRunSchema.shape.stage.options);
+    expect(openApiRun.properties.allowance.enum).toEqual(mobileRunSchema.shape.allowance.options);
   });
 
   it("assigns every contract-only operation to an explicit issue owner", () => {
