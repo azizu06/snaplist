@@ -2,6 +2,7 @@ import { logEvent } from "@/lib/observability";
 import { PIPELINE_OPERATIONS_POLICY } from "./policy";
 import type {
   PipelineCleanupOutcome,
+  GuestRecoveryExpiry,
   PipelineOperationsHealth,
   PipelineOperationsStore,
 } from "./store";
@@ -11,6 +12,7 @@ export interface PipelinePhotoCleanupCapability {
 }
 
 export interface PipelineMaintenanceSummary extends PipelineCleanupOutcome {
+  guestRecoveryExpiry: GuestRecoveryExpiry;
   health: PipelineOperationsHealth;
 }
 
@@ -18,6 +20,9 @@ export async function runPipelineMaintenance(dependencies: {
   store: PipelineOperationsStore;
   photos: PipelinePhotoCleanupCapability;
 }): Promise<PipelineMaintenanceSummary> {
+  const guestRecoveryExpiry = await dependencies.store.expireGuestRecoveries(
+    PIPELINE_OPERATIONS_POLICY.maintenance.batchSize,
+  );
   const prepared = await dependencies.store.prepareRetention(
     PIPELINE_OPERATIONS_POLICY.maintenance.batchSize,
   );
@@ -69,7 +74,8 @@ export async function runPipelineMaintenance(dependencies: {
     cleanupDeadLetters: health.cleanupDeadLetters,
     deletedObjects,
     failedObjects,
+    guestRecoveriesExpired: guestRecoveryExpiry.expiredCount,
   });
 
-  return { ...outcome, health };
+  return { ...outcome, guestRecoveryExpiry, health };
 }

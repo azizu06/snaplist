@@ -1,12 +1,20 @@
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
+import { z } from "zod";
+import {
+  GuestClaimIdempotencyConflictError,
+  GuestClaimInProgressError,
+  type GuestClaimTerminalOutcome,
+  type VerifiedGuestHandoff,
+} from "@/lib/guest-recovery/service";
 import {
   MOBILE_API_VERSION,
   apiErrorEnvelopeSchema,
   healthEnvelopeSchema,
   homeProjectionEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
+  guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
   workerSummaryEnvelopeSchema,
@@ -25,6 +33,14 @@ export interface MobileApiDependencies {
    * the concrete verifier; request bodies never supply a user id.
    */
   authenticate(token: string): Promise<MobileApiPrincipal>;
+  /** #174 verifies the opaque App Attest/auth handoff; #175 consumes only this result. */
+  verifyGuestClaimHandoff?: (token: string) => Promise<VerifiedGuestHandoff>;
+  /** Authoritative #175 claim service. The target always comes from authenticate(). */
+  claimGuestRecovery?: (input: {
+    handoff: VerifiedGuestHandoff;
+    idempotencyKey: string;
+    targetUserId: string;
+  }) => Promise<GuestClaimTerminalOutcome>;
   worker: PipelineWorker;
   subscriptionBridge?: NativeSubscriptionBridge;
   /** Read-only RLS projection for the native Seller Home. */
@@ -172,6 +188,104 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Home is temporarily unavailable.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/guest/claims`) {
+      if (request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const accountToken = bearerToken(request);
+      const guestHandoffToken = request.headers
+        .get("x-snaplist-guest-handoff")
+        ?.trim();
+      if (!accountToken || !guestHandoffToken) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
+      if (!idempotencyKey.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid Idempotency-Key is required.",
+        );
+      }
+      if (
+        !dependencies.verifyGuestClaimHandoff ||
+        !dependencies.claimGuestRecovery
+      ) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Guest recovery is not configured.",
+        );
+      }
+
+      let principal: MobileApiPrincipal;
+      let handoff: VerifiedGuestHandoff;
+      try {
+        [principal, handoff] = await Promise.all([
+          dependencies.authenticate(accountToken),
+          dependencies.verifyGuestClaimHandoff(guestHandoffToken),
+        ]);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.guest-claim-authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+
+      try {
+        const outcome = await dependencies.claimGuestRecovery({
+          handoff,
+          idempotencyKey: idempotencyKey.data,
+          targetUserId: principal.userId,
+        });
+        return json(
+          guestClaimEnvelopeSchema.parse({
+            data: outcome,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        if (
+          error instanceof GuestClaimInProgressError
+          || error instanceof GuestClaimIdempotencyConflictError
+        ) {
+          return errorResponse(
+            requestId,
+            409,
+            "conflict",
+            error instanceof GuestClaimIdempotencyConflictError
+              ? "The Idempotency-Key is already bound to another guest claim."
+              : "The guest draft claim is already in progress.",
+          );
+        }
+        dependencies.reportError?.("mobile-api.guest-claim", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "The guest draft could not be claimed. Retry before it expires.",
         );
       }
     }

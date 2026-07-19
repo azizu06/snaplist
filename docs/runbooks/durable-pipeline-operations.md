@@ -35,6 +35,7 @@ partial-completion acceptance, but the scheduled production contract does not us
 | --- | --- |
 | Unresolved staging paths | eligible after 24 hours; every path referenced by an item is protected |
 | Failed/canceled abandoned capture | after every terminal attempt is 30 days old, only when it has no listing and no active/successful sibling run; retention locks and re-checks sibling runs before atomically marking them expired and queuing photo deletion; item/run ids remain accounting tombstones and the UI directs the seller to recapture |
+| Unclaimed guest draft | exactly 24 hours after the completed run made the usable draft durable; server time expires and scrubs recoverable product content while preserving run, prediction, provider, and settled-credit evidence |
 | Successful terminal run | after 30 days, prune checkpoint/capture input only; preserve the run, listing, item, and photos |
 | Active PGMQ message paired to a terminal run | delete after 24 hours (crash-recovery sweep) |
 | PGMQ archive rows | delete after 7 days |
@@ -48,6 +49,13 @@ eligibility in Postgres and persists exact paths in
 only those paths from the private `photos` bucket. A crash or Storage error
 leaves a leased job for bounded replay. A fifth failure is a dead letter; it is
 never silently discarded.
+
+The same maintenance cycle first invokes `expire_guest_draft_recoveries` with
+the fixed batch bound. Claim completion and expiry share a recovery advisory
+lock and terminal predicate, so exactly one can become authoritative. Expiry
+queues guest source objects and any destination objects left by an interrupted
+copy; a successful claim queues only guest source objects. The Storage phase is
+therefore replayable and cannot delete the account copy of a committed claim.
 
 Terminal `pipeline_runs` rows are not deleted. They remain durable notification
 and AI-item-credit accounting anchors, including the ledger owned by #168.

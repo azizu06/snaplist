@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { runPipelineMaintenance } from "./maintenance";
 
 describe("pipeline maintenance", () => {
-  it("deletes only claimed photo paths and exposes aggregate health", async () => {
+  it("purges exact expired guest source and abandoned claim-copy paths", async () => {
     const store = {
+      expireGuestRecoveries: vi.fn().mockResolvedValue({
+        expiredCount: 2,
+        skippedForLock: false,
+      }),
       prepareRetention: vi.fn().mockResolvedValue({
         queueMessagesDeleted: 1,
         queueArchiveRowsDeleted: 2,
@@ -20,7 +24,10 @@ describe("pipeline maintenance", () => {
           job: {
             jobId: "11111111-1111-4111-8111-111111111111",
             leaseToken: "22222222-2222-4222-8222-222222222222",
-            photoPaths: ["user/pipeline-staging/a/photo.jpg"],
+            photoPaths: [
+              "guest_fixture/items/front.enc",
+              "user_account/guest-claims/recovery/lease/1",
+            ],
             attemptCount: 1,
             maxAttempts: 5,
           },
@@ -38,7 +45,7 @@ describe("pipeline maintenance", () => {
         cleanupPending: 0,
         cleanupDeadLetters: 0,
         lastCleanupAt: "2026-07-17T00:00:00.000Z",
-        lastCleanupDeletedObjects: 1,
+        lastCleanupDeletedObjects: 2,
         lastCleanupFailedObjects: 0,
       }),
     };
@@ -46,21 +53,27 @@ describe("pipeline maintenance", () => {
 
     await expect(runPipelineMaintenance({ store, photos })).resolves.toMatchObject({
       claimedStorageJobs: 1,
-      deletedObjects: 1,
+      deletedObjects: 2,
       failedObjects: 0,
+      guestRecoveryExpiry: { expiredCount: 2, skippedForLock: false },
       health: { queueDepth: 0 },
     });
     expect(photos.remove).toHaveBeenCalledWith([
-      "user/pipeline-staging/a/photo.jpg",
+      "guest_fixture/items/front.enc",
+      "user_account/guest-claims/recovery/lease/1",
     ]);
     expect(store.completeStorageCleanup).toHaveBeenCalledOnce();
     expect(store.recordCleanupOutcome).toHaveBeenCalledWith(
-      expect.objectContaining({ deletedObjects: 1, failedObjects: 0 }),
+      expect.objectContaining({ deletedObjects: 2, failedObjects: 0 }),
     );
   });
 
   it("dead-letters through the store without leaking raw Storage errors", async () => {
     const store = {
+      expireGuestRecoveries: vi.fn().mockResolvedValue({
+        expiredCount: 0,
+        skippedForLock: false,
+      }),
       prepareRetention: vi.fn().mockResolvedValue({
         queueMessagesDeleted: 0,
         queueArchiveRowsDeleted: 0,

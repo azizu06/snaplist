@@ -139,6 +139,29 @@ expired worker leases, cleanup backlog/dead letters, and the last cleanup outcom
 `docs/runbooks/durable-pipeline-operations.md` for exact policy, local operation, Free-plan accounting,
 queue drain, replay, rollback, and owner-only hosted activation.
 
+## Guest draft recovery and account claim
+
+The completed pipeline run is the only clock source for guest recovery. When a coherent item,
+prediction, and editable draft are durably linked to the already-settled AI-item reservation,
+`register_guest_draft_recovery` fixes `usable_draft_at` to the run's server-written `completed_at`
+and fixes `expires_at` to exactly 24 hours later. Registration replay returns the same encrypted
+artifact and never changes either timestamp or reserves AI work again.
+
+Claim is a database-fenced two-phase operation. A verified #174 handoff starts a short claim lease;
+the application copies every manifest object inside the authenticated account's private Storage
+namespace and verifies its byte length and SHA-256 before asking Postgres to commit. The commit
+atomically transfers the item, run, editable draft, prediction, notification, quota attribution,
+and the exact settled #168 reservation. It does not settle, restore, duplicate, or create a credit.
+Source objects enter the existing bounded Storage-cleanup queue only after the account copy is
+authoritative.
+
+Expiry takes the same recovery advisory lock and row predicate as claim completion. At the exact
+boundary, expiry wins, encrypted recovery material is wiped, unclaimed product content is scrubbed,
+and source plus any interrupted account-copy paths enter the same bounded cleanup queue. Durable run,
+prediction, provider, and credit-accounting evidence remains. Stable `claimed` and `expired` terminal
+outcomes let #174 and #181 purge local recovery without redefining the clock, fencing, transfer, or
+cleanup rules.
+
 ## Issue #159 integration contract
 
 Issue #159 remains the owner of single/batch upload UI, quota reservation, staging, and enqueue. Its

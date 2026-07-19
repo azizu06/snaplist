@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSupabaseNativeSubscriptionBridge } from "@/lib/billing/revenuecat-store";
+import {
+  GuestClaimIdempotencyConflictError,
+  GuestClaimInProgressError,
+} from "@/lib/guest-recovery/service";
 import { createMobileApiHandler } from "./app";
 
 const summary = {
@@ -13,6 +17,18 @@ const summary = {
 function handler(overrides: Record<string, unknown> = {}) {
   return createMobileApiHandler({
     authenticate: vi.fn().mockResolvedValue({ userId: "user_smoke" }),
+    verifyGuestClaimHandoff: vi.fn().mockResolvedValue({
+      recoveryId: "11111111-1111-4111-8111-111111111111",
+      guestUserId: "guest_fixture",
+      recoveryTokenHash: "a".repeat(64),
+    }),
+    claimGuestRecovery: vi.fn().mockResolvedValue({
+      outcome: "claimed",
+      itemId: "22222222-2222-4222-8222-222222222222",
+      runId: "33333333-3333-4333-8333-333333333333",
+      draftId: "44444444-4444-4444-8444-444444444444",
+      purgeLocalRecovery: true,
+    }),
     worker: { consume: vi.fn().mockResolvedValue(summary) },
     workerSecret: "worker-secret",
     requestId: () => "req_test",
@@ -279,6 +295,152 @@ describe("mobile API v1 provider-neutral handler", () => {
       },
       meta: { requestId: "req_test" },
     });
+  });
+
+  it("consumes #174's verified handoff and derives claim ownership only from the Clerk principal", async () => {
+    const accountRecovery = {
+      encryptedArtifact: {
+        version: 1 as const,
+        algorithm: "aes-256-gcm" as const,
+        keyId: "guest-recovery-v1",
+        keyEnvelope: Buffer.alloc(32, 1).toString("base64"),
+        nonce: Buffer.alloc(12, 2).toString("base64"),
+        tag: Buffer.alloc(16, 3).toString("base64"),
+        ciphertext: Buffer.from("encrypted-draft").toString("base64"),
+      },
+      storageManifest: [{
+        destinationPath: "user_account/items/front.enc",
+        sha256: "b".repeat(64),
+        byteLength: 128,
+        encryption: {
+          algorithm: "aes-256-gcm" as const,
+          keyId: "guest-recovery-v1",
+          nonce: Buffer.alloc(12, 4).toString("base64"),
+          tag: Buffer.alloc(16, 5).toString("base64"),
+        },
+      }],
+    };
+    const verifyGuestClaimHandoff = vi.fn().mockResolvedValue({
+      recoveryId: "11111111-1111-4111-8111-111111111111",
+      guestUserId: "guest_fixture",
+      recoveryTokenHash: "a".repeat(64),
+    });
+    const claimGuestRecovery = vi.fn().mockResolvedValue({
+      outcome: "claimed",
+      itemId: "22222222-2222-4222-8222-222222222222",
+      runId: "33333333-3333-4333-8333-333333333333",
+      draftId: "44444444-4444-4444-8444-444444444444",
+      purgeLocalRecovery: true,
+      accountRecovery,
+    });
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_account" }),
+      verifyGuestClaimHandoff,
+      claimGuestRecovery,
+    })(
+      new Request("http://localhost/v1/guest/claims", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer signed-account-jwt",
+          "idempotency-key": "55555555-5555-4555-8555-555555555555",
+          "x-snaplist-guest-handoff": "opaque-174-handoff",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          targetUserId: "attacker",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(verifyGuestClaimHandoff).toHaveBeenCalledWith("opaque-174-handoff");
+    expect(claimGuestRecovery).toHaveBeenCalledWith({
+      handoff: {
+        recoveryId: "11111111-1111-4111-8111-111111111111",
+        guestUserId: "guest_fixture",
+        recoveryTokenHash: "a".repeat(64),
+      },
+      idempotencyKey: "55555555-5555-4555-8555-555555555555",
+      targetUserId: "user_account",
+    });
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        outcome: "claimed",
+        itemId: "22222222-2222-4222-8222-222222222222",
+        runId: "33333333-3333-4333-8333-333333333333",
+        draftId: "44444444-4444-4444-8444-444444444444",
+        purgeLocalRecovery: true,
+        accountRecovery,
+      },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("requires both account authentication and the verified guest handoff", async () => {
+    const headerCases: HeadersInit[] = [
+      { "x-snaplist-guest-handoff": "opaque-174-handoff" },
+      { authorization: "Bearer signed-account-jwt" },
+    ];
+    for (const headers of headerCases) {
+      const response = await handler()(
+        new Request("http://localhost/v1/guest/claims", {
+          method: "POST",
+          headers,
+        }),
+      );
+      expect(response.status).toBe(401);
+    }
+  });
+
+  it("requires one UUID idempotency key for the logical guest claim mutation", async () => {
+    for (const idempotencyKey of [undefined, "not-a-uuid"]) {
+      const headers: Record<string, string> = {
+        authorization: "Bearer signed-account-jwt",
+        "x-snaplist-guest-handoff": "opaque-174-handoff",
+      };
+      if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
+
+      const response = await handler()(
+        new Request("http://localhost/v1/guest/claims", {
+          method: "POST",
+          headers,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "invalid_request", requestId: "req_test" },
+      });
+    }
+  });
+
+  it("returns stable retry-safe guest claim errors without leaking internals", async () => {
+    for (const [error, status, code] of [
+      [new GuestClaimInProgressError(5), 409, "conflict"],
+      [new GuestClaimIdempotencyConflictError(), 409, "conflict"],
+      [new Error("private storage credential detail"), 503, "internal_error"],
+    ] as const) {
+      const response = await handler({
+        claimGuestRecovery: vi.fn().mockRejectedValue(error),
+        reportError: vi.fn(),
+      })(
+        new Request("http://localhost/v1/guest/claims", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-account-jwt",
+            "idempotency-key": "55555555-5555-4555-8555-555555555555",
+            "x-snaplist-guest-handoff": "opaque-174-handoff",
+          },
+        }),
+      );
+      expect(response.status).toBe(status);
+      const body = await response.text();
+      expect(JSON.parse(body)).toMatchObject({
+        error: { code, requestId: "req_test" },
+      });
+      expect(body).not.toContain("credential");
+    }
   });
 
   it("requires authentication before either native billing seam", async () => {
