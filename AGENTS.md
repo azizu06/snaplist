@@ -118,6 +118,14 @@ not the default product posture.
   issues, branches, worktrees, and PR diffs before implementation. If discovered
   work is not required by the frozen issue contract, split or route it instead
   of widening the branch.
+- **One visible implementation task per issue.** The orchestration hub stays
+  available for product decisions, design intake, dependency release, and
+  status relays. A substantive implementation owner runs in a separate
+  user-visible Codex task tied to the issue's single isolated worktree; resume
+  the existing issue task/worktree rather than creating another. Hub sub-agents
+  are not primary implementation owners. The implementation task may spawn
+  fresh-context, read-only Standards and Spec reviewers (and other bounded
+  reviewer roles) that did not author the code.
 - **Tracer-bullet + TDD.** Thin end-to-end threads: one or two backend pieces + minimal frontend to
   exercise them + tests, proven working before the next. No full-backend-then-frontend; no
   layer-by-layer. Always keep something that runs. A tracer bullet proves one finite observable
