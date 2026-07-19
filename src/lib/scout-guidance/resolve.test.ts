@@ -7,6 +7,7 @@ import {
   resolveScoutGuidance,
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
+  verifiedPriceEvidence,
   type ResolveScoutGuidanceRequest,
 } from "./resolve";
 
@@ -185,6 +186,103 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
+  it("rejects a spread clone of an enrolled fact", () => {
+    const enrolled = verifiedCapturedPhotoCount({
+      captureSessionId: CAPTURE_SESSION_ID,
+      capturedPhotoCount: 2,
+    });
+
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "capture.photo-count",
+        locale: "en-US",
+        substitutions: {
+          capturedPhotoCount: { ...enrolled, value: 4 },
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "untrusted-substitution",
+        substitutionKey: "capturedPhotoCount",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
+  it("keeps trust enrollment out of enumerable symbols and rejects equivalent replacements", () => {
+    const enrolled = verifiedCapturedPhotoCount({
+      captureSessionId: CAPTURE_SESSION_ID,
+      capturedPhotoCount: 2,
+    });
+    const equivalentReplacement = Object.create(
+      Object.getPrototypeOf(enrolled),
+      Object.getOwnPropertyDescriptors(enrolled),
+    ) as ResolveScoutGuidanceRequest["substitutions"][string];
+
+    expect(Object.getOwnPropertySymbols(enrolled)).toEqual([]);
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "capture.photo-count",
+        locale: "en-US",
+        substitutions: { capturedPhotoCount: equivalentReplacement },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "untrusted-substitution",
+        substitutionKey: "capturedPhotoCount",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
+  it("rejects price facts swapped across their semantic keys", () => {
+    const evidence = verifiedPriceEvidence({
+      recommendationId: "44444444-4444-4444-8444-444444444444",
+      soldCompCount: 3,
+      windowDays: 90,
+    });
+
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "uncertainty.limited-price-evidence",
+        locale: "en-US",
+        substitutions: {
+          soldCompCount: evidence.windowDays,
+          windowDays: evidence.soldCompCount,
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "invalid-substitution",
+        substitutionKey: "soldCompCount",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
+  });
+
+  it("renders a one-day price evidence window with singular grammar", () => {
+    const evidence = verifiedPriceEvidence({
+      recommendationId: "44444444-4444-4444-8444-444444444444",
+      soldCompCount: 1,
+      windowDays: 1,
+    });
+
+    const result = resolveScoutGuidance({
+      contractVersion: "scout-guidance-v1",
+      state: "uncertainty.limited-price-evidence",
+      locale: "en-US",
+      substitutions: evidence,
+    });
+
+    expect(result.message.body).toBe("1 sold · 1 day");
+    expect(result.accessibility.label).toBe(
+      "Limited evidence. 1 sold · 1 day",
+    );
+  });
+
   it("rejects raw caller-spoofed provenance even when its labels satisfy the catalog", () => {
     expect(() =>
       resolveScoutGuidance({
@@ -226,6 +324,22 @@ describe("resolveScoutGuidance", () => {
         title: "Photograph an item. Get real comps and a listing you control.",
       },
     });
+  });
+
+  it("rejects a non-BCP-47 requested locale", () => {
+    expect(() =>
+      resolveScoutGuidance({
+        contractVersion: "scout-guidance-v1",
+        state: "onboarding.outcome",
+        locale: "not a locale",
+        substitutions: {},
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ScoutGuidanceContractError",
+        code: "invalid-locale",
+      }) satisfies Partial<ScoutGuidanceContractError>,
+    );
   });
 
   it("exposes static reduced-motion and text-complete accessibility metadata", () => {

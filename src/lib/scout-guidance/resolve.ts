@@ -2,6 +2,7 @@ import catalog from "./catalog.v1.json";
 import { z } from "zod";
 import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
+  canonicalizeScoutGuidanceLocale,
   scoutGuidanceCatalogSchema,
   type ScoutGuidanceDefinition,
   type ScoutGuidanceTrustedSource,
@@ -19,6 +20,7 @@ export class ScoutGuidanceContractError extends Error {
       | "missing-substitution"
       | "untrusted-substitution"
       | "invalid-substitution"
+      | "invalid-locale"
       | "unsupported-contract-version"
       | "unsupported-state",
     readonly state: string,
@@ -41,14 +43,16 @@ export class ScoutGuidanceFactError extends Error {
   }
 }
 
-const verifiedFactMarker: unique symbol = Symbol("verified-scout-guidance-fact");
+declare const verifiedFactBrand: unique symbol;
 
 export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
   reference: string;
   value: string | number;
-  [verifiedFactMarker]: true;
+  [verifiedFactBrand]: true;
 }>;
+
+const enrolledVerifiedFacts = new WeakMap<object, string>();
 
 const uuidSchema = z.string().uuid();
 const durableItemRecordSchema = z.object({
@@ -69,24 +73,25 @@ const scoutItemDisplayNameSchema = z
   .regex(/^[\p{L}\p{N}][\p{L}\p{M}\p{N} ./'’&()+#-]*$/u);
 
 function verifiedFact(
+  semanticKey: string,
   source: ScoutGuidanceTrustedSource,
   reference: string,
   value: string | number,
 ): VerifiedScoutGuidanceFact {
-  return Object.freeze({
+  const fact = Object.freeze({
     source,
     reference,
     value,
-    [verifiedFactMarker]: true as const,
-  });
+  }) as VerifiedScoutGuidanceFact;
+  enrolledVerifiedFacts.set(fact, semanticKey);
+  return fact;
 }
 
 function isVerifiedFact(value: unknown): value is VerifiedScoutGuidanceFact {
   return (
     typeof value === "object" &&
     value !== null &&
-    verifiedFactMarker in value &&
-    value[verifiedFactMarker] === true
+    enrolledVerifiedFacts.has(value)
   );
 }
 
@@ -123,6 +128,7 @@ export function verifiedItemDisplayNameFromDurableRecord(record: {
     );
   }
   return verifiedFact(
+    "itemDisplayName",
     "durable-item-record",
     `item:${durableRecord.id}:review-revision:${durableRecord.review_revision}`,
     parsedCandidate.data,
@@ -134,6 +140,7 @@ export function verifiedCapturedPhotoCount(input: {
   capturedPhotoCount: number;
 }): VerifiedScoutGuidanceFact {
   return verifiedFact(
+    "capturedPhotoCount",
     "capture-session",
     `capture-session:${uuidSchema.parse(input.captureSessionId)}`,
     input.capturedPhotoCount,
@@ -151,11 +158,17 @@ export function verifiedPriceEvidence(input: {
   const reference = `price-recommendation:${uuidSchema.parse(input.recommendationId)}`;
   return Object.freeze({
     soldCompCount: verifiedFact(
+      "soldCompCount",
       "price-recommendation",
       reference,
       input.soldCompCount,
     ),
-    windowDays: verifiedFact("price-recommendation", reference, input.windowDays),
+    windowDays: verifiedFact(
+      "windowDays",
+      "price-recommendation",
+      reference,
+      input.windowDays,
+    ),
   });
 }
 
@@ -164,6 +177,7 @@ export function verifiedUploadedPhotoCount(input: {
   uploadedPhotoCount: number;
 }): VerifiedScoutGuidanceFact {
   return verifiedFact(
+    "uploadedPhotoCount",
     "durable-run",
     `run:${uuidSchema.parse(input.runId)}`,
     input.uploadedPhotoCount,
@@ -241,6 +255,14 @@ function validatedSubstitutions(
           `Substitution ${rule.key} did not come from a trusted source.`,
         );
       }
+      if (enrolledVerifiedFacts.get(substitution) !== rule.key) {
+        throw new ScoutGuidanceContractError(
+          "invalid-substitution",
+          state,
+          rule.key,
+          `Substitution ${rule.key} is bound to a different semantic fact.`,
+        );
+      }
       if (
         rule.valueType === "integer" &&
         (typeof substitution.value !== "number" ||
@@ -301,18 +323,11 @@ function renderTemplate(
   });
 }
 
-function resolveLocale(requestedLocale: string): {
+function resolveLocale(canonicalLocale: string): {
   resolvedLocale: string;
   fallbackChain: string[];
 } {
-  let canonicalLocale: string;
-  let language: string | null = null;
-  try {
-    canonicalLocale = Intl.getCanonicalLocales(requestedLocale)[0];
-    language = new Intl.Locale(canonicalLocale).language;
-  } catch {
-    canonicalLocale = requestedLocale;
-  }
+  const language = new Intl.Locale(canonicalLocale).language;
 
   const fallbackChain = [
     canonicalLocale,
@@ -324,6 +339,20 @@ function resolveLocale(requestedLocale: string): {
     guidanceCatalog.defaultLocale;
 
   return { resolvedLocale, fallbackChain };
+}
+
+function pluralizedCopyKey(
+  definition: ScoutGuidanceDefinition,
+  slot: "body" | "accessibilityLabel",
+  fallbackCopyKey: string,
+  locale: string,
+  substitutions: Record<string, string>,
+): string {
+  const pluralCopyKeys = definition.pluralCopyKeys;
+  if (!pluralCopyKeys) return fallbackCopyKey;
+  const selectorValue = Number(substitutions[pluralCopyKeys.selector]);
+  const category = new Intl.PluralRules(locale).select(selectorValue);
+  return pluralCopyKeys[slot]?.[category] ?? fallbackCopyKey;
 }
 
 export function resolveScoutGuidance(
@@ -347,7 +376,16 @@ export function resolveScoutGuidance(
       `Unsupported Scout guidance state ${request.state}.`,
     );
   }
-  const localeResolution = resolveLocale(request.locale);
+  const canonicalLocale = canonicalizeScoutGuidanceLocale(request.locale);
+  if (!canonicalLocale) {
+    throw new ScoutGuidanceContractError(
+      "invalid-locale",
+      request.state,
+      "",
+      `Invalid Scout guidance locale ${request.locale}.`,
+    );
+  }
+  const localeResolution = resolveLocale(canonicalLocale);
   const locale = guidanceCatalog.locales[localeResolution.resolvedLocale];
   const substitutions = validatedSubstitutions(
     request.state,
@@ -355,6 +393,22 @@ export function resolveScoutGuidance(
     request.substitutions,
   );
   const copy = (key: string) => renderTemplate(locale[key], substitutions);
+  const bodyCopyKey = definition.copyKeys.body
+    ? pluralizedCopyKey(
+        definition,
+        "body",
+        definition.copyKeys.body,
+        localeResolution.resolvedLocale,
+        substitutions,
+      )
+    : null;
+  const accessibilityCopyKey = pluralizedCopyKey(
+    definition,
+    "accessibilityLabel",
+    definition.copyKeys.accessibilityLabel,
+    localeResolution.resolvedLocale,
+    substitutions,
+  );
 
   return {
     contractVersion: SCOUT_GUIDANCE_CONTRACT_VERSION,
@@ -366,10 +420,10 @@ export function resolveScoutGuidance(
     localeFallbackChain: localeResolution.fallbackChain,
     message: {
       title: copy(definition.copyKeys.title),
-      body: definition.copyKeys.body ? copy(definition.copyKeys.body) : null,
+      body: bodyCopyKey ? copy(bodyCopyKey) : null,
     },
     accessibility: {
-      label: copy(definition.copyKeys.accessibilityLabel),
+      label: copy(accessibilityCopyKey),
       ...guidanceCatalog.accessibilityPolicy,
     },
     guide: {

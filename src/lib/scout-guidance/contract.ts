@@ -10,6 +10,24 @@ export const scoutGuidanceTrustedSourceSchema = z.enum([
   "seller-confirmed-item",
 ]);
 
+export function canonicalizeScoutGuidanceLocale(
+  locale: string,
+): string | null {
+  try {
+    return Intl.getCanonicalLocales(locale)[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const canonicalBcp47LocaleSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (locale) => canonicalizeScoutGuidanceLocale(locale) === locale,
+    "Locale identifiers must be canonical BCP-47 language tags.",
+  );
+
 const substitutionRuleSchema = z
   .object({
     key: z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/),
@@ -52,6 +70,29 @@ const substitutionRuleSchema = z
     }
   });
 
+const pluralCategorySchema = z.enum([
+  "zero",
+  "one",
+  "two",
+  "few",
+  "many",
+  "other",
+]);
+
+const pluralCopyKeysSchema = z
+  .object({
+    selector: z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/),
+    body: z.partialRecord(pluralCategorySchema, z.string().min(1)).optional(),
+    accessibilityLabel: z
+      .partialRecord(pluralCategorySchema, z.string().min(1))
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (plural) => plural.body !== undefined || plural.accessibilityLabel !== undefined,
+    "Plural copy must declare at least one localized message variant.",
+  );
+
 export const scoutGuidanceStateSchema = z
   .object({
     family: z.enum([
@@ -72,6 +113,7 @@ export const scoutGuidanceStateSchema = z
         accessibilityLabel: z.string().min(1),
       })
       .strict(),
+    pluralCopyKeys: pluralCopyKeysSchema.optional(),
     guide: z
       .object({
         optional: z.literal(true),
@@ -92,7 +134,27 @@ export const scoutGuidanceStateSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((definition, context) => {
+    if (!definition.pluralCopyKeys) return;
+    const selector = definition.substitutions.find(
+      (substitution) => substitution.key === definition.pluralCopyKeys?.selector,
+    );
+    if (!selector || selector.valueType !== "integer") {
+      context.addIssue({
+        code: "custom",
+        path: ["pluralCopyKeys", "selector"],
+        message: "Plural copy selectors must reference a declared integer substitution.",
+      });
+    }
+    if (definition.copyKeys.body === null && definition.pluralCopyKeys.body) {
+      context.addIssue({
+        code: "custom",
+        path: ["pluralCopyKeys", "body"],
+        message: "Plural body copy requires a base body copy key.",
+      });
+    }
+  });
 
 function parseTemplate(template: string): {
   variables: string[];
@@ -122,7 +184,7 @@ function sameVariables(actual: string[], expected: string[]): boolean {
 export const scoutGuidanceCatalogSchema = z
   .object({
     contractVersion: z.literal(SCOUT_GUIDANCE_CONTRACT_VERSION),
-    defaultLocale: z.string().min(1),
+    defaultLocale: canonicalBcp47LocaleSchema,
     accessibilityPolicy: z
       .object({
         scoutAssetDecorative: z.literal(true),
@@ -131,7 +193,10 @@ export const scoutGuidanceCatalogSchema = z
       })
       .strict(),
     states: z.record(z.string().min(1), scoutGuidanceStateSchema),
-    locales: z.record(z.string().min(1), z.record(z.string().min(1), z.string().min(1))),
+    locales: z.record(
+      canonicalBcp47LocaleSchema,
+      z.record(z.string().min(1), z.string().min(1)),
+    ),
   })
   .strict()
   .superRefine((catalog, context) => {
@@ -154,6 +219,10 @@ export const scoutGuidanceCatalogSchema = z
         definition.copyKeys.title,
         ...(definition.copyKeys.body ? [definition.copyKeys.body] : []),
         definition.copyKeys.accessibilityLabel,
+        ...Object.values(definition.pluralCopyKeys?.body ?? {}),
+        ...Object.values(
+          definition.pluralCopyKeys?.accessibilityLabel ?? {},
+        ),
       ];
 
       for (const copyKey of copyKeys) {

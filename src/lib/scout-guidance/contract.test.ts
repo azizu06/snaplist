@@ -82,6 +82,14 @@ describe("Scout guidance catalog contract", () => {
     expect(scoutGuidanceCatalogSchema.parse(catalog)).toEqual(catalog);
   });
 
+  it("rejects non-BCP-47 locale identifiers", () => {
+    const invalid = structuredClone(catalog);
+    invalid.defaultLocale = "not a locale";
+    invalid.locales["not a locale"] = invalid.locales["en-US"];
+
+    expect(scoutGuidanceCatalogSchema.safeParse(invalid).success).toBe(false);
+  });
+
   it("rejects substitution permissions that no localized template uses", () => {
     const widened = structuredClone(catalog);
     widened.states["onboarding.outcome"].substitutions.push({
@@ -231,6 +239,13 @@ describe("Scout guidance catalog contract", () => {
             body: string | null;
             accessibilityLabel: string;
           };
+          localeGrammar?: {
+            selector: string;
+            one: {
+              body: string;
+              accessibilityLabel: string;
+            };
+          };
           canonicalSubstitutions: Record<string, string>;
           expected: {
             title: string;
@@ -272,6 +287,23 @@ describe("Scout guidance catalog contract", () => {
         catalog.locales["en-US"][definition.copyKeys.accessibilityLabel],
         state,
       ).toBe(expected.templates.accessibilityLabel);
+      if (expected.localeGrammar) {
+        expect(definition.pluralCopyKeys?.selector, state).toBe(
+          expected.localeGrammar.selector,
+        );
+        expect(
+          catalog.locales["en-US"][
+            definition.pluralCopyKeys?.body?.one ?? ""
+          ],
+          state,
+        ).toBe(expected.localeGrammar.one.body);
+        expect(
+          catalog.locales["en-US"][
+            definition.pluralCopyKeys?.accessibilityLabel?.one ?? ""
+          ],
+          state,
+        ).toBe(expected.localeGrammar.one.accessibilityLabel);
+      }
 
       for (const source of expected.sources) {
         const sourceText = readFileSync(resolve(source.path), "utf8");

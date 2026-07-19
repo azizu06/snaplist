@@ -223,6 +223,13 @@
         "body": "{soldCompCount} sold · {windowDays} days",
         "accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days"
       },
+      "localeGrammar": {
+        "selector": "windowDays",
+        "one": {
+          "body": "{soldCompCount} sold · {windowDays} day",
+          "accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} day"
+        }
+      },
       "canonicalSubstitutions": {"soldCompCount": "3", "windowDays": "90"},
       "expected": {
         "title": "Limited evidence",

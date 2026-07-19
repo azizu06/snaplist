@@ -15,6 +15,11 @@ The same request always produces the same result.
 Substitutions are opaque verified facts, not caller-labelled objects or prose extensions:
 
 - source-specific constructors derive provenance and validate real UUID identifiers;
+- each constructor enrolls the exact frozen object identity in module-private runtime state and binds
+  it to one semantic key; no marker property or enumerable symbol is exposed for object spread,
+  descriptor copying, or a caller assertion to forge;
+- a verified value is accepted only for its enrolled semantic key, so facts such as `soldCompCount`
+  and `windowDays` cannot be swapped even when their source, reference, and integer bounds overlap;
 - the durable-item constructor accepts an already tenant-scoped item projection and derives the display
   name only from bounded structured brand, model, or category facts; generated listing titles and other
   free-form model text are never used;
@@ -27,10 +32,18 @@ Substitutions are opaque verified facts, not caller-labelled objects or prose ex
 templates, canonical resolved copy, and checked-in design authority. Contract tests verify all
 source fragments verbatim; accessibility labels compose those approved phrases with verified facts.
 
-The checked-in catalog currently ships approved `en-US` copy. Locale lookup tries the canonical
-requested locale, then its language tag, then `en-US`. New translations must provide the complete
-dictionary, use the exact approved placeholder set for each copy key, and contain balanced template
-braces; they do not change state selection or authorize new guide moments.
+The checked-in catalog currently ships approved `en-US` copy. Catalog locale keys are canonical
+BCP-47 language tags. A request must contain a well-formed BCP-47 tag; invalid tags fail closed with
+`invalid-locale`, while valid tags are canonicalized before lookup. Locale lookup then tries the
+canonical requested locale, its language tag, and finally `en-US`, in that deterministic order.
+New translations must provide the complete dictionary, use the exact approved placeholder set for
+each copy key, and contain balanced template braces; they do not change state selection or authorize
+new guide moments.
+
+Grammar variants remain catalog copy rather than resolver-written English. A state's
+`pluralCopyKeys` selects a declared integer fact, applies `Intl.PluralRules` for the resolved locale,
+and chooses that locale's category-specific copy key with the base key as the deterministic fallback.
+The V1 price-evidence message therefore renders `1 day` for the `one` category and `days` otherwise.
 
 ## Presentation boundary
 

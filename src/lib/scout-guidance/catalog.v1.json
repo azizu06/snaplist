@@ -267,6 +267,15 @@
         "body": "uncertainty.limited-price-evidence.body",
         "accessibilityLabel": "uncertainty.limited-price-evidence.accessibilityLabel"
       },
+      "pluralCopyKeys": {
+        "selector": "windowDays",
+        "body": {
+          "one": "uncertainty.limited-price-evidence.body.one"
+        },
+        "accessibilityLabel": {
+          "one": "uncertainty.limited-price-evidence.accessibilityLabel.one"
+        }
+      },
       "guide": {
         "optional": true,
         "persistent": false,
@@ -458,7 +467,9 @@
       "processing.finding-sold-comps.accessibilityLabel": "Working on your item. {itemDisplayName}. Finding recent sold comps. You can leave — we’ll keep working.",
       "uncertainty.limited-price-evidence.title": "Limited evidence",
       "uncertainty.limited-price-evidence.body": "{soldCompCount} sold · {windowDays} days",
+      "uncertainty.limited-price-evidence.body.one": "{soldCompCount} sold · {windowDays} day",
       "uncertainty.limited-price-evidence.accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days",
+      "uncertainty.limited-price-evidence.accessibilityLabel.one": "Limited evidence. {soldCompCount} sold · {windowDays} day",
       "uncertainty.identity.title": "We’re not fully sure",
       "uncertainty.identity.body": "Limited evidence",
       "uncertainty.identity.accessibilityLabel": "We’re not fully sure. Limited evidence.",
