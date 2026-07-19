@@ -8,7 +8,6 @@ import collections
 import contextlib
 import io
 import importlib.metadata
-import importlib.util
 import json
 import re
 import subprocess
@@ -248,7 +247,11 @@ def main() -> None:
 
     if importlib.metadata.version("graphifyy") != "0.8.33":
         raise SystemExit("Graphify v0.8.33 is required for this snapshot")
-    if importlib.util.find_spec("tree_sitter_sql") is None:
+    try:
+        sql_parser_version = importlib.metadata.version("tree-sitter-sql")
+    except importlib.metadata.PackageNotFoundError:
+        sql_parser_version = None
+    if sql_parser_version != "0.3.11":
         raise SystemExit("Install the Graphify SQL extra: uv pip install --python ~/.local/share/uv/tools/graphifyy/bin/python tree-sitter-sql==0.3.11")
 
     detection = detect(corpus)

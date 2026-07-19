@@ -16,6 +16,8 @@ docs/agents/domain.md
 docs/agents/issue-tracker.md
 docs/agents/triage-labels.md
 docs/contracts/mobile-api-v1.openapi.json
+docs/design/native-v1-design-inventory.json
+docs/design/native-v1-implementation-handoff.md
 eslint.config.mjs
 ios/DesignContracts/V1/README-FIRST.md
 ios/DesignContracts/V1/mobile-api-v1.openapi.json
