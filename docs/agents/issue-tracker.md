@@ -33,11 +33,21 @@ must record:
 - the Apple primitive evaluated, availability gate, honest fallback, and server/provider-truth
   boundary when a native capability applies.
 
+Start implementation only from `Lane = Ready`; never start an issue while it remains `Blocked`.
+When every recorded blocker closes, move the dependent issue from `Blocked` to `Ready`. Keep the
+lane aligned with reality through `Ready` → `In progress` → `In review` → `Done`.
+
 Use one issue, one branch, one isolated worktree, and one PR. Collision-check semantic ownership across
 open issues, branches, worktrees, and PR diffs before editing. A change crossing more than two major
 production surfaces or roughly 15 production files / 800 non-generated production lines triggers a
 mandatory hub re-scope checkpoint. The hub may keep one inseparable atomic path together only with a
 written reason.
+
+Each substantive implementation issue also has one user-visible Codex task tied to that isolated
+worktree. Resume an existing issue task and worktree rather than creating a duplicate owner. The
+orchestration hub stays available for product, design, dependency, and status coordination; it does
+not use a hidden sub-agent as the primary implementation owner. The implementation task may spawn
+fresh-context, read-only Standards and Spec reviewers that did not author the candidate.
 
 ## Tracer bullets and skill gates
 
