@@ -45,7 +45,8 @@ not the default product posture.
   `{ suggested, range, confidence, sources[] }` and is user-editable. Never collapse this to a single
   source. The eBay-sold scraper is **read-only price research** — distinct from the transactional eBay
   **adapter**, which remains the only path for posting/messaging. Sold prices are **live-fetched**
-  (cache-on-miss + age-decay, #59); the pgvector corpus is never the price oracle. Sold-comps egress
+  (cache-on-miss + age-decay, #59); the pgvector corpus does not contribute to pricing or confidence.
+  Sold-comps egress
   is best-effort: direct fetch is the default, an optional proxy template is validated before use,
   and blocked/thin results fall through. Every evidence-backed tier cites sources; only the clearly
   labeled terminal `llm-only` estimate may return an empty `sources[]`.
@@ -86,6 +87,10 @@ not the default product posture.
   may update profit retroactively.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
+- **Listing-example retrieval is optional and evaluation-gated.** The validated item core is the
+  factual authority. RAG is default-off, must fail open to no examples, never affects pricing or
+  confidence, and cannot become a native client state or AI-item accounting boundary. Do not write
+  seller drafts to the global corpus. See ADR-0010.
 - **Review correction stays coherent and pre-publish.** Bounded identity edits must rerun the shared
   pricing router, composite confidence, and grounded listing generator, then atomically persist the
   item, eBay draft, and prediction log under RLS. Preserve seller price overrides, invalidate stale

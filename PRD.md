@@ -128,7 +128,7 @@ authoritative source supports it and otherwise hands that status check to eBay.
 
 **Listing generation, review & approval**
 17. As a seller, I want a generated eBay draft with platform-valid title, item specifics, description, and photos, so that I do not write it from scratch.
-18. As a seller, I want generated copy grounded in validated item facts and similar listings, so that it does not invent claims.
+18. As a seller, I want generated copy grounded in validated item facts, so that it does not invent claims.
 19. As a seller, I want to manually edit the complete draft, including identity, condition, title, description, specifics, photos, and price.
 20. As a seller, I want one bounded guided identity correction to re-price and regenerate only dependent fields without mixing stale identity, confidence, price, or copy.
 21. As a seller, I want confidence and attention signals to mark readiness without publishing anything, so that the easy cases stand out while I retain control.
@@ -207,7 +207,8 @@ authoritative source supports it and otherwise hands that status check to eBay.
 
 ### Tenancy & data
 - **Multi-tenant from day one.** Clerk auth reaches Supabase through third-party JWTs; every domain table carries the text Clerk `user_id`, and **Postgres row-level security** enforces per-user isolation. This is a primary Security-skill surface.
-- **Postgres + pgvector** (Supabase) holds items, listings, messages, embeddings, and prediction logs.
+- **Postgres + pgvector** (Supabase) holds items, listings, messages, optional evaluation embeddings,
+  and prediction logs. Vector retrieval is not a native-launch dependency.
 - **Photos** in Supabase Storage, paths scoped by `user_id`, access governed by RLS/storage policies.
 - **Guest artifacts have a separate, bounded lifecycle.** The one App Attest-backed guest allowance
   retains encrypted photos, run state, and usable output for 24 hours after the usable draft exists.
@@ -226,7 +227,8 @@ authoritative source supports it and otherwise hands that status check to eBay.
   platform, generated copy, status, source_review_revision), `messages` (item_id/listing_id,
   direction, body, draft_reply, marketplace, exact external identities, delivery state), per-seller
   `message_attachments` (tenant/message/request identity, private object path, hosted-provider
-  reference, delivery state), messaging sync/reconciliation state, `embeddings`/corpus (vector, source ref, metadata),
+  reference, delivery state), messaging sync/reconciliation state, an optional evaluation-only
+  reference corpus (vector, source ref, metadata),
   `prediction_logs` (item_id, extracted attrs, price, range, confidence, tier_fired, model used).
 
 ### Native activation, entitlement & AI-item credits
@@ -259,7 +261,7 @@ authoritative source supports it and otherwise hands that status check to eBay.
   See ADR-0008.
 
 ### Models & LLM access
-- **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). Provider is a config flip via `LLM_PROVIDER`: **dev defaults to Gemini** (generous free tier — protects the OpenAI budget), the **showcase runs on OpenAI**. A strong multimodal model handles vision + structured extraction; model ids are per-role and provider-aware, confirmed against current docs at build time. Embeddings stay on a fixed provider (pgvector `vector(1536)` dimension lock).
+- **Vercel AI SDK behind a role-keyed provider registry** (`src/lib/llm`, ADR-0002). Provider is a config flip via `LLM_PROVIDER`: **dev defaults to Gemini** (generous free tier protects the OpenAI budget), the **showcase runs on OpenAI**. A strong multimodal model handles vision + structured extraction; model ids are per-role and provider-aware, confirmed against current docs at build time. The retained evaluation corpus uses a fixed embedding space because of its pgvector `vector(1536)` schema, but embedding work is outside the launch-critical path.
 - **Structured outputs** via the AI SDK's `generateObject` + **Zod** schemas (attributes, listing, price recommendation). Validation + retry on schema mismatch.
 - **Cost-aware model routing:** cheap model for easy/high-confidence work, escalate to the strong model for hard/low-confidence items. Routing is itself a showcased technique and feeds the confidence story.
 - Provider stays swappable behind the SDK (config flip).
@@ -285,7 +287,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   config fails before egress, and Actor/public blocked or thin results decline to
   lower tiers. Provider credentials and raw upstream errors never enter results,
   reports, cache keys, or pricing diagnostics.
-- **Freshness:** sold prices drift, so the source of truth is a **live fetch at query time**; a TTL cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. The pgvector **reference corpus** grounds listing copy and *corroborates* pricing — it is **never** the price oracle.
+- **Freshness:** sold prices drift, so the source of truth is a **live fetch at query time**; a TTL cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority. Reference-corpus prices do not contribute to pricing or confidence.
 
 ### Pricing research agent
 - **Genuine but bounded tool-calling loop:** formulate targeted queries (e.g. `"{brand} {model} used resale price sold"`) → search → judge coverage/agreement → optionally refine **once** → synthesize a **cited** range. Capped at ~2–3 search iterations for cost/latency.
@@ -351,12 +353,31 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   target). Launch assisted handoffs target **Facebook Marketplace**, **Mercari**, and **Depop** with
   platform-appropriate copy/photos and an honest native share/deep-link checklist. They never claim a
   direct post. Poshmark remains a later option if the branded-apparel slice is expanded.
-- Generation is **grounded** by pgvector retrieval of similar past/seed listings (few-shot).
+- Generation is always grounded in the validated item core. Optional similar-listing examples may
+  provide style and structure hints only after the evaluation gate below passes.
 
-### RAG (pgvector)
-- **Seeded reference corpus from day one** (hero-domain-weighted; curated or realistic-synthetic, with prices + good copy). Avoids cold-start.
-- Two live jobs: (a) **ground pricing** as a corroborating signal feeding confidence; (b) **few-shot the listing generator**.
-- README discloses honestly if the corpus is synthetic.
+### Optional listing-example retrieval
+- **Default-off and non-blocking.** Similar-listing retrieval is an optional server-side adapter at
+  the listing-generation seam. Disabled, empty, incompatible, timed-out, or failed retrieval produces
+  no examples and cannot fail identification, pricing, listing generation, guided correction, durable
+  recovery, or AI-item accounting. Native clients have no retrieval-specific state.
+- **No pricing authority.** The corpus never contributes a price, range, confidence input, evidence
+  source, or freshness signal. The provider-neutral pricing router remains the only pricing seam.
+- **Facts stay item-owned.** Examples may influence layout and marketplace terminology only. They
+  cannot add condition, completeness, accessories, measurements, provenance, authenticity, shipping,
+  urgency, price, or marketplace status beyond the validated item core.
+- **Evaluation before enablement.** A paired on/off gold-set run must predefine and prove a meaningful
+  improvement in seller edit burden or first-pass acceptance, with no increase in unsupported claims
+  and acceptable latency and cost. If it does not pass, remove runtime retrieval instead of tuning it
+  without a stop condition.
+- **No global seller-data flywheel.** Seller-approved drafts are not written to the global readable
+  corpus. Any future personalization requires a separate tenant-scoped privacy and consent decision.
+- **Schema retained during evaluation.** Existing pgvector and reference-corpus migrations remain for
+  compatibility until the evaluation decides whether a later contract migration removes them. See
+  ADR-0010.
+- **Transition status.** The current retrieval-first server implementation is legacy behavior until
+  the dedicated runtime tracer bullet makes retrieval default-off and fail-open. Do not treat this
+  target contract as already implemented.
 
 ### Item domain
 - **Hero domain + graceful degradation — a positioning choice, not a caveat.** The hero domain *is* reseller inventory: books/media (ISBN), consumer electronics, video games and consoles, board games, LEGO, sneakers, branded clothing/streetwear, and branded gear. These are exactly the categories where eBay public **sold comps** are dense, so the pricing tier is genuinely strong and the suggestion is defensible. We concentrate there on purpose rather than chasing a "price anything" guarantee. Generic household items still flow through the same pipeline but honestly show low confidence. Demo arc: exact barcode → researched sold comps → correctly-flagged generic.
@@ -483,6 +504,8 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - A pre-value seller questionnaire. Optional personalization begins only after a usable first draft.
 - Presenting legacy daily server limits as the native SnapList Pro entitlement or public allowance.
 - Making bulk/haul or inventory-scale automation the default launch posture.
+- Making RAG, an embedding provider, or a reference corpus a launch dependency.
+- Using reference-corpus prices or seller drafts as shared pricing, confidence, or generation truth.
 
 ## Further Notes
 
@@ -490,14 +513,15 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
   defaults (single-source-leaning eBay framing, "any household item", `gpt-4o` default, etc.). This
   PRD overrides those. Keep the brief as origin/narrative context.
 - **Skills-on-display map** (for README + interview narrative): multimodal vision (extraction),
-  agents + tool calling (pricing agent, buyer-Q&A agent), RAG/synthesis (cited web-search range, similar-item
-  grounding), structured Zod outputs, prompt/context engineering (per-platform generation,
+  agents + tool calling (pricing agent, buyer-Q&A agent), cited evidence synthesis, structured Zod
+  outputs, prompt/context engineering (per-platform generation,
   used-vs-new disambiguation), pgvector, security (Auth + RLS + secret handling + input validation +
   account-deletion endpoint), cost-aware model routing, evals + calibration, Docker/CI/observability (Phase 4).
 - **Coherence to emphasize:** the *pricing tier that fired* → *confidence score* → *eval calibration*
   is one spine seen three ways. Lead with that in interviews.
-- **Honesty as a selling point:** UPC isn't a free price oracle; asking-prices ≠ sold-prices; synthetic
-  corpus disclosed. Being able to state the system's accuracy ceiling is a differentiator.
+- **Honesty as a selling point:** UPC is not a free price oracle; asking prices are not sold prices;
+  optional retrieval must prove user value before enablement. Being able to state the system's
+  accuracy ceiling is a differentiator.
 
 ### Phase sequencing (tracer-bullet, not rigid)
 - **Phase 0 — contract and foundations:** canonical product/ADR contract; repo and server foundations;

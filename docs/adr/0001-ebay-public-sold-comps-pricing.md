@@ -64,11 +64,11 @@ sold-comp research is now a first-class tier.
    loopback / link-local hosts are rejected. The proxy endpoint is trusted operator configuration;
    the base eBay host remains constrained, so a misconfiguration declines before target egress.
 
-5. **Freshness is live-fetch-first; the vector DB is NEVER the price oracle.** Sold prices drift,
+5. **Freshness is live-fetch-first; the vector DB is not pricing evidence.** Sold prices drift,
    so the source of truth is a **live fetch at query time**. A TTL **cache-on-miss** + recency /
-   age-decay layer (issue #59) reduces footprint without becoming the authority. The **reference
-   corpus** (pgvector) keeps its PRD roles — grounding listing-copy few-shot and *corroborating*
-   pricing — and explicitly does **not** serve stored prices as current truth.
+   age-decay layer (issue #59) reduces footprint without becoming the authority. Reference-corpus
+   data does not contribute to suggested price, range, confidence, evidence, or freshness. Optional
+   listing-example retrieval is governed separately by ADR-0010.
 
 6. **Confidence stays signal-based.** `ebay-sold` is sold-grounded by construction (every source
    is a `sold-comp`), so when its comps cluster tightly it maps to the first-class **`sold`**
