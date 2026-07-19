@@ -60,24 +60,36 @@ export type ListingGenerate = (args: {
 
 /**
  * Injectable few-shot retrieval. Returns the grounding exemplars for these
- * attributes. Defaults to the real rag path (`retrieveReferences` + `fewShotExamples`)
- * which is DB-backed; tests pass a fake so generation runs offline.
+ * attributes. When the experiment is explicitly enabled, it defaults to the real
+ * DB-backed rag path; tests pass a fake so generation runs offline.
  */
 export type RetrieveFewShot = (
   attributes: ExtractedAttributes,
 ) => Promise<FewShotExamples>;
+
+export interface ListingExampleRetrievalOptions {
+  /** Explicit experiment gate. Omitted means the server environment decides. */
+  enabled?: boolean;
+  /** Maximum time spent waiting for optional examples before generation continues. */
+  timeoutMs?: number;
+}
+
+const DEFAULT_LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS = 2_000;
+const MAX_LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS = 5_000;
 
 export interface GenerateEbayListingInput {
   /** The Zod-validated attribute core. The ONLY source of truth for facts. */
   attributes: ExtractedAttributes;
   /**
    * Grounding exemplars. Provide `fewShot` directly (already retrieved), OR a
-   * `retrieve` fn the generator calls. If neither is given, the real rag retrieval
-   * is used (requires a Supabase client + embedder via env — never on the test path).
+   * `retrieve` fn the generator calls. If neither is given and the experiment is
+   * enabled, the real rag retrieval is used. Retrieval stays off by default.
    */
   fewShot?: FewShotExamples;
   /** Injectable retrieval; called when `fewShot` is not supplied. */
   retrieve?: RetrieveFewShot;
+  /** Server-side experiment policy. Retrieval is disabled unless explicitly enabled. */
+  listingExampleRetrieval?: ListingExampleRetrievalOptions;
   /** Injected model call. Defaults to the real lazy `generateObject` wrapper. */
   generate?: ListingGenerate;
   /** Constraint-repair retries before giving up and repairing deterministically. Default 1. */
@@ -293,17 +305,58 @@ export async function generateEbayListing(
 }
 
 /**
- * Resolve few-shot grounding when not provided directly. Uses the injected `retrieve`
- * fn if present, else the real rag path. The real path requires a Supabase client +
- * embedder from the environment; it is imported lazily so the offline test path (which
- * always injects `fewShot` or `retrieve`) never loads it.
+ * Resolve optional few-shot grounding when not provided directly. Disabled and
+ * unusable retrieval both normalize to the same no-examples result.
  */
+function noListingExamples(): FewShotExamples {
+  return { matches: [], examples: [] };
+}
+
+function isFewShotExamples(value: unknown): value is FewShotExamples {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<FewShotExamples>;
+  return (
+    Array.isArray(candidate.matches) &&
+    Array.isArray(candidate.examples) &&
+    candidate.matches.length === candidate.examples.length &&
+    candidate.examples.every(
+      (example, index) =>
+        typeof example === "string" &&
+        candidate.matches?.[index]?.content === example,
+    )
+  );
+}
+
 async function resolveFewShot(
   input: GenerateEbayListingInput,
   attributes: ExtractedAttributes,
 ): Promise<FewShotExamples> {
-  if (input.retrieve) return input.retrieve(attributes);
-  return createRealFewShotRetrieval()(attributes);
+  const enabled =
+    input.listingExampleRetrieval?.enabled ??
+    process.env.LISTING_EXAMPLE_RETRIEVAL_ENABLED === "true";
+  if (!enabled) return noListingExamples();
+  const configuredTimeout =
+    input.listingExampleRetrieval?.timeoutMs ??
+    Number(process.env.LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS);
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? Math.min(configuredTimeout, MAX_LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS)
+      : DEFAULT_LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const retrieve = input.retrieve ?? createRealFewShotRetrieval();
+    const retrieved: unknown = await Promise.race([
+      retrieve(attributes),
+      new Promise<FewShotExamples>((resolve) => {
+        timeout = setTimeout(() => resolve(noListingExamples()), timeoutMs);
+      }),
+    ]);
+    return isFewShotExamples(retrieved) ? retrieved : noListingExamples();
+  } catch {
+    return noListingExamples();
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 // ---------------------------------------------------------------------------

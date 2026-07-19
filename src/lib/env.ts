@@ -85,6 +85,11 @@ const envSchema = z.object({
   REVENUECAT_OFFERING_ID: z.string().min(1).optional(),
   SNAPLIST_PRO_MONTHLY_AI_ITEM_ALLOWANCE: z.string().min(1).optional(),
 
+  // Experimental listing-example retrieval (ADR-0010). Default-off and bounded;
+  // these are server-only controls and must never become native client state.
+  LISTING_EXAMPLE_RETRIEVAL_ENABLED: z.string().min(1).optional(),
+  LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS: z.string().min(1).optional(),
+
   // eBay public sold-listings scraper (pricing tier "ebay-sold", issue #56).
   // Read-only price research over eBay's PUBLIC sold/completed pages — no API, no
   // auth, no secret. Set EBAY_SOLD_ENABLED=false (or 0/off) to disable the tier
