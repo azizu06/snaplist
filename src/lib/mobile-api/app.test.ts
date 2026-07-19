@@ -316,6 +316,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         method: "POST",
         headers: {
           authorization: "Bearer signed-account-jwt",
+          "idempotency-key": "55555555-5555-4555-8555-555555555555",
           "x-snaplist-guest-handoff": "opaque-174-handoff",
           "content-type": "application/json",
         },
@@ -364,6 +365,28 @@ describe("mobile API v1 provider-neutral handler", () => {
     }
   });
 
+  it("requires one UUID idempotency key for the logical guest claim mutation", async () => {
+    for (const idempotencyKey of [undefined, "not-a-uuid"]) {
+      const headers: Record<string, string> = {
+        authorization: "Bearer signed-account-jwt",
+        "x-snaplist-guest-handoff": "opaque-174-handoff",
+      };
+      if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
+
+      const response = await handler()(
+        new Request("http://localhost/v1/guest/claims", {
+          method: "POST",
+          headers,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "invalid_request", requestId: "req_test" },
+      });
+    }
+  });
+
   it("returns stable retry-safe guest claim errors without leaking internals", async () => {
     for (const [error, status, code] of [
       [new GuestClaimInProgressError(5), 409, "conflict"],
@@ -377,6 +400,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           method: "POST",
           headers: {
             authorization: "Bearer signed-account-jwt",
+            "idempotency-key": "55555555-5555-4555-8555-555555555555",
             "x-snaplist-guest-handoff": "opaque-174-handoff",
           },
         }),

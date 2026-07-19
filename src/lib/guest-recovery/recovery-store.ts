@@ -29,12 +29,17 @@ function canonicalBase64Schema(bounds: Base64Bounds = {}) {
 }
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+const encryptionKeyIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/);
 
 export const encryptedGuestRecoveryArtifactSchema = z
   .object({
     version: z.literal(1),
     algorithm: z.literal("aes-256-gcm"),
-    keyId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+    keyId: encryptionKeyIdSchema,
     keyEnvelope: canonicalBase64Schema({ minBytes: 1, maxBytes: 64 * 1_024 }),
     nonce: canonicalBase64Schema({ exactBytes: 12 }),
     tag: canonicalBase64Schema({ exactBytes: 16 }),
@@ -57,6 +62,14 @@ export const guestRecoveryStorageManifestSchema = z
           .refine((value) => !value.includes("://") && !/[?#]/.test(value)),
         sha256: sha256Schema,
         byteLength: z.number().int().positive().max(50 * 1_024 * 1_024),
+        encryption: z
+          .object({
+            algorithm: z.literal("aes-256-gcm"),
+            keyId: encryptionKeyIdSchema,
+            nonce: canonicalBase64Schema({ exactBytes: 12 }),
+            tag: canonicalBase64Schema({ exactBytes: 16 }),
+          })
+          .strict(),
       })
       .strict(),
   )
@@ -143,20 +156,32 @@ const identitySchema = z.object({
   recoveryTokenHash: sha256Schema,
 });
 
+const recoveryRegistrationSchema = identitySchema
+  .extend({
+    pipelineRunId: z.string().uuid(),
+    encryptedArtifact: encryptedGuestRecoveryArtifactSchema,
+    storageManifest: guestRecoveryStorageManifestSchema,
+  })
+  .strict()
+  .superRefine((input, context) => {
+    input.storageManifest.forEach((object, index) => {
+      if (object.encryption.keyId !== input.encryptedArtifact.keyId) {
+        context.addIssue({
+          code: "custom",
+          message: "Storage ciphertext must use the recovery key envelope.",
+          path: ["storageManifest", index, "encryption", "keyId"],
+        });
+      }
+    });
+  });
+
 /** Fixed recovery capability for #174/#159 consumers; no generic domain access. */
 export function createSupabaseGuestRecoveryStore(
   client: GuestRecoveryRpcClient,
 ): GuestRecoveryStore {
   return {
     async register(rawInput) {
-      const input = identitySchema
-        .extend({
-          pipelineRunId: z.string().uuid(),
-          encryptedArtifact: encryptedGuestRecoveryArtifactSchema,
-          storageManifest: guestRecoveryStorageManifestSchema,
-        })
-        .strict()
-        .parse(rawInput);
+      const input = recoveryRegistrationSchema.parse(rawInput);
       const result = await client.rpc("register_guest_draft_recovery", {
         p_encrypted_artifact: input.encryptedArtifact,
         p_guest_user_id: input.guestUserId,

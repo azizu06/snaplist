@@ -55,7 +55,7 @@
         "x-related-owner-issues": [174, 181],
         "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
-        "parameters": [{ "name": "X-SnapList-Guest-Handoff", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Opaque handoff verified by issue #174. It contains no client-defined deadline or account owner." }],
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }, { "name": "X-SnapList-Guest-Handoff", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Opaque handoff verified by issue #174. It contains no client-defined deadline or account owner." }],
         "responses": {
           "200": { "description": "Stable claimed or expired outcome. Either terminal outcome requires local encrypted recovery deletion.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GuestClaimEnvelope" } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSupabaseGuestRecoveryStore } from "./recovery-store";
+import {
+  createSupabaseGuestRecoveryStore,
+  guestRecoveryStorageManifestSchema,
+} from "./recovery-store";
 
 const encryptedArtifact = {
   version: 1 as const,
@@ -14,9 +17,44 @@ const storageManifest = [{
   sourcePath: "guest_fixture/item/front.enc",
   sha256: "a".repeat(64),
   byteLength: 128,
+  encryption: {
+    algorithm: "aes-256-gcm" as const,
+    keyId: encryptedArtifact.keyId,
+    nonce: Buffer.alloc(12, 4).toString("base64"),
+    tag: Buffer.alloc(16, 5).toString("base64"),
+  },
 }];
 
 describe("guest encrypted recovery fixed-RPC store", () => {
+  it("rejects an unlabeled Storage object as recoverable ciphertext", () => {
+    expect(guestRecoveryStorageManifestSchema.safeParse([{
+      sourcePath: "guest_fixture/item/front.enc",
+      sha256: "a".repeat(64),
+      byteLength: 128,
+    }]).success).toBe(false);
+  });
+
+  it("rejects Storage ciphertext that is not tied to the recovery key envelope", async () => {
+    const rpc = vi.fn();
+    const store = createSupabaseGuestRecoveryStore({ rpc });
+
+    await expect(store.register({
+      recoveryId: "11111111-1111-4111-8111-111111111111",
+      guestUserId: "guest_fixture",
+      pipelineRunId: "33333333-3333-4333-8333-333333333333",
+      recoveryTokenHash: "b".repeat(64),
+      encryptedArtifact,
+      storageManifest: [{
+        ...storageManifest[0],
+        encryption: {
+          ...storageManifest[0].encryption,
+          keyId: "different-key-envelope",
+        },
+      }],
+    })).rejects.toThrow();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("registers against a durable run without accepting a device clock or TTL", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: {

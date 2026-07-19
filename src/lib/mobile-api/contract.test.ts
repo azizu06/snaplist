@@ -136,6 +136,9 @@ describe("SwiftUI mobile HTTP contract", () => {
       security: [{ ClerkBearer: [] }],
     });
     expect(JSON.stringify(claim)).toContain("X-SnapList-Guest-Handoff");
+    expect(JSON.stringify(claim)).toContain(
+      "#/components/parameters/IdempotencyKey",
+    );
     expect(JSON.stringify(claim)).not.toContain("expiresAt");
     expect(JSON.stringify(claim)).not.toContain("targetUserId");
     expect(contract.components.schemas.GuestClaimEnvelope).toMatchObject({

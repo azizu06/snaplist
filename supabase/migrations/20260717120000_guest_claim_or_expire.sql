@@ -1056,6 +1056,25 @@ begin
     return v_recovery;
   end if;
 
+  delete from public.listings draft
+  where draft.id = v_recovery.draft_id
+    and draft.item_id = v_recovery.item_id
+    and draft.user_id = v_recovery.guest_user_id
+    and draft.status in ('draft', 'queued')
+    and draft.ebay_listing_id is null
+    and draft.ebay_status is distinct from 'publishing'
+    and draft.ebay_status is distinct from 'published';
+
+  if not found and exists (
+    select 1
+    from public.listings listing
+    where listing.id = v_recovery.draft_id
+  ) then
+    raise exception using
+      errcode = '55000',
+      message = 'Guest expiry requires unclaimed draft evidence';
+  end if;
+
   perform private.queue_guest_recovery_storage_cleanup(v_recovery);
   if v_recovery.state = 'copying' then
     perform private.queue_guest_claim_copy_cleanup(
@@ -1064,13 +1083,6 @@ begin
       v_recovery.claim_lease_token
     );
   end if;
-
-  delete from public.listings draft
-  where draft.id = v_recovery.draft_id
-    and draft.item_id = v_recovery.item_id
-    and draft.user_id = v_recovery.guest_user_id
-    and draft.status in ('draft', 'queued')
-    and draft.ebay_listing_id is null;
 
   update public.pipeline_runs run
   set checkpoint = '{}'::jsonb,
@@ -1186,12 +1198,33 @@ begin
     from jsonb_array_elements(p_storage_manifest) entry(value)
   loop
     if jsonb_typeof(v_object) is distinct from 'object'
-      or v_object - array['sourcePath', 'sha256', 'byteLength']::text[]
+      or v_object - array[
+        'sourcePath', 'sha256', 'byteLength', 'encryption'
+      ]::text[]
         <> '{}'::jsonb
-      or not v_object ?& array['sourcePath', 'sha256', 'byteLength']
+      or not v_object ?& array[
+        'sourcePath', 'sha256', 'byteLength', 'encryption'
+      ]
       or jsonb_typeof(v_object->'sourcePath') is distinct from 'string'
       or jsonb_typeof(v_object->'sha256') is distinct from 'string'
       or jsonb_typeof(v_object->'byteLength') is distinct from 'number'
+      or jsonb_typeof(v_object->'encryption') is distinct from 'object'
+      or (v_object->'encryption') - array[
+        'algorithm', 'keyId', 'nonce', 'tag'
+      ]::text[] <> '{}'::jsonb
+      or not (v_object->'encryption') ?& array[
+        'algorithm', 'keyId', 'nonce', 'tag'
+      ]
+      or v_object->'encryption'->>'algorithm' <> 'aes-256-gcm'
+      or v_object->'encryption'->>'keyId' <> p_encrypted_artifact->>'keyId'
+      or not coalesce(private.valid_guest_base64(
+        v_object->'encryption'->>'nonce',
+        p_exact_bytes => 12
+      ), false)
+      or not coalesce(private.valid_guest_base64(
+        v_object->'encryption'->>'tag',
+        p_exact_bytes => 16
+      ), false)
       or left(
         v_object->>'sourcePath', char_length(p_guest_user_id) + 1
       ) <> p_guest_user_id || '/'

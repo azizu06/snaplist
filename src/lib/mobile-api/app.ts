@@ -1,6 +1,7 @@
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
+import { z } from "zod";
 import {
   GuestClaimInProgressError,
   type GuestClaimTerminalOutcome,
@@ -208,6 +209,18 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
+      if (!idempotencyKey.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid Idempotency-Key is required.",
         );
       }
       if (

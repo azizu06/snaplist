@@ -1,6 +1,6 @@
 begin;
 
-select plan(52);
+select plan(57);
 
 select ok(
   to_regclass('private.guest_draft_recoveries') is not null,
@@ -124,7 +124,7 @@ insert into public.pipeline_runs (
     'succeeded',
     'completed',
     'guest-pgtap-expire',
-    statement_timestamp() - interval '24 hours',
+    statement_timestamp() - interval '23 hours',
     null,
     null
   ),
@@ -365,9 +365,34 @@ select throws_ok(
       repeat('a', 64),
       '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
       jsonb_build_array(jsonb_build_object(
-        'sourcePath', 'guestXpgtap_claim/items/front.enc',
+        'sourcePath', 'guest_pgtap_claim/items/front.enc',
         'sha256', repeat('b', 64),
         'byteLength', 128
+      ))
+    )
+  $$,
+  '22023',
+  'Invalid private Storage recovery manifest',
+  'unlabeled Storage bytes cannot become recoverable ciphertext'
+);
+select throws_ok(
+  $$
+    select public.register_guest_draft_recovery(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      '20000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
+      jsonb_build_array(jsonb_build_object(
+        'sourcePath', 'guestXpgtap_claim/items/front.enc',
+        'sha256', repeat('b', 64),
+        'byteLength', 128,
+        'encryption', jsonb_build_object(
+          'algorithm', 'aes-256-gcm',
+          'keyId', 'fixture',
+          'nonce', 'BAQEBAQEBAQEBAQE',
+          'tag', 'BQUFBQUFBQUFBQUFBQUFBQ=='
+        )
       ))
     )
   $$,
@@ -387,7 +412,13 @@ insert into guest_claim_results values (
     jsonb_build_array(jsonb_build_object(
       'sourcePath', 'guest_pgtap_claim/items/front.enc',
       'sha256', repeat('b', 64),
-      'byteLength', 128
+      'byteLength', 128,
+      'encryption', jsonb_build_object(
+        'algorithm', 'aes-256-gcm',
+        'keyId', 'fixture',
+        'nonce', 'BAQEBAQEBAQEBAQE',
+        'tag', 'BQUFBQUFBQUFBQUFBQUFBQ=='
+      )
     ))
   )
 );
@@ -777,14 +808,74 @@ insert into guest_claim_results values (
     jsonb_build_array(jsonb_build_object(
       'sourcePath', 'guest_pgtap_expire/items/front.enc',
       'sha256', repeat('d', 64),
-      'byteLength', 128
+      'byteLength', 128,
+      'encryption', jsonb_build_object(
+        'algorithm', 'aes-256-gcm',
+        'keyId', 'fixture',
+        'nonce', 'BAQEBAQEBAQEBAQE',
+        'tag', 'BQUFBQUFBQUFBQUFBQUFBQ=='
+      )
     ))
   )
 );
 select is(
   (select payload->>'outcome' from guest_claim_results where label = 'expired-registration'),
-  'expired',
-  'the exact boundary expires instead of opening a claim window'
+  'recoverable',
+  'the guest draft registers before its server-owned boundary'
+);
+
+reset role;
+update private.guest_draft_recoveries
+set usable_draft_at = statement_timestamp() - interval '24 hours',
+    expires_at = statement_timestamp()
+where id = '70000000-0000-4000-8000-000000000002';
+update public.listings
+set status = 'active',
+    ebay_listing_id = 'provider-listing-175',
+    ebay_status = 'published'
+where id = '30000000-0000-4000-8000-000000000002';
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select throws_ok(
+  $$ select public.expire_guest_draft_recoveries(25) $$,
+  '55000',
+  'Guest expiry requires unclaimed draft evidence',
+  'expiry fails closed when provider-success listing state wins first'
+);
+select is(
+  (
+    select cardinality(photos)
+    from public.items
+    where id = '10000000-0000-4000-8000-000000000002'
+  ),
+  1,
+  'failed-closed expiry preserves successful listing photo references'
+);
+select is(
+  (
+    select count(*)::integer
+    from public.listings
+    where id = '30000000-0000-4000-8000-000000000002'
+      and status = 'active'
+      and ebay_listing_id = 'provider-listing-175'
+  ),
+  1,
+  'failed-closed expiry preserves provider listing truth'
+);
+
+reset role;
+update public.listings
+set status = 'draft',
+    ebay_listing_id = null,
+    ebay_status = null
+where id = '30000000-0000-4000-8000-000000000002';
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select is(
+  (public.expire_guest_draft_recoveries(25)->>'expiredCount')::integer,
+  1,
+  'the exact server boundary expires after the unclaimed-draft predicate holds'
 );
 select is(
   (
@@ -856,10 +947,46 @@ insert into private.guest_draft_recoveries (
   repeat('e', 64),
   '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
   jsonb_build_array(
-    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/1.enc', 'sha256', repeat('1', 64), 'byteLength', 1),
-    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/2.enc', 'sha256', repeat('2', 64), 'byteLength', 1),
-    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/3.enc', 'sha256', repeat('3', 64), 'byteLength', 1),
-    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/4.enc', 'sha256', repeat('4', 64), 'byteLength', 1)
+    jsonb_build_object(
+      'sourcePath', 'guest_pgtap_four/items/1.enc',
+      'sha256', repeat('1', 64),
+      'byteLength', 1,
+      'encryption', jsonb_build_object(
+        'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+        'nonce', 'BAQEBAQEBAQEBAQE',
+        'tag', 'DAwMDAwMDAwMDAwMDAwMDA=='
+      )
+    ),
+    jsonb_build_object(
+      'sourcePath', 'guest_pgtap_four/items/2.enc',
+      'sha256', repeat('2', 64),
+      'byteLength', 1,
+      'encryption', jsonb_build_object(
+        'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+        'nonce', 'BQUFBQUFBQUFBQUF',
+        'tag', 'DQ0NDQ0NDQ0NDQ0NDQ0NDQ=='
+      )
+    ),
+    jsonb_build_object(
+      'sourcePath', 'guest_pgtap_four/items/3.enc',
+      'sha256', repeat('3', 64),
+      'byteLength', 1,
+      'encryption', jsonb_build_object(
+        'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+        'nonce', 'BgYGBgYGBgYGBgYG',
+        'tag', 'Dg4ODg4ODg4ODg4ODg4ODg=='
+      )
+    ),
+    jsonb_build_object(
+      'sourcePath', 'guest_pgtap_four/items/4.enc',
+      'sha256', repeat('4', 64),
+      'byteLength', 1,
+      'encryption', jsonb_build_object(
+        'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+        'nonce', 'BwcHBwcHBwcHBwcH',
+        'tag', 'Dw8PDw8PDw8PDw8PDw8PDw=='
+      )
+    )
   ),
   4,
   statement_timestamp() - interval '24 hours',

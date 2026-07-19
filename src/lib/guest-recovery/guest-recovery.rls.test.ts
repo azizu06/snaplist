@@ -14,7 +14,10 @@ import {
 } from "@/test/exclusive-resource-lock";
 import { runPipelineMaintenance } from "@/lib/pipeline-operations/maintenance";
 import { createSupabasePipelineOperationsStore } from "@/lib/pipeline-operations/store";
-import { createSupabaseGuestRecoveryStore } from "./recovery-store";
+import {
+  createSupabaseGuestRecoveryStore,
+  type GuestRecoveryStorageManifest,
+} from "./recovery-store";
 import {
   GuestClaimStorageError,
   claimGuestRecovery,
@@ -56,6 +59,7 @@ interface Fixture {
   reviewRevision: string;
   completedAt: string;
   objects: Array<Omit<GuestClaimObject, "destinationPath">>;
+  storageManifest: GuestRecoveryStorageManifest;
 }
 
 let reachable = false;
@@ -128,6 +132,17 @@ async function createFixture(
       byteLength: bytes.byteLength,
     };
   });
+  const storageManifest: GuestRecoveryStorageManifest = objects.map(
+    (object, index) => ({
+      ...object,
+      encryption: {
+        algorithm: "aes-256-gcm",
+        keyId: encryptedArtifact.keyId,
+        nonce: Buffer.alloc(12, index + 4).toString("base64"),
+        tag: Buffer.alloc(16, index + 12).toString("base64"),
+      },
+    }),
+  );
 
   await database.query("begin");
   try {
@@ -254,6 +269,7 @@ async function createFixture(
     reviewRevision,
     completedAt,
     objects,
+    storageManifest,
   };
 }
 
@@ -295,10 +311,9 @@ async function register(fixture: Fixture, shaOverride?: string) {
     pipelineRunId: fixture.runId,
     recoveryTokenHash: fixture.recoveryTokenHash,
     encryptedArtifact,
-    storageManifest: fixture.objects.map(({ sourcePath, sha256, byteLength }) => ({
-      sourcePath,
-      sha256: shaOverride ?? sha256,
-      byteLength,
+    storageManifest: fixture.storageManifest.map((object) => ({
+      ...object,
+      sha256: shaOverride ?? object.sha256,
     })),
   });
 }
