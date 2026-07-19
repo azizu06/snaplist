@@ -138,6 +138,7 @@ struct AppDependencies {
     let framingEvaluator: any FramingEvaluating
     let captureDraftStore: any CaptureDraftStoring
     let subscriptionClient: any SubscriptionClient
+    let analyticsClient: any AnalyticsClient
 
     static func make(configuration: LaunchConfiguration) -> AppDependencies {
         let cameraAuthorization: any CameraAuthorizationProviding
@@ -160,7 +161,8 @@ struct AppDependencies {
                 captureCamera: captureCamera,
                 framingEvaluator: VisionObjectFramingEvaluator(),
                 captureDraftStore: captureDraftStore,
-                subscriptionClient: FixtureSubscriptionClient()
+                subscriptionClient: FixtureSubscriptionClient(),
+                analyticsClient: NoOpAnalyticsClient()
             )
         }
 
@@ -178,7 +180,8 @@ struct AppDependencies {
             captureCamera: captureCamera,
             framingEvaluator: VisionObjectFramingEvaluator(),
             captureDraftStore: captureDraftStore,
-            subscriptionClient: RevenueCatSubscriptionClient()
+            subscriptionClient: RevenueCatSubscriptionClient(),
+            analyticsClient: NoOpAnalyticsClient()
         )
     }
 
