@@ -97,9 +97,46 @@ not the default product posture.
   RLS or audited run-scoped RPCs. See ADR-0007.
 
 ## How we build
+- **Matt workflow gates are explicit, not implied by setup.** Apply `to-tickets`
+  once when an approved spec or parent is decomposed into child issues; do not
+  rerun it on an existing child. Before that child can move to Ready, complete
+  the repository issue contract with one finite outcome, binary acceptance
+  criteria, blockers, owned surfaces, exclusions, and named test seams. Only a
+  user-approved issue contract or explicit user confirmation approves the TDD
+  seam. Implement changed behavior with `tdd`, one public-interface RED to
+  minimal GREEN at a time. Use `diagnosing-bugs` before changing code for a
+  regression whose cause is not proved. Before merge review, use `code-review`
+  with separate fresh-context, read-only Standards and Spec reviewers; the code
+  author cannot approve either axis. Every PR handoff names the applicable gates
+  and evidence.
+- **One issue, one branch, one isolated worktree, one PR.** Collision-check open
+  issues, branches, worktrees, and PR diffs before implementation. If discovered
+  work is not required by the frozen issue contract, split or route it instead
+  of widening the branch.
 - **Tracer-bullet + TDD.** Thin end-to-end threads: one or two backend pieces + minimal frontend to
   exercise them + tests, proven working before the next. No full-backend-then-frontend; no
-  layer-by-layer. Always keep something that runs.
+  layer-by-layer. Always keep something that runs. A tracer bullet proves one finite observable
+  behavior; it is not permission to build the complete surrounding system. It may cross layers only
+  as far as that behavior requires. SnapList may split an independently observable,
+  provider-neutral backend or native public seam from its consumer when that seam is contract-tested
+  and explicitly blocks the consumer.
+- **Bounded issue and review scope.** Freeze acceptance behavior, owned surfaces, non-goals, and
+  proportional gates before implementation. More than two major production surfaces or roughly 15
+  production files / 800 non-generated production lines is a mandatory re-scope checkpoint. Keep one
+  slice only when the hub records why splitting would make correctness or delivery worse. Once review
+  begins, do not add product or architecture scope. One review round is the combined assessment of one
+  exact head by fresh Standards and Spec reviewers plus GitHub Codex. Count the first candidate as
+  round 1/3 and request another round only after qualifying fixes change the head. P0/P1 block. P2
+  blocks only for a proved in-scope acceptance, security/tenancy, data, external-side-effect or direct
+  cost, unrecoverable-reliability, or required-test-validity defect. P3, cleanup, optional hardening,
+  cosmetics, and adjacent discoveries become follow-up issues. After round 3, stop for split,
+  redesign, or explicit owner direction.
+- **Adjudicate GitHub Codex findings.** Treat the App as independent evidence, not authority. Apply
+  the frozen issue contract, severity filter, scope split, and shared three-round counter. Run the
+  fresh local Standards and Spec reviews first. Fix qualifying local blockers and obtain the required
+  delta-focused local acceptance before requesting GitHub Codex on the resulting locally approved
+  exact head. Route every valid adjacent or non-blocking finding to a focused existing or new issue,
+  and explain invalid or out-of-scope findings with evidence. Do not chase a zero-comment review.
 - **Test external behavior at the highest seam**, not implementation details. Key seams: the
   `PricingProvider` router (stub providers, assert tier selection), the **pure confidence function**
   (unit-test directly with crafted signals), vision/listing **contract** tests (output validates
@@ -123,6 +160,12 @@ by documentation work.
 
 ## Conventions
 - Confirm current OpenAI model IDs against live docs before hardcoding — they move fast.
+- **Apple capability first in the native app.** Before adding a third-party or custom device-level
+  capture or perception implementation, evaluate the supported Apple framework and use it when it
+  supplies the needed primitive. Availability-gate hardware-specific capabilities and define an
+  honest fallback. Device evidence is not external catalog, marketplace, pricing, or verified-
+  condition truth; those remain behind provider-neutral server contracts. The issue and PR must name
+  the Apple primitive checked, availability gate, fallback, and server-truth boundary.
 - Secrets via env; never commit keys. Transactional eBay calls use per-user **encrypted** OAuth
   tokens; the app-level Sandbox fallback is restricted to one configured operator tenant/seller.
 - For non-trivial UI work, follow the current provider-neutral Claude Design handoff and the user's
@@ -142,7 +185,8 @@ flow through but honestly show low confidence. Don't chase universal coverage.
 
 ### Issue tracker
 
-Issues and PRDs live as GitHub issues in `azizu06/snaplist` (use the `gh` CLI). See `docs/agents/issue-tracker.md`.
+Issues and PRDs live as GitHub issues in `azizu06/snaplist` (prefer `gh-axi`; use
+`gh` only for a documented wrapper gap). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -165,3 +209,6 @@ Rules:
 - When a blocker closes, its dependents' in-degree drops — move them **Blocked → Ready** and pick up the
   next parallel wave. Unblocked, independent slices can be worked **in parallel**.
 - Move a slice's lane to reflect reality: Ready → In progress → In review → Done.
+- Before moving a slice to In review, record the frozen issue contract and `Review round: 0/3`.
+  Compare the exact diff to the issue and remove or split anything unasked. Review never expands the
+  issue contract.
