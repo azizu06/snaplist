@@ -318,7 +318,12 @@ function isFewShotExamples(value: unknown): value is FewShotExamples {
   return (
     Array.isArray(candidate.matches) &&
     Array.isArray(candidate.examples) &&
-    candidate.examples.every((example) => typeof example === "string")
+    candidate.matches.length === candidate.examples.length &&
+    candidate.examples.every(
+      (example, index) =>
+        typeof example === "string" &&
+        candidate.matches?.[index]?.content === example,
+    )
   );
 }
 

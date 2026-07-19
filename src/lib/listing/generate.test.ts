@@ -411,6 +411,22 @@ describe("listing/generate — grounded by injected few-shot retrieval", () => {
     expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
   });
 
+  it("fails open when enabled retrieval returns examples without matching corpus rows", async () => {
+    const retrieve = vi.fn(async () => ({ matches: [], examples: ["stale copy"] }));
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const result = await generateEbayListing({
+      attributes: CORE,
+      retrieve,
+      generate,
+      listingExampleRetrieval: { enabled: true },
+    });
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(calls[0].fewShot).toEqual({ matches: [], examples: [] });
+    expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
+  });
+
   it("fails open to no examples when enabled retrieval times out", async () => {
     const retrieve = vi.fn(() => new Promise<FewShotExamples>(() => {}));
     const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
