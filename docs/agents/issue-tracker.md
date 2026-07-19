@@ -39,6 +39,12 @@ production surfaces or roughly 15 production files / 800 non-generated productio
 mandatory hub re-scope checkpoint. The hub may keep one inseparable atomic path together only with a
 written reason.
 
+Each substantive implementation issue also has one user-visible Codex task tied to that isolated
+worktree. Resume an existing issue task and worktree rather than creating a duplicate owner. The
+orchestration hub stays available for product, design, dependency, and status coordination; it does
+not use a hidden sub-agent as the primary implementation owner. The implementation task may spawn
+fresh-context, read-only Standards and Spec reviewers that did not author the candidate.
+
 ## Tracer bullets and skill gates
 
 A tracer bullet owns one finite observable outcome. It may cross only the layers needed to prove that
