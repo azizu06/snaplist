@@ -303,6 +303,70 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertNil(identity.identity.clerkUserID)
     }
 
+    func testDeniedDebugActionCannotReplayAfterConcurrentConsentGrant() {
+        let consent = DelayedAnalyticsConsentStore(consent: .denied)
+        let sink = RecordingAnalyticsDebugSink()
+        let client = DebugAnalyticsClient(
+            metadata: metadata,
+            consentStore: consent,
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            identityStore: InMemoryAnalyticsIdentityStore(),
+            sink: sink
+        )
+        client.capture(
+            .correctionCompleted(
+                eventID: UUID(uuidString: "27000000-0000-4000-8000-000000000021")!
+            )
+        )
+        XCTAssertEqual(consent.readDidStart.wait(timeout: .now() + 1), .success)
+
+        let grantReturned = expectation(description: "consent grant returned")
+        DispatchQueue.global().async {
+            client.setConsent(.granted)
+            grantReturned.fulfill()
+        }
+        _ = consent.grantDidPersist.wait(timeout: .now() + 0.1)
+        consent.allowReadToReturn.signal()
+        wait(for: [grantReturned], timeout: 1)
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+
+        XCTAssertEqual(consent.consent, .granted)
+        XCTAssertTrue(sink.records.isEmpty)
+    }
+
+    func testConsentDenialWaitsForAlreadyStartedDebugWorkToFinish() {
+        let consent = InMemoryAnalyticsConsentStore(consent: .granted)
+        let sink = BlockingAnalyticsDebugSink()
+        let client = DebugAnalyticsClient(
+            metadata: metadata,
+            consentStore: consent,
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            identityStore: InMemoryAnalyticsIdentityStore(),
+            sink: sink
+        )
+        client.capture(
+            .correctionCompleted(
+                eventID: UUID(uuidString: "27000000-0000-4000-8000-000000000022")!
+            )
+        )
+        XCTAssertEqual(sink.recordDidStart.wait(timeout: .now() + 1), .success)
+
+        let denialReturned = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            client.setConsent(.denied)
+            denialReturned.signal()
+        }
+        let returnedBeforeRelease = denialReturned.wait(timeout: .now() + 0.1) == .success
+        sink.allowRecordToReturn.signal()
+        if !returnedBeforeRelease {
+            XCTAssertEqual(denialReturned.wait(timeout: .now() + 1), .success)
+        }
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+
+        XCTAssertFalse(returnedBeforeRelease)
+        XCTAssertEqual(consent.consent, .denied)
+    }
+
     func testDebugRuntimeRecordsSanitizedEventsOnceWithoutIdentityValues() throws {
         let suiteName = "AnalyticsContractTests-debug-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -401,5 +465,47 @@ private final class FailingAnalyticsDebugSink: AnalyticsDebugSinking {
     func record(_ record: AnalyticsDebugRecord) throws {
         attempts += 1
         throw Failure.expected
+    }
+}
+
+private final class BlockingAnalyticsDebugSink: AnalyticsDebugSinking {
+    let recordDidStart = DispatchSemaphore(value: 0)
+    let allowRecordToReturn = DispatchSemaphore(value: 0)
+
+    func record(_ record: AnalyticsDebugRecord) throws {
+        recordDidStart.signal()
+        _ = allowRecordToReturn.wait(timeout: .now() + 2)
+    }
+}
+
+private final class DelayedAnalyticsConsentStore: AnalyticsConsentStoring, @unchecked Sendable {
+    let readDidStart = DispatchSemaphore(value: 0)
+    let allowReadToReturn = DispatchSemaphore(value: 0)
+    let grantDidPersist = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var value: AnalyticsConsent
+    private var shouldDelayRead = true
+
+    init(consent: AnalyticsConsent) {
+        value = consent
+    }
+
+    var consent: AnalyticsConsent {
+        let shouldDelay = lock.withLock {
+            defer { shouldDelayRead = false }
+            return shouldDelayRead
+        }
+        if shouldDelay {
+            readDidStart.signal()
+            _ = allowReadToReturn.wait(timeout: .now() + 2)
+        }
+        return lock.withLock { value }
+    }
+
+    func setConsent(_ consent: AnalyticsConsent) {
+        lock.withLock { value = consent }
+        if consent == .granted {
+            grantDidPersist.signal()
+        }
     }
 }

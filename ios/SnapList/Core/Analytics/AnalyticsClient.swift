@@ -88,6 +88,7 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     private let identityStore: any AnalyticsIdentityStoring
     private let sink: any AnalyticsDebugSinking
     private let sanitizer = AnalyticsSanitizer()
+    private let executorKey = DispatchSpecificKey<Void>()
     private let executor = DispatchQueue(
         label: "com.snaplist.analytics.debug",
         qos: .utility
@@ -105,6 +106,7 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
         self.dedupeStore = dedupeStore
         self.identityStore = identityStore
         self.sink = sink
+        executor.setSpecific(key: executorKey, value: ())
     }
 
     convenience init(
@@ -172,7 +174,13 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     }
 
     func setConsent(_ consent: AnalyticsConsent) {
-        consentStore.setConsent(consent)
+        if DispatchQueue.getSpecific(key: executorKey) != nil {
+            consentStore.setConsent(consent)
+        } else {
+            executor.sync { [self] in
+                consentStore.setConsent(consent)
+            }
+        }
     }
 
     func flush() {
