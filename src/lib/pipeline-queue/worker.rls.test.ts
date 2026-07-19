@@ -20,6 +20,7 @@ import {
   acquireExclusiveTestResource,
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
+import { createSupabasePricingEvidenceReader } from "@/lib/pricing-evidence";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -36,8 +37,55 @@ const RESULT: PipelineResult = {
     suggested: 149,
     range: { min: 130, max: 170 },
     confidence: 0.8,
-    sources: [],
-    tier: "llm-only",
+    sources: [
+      {
+        url: "https://www.ebay.com/itm/worker-sold-1",
+        title: "Sony WH-1000XM4 sold",
+        kind: "sold-comp",
+      },
+      {
+        url: "https://www.ebay.com/itm/worker-sold-2",
+        title: "Sony WH-1000XM4 sold without date",
+        kind: "sold-comp",
+      },
+      {
+        url: "https://www.ebay.com/itm/worker-asking-1",
+        title: "Sony WH-1000XM4 best offer accepted",
+        kind: "asking-comp",
+      },
+    ],
+    evidence: [
+      {
+        id: "worker-sold-1",
+        sourceUrl: "https://www.ebay.com/itm/worker-sold-1",
+        title: "Sony WH-1000XM4 sold",
+        price: 145,
+        currency: "USD",
+        condition: "Used",
+        soldAt: Date.parse("2026-07-10T12:00:00.000Z"),
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      },
+      {
+        id: "worker-sold-2",
+        sourceUrl: "https://www.ebay.com/itm/worker-sold-2",
+        title: "Sony WH-1000XM4 sold without date",
+        price: 153,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      },
+      {
+        id: "worker-asking-1",
+        sourceUrl: "https://www.ebay.com/itm/worker-asking-1",
+        title: "Sony WH-1000XM4 best offer accepted",
+        price: 199,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "asking-price-not-accepted-amount",
+      },
+    ],
+    tier: "ebay-sold",
   },
   confidence: { score: 0.86, band: "high", autopilotEligible: true },
   listing: {
@@ -69,6 +117,7 @@ let userA: ClerkTestUser;
 let userB: ClerkTestUser;
 let itemA = "";
 let itemB = "";
+let itemAOther = "";
 let runA = "";
 let runB = "";
 let runRetry = "";
@@ -95,10 +144,19 @@ beforeAll(async () => {
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "pipeline_worker_b"),
   ]);
 
-  const [{ data: a, error: aError }, { data: b, error: bError }] = await Promise.all([
+  const [
+    { data: a, error: aError },
+    { data: aOther, error: aOtherError },
+    { data: b, error: bError },
+  ] = await Promise.all([
     userA.client
       .from("items")
       .insert({ user_id: userA.id, photos: [`${userA.id}/a.jpg`] })
+      .select("id")
+      .single(),
+    userA.client
+      .from("items")
+      .insert({ user_id: userA.id, photos: [`${userA.id}/other.jpg`] })
       .select("id")
       .single(),
     userB.client
@@ -108,8 +166,10 @@ beforeAll(async () => {
       .single(),
   ]);
   expect(aError).toBeNull();
+  expect(aOtherError).toBeNull();
   expect(bError).toBeNull();
   itemA = a!.id;
+  itemAOther = aOther!.id;
   itemB = b!.id;
 
   const [
@@ -292,7 +352,14 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       autopilotEnabled: true,
     });
 
-    const [{ data: run }, { data: listings }, { data: logs }, { data: bVisible }] =
+    const [
+      { data: run },
+      { data: listings },
+      { data: logs },
+      { data: snapshots },
+      { data: bVisible },
+      { data: bSnapshotVisible },
+    ] =
       await Promise.all([
         userA.client
           .from("pipeline_runs")
@@ -301,14 +368,63 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
           .single(),
         userA.client.from("listings").select("id, item_id, run_id, status").eq("run_id", runA),
         userA.client.from("prediction_logs").select("id, item_id, run_id").eq("run_id", runA),
+        userA.client
+          .from("pricing_evidence_snapshots")
+          .select("run_id,user_id,item_id,listing_id,prediction_id,schema_version,evidence,evidence_as_of")
+          .eq("run_id", runA),
         userB.client.from("pipeline_runs").select("id").eq("id", runA),
+        userB.client.from("pricing_evidence_snapshots").select("run_id").eq("run_id", runA),
       ]);
     expect(run).toMatchObject({ status: "succeeded", stage: "completed", attempt_count: 2 });
     expect(listings).toHaveLength(1);
     expect(listings?.[0]).toMatchObject({ item_id: itemA, run_id: runA, status: "queued" });
     expect(logs).toHaveLength(1);
     expect(logs?.[0]).toMatchObject({ item_id: itemA, run_id: runA });
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots?.[0]).toMatchObject({
+      run_id: runA,
+      user_id: userA.id,
+      item_id: itemA,
+      listing_id: listings?.[0]?.id,
+      prediction_id: logs?.[0]?.id,
+      schema_version: 1,
+    });
+    expect(snapshots?.[0]?.evidence).toEqual([
+      expect.objectContaining({
+        id: "worker-sold-1",
+        priceDisclosure: "displayed-sold-price",
+        evidenceAsOf: snapshots?.[0]?.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-2",
+        priceDisclosure: "displayed-sold-price",
+        evidenceAsOf: snapshots?.[0]?.evidence_as_of,
+      }),
+    ]);
     expect(bVisible).toEqual([]);
+    expect(bSnapshotVisible).toEqual([]);
+
+    const reader = createSupabasePricingEvidenceReader(async () => userA.client);
+    await expect(
+      reader.forItem({ userId: userA.id, bearerToken: "test", itemId: itemA }),
+    ).resolves.toMatchObject({
+      item: { id: itemA },
+      evidenceLevel: "limited",
+      defaultWindow: "90D",
+      comparables: [
+        expect.objectContaining({ id: "worker-sold-1" }),
+        expect.objectContaining({ id: "worker-sold-2" }),
+      ],
+    });
+    await expect(
+      reader.forItem({ userId: userA.id, bearerToken: "test", itemId: itemAOther }),
+    ).resolves.toBeNull();
+
+    const { error: immutableError } = await userA.client
+      .from("pricing_evidence_snapshots")
+      .update({ schema_version: 1 })
+      .eq("run_id", runA);
+    expect(immutableError).not.toBeNull();
 
     await expect(
       store.complete({

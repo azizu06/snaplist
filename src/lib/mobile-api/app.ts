@@ -1,6 +1,7 @@
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
+import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
 import {
   MobileRunConflictError,
   MobileRunNotFoundError,
@@ -19,6 +20,7 @@ import {
   healthEnvelopeSchema,
   homeProjectionEnvelopeSchema,
   mobileRunEnvelopeSchema,
+  pricingEvidenceEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
@@ -53,6 +55,8 @@ export interface MobileApiDependencies {
   homeProjection?: HomeProjectionReader;
   /** Authenticated, tenant/RLS-scoped view of canonical #161 durable-run truth. */
   runOperations?: MobileRunOperations;
+  /** Immutable, run-coherent RLS pricing evidence for native item detail. */
+  pricingEvidence?: PricingEvidenceReader;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -317,6 +321,67 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           unavailableMessage,
+        );
+      }
+    }
+
+    const pricingPath = pathname.match(
+      new RegExp(`^/${MOBILE_API_VERSION}/items/([^/]+)/pricing$`),
+    );
+    if (pricingPath) {
+      if (request.method !== "GET") {
+        return errorResponse(requestId, 405, "method_not_allowed", "This method is not allowed.");
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      const itemId = z.string().uuid().safeParse(pricingPath[1]);
+      if (!itemId.success) {
+        return errorResponse(requestId, 400, "invalid_request", "A valid item id is required.");
+      }
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(requestId, 401, "unauthorized", "Authentication is required.");
+      }
+      if (!dependencies.pricingEvidence) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Pricing evidence is temporarily unavailable.",
+        );
+      }
+      try {
+        const pricing = await dependencies.pricingEvidence.forItem({
+          userId: principal.userId,
+          bearerToken: token,
+          itemId: itemId.data,
+        });
+        if (!pricing) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "Pricing evidence was not found for this item.",
+          );
+        }
+        return json(
+          pricingEvidenceEnvelopeSchema.parse({
+            data: pricing,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.pricing-evidence", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Pricing evidence is temporarily unavailable.",
         );
       }
     }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { homeProjectionSchema } from "@/lib/home/projection";
 import { pipelineConsumerSummarySchema } from "./worker-summary";
 import { guestClaimTerminalOutcomeSchema } from "@/lib/guest-recovery/service";
+import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 
 export const MOBILE_API_VERSION = "v1" as const;
 
@@ -122,6 +123,10 @@ export type MobileRun = z.infer<typeof mobileRunSchema>;
 
 export const mobileRunEnvelopeSchema = z
   .object({ data: mobileRunSchema, meta: apiMetaSchema })
+  .strict();
+
+export const pricingEvidenceEnvelopeSchema = z
+  .object({ data: pricingEvidenceProjectionSchema, meta: apiMetaSchema })
   .strict();
 
 export const revenueCatConfigurationEnvelopeSchema = z

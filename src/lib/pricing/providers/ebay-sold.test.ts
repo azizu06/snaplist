@@ -797,6 +797,17 @@ describe("synthesizeSoldResult — robust core rescues a tight cluster from one 
     // Only the core comps are cited as backing the price (the spike is not evidence).
     expect(withSpike.sources).toHaveLength(5);
     expect(withSpike.sources.every((s) => s.kind === "sold-comp")).toBe(true);
+    expect(withSpike.evidence).toEqual(
+      [120, 125, 130, 135, 140].map((price, index) => ({
+        id: `https://www.ebay.com/itm/${index}`,
+        sourceUrl: `https://www.ebay.com/itm/${index}`,
+        title: `c${index}`,
+        price,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      })),
+    );
   });
 
   it("trims a low 'for parts' spike the same way", () => {
