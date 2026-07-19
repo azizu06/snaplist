@@ -60,6 +60,7 @@ export function createSupabaseGuestClaimStorage(
         destinationPath: object.destinationPath,
         sha256: digest,
         byteLength: bytes.byteLength,
+        encryption: object.encryption,
       };
     },
   };

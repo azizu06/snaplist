@@ -1,51 +1,12 @@
-import { Buffer } from "node:buffer";
 import { z } from "zod";
-import { guestClaimTerminalOutcomeSchema } from "./service";
-
-interface Base64Bounds {
-  exactBytes?: number;
-  minBytes?: number;
-  maxBytes?: number;
-}
-
-function canonicalBase64Schema(bounds: Base64Bounds = {}) {
-  return z.string().superRefine((value, context) => {
-    const canonical = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-    const decoded = Buffer.from(value, "base64");
-    if (!canonical.test(value) || decoded.toString("base64") !== value) {
-      context.addIssue({ code: "custom", message: "Expected canonical Base64." });
-      return;
-    }
-    if (bounds.exactBytes !== undefined && decoded.byteLength !== bounds.exactBytes) {
-      context.addIssue({ code: "custom", message: "Unexpected decoded byte length." });
-    }
-    if (bounds.minBytes !== undefined && decoded.byteLength < bounds.minBytes) {
-      context.addIssue({ code: "custom", message: "Decoded value is too short." });
-    }
-    if (bounds.maxBytes !== undefined && decoded.byteLength > bounds.maxBytes) {
-      context.addIssue({ code: "custom", message: "Decoded value is too long." });
-    }
-  });
-}
+import {
+  encryptedGuestRecoveryArtifactSchema,
+  guestRecoveryObjectEncryptionSchema,
+  guestRecoveryTerminalOutcomeSchema,
+} from "./service";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
-const encryptionKeyIdSchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[A-Za-z0-9_-]+$/);
-
-export const encryptedGuestRecoveryArtifactSchema = z
-  .object({
-    version: z.literal(1),
-    algorithm: z.literal("aes-256-gcm"),
-    keyId: encryptionKeyIdSchema,
-    keyEnvelope: canonicalBase64Schema({ minBytes: 1, maxBytes: 64 * 1_024 }),
-    nonce: canonicalBase64Schema({ exactBytes: 12 }),
-    tag: canonicalBase64Schema({ exactBytes: 16 }),
-    ciphertext: canonicalBase64Schema({ minBytes: 1, maxBytes: 2 * 1_024 * 1_024 }),
-  })
-  .strict();
+export { encryptedGuestRecoveryArtifactSchema } from "./service";
 
 export type EncryptedGuestRecoveryArtifact = z.infer<
   typeof encryptedGuestRecoveryArtifactSchema
@@ -62,14 +23,7 @@ export const guestRecoveryStorageManifestSchema = z
           .refine((value) => !value.includes("://") && !/[?#]/.test(value)),
         sha256: sha256Schema,
         byteLength: z.number().int().positive().max(50 * 1_024 * 1_024),
-        encryption: z
-          .object({
-            algorithm: z.literal("aes-256-gcm"),
-            keyId: encryptionKeyIdSchema,
-            nonce: canonicalBase64Schema({ exactBytes: 12 }),
-            tag: canonicalBase64Schema({ exactBytes: 16 }),
-          })
-          .strict(),
+        encryption: guestRecoveryObjectEncryptionSchema,
       })
       .strict(),
   )
@@ -80,6 +34,15 @@ export const guestRecoveryStorageManifestSchema = z
       context.addIssue({
         code: "custom",
         message: "Guest recovery Storage paths must be unique.",
+      });
+    }
+    if (
+      new Set(objects.map((object) => object.encryption.nonce)).size
+        !== objects.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Guest recovery AES-GCM nonces must be unique.",
       });
     }
   });
@@ -104,7 +67,7 @@ export const guestRecoverableOutcomeSchema = z
 
 export const guestRecoveryResolutionSchema = z.discriminatedUnion("outcome", [
   guestRecoverableOutcomeSchema,
-  ...guestClaimTerminalOutcomeSchema.options,
+  ...guestRecoveryTerminalOutcomeSchema.options,
 ]);
 
 export type GuestRecoveryResolution = z.infer<
@@ -170,6 +133,13 @@ const recoveryRegistrationSchema = identitySchema
           code: "custom",
           message: "Storage ciphertext must use the recovery key envelope.",
           path: ["storageManifest", index, "encryption", "keyId"],
+        });
+      }
+      if (object.encryption.nonce === input.encryptedArtifact.nonce) {
+        context.addIssue({
+          code: "custom",
+          message: "Storage ciphertext cannot reuse the artifact AES-GCM nonce.",
+          path: ["storageManifest", index, "encryption", "nonce"],
         });
       }
     });

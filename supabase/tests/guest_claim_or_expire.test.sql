@@ -1,6 +1,6 @@
 begin;
 
-select plan(57);
+select plan(63);
 
 select ok(
   to_regclass('private.guest_draft_recoveries') is not null,
@@ -384,6 +384,64 @@ select throws_ok(
       repeat('a', 64),
       '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
       jsonb_build_array(jsonb_build_object(
+        'sourcePath', 'guest_pgtap_claim/items/front.enc',
+        'sha256', repeat('b', 64),
+        'byteLength', 128,
+        'encryption', jsonb_build_object(
+          'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+          'nonce', 'AgICAgICAgICAgIC',
+          'tag', 'BQUFBQUFBQUFBQUFBQUFBQ=='
+        )
+      ))
+    )
+  $$,
+  '22023',
+  'Guest recovery AES-GCM nonces must be unique',
+  'a Storage object cannot reuse the encrypted artifact nonce'
+);
+select throws_ok(
+  $$
+    select public.register_guest_draft_recovery(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      '20000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
+      jsonb_build_array(
+        jsonb_build_object(
+          'sourcePath', 'guest_pgtap_claim/items/front.enc',
+          'sha256', repeat('b', 64), 'byteLength', 128,
+          'encryption', jsonb_build_object(
+            'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+            'nonce', 'BAQEBAQEBAQEBAQE',
+            'tag', 'BQUFBQUFBQUFBQUFBQUFBQ=='
+          )
+        ),
+        jsonb_build_object(
+          'sourcePath', 'guest_pgtap_claim/items/back.enc',
+          'sha256', repeat('c', 64), 'byteLength', 64,
+          'encryption', jsonb_build_object(
+            'algorithm', 'aes-256-gcm', 'keyId', 'fixture',
+            'nonce', 'BAQEBAQEBAQEBAQE',
+            'tag', 'BgYGBgYGBgYGBgYGBgYGBg=='
+          )
+        )
+      )
+    )
+  $$,
+  '22023',
+  'Guest recovery AES-GCM nonces must be unique',
+  'Storage objects cannot reuse an AES-GCM nonce under one recovery key'
+);
+select throws_ok(
+  $$
+    select public.register_guest_draft_recovery(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      '20000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
+      jsonb_build_array(jsonb_build_object(
         'sourcePath', 'guestXpgtap_claim/items/front.enc',
         'sha256', repeat('b', 64),
         'byteLength', 128,
@@ -475,6 +533,7 @@ insert into guest_claim_results values (
     'guest_pgtap_claim',
     repeat('a', 64),
     'user_pgtap_claim',
+    '11111111-1111-4111-8111-111111111175',
     300
   )
 );
@@ -510,6 +569,7 @@ insert into guest_claim_results values (
     'guest_pgtap_claim',
     repeat('a', 64),
     'user_pgtap_claim',
+    '11111111-1111-4111-8111-111111111175',
     300
   )
 );
@@ -615,7 +675,11 @@ insert into guest_claim_results values (
         from guest_claim_results where label = 'begun-retry'
       ),
       'sha256', repeat('b', 64),
-      'byteLength', 128
+      'byteLength', 128,
+      'encryption', (
+        select payload #> '{objects,0,encryption}'
+        from guest_claim_results where label = 'begun-retry'
+      )
     ))
   )
 );
@@ -625,6 +689,46 @@ select is(
   (select payload->>'outcome' from guest_claim_results where label = 'completed'),
   'claimed',
   'verified Storage completes one authoritative claim'
+);
+select is(
+  (
+    select (payload #>> '{accountRecovery,encryptedArtifact,keyId}') || ':'
+      || (payload #>> '{accountRecovery,storageManifest,0,encryption,keyId}')
+    from guest_claim_results where label = 'completed'
+  ),
+  'fixture:fixture',
+  'claimed retries retain one account-owned key envelope and object decrypt contract'
+);
+insert into guest_claim_results values (
+  'completed-replay',
+  public.begin_guest_draft_claim(
+    '70000000-0000-4000-8000-000000000001',
+    'guest_pgtap_claim',
+    repeat('a', 64),
+    'user_pgtap_claim',
+    '11111111-1111-4111-8111-111111111175',
+    300
+  )
+);
+select is(
+  (select payload from guest_claim_results where label = 'completed-replay'),
+  (select payload from guest_claim_results where label = 'completed'),
+  'the same principal, key, and recovery replay the exact terminal outcome'
+);
+select throws_ok(
+  $$
+    select public.begin_guest_draft_claim(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      repeat('a', 64),
+      'user_pgtap_claim',
+      '22222222-2222-4222-8222-222222222275',
+      300
+    )
+  $$,
+  '23505',
+  'Guest claim Idempotency-Key is already bound',
+  'one recovery cannot be rebound to a different logical mutation key'
 );
 select ok(
   public.queue_guest_claim_copy_cleanup(
@@ -753,6 +857,7 @@ select throws_ok(
       'guest_pgtap_claim',
       repeat('a', 64),
       'user_pgtap_other',
+      '11111111-1111-4111-8111-111111111175',
       300
     )
   $$,
@@ -822,6 +927,21 @@ select is(
   (select payload->>'outcome' from guest_claim_results where label = 'expired-registration'),
   'recoverable',
   'the guest draft registers before its server-owned boundary'
+);
+select throws_ok(
+  $$
+    select public.begin_guest_draft_claim(
+      '70000000-0000-4000-8000-000000000002',
+      'guest_pgtap_expire',
+      repeat('c', 64),
+      'user_pgtap_claim',
+      '11111111-1111-4111-8111-111111111175',
+      300
+    )
+  $$,
+  '23505',
+  'Guest claim Idempotency-Key is already bound',
+  'one principal cannot reuse a logical mutation key for another recovery'
 );
 
 reset role;

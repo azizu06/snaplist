@@ -48,6 +48,7 @@ interface Fixture {
   guest: ClerkTestUser;
   target: ClerkTestUser;
   recoveryId: string;
+  claimIdempotencyKey: string;
   recoveryTokenHash: string;
   itemId: string;
   runId: string;
@@ -107,6 +108,7 @@ async function createFixture(
   users.push(guest, target);
 
   const recoveryId = crypto.randomUUID();
+  const claimIdempotencyKey = crypto.randomUUID();
   const recoveryTokenHash = createHash("sha256")
     .update(`recovery-token-${label}-${recoveryId}`)
     .digest("hex");
@@ -130,17 +132,17 @@ async function createFixture(
       sourcePath,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: bytes.byteLength,
-    };
-  });
-  const storageManifest: GuestRecoveryStorageManifest = objects.map(
-    (object, index) => ({
-      ...object,
       encryption: {
         algorithm: "aes-256-gcm",
         keyId: encryptedArtifact.keyId,
         nonce: Buffer.alloc(12, index + 4).toString("base64"),
         tag: Buffer.alloc(16, index + 12).toString("base64"),
       },
+    };
+  });
+  const storageManifest: GuestRecoveryStorageManifest = objects.map(
+    (object) => ({
+      ...object,
     }),
   );
 
@@ -258,6 +260,7 @@ async function createFixture(
     guest,
     target,
     recoveryId,
+    claimIdempotencyKey,
     recoveryTokenHash,
     itemId,
     runId,
@@ -393,11 +396,14 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
           guestUserId: fixture.guest.id,
           recoveryTokenHash: fixture.recoveryTokenHash,
         },
+        idempotencyKey: fixture.claimIdempotencyKey,
         targetUserId: fixture.target.id,
       },
       { store: claimStore(), storage: claimStorage() },
     );
     expect(outcome).toMatchObject({ outcome: "claimed", purgeLocalRecovery: true });
+    if (outcome.outcome !== "claimed") throw new Error("expected claimed recovery");
+    expect(outcome.accountRecovery).toMatchObject({ encryptedArtifact });
 
     const after = await database.query(
       `select id, pipeline_run_id, item_id, logical_run_key, state,
@@ -461,18 +467,21 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
             guestUserId: fixture.guest.id,
             recoveryTokenHash: fixture.recoveryTokenHash,
           },
+          idempotencyKey: fixture.claimIdempotencyKey,
           targetUserId: fixture.target.id,
         },
         { store: claimStore(), storage: claimStorage() },
       ),
     ).resolves.toEqual(outcome);
+    const { accountRecovery: _accountRecovery, ...guestOutcome } = outcome;
+    void _accountRecovery;
     await expect(
       recoveryStore().recover({
         recoveryId: fixture.recoveryId,
         guestUserId: fixture.guest.id,
         recoveryTokenHash: fixture.recoveryTokenHash,
       }),
-    ).resolves.toEqual(outcome);
+    ).resolves.toEqual(guestOutcome);
 
     const otherTarget = `${fixture.target.id}_other`;
     await expect(claimStore().beginClaim({
@@ -480,6 +489,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: otherTarget,
       guestUserId: fixture.guest.id,
+      idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
     })).rejects.toThrow(/not found/i);
     await expect(claimStore().releaseClaim({
@@ -497,6 +507,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         destinationPath: `${otherTarget}/guest-claims/${fixture.recoveryId}/${crypto.randomUUID()}/1`,
         sha256: "f".repeat(64),
         byteLength: 1,
+        encryption: fixture.storageManifest[0].encryption,
       }],
     })).rejects.toThrow(/not found/i);
 
@@ -563,6 +574,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
           guestUserId: fixture.guest.id,
           recoveryTokenHash: fixture.recoveryTokenHash,
         },
+        idempotencyKey: fixture.claimIdempotencyKey,
         targetUserId: fixture.target.id,
       },
       { store: claimStore(), storage: claimStorage() },
@@ -606,6 +618,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
             guestUserId: fixture.guest.id,
             recoveryTokenHash: fixture.recoveryTokenHash,
           },
+          idempotencyKey: fixture.claimIdempotencyKey,
           targetUserId: fixture.target.id,
         },
         { store: claimStore(), storage: claimStorage() },
@@ -644,6 +657,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: fixture.target.id,
       guestUserId: fixture.guest.id,
+      idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
     };
     const [left, right] = await Promise.all([
@@ -669,6 +683,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
           guestUserId: fixture.guest.id,
           recoveryTokenHash: fixture.recoveryTokenHash,
         },
+        idempotencyKey: fixture.claimIdempotencyKey,
         targetUserId: fixture.target.id,
       },
       { store: claimStore(), storage: claimStorage() },
@@ -773,6 +788,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: fixture.target.id,
       guestUserId: fixture.guest.id,
+      idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
     });
     if (plan.outcome !== "copy_required") throw new Error("expected copy plan");
@@ -813,6 +829,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: fixture.target.id,
       guestUserId: fixture.guest.id,
+      idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
     });
     if (plan.outcome !== "copy_required") throw new Error("expected plan");
@@ -871,6 +888,7 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       recoveryTokenHash: fixture.recoveryTokenHash,
       targetUserId: fixture.target.id,
       guestUserId: fixture.guest.id,
+      idempotencyKey: fixture.claimIdempotencyKey,
       leaseSeconds: 300,
     });
     if (plan.outcome !== "copy_required") throw new Error("expected plan");

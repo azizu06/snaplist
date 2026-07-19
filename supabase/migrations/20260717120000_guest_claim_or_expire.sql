@@ -67,6 +67,8 @@ create table private.guest_draft_recoveries (
   usable_draft_at timestamptz not null,
   expires_at timestamptz not null,
   state text not null default 'claimable',
+  claim_idempotency_user_id text,
+  claim_idempotency_key uuid,
   claim_target_user_id text,
   claim_lease_token uuid,
   claim_lease_expires_at timestamptz,
@@ -91,6 +93,19 @@ create table private.guest_draft_recoveries (
   constraint guest_draft_recoveries_token_check check (
     recovery_token_hash ~ '^[0-9a-f]{64}$'
   ),
+  constraint guest_draft_recoveries_idempotency_check check (
+    (
+      claim_idempotency_user_id is null
+      and claim_idempotency_key is null
+    )
+    or (
+      claim_idempotency_user_id is not null
+      and claim_idempotency_key is not null
+      and char_length(claim_idempotency_user_id) between 1 and 255
+      and claim_idempotency_user_id ~ '^[A-Za-z0-9_-]+$'
+      and claim_idempotency_user_id <> guest_user_id
+    )
+  ),
   constraint guest_draft_recoveries_deadline_check check (
     expires_at = usable_draft_at + interval '24 hours'
   ),
@@ -107,7 +122,12 @@ create table private.guest_draft_recoveries (
       and storage_manifest is not null
     )
     or (
-      state in ('claimed', 'expired')
+      state = 'claimed'
+      and encrypted_artifact is not null
+      and storage_manifest is null
+    )
+    or (
+      state = 'expired'
       and encrypted_artifact is null
       and storage_manifest is null
     )
@@ -162,9 +182,15 @@ create index guest_draft_recoveries_expiry_idx
 create index guest_draft_recoveries_copy_lease_idx
   on private.guest_draft_recoveries (claim_lease_expires_at, id)
   where state = 'copying';
+create unique index guest_draft_recoveries_idempotency_idx
+  on private.guest_draft_recoveries (
+    claim_idempotency_user_id,
+    claim_idempotency_key
+  )
+  where claim_idempotency_key is not null;
 
 comment on table private.guest_draft_recoveries is
-  'Opaque encrypted guest recovery plus one server-time claim-or-expire predicate. Terminal rows retain identifiers and outcome, never the encrypted guest artifact.';
+  'Opaque encrypted recovery plus one server-time claim-or-expire predicate. Claimed rows retain the account recovery envelope; expired rows retain identifiers only.';
 comment on column private.guest_draft_recoveries.usable_draft_at is
   'Exact durable pipeline completed_at timestamp; capture and device clocks never participate.';
 comment on column private.guest_draft_recoveries.recovery_token_hash is
@@ -173,6 +199,8 @@ comment on column private.guest_draft_recoveries.storage_object_count is
   'Non-secret bounded count retained after manifest purge so only an exact stale lease namespace can be requeued.';
 comment on column private.guest_draft_recoveries.claimed_lease_token is
   'Winning Storage-copy fence retained so cleanup can never target claimed account objects.';
+comment on column private.guest_draft_recoveries.claim_idempotency_key is
+  'Principal-bound logical mutation key retained so retries replay one recovery outcome.';
 
 revoke all on table private.guest_draft_recoveries
   from public, anon, authenticated, service_role;
@@ -276,7 +304,16 @@ begin
     and p_recovery.claim_target_user_id is distinct from p_target_user_id then
     raise exception using errcode = 'P0002', message = 'Guest recovery not found';
   end if;
-  return private.guest_terminal_outcome(p_recovery);
+  return private.guest_terminal_outcome(p_recovery)
+    || case
+      when p_recovery.state = 'claimed' then jsonb_build_object(
+        'accountRecovery', jsonb_build_object(
+          'encryptedArtifact', p_recovery.encrypted_artifact,
+          'storageManifest', p_recovery.claimed_storage_manifest
+        )
+      )
+      else '{}'::jsonb
+    end;
 end;
 $$;
 
@@ -1149,6 +1186,7 @@ declare
   v_object jsonb;
   v_source_paths text[];
   v_distinct_paths integer;
+  v_distinct_nonces integer;
 begin
   perform private.guest_claim_service_role_required();
 
@@ -1250,6 +1288,19 @@ begin
     raise exception using
       errcode = '22023',
       message = 'Guest recovery Storage paths must be unique';
+  end if;
+  select count(distinct entry.value->'encryption'->>'nonce')
+  into v_distinct_nonces
+  from jsonb_array_elements(p_storage_manifest) entry(value);
+  if v_distinct_nonces <> jsonb_array_length(p_storage_manifest)
+    or exists (
+      select 1
+      from jsonb_array_elements(p_storage_manifest) entry(value)
+      where entry.value->'encryption'->>'nonce' = p_encrypted_artifact->>'nonce'
+    ) then
+    raise exception using
+      errcode = '22023',
+      message = 'Guest recovery AES-GCM nonces must be unique';
   end if;
 
   perform pg_advisory_xact_lock(
@@ -1470,6 +1521,7 @@ create or replace function public.begin_guest_draft_claim(
   p_guest_user_id text,
   p_recovery_token_hash text,
   p_target_user_id text,
+  p_idempotency_key uuid,
   p_claim_lease_seconds integer default 300
 )
 returns jsonb
@@ -1481,15 +1533,24 @@ declare
   v_recovery private.guest_draft_recoveries%rowtype;
   v_objects jsonb;
   v_retry_after integer;
+  v_bound_recovery_id uuid;
 begin
   perform private.guest_claim_service_role_required();
   if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
     or p_target_user_id !~ '^[A-Za-z0-9_-]+$'
     or p_target_user_id = p_guest_user_id
+    or p_idempotency_key is null
     or p_claim_lease_seconds not between 30 and 3600 then
     raise exception using errcode = '22023', message = 'Invalid guest claim request';
   end if;
 
+  perform pg_advisory_xact_lock(
+    hashtextextended(
+      'guest-claim-idempotency:' || p_target_user_id || ':'
+        || p_idempotency_key::text,
+      0
+    )
+  );
   perform pg_advisory_xact_lock(
     hashtextextended('guest-recovery:' || p_recovery_id::text, 0)
   );
@@ -1501,6 +1562,36 @@ begin
   for update;
   if not found then
     raise exception using errcode = 'P0002', message = 'Guest recovery not found';
+  end if;
+
+  if v_recovery.claim_idempotency_user_id is not null then
+    if v_recovery.claim_idempotency_user_id is distinct from p_target_user_id then
+      raise exception using errcode = 'P0002', message = 'Guest recovery not found';
+    end if;
+    if v_recovery.claim_idempotency_key is distinct from p_idempotency_key then
+      raise exception using
+        errcode = '23505',
+        message = 'Guest claim Idempotency-Key is already bound';
+    end if;
+  end if;
+
+  select recovery.id into v_bound_recovery_id
+  from private.guest_draft_recoveries recovery
+  where recovery.claim_idempotency_user_id = p_target_user_id
+    and recovery.claim_idempotency_key = p_idempotency_key;
+  if found and v_bound_recovery_id <> v_recovery.id then
+    raise exception using
+      errcode = '23505',
+      message = 'Guest claim Idempotency-Key is already bound';
+  end if;
+
+  if v_recovery.claim_idempotency_key is null then
+    update private.guest_draft_recoveries recovery
+    set claim_idempotency_user_id = p_target_user_id,
+        claim_idempotency_key = p_idempotency_key,
+        updated_at = statement_timestamp()
+    where recovery.id = v_recovery.id
+    returning * into v_recovery;
   end if;
 
   if v_recovery.state not in ('claimed', 'expired')
@@ -1554,7 +1645,8 @@ begin
         || v_recovery.id::text || '/' || v_recovery.claim_lease_token::text
         || '/' || entry.ordinality::text,
       'sha256', entry.value->>'sha256',
-      'byteLength', (entry.value->>'byteLength')::bigint
+      'byteLength', (entry.value->>'byteLength')::bigint,
+      'encryption', entry.value->'encryption'
     ) order by entry.ordinality
   ) into v_objects
   from jsonb_array_elements(v_recovery.storage_manifest)
@@ -1573,10 +1665,10 @@ end;
 $$;
 
 revoke all on function public.begin_guest_draft_claim(
-  uuid, text, text, text, integer
+  uuid, text, text, text, uuid, integer
 ) from public, anon, authenticated;
 grant execute on function public.begin_guest_draft_claim(
-  uuid, text, text, text, integer
+  uuid, text, text, text, uuid, integer
 ) to service_role;
 
 create or replace function public.queue_guest_claim_copy_cleanup(
@@ -1818,7 +1910,8 @@ begin
         || v_recovery.id::text || '/' || p_claim_lease_token::text
         || '/' || entry.ordinality::text,
       'sha256', entry.value->>'sha256',
-      'byteLength', (entry.value->>'byteLength')::bigint
+      'byteLength', (entry.value->>'byteLength')::bigint,
+      'encryption', entry.value->'encryption'
     ) order by entry.ordinality
   ) into v_expected_objects
   from jsonb_array_elements(v_recovery.storage_manifest)
@@ -2112,7 +2205,6 @@ begin
       claimed_lease_token = p_claim_lease_token,
       claim_lease_token = null,
       claim_lease_expires_at = null,
-      encrypted_artifact = null,
       storage_manifest = null,
       claimed_storage_manifest = p_verified_objects,
       claimed_at = statement_timestamp(),

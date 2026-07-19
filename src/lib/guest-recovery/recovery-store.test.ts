@@ -34,6 +34,35 @@ describe("guest encrypted recovery fixed-RPC store", () => {
     }]).success).toBe(false);
   });
 
+  it("rejects AES-GCM nonce reuse across public recovery descriptors", async () => {
+    expect(guestRecoveryStorageManifestSchema.safeParse([
+      storageManifest[0],
+      {
+        ...storageManifest[0],
+        sourcePath: "guest_fixture/item/back.enc",
+        sha256: "c".repeat(64),
+      },
+    ]).success).toBe(false);
+
+    const rpc = vi.fn();
+    const store = createSupabaseGuestRecoveryStore({ rpc });
+    await expect(store.register({
+      recoveryId: "11111111-1111-4111-8111-111111111111",
+      guestUserId: "guest_fixture",
+      pipelineRunId: "33333333-3333-4333-8333-333333333333",
+      recoveryTokenHash: "b".repeat(64),
+      encryptedArtifact,
+      storageManifest: [{
+        ...storageManifest[0],
+        encryption: {
+          ...storageManifest[0].encryption,
+          nonce: encryptedArtifact.nonce,
+        },
+      }],
+    })).rejects.toThrow();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("rejects Storage ciphertext that is not tied to the recovery key envelope", async () => {
     const rpc = vi.fn();
     const store = createSupabaseGuestRecoveryStore({ rpc });

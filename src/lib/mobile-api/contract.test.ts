@@ -134,6 +134,9 @@ describe("SwiftUI mobile HTTP contract", () => {
       "x-owner-issue": 175,
       "x-implementation-status": "implemented",
       security: [{ ClerkBearer: [] }],
+      responses: {
+        "400": { $ref: "#/components/responses/InvalidRequest" },
+      },
     });
     expect(JSON.stringify(claim)).toContain("X-SnapList-Guest-Handoff");
     expect(JSON.stringify(claim)).toContain(
@@ -144,12 +147,16 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(contract.components.schemas.GuestClaimEnvelope).toMatchObject({
       properties: {
         data: {
-          properties: {
-            outcome: { enum: ["claimed", "expired"] },
-            purgeLocalRecovery: { const: true },
-          },
+          oneOf: [
+            { $ref: "#/components/schemas/GuestClaimClaimedOutcome" },
+            { $ref: "#/components/schemas/GuestClaimExpiredOutcome" },
+          ],
         },
       },
+    });
+    expect(contract.components.schemas.GuestClaimClaimedOutcome).toMatchObject({
+      required: expect.arrayContaining(["accountRecovery"]),
+      properties: { outcome: { const: "claimed" } },
     });
   });
 

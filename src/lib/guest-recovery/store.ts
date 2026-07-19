@@ -4,6 +4,7 @@ import {
   guestClaimTerminalOutcomeSchema,
   guestClaimVerifiedObjectSchema,
   guestRecoveryOutcomeSchema,
+  GuestClaimIdempotencyConflictError,
   type GuestClaimStore,
 } from "./service";
 
@@ -28,6 +29,9 @@ export interface GuestClaimRpcClient {
 
 function rpcData(operation: string, result: GuestClaimRpcResult): unknown {
   if (result.error) {
+    if (result.error.message === "Guest claim Idempotency-Key is already bound") {
+      throw new GuestClaimIdempotencyConflictError();
+    }
     throw new Error(`Guest recovery ${operation} failed: ${result.error.message}`);
   }
   return result.data;
@@ -48,6 +52,7 @@ export function createSupabaseGuestClaimStore(
       const result = await client.rpc("begin_guest_draft_claim", {
         p_claim_lease_seconds: z.number().int().min(30).max(3_600).parse(input.leaseSeconds),
         p_guest_user_id: z.string().min(1).max(255).parse(input.guestUserId),
+        p_idempotency_key: z.string().uuid().parse(input.idempotencyKey),
         p_recovery_id: z.string().uuid().parse(input.recoveryId),
         p_recovery_token_hash: z.string().regex(/^[0-9a-f]{64}$/).parse(input.recoveryTokenHash),
         p_target_user_id: z.string().min(1).max(255).parse(input.targetUserId),

@@ -3,6 +3,7 @@ import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
 import { z } from "zod";
 import {
+  GuestClaimIdempotencyConflictError,
   GuestClaimInProgressError,
   type GuestClaimTerminalOutcome,
   type VerifiedGuestHandoff,
@@ -37,6 +38,7 @@ export interface MobileApiDependencies {
   /** Authoritative #175 claim service. The target always comes from authenticate(). */
   claimGuestRecovery?: (input: {
     handoff: VerifiedGuestHandoff;
+    idempotencyKey: string;
     targetUserId: string;
   }) => Promise<GuestClaimTerminalOutcome>;
   worker: PipelineWorker;
@@ -255,6 +257,7 @@ export function createMobileApiHandler(
       try {
         const outcome = await dependencies.claimGuestRecovery({
           handoff,
+          idempotencyKey: idempotencyKey.data,
           targetUserId: principal.userId,
         });
         return json(
@@ -264,12 +267,17 @@ export function createMobileApiHandler(
           }),
         );
       } catch (error) {
-        if (error instanceof GuestClaimInProgressError) {
+        if (
+          error instanceof GuestClaimInProgressError
+          || error instanceof GuestClaimIdempotencyConflictError
+        ) {
           return errorResponse(
             requestId,
             409,
             "conflict",
-            "The guest draft claim is already in progress.",
+            error instanceof GuestClaimIdempotencyConflictError
+              ? "The Idempotency-Key is already bound to another guest claim."
+              : "The guest draft claim is already in progress.",
           );
         }
         dependencies.reportError?.("mobile-api.guest-claim", error);

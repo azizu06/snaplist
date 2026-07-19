@@ -8,6 +8,12 @@ const object = {
   destinationPath: "user_account/item/front.enc",
   sha256: createHash("sha256").update(bytes).digest("hex"),
   byteLength: bytes.byteLength,
+  encryption: {
+    algorithm: "aes-256-gcm" as const,
+    keyId: "guest-recovery-v1",
+    nonce: Buffer.alloc(12, 4).toString("base64"),
+    tag: Buffer.alloc(16, 5).toString("base64"),
+  },
 };
 
 function client(input: {
@@ -44,6 +50,7 @@ describe("guest private Storage copy verification", () => {
       destinationPath: object.destinationPath,
       sha256: object.sha256,
       byteLength: object.byteLength,
+      encryption: object.encryption,
     });
     expect(fake.copy).toHaveBeenCalledWith(object.sourcePath, object.destinationPath);
     expect(fake.download).toHaveBeenCalledWith(object.destinationPath);
