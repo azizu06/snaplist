@@ -133,10 +133,10 @@ not the default product posture.
   redesign, or explicit owner direction.
 - **Adjudicate GitHub Codex findings.** Treat the App as independent evidence, not authority. Apply
   the frozen issue contract, severity filter, scope split, and shared three-round counter. Run the
-  fresh local Standards and Spec reviews first, then request GitHub Codex on that exact head. Fix only
-  qualifying blockers. Route every valid adjacent or non-blocking finding to a focused existing or
-  new issue, and explain invalid or out-of-scope findings with evidence. Do not chase a zero-comment
-  review.
+  fresh local Standards and Spec reviews first. Fix qualifying local blockers and obtain the required
+  delta-focused local acceptance before requesting GitHub Codex on the resulting locally approved
+  exact head. Route every valid adjacent or non-blocking finding to a focused existing or new issue,
+  and explain invalid or out-of-scope findings with evidence. Do not chase a zero-comment review.
 - **Test external behavior at the highest seam**, not implementation details. Key seams: the
   `PricingProvider` router (stub providers, assert tier selection), the **pure confidence function**
   (unit-test directly with crafted signals), vision/listing **contract** tests (output validates

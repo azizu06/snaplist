@@ -63,7 +63,8 @@ Before review, compare the exact diff to the frozen issue contract and remove or
 behavior. Once independent review starts, do not add product or architecture scope.
 
 One review round is the combined assessment of one exact head. Run the fresh Standards/Spec pair
-first, then request GitHub Codex on that exact head. The first candidate is round 1. Record
+first. Fix qualifying local blockers and obtain delta-focused local acceptance before requesting
+GitHub Codex on the resulting locally approved exact head. The first candidate is round 1. Record
 `Review round: N/3` in the PR body or a comment.
 Request a replacement round only after qualifying fixes change the head. Replacement local reviews
 are delta-focused unless a fix changes a security, tenancy, data, billing, provider, or other high-risk
