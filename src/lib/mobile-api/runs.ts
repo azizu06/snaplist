@@ -34,8 +34,14 @@ export interface MobileRunDataClient {
   readRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readItem(itemId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readReservation(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
-  retryRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
-  cancelRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
+  retryRun(
+    runId: string,
+    idempotencyKey: string,
+  ): PromiseLike<MobileRunDataResult<unknown>>;
+  cancelRun(
+    runId: string,
+    idempotencyKey: string,
+  ): PromiseLike<MobileRunDataResult<unknown>>;
 }
 
 export class MobileRunNotFoundError extends Error {}
@@ -130,7 +136,8 @@ async function readCanonicalRun(
   const terminalOutcome = ["succeeded", "failed", "canceled"].includes(run.status)
     ? run.status as "succeeded" | "failed" | "canceled"
     : null;
-  const canRetry = !expired
+  const canRetry = allowance !== "restored"
+    && !expired
     && run.listing_id === null
     && (run.status === "failed" || run.status === "canceled");
   const canCancel = run.listing_id === null
@@ -161,7 +168,7 @@ async function readCanonicalRun(
     },
     requiredInput: null,
     terminalOutcome,
-    safeFailure: run.safe_failure_message
+    safeFailure: run.status === "failed" && run.safe_failure_message
       ? {
           reason: "This run couldn’t finish",
           detail: run.safe_failure_message,
@@ -202,7 +209,7 @@ export function createMobileRunOperations(
     async retry(rawInput) {
       const input = mutationRequestSchema.parse(rawInput);
       const client = await clientForBearer(input.bearerToken);
-      const result = await client.retryRun(input.runId);
+      const result = await client.retryRun(input.runId, input.idempotencyKey);
       if (result.error) mutationFailure(result.error);
       const run = await readCanonicalRun(client, input.runId, input.userId);
       if (!run) throw new MobileRunNotFoundError();
@@ -212,7 +219,7 @@ export function createMobileRunOperations(
     async cancel(rawInput) {
       const input = mutationRequestSchema.parse(rawInput);
       const client = await clientForBearer(input.bearerToken);
-      const result = await client.cancelRun(input.runId);
+      const result = await client.cancelRun(input.runId, input.idempotencyKey);
       if (result.error) mutationFailure(result.error);
       const run = await readCanonicalRun(client, input.runId, input.userId);
       if (!run) throw new MobileRunNotFoundError();
@@ -267,11 +274,19 @@ export function createSupabaseMobileRunDataClient(
         .eq("pipeline_run_id", runId)
         .maybeSingle();
     },
-    retryRun(runId) {
-      return client.rpc("retry_pipeline_run", { p_run_id: runId });
+    retryRun(runId, idempotencyKey) {
+      return client.rpc("apply_mobile_run_operation", {
+        p_run_id: runId,
+        p_operation: "retry",
+        p_idempotency_key: idempotencyKey,
+      });
     },
-    cancelRun(runId) {
-      return client.rpc("cancel_pipeline_run", { p_run_id: runId });
+    cancelRun(runId, idempotencyKey) {
+      return client.rpc("apply_mobile_run_operation", {
+        p_run_id: runId,
+        p_operation: "cancel",
+        p_idempotency_key: idempotencyKey,
+      });
     },
   };
 }

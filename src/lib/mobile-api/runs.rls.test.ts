@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { Client } from "pg";
 import {
   cleanupClerkTestUsers,
   mintUserJwt,
@@ -8,6 +9,7 @@ import {
   MobileRunNotFoundError,
   createConfiguredSupabaseMobileRunOperations,
 } from "./runs";
+import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL
@@ -16,6 +18,10 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DATABASE_URL = resolveLocalTestDatabaseUrl(
+  process.env.SUPABASE_TEST_DB_URL
+    ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+);
 
 let reachable = false;
 let admin: SupabaseClient;
@@ -154,6 +160,56 @@ describe("mobile durable-run RLS adapter", () => {
     const duplicateRetry = await operations.retry({ ...base, idempotencyKey: retryKey });
     expect(firstRetry).toMatchObject({ id: runA, itemId: itemA, status: "queued" });
     expect(duplicateRetry).toMatchObject({ id: runA, itemId: itemA, status: "queued" });
+
+    const database = new Client({ connectionString: DATABASE_URL });
+    await database.connect();
+    try {
+      await database.query(
+        `select pgmq.delete('pipeline_jobs', run.queue_message_id)
+         from public.pipeline_runs run
+         where run.id = $1
+           and run.queue_message_id is not null`,
+        [runA],
+      );
+      await database.query(
+        `update public.pipeline_runs
+         set status = 'running',
+             stage = 'pricing',
+             attempt_count = attempt_count + 1,
+             queue_message_id = null,
+             enqueued_at = null,
+             started_at = statement_timestamp(),
+             last_attempted_at = statement_timestamp(),
+             lease_token = gen_random_uuid(),
+             lease_expires_at = statement_timestamp() + interval '1 minute'
+         where id = $1`,
+        [runA],
+      );
+      await database.query(
+        `update public.pipeline_runs
+         set status = 'failed',
+             failure_code = 'attempts_exhausted',
+             safe_failure_message = 'A later attempt failed.',
+             completed_at = statement_timestamp(),
+             lease_token = null,
+             lease_expires_at = null
+         where id = $1`,
+        [runA],
+      );
+    } finally {
+      await database.end();
+    }
+    const delayedRetryReplay = await operations.retry({
+      ...base,
+      idempotencyKey: retryKey,
+    });
+    expect(delayedRetryReplay).toMatchObject({ id: runA, status: "failed" });
+
+    const newRetry = await operations.retry({
+      ...base,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(newRetry).toMatchObject({ id: runA, status: "queued" });
 
     const finalCancel = await operations.cancel({
       ...base,

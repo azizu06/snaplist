@@ -164,7 +164,9 @@ describe("mobile durable-run operations", () => {
             status,
             stage,
             listing_id: listingId,
-            safe_failure_message: status === "failed" ? "Price research timed out." : null,
+            safe_failure_message: ["retrying", "failed"].includes(status)
+              ? "Price research timed out."
+              : null,
             completed_at: terminalOutcome ? "2026-07-19T18:02:00.000Z" : null,
           }),
           error: null,
@@ -183,6 +185,16 @@ describe("mobile durable-run operations", () => {
         terminalOutcome,
         legalActions: { canRetry, canCancel },
       });
+      expect(result?.safeFailure).toEqual(
+        status === "failed"
+          ? {
+              reason: "This run couldn’t finish",
+              detail: "Price research timed out.",
+              retryable: true,
+              workPreserved: true,
+            }
+          : null,
+      );
       expect(result).not.toHaveProperty("progress");
       expect(result).not.toHaveProperty("percentage");
       expect(result).not.toHaveProperty("eta");
@@ -231,6 +243,35 @@ describe("mobile durable-run operations", () => {
     expect(canceled).toMatchObject({ id: RUN_ID, status: "canceled" });
     expect(client.retryRun).toHaveBeenCalledTimes(2);
     expect(client.cancelRun).toHaveBeenCalledOnce();
+  });
+
+  it("does not advertise retry after #168 has restored the run credit", async () => {
+    const client = dataClient({
+      readRun: vi.fn().mockResolvedValue({
+        data: runRow({
+          status: "failed",
+          safe_failure_message: "Price research timed out.",
+          completed_at: "2026-07-19T18:02:00.000Z",
+        }),
+        error: null,
+      }),
+      readReservation: vi.fn().mockResolvedValue({
+        data: { state: "restored" },
+        error: null,
+      }),
+    });
+
+    await expect(
+      createMobileRunOperations(async () => client).get({
+        runId: RUN_ID,
+        userId: "user_native",
+        bearerToken: "signed-jwt",
+      }),
+    ).resolves.toMatchObject({
+      allowance: "restored",
+      legalActions: { canRetry: false },
+      safeFailure: { retryable: false },
+    });
   });
 
   it.each([
@@ -290,8 +331,10 @@ describe("mobile durable-run operations", () => {
     await client.readRun(RUN_ID);
     await client.readItem(ITEM_ID);
     await client.readReservation(RUN_ID);
-    await client.retryRun(RUN_ID);
-    await client.cancelRun(RUN_ID);
+    const retryKey = "24100000-0000-4000-8000-000000000003";
+    const cancelKey = "24100000-0000-4000-8000-000000000004";
+    await client.retryRun(RUN_ID, retryKey);
+    await client.cancelRun(RUN_ID, cancelKey);
 
     expect(supabase.from).toHaveBeenNthCalledWith(1, "pipeline_runs");
     expect(supabase.from).toHaveBeenNthCalledWith(2, "items");
@@ -299,7 +342,15 @@ describe("mobile durable-run operations", () => {
       3,
       "ai_item_credit_reservations",
     );
-    expect(rpc).toHaveBeenNthCalledWith(1, "retry_pipeline_run", { p_run_id: RUN_ID });
-    expect(rpc).toHaveBeenNthCalledWith(2, "cancel_pipeline_run", { p_run_id: RUN_ID });
+    expect(rpc).toHaveBeenNthCalledWith(1, "apply_mobile_run_operation", {
+      p_idempotency_key: retryKey,
+      p_operation: "retry",
+      p_run_id: RUN_ID,
+    });
+    expect(rpc).toHaveBeenNthCalledWith(2, "apply_mobile_run_operation", {
+      p_idempotency_key: cancelKey,
+      p_operation: "cancel",
+      p_run_id: RUN_ID,
+    });
   });
 });
