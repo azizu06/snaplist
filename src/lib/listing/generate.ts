@@ -305,11 +305,23 @@ export async function generateEbayListing(
 }
 
 /**
- * Resolve few-shot grounding when not provided directly. Uses the injected `retrieve`
- * fn if present, else the real rag path. The real path requires a Supabase client +
- * embedder from the environment; it is imported lazily so the offline test path (which
- * always injects `fewShot` or `retrieve`) never loads it.
+ * Resolve optional few-shot grounding when not provided directly. Disabled and
+ * unusable retrieval both normalize to the same no-examples result.
  */
+function noListingExamples(): FewShotExamples {
+  return { matches: [], examples: [] };
+}
+
+function isFewShotExamples(value: unknown): value is FewShotExamples {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<FewShotExamples>;
+  return (
+    Array.isArray(candidate.matches) &&
+    Array.isArray(candidate.examples) &&
+    candidate.examples.every((example) => typeof example === "string")
+  );
+}
+
 async function resolveFewShot(
   input: GenerateEbayListingInput,
   attributes: ExtractedAttributes,
@@ -317,7 +329,7 @@ async function resolveFewShot(
   const enabled =
     input.listingExampleRetrieval?.enabled ??
     process.env.LISTING_EXAMPLE_RETRIEVAL_ENABLED === "true";
-  if (!enabled) return { matches: [], examples: [] };
+  if (!enabled) return noListingExamples();
   const configuredTimeout =
     input.listingExampleRetrieval?.timeoutMs ??
     Number(process.env.LISTING_EXAMPLE_RETRIEVAL_TIMEOUT_MS);
@@ -328,17 +340,15 @@ async function resolveFewShot(
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const retrieve = input.retrieve ?? createRealFewShotRetrieval();
-    return await Promise.race([
+    const retrieved: unknown = await Promise.race([
       retrieve(attributes),
       new Promise<FewShotExamples>((resolve) => {
-        timeout = setTimeout(
-          () => resolve({ matches: [], examples: [] }),
-          timeoutMs,
-        );
+        timeout = setTimeout(() => resolve(noListingExamples()), timeoutMs);
       }),
     ]);
+    return isFewShotExamples(retrieved) ? retrieved : noListingExamples();
   } catch {
-    return { matches: [], examples: [] };
+    return noListingExamples();
   } finally {
     if (timeout) clearTimeout(timeout);
   }

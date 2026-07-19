@@ -8,6 +8,7 @@ import {
   generateEbayListing,
   listingHallucinatesAttributes,
   type ListingGenerate,
+  type RetrieveFewShot,
 } from "./generate";
 
 /**
@@ -380,6 +381,22 @@ describe("listing/generate — grounded by injected few-shot retrieval", () => {
 
   it("generates without examples when the enabled corpus is empty", async () => {
     const retrieve = vi.fn(async () => fewShotOf());
+    const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
+
+    const result = await generateEbayListing({
+      attributes: CORE,
+      retrieve,
+      generate,
+      listingExampleRetrieval: { enabled: true },
+    });
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(calls[0].fewShot).toEqual({ matches: [], examples: [] });
+    expect(ebayListingSchema.safeParse(result.listing).success).toBe(true);
+  });
+
+  it("fails open to no examples when enabled retrieval returns an incompatible value", async () => {
+    const retrieve = vi.fn(async () => null) as unknown as RetrieveFewShot;
     const { generate, calls } = scriptedGenerate([GOOD_LISTING]);
 
     const result = await generateEbayListing({
