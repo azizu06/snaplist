@@ -320,12 +320,15 @@ final class AnalyticsContractTests: XCTestCase {
         )
         XCTAssertEqual(consent.readDidStart.wait(timeout: .now() + 1), .success)
 
+        let grantAttemptStarted = DispatchSemaphore(value: 0)
         let grantReturned = expectation(description: "consent grant returned")
         DispatchQueue.global().async {
+            grantAttemptStarted.signal()
             client.setConsent(.granted)
             grantReturned.fulfill()
         }
-        _ = consent.grantDidPersist.wait(timeout: .now() + 0.1)
+        XCTAssertEqual(grantAttemptStarted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(consent.grantDidPersist.wait(timeout: .now() + 0.1), .timedOut)
         consent.allowReadToReturn.signal()
         wait(for: [grantReturned], timeout: 1)
         XCTAssertTrue(client.waitUntilIdleForTesting())
@@ -351,19 +354,19 @@ final class AnalyticsContractTests: XCTestCase {
         )
         XCTAssertEqual(sink.recordDidStart.wait(timeout: .now() + 1), .success)
 
+        let denialAttemptStarted = DispatchSemaphore(value: 0)
         let denialReturned = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
+            denialAttemptStarted.signal()
             client.setConsent(.denied)
             denialReturned.signal()
         }
-        let returnedBeforeRelease = denialReturned.wait(timeout: .now() + 0.1) == .success
+        XCTAssertEqual(denialAttemptStarted.wait(timeout: .now() + 1), .success)
+        XCTAssertEqual(denialReturned.wait(timeout: .now() + 0.1), .timedOut)
         sink.allowRecordToReturn.signal()
-        if !returnedBeforeRelease {
-            XCTAssertEqual(denialReturned.wait(timeout: .now() + 1), .success)
-        }
+        XCTAssertEqual(denialReturned.wait(timeout: .now() + 1), .success)
         XCTAssertTrue(client.waitUntilIdleForTesting())
 
-        XCTAssertFalse(returnedBeforeRelease)
         XCTAssertEqual(consent.consent, .denied)
     }
 
