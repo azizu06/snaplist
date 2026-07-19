@@ -420,7 +420,7 @@ describe("resolveScoutGuidance", () => {
     );
   });
 
-  it("canonicalizes grandfathered tags and falls back for private-use and extended-language tags", () => {
+  it("canonicalizes grandfathered and registered extlang tags before fallback", () => {
     const grandfathered = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
       state: "onboarding.outcome",
@@ -436,7 +436,7 @@ describe("resolveScoutGuidance", () => {
     const extendedLanguage = resolveScoutGuidance({
       contractVersion: "scout-guidance-v1",
       state: "onboarding.outcome",
-      locale: "zh-cmn-hans-cn",
+      locale: "zh-cmn-Hans-CN",
       substitutions: {},
     });
 
@@ -444,8 +444,8 @@ describe("resolveScoutGuidance", () => {
     expect(privateUse.localeFallbackChain).toEqual(["x-scout", "en-US"]);
     expect(privateUse.resolvedLocale).toBe("en-US");
     expect(extendedLanguage.localeFallbackChain).toEqual([
-      "zh-cmn-Hans-CN",
-      "zh",
+      "cmn-Hans-CN",
+      "cmn",
       "en-US",
     ]);
   });

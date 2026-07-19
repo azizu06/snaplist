@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  canonicalizeScoutGuidanceLocale,
   scoutGuidanceCatalogSchema,
   scoutGuidanceTrustedSourceSchema,
 } from "./contract";
@@ -128,19 +129,24 @@ describe("Scout guidance catalog contract", () => {
     }
   });
 
-  it("accepts canonical BCP-47 private-use locale identifiers", () => {
+  it("requires registered extlang catalog keys to use their preferred values", () => {
     const privateUse = structuredClone(catalog);
     privateUse.defaultLocale = "x-scout";
     privateUse.locales["x-scout"] = privateUse.locales["en-US"];
-    const extendedLanguage = structuredClone(catalog);
-    extendedLanguage.defaultLocale = "zh-cmn-Hans-CN";
-    extendedLanguage.locales["zh-cmn-Hans-CN"] =
-      extendedLanguage.locales["en-US"];
+    const preferredExtlang = structuredClone(catalog);
+    preferredExtlang.defaultLocale = "cmn-Hans-CN";
+    preferredExtlang.locales["cmn-Hans-CN"] =
+      preferredExtlang.locales["en-US"];
+    const extlangForm = structuredClone(catalog);
+    extlangForm.defaultLocale = "zh-cmn-Hans-CN";
+    extlangForm.locales["zh-cmn-Hans-CN"] = extlangForm.locales["en-US"];
 
     expect(scoutGuidanceCatalogSchema.safeParse(privateUse).success).toBe(true);
     expect(
-      scoutGuidanceCatalogSchema.safeParse(extendedLanguage).success,
+      scoutGuidanceCatalogSchema.safeParse(preferredExtlang).success,
     ).toBe(true);
+    expect(scoutGuidanceCatalogSchema.safeParse(extlangForm).success).toBe(false);
+    expect(canonicalizeScoutGuidanceLocale("sw-swc")).toBe("swc");
   });
 
   it("does not publish speculative seller-confirmed trust sources", () => {

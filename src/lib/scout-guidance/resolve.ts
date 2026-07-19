@@ -397,15 +397,10 @@ function resolveLocale(canonicalLocale: string): {
   resolvedLocale: string;
   fallbackChain: string[];
 } {
-  let language: string | null = null;
-  try {
-    language = new Intl.Locale(canonicalLocale).language;
-  } catch {
-    const primaryLanguage = canonicalLocale.split("-", 1)[0];
-    if (/^[A-Za-z]{2,8}$/.test(primaryLanguage)) {
-      language = primaryLanguage.toLowerCase();
-    }
-  }
+  const primaryLanguage = canonicalLocale.split("-", 1)[0];
+  const language = /^[A-Za-z]{2,8}$/.test(primaryLanguage)
+    ? primaryLanguage.toLowerCase()
+    : null;
 
   const fallbackChain = [
     canonicalLocale,
