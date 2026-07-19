@@ -6,7 +6,11 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Folder from "@/components/bits/Folder";
 import { menuArrowNav, useEscapeToClose, useModalFocus } from "@/components/ui/overlay-behavior";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { DEMO_PRODUCTS_BY_SLUG, type DemoProduct } from "@/lib/demo-products";
+import {
+  DEMO_PRODUCTS_BY_SLUG,
+  DEMO_SURFACE_ASSIGNMENTS,
+  type DemoProduct,
+} from "@/lib/demo-products";
 import { StatusBadge } from "@/components/ui/badge";
 import { lifecycleShortLabel } from "@/lib/ui/status";
 import { manualPublishPath } from "@/lib/ui/publish-eligibility";
@@ -749,9 +753,9 @@ function AddFilterMenu({
  * the demo catalog (image + name + price from the SAME DemoProduct).
  */
 const FOLDER_ITEMS: DemoProduct[] = [
-  DEMO_PRODUCTS_BY_SLUG.kettlebell,
-  DEMO_PRODUCTS_BY_SLUG.binoculars,
-  DEMO_PRODUCTS_BY_SLUG.sewingmachine,
+  ...DEMO_SURFACE_ASSIGNMENTS["dashboard-folder"].map(
+    (slug) => DEMO_PRODUCTS_BY_SLUG[slug],
+  ),
 ];
 
 function MiniListingCard({ product }: { product: DemoProduct }) {

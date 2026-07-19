@@ -39,13 +39,14 @@ chosen because the product remains identifiable in both crops, the original has
 enough resolution for the 1440px landing page, and the set tells one coherent
 shippable electronics / gaming / collectibles / streetwear resale story.
 
-The following previous high-salience assets remain available to low-salience
-legacy/demo consumers but are retired from every primary assignment and every
-real-app Guide capture:
+The following previous high-salience assets were retired from the runtime demo
+catalog and removed in issue #248. Four benchmark-only images remain outside
+the runtime catalog because native pricing tests reference them directly:
 
-- `public/demo/authentic/acer-predator-a{1-open,2-night,3-closed,4-boot}.jpg`
-- `public/demo/authentic/{a-macbookair,a-cyberpc,a-xbox360}.jpg`
-- `public/demo/{console,camera,gameboy,gshock,sneakers,book}.jpg`
+- `public/demo/book.jpg`
+- `public/demo/camera.jpg`
+- `public/demo/headphones.jpg`
+- `public/demo/macbook.jpg`
 
 An additional candidate, `NCMSwdnje0Y` by The Drink Break, was downloaded and
 inspected but rejected: its dark close-up reads as a generic filter at small card
