@@ -471,13 +471,6 @@
   .marquee-pause:hover .marquee-track {
     animation-play-state: paused;
   }
-  /* Empty-state aperture iris: the blade group drifts one revolution every
-     40s — barely perceptible, just alive. */
-  .aperture-blades {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: aperture-spin 40s linear infinite;
-  }
   /* Skeleton shimmer: a translating gradient sheen layered over the
      animate-pulse base so loading blocks read as in-motion, not stalled. */
   .skeleton-shimmer {
@@ -507,7 +500,6 @@
     );
   }
   @media (prefers-reduced-motion: reduce) {
-    .aperture-blades,
     .skeleton-shimmer::after {
       animation: none;
     }
@@ -593,15 +585,6 @@
   }
   to {
     transform: translateX(-50%);
-  }
-}
-
-@keyframes aperture-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
   }
 }
 
