@@ -88,12 +88,12 @@ export interface ItemSignal {
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({
   /** Canonical link to the comp or lookup record. Required — a source must be checkable. */
-  url: z.string().min(1),
+  url: z.string().url().max(2_048),
   /** Human-readable label (listing/page title). */
   title: z.string().optional(),
   /** What kind of source this is, e.g. "isbn-lookup" | "sold-comp" | "asking-comp". */
   kind: z.string().optional(),
-});
+}).strict();
 
 export type PriceSource = z.infer<typeof priceSourceSchema>;
 

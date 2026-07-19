@@ -51,15 +51,10 @@ function row() {
         title: evidence.title,
         kind: evidence.priceDisclosure === "displayed-sold-price" ? "sold-comp" : "asking-comp",
       })),
-      evidence: [...sold, asking].map((record) => {
-        const evidence = { ...record };
-        delete (evidence as Partial<typeof evidence>).evidenceAsOf;
-        return evidence;
-      }),
       tier: "ebay-sold",
       compAgreement: 0.8,
     },
-    evidence: [...sold, asking],
+    evidence: sold,
     evidence_as_of: EVIDENCE_AS_OF,
     pipeline_runs: {
       id: "11111111-1111-4111-8111-111111111111",
@@ -67,6 +62,12 @@ function row() {
       stage: "completed",
       listing_id: "44444444-4444-4444-8444-444444444444",
       completed_at: EVIDENCE_AS_OF,
+    },
+    listings: {
+      id: "44444444-4444-4444-8444-444444444444",
+      run_id: "11111111-1111-4111-8111-111111111111",
+      item_id: "22222222-2222-4222-8222-222222222222",
+      user_id: "user_a",
     },
   };
 }
@@ -102,6 +103,22 @@ describe("pricing-evidence read projection", () => {
 
   it("selects only the latest completed snapshot through the seller bearer client", async () => {
     const calls: unknown[][] = [];
+    const older = row();
+    older.run_id = "55555555-5555-4555-8555-555555555555";
+    older.prediction_id = "66666666-6666-4666-8666-666666666666";
+    older.listing_id = "77777777-7777-4777-8777-777777777777";
+    older.evidence_as_of = "2026-07-17T12:00:00+00:00";
+    older.price_result.suggested = 125;
+    older.pipeline_runs.id = older.run_id;
+    older.pipeline_runs.listing_id = older.listing_id;
+    older.pipeline_runs.completed_at = older.evidence_as_of;
+    older.listings.id = older.listing_id;
+    older.listings.run_id = older.run_id;
+    older.evidence = older.evidence.map((record) => ({
+      ...record,
+      evidenceAsOf: older.evidence_as_of,
+    }));
+    const candidates = [older, row()];
     const query = {
       select: (...args: unknown[]) => {
         calls.push(["select", ...args]);
@@ -117,7 +134,18 @@ describe("pricing-evidence read projection", () => {
       },
       limit: async (...args: unknown[]) => {
         calls.push(["limit", ...args]);
-        return { data: [row()], error: null };
+        const hasDeterministicLatestOrder = calls.some(
+          (call) =>
+            call[0] === "order" &&
+            call[1] === "evidence_as_of" &&
+            (call[2] as { ascending?: boolean })?.ascending === false,
+        );
+        const selected = hasDeterministicLatestOrder
+          ? [...candidates].sort((left, right) =>
+              right.evidence_as_of.localeCompare(left.evidence_as_of),
+            )[0]
+          : candidates[0];
+        return { data: [selected], error: null };
       },
     };
     const from = (table: string) => {
@@ -148,6 +176,8 @@ describe("pricing-evidence read projection", () => {
     expect(calls).toContainEqual(["eq", "user_id", "user_a"]);
     expect(calls).toContainEqual(["eq", "pipeline_runs.status", "succeeded"]);
     expect(calls).toContainEqual(["eq", "pipeline_runs.stage", "completed"]);
+    expect(calls).toContainEqual(["order", "evidence_as_of", { ascending: false }]);
+    expect(calls).toContainEqual(["order", "run_id", { ascending: false }]);
     expect(calls).toContainEqual(["limit", 1]);
   });
 
@@ -169,6 +199,33 @@ describe("pricing-evidence read projection", () => {
         now: Date.parse("2026-07-20T00:00:00.000Z"),
       }),
     ).toThrow(/coherent|timestamp/i);
+
+    const rebound = row();
+    rebound.listings.run_id = "55555555-5555-4555-8555-555555555555";
+    expect(() =>
+      buildPricingEvidenceProjection(rebound, {
+        userId: rebound.user_id,
+        itemId: rebound.item_id,
+      }),
+    ).toThrow(/coherent|run/i);
+
+    const duplicated = row();
+    (duplicated.price_result as typeof duplicated.price_result & { evidence: unknown[] }).evidence = [
+      {
+        id: "conflicting-copy",
+        sourceUrl: "https://www.ebay.com/itm/sale-1",
+        price: 999,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      },
+    ];
+    expect(() =>
+      buildPricingEvidenceProjection(duplicated, {
+        userId: duplicated.user_id,
+        itemId: duplicated.item_id,
+      }),
+    ).toThrow(/malformed/i);
   });
 
   it("labels thin old evidence as limited and stale without inventing optional facts", () => {

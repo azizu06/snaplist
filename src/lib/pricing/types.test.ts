@@ -42,6 +42,15 @@ describe("PriceResult contract", () => {
     expect(() => priceResultSchema.parse(noUrl)).toThrow();
   });
 
+  it("requires source URLs to be bounded URIs for mobile contract parity", () => {
+    expect(() =>
+      priceResultSchema.parse({
+        ...valid,
+        sources: [{ url: "not a uri", kind: "sold-comp" }],
+      }),
+    ).toThrow();
+  });
+
   it("rejects an unknown tier identifier", () => {
     expect(() => priceResultSchema.parse({ ...valid, tier: "not-a-tier" })).toThrow();
   });

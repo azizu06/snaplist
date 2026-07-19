@@ -14,6 +14,7 @@ import {
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
+import { createSupabasePricingEvidenceReader } from "@/lib/pricing-evidence";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -722,6 +723,16 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       guided_correction_revision: editedRevision,
       guided_correction_completed_at: expect.any(String),
     });
+    const pricingReader = createSupabasePricingEvidenceReader(
+      async () => lifecycleUser.client,
+    );
+    await expect(
+      pricingReader.forItem({
+        userId: lifecycleUser.id,
+        bearerToken: "test",
+        itemId: settledRun.item_id,
+      }),
+    ).rejects.toThrow(/coherent|run/i);
     const secondCorrection = await lifecycleUser.client.rpc(
       "authorize_ai_item_guided_correction",
       {
