@@ -1675,7 +1675,6 @@ create or replace function public.queue_guest_claim_copy_cleanup(
   p_recovery_id uuid,
   p_recovery_token_hash text,
   p_target_user_id text,
-  p_idempotency_key uuid,
   p_claim_lease_token uuid
 )
 returns boolean
@@ -1689,7 +1688,6 @@ begin
   perform private.guest_claim_service_role_required();
   if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
     or p_target_user_id !~ '^[A-Za-z0-9_-]+$'
-    or p_idempotency_key is null
     or p_claim_lease_token is null then
     raise exception using errcode = '22023', message = 'Invalid guest cleanup request';
   end if;
@@ -1700,8 +1698,6 @@ begin
   from private.guest_draft_recoveries recovery
   where recovery.id = p_recovery_id
     and recovery.recovery_token_hash = p_recovery_token_hash
-    and recovery.claim_idempotency_user_id = p_target_user_id
-    and recovery.claim_idempotency_key = p_idempotency_key
   for update;
   if not found then
     raise exception using errcode = 'P0002', message = 'Guest recovery not found';
@@ -1717,10 +1713,10 @@ end;
 $$;
 
 revoke all on function public.queue_guest_claim_copy_cleanup(
-  uuid, text, text, uuid, uuid
+  uuid, text, text, uuid
 ) from public, anon, authenticated;
 grant execute on function public.queue_guest_claim_copy_cleanup(
-  uuid, text, text, uuid, uuid
+  uuid, text, text, uuid
 ) to service_role;
 
 create or replace function public.release_guest_draft_claim(

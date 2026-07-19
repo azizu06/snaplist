@@ -8,9 +8,16 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const quiescenceMigration = readFileSync(
+  new URL(
+    "../../../supabase/migrations/20260719183500_guest_claim_copy_cleanup_quiescence.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
-function functionBody(name: string): string {
-  const match = migration.match(new RegExp(
+function functionBody(name: string, source = migration): string {
+  const match = source.match(new RegExp(
     `create or replace function ${name.replaceAll(".", "\\.")}[\\s\\S]+?as \\$\\$([\\s\\S]+?)\\$\\$;`,
     "i",
   ));
@@ -133,7 +140,7 @@ describe("guest claim-or-expire database contract", () => {
     expect(migration).toMatch(/guest_copy_writer_quiesced\s+boolean\s+not null/i);
     expect(migration).toMatch(/resweep_requested\s+boolean\s+not null/i);
     expect(migration).toMatch(/guest_copy_final_sweep_armed\s+boolean\s+not null/i);
-    expect(functionBody("public.queue_guest_claim_copy_cleanup")).toMatch(
+    expect(functionBody("public.queue_guest_claim_copy_cleanup", quiescenceMigration)).toMatch(
       /claim_idempotency_user_id\s*=\s*p_target_user_id[\s\S]+claim_idempotency_key\s*=\s*p_idempotency_key[\s\S]+private\.queue_guest_claim_copy_cleanup\([\s\S]+p_target_user_id[\s\S]+p_claim_lease_token/i,
     );
     expect(functionBody("private.queue_guest_claim_copy_cleanup")).toMatch(
@@ -152,5 +159,17 @@ describe("guest claim-or-expire database contract", () => {
     expect(migration).toMatch(/grant execute on function public\.(?:register|begin|complete|release|resolve|expire|queue)_guest[^;]+to service_role/gi);
     expect(migration).not.toMatch(/grant execute on function public\.(?:register|begin|complete|release|resolve|expire|queue)_guest[^;]+to (?:anon|authenticated)/i);
     expect(migration).toMatch(/revoke all on table private\.guest_draft_recoveries/i);
+  });
+
+  it("upgrades databases that already applied the frozen parent migration", () => {
+    expect(quiescenceMigration).toMatch(
+      /drop function public\.queue_guest_claim_copy_cleanup\(uuid, text, text, uuid\)/i,
+    );
+    expect(quiescenceMigration).toMatch(
+      /create or replace function public\.queue_guest_claim_copy_cleanup\([\s\S]+p_idempotency_key uuid[\s\S]+p_claim_lease_token uuid/i,
+    );
+    expect(quiescenceMigration).toMatch(
+      /grant execute on function public\.queue_guest_claim_copy_cleanup\(\s*uuid, text, text, uuid, uuid\s*\) to service_role/i,
+    );
   });
 });
