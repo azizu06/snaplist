@@ -370,7 +370,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   improvement in seller edit burden or first-pass acceptance, with no increase in unsupported claims
   and acceptable latency and cost. If it does not pass, remove runtime retrieval instead of tuning it
   without a stop condition.
-- **No global seller-data flywheel.** Seller-approved drafts are not written to the global readable
+- **No global seller-data flywheel.** Private seller drafts are never written to the global readable
   corpus. Any future personalization requires a separate tenant-scoped privacy and consent decision.
 - **Schema retained during evaluation.** Existing pgvector and reference-corpus migrations remain for
   compatibility until the evaluation decides whether a later contract migration removes them. See
@@ -420,7 +420,7 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
 
 ### Eval & observability
 - **Log every run's predictions from day one** (extracted attributes, chosen price, range, confidence, tier fired, model). Prerequisite for evaluation.
-- **Lightweight-but-real eval harness** over a fixed gold set (~30–50 hero-domain items): ID field accuracy, pricing-within-band (median error + % within band), **confidence calibration** (reliability bucketing), and **listing quality** via a *validated* LLM-judge rubric. Script first; CI later (Phase 4). Gold set doubles as demo set and overlaps the seed corpus.
+- **Lightweight-but-real eval harness** over a fixed gold set (~30 to 50 hero-domain items): ID field accuracy, pricing-within-band (median error + % within band), **confidence calibration** (reliability bucketing), and **listing quality** via a *validated* LLM-judge rubric. Script first; CI later (Phase 4). The current gold set doubles as demo data and overlaps the seed corpus, so it is invalid for the listing-example retention decision. That decision requires a disjoint holdout with source-identity, canonical-item, exact-match, and near-duplicate exclusions.
 
 ### Deploy
 - **Split marketing from trusted native compute.** Keep the public marketing site on Vercel. The

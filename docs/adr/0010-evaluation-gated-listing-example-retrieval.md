@@ -30,7 +30,7 @@ The reference corpus never contributes to suggested price, range, confidence, ev
 or provider selection. Examples may influence style and structure only. Validated item attributes
 remain the sole factual authority.
 
-Seller-approved drafts are not written to the global readable corpus. A future learning or
+Private seller drafts are never written to the global readable corpus. A future learning or
 personalization feature requires its own tenant-scoped privacy and consent decision.
 
 The existing pgvector schema remains compatible during evaluation. If retrieval fails its evaluation,
@@ -39,11 +39,13 @@ consumer remains.
 
 ## Evaluation gate
 
-Compare the same gold-set items with retrieval enabled and disabled. Define the pass threshold before
-running the experiment. Measure seller edit burden or first-pass acceptance, unsupported-claim rate,
-latency, and incremental cost. Retrieval may become an enabled product capability only when it shows a
-meaningful seller benefit, does not increase unsupported claims, and stays within the approved latency
-and cost bounds.
+Compare the same holdout items with retrieval enabled and disabled. The holdout must be disjoint from
+the reference corpus by source identity and canonical item fingerprint, and must exclude exact and
+near-duplicate content. The existing overlapping demo/eval fixtures are not valid for this decision.
+Define the pass threshold before running the experiment. Measure seller edit burden or first-pass
+acceptance, unsupported-claim rate, latency, and incremental cost. Retrieval may become an enabled
+product capability only when it shows a meaningful seller benefit, does not increase unsupported
+claims, and stays within the approved latency and cost bounds.
 
 If the gate does not pass, remove runtime retrieval. Do not extend the experiment through repeated
 prompt or corpus tuning without a new product decision.
@@ -56,5 +58,6 @@ prompt or corpus tuning without a new product decision.
 - Existing runtime retrieval must be hardened in a separate tracer-bullet ticket.
 - The current realistic-synthetic seed is retained only as disclosed evaluation material until the
   keep-or-remove decision.
-- README and unit-economics claims must be reconciled with the actual runtime when the hardening ticket
-  lands.
+- README and unit-economics claims record both the current legacy cost path and the target contract.
+  The runtime hardening ticket must remove the legacy caveat and regenerate economics from its actual
+  default-off behavior.
