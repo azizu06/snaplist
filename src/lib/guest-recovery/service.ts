@@ -113,12 +113,14 @@ export interface GuestClaimStore {
   releaseClaim(input: ClaimIdentity & {
     claimLeaseToken: string;
   }): Promise<GuestRecoveryOutcome | { outcome: "released" }>;
+  queueCopyCleanup(input: ClaimIdentity & {
+    claimLeaseToken: string;
+  }): Promise<boolean>;
   resolveOutcome(input: ClaimIdentity): Promise<GuestRecoveryOutcome>;
 }
 
 export interface GuestClaimStorage {
   copyAndVerify(object: GuestClaimObject): Promise<GuestClaimVerifiedObject>;
-  remove(destinationPaths: string[]): Promise<void>;
 }
 
 export class GuestClaimInProgressError extends Error {
@@ -143,14 +145,6 @@ const targetUserIdSchema = z
   .min(1)
   .max(255)
   .regex(/^[A-Za-z0-9_-]+$/);
-
-async function removeCopiedObjects(
-  storage: GuestClaimStorage,
-  paths: string[],
-): Promise<void> {
-  if (paths.length === 0) return;
-  await storage.remove(paths).catch(() => undefined);
-}
 
 /**
  * Executes only the Storage phase around the database's authoritative claim
@@ -183,7 +177,6 @@ export async function claimGuestRecovery(
     throw new GuestClaimInProgressError(start.retryAfterSeconds);
   }
 
-  const destinationPaths = start.objects.map((object) => object.destinationPath);
   const verifiedObjects: GuestClaimVerifiedObject[] = [];
   try {
     for (const object of start.objects) {
@@ -200,11 +193,17 @@ export async function claimGuestRecovery(
       verifiedObjects.push(verified);
     }
   } catch {
-    await dependencies.store.releaseClaim({
+    await dependencies.store.queueCopyCleanup({
       ...identity,
       claimLeaseToken: start.claimLeaseToken,
-    }).catch(() => undefined);
-    await removeCopiedObjects(dependencies.storage, destinationPaths);
+    }).catch(() => false);
+    const released = await dependencies.store.releaseClaim({
+      ...identity,
+      claimLeaseToken: start.claimLeaseToken,
+    }).catch(() => null);
+    if (released?.outcome === "claimed" || released?.outcome === "expired") {
+      return released;
+    }
     throw new GuestClaimStorageError();
   }
 
@@ -216,26 +215,28 @@ export async function claimGuestRecovery(
         verifiedObjects,
       }),
     );
-    if (completed.outcome === "expired") {
-      await removeCopiedObjects(dependencies.storage, destinationPaths);
-    }
     return completed;
   } catch {
-    // The database commit may have succeeded even if its response was lost.
-    // Resolve the terminal predicate before deleting any account object.
+    // Requeue this exact lease first. The database protects the winning lease,
+    // while an obsolete writer can recreate only its own namespace.
+    await dependencies.store.queueCopyCleanup({
+      ...identity,
+      claimLeaseToken: start.claimLeaseToken,
+    }).catch(() => false);
+    const released = await dependencies.store.releaseClaim({
+      ...identity,
+      claimLeaseToken: start.claimLeaseToken,
+    }).catch(() => null);
+    if (released?.outcome === "claimed" || released?.outcome === "expired") {
+      return released;
+    }
+
     const resolved = guestRecoveryOutcomeSchema.parse(
       await dependencies.store.resolveOutcome(identity),
     );
-    if (resolved.outcome === "claimed") return resolved;
-
-    if (resolved.outcome === "claimable") {
-      await dependencies.store.releaseClaim({
-        ...identity,
-        claimLeaseToken: start.claimLeaseToken,
-      }).catch(() => undefined);
+    if (resolved.outcome === "claimed" || resolved.outcome === "expired") {
+      return resolved;
     }
-    await removeCopiedObjects(dependencies.storage, destinationPaths);
-    if (resolved.outcome === "expired") return resolved;
     throw new GuestClaimStorageError();
   }
 }

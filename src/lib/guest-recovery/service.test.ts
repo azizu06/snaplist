@@ -48,12 +48,15 @@ function store(overrides: Partial<GuestClaimStore> = {}): GuestClaimStore {
     beginClaim: vi.fn().mockResolvedValue(plan),
     completeClaim: vi.fn().mockResolvedValue(terminal),
     releaseClaim: vi.fn().mockResolvedValue({ outcome: "released" }),
+    queueCopyCleanup: vi.fn().mockResolvedValue(true),
     resolveOutcome: vi.fn().mockResolvedValue({ outcome: "claimable" }),
     ...overrides,
   };
 }
 
-function storage(overrides: Partial<GuestClaimStorage> = {}): GuestClaimStorage {
+function storage(
+  overrides: Partial<GuestClaimStorage> = {},
+): GuestClaimStorage & { remove: ReturnType<typeof vi.fn> } {
   return {
     copyAndVerify: vi.fn(async (object) => ({
       destinationPath: object.destinationPath,
@@ -105,7 +108,7 @@ describe("guest claim-or-expire orchestrator", () => {
     expect(claimStore.completeClaim).not.toHaveBeenCalled();
   });
 
-  it("releases a failed copy and removes partial account objects while guest state stays claimable", async () => {
+  it("delegates failed-copy cleanup to the durable release predicate without deleting paths directly", async () => {
     const claimStore = store();
     const privateStorage = storage({
       copyAndVerify: vi
@@ -132,15 +135,37 @@ describe("guest claim-or-expire orchestrator", () => {
       targetUserId: "user_account",
       claimLeaseToken: plan.claimLeaseToken,
     });
-    expect(privateStorage.remove).toHaveBeenCalledWith(
-      plan.objects.map((object) => object.destinationPath),
-    );
+    expect(claimStore.queueCopyCleanup).toHaveBeenCalledWith({
+      recoveryId: handoff.recoveryId,
+      recoveryTokenHash: handoff.recoveryTokenHash,
+      targetUserId: "user_account",
+      claimLeaseToken: plan.claimLeaseToken,
+    });
+    expect(privateStorage.remove).not.toHaveBeenCalled();
   });
 
-  it("resolves an interrupted completion before cleanup so a committed claim can never lose its copied photos", async () => {
+  it("returns a concurrently completed claim instead of letting a stale failed request delete its photos", async () => {
+    const claimStore = store({
+      releaseClaim: vi.fn().mockResolvedValue(terminal),
+    });
+    const privateStorage = storage({
+      copyAndVerify: vi.fn().mockRejectedValue(new Error("stale copy failed")),
+    });
+
+    await expect(
+      claimGuestRecovery(
+        { handoff, targetUserId: "user_account" },
+        { store: claimStore, storage: privateStorage },
+      ),
+    ).resolves.toEqual(terminal);
+    expect(privateStorage.remove).not.toHaveBeenCalled();
+  });
+
+  it("releases the exact lease before resolving an interrupted completion so late stale writes requeue cleanup", async () => {
     const claimStore = store({
       completeClaim: vi.fn().mockRejectedValue(new Error("response lost")),
-      resolveOutcome: vi.fn().mockResolvedValue(terminal),
+      releaseClaim: vi.fn().mockResolvedValue(terminal),
+      resolveOutcome: vi.fn().mockRejectedValue(new Error("must not resolve first")),
     });
     const privateStorage = storage();
 
@@ -151,6 +176,18 @@ describe("guest claim-or-expire orchestrator", () => {
       ),
     ).resolves.toEqual(terminal);
     expect(privateStorage.remove).not.toHaveBeenCalled();
-    expect(claimStore.releaseClaim).not.toHaveBeenCalled();
+    expect(claimStore.releaseClaim).toHaveBeenCalledWith({
+      recoveryId: handoff.recoveryId,
+      recoveryTokenHash: handoff.recoveryTokenHash,
+      targetUserId: "user_account",
+      claimLeaseToken: plan.claimLeaseToken,
+    });
+    expect(claimStore.queueCopyCleanup).toHaveBeenCalledWith({
+      recoveryId: handoff.recoveryId,
+      recoveryTokenHash: handoff.recoveryTokenHash,
+      targetUserId: "user_account",
+      claimLeaseToken: plan.claimLeaseToken,
+    });
+    expect(claimStore.resolveOutcome).not.toHaveBeenCalled();
   });
 });

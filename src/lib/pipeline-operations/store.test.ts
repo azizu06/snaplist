@@ -45,7 +45,7 @@ describe("pipeline operations fixed RPC store", () => {
           expiredWorkerLeases: 0,
           cleanupPending: 0,
           cleanupDeadLetters: 0,
-          lastCleanupAt: "2026-07-17T00:00:00.000Z",
+          lastCleanupAt: "2026-07-17T22:44:17.103155+00:00",
           lastCleanupDeletedObjects: 1,
           lastCleanupFailedObjects: 0,
         },

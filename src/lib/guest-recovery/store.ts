@@ -10,6 +10,7 @@ import {
 type GuestClaimRpcName =
   | "begin_guest_draft_claim"
   | "complete_guest_draft_claim"
+  | "queue_guest_claim_copy_cleanup"
   | "release_guest_draft_claim"
   | "resolve_guest_recovery_outcome";
 
@@ -77,6 +78,16 @@ export function createSupabaseGuestClaimStore(
         p_target_user_id: z.string().min(1).max(255).parse(input.targetUserId),
       });
       return releaseOutcomeSchema.parse(rpcData("claim release", result));
+    },
+
+    async queueCopyCleanup(input) {
+      const result = await client.rpc("queue_guest_claim_copy_cleanup", {
+        p_claim_lease_token: z.string().uuid().parse(input.claimLeaseToken),
+        p_recovery_id: z.string().uuid().parse(input.recoveryId),
+        p_recovery_token_hash: z.string().regex(/^[0-9a-f]{64}$/).parse(input.recoveryTokenHash),
+        p_target_user_id: z.string().min(1).max(255).parse(input.targetUserId),
+      });
+      return z.boolean().parse(rpcData("claim copy cleanup", result));
     },
 
     async resolveOutcome(input) {

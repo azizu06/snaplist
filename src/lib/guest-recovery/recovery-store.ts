@@ -1,7 +1,33 @@
+import { Buffer } from "node:buffer";
 import { z } from "zod";
 import { guestClaimTerminalOutcomeSchema } from "./service";
 
-const base64Schema = z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/);
+interface Base64Bounds {
+  exactBytes?: number;
+  minBytes?: number;
+  maxBytes?: number;
+}
+
+function canonicalBase64Schema(bounds: Base64Bounds = {}) {
+  return z.string().superRefine((value, context) => {
+    const canonical = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+    const decoded = Buffer.from(value, "base64");
+    if (!canonical.test(value) || decoded.toString("base64") !== value) {
+      context.addIssue({ code: "custom", message: "Expected canonical Base64." });
+      return;
+    }
+    if (bounds.exactBytes !== undefined && decoded.byteLength !== bounds.exactBytes) {
+      context.addIssue({ code: "custom", message: "Unexpected decoded byte length." });
+    }
+    if (bounds.minBytes !== undefined && decoded.byteLength < bounds.minBytes) {
+      context.addIssue({ code: "custom", message: "Decoded value is too short." });
+    }
+    if (bounds.maxBytes !== undefined && decoded.byteLength > bounds.maxBytes) {
+      context.addIssue({ code: "custom", message: "Decoded value is too long." });
+    }
+  });
+}
+
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 
 export const encryptedGuestRecoveryArtifactSchema = z
@@ -9,10 +35,10 @@ export const encryptedGuestRecoveryArtifactSchema = z
     version: z.literal(1),
     algorithm: z.literal("aes-256-gcm"),
     keyId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
-    keyEnvelope: base64Schema,
-    nonce: base64Schema,
-    tag: base64Schema,
-    ciphertext: base64Schema,
+    keyEnvelope: canonicalBase64Schema({ minBytes: 1, maxBytes: 64 * 1_024 }),
+    nonce: canonicalBase64Schema({ exactBytes: 12 }),
+    tag: canonicalBase64Schema({ exactBytes: 16 }),
+    ciphertext: canonicalBase64Schema({ minBytes: 1, maxBytes: 2 * 1_024 * 1_024 }),
   })
   .strict();
 

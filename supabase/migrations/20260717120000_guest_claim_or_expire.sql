@@ -9,8 +9,29 @@ alter table private.pipeline_storage_cleanup_jobs
   drop constraint pipeline_storage_cleanup_source_check;
 alter table private.pipeline_storage_cleanup_jobs
   add constraint pipeline_storage_cleanup_source_check check (
-    source_type in ('staging', 'abandoned_item', 'guest_recovery')
+    source_type in (
+      'staging', 'abandoned_item', 'guest_recovery', 'guest_claim_copy'
+    )
   );
+alter table private.pipeline_storage_cleanup_jobs
+  add column guest_copy_writer_quiesced boolean not null default true,
+  add column resweep_requested boolean not null default false,
+  add column guest_copy_final_sweep_armed boolean not null default false,
+  add constraint pipeline_storage_cleanup_guest_copy_fence_check check (
+    source_type = 'guest_claim_copy'
+    or (
+      guest_copy_writer_quiesced
+      and not resweep_requested
+      and not guest_copy_final_sweep_armed
+    )
+  );
+
+comment on column private.pipeline_storage_cleanup_jobs.guest_copy_writer_quiesced is
+  'False keeps obsolete guest-copy cleanup sweeping until its writer exits or the bounded job dead-letters.';
+comment on column private.pipeline_storage_cleanup_jobs.resweep_requested is
+  'A late writer marker that prevents a running cleanup from deleting its durable intent.';
+comment on column private.pipeline_storage_cleanup_jobs.guest_copy_final_sweep_armed is
+  'One-shot fence reserving the final post-writer cleanup without resetting the bounded retry cycle.';
 
 -- Claim moves a tenant key across a coherent graph in one transaction. These
 -- foreign keys remain immediate everywhere else and are deferred only by the
@@ -42,12 +63,14 @@ create table private.guest_draft_recoveries (
   recovery_token_hash text not null,
   encrypted_artifact jsonb,
   storage_manifest jsonb,
+  storage_object_count integer not null,
   usable_draft_at timestamptz not null,
   expires_at timestamptz not null,
   state text not null default 'claimable',
   claim_target_user_id text,
   claim_lease_token uuid,
   claim_lease_expires_at timestamptz,
+  claimed_lease_token uuid,
   claimed_storage_manifest jsonb,
   claimed_at timestamptz,
   expired_at timestamptz,
@@ -74,6 +97,9 @@ create table private.guest_draft_recoveries (
   constraint guest_draft_recoveries_state_check check (
     state in ('claimable', 'copying', 'claimed', 'expired')
   ),
+  constraint guest_draft_recoveries_object_count_check check (
+    storage_object_count between 1 and 4
+  ),
   constraint guest_draft_recoveries_material_check check (
     (
       state in ('claimable', 'copying')
@@ -92,6 +118,7 @@ create table private.guest_draft_recoveries (
       and claim_target_user_id is null
       and claim_lease_token is null
       and claim_lease_expires_at is null
+      and claimed_lease_token is null
       and claimed_storage_manifest is null
       and claimed_at is null
       and expired_at is null
@@ -101,6 +128,7 @@ create table private.guest_draft_recoveries (
       and claim_target_user_id is not null
       and claim_lease_token is not null
       and claim_lease_expires_at is not null
+      and claimed_lease_token is null
       and claimed_storage_manifest is null
       and claimed_at is null
       and expired_at is null
@@ -110,6 +138,7 @@ create table private.guest_draft_recoveries (
       and claim_target_user_id is not null
       and claim_lease_token is null
       and claim_lease_expires_at is null
+      and claimed_lease_token is not null
       and claimed_storage_manifest is not null
       and claimed_at is not null
       and expired_at is null
@@ -119,6 +148,7 @@ create table private.guest_draft_recoveries (
       and claim_target_user_id is null
       and claim_lease_token is null
       and claim_lease_expires_at is null
+      and claimed_lease_token is null
       and claimed_storage_manifest is null
       and claimed_at is null
       and expired_at is not null
@@ -139,6 +169,10 @@ comment on column private.guest_draft_recoveries.usable_draft_at is
   'Exact durable pipeline completed_at timestamp; capture and device clocks never participate.';
 comment on column private.guest_draft_recoveries.recovery_token_hash is
   'SHA-256 of the #174-verified opaque recovery capability. The raw capability is never stored.';
+comment on column private.guest_draft_recoveries.storage_object_count is
+  'Non-secret bounded count retained after manifest purge so only an exact stale lease namespace can be requeued.';
+comment on column private.guest_draft_recoveries.claimed_lease_token is
+  'Winning Storage-copy fence retained so cleanup can never target claimed account objects.';
 
 revoke all on table private.guest_draft_recoveries
   from public, anon, authenticated, service_role;
@@ -159,6 +193,50 @@ end;
 $$;
 
 revoke all on function private.guest_claim_service_role_required()
+  from public, anon, authenticated, service_role;
+
+create or replace function private.valid_guest_base64(
+  p_value text,
+  p_exact_bytes integer default null,
+  p_min_bytes integer default 1,
+  p_max_bytes integer default 2097152
+)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_decoded bytea;
+begin
+  if p_value is null
+    or p_min_bytes is null
+    or p_max_bytes is null
+    or p_min_bytes < 0
+    or p_max_bytes < p_min_bytes
+    or (p_exact_bytes is not null and p_exact_bytes < 0)
+    or p_value !~ '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$'
+    or char_length(p_value) % 4 <> 0 then
+    return false;
+  end if;
+
+  v_decoded := decode(p_value, 'base64');
+  if replace(encode(v_decoded, 'base64'), E'\n', '') <> p_value
+    or octet_length(v_decoded) < p_min_bytes
+    or octet_length(v_decoded) > p_max_bytes
+    or (
+      p_exact_bytes is not null
+      and octet_length(v_decoded) <> p_exact_bytes
+    ) then
+    return false;
+  end if;
+  return true;
+exception when others then
+  return false;
+end;
+$$;
+
+revoke all on function private.valid_guest_base64(text, integer, integer, integer)
   from public, anon, authenticated, service_role;
 
 create or replace function private.guest_terminal_outcome(
@@ -183,6 +261,29 @@ revoke all on function private.guest_terminal_outcome(
   private.guest_draft_recoveries
 ) from public, anon, authenticated, service_role;
 
+create or replace function private.guest_terminal_outcome_for_target(
+  p_recovery private.guest_draft_recoveries,
+  p_target_user_id text
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if p_recovery.state = 'claimed'
+    and p_recovery.claim_target_user_id is distinct from p_target_user_id then
+    raise exception using errcode = 'P0002', message = 'Guest recovery not found';
+  end if;
+  return private.guest_terminal_outcome(p_recovery);
+end;
+$$;
+
+revoke all on function private.guest_terminal_outcome_for_target(
+  private.guest_draft_recoveries, text
+) from public, anon, authenticated, service_role;
+
 create or replace function private.guest_manifest_source_paths(
   p_manifest jsonb
 )
@@ -201,7 +302,8 @@ $$;
 create or replace function private.guest_manifest_destination_paths(
   p_manifest jsonb,
   p_recovery_id uuid,
-  p_target_user_id text
+  p_target_user_id text,
+  p_claim_lease_token uuid
 )
 returns text[]
 language sql
@@ -211,7 +313,7 @@ as $$
   select coalesce(
     array_agg(
       p_target_user_id || '/guest-claims/' || p_recovery_id::text || '/'
-        || entry.ordinality::text
+        || p_claim_lease_token::text || '/' || entry.ordinality::text
       order by entry.ordinality
     ),
     '{}'::text[]
@@ -219,10 +321,37 @@ as $$
   from jsonb_array_elements(p_manifest) with ordinality entry(value, ordinality)
 $$;
 
+create or replace function private.guest_claim_destination_paths(
+  p_recovery_id uuid,
+  p_target_user_id text,
+  p_claim_lease_token uuid,
+  p_object_count integer
+)
+returns text[]
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(
+    array_agg(
+      p_target_user_id || '/guest-claims/' || p_recovery_id::text || '/'
+        || p_claim_lease_token::text || '/' || entry.ordinality::text
+      order by entry.ordinality
+    ),
+    '{}'::text[]
+  )
+  from generate_series(1, p_object_count) entry(ordinality)
+$$;
+
 revoke all on function private.guest_manifest_source_paths(jsonb)
   from public, anon, authenticated, service_role;
-revoke all on function private.guest_manifest_destination_paths(jsonb, uuid, text)
+revoke all on function private.guest_manifest_destination_paths(
+  jsonb, uuid, text, uuid
+)
   from public, anon, authenticated, service_role;
+revoke all on function private.guest_claim_destination_paths(
+  uuid, text, uuid, integer
+) from public, anon, authenticated, service_role;
 
 create or replace function private.guest_claim_photo_remap_allowed(
   p_old public.items,
@@ -263,7 +392,8 @@ begin
       and private.guest_manifest_destination_paths(
         recovery.storage_manifest,
         recovery.id,
-        recovery.claim_target_user_id
+        recovery.claim_target_user_id,
+        recovery.claim_lease_token
       ) is not distinct from p_new.photos
   );
 end;
@@ -553,7 +683,8 @@ begin
             private.guest_manifest_destination_paths(
               recovery.storage_manifest,
               recovery.id,
-              recovery.claim_target_user_id
+              recovery.claim_target_user_id,
+              recovery.claim_lease_token
             )
           )::text, 'UTF8')),
           'hex'
@@ -656,8 +787,7 @@ revoke all on function private.enforce_ai_item_credit_transition()
   from public, anon, authenticated, service_role;
 
 create or replace function private.queue_guest_recovery_storage_cleanup(
-  p_recovery private.guest_draft_recoveries,
-  p_include_claim_destinations boolean default false
+  p_recovery private.guest_draft_recoveries
 )
 returns void
 language plpgsql
@@ -668,15 +798,6 @@ declare
   v_paths text[];
 begin
   v_paths := private.guest_manifest_source_paths(p_recovery.storage_manifest);
-  if p_include_claim_destinations
-    and p_recovery.state = 'copying'
-    and p_recovery.claim_target_user_id is not null then
-    v_paths := v_paths || private.guest_manifest_destination_paths(
-      p_recovery.storage_manifest,
-      p_recovery.id,
-      p_recovery.claim_target_user_id
-    );
-  end if;
   if cardinality(v_paths) not between 1 and 4 then
     raise exception using
       errcode = '23514',
@@ -697,8 +818,219 @@ end;
 $$;
 
 revoke all on function private.queue_guest_recovery_storage_cleanup(
-  private.guest_draft_recoveries, boolean
+  private.guest_draft_recoveries
 ) from public, anon, authenticated, service_role;
+
+create or replace function private.queue_guest_claim_copy_cleanup(
+  p_recovery private.guest_draft_recoveries,
+  p_target_user_id text,
+  p_claim_lease_token uuid,
+  p_writer_quiesced boolean default false
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_paths text[];
+  v_available_at timestamptz := statement_timestamp() + interval '5 minutes';
+begin
+  if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
+    or p_target_user_id !~ '^[A-Za-z0-9_-]+$'
+    or p_target_user_id = p_recovery.guest_user_id
+    or p_claim_lease_token is null
+    or p_recovery.storage_object_count not between 1 and 4 then
+    raise exception using
+      errcode = '23514',
+      message = 'Guest claim copy cleanup requires an exact bounded lease';
+  end if;
+
+  if p_recovery.state = 'claimed'
+    and p_recovery.claim_target_user_id = p_target_user_id
+    and p_recovery.claimed_lease_token = p_claim_lease_token then
+    return false;
+  end if;
+
+  v_paths := private.guest_claim_destination_paths(
+    p_recovery.id,
+    p_target_user_id,
+    p_claim_lease_token,
+    p_recovery.storage_object_count
+  );
+  if cardinality(v_paths) not between 1 and 4 then
+    raise exception using
+      errcode = '23514',
+      message = 'Guest claim copy cleanup is not bounded';
+  end if;
+
+  if p_recovery.state = 'copying'
+    and p_recovery.claim_target_user_id = p_target_user_id
+    and p_recovery.claim_lease_token = p_claim_lease_token then
+    v_available_at := greatest(
+      v_available_at,
+      p_recovery.claim_lease_expires_at + interval '5 minutes'
+    );
+  end if;
+
+  insert into private.pipeline_storage_cleanup_jobs as cleanup_job (
+    source_type,
+    source_id,
+    photo_paths,
+    available_at,
+    guest_copy_writer_quiesced,
+    resweep_requested,
+    guest_copy_final_sweep_armed
+  ) values (
+    'guest_claim_copy',
+    p_claim_lease_token,
+    v_paths,
+    v_available_at,
+    p_writer_quiesced,
+    p_writer_quiesced,
+    false
+  )
+  on conflict (source_type, source_id) do update
+  set state = case
+        when cleanup_job.state = 'dead'
+          and excluded.guest_copy_writer_quiesced
+          and not cleanup_job.guest_copy_final_sweep_armed
+        then 'pending'
+        else cleanup_job.state
+      end,
+      attempt_count = case
+        when cleanup_job.state = 'dead'
+          and excluded.guest_copy_writer_quiesced
+          and not cleanup_job.guest_copy_final_sweep_armed
+        then greatest(0, cleanup_job.max_attempts - 1)
+        else cleanup_job.attempt_count
+      end,
+      available_at = case
+        when cleanup_job.state = 'dead'
+          and excluded.guest_copy_writer_quiesced
+          and not cleanup_job.guest_copy_final_sweep_armed
+        then statement_timestamp() + interval '5 minutes'
+        else cleanup_job.available_at
+      end,
+      safe_error = case
+        when cleanup_job.state = 'dead'
+          and excluded.guest_copy_writer_quiesced
+          and not cleanup_job.guest_copy_final_sweep_armed
+        then null
+        else cleanup_job.safe_error
+      end,
+      guest_copy_writer_quiesced =
+        cleanup_job.guest_copy_writer_quiesced
+        or excluded.guest_copy_writer_quiesced,
+      resweep_requested = case
+        when cleanup_job.state = 'dead'
+          and excluded.guest_copy_writer_quiesced
+          and not cleanup_job.guest_copy_final_sweep_armed
+        then false
+        else cleanup_job.resweep_requested
+          or (
+            excluded.resweep_requested
+            and not cleanup_job.guest_copy_final_sweep_armed
+          )
+      end,
+      guest_copy_final_sweep_armed =
+        cleanup_job.guest_copy_final_sweep_armed
+        or (
+          cleanup_job.state = 'dead'
+          and excluded.guest_copy_writer_quiesced
+          and not cleanup_job.guest_copy_final_sweep_armed
+        ),
+      updated_at = statement_timestamp()
+  where cleanup_job.source_type = 'guest_claim_copy';
+  return true;
+end;
+$$;
+
+revoke all on function private.queue_guest_claim_copy_cleanup(
+  private.guest_draft_recoveries, text, uuid, boolean
+) from public, anon, authenticated, service_role;
+
+create or replace function public.complete_pipeline_storage_cleanup(
+  p_job_id uuid,
+  p_lease_token uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_job private.pipeline_storage_cleanup_jobs%rowtype;
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using
+      errcode = '42501',
+      message = 'Pipeline operations authorization is required';
+  end if;
+
+  select * into v_job
+  from private.pipeline_storage_cleanup_jobs job
+  where job.job_id = p_job_id
+    and job.state = 'running'
+    and job.lease_token = p_lease_token
+    and job.lease_expires_at > statement_timestamp()
+  for update;
+  if not found then return false; end if;
+
+  if v_job.source_type = 'guest_claim_copy'
+    and v_job.resweep_requested
+    and not v_job.guest_copy_final_sweep_armed then
+    -- A quiescence signal that races the ordinary final attempt always earns
+    -- one, and only one, post-writer sweep. Reusing the last attempt number
+    -- keeps the existing bounded failure/dead-letter policy intact.
+    update private.pipeline_storage_cleanup_jobs job
+    set state = 'pending',
+        attempt_count = greatest(0, v_job.max_attempts - 1),
+        available_at = statement_timestamp() + interval '5 minutes',
+        lease_token = null,
+        lease_expires_at = null,
+        resweep_requested = false,
+        guest_copy_final_sweep_armed = true,
+        safe_error = null,
+        updated_at = statement_timestamp()
+    where job.job_id = v_job.job_id;
+    return true;
+  end if;
+
+  if v_job.source_type = 'guest_claim_copy'
+    and not v_job.guest_copy_writer_quiesced then
+    if v_job.attempt_count >= v_job.max_attempts then
+      update private.pipeline_storage_cleanup_jobs job
+      set state = 'dead',
+          lease_token = null,
+          lease_expires_at = null,
+          safe_error = 'Guest claim copy cleanup requires reconciliation.',
+          updated_at = statement_timestamp()
+      where job.job_id = v_job.job_id;
+    else
+      update private.pipeline_storage_cleanup_jobs job
+      set state = 'pending',
+          available_at = statement_timestamp() + interval '5 minutes',
+          lease_token = null,
+          lease_expires_at = null,
+          resweep_requested = false,
+          safe_error = null,
+          updated_at = statement_timestamp()
+      where job.job_id = v_job.job_id;
+    end if;
+    return true;
+  end if;
+
+  delete from private.pipeline_storage_cleanup_jobs job
+  where job.job_id = v_job.job_id;
+  return found;
+end;
+$$;
+
+revoke all on function public.complete_pipeline_storage_cleanup(uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.complete_pipeline_storage_cleanup(uuid, uuid)
+  to service_role;
 
 create or replace function private.expire_guest_recovery_locked(
   p_recovery_id uuid
@@ -724,7 +1056,14 @@ begin
     return v_recovery;
   end if;
 
-  perform private.queue_guest_recovery_storage_cleanup(v_recovery, true);
+  perform private.queue_guest_recovery_storage_cleanup(v_recovery);
+  if v_recovery.state = 'copying' then
+    perform private.queue_guest_claim_copy_cleanup(
+      v_recovery,
+      v_recovery.claim_target_user_id,
+      v_recovery.claim_lease_token
+    );
+  end if;
 
   delete from public.listings draft
   where draft.id = v_recovery.draft_id
@@ -816,10 +1155,24 @@ begin
     or p_encrypted_artifact->>'version' <> '1'
     or p_encrypted_artifact->>'algorithm' <> 'aes-256-gcm'
     or coalesce(p_encrypted_artifact->>'keyId', '') !~ '^[A-Za-z0-9_-]{1,128}$'
-    or coalesce(p_encrypted_artifact->>'keyEnvelope', '') !~ '^[A-Za-z0-9+/]+={0,2}$'
-    or coalesce(p_encrypted_artifact->>'nonce', '') !~ '^[A-Za-z0-9+/]+={0,2}$'
-    or coalesce(p_encrypted_artifact->>'tag', '') !~ '^[A-Za-z0-9+/]+={0,2}$'
-    or coalesce(p_encrypted_artifact->>'ciphertext', '') !~ '^[A-Za-z0-9+/]+={0,2}$'
+    or not coalesce(private.valid_guest_base64(
+      p_encrypted_artifact->>'keyEnvelope',
+      p_min_bytes => 1,
+      p_max_bytes => 65536
+    ), false)
+    or not coalesce(private.valid_guest_base64(
+      p_encrypted_artifact->>'nonce',
+      p_exact_bytes => 12
+    ), false)
+    or not coalesce(private.valid_guest_base64(
+      p_encrypted_artifact->>'tag',
+      p_exact_bytes => 16
+    ), false)
+    or not coalesce(private.valid_guest_base64(
+      p_encrypted_artifact->>'ciphertext',
+      p_min_bytes => 1,
+      p_max_bytes => 2097152
+    ), false)
     or pg_column_size(p_encrypted_artifact) > 2 * 1024 * 1024
     or jsonb_typeof(p_storage_manifest) is distinct from 'array'
     or jsonb_array_length(p_storage_manifest) not between 1 and 4 then
@@ -839,7 +1192,10 @@ begin
       or jsonb_typeof(v_object->'sourcePath') is distinct from 'string'
       or jsonb_typeof(v_object->'sha256') is distinct from 'string'
       or jsonb_typeof(v_object->'byteLength') is distinct from 'number'
-      or v_object->>'sourcePath' not like p_guest_user_id || '/%'
+      or left(
+        v_object->>'sourcePath', char_length(p_guest_user_id) + 1
+      ) <> p_guest_user_id || '/'
+      or char_length(v_object->>'sourcePath') <= char_length(p_guest_user_id) + 1
       or v_object->>'sourcePath' like '%://%'
       or v_object->>'sourcePath' ~ '[?#]'
       or v_object->>'sourcePath' ~ '(^|/)\.\.?(/|$)'
@@ -976,6 +1332,7 @@ begin
     recovery_token_hash,
     encrypted_artifact,
     storage_manifest,
+    storage_object_count,
     usable_draft_at,
     expires_at
   ) values (
@@ -989,6 +1346,7 @@ begin
     p_recovery_token_hash,
     p_encrypted_artifact,
     p_storage_manifest,
+    jsonb_array_length(p_storage_manifest),
     v_run.completed_at,
     v_run.completed_at + interval '24 hours'
   )
@@ -1117,7 +1475,9 @@ begin
     v_recovery := private.expire_guest_recovery_locked(v_recovery.id);
   end if;
   if v_recovery.state in ('claimed', 'expired') then
-    return private.guest_terminal_outcome(v_recovery);
+    return private.guest_terminal_outcome_for_target(
+      v_recovery, p_target_user_id
+    );
   end if;
 
   if v_recovery.state = 'copying'
@@ -1131,6 +1491,16 @@ begin
     return jsonb_build_object(
       'outcome', 'in_progress',
       'retryAfterSeconds', v_retry_after
+    );
+  end if;
+
+  if v_recovery.state = 'copying' then
+    -- A new lease always receives a new destination namespace. Persist cleanup
+    -- for the obsolete lease before replacing its only durable authority.
+    perform private.queue_guest_claim_copy_cleanup(
+      v_recovery,
+      v_recovery.claim_target_user_id,
+      v_recovery.claim_lease_token
     );
   end if;
 
@@ -1148,7 +1518,8 @@ begin
     jsonb_build_object(
       'sourcePath', entry.value->>'sourcePath',
       'destinationPath', p_target_user_id || '/guest-claims/'
-        || v_recovery.id::text || '/' || entry.ordinality::text,
+        || v_recovery.id::text || '/' || v_recovery.claim_lease_token::text
+        || '/' || entry.ordinality::text,
       'sha256', entry.value->>'sha256',
       'byteLength', (entry.value->>'byteLength')::bigint
     ) order by entry.ordinality
@@ -1175,6 +1546,54 @@ grant execute on function public.begin_guest_draft_claim(
   uuid, text, text, text, integer
 ) to service_role;
 
+create or replace function public.queue_guest_claim_copy_cleanup(
+  p_recovery_id uuid,
+  p_recovery_token_hash text,
+  p_target_user_id text,
+  p_claim_lease_token uuid
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_recovery private.guest_draft_recoveries%rowtype;
+begin
+  perform private.guest_claim_service_role_required();
+  if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
+    or p_target_user_id !~ '^[A-Za-z0-9_-]+$'
+    or p_claim_lease_token is null then
+    raise exception using errcode = '22023', message = 'Invalid guest cleanup request';
+  end if;
+  perform pg_advisory_xact_lock(
+    hashtextextended('guest-recovery:' || p_recovery_id::text, 0)
+  );
+  select * into v_recovery
+  from private.guest_draft_recoveries recovery
+  where recovery.id = p_recovery_id
+    and recovery.recovery_token_hash = p_recovery_token_hash
+  for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Guest recovery not found';
+  end if;
+
+  return private.queue_guest_claim_copy_cleanup(
+    v_recovery,
+    p_target_user_id,
+    p_claim_lease_token,
+    true
+  );
+end;
+$$;
+
+revoke all on function public.queue_guest_claim_copy_cleanup(
+  uuid, text, text, uuid
+) from public, anon, authenticated;
+grant execute on function public.queue_guest_claim_copy_cleanup(
+  uuid, text, text, uuid
+) to service_role;
+
 create or replace function public.release_guest_draft_claim(
   p_recovery_id uuid,
   p_recovery_token_hash text,
@@ -1190,6 +1609,10 @@ declare
   v_recovery private.guest_draft_recoveries%rowtype;
 begin
   perform private.guest_claim_service_role_required();
+  if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
+    or p_target_user_id !~ '^[A-Za-z0-9_-]+$' then
+    raise exception using errcode = '22023', message = 'Invalid guest claim request';
+  end if;
   perform pg_advisory_xact_lock(
     hashtextextended('guest-recovery:' || p_recovery_id::text, 0)
   );
@@ -1207,7 +1630,22 @@ begin
     v_recovery := private.expire_guest_recovery_locked(v_recovery.id);
   end if;
   if v_recovery.state in ('claimed', 'expired') then
-    return private.guest_terminal_outcome(v_recovery);
+    return private.guest_terminal_outcome_for_target(
+      v_recovery, p_target_user_id
+    );
+  end if;
+
+  if v_recovery.state = 'copying'
+    and v_recovery.claim_target_user_id = p_target_user_id
+    and v_recovery.claim_lease_token = p_claim_lease_token then
+    -- The cleanup job and lease release commit together. Paths are unique to
+    -- this lease, so a later successful retry can never be deleted by it.
+    perform private.queue_guest_claim_copy_cleanup(
+      v_recovery,
+      p_target_user_id,
+      p_claim_lease_token,
+      true
+    );
   end if;
 
   update private.guest_draft_recoveries recovery
@@ -1247,6 +1685,10 @@ declare
   v_recovery private.guest_draft_recoveries%rowtype;
 begin
   perform private.guest_claim_service_role_required();
+  if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
+    or p_target_user_id !~ '^[A-Za-z0-9_-]+$' then
+    raise exception using errcode = '22023', message = 'Invalid guest claim request';
+  end if;
   perform pg_advisory_xact_lock(
     hashtextextended('guest-recovery:' || p_recovery_id::text, 0)
   );
@@ -1268,7 +1710,9 @@ begin
     v_recovery := private.expire_guest_recovery_locked(v_recovery.id);
   end if;
   if v_recovery.state in ('claimed', 'expired') then
-    return private.guest_terminal_outcome(v_recovery);
+    return private.guest_terminal_outcome_for_target(
+      v_recovery, p_target_user_id
+    );
   end if;
   return jsonb_build_object('outcome', 'claimable');
 end;
@@ -1303,6 +1747,10 @@ declare
   v_target_used integer;
 begin
   perform private.guest_claim_service_role_required();
+  if coalesce(char_length(p_target_user_id), 0) not between 1 and 255
+    or p_target_user_id !~ '^[A-Za-z0-9_-]+$' then
+    raise exception using errcode = '22023', message = 'Invalid guest claim request';
+  end if;
   perform pg_advisory_xact_lock(
     hashtextextended('guest-recovery:' || p_recovery_id::text, 0)
   );
@@ -1320,7 +1768,9 @@ begin
     v_recovery := private.expire_guest_recovery_locked(v_recovery.id);
   end if;
   if v_recovery.state in ('claimed', 'expired') then
-    return private.guest_terminal_outcome(v_recovery);
+    return private.guest_terminal_outcome_for_target(
+      v_recovery, p_target_user_id
+    );
   end if;
   if v_recovery.state <> 'copying'
     or v_recovery.claim_target_user_id is distinct from p_target_user_id
@@ -1332,7 +1782,8 @@ begin
   select jsonb_agg(
     jsonb_build_object(
       'destinationPath', p_target_user_id || '/guest-claims/'
-        || v_recovery.id::text || '/' || entry.ordinality::text,
+        || v_recovery.id::text || '/' || p_claim_lease_token::text
+        || '/' || entry.ordinality::text,
       'sha256', entry.value->>'sha256',
       'byteLength', (entry.value->>'byteLength')::bigint
     ) order by entry.ordinality
@@ -1390,6 +1841,10 @@ begin
     and reservation.user_id = v_recovery.guest_user_id
     and reservation.state = 'settled'
     and reservation.listing_id = v_recovery.draft_id
+    and (
+      reservation.guided_correction_started_at is null
+      or reservation.guided_correction_completed_at is not null
+    )
   for update;
   if not found then
     raise exception using errcode = '55000', message = 'Settled guest credit changed';
@@ -1417,12 +1872,13 @@ begin
       message = 'Guest claim contains unsupported post-draft records';
   end if;
 
-  if not exists (
-    select 1
+  perform draft.id
     from public.listings draft
+    join public.items item
+      on item.id = draft.item_id
+     and item.user_id = draft.user_id
     join public.prediction_logs prediction
-      on prediction.id = v_reservation.prediction_log_id
-     and prediction.run_id = v_recovery.pipeline_run_id
+      on prediction.run_id = draft.run_id
      and prediction.item_id = v_recovery.item_id
      and prediction.user_id = v_recovery.guest_user_id
     where draft.id = v_recovery.draft_id
@@ -1432,7 +1888,34 @@ begin
       and draft.ebay_listing_id is null
       and draft.ebay_status is distinct from 'publishing'
       and draft.ebay_status is distinct from 'published'
-  ) then
+      and jsonb_typeof(item.attributes) = 'object'
+      and item.attributes <> '{}'::jsonb
+      and jsonb_typeof(item.identification) = 'object'
+      and item.review_revision is not distinct from item.review_content_revision
+      and draft.source_review_revision is not distinct from item.review_revision
+      and prediction.price > 0
+      and jsonb_typeof(prediction.price_range) = 'object'
+      and prediction.confidence between 0 and 1
+      and coalesce(btrim(prediction.tier_fired), '') <> ''
+      and jsonb_typeof(prediction.sources) = 'array'
+      and (
+        jsonb_array_length(prediction.sources) > 0
+        or prediction.tier_fired = 'llm-only'
+      )
+      and draft.platform = 'ebay'
+      and coalesce(btrim(draft.title), '') <> ''
+      and char_length(draft.title) <= 80
+      and coalesce(btrim(draft.description), '') <> ''
+      and exists (
+        select 1
+        from public.prediction_logs settled_prediction
+        where settled_prediction.id = v_reservation.prediction_log_id
+          and settled_prediction.run_id = v_recovery.pipeline_run_id
+          and settled_prediction.item_id = v_recovery.item_id
+          and settled_prediction.user_id = v_recovery.guest_user_id
+      )
+  for update of draft, prediction;
+  if not found then
     raise exception using errcode = '55000', message = 'Guest draft is no longer claimable';
   end if;
 
@@ -1532,7 +2015,8 @@ begin
   v_destination_paths := private.guest_manifest_destination_paths(
     v_recovery.storage_manifest,
     v_recovery.id,
-    p_target_user_id
+    p_target_user_id,
+    p_claim_lease_token
   );
   v_new_fingerprint := encode(
     sha256(convert_to(array_to_json(v_destination_paths)::text, 'UTF8')),
@@ -1557,7 +2041,7 @@ begin
 
   update public.prediction_logs prediction
   set user_id = p_target_user_id
-  where prediction.id = v_reservation.prediction_log_id
+  where prediction.item_id = v_recovery.item_id
     and prediction.user_id = v_recovery.guest_user_id;
 
   update public.notifications notification
@@ -1588,10 +2072,11 @@ begin
       );
   end if;
 
-  perform private.queue_guest_recovery_storage_cleanup(v_recovery, false);
+  perform private.queue_guest_recovery_storage_cleanup(v_recovery);
 
   update private.guest_draft_recoveries recovery
   set state = 'claimed',
+      claimed_lease_token = p_claim_lease_token,
       claim_lease_token = null,
       claim_lease_expires_at = null,
       encrypted_artifact = null,
@@ -1607,7 +2092,9 @@ begin
     raise exception using errcode = '55000', message = 'Guest claim lost its lease';
   end if;
 
-  return private.guest_terminal_outcome(v_recovery);
+  return private.guest_terminal_outcome_for_target(
+    v_recovery, p_target_user_id
+  );
 end;
 $$;
 

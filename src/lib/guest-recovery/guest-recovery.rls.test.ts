@@ -12,6 +12,8 @@ import {
   resolveLocalTestDatabaseUrl,
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
+import { runPipelineMaintenance } from "@/lib/pipeline-operations/maintenance";
+import { createSupabasePipelineOperationsStore } from "@/lib/pipeline-operations/store";
 import { createSupabaseGuestRecoveryStore } from "./recovery-store";
 import {
   GuestClaimStorageError,
@@ -33,9 +35,9 @@ const encryptedArtifact = {
   version: 1 as const,
   algorithm: "aes-256-gcm" as const,
   keyId: "guest-recovery-test-v1",
-  keyEnvelope: Buffer.from("wrapped-test-key").toString("base64"),
-  nonce: Buffer.from("twelve-bytes!").toString("base64"),
-  tag: Buffer.from("authentication-tag").toString("base64"),
+  keyEnvelope: Buffer.alloc(32, 1).toString("base64"),
+  nonce: Buffer.alloc(12, 2).toString("base64"),
+  tag: Buffer.alloc(16, 3).toString("base64"),
   ciphertext: Buffer.from("encrypted-draft-artifact").toString("base64"),
 };
 
@@ -53,7 +55,7 @@ interface Fixture {
   targetPeriodId: string | null;
   reviewRevision: string;
   completedAt: string;
-  objects: GuestClaimObject[];
+  objects: Array<Omit<GuestClaimObject, "destinationPath">>;
 }
 
 let reachable = false;
@@ -62,6 +64,7 @@ let database: Client;
 let lease: ExclusiveTestResourceLease | undefined;
 const users: ClerkTestUser[] = [];
 const recoveryIds: string[] = [];
+const claimLeaseIds = new Set<string>();
 const storagePaths = new Set<string>();
 
 async function stackReachable(): Promise<boolean> {
@@ -115,14 +118,12 @@ async function createFixture(
   const reviewRevision = crypto.randomUUID();
   const completedAt = options.completedAt ?? new Date().toISOString();
   const contents = options.photoContents ?? ["encrypted-front", "encrypted-back"];
-  const objects: GuestClaimObject[] = contents.map((content, index) => {
+  const objects: Array<Omit<GuestClaimObject, "destinationPath">> = contents.map((content, index) => {
     const bytes = new TextEncoder().encode(content);
     const sourcePath = `${guest.id}/guest-recovery/${itemId}/${index}.enc`;
     storagePaths.add(sourcePath);
-    storagePaths.add(`${target.id}/guest-claims/${recoveryId}/${index + 1}`);
     return {
       sourcePath,
-      destinationPath: `${target.id}/guest-claims/${recoveryId}/${index + 1}`,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: bytes.byteLength,
     };
@@ -132,10 +133,10 @@ async function createFixture(
   try {
     await database.query(
       `insert into public.items (
-         id, user_id, photos, attributes, condition,
+         id, user_id, photos, attributes, condition, identification,
          review_revision, review_content_revision
        ) values ($1, $2, $3, '{"brand":"RecoveryFixture"}'::jsonb,
-         'good', $4, $4)`,
+         'good', '{"kind":"fixture"}'::jsonb, $4, $4)`,
       [itemId, guest.id, objects.map((object) => object.sourcePath), reviewRevision],
     );
     await database.query(
@@ -261,11 +262,30 @@ function recoveryStore() {
 }
 
 function claimStore() {
-  return createSupabaseGuestClaimStore(admin as never);
+  const store = createSupabaseGuestClaimStore(admin as never);
+  return {
+    ...store,
+    async beginClaim(input: Parameters<typeof store.beginClaim>[0]) {
+      const outcome = await store.beginClaim(input);
+      if (outcome.outcome === "copy_required") {
+        claimLeaseIds.add(outcome.claimLeaseToken);
+      }
+      return outcome;
+    },
+  };
 }
 
 function claimStorage() {
-  return createSupabaseGuestClaimStorage(admin as never);
+  const storage = createSupabaseGuestClaimStorage(admin as never);
+  return {
+    async copyAndVerify(object: GuestClaimObject) {
+      storagePaths.add(object.destinationPath);
+      const segments = object.destinationPath.split("/");
+      const leaseId = segments.at(-2);
+      if (leaseId) claimLeaseIds.add(leaseId);
+      return storage.copyAndVerify(object);
+    },
+  };
 }
 
 async function register(fixture: Fixture, shaOverride?: string) {
@@ -307,6 +327,12 @@ afterAll(async () => {
     await database.query(
       "delete from private.guest_draft_recoveries where id = any($1::uuid[])",
       [recoveryIds],
+    );
+  }
+  if (claimLeaseIds.size > 0) {
+    await database.query(
+      "delete from private.pipeline_storage_cleanup_jobs where source_type = 'guest_claim_copy' and source_id = any($1::uuid[])",
+      [[...claimLeaseIds]],
     );
   }
   await cleanupClerkTestUsers(admin, users.map((user) => user.id));
@@ -383,16 +409,20 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       fixture.target.client.from("items").select("id, photos").eq("id", fixture.itemId),
       fixture.guest.client.from("items").select("id").eq("id", fixture.itemId),
     ]);
-    expect(targetItem.data).toEqual([{
-      id: fixture.itemId,
-      photos: fixture.objects.map((object) => object.destinationPath),
-    }]);
+    expect(targetItem.data).toHaveLength(1);
+    const claimedPhotos = targetItem.data?.[0]?.photos as string[];
+    expect(claimedPhotos).toHaveLength(fixture.objects.length);
+    claimedPhotos.forEach((path, index) => {
+      expect(path).toMatch(new RegExp(
+        `^${fixture.target.id}/guest-claims/${fixture.recoveryId}/[0-9a-f-]{36}/${index + 1}$`,
+      ));
+    });
     expect(guestItem.data).toEqual([]);
 
-    for (const object of fixture.objects) {
+    for (const path of claimedPhotos) {
       const downloaded = await fixture.target.client.storage
         .from("photos")
-        .download(object.destinationPath);
+        .download(path);
       expect(downloaded.error).toBeNull();
     }
     const attribution = await database.query(
@@ -429,6 +459,32 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       }),
     ).resolves.toEqual(outcome);
 
+    const otherTarget = `${fixture.target.id}_other`;
+    await expect(claimStore().beginClaim({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: otherTarget,
+      guestUserId: fixture.guest.id,
+      leaseSeconds: 300,
+    })).rejects.toThrow(/not found/i);
+    await expect(claimStore().releaseClaim({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: otherTarget,
+      claimLeaseToken: crypto.randomUUID(),
+    })).rejects.toThrow(/not found/i);
+    await expect(claimStore().completeClaim({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: otherTarget,
+      claimLeaseToken: crypto.randomUUID(),
+      verifiedObjects: [{
+        destinationPath: `${otherTarget}/guest-claims/${fixture.recoveryId}/${crypto.randomUUID()}/1`,
+        sha256: "f".repeat(64),
+        byteLength: 1,
+      }],
+    })).rejects.toThrow(/not found/i);
+
     const entitlement = await admin.rpc("get_verified_ai_item_entitlement", {
       p_user_id: fixture.target.id,
     });
@@ -436,6 +492,87 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     expect(entitlement.data?.[0]).toMatchObject({
       billing_source: "included",
       remaining_items: 0,
+    });
+  }, 20_000);
+
+  it("claims the current guided-correction prediction/run without changing settled accounting", async () => {
+    if (!reachable) return;
+    const fixture = await createFixture("guided_correction");
+    const correctedRunId = crypto.randomUUID();
+    const correctedPredictionId = crypto.randomUUID();
+    await database.query("begin");
+    try {
+      await database.query(
+        `insert into public.prediction_logs (
+           id, user_id, item_id, run_id, extracted_attrs, price, price_range,
+           confidence, tier_fired, model, listing_model, sources
+         ) values ($1, $2, $3, $4, '{"brand":"CorrectedFixture"}'::jsonb,
+           27, '{"low":22,"high":32}'::jsonb, 0.9, 'llm-only',
+           'offline-corrected-model', 'offline-corrected-listing', '[]'::jsonb)`,
+        [correctedPredictionId, fixture.guest.id, fixture.itemId, correctedRunId],
+      );
+      await database.query(
+        `update public.items
+         set attributes = '{"brand":"CorrectedFixture"}'::jsonb,
+             review_revision = $1,
+             review_content_revision = $1
+         where id = $2 and user_id = $3`,
+        [correctedRunId, fixture.itemId, fixture.guest.id],
+      );
+      await database.query(
+        `update public.listings
+         set run_id = $1, source_review_revision = $1
+         where id = $2 and user_id = $3`,
+        [correctedRunId, fixture.draftId, fixture.guest.id],
+      );
+      await database.query(
+        `update public.ai_item_credit_reservations
+         set guided_correction_revision = $1,
+             guided_correction_started_at = statement_timestamp(),
+             guided_correction_completed_at = statement_timestamp(),
+             updated_at = statement_timestamp()
+         where id = $2`,
+        [fixture.reviewRevision, fixture.reservationId],
+      );
+      await database.query("commit");
+    } catch (error) {
+      await database.query("rollback");
+      throw error;
+    }
+
+    await register(fixture);
+    await expect(claimGuestRecovery(
+      {
+        handoff: {
+          recoveryId: fixture.recoveryId,
+          guestUserId: fixture.guest.id,
+          recoveryTokenHash: fixture.recoveryTokenHash,
+        },
+        targetUserId: fixture.target.id,
+      },
+      { store: claimStore(), storage: claimStorage() },
+    )).resolves.toMatchObject({ outcome: "claimed" });
+
+    const transferred = await database.query(
+      `select
+         (select user_id from public.prediction_logs where id = $1) as settled_prediction_user,
+         (select user_id from public.prediction_logs where id = $2) as corrected_prediction_user,
+         (select run_id from public.listings where id = $3) as draft_run_id,
+         (select state from public.ai_item_credit_reservations where id = $4) as reservation_state,
+         (select count(*)::integer from public.ai_item_credit_reservations where id = $4) as reservation_count`,
+      [
+        fixture.predictionId,
+        correctedPredictionId,
+        fixture.draftId,
+        fixture.reservationId,
+      ],
+    );
+    expect(transferred.rows[0]).toEqual({
+      settled_prediction_user: fixture.target.id,
+      corrected_prediction_user: fixture.target.id,
+      draft_run_id: correctedRunId,
+      reservation_state: "settled",
+      reservation_count: 1,
     });
   }, 20_000);
 
@@ -468,8 +605,16 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     expect(
       await fixture.guest.client.from("items").select("id").eq("id", fixture.itemId),
     ).toMatchObject({ data: [{ id: fixture.itemId }] });
+    const cleanup = await database.query(
+      `select photo_paths
+       from private.pipeline_storage_cleanup_jobs
+       where source_type = 'guest_claim_copy'
+         and photo_paths[1] like $1`,
+      [`${fixture.target.id}/guest-claims/${fixture.recoveryId}/%`],
+    );
+    expect(cleanup.rows).toHaveLength(1);
     expect(
-      (await admin.storage.from("photos").download(fixture.objects[0].destinationPath)).error,
+      (await admin.storage.from("photos").download(cleanup.rows[0].photo_paths[0])).error,
     ).not.toBeNull();
   });
 
@@ -502,19 +647,53 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       "update private.guest_draft_recoveries set claim_lease_expires_at = statement_timestamp() - interval '1 second' where id = $1",
       [fixture.recoveryId],
     );
-    await expect(
-      claimGuestRecovery(
-        {
-          handoff: {
-            recoveryId: fixture.recoveryId,
-            guestUserId: fixture.guest.id,
-            recoveryTokenHash: fixture.recoveryTokenHash,
-          },
-          targetUserId: fixture.target.id,
+    const retryOutcome = await claimGuestRecovery(
+      {
+        handoff: {
+          recoveryId: fixture.recoveryId,
+          guestUserId: fixture.guest.id,
+          recoveryTokenHash: fixture.recoveryTokenHash,
         },
-        { store: claimStore(), storage: claimStorage() },
-      ),
-    ).resolves.toMatchObject({ outcome: "claimed" });
+        targetUserId: fixture.target.id,
+      },
+      { store: claimStore(), storage: claimStorage() },
+    );
+    expect(retryOutcome).toMatchObject({ outcome: "claimed" });
+    await database.query(
+      "delete from private.pipeline_storage_cleanup_jobs where source_type = 'guest_claim_copy' and source_id = $1",
+      [plan.claimLeaseToken],
+    );
+    await expect(claimStore().queueCopyCleanup({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: fixture.target.id,
+      claimLeaseToken: plan.claimLeaseToken,
+    })).resolves.toBe(true);
+    await expect(claimStore().releaseClaim({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: fixture.target.id,
+      claimLeaseToken: plan.claimLeaseToken,
+    })).resolves.toEqual(retryOutcome);
+    const oldCleanup = await database.query(
+      "select photo_paths from private.pipeline_storage_cleanup_jobs where source_type = 'guest_claim_copy' and source_id = $1",
+      [plan.claimLeaseToken],
+    );
+    expect(oldCleanup.rows[0].photo_paths).toEqual(
+      plan.objects.map((object) => object.destinationPath),
+    );
+    const claimed = await fixture.target.client
+      .from("items")
+      .select("photos")
+      .eq("id", fixture.itemId)
+      .single();
+    expect(claimed.error).toBeNull();
+    expect(claimed.data?.photos).not.toEqual(
+      plan.objects.map((object) => object.destinationPath),
+    );
+    for (const path of claimed.data?.photos ?? []) {
+      expect((await admin.storage.from("photos").download(path)).error).toBeNull();
+    }
     expect(
       await database.query(
         "select count(*)::integer as count from public.ai_item_credit_reservations where id = $1 and state = 'settled'",
@@ -568,6 +747,104 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     });
   });
 
+  it("expires a four-photo copying claim into separate bounded source and destination cleanup jobs", async () => {
+    if (!reachable) return;
+    const fixture = await createFixture("four_photo_expiry", {
+      photoContents: ["one", "two", "three", "four"],
+    });
+    await register(fixture);
+    const plan = await claimStore().beginClaim({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: fixture.target.id,
+      guestUserId: fixture.guest.id,
+      leaseSeconds: 300,
+    });
+    if (plan.outcome !== "copy_required") throw new Error("expected copy plan");
+    await database.query(
+      `update private.guest_draft_recoveries
+       set usable_draft_at = statement_timestamp() - interval '24 hours',
+           expires_at = statement_timestamp()
+       where id = $1`,
+      [fixture.recoveryId],
+    );
+
+    const expired = await admin.rpc("expire_guest_draft_recoveries", {
+      p_batch_size: 25,
+    });
+    expect(expired.error).toBeNull();
+    const cleanup = await database.query(
+      `select
+         (select state from private.guest_draft_recoveries where id = $1) as state,
+         (select cardinality(photo_paths) from private.pipeline_storage_cleanup_jobs where source_type = 'guest_recovery' and source_id = $1) as source_count,
+         (select cardinality(photo_paths) from private.pipeline_storage_cleanup_jobs where source_type = 'guest_claim_copy' and source_id = $2) as destination_count`,
+      [fixture.recoveryId, plan.claimLeaseToken],
+    );
+    expect(cleanup.rows[0]).toEqual({
+      state: "expired",
+      source_count: 4,
+      destination_count: 4,
+    });
+  });
+
+  it("keeps the winning claim namespace alive when expiry and real maintenance run afterward", async () => {
+    if (!reachable) return;
+    const fixture = await createFixture("claim_wins_race", {
+      photoContents: ["claim-wins-source"],
+    });
+    await register(fixture);
+    const plan = await claimStore().beginClaim({
+      recoveryId: fixture.recoveryId,
+      recoveryTokenHash: fixture.recoveryTokenHash,
+      targetUserId: fixture.target.id,
+      guestUserId: fixture.guest.id,
+      leaseSeconds: 300,
+    });
+    if (plan.outcome !== "copy_required") throw new Error("expected plan");
+    const verified = await Promise.all(
+      plan.objects.map((object) => claimStorage().copyAndVerify(object)),
+    );
+
+    const [completion, expiry] = await Promise.all([
+      claimStore().completeClaim({
+        recoveryId: fixture.recoveryId,
+        recoveryTokenHash: fixture.recoveryTokenHash,
+        targetUserId: fixture.target.id,
+        claimLeaseToken: plan.claimLeaseToken,
+        verifiedObjects: verified,
+      }),
+      admin.rpc("expire_guest_draft_recoveries", { p_batch_size: 25 }),
+    ]);
+    expect(completion.outcome).toBe("claimed");
+    expect(expiry.error).toBeNull();
+    expect(
+      await database.query(
+        "select count(*)::integer as count from private.pipeline_storage_cleanup_jobs where source_type = 'guest_claim_copy' and source_id = $1",
+        [plan.claimLeaseToken],
+      ),
+    ).toMatchObject({ rows: [{ count: 0 }] });
+
+    const operations = createSupabasePipelineOperationsStore(admin as never);
+    await runPipelineMaintenance({
+      store: operations,
+      photos: {
+        async remove(paths) {
+          const removed = await admin.storage.from("photos").remove(paths);
+          if (removed.error) throw new Error(removed.error.message);
+        },
+      },
+    });
+
+    expect(
+      (await admin.storage.from("photos").download(fixture.objects[0].sourcePath)).error,
+    ).not.toBeNull();
+    for (const object of plan.objects) {
+      expect(
+        (await admin.storage.from("photos").download(object.destinationPath)).error,
+      ).toBeNull();
+    }
+  }, 30_000);
+
   it("lets exactly one terminal predicate win when claim completion races expiry cleanup", async () => {
     if (!reachable) return;
     const fixture = await createFixture("race", {
@@ -611,13 +888,20 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     );
     expect(terminal.rows[0]).toMatchObject({ state: "expired", claimed_at: null });
     expect(terminal.rows[0].expired_at).not.toBeNull();
-    const cleanupPaths = await database.query(
+    const sourceCleanupPaths = await database.query(
       "select photo_paths from private.pipeline_storage_cleanup_jobs where source_type = 'guest_recovery' and source_id = $1",
       [fixture.recoveryId],
     );
-    expect(cleanupPaths.rows[0].photo_paths.sort()).toEqual(
-      [fixture.objects[0].sourcePath, fixture.objects[0].destinationPath].sort(),
+    expect(sourceCleanupPaths.rows[0].photo_paths).toEqual([
+      fixture.objects[0].sourcePath,
+    ]);
+    const copyCleanupPaths = await database.query(
+      "select photo_paths from private.pipeline_storage_cleanup_jobs where source_type = 'guest_claim_copy' and source_id = $1",
+      [plan.claimLeaseToken],
     );
+    expect(copyCleanupPaths.rows[0].photo_paths).toEqual([
+      plan.objects[0].destinationPath,
+    ]);
     expect(
       await database.query(
         "select count(*)::integer as count from public.items where id = $1 and user_id = $2",

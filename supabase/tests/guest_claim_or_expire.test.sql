@@ -1,6 +1,6 @@
 begin;
 
-select plan(33);
+select plan(52);
 
 select ok(
   to_regclass('private.guest_draft_recoveries') is not null,
@@ -29,6 +29,22 @@ select ok(
   'authenticated callers cannot forge claim completion'
 );
 select ok(
+  has_function_privilege(
+    'service_role',
+    'public.queue_guest_claim_copy_cleanup(uuid,text,text,uuid)',
+    'execute'
+  ),
+  'service role may requeue only one exact guest claim-copy lease'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.queue_guest_claim_copy_cleanup(uuid,text,text,uuid)',
+    'execute'
+  ),
+  'authenticated callers cannot mint claim-copy cleanup authority'
+);
+select ok(
   not has_function_privilege(
     'anon',
     'public.expire_guest_draft_recoveries(integer)',
@@ -52,7 +68,7 @@ create temporary table guest_claim_results (
 grant select, insert, update on guest_claim_results to service_role;
 
 insert into public.items (
-  id, user_id, photos, attributes, condition,
+  id, user_id, photos, attributes, condition, identification,
   review_revision, review_content_revision
 ) values
   (
@@ -61,6 +77,7 @@ insert into public.items (
     array['guest_pgtap_claim/items/front.enc'],
     '{"brand":"Fixture"}'::jsonb,
     'good',
+    '{"kind":"fixture"}'::jsonb,
     '80000000-0000-4000-8000-000000000001',
     '80000000-0000-4000-8000-000000000001'
   ),
@@ -70,6 +87,7 @@ insert into public.items (
     array['guest_pgtap_expire/items/front.enc'],
     '{"brand":"Expiry"}'::jsonb,
     'good',
+    '{"kind":"fixture"}'::jsonb,
     '80000000-0000-4000-8000-000000000002',
     '80000000-0000-4000-8000-000000000002'
   ),
@@ -78,6 +96,7 @@ insert into public.items (
     'guest_pgtap_claim',
     array['guest_pgtap_claim/items/restored.enc'],
     '{}'::jsonb,
+    null,
     null,
     '80000000-0000-4000-8000-000000000003',
     '80000000-0000-4000-8000-000000000003'
@@ -279,8 +298,83 @@ insert into public.ai_item_credit_reservations (
     null
   );
 
+-- Simulate the included #168 guided correction before the guest claims. The
+-- settled reservation remains bound to the original pipeline prediction while
+-- the editable draft is coherently paired to this current corrected evidence.
+insert into public.prediction_logs (
+  id, user_id, item_id, run_id, extracted_attrs, price, price_range,
+  confidence, tier_fired, model, listing_model, sources
+) values (
+  '40000000-0000-4000-8000-000000000004',
+  'guest_pgtap_claim',
+  '10000000-0000-4000-8000-000000000001',
+  '90000000-0000-4000-8000-000000000001',
+  '{"brand":"Corrected Fixture"}'::jsonb,
+  27,
+  '{"low":22,"high":32}'::jsonb,
+  0.9,
+  'llm-only',
+  'offline-corrected-model',
+  'offline-corrected-listing',
+  '[]'::jsonb
+);
+update public.items
+set attributes = '{"brand":"Corrected Fixture"}'::jsonb,
+    review_revision = '90000000-0000-4000-8000-000000000001',
+    review_content_revision = '90000000-0000-4000-8000-000000000001'
+where id = '10000000-0000-4000-8000-000000000001';
+update public.listings
+set run_id = '90000000-0000-4000-8000-000000000001',
+    source_review_revision = '90000000-0000-4000-8000-000000000001'
+where id = '30000000-0000-4000-8000-000000000001';
+update public.ai_item_credit_reservations
+set guided_correction_revision = '80000000-0000-4000-8000-000000000001',
+    guided_correction_started_at = statement_timestamp(),
+    guided_correction_completed_at = statement_timestamp(),
+    updated_at = statement_timestamp()
+where id = '60000000-0000-4000-8000-000000000001';
+
 set local role service_role;
 select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select throws_ok(
+  $$
+    select public.register_guest_draft_recovery(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      '20000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgI=","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
+      jsonb_build_array(jsonb_build_object(
+        'sourcePath', 'guest_pgtap_claim/items/front.enc',
+        'sha256', repeat('b', 64),
+        'byteLength', 128
+      ))
+    )
+  $$,
+  '22023',
+  'Invalid encrypted guest recovery artifact',
+  'an eleven-byte AES-GCM IV is rejected before registration'
+);
+select throws_ok(
+  $$
+    select public.register_guest_draft_recovery(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      '20000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
+      jsonb_build_array(jsonb_build_object(
+        'sourcePath', 'guestXpgtap_claim/items/front.enc',
+        'sha256', repeat('b', 64),
+        'byteLength', 128
+      ))
+    )
+  $$,
+  '22023',
+  'Invalid private Storage recovery manifest',
+  'an underscore in the guest id is matched literally, never as LIKE wildcard'
+);
 
 insert into guest_claim_results values (
   'registered',
@@ -289,7 +383,7 @@ insert into guest_claim_results values (
     'guest_pgtap_claim',
     '20000000-0000-4000-8000-000000000001',
     repeat('a', 64),
-    '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"ZW52","nonce":"bm9uY2U=","tag":"dGFn","ciphertext":"Y2lwaGVy"}'::jsonb,
+    '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
     jsonb_build_array(jsonb_build_object(
       'sourcePath', 'guest_pgtap_claim/items/front.enc',
       'sha256', repeat('b', 64),
@@ -363,9 +457,116 @@ select is(
     select payload #>> '{objects,0,destinationPath}'
     from guest_claim_results where label = 'begun'
   ),
-  'user_pgtap_claim/guest-claims/70000000-0000-4000-8000-000000000001/1',
+  'user_pgtap_claim/guest-claims/70000000-0000-4000-8000-000000000001/'
+    || (
+      select payload->>'claimLeaseToken'
+      from guest_claim_results where label = 'begun'
+    ) || '/1',
   'the destination is derived in the account namespace'
 );
+
+reset role;
+update private.guest_draft_recoveries
+set claim_lease_expires_at = statement_timestamp() - interval '1 second'
+where id = '70000000-0000-4000-8000-000000000001';
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+insert into guest_claim_results values (
+  'begun-retry',
+  public.begin_guest_draft_claim(
+    '70000000-0000-4000-8000-000000000001',
+    'guest_pgtap_claim',
+    repeat('a', 64),
+    'user_pgtap_claim',
+    300
+  )
+);
+select isnt(
+  (select payload #>> '{objects,0,destinationPath}' from guest_claim_results where label = 'begun'),
+  (select payload #>> '{objects,0,destinationPath}' from guest_claim_results where label = 'begun-retry'),
+  'a retry receives a lease-unique destination namespace'
+);
+select is(
+  (
+    select photo_paths[1]
+    from private.pipeline_storage_cleanup_jobs
+    where source_type = 'guest_claim_copy'
+      and source_id = (
+        select (payload->>'claimLeaseToken')::uuid
+        from guest_claim_results where label = 'begun'
+      )
+  ),
+  (select payload #>> '{objects,0,destinationPath}' from guest_claim_results where label = 'begun'),
+  'the obsolete lease path has durable bounded cleanup intent before replacement'
+);
+
+-- Simulate a cleanup worker finishing before a stale process reports its late
+-- write. The exact obsolete lease must be able to recreate durable cleanup.
+reset role;
+update private.pipeline_storage_cleanup_jobs
+set state = 'running',
+    attempt_count = 1,
+    available_at = statement_timestamp(),
+    lease_token = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    lease_expires_at = statement_timestamp() + interval '5 minutes'
+where source_type = 'guest_claim_copy'
+  and source_id = (
+    select (payload->>'claimLeaseToken')::uuid
+    from guest_claim_results where label = 'begun'
+  );
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+select ok(
+  public.queue_guest_claim_copy_cleanup(
+    '70000000-0000-4000-8000-000000000001',
+    repeat('a', 64),
+    'user_pgtap_claim',
+    (
+      select (payload->>'claimLeaseToken')::uuid
+      from guest_claim_results where label = 'begun'
+    )
+  ),
+  'a late writer durably marks an already-running cleanup for another sweep'
+);
+select ok(
+  public.complete_pipeline_storage_cleanup(
+    (
+      select job_id from private.pipeline_storage_cleanup_jobs
+      where source_type = 'guest_claim_copy'
+        and source_id = (
+          select (payload->>'claimLeaseToken')::uuid
+          from guest_claim_results where label = 'begun'
+        )
+    ),
+    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  ),
+  'running cleanup completion observes the durable late-writer marker'
+);
+select is(
+  (
+    select state || ':' || guest_copy_writer_quiesced::text || ':'
+      || resweep_requested::text || ':' || guest_copy_final_sweep_armed::text
+    from private.pipeline_storage_cleanup_jobs
+    where source_type = 'guest_claim_copy'
+      and source_id = (
+        select (payload->>'claimLeaseToken')::uuid
+        from guest_claim_results where label = 'begun'
+      )
+  ),
+  'pending:true:false:true',
+  'the late writer forces one more bounded cleanup sweep instead of losing intent'
+);
+
+reset role;
+delete from private.pipeline_storage_cleanup_jobs
+where source_type = 'guest_claim_copy'
+  and source_id = (
+    select (payload->>'claimLeaseToken')::uuid
+    from guest_claim_results where label = 'begun'
+  );
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
 
 insert into guest_claim_results values (
   'completed',
@@ -375,10 +576,13 @@ insert into guest_claim_results values (
     'user_pgtap_claim',
     (
       select (payload->>'claimLeaseToken')::uuid
-      from guest_claim_results where label = 'begun'
+      from guest_claim_results where label = 'begun-retry'
     ),
     jsonb_build_array(jsonb_build_object(
-      'destinationPath', 'user_pgtap_claim/guest-claims/70000000-0000-4000-8000-000000000001/1',
+      'destinationPath', (
+        select payload #>> '{objects,0,destinationPath}'
+        from guest_claim_results where label = 'begun-retry'
+      ),
       'sha256', repeat('b', 64),
       'byteLength', 128
     ))
@@ -390,6 +594,31 @@ select is(
   (select payload->>'outcome' from guest_claim_results where label = 'completed'),
   'claimed',
   'verified Storage completes one authoritative claim'
+);
+select ok(
+  public.queue_guest_claim_copy_cleanup(
+    '70000000-0000-4000-8000-000000000001',
+    repeat('a', 64),
+    'user_pgtap_claim',
+    (
+      select (payload->>'claimLeaseToken')::uuid
+      from guest_claim_results where label = 'begun'
+    )
+  ),
+  'a late stale writer durably requeues only its obsolete lease namespace'
+);
+select is(
+  (
+    select photo_paths[1]
+    from private.pipeline_storage_cleanup_jobs
+    where source_type = 'guest_claim_copy'
+      and source_id = (
+        select (payload->>'claimLeaseToken')::uuid
+        from guest_claim_results where label = 'begun'
+      )
+  ),
+  (select payload #>> '{objects,0,destinationPath}' from guest_claim_results where label = 'begun'),
+  'requeued stale cleanup cannot target the successful retry lease'
 );
 select is(
   (select user_id from public.items where id = '10000000-0000-4000-8000-000000000001'),
@@ -410,6 +639,11 @@ select is(
   (select user_id from public.prediction_logs where id = '40000000-0000-4000-8000-000000000001'),
   'user_pgtap_claim',
   'provider prediction evidence transfers with the draft'
+);
+select is(
+  (select user_id from public.prediction_logs where id = '40000000-0000-4000-8000-000000000004'),
+  'user_pgtap_claim',
+  'the current guided-correction prediction transfers with its draft run'
 );
 select is(
   (select user_id from public.ai_item_credit_reservations where id = '60000000-0000-4000-8000-000000000001'),
@@ -481,6 +715,47 @@ select throws_ok(
   'Guest recovery not found',
   'a claimed outcome is fenced to its authenticated account target'
 );
+select throws_ok(
+  $$
+    select public.begin_guest_draft_claim(
+      '70000000-0000-4000-8000-000000000001',
+      'guest_pgtap_claim',
+      repeat('a', 64),
+      'user_pgtap_other',
+      300
+    )
+  $$,
+  'P0002',
+  'Guest recovery not found',
+  'terminal claim start never discloses claimed ids to another account'
+);
+select throws_ok(
+  $$
+    select public.release_guest_draft_claim(
+      '70000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      'user_pgtap_other',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    )
+  $$,
+  'P0002',
+  'Guest recovery not found',
+  'terminal claim release never discloses claimed ids to another account'
+);
+select throws_ok(
+  $$
+    select public.complete_guest_draft_claim(
+      '70000000-0000-4000-8000-000000000001',
+      repeat('a', 64),
+      'user_pgtap_other',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      '[]'::jsonb
+    )
+  $$,
+  'P0002',
+  'Guest recovery not found',
+  'terminal claim completion never discloses claimed ids to another account'
+);
 select is(
   public.recover_guest_draft(
     '70000000-0000-4000-8000-000000000001',
@@ -498,7 +773,7 @@ insert into guest_claim_results values (
     'guest_pgtap_expire',
     '20000000-0000-4000-8000-000000000002',
     repeat('c', 64),
-    '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"ZW52","nonce":"bm9uY2U=","tag":"dGFn","ciphertext":"Y2lwaGVy"}'::jsonb,
+    '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
     jsonb_build_array(jsonb_build_object(
       'sourcePath', 'guest_pgtap_expire/items/front.enc',
       'sha256', repeat('d', 64),
@@ -562,6 +837,69 @@ select is(
   (public.expire_guest_draft_recoveries(25)->>'expiredCount')::integer,
   0,
   'repeated bounded cleanup does not expire terminal state twice'
+);
+
+reset role;
+insert into private.guest_draft_recoveries (
+  id, guest_user_id, pipeline_run_id, item_id, draft_id, reservation_id,
+  allowance_period_id, recovery_token_hash, encrypted_artifact,
+  storage_manifest, storage_object_count, usable_draft_at, expires_at, state,
+  claim_target_user_id, claim_lease_token, claim_lease_expires_at
+) values (
+  '70000000-0000-4000-8000-000000000004',
+  'guest_pgtap_four',
+  '20000000-0000-4000-8000-000000000004',
+  '10000000-0000-4000-8000-000000000004',
+  '30000000-0000-4000-8000-000000000004',
+  '60000000-0000-4000-8000-000000000004',
+  '50000000-0000-4000-8000-000000000004',
+  repeat('e', 64),
+  '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
+  jsonb_build_array(
+    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/1.enc', 'sha256', repeat('1', 64), 'byteLength', 1),
+    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/2.enc', 'sha256', repeat('2', 64), 'byteLength', 1),
+    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/3.enc', 'sha256', repeat('3', 64), 'byteLength', 1),
+    jsonb_build_object('sourcePath', 'guest_pgtap_four/items/4.enc', 'sha256', repeat('4', 64), 'byteLength', 1)
+  ),
+  4,
+  statement_timestamp() - interval '24 hours',
+  statement_timestamp(),
+  'copying',
+  'user_pgtap_four',
+  '90000000-0000-4000-8000-000000000004',
+  statement_timestamp() + interval '5 minutes'
+);
+set local role service_role;
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
+select lives_ok(
+  $$ select public.expire_guest_draft_recoveries(25) $$,
+  'copying-state expiry accepts four source plus four destination paths'
+);
+select is(
+  (select state from private.guest_draft_recoveries where id = '70000000-0000-4000-8000-000000000004'),
+  'expired',
+  'four-photo copying recovery reaches the stable expired outcome'
+);
+select is(
+  (
+    select cardinality(photo_paths)
+    from private.pipeline_storage_cleanup_jobs
+    where source_type = 'guest_recovery'
+      and source_id = '70000000-0000-4000-8000-000000000004'
+  ),
+  4,
+  'four guest source objects remain one bounded cleanup job'
+);
+select is(
+  (
+    select cardinality(photo_paths)
+    from private.pipeline_storage_cleanup_jobs
+    where source_type = 'guest_claim_copy'
+      and source_id = '90000000-0000-4000-8000-000000000004'
+  ),
+  4,
+  'four obsolete account copies remain a separate bounded cleanup job'
 );
 
 select * from finish();

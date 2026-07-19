@@ -5,10 +5,10 @@ const encryptedArtifact = {
   version: 1 as const,
   algorithm: "aes-256-gcm" as const,
   keyId: "guest-recovery-v1",
-  keyEnvelope: "ZW52ZWxvcGU=",
-  nonce: "bm9uY2U=",
-  tag: "YXV0aC10YWc=",
-  ciphertext: "Y2lwaGVydGV4dA==",
+  keyEnvelope: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+  nonce: "AgICAgICAgICAgIC",
+  tag: "AwMDAwMDAwMDAwMDAwMDAw==",
+  ciphertext: "ZW5jcnlwdGVkLWRyYWZ0",
 };
 const storageManifest = [{
   sourcePath: "guest_fixture/item/front.enc",
@@ -53,5 +53,25 @@ describe("guest encrypted recovery fixed-RPC store", () => {
     });
     expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_expires_at");
     expect(rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_usable_draft_at");
+  });
+
+  it.each([
+    ["malformed Base64", { keyEnvelope: "A" }],
+    ["an eleven-byte IV", { nonce: "AgICAgICAgICAgI=" }],
+    ["a fifteen-byte authentication tag", { tag: "AwMDAwMDAwMDAwMDAwMD" }],
+    ["an empty ciphertext", { ciphertext: "" }],
+  ])("rejects %s before registering an unrecoverable artifact", async (_label, change) => {
+    const rpc = vi.fn();
+    const store = createSupabaseGuestRecoveryStore({ rpc });
+
+    await expect(store.register({
+      recoveryId: "11111111-1111-4111-8111-111111111111",
+      guestUserId: "guest_fixture",
+      pipelineRunId: "33333333-3333-4333-8333-333333333333",
+      recoveryTokenHash: "b".repeat(64),
+      encryptedArtifact: { ...encryptedArtifact, ...change },
+      storageManifest,
+    })).rejects.toThrow();
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

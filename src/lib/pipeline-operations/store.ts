@@ -43,7 +43,7 @@ const healthSchema = z.object({
   expiredWorkerLeases: z.number().int().nonnegative(),
   cleanupPending: z.number().int().nonnegative(),
   cleanupDeadLetters: z.number().int().nonnegative(),
-  lastCleanupAt: z.string().datetime().nullable(),
+  lastCleanupAt: z.string().datetime({ offset: true }).nullable(),
   lastCleanupDeletedObjects: z.number().int().nonnegative(),
   lastCleanupFailedObjects: z.number().int().nonnegative(),
 }).strict();

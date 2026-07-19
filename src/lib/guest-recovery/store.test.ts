@@ -71,4 +71,21 @@ describe("guest claim fixed-RPC store", () => {
       p_verified_objects: verifiedObjects,
     });
   });
+
+  it("requeues cleanup only through the exact recovery and copy lease capability", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const store = createSupabaseGuestClaimStore({ rpc });
+
+    await expect(store.queueCopyCleanup({
+      ...identity,
+      claimLeaseToken: "55555555-5555-4555-8555-555555555555",
+    })).resolves.toBe(true);
+
+    expect(rpc).toHaveBeenCalledWith("queue_guest_claim_copy_cleanup", {
+      p_claim_lease_token: "55555555-5555-4555-8555-555555555555",
+      p_recovery_id: identity.recoveryId,
+      p_recovery_token_hash: identity.recoveryTokenHash,
+      p_target_user_id: identity.targetUserId,
+    });
+  });
 });

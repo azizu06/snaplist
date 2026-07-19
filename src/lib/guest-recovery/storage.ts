@@ -62,13 +62,5 @@ export function createSupabaseGuestClaimStorage(
         byteLength: bytes.byteLength,
       };
     },
-
-    async remove(destinationPaths) {
-      if (destinationPaths.length === 0) return;
-      const removed = await bucket.remove(destinationPaths);
-      if (removed.error) {
-        throw new Error("Guest Storage destination cleanup failed.");
-      }
-    },
   };
 }
