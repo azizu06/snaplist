@@ -869,12 +869,24 @@ export function synthesizeSoldResult(
     title: c.title,
     kind: "sold-comp",
   }));
+  const evidence = core.map((c) => ({
+    id: c.url,
+    sourceUrl: c.url,
+    ...(c.title ? { title: c.title } : {}),
+    price: round2(c.price),
+    currency: "USD",
+    ...(c.condition ? { condition: c.condition } : {}),
+    ...(c.soldAt != null ? { soldAt: c.soldAt } : {}),
+    kind: "sold-comparable" as const,
+    priceDisclosure: "displayed-sold-price" as const,
+  }));
 
   return {
     suggested: round2(suggested),
     range: { min: round2(min), max: round2(max) },
     confidence,
     sources,
+    evidence,
     tier: "ebay-sold",
     // The judged tightness rides downstream so a scattered sold set cannot ride
     // the sold-comp label into the ready-to-publish confidence band.

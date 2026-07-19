@@ -2,6 +2,7 @@ import { z } from "zod";
 import { homeProjectionSchema } from "@/lib/home/projection";
 import { pipelineConsumerSummarySchema } from "./worker-summary";
 import { guestClaimTerminalOutcomeSchema } from "@/lib/guest-recovery/service";
+import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 
 export const MOBILE_API_VERSION = "v1" as const;
 
@@ -56,6 +57,10 @@ export const sessionEnvelopeSchema = z
 
 export const homeProjectionEnvelopeSchema = z
   .object({ data: homeProjectionSchema, meta: apiMetaSchema })
+  .strict();
+
+export const pricingEvidenceEnvelopeSchema = z
+  .object({ data: pricingEvidenceProjectionSchema, meta: apiMetaSchema })
   .strict();
 
 export const revenueCatConfigurationEnvelopeSchema = z

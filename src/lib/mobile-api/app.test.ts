@@ -162,6 +162,86 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(JSON.stringify(await unavailable.json())).not.toContain("database unavailable");
   });
 
+  it("returns one authenticated run-coherent pricing evidence snapshot", async () => {
+    const pricingEvidence = {
+      forItem: vi.fn().mockResolvedValue({
+        item: {
+          id: "22222222-2222-4222-8222-222222222222",
+          title: "Sony WH-1000XM4",
+          condition: "Used - Good",
+        },
+        priceResult: {
+          suggested: 130,
+          range: { min: 120, max: 140 },
+          confidence: 0.88,
+          sources: [
+            {
+              url: "https://www.ebay.com/itm/sale-1",
+              title: "Sony headphones",
+              kind: "sold-comp",
+            },
+          ],
+          evidence: [
+            {
+              id: "sale-1",
+              sourceUrl: "https://www.ebay.com/itm/sale-1",
+              title: "Sony headphones",
+              price: 130,
+              currency: "USD",
+              kind: "sold-comparable",
+              priceDisclosure: "displayed-sold-price",
+            },
+          ],
+          tier: "ebay-sold",
+          compAgreement: 0.8,
+        },
+        evidenceLevel: "limited",
+        evidenceAsOf: "2026-07-18T12:00:00.000Z",
+        evidenceAgeDays: 1.5,
+        isStale: false,
+        defaultWindow: "90D",
+        comparables: [
+          {
+            id: "sale-1",
+            sourceUrl: "https://www.ebay.com/itm/sale-1",
+            title: "Sony headphones",
+            price: 130,
+            currency: "USD",
+            kind: "sold-comparable",
+            priceDisclosure: "displayed-sold-price",
+            evidenceAsOf: "2026-07-18T12:00:00.000Z",
+          },
+        ],
+        estimatedFees: 17.53,
+        estimatedPayout: 112.47,
+        chartBounds: null,
+      }),
+    };
+    const authenticate = vi.fn().mockResolvedValue({ userId: "user_native" });
+
+    const response = await handler({ authenticate, pricingEvidence })(
+      new Request(
+        "http://localhost/v1/items/22222222-2222-4222-8222-222222222222/pricing",
+        { headers: { authorization: "Bearer signed-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(pricingEvidence.forItem).toHaveBeenCalledWith({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      itemId: "22222222-2222-4222-8222-222222222222",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: {
+        priceResult: { suggested: 130, tier: "ebay-sold" },
+        comparables: [{ id: "sale-1", price: 130 }],
+        estimatedPayout: 112.47,
+      },
+      meta: { requestId: "req_test" },
+    });
+  });
+
   it("binds RevenueCat only to the verified Clerk principal and ignores a body user id", async () => {
     const configurationFor = vi.fn().mockResolvedValue({
       configured: true,

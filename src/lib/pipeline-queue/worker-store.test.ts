@@ -16,8 +16,39 @@ const RESULT: PipelineResult = {
     suggested: 50,
     range: { min: 40, max: 60 },
     confidence: 0.5,
-    sources: [],
-    tier: "llm-only",
+    sources: [
+      {
+        url: "https://www.ebay.com/itm/sold-1",
+        title: "Sold Sony headphones",
+        kind: "sold-comp",
+      },
+      {
+        url: "https://www.ebay.com/itm/asking-1",
+        title: "Best offer accepted",
+        kind: "asking-comp",
+      },
+    ],
+    tier: "ebay-sold",
+    evidence: [
+      {
+        id: "sold-1",
+        sourceUrl: "https://www.ebay.com/itm/sold-1",
+        title: "Sold Sony headphones",
+        price: 50,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      },
+      {
+        id: "asking-1",
+        sourceUrl: "https://www.ebay.com/itm/asking-1",
+        title: "Best offer accepted",
+        price: 70,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "asking-price-not-accepted-amount",
+      },
+    ],
   },
   confidence: { score: 0.5, band: "medium", autopilotEligible: false },
   listing: {
@@ -115,7 +146,38 @@ describe("run-scoped pipeline worker store", () => {
     expect(completion.p_persistence).toMatchObject({
       listing: { status: "draft" },
       prediction: { model: "vision-model", listing_model: "listing-model" },
+      pricing_snapshot: {
+        schema_version: 1,
+        item: { title: "Sony headphones", condition: "good" },
+        price_result: {
+          suggested: 50,
+          range: { min: 40, max: 60 },
+          tier: "ebay-sold",
+          evidence: [
+            expect.objectContaining({
+              id: "sold-1",
+              priceDisclosure: "displayed-sold-price",
+            }),
+          ],
+        },
+        evidence: [
+          expect.objectContaining({
+            id: "sold-1",
+            priceDisclosure: "displayed-sold-price",
+          }),
+        ],
+      },
     });
+    const persistence = completion.p_persistence as {
+      pricing_snapshot: {
+        price_result: { evidence?: Array<{ id: string }> };
+        evidence: Array<{ id: string }>;
+      };
+    };
+    expect(persistence.pricing_snapshot.price_result.evidence?.map(({ id }) => id)).toEqual([
+      "sold-1",
+    ]);
+    expect(persistence.pricing_snapshot.evidence.map(({ id }) => id)).toEqual(["sold-1"]);
   });
 
   it("uses lease-fenced failure and message-rejection RPCs", async () => {

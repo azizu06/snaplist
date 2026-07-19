@@ -97,6 +97,38 @@ export const priceSourceSchema = z.object({
 
 export type PriceSource = z.infer<typeof priceSourceSchema>;
 
+export const pricingEvidenceKindSchema = z.literal("sold-comparable");
+
+export const pricingPriceDisclosureSchema = z.enum([
+  "displayed-sold-price",
+  "asking-price-not-accepted-amount",
+]);
+
+/**
+ * One provider-neutral comparable carried out of pricing after retrieval,
+ * matching, freshness, and robust-core selection have all accepted it.
+ *
+ * This is deliberately richer than `PriceSource`: citations remain enough for
+ * provenance, while native evidence presentation also needs the accepted
+ * amount and honest optional sale/condition facts. `evidenceAsOf` belongs to
+ * the immutable persisted snapshot, not to the provider result.
+ */
+export const pricingEvidenceRecordSchema = z
+  .object({
+    id: z.string().min(1).max(2_048),
+    sourceUrl: z.string().url().max(2_048),
+    title: z.string().min(1).max(500).optional(),
+    price: z.number().positive().max(100_000_000),
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    condition: z.string().min(1).max(120).optional(),
+    soldAt: z.number().int().nonnegative().optional(),
+    kind: pricingEvidenceKindSchema,
+    priceDisclosure: pricingPriceDisclosureSchema,
+  })
+  .strict();
+
+export type PricingEvidenceRecord = z.infer<typeof pricingEvidenceRecordSchema>;
+
 /**
  * A price recommendation. Always `{ suggested, range, confidence, sources[] }`
  * (never a bare number) and always user-editable. Carries the firing `tier` and
@@ -120,6 +152,12 @@ export const priceResultSchema = z
     confidence: z.number().min(0).max(1),
     /** Cited comps / lookup records. May be empty for the LLM-only fallback. */
     sources: z.array(priceSourceSchema),
+    /**
+     * Accepted sold anchors used by this recommendation, when a sold-backed
+     * tier resolved. Optional preserves non-sold and legacy provider results;
+     * it is never reconstructed later from citation text.
+     */
+    evidence: z.array(pricingEvidenceRecordSchema).max(60).optional(),
     /** Which tier produced this — a logged, confidence-bearing fact. */
     tier: pricingTierSchema,
     /**

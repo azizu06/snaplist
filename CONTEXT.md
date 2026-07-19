@@ -47,6 +47,11 @@ receive honest **assisted marketplace handoffs**.
 - **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
   user-editable. Never a bare number. Evidence-backed tiers require citations; the clearly labeled
   terminal `llm-only` estimate may have an empty `sources[]`.
+- **Pricing-evidence snapshot** — the immutable, tenant-scoped record committed with one successful
+  **pipeline run**. It contains that run's validated **price recommendation** and only the **sold
+  comps** that survived retrieval, matching, freshness, and robust-core selection, all stamped with
+  one server `evidenceAsOf` time. Native reads consume one whole snapshot; they never rebuild comp
+  facts from citations, combine runs, or turn an **asking comp** into a disclosed sale.
 - **Cost basis (COGS)** — what the seller **paid** for the item (cost of goods sold), captured
   optionally at upload or review. Blank means *unknown* (stored `NULL`, never a fake $0); a recorded
   **$0** is a real value (a free find). Persisted as `items.cost_basis`; feeds **net profit**.

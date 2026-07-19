@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { apiErrorEnvelopeSchema } from "./contract";
+import {
+  apiErrorEnvelopeSchema,
+  pricingEvidenceEnvelopeSchema,
+} from "./contract";
 
 const serverContractSource = readFileSync(
   resolve("docs/contracts/mobile-api-v1.openapi.json"),
@@ -21,7 +24,7 @@ const contract = JSON.parse(serverContractSource) as {
 };
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
-const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174, 175]);
+const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174, 175, 240]);
 
 function operations() {
   return Object.entries(contract.paths).flatMap(([path, pathItem]) =>
@@ -70,6 +73,15 @@ describe("SwiftUI mobile HTTP contract", () => {
       security: [{ ClerkBearer: [] }],
     });
     expect(contract.components.schemas).toHaveProperty("HomeEnvelope");
+    expect(contract.paths["/v1/items/{itemId}/pricing"].get).toMatchObject({
+      operationId: "getItemPricing",
+      "x-owner-issue": 240,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+    });
+    expect(contract.components.schemas).toHaveProperty("PricingEvidenceEnvelope");
+    expect(contract.components.schemas).toHaveProperty("PriceResult");
+    expect(contract.components.schemas).toHaveProperty("PricingComparable");
     expect(JSON.stringify(contract.paths["/v1/items/runs"])).toContain(
       "#/components/parameters/IdempotencyKey",
     );
@@ -98,6 +110,19 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(primitiveSchemaAccepts(homeSummary.properties.orders, 0)).toBe(true);
   });
 
+  it("keeps one native decode fixture on the exact runtime pricing envelope", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve("ios/SnapListTests/Fixtures/pricing-evidence-response.json"),
+        "utf8",
+      ),
+    );
+
+    expect(() => pricingEvidenceEnvelopeSchema.parse(fixture)).not.toThrow();
+    expect(fixture.data.comparables).toHaveLength(2);
+    expect(fixture.data.comparables[1]).not.toHaveProperty("soldAt");
+  });
+
   it("documents the standard Clerk token checks without inventing an audience", () => {
     const description =
       contract.components.securitySchemes.ClerkBearer.description ?? "";
@@ -123,7 +148,7 @@ describe("SwiftUI mobile HTTP contract", () => {
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);
-    for (const issue of [17, 159, 161, 162, 168, 173, 174, 175]) {
+    for (const issue of [17, 159, 161, 162, 168, 173, 174, 175, 240]) {
       expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
     }
   });
