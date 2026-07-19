@@ -62,8 +62,9 @@ does not satisfy these gates.
 Before review, compare the exact diff to the frozen issue contract and remove or split unasked
 behavior. Once independent review starts, do not add product or architecture scope.
 
-One review round is the combined assessment of one exact head by the fresh Standards/Spec pair and
-GitHub Codex. The first candidate is round 1. Record `Review round: N/3` in the PR body or a comment.
+One review round is the combined assessment of one exact head. Run the fresh Standards/Spec pair
+first, then request GitHub Codex on that exact head. The first candidate is round 1. Record
+`Review round: N/3` in the PR body or a comment.
 Request a replacement round only after qualifying fixes change the head. Replacement local reviews
 are delta-focused unless a fix changes a security, tenancy, data, billing, provider, or other high-risk
 boundary.
@@ -75,8 +76,9 @@ and do not extend the active PR. If qualifying blockers remain after round 3, st
 hub for split, redesign, or explicit owner direction.
 
 GitHub Codex findings use the same filter and shared counter. They are independent evidence, not
-automatic commands. Fix qualifying blockers, document the disposition of every other finding, and do
-not optimize for a zero-comment review.
+automatic commands. Fix qualifying blockers. Route every valid adjacent or non-blocking finding to a
+focused existing or new issue; document invalid or out-of-scope findings with evidence. Do not
+optimize for a zero-comment review.
 
 ## When a skill says "publish to the issue tracker"
 
