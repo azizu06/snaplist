@@ -12,7 +12,10 @@ struct AnalyticsProviderRoute: Equatable, Sendable {
     ) {
         let token = projectToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard environment != .local,
-              !token.isEmpty,
+              token.range(
+                  of: #"^phc_[A-Za-z0-9_-]+$"#,
+                  options: .regularExpression
+              ) != nil,
               host.scheme?.lowercased() == "https",
               host.host?.isEmpty == false,
               host.user == nil,

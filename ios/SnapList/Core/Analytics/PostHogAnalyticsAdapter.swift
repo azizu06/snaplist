@@ -34,7 +34,13 @@ enum PostHogAnalyticsConfiguration {
         config.rageClickConfig.enabled = false
         config.surveys = false
         config.debug = false
-        config.urlSessionConfiguration = urlSessionConfiguration
+        let sessionConfiguration = (urlSessionConfiguration?.copy() as? URLSessionConfiguration)
+            ?? URLSessionConfiguration.default
+        var protocolClasses = sessionConfiguration.protocolClasses ?? []
+        protocolClasses.removeAll { $0 == AnalyticsPostHogNetworkFirewallURLProtocol.self }
+        protocolClasses.insert(AnalyticsPostHogNetworkFirewallURLProtocol.self, at: 0)
+        sessionConfiguration.protocolClasses = protocolClasses
+        config.urlSessionConfiguration = sessionConfiguration
         config.reuseAnonymousId = false
         config.personProfiles = .identifiedOnly
         config.logs.setBeforeSend { _ in nil }
@@ -56,6 +62,7 @@ enum PostHogAnalyticsConfiguration {
 
 final class PostHogSDKTransport: AnalyticsTransport {
     private let sdk: PostHogSDK
+    private let storageURL: URL
 
     init?(
         route: AnalyticsProviderRoute,
@@ -63,6 +70,10 @@ final class PostHogSDKTransport: AnalyticsTransport {
         urlSessionConfiguration: URLSessionConfiguration? = nil
     ) {
         guard route.environment == metadata.environment else { return nil }
+        storageURL = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.posthog.unknown")
+            .appendingPathComponent(route.projectToken)
         sdk = PostHogSDK.with(
             PostHogAnalyticsConfiguration.makeConfig(
                 route: route,
@@ -77,6 +88,14 @@ final class PostHogSDKTransport: AnalyticsTransport {
             sdk.optIn()
         } else {
             sdk.optOut()
+        }
+    }
+
+    func revokeConsent() throws {
+        sdk.optOut()
+        sdk.close()
+        if FileManager.default.fileExists(atPath: storageURL.path) {
+            try FileManager.default.removeItem(at: storageURL)
         }
     }
 
@@ -112,6 +131,10 @@ final class DebugAnalyticsTransport: AnalyticsTransport {
         log("analytics consent \(granted ? "granted" : "disabled")")
     }
 
+    func revokeConsent() throws {
+        log("analytics consent revoked")
+    }
+
     func capture(_ payload: AnalyticsPayload) throws {
         log("analytics event \(payload.name) keys=\(payload.properties.keys.sorted())")
     }
@@ -127,6 +150,32 @@ final class DebugAnalyticsTransport: AnalyticsTransport {
     func reset() throws {
         log("analytics reset")
     }
+}
+
+private final class AnalyticsPostHogNetworkFirewallURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.path.hasSuffix("/batch") == false
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url,
+              let response = HTTPURLResponse(
+                  url: url,
+                  statusCode: 200,
+                  httpVersion: nil,
+                  headerFields: nil
+              ) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 final class DebugAnalyticsClient: AnalyticsClient {

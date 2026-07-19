@@ -208,7 +208,7 @@ final class AnalyticsContractTests: XCTestCase {
         client.reset()
         XCTAssertTrue(client.waitUntilIdleForTesting())
 
-        XCTAssertEqual(transport.calls.suffix(3), [.consent(false), .reset, .reset])
+        XCTAssertEqual(transport.calls.suffix(2), [.identify("user_abc123"), .revoke])
     }
 
     func testDeniedConsentNeverConstructsOrWakesTheProviderAcrossRelaunch() {
@@ -258,11 +258,90 @@ final class AnalyticsContractTests: XCTestCase {
         )
         XCTAssertTrue(transport.captureStarted.wait(timeout: .now() + 1) == .success)
 
-        client.setConsent(.denied)
-
-        XCTAssertEqual(consent.consent, .denied)
+        let revokeReturned = expectation(description: "revocation returned")
+        DispatchQueue.global().async {
+            client.setConsent(.denied)
+            revokeReturned.fulfill()
+        }
+        XCTAssertTrue(waitUntil { consent.consent == .denied })
         transport.allowCaptureToFinish.signal()
+        wait(for: [revokeReturned], timeout: 1)
         XCTAssertTrue(client.waitUntilIdleForTesting())
+    }
+
+    func testConcurrentConsentPersistenceAndRuntimeTransitionsShareOneOrder() {
+        let consent = InterleavingAnalyticsConsentStore()
+        let transport = RecordingAnalyticsTransport()
+        let client = PostHogAnalyticsClient(
+            metadata: metadata,
+            consentStore: consent,
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            transportFactory: { transport }
+        )
+        let grantReturned = expectation(description: "grant returned")
+        DispatchQueue.global().async {
+            client.setConsent(.granted)
+            grantReturned.fulfill()
+        }
+        XCTAssertEqual(consent.grantDidPersist.wait(timeout: .now() + 1), .success)
+
+        let denyStarted = DispatchSemaphore(value: 0)
+        let denyReturned = expectation(description: "deny returned")
+        DispatchQueue.global().async {
+            denyStarted.signal()
+            client.setConsent(.denied)
+            denyReturned.fulfill()
+        }
+        XCTAssertEqual(denyStarted.wait(timeout: .now() + 1), .success)
+        Thread.sleep(forTimeInterval: 0.05)
+        consent.allowGrantToReturn.signal()
+        wait(for: [grantReturned, denyReturned], timeout: 1)
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+        XCTAssertEqual(consent.consent, .denied)
+
+        client.capture(
+            .correctionCompleted(
+                eventID: UUID(uuidString: "22900000-0000-4000-8000-00000000000d")!
+            )
+        )
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+        XCTAssertTrue(transport.calls.compactMap(\.capturedPayload).isEmpty)
+    }
+
+    func testRegrantCreatesAndOptsInAFreshTransportBeforeCapture() {
+        let consent = InMemoryAnalyticsConsentStore(consent: .granted)
+        let factory = RecordingAnalyticsTransportFactory()
+        let client = PostHogAnalyticsClient(
+            metadata: metadata,
+            consentStore: consent,
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            transportFactory: { factory.make() }
+        )
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+
+        client.setConsent(.denied)
+        client.setConsent(.granted)
+        client.capture(
+            .correctionCompleted(
+                eventID: UUID(uuidString: "22900000-0000-4000-8000-00000000000e")!
+            )
+        )
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+
+        XCTAssertEqual(factory.makeCount, 2)
+        XCTAssertEqual(
+            factory.transport.calls,
+            [.consent(true), .revoke, .consent(true), .capture(
+                try! XCTUnwrap(
+                    AnalyticsSanitizer().sanitize(
+                        event: .correctionCompleted(
+                            eventID: UUID(uuidString: "22900000-0000-4000-8000-00000000000e")!
+                        ),
+                        metadata: metadata
+                    )
+                )
+            )]
+        )
     }
 
     func testLifecycleIsSerializedOffCallerAndConcurrentStableIDsEnqueueOnce() {
@@ -478,6 +557,86 @@ final class AnalyticsContractTests: XCTestCase {
         restored.close()
     }
 
+    func testRealSDKRevocationPurgesOfflineQueueBeforeNetworkRestoration() throws {
+        let token = "phc_revoke_contract_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let route = try XCTUnwrap(
+            AnalyticsProviderRoute(
+                environment: .testFlight,
+                projectToken: token,
+                host: URL(string: "https://analytics.invalid")!
+            )
+        )
+        let storageURL = postHogStorageURL(projectToken: token)
+        defer { try? FileManager.default.removeItem(at: storageURL) }
+        try? FileManager.default.removeItem(at: storageURL)
+        QueueContractURLProtocol.reset(online: false)
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [QueueContractURLProtocol.self]
+        let transport = try XCTUnwrap(
+            PostHogSDKTransport(
+                route: route,
+                metadata: metadata,
+                urlSessionConfiguration: sessionConfiguration
+            )
+        )
+        let client = PostHogAnalyticsClient(
+            metadata: metadata,
+            consentStore: InMemoryAnalyticsConsentStore(consent: .granted),
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            transportFactory: { transport }
+        )
+        client.capture(
+            .correctionCompleted(
+                eventID: UUID(uuidString: "22900000-0000-4000-8000-00000000000f")!
+            )
+        )
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+        let queueURL = storageURL.appendingPathComponent("posthog.queueFolder.uuid")
+        XCTAssertEqual(queueDepth(at: queueURL), 1)
+
+        client.setConsent(.denied)
+        XCTAssertTrue(client.waitUntilIdleForTesting())
+        XCTAssertEqual(queueDepth(at: queueURL), 0)
+
+        QueueContractURLProtocol.setOnline(true)
+        try transport.flush()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(QueueContractURLProtocol.successfulRequestCount, 0)
+    }
+
+    func testRealSDKIdentityUsesOnlyTheSanitizedBatchEndpoint() throws {
+        let token = "phc_identify_contract_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let route = try XCTUnwrap(
+            AnalyticsProviderRoute(
+                environment: .testFlight,
+                projectToken: token,
+                host: URL(string: "https://analytics.invalid")!
+            )
+        )
+        let storageURL = postHogStorageURL(projectToken: token)
+        defer { try? FileManager.default.removeItem(at: storageURL) }
+        try? FileManager.default.removeItem(at: storageURL)
+        QueueContractURLProtocol.reset(online: true)
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [QueueContractURLProtocol.self]
+        let transport = try XCTUnwrap(
+            PostHogSDKTransport(
+                route: route,
+                metadata: metadata,
+                urlSessionConfiguration: sessionConfiguration
+            )
+        )
+        try transport.setConsent(granted: true)
+
+        try transport.identify(clerkUserID: "user_queueonly229")
+        try transport.flush()
+
+        XCTAssertTrue(waitUntil { QueueContractURLProtocol.successfulRequestCount == 1 })
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertEqual(QueueContractURLProtocol.nonBatchRequestCount, 0)
+        transport.close()
+    }
+
     func testProviderFirewallAddsMetadataToIdentifyAndRejectsUnknownAppProperties() throws {
         let sanitizer = AnalyticsSanitizer()
         let anonymousID = "22900000-0000-4000-8000-000000000008"
@@ -601,11 +760,13 @@ private final class RecordingAnalyticsTransport: AnalyticsTransport {
         case identify(String)
         case flush
         case reset
+        case revoke
     }
 
     private(set) var calls: [Call] = []
 
     func setConsent(granted: Bool) throws { calls.append(.consent(granted)) }
+    func revokeConsent() throws { calls.append(.revoke) }
     func capture(_ payload: AnalyticsPayload) throws { calls.append(.capture(payload)) }
     func identify(clerkUserID: String) throws { calls.append(.identify(clerkUserID)) }
     func flush() throws { calls.append(.flush) }
@@ -624,6 +785,7 @@ private final class FailingAnalyticsTransport: AnalyticsTransport {
     private(set) var captureAttempts = 0
 
     func setConsent(granted: Bool) throws {}
+    func revokeConsent() throws { throw Failure.expected }
     func capture(_ payload: AnalyticsPayload) throws {
         captureAttempts += 1
         throw Failure.expected
@@ -635,7 +797,7 @@ private final class FailingAnalyticsTransport: AnalyticsTransport {
 
 private final class RecordingAnalyticsTransportFactory: @unchecked Sendable {
     private let lock = NSLock()
-    private let transport = RecordingAnalyticsTransport()
+    let transport = RecordingAnalyticsTransport()
     private(set) var makeCount = 0
 
     func make() -> (any AnalyticsTransport)? {
@@ -644,8 +806,25 @@ private final class RecordingAnalyticsTransportFactory: @unchecked Sendable {
     }
 }
 
+private final class InterleavingAnalyticsConsentStore: AnalyticsConsentStoring, @unchecked Sendable {
+    let grantDidPersist = DispatchSemaphore(value: 0)
+    let allowGrantToReturn = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var value: AnalyticsConsent = .denied
+
+    var consent: AnalyticsConsent { lock.withLock { value } }
+
+    func setConsent(_ consent: AnalyticsConsent) {
+        lock.withLock { value = consent }
+        if consent == .granted {
+            grantDidPersist.signal()
+            _ = allowGrantToReturn.wait(timeout: .now() + 2)
+        }
+    }
+}
+
 private final class BlockingAnalyticsTransport: AnalyticsTransport, @unchecked Sendable {
-    enum Call: Equatable { case consent, capture, identify, flush, reset }
+    enum Call: Equatable { case consent, capture, identify, flush, reset, revoke }
 
     let captureStarted = DispatchSemaphore(value: 0)
     let allowCaptureToFinish = DispatchSemaphore(value: 0)
@@ -656,6 +835,7 @@ private final class BlockingAnalyticsTransport: AnalyticsTransport, @unchecked S
     private(set) var calls: [Call] = []
 
     func setConsent(granted: Bool) throws { record(.consent) }
+    func revokeConsent() throws { record(.revoke) }
 
     func capture(_ payload: AnalyticsPayload) throws {
         begin(.capture)
@@ -693,15 +873,18 @@ private final class QueueContractURLProtocol: URLProtocol, @unchecked Sendable {
     private static var online = false
     private static var failedRequests = 0
     private static var successfulRequests = 0
+    private static var nonBatchRequests = 0
 
     static var failedRequestCount: Int { lock.withLock { failedRequests } }
     static var successfulRequestCount: Int { lock.withLock { successfulRequests } }
+    static var nonBatchRequestCount: Int { lock.withLock { nonBatchRequests } }
 
     static func reset(online: Bool) {
         lock.withLock {
             self.online = online
             failedRequests = 0
             successfulRequests = 0
+            nonBatchRequests = 0
         }
     }
 
@@ -715,6 +898,9 @@ private final class QueueContractURLProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let shouldSucceed = Self.lock.withLock { Self.online }
         let isBatchRequest = request.url?.path.hasSuffix("/batch") == true
+        if !isBatchRequest {
+            Self.lock.withLock { Self.nonBatchRequests += 1 }
+        }
         if shouldSucceed {
             if isBatchRequest {
                 Self.lock.withLock { Self.successfulRequests += 1 }

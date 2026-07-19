@@ -25,6 +25,7 @@ protocol AnalyticsClient {
 
 protocol AnalyticsTransport: AnyObject {
     func setConsent(granted: Bool) throws
+    func revokeConsent() throws
     func capture(_ payload: AnalyticsPayload) throws
     func identify(clerkUserID: String) throws
     func flush() throws
@@ -83,6 +84,7 @@ final class PostHogAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     private let consentStore: any AnalyticsConsentStoring
     private let dedupeStore: any AnalyticsDedupeStoring
     private let transportFactory: @Sendable () -> (any AnalyticsTransport)?
+    private let consentOrderingLock = NSLock()
     private let executor = DispatchQueue(
         label: "com.snaplist.analytics.client",
         qos: .utility
@@ -167,17 +169,29 @@ final class PostHogAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     }
 
     func setConsent(_ consent: AnalyticsConsent) {
-        // The user choice must survive an immediate relaunch even though all SDK work is deferred.
-        consentStore.setConsent(consent)
-        executor.async { [self] in
-            currentConsent = consent
-            switch consent {
-            case .granted:
-                _ = activatedTransport()
-            case .denied, .notDetermined:
-                try? transport?.setConsent(granted: false)
-                try? transport?.reset()
-                identifiedClerkUserID = nil
+        consentOrderingLock.withLock {
+            // Persist and enqueue under one lock so concurrent callers cannot invert relaunch truth.
+            consentStore.setConsent(consent)
+            let transition = { [self] in
+                currentConsent = consent
+                switch consent {
+                case .granted:
+                    if let active = transport {
+                        try? active.setConsent(granted: true)
+                    } else {
+                        _ = activatedTransport()
+                    }
+                case .denied, .notDetermined:
+                    try? transport?.revokeConsent()
+                    transport = nil
+                    identifiedClerkUserID = nil
+                }
+            }
+            if consent == .granted {
+                executor.async(execute: transition)
+            } else {
+                // Revocation is the one synchronous boundary: delivery must be stopped before return.
+                executor.sync(execute: transition)
             }
         }
     }
