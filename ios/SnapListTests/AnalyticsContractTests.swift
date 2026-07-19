@@ -288,7 +288,7 @@ final class AnalyticsContractTests: XCTestCase {
         client.screen(.capture)
         client.identify(clerkUserID: "user_private270")
         client.flush()
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        client.finishPendingWorkForTesting()
         XCTAssertTrue(sink.records.isEmpty)
         XCTAssertNil(identity.identity.clerkUserID)
 
@@ -297,7 +297,7 @@ final class AnalyticsContractTests: XCTestCase {
         client.screen(.capture)
         client.identify(clerkUserID: "user_private270")
         client.flush()
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        client.finishPendingWorkForTesting()
         XCTAssertEqual(consent.consent, .denied)
         XCTAssertTrue(sink.records.isEmpty)
         XCTAssertNil(identity.identity.clerkUserID)
@@ -306,32 +306,42 @@ final class AnalyticsContractTests: XCTestCase {
     func testDeniedDebugActionCannotReplayAfterConcurrentConsentGrant() {
         let consent = DelayedAnalyticsConsentStore(consent: .denied)
         let sink = RecordingAnalyticsDebugSink()
+        let grantDidSubmitConsentTransition = DispatchSemaphore(value: 0)
+        let grantDidEnterConsentTransition = DispatchSemaphore(value: 0)
         let client = DebugAnalyticsClient(
             metadata: metadata,
             consentStore: consent,
             dedupeStore: InMemoryAnalyticsDedupeStore(),
             identityStore: InMemoryAnalyticsIdentityStore(),
-            sink: sink
+            sink: sink,
+            consentTransitionDidSubmit: { consent in
+                if consent == .granted {
+                    grantDidSubmitConsentTransition.signal()
+                }
+            },
+            consentTransitionDidEnterSerializedBoundary: { consent in
+                if consent == .granted {
+                    grantDidEnterConsentTransition.signal()
+                }
+            }
         )
         client.capture(
             .correctionCompleted(
                 eventID: UUID(uuidString: "27000000-0000-4000-8000-000000000021")!
             )
         )
-        XCTAssertEqual(consent.readDidStart.wait(timeout: .now() + 1), .success)
+        consent.readDidStart.wait()
 
-        let grantAttemptStarted = DispatchSemaphore(value: 0)
-        let grantReturned = expectation(description: "consent grant returned")
+        let grantReturned = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            grantAttemptStarted.signal()
             client.setConsent(.granted)
-            grantReturned.fulfill()
+            grantReturned.signal()
         }
-        XCTAssertEqual(grantAttemptStarted.wait(timeout: .now() + 1), .success)
-        XCTAssertEqual(consent.grantDidPersist.wait(timeout: .now() + 0.1), .timedOut)
+        grantDidSubmitConsentTransition.wait()
         consent.allowReadToReturn.signal()
-        wait(for: [grantReturned], timeout: 1)
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        grantDidEnterConsentTransition.wait()
+        grantReturned.wait()
+        client.finishPendingWorkForTesting()
 
         XCTAssertEqual(consent.consent, .granted)
         XCTAssertTrue(sink.records.isEmpty)
@@ -339,35 +349,54 @@ final class AnalyticsContractTests: XCTestCase {
 
     func testConsentDenialWaitsForAlreadyStartedDebugWorkToFinish() {
         let consent = InMemoryAnalyticsConsentStore(consent: .granted)
-        let sink = BlockingAnalyticsDebugSink()
+        let ordering = ConsentOrderingRecorder()
+        let sink = BlockingAnalyticsDebugSink {
+            ordering.append(.debugWorkFinished)
+        }
+        let denialDidSubmitConsentTransition = DispatchSemaphore(value: 0)
+        let denialDidEnterConsentTransition = DispatchSemaphore(value: 0)
         let client = DebugAnalyticsClient(
             metadata: metadata,
             consentStore: consent,
             dedupeStore: InMemoryAnalyticsDedupeStore(),
             identityStore: InMemoryAnalyticsIdentityStore(),
-            sink: sink
+            sink: sink,
+            consentTransitionDidSubmit: { consent in
+                if consent == .denied {
+                    denialDidSubmitConsentTransition.signal()
+                }
+            },
+            consentTransitionDidEnterSerializedBoundary: { consent in
+                if consent == .denied {
+                    ordering.append(.consentBoundaryEntered)
+                    denialDidEnterConsentTransition.signal()
+                }
+            }
         )
         client.capture(
             .correctionCompleted(
                 eventID: UUID(uuidString: "27000000-0000-4000-8000-000000000022")!
             )
         )
-        XCTAssertEqual(sink.recordDidStart.wait(timeout: .now() + 1), .success)
+        sink.recordDidStart.wait()
 
-        let denialAttemptStarted = DispatchSemaphore(value: 0)
         let denialReturned = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
-            denialAttemptStarted.signal()
             client.setConsent(.denied)
+            ordering.append(.consentReturned)
             denialReturned.signal()
         }
-        XCTAssertEqual(denialAttemptStarted.wait(timeout: .now() + 1), .success)
-        XCTAssertEqual(denialReturned.wait(timeout: .now() + 0.1), .timedOut)
+        denialDidSubmitConsentTransition.wait()
         sink.allowRecordToReturn.signal()
-        XCTAssertEqual(denialReturned.wait(timeout: .now() + 1), .success)
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        denialDidEnterConsentTransition.wait()
+        denialReturned.wait()
+        client.finishPendingWorkForTesting()
 
         XCTAssertEqual(consent.consent, .denied)
+        XCTAssertEqual(
+            ordering.milestones,
+            [.debugWorkFinished, .consentBoundaryEntered, .consentReturned]
+        )
     }
 
     func testDebugRuntimeRecordsSanitizedEventsOnceWithoutIdentityValues() throws {
@@ -389,7 +418,7 @@ final class AnalyticsContractTests: XCTestCase {
         client.identify(clerkUserID: "seller@example.com")
         client.identify(clerkUserID: "user_private270")
         client.identify(clerkUserID: "user_other270")
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        client.finishPendingWorkForTesting()
 
         XCTAssertEqual(
             sink.records,
@@ -425,7 +454,7 @@ final class AnalyticsContractTests: XCTestCase {
         client.identify(clerkUserID: "user_first270")
         client.reset()
         client.identify(clerkUserID: "user_second270")
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        client.finishPendingWorkForTesting()
 
         XCTAssertNotEqual(identity.identity.anonymousID, originalID)
         XCTAssertEqual(identity.identity.clerkUserID, "user_second270")
@@ -446,7 +475,7 @@ final class AnalyticsContractTests: XCTestCase {
 
         client.capture(.correctionCompleted(eventID: eventID))
         client.capture(.correctionCompleted(eventID: eventID))
-        XCTAssertTrue(client.waitUntilIdleForTesting())
+        client.finishPendingWorkForTesting()
 
         XCTAssertEqual(sink.attempts, 2)
         XCTAssertFalse(dedupe.contains(eventID))
@@ -474,17 +503,41 @@ private final class FailingAnalyticsDebugSink: AnalyticsDebugSinking {
 private final class BlockingAnalyticsDebugSink: AnalyticsDebugSinking {
     let recordDidStart = DispatchSemaphore(value: 0)
     let allowRecordToReturn = DispatchSemaphore(value: 0)
+    private let recordDidFinish: @Sendable () -> Void
+
+    init(recordDidFinish: @escaping @Sendable () -> Void) {
+        self.recordDidFinish = recordDidFinish
+    }
 
     func record(_ record: AnalyticsDebugRecord) throws {
         recordDidStart.signal()
-        _ = allowRecordToReturn.wait(timeout: .now() + 2)
+        allowRecordToReturn.wait()
+        recordDidFinish()
+    }
+}
+
+private enum ConsentOrderingMilestone: Equatable {
+    case debugWorkFinished
+    case consentBoundaryEntered
+    case consentReturned
+}
+
+private final class ConsentOrderingRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [ConsentOrderingMilestone] = []
+
+    var milestones: [ConsentOrderingMilestone] {
+        lock.withLock { values }
+    }
+
+    func append(_ milestone: ConsentOrderingMilestone) {
+        lock.withLock { values.append(milestone) }
     }
 }
 
 private final class DelayedAnalyticsConsentStore: AnalyticsConsentStoring, @unchecked Sendable {
     let readDidStart = DispatchSemaphore(value: 0)
     let allowReadToReturn = DispatchSemaphore(value: 0)
-    let grantDidPersist = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var value: AnalyticsConsent
     private var shouldDelayRead = true
@@ -500,15 +553,12 @@ private final class DelayedAnalyticsConsentStore: AnalyticsConsentStoring, @unch
         }
         if shouldDelay {
             readDidStart.signal()
-            _ = allowReadToReturn.wait(timeout: .now() + 2)
+            allowReadToReturn.wait()
         }
         return lock.withLock { value }
     }
 
     func setConsent(_ consent: AnalyticsConsent) {
         lock.withLock { value = consent }
-        if consent == .granted {
-            grantDidPersist.signal()
-        }
     }
 }
