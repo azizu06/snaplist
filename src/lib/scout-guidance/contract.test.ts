@@ -1,155 +1,21 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { beforeAll, describe, expect, it, vi } from "vitest";
-import { loadReviewSnapshot } from "@/lib/pipeline/review-snapshot";
-import {
-  appendAcceptedPhotos,
-  type AppendAcceptedPhotosResult,
-} from "@/lib/capture-progress";
-import {
-  checkpointTrustedPriceEvidence,
-  createApifySoldPricingProvider,
-  PriceRouter,
-  type PriceResult,
-} from "@/lib/pricing";
-import {
-  stageUploadEntries,
-  type UploadProgressSnapshot,
-} from "@/lib/upload-staging";
+import { describe, expect, it } from "vitest";
 import { scoutGuidanceCatalogSchema } from "./contract";
 import {
   resolveScoutGuidance,
   verifiedCapturedPhotoCount,
   verifiedItemDisplayNameFromDurableRecord,
   verifiedPriceEvidence,
-  verifiedUploadProgress,
+  verifiedUploadedPhotoCount,
   type ResolveScoutGuidanceRequest,
-  type VerifiedScoutGuidanceFact,
 } from "./resolve";
 
 const ITEM_ID = "11111111-1111-4111-8111-111111111111";
 const REVIEW_REVISION = "33333333-3333-4333-8333-333333333333";
 const CAPTURE_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+const RECOMMENDATION_ID = "44444444-4444-4444-8444-444444444444";
 const RUN_ID = "55555555-5555-4555-8555-555555555555";
-const verifiedItemFacts = new Map<string, VerifiedScoutGuidanceFact>();
-const captureProgress = new Map<number, AppendAcceptedPhotosResult>();
-const uploadProgress = new Map<number, UploadProgressSnapshot>();
-const priceEvidence = new Map<string, PriceResult>();
-
-const photo = (index: number) =>
-  new File([String(index)], `${index}.jpg`, { type: "image/jpeg" });
-
-async function collectUploadProgress(photoCount: number): Promise<void> {
-  await stageUploadEntries(
-    {
-      batchId: CAPTURE_SESSION_ID,
-      userId: "user_test",
-      dailyLimit: 10,
-      perMinuteLimit: 5,
-      entries: [{
-        idempotencyKey: `capture-${photoCount}`,
-        source: "single",
-        autopilotEnabled: false,
-        costBasis: null,
-        photos: Array.from({ length: photoCount }, (_, index) => photo(index)),
-      }],
-    },
-    {
-      async upload() {},
-      onUploadProgress(snapshot) {
-        uploadProgress.set(photoCount, snapshot);
-      },
-      async remove() {},
-      async recordCleanupIntent() {},
-      async resolveCleanupIntent() {},
-      async findReplay() { return []; },
-      async stageAndEnqueue() {
-        return [{
-          batch_id: CAPTURE_SESSION_ID,
-          batch_position: 0,
-          idempotency_key: `capture-${photoCount}`,
-          item_id: ITEM_ID,
-          run_id: RUN_ID,
-          queue_message_id: "1",
-          listing_id: null,
-          status: "queued" as const,
-          stage: "queued" as const,
-          attempt_count: 0,
-          max_attempts: 3,
-          safe_failure_message: null,
-          updated_at: "2026-07-18T00:00:00.000Z",
-        }];
-      },
-    },
-  );
-}
-
-async function routedPriceRecommendation(
-  soldCompCount: number,
-  windowDays: number,
-): Promise<PriceResult> {
-  const observedAt = Date.now();
-  const endedAt = new Date(
-    observedAt - (windowDays - 0.5) * 86_400_000,
-  ).toISOString();
-  const provider = createApifySoldPricingProvider({
-    enabled: true,
-    token: "test-only-token",
-    now: () => observedAt,
-    staleDays: 366,
-    runActor: async () => ({
-      status: "SUCCEEDED",
-      items: Array.from({ length: soldCompCount }, (_, index) => ({
-        url: `https://www.ebay.com/itm/contract-${soldCompCount}-${index}`,
-        title: "Canon AE-1 35mm Film Camera",
-        condition: "Pre-Owned",
-        endedAt,
-        soldPrice: 40,
-        soldCurrency: "USD",
-        listingType: "buy_it_now",
-        isBestOfferAccepted: false,
-      })),
-    }),
-  });
-  const recommendation = await new PriceRouter([provider]).price({
-    brand: "Canon",
-    model: "AE-1",
-    category: "electronics",
-    condition: "good",
-    conditionKnown: true,
-  });
-  return checkpointTrustedPriceEvidence(recommendation);
-}
-
-async function loadVerifiedItemFact(
-  displayName: string,
-): Promise<VerifiedScoutGuidanceFact> {
-  const snapshot = {
-    item: {
-      id: ITEM_ID,
-      photos: [],
-      attributes: { brand: displayName },
-      condition: null,
-      identification: null,
-      price_override: null,
-      cost_basis: null,
-      review_revision: REVIEW_REVISION,
-      created_at: "2026-07-18T00:00:00.000Z",
-    },
-    listing: null,
-    prediction: null,
-    reviewBlocked: false,
-  };
-  const rpc = vi.fn(async () => ({ data: snapshot, error: null }));
-  const loaded = await loadReviewSnapshot(
-    { rpc } as unknown as SupabaseClient,
-    ITEM_ID,
-  );
-  if (!loaded) throw new Error("Expected a trusted review snapshot fixture.");
-  return verifiedItemDisplayNameFromDurableRecord(loaded);
-}
 
 function verifiedSubstitutionsFor(
   state: string,
@@ -158,29 +24,32 @@ function verifiedSubstitutionsFor(
   switch (state) {
     case "capture.photo-count":
       return {
-        capturedPhotoCount: verifiedCapturedPhotoCount(
-          captureProgress.get(Number(values.capturedPhotoCount ?? 1))!,
-        ),
+        capturedPhotoCount: verifiedCapturedPhotoCount({
+          captureSessionId: CAPTURE_SESSION_ID,
+          capturedPhotoCount: Number(values.capturedPhotoCount ?? 1),
+        }),
       };
     case "processing.finding-sold-comps":
-      return {};
-    case "retry.automatic": {
-      const displayName = values.itemDisplayName ?? "Verified item";
+    case "retry.automatic":
       return {
-        itemDisplayName: verifiedItemFacts.get(displayName)!,
+        itemDisplayName: verifiedItemDisplayNameFromDurableRecord({
+          id: ITEM_ID,
+          review_revision: REVIEW_REVISION,
+          attributes: { brand: values.itemDisplayName ?? "Verified item" },
+        }),
       };
-    }
     case "uncertainty.limited-price-evidence":
-      return verifiedPriceEvidence(
-        priceEvidence.get(
-          `${Number(values.soldCompCount ?? 2)}:${Number(values.windowDays ?? 1)}`,
-        )!,
-      );
+      return verifiedPriceEvidence({
+        recommendationId: RECOMMENDATION_ID,
+        soldCompCount: Number(values.soldCompCount ?? 1),
+        windowDays: Number(values.windowDays ?? 1),
+      });
     case "recovery.upload-paused":
       return {
-        uploadProgressSummary: verifiedUploadProgress(
-          uploadProgress.get(2)!,
-        ),
+        uploadedPhotoCount: verifiedUploadedPhotoCount({
+          runId: RUN_ID,
+          uploadedPhotoCount: Number(values.uploadedPhotoCount ?? 0),
+        }),
       };
     default:
       return {};
@@ -209,83 +78,8 @@ const assetManifests = [
 );
 
 describe("Scout guidance catalog contract", () => {
-  beforeAll(async () => {
-    for (const displayName of [
-      "Verified item",
-      "Canon AE-1 film camera",
-      "AE-1 Program",
-    ]) {
-      verifiedItemFacts.set(displayName, await loadVerifiedItemFact(displayName));
-    }
-    captureProgress.set(1, appendAcceptedPhotos([], [photo(1)]));
-    await collectUploadProgress(2);
-    for (const [soldCompCount, windowDays] of [[2, 1], [3, 90]]) {
-      priceEvidence.set(
-        `${soldCompCount}:${windowDays}`,
-        await routedPriceRecommendation(soldCompCount, windowDays),
-      );
-    }
-  });
-
   it("validates the checked-in provider-neutral V1 catalog", () => {
     expect(scoutGuidanceCatalogSchema.parse(catalog)).toEqual(catalog);
-  });
-
-  it("rejects invalid BCP 47 locale keys and defaultLocale values", () => {
-    const invalid = structuredClone(catalog);
-    invalid.defaultLocale = "pt_BR";
-    invalid.locales.pt_BR = invalid.locales["en-US"];
-    delete invalid.locales["en-US"];
-
-    const result = scoutGuidanceCatalogSchema.safeParse(invalid);
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: ["defaultLocale"],
-            message: "Default locale pt_BR must be a valid BCP 47 language tag.",
-          }),
-          expect.objectContaining({
-            path: ["locales", "pt_BR"],
-            message: "Locale key pt_BR must be a valid BCP 47 language tag.",
-          }),
-        ]),
-      );
-    }
-  });
-
-  it("rejects locale aliases until keys and defaultLocale use canonical form", () => {
-    const aliased = structuredClone(catalog);
-    aliased.defaultLocale = "iw";
-    aliased.locales.iw = aliased.locales["en-US"];
-    delete aliased.locales["en-US"];
-
-    const result = scoutGuidanceCatalogSchema.safeParse(aliased);
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: ["defaultLocale"],
-            message: "Default locale iw must use canonical form he.",
-          }),
-          expect.objectContaining({
-            path: ["locales", "iw"],
-            message: "Locale key iw must use canonical form he.",
-          }),
-        ]),
-      );
-    }
-  });
-
-  it("accepts canonical BCP 47 locale keys", () => {
-    const canonical = structuredClone(catalog);
-    canonical.locales["pt-BR"] = structuredClone(catalog.locales["en-US"]);
-
-    expect(scoutGuidanceCatalogSchema.safeParse(canonical).success).toBe(true);
   });
 
   it("rejects substitution permissions that no localized template uses", () => {
@@ -376,58 +170,6 @@ describe("Scout guidance catalog contract", () => {
     }
   });
 
-  it("requires complete localized plural formats in every locale", () => {
-    for (const missingKey of [
-      "format.upload-progress.known-one",
-      "format.window-days.one",
-    ]) {
-      const missingFormat = structuredClone(catalog);
-      delete missingFormat.locales.es[missingKey];
-
-      const result = scoutGuidanceCatalogSchema.safeParse(missingFormat);
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              message: `Locale es is missing copy key ${missingKey}.`,
-            }),
-          ]),
-        );
-      }
-    }
-  });
-
-  it("audits every shipped locale for direct, calm Scout copy", () => {
-    const bannedPhrasing = [
-      /[—–]/,
-      /\b(?:I|me|my)\b/,
-      /\b(?:yo|mi)\b/i,
-      /\beither way works\b/i,
-      /\bhit a snag\b/i,
-      /\bnot (?:just|beginning)\b/i,
-      /\bno solo\b/i,
-      /\bon us\b/i,
-      /\boriginal draft is safe\b/i,
-      /\b(?:unlock|seamless|effortless|powerful)\b/i,
-      /\b(?:desbloquea|sin esfuerzo)\b/i,
-    ];
-
-    const auditedLocales: string[] = [];
-    for (const [locale, dictionary] of Object.entries(
-      catalog.locales as Record<string, Record<string, string>>,
-    )) {
-      auditedLocales.push(locale);
-      for (const copy of Object.values(dictionary)) {
-        for (const pattern of bannedPhrasing) {
-          expect(copy, `${locale}: ${copy} violates ${pattern}`).not.toMatch(pattern);
-        }
-      }
-    }
-    expect(auditedLocales).toEqual(Object.keys(catalog.locales));
-  });
-
   it("references only implementation-frozen states and approved Scout placements", () => {
     const frozenStateIds = new Set(
       inventory.states
@@ -469,93 +211,6 @@ describe("Scout guidance catalog contract", () => {
           `${definition.guide.scoutAsset} is not approved for ${approvedStateId}`,
         ).toBe(true);
       }
-    }
-  });
-
-  it("uses machine-readable approved design copy for every semantic state", () => {
-    const provenance = JSON.parse(
-      readFileSync(
-        resolve("src/lib/scout-guidance/approved-copy-provenance.v1.json"),
-        "utf8",
-      ),
-    ) as {
-      states: Record<string, { sources: Array<{ kind: string }> }>;
-    };
-
-    const nonMachineReadableSources = Object.entries(provenance.states).flatMap(
-      ([state, definition]) =>
-        definition.sources
-          .filter((source) => source.kind === "source-text")
-          .map(() => state),
-    );
-
-    expect(nonMachineReadableSources).toEqual([]);
-
-    const approvedOverride = JSON.parse(
-      readFileSync(
-        resolve("docs/design/scout-guidance-copy-overrides.v1.json"),
-        "utf8",
-      ),
-    ) as {
-      version: string;
-      status: string;
-      strings_by_state: Record<string, string[]>;
-    };
-    expect(approvedOverride).toMatchObject({
-      version: "scout-guidance-copy-overrides-v1",
-      status: "approved-repo-override",
-    });
-    expect(Object.keys(approvedOverride.strings_by_state)).toEqual([
-      "ONB-01",
-      "ONB-07",
-      "ONB-08",
-      "ONB-09-camera",
-      "ONB-09-library",
-      "CAP-02a",
-      "RUN-02",
-      "RUN-04",
-      "RUN-05",
-      "RUN-06",
-      "REV-02d-retry",
-      "HOME-02",
-    ]);
-  });
-
-  it("has independent exact-copy provenance for every shipped locale", () => {
-    const provenance = JSON.parse(
-      readFileSync(
-        resolve("src/lib/scout-guidance/approved-copy-provenance.v1.json"),
-        "utf8",
-      ),
-    ) as {
-      locales: Record<string, { path: string; locale: string }>;
-    };
-
-    expect(Object.keys(provenance.locales)).toEqual(Object.keys(catalog.locales));
-    for (const [locale, source] of Object.entries(provenance.locales)) {
-      const authority = JSON.parse(
-        readFileSync(resolve(source.path), "utf8"),
-      ) as {
-        version: string;
-        status: string;
-        locales: Record<string, { sha256: string }>;
-      };
-      const canonicalCopy = JSON.stringify(
-        Object.fromEntries(
-          Object.entries(catalog.locales[locale]).sort(([left], [right]) =>
-            left < right ? -1 : left > right ? 1 : 0,
-          ),
-        ),
-      );
-      expect(source.locale).toBe(locale);
-      expect(authority).toMatchObject({
-        version: "scout-guidance-locales-v1",
-        status: "approved-repo-localization",
-      });
-      expect(
-        createHash("sha256").update(canonicalCopy).digest("hex"),
-        locale,
-      ).toBe(authority.locales[locale]?.sha256);
     }
   });
 

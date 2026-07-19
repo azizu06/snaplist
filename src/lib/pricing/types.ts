@@ -85,164 +85,17 @@ export interface ItemSignal {
   specs?: string[];
 }
 
-export const soldEvidenceProviderSchema = z.enum([
-  "ebay-public-sold",
-  "apify-ebay-sold",
-]);
-export type SoldEvidenceProvider = z.infer<typeof soldEvidenceProviderSchema>;
-
-export const PRICE_SOURCE_URL_MAX_LENGTH = 2_048;
-export const PRICE_SOURCE_TITLE_MAX_LENGTH = 256;
-export const PRICE_SOURCE_KIND_MAX_LENGTH = 64;
-/** Matches the established public eBay sold-page retrieval ceiling. */
-export const PRICE_RESULT_MAX_SOURCES = 60;
-
-function isWellFormedUnicode(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const codeUnit = value.charCodeAt(index);
-    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
-      index += 1;
-    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function isAbsoluteHttpUrl(value: string): boolean {
-  if (!/^https?:\/\//i.test(value)) return false;
-  try {
-    const parsed = new URL(value);
-    return (
-      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-      parsed.hostname.length > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-function excludesPostgresUnsupportedNul(value: string): boolean {
-  return !value.includes("\u0000");
-}
-
-/**
- * Bound a string by UTF-16 storage length without cutting a Unicode code point.
- * Malformed input code units and PostgreSQL-incompatible U+0000 become U+FFFD,
- * matching JavaScript's well-formed-string repair semantics while ensuring
- * persisted JSON never carries text PostgreSQL rejects.
- */
-export function boundWellFormedString(
-  value: string,
-  maxLength: number,
-): string {
-  const limit = Math.max(0, Math.floor(maxLength));
-  let bounded = "";
-  for (let index = 0; index < value.length; index += 1) {
-    const codeUnit = value.charCodeAt(index);
-    let codePoint: string;
-    if (codeUnit === 0) {
-      codePoint = "\ufffd";
-    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        codePoint = value.slice(index, index + 2);
-        index += 1;
-      } else {
-        codePoint = "\ufffd";
-      }
-    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
-      codePoint = "\ufffd";
-    } else {
-      codePoint = value[index];
-    }
-    if (bounded.length + codePoint.length > limit) break;
-    bounded += codePoint;
-  }
-  return bounded;
-}
-
-const wellFormedSourceUrlSchema = z
-  .string()
-  .min(1)
-  .max(PRICE_SOURCE_URL_MAX_LENGTH)
-  .refine(isWellFormedUnicode, "Source URL must contain well-formed Unicode.")
-  .refine(
-    excludesPostgresUnsupportedNul,
-    "Source URL must not contain U+0000.",
-  )
-  .refine(
-    isAbsoluteHttpUrl,
-    "Source URL must be an absolute HTTP(S) URL.",
-  );
-const wellFormedSourceTitleSchema = z
-  .string()
-  .max(PRICE_SOURCE_TITLE_MAX_LENGTH)
-  .refine(isWellFormedUnicode, "Source title must contain well-formed Unicode.")
-  .refine(
-    excludesPostgresUnsupportedNul,
-    "Source title must not contain U+0000.",
-  );
-const wellFormedSourceKindSchema = z
-  .string()
-  .max(PRICE_SOURCE_KIND_MAX_LENGTH)
-  .refine(isWellFormedUnicode, "Source kind must contain well-formed Unicode.")
-  .refine(
-    excludesPostgresUnsupportedNul,
-    "Source kind must not contain U+0000.",
-  );
-
 /** A comparable price point / citation behind a price recommendation. */
 export const priceSourceSchema = z.object({
   /** Canonical link to the comp or lookup record. Required — a source must be checkable. */
-  url: wellFormedSourceUrlSchema,
+  url: z.string().min(1),
   /** Human-readable label (listing/page title). */
-  title: wellFormedSourceTitleSchema.optional(),
+  title: z.string().optional(),
   /** What kind of source this is, e.g. "isbn-lookup" | "sold-comp" | "asking-comp". */
-  kind: wellFormedSourceKindSchema.optional(),
-  /** Completed-sale timestamp retained through prediction-log JSON persistence. */
-  soldAt: z.number().nonnegative().optional(),
-  /** Observation timestamp used to derive an honest bounded evidence window. */
-  observedAt: z.number().nonnegative().optional(),
-  /** Router-stamped durable provenance for an approved sold provider. */
-  soldProvider: soldEvidenceProviderSchema.optional(),
+  kind: z.string().optional(),
 });
 
 export type PriceSource = z.infer<typeof priceSourceSchema>;
-
-/**
- * Normalize citation metadata received from an external provider without ever
- * changing its primary URL. Oversized/invalid URLs are rejected (or replaced
- * by an explicitly supplied canonical provider URL), while a human-readable
- * title may be deterministically bounded because it is only a label.
- */
-export function normalizeExternalPriceSource(
-  source: PriceSource,
-  options: { fallbackUrl?: string } = {},
-): PriceSource | null {
-  const url = [source.url, options.fallbackUrl].find(
-    (candidate): candidate is string =>
-      typeof candidate === "string" &&
-      priceSourceSchema.shape.url.safeParse(candidate).success,
-  );
-  if (!url) return null;
-
-  const normalized = priceSourceSchema.safeParse({
-    ...source,
-    url,
-    ...(source.title != null
-      ? {
-          title: boundWellFormedString(
-            source.title,
-            PRICE_SOURCE_TITLE_MAX_LENGTH,
-          ),
-        }
-      : {}),
-  });
-  return normalized.success ? normalized.data : null;
-}
 
 /**
  * A price recommendation. Always `{ suggested, range, confidence, sources[] }`
@@ -266,7 +119,7 @@ export const priceResultSchema = z
      */
     confidence: z.number().min(0).max(1),
     /** Cited comps / lookup records. May be empty for the LLM-only fallback. */
-    sources: z.array(priceSourceSchema).max(PRICE_RESULT_MAX_SOURCES),
+    sources: z.array(priceSourceSchema),
     /** Which tier produced this — a logged, confidence-bearing fact. */
     tier: pricingTierSchema,
     /**

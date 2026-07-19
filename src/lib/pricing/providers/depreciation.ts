@@ -1,10 +1,9 @@
 import { z } from "zod";
-import {
-  normalizeExternalPriceSource,
-  type ItemSignal,
-  type PriceResult,
-  type PriceSource,
-  type PricingProvider,
+import type {
+  ItemSignal,
+  PriceResult,
+  PriceSource,
+  PricingProvider,
 } from "../types";
 import {
   canonicalizeCondition,
@@ -340,27 +339,14 @@ export function createDepreciationPricingProvider(
         if (results.length > 0) {
           const extracted = await extractRetail({ signal, query, results });
           const allowedUrls = new Set(results.map((r) => r.url));
-          for (const externalFinding of extracted) {
-            const parsedFinding = retailFindingSchema.safeParse(externalFinding);
-            if (!parsedFinding.success) continue;
-            const finding = parsedFinding.data;
+          for (const finding of extracted) {
             // Anti-hallucination: a finding must cite one of THIS search's
             // result URLs, carry a positive price, and not duplicate a source.
             if (!allowedUrls.has(finding.url)) continue;
             if (!(finding.price > 0)) continue;
             if (seenUrls.has(finding.url)) continue;
-            const source = normalizeExternalPriceSource({
-              url: finding.url,
-              title: finding.title,
-              kind: "retail-price",
-            });
-            if (source === null) continue;
-            seenUrls.add(source.url);
-            findings.push({
-              url: source.url,
-              title: source.title,
-              price: finding.price,
-            });
+            seenUrls.add(finding.url);
+            findings.push(finding);
           }
         }
         // One cited retail price is a usable anchor; later queries exist only

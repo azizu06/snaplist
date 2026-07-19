@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createInMemoryTtlCache, type TtlCache } from "../comp-cache";
-import {
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
-  priceResultSchema,
-  type ItemSignal,
-} from "../types";
+import { priceResultSchema, type ItemSignal } from "../types";
 
 const apifySdk = vi.hoisted(() => ({
   clients: [] as Array<Record<string, unknown>>,
@@ -220,18 +216,6 @@ describe("normalizeApifySoldItems", () => {
       rawItem({ itemId: String(index), url: `https://www.ebay.com/itm/synthetic-${index}` }),
     );
     expect(normalizeApifySoldItems(rows)).toHaveLength(APIFY_SOLD_MAX_RESULTS_DEFAULT);
-  });
-
-  it("bounds untrusted Actor citation strings before they enter pricing", () => {
-    const [bounded] = normalizeApifySoldItems([
-      rawItem({ title: `Sony WH-1000XM4 ${"x".repeat(1_000)}` }),
-    ]);
-    const oversizedUrl = `https://www.ebay.com/itm/${"1".repeat(2_100)}`;
-
-    expect(bounded.title).toHaveLength(PRICE_SOURCE_TITLE_MAX_LENGTH);
-    expect(
-      normalizeApifySoldItems([rawItem({ url: oversizedUrl })]),
-    ).toEqual([]);
   });
 });
 

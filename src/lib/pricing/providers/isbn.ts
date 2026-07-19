@@ -1,12 +1,9 @@
-import {
-  PRICE_RESULT_MAX_SOURCES,
-  normalizeExternalPriceSource,
-  type ItemSignal,
-  type PriceResult,
-  type PriceSource,
-  type PricingProvider,
+import type {
+  ItemSignal,
+  PriceResult,
+  PriceSource,
+  PricingProvider,
 } from "../types";
-import { inheritTrustedSoldEvidence } from "../approved-sold-provider";
 import {
   canonicalizeCondition,
   isPricedItemCondition,
@@ -136,39 +133,6 @@ function googleBooksUrl(isbn: string): string {
   return `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
 }
 
-function openLibraryCitationUrl(key: unknown): string | undefined {
-  if (typeof key !== "string" || !key.startsWith("/books/")) return undefined;
-  try {
-    const url = new URL(key, "https://openlibrary.org");
-    return url.origin === "https://openlibrary.org" &&
-      url.pathname.startsWith("/books/")
-      ? url.toString()
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function googleBooksCitationUrl(infoLink: unknown): string | undefined {
-  if (typeof infoLink !== "string" || infoLink.length === 0) return undefined;
-  try {
-    const url = new URL(infoLink);
-    const providerOrigin =
-      url.origin === "https://books.google.com" ||
-      url.origin === "http://books.google.com";
-    const providerPath =
-      url.pathname === "/books" || url.pathname.startsWith("/books/");
-    return providerOrigin &&
-      !url.username &&
-      !url.password &&
-      providerPath
-      ? url.toString()
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Minimal shapes of the API responses we read (defensive — only what we use)
 // ---------------------------------------------------------------------------
@@ -220,24 +184,6 @@ interface ResolvedHit {
   cleanHit: boolean;
 }
 
-function boundedCatalogSource(args: {
-  preferredUrl?: string;
-  fallbackUrl: string;
-  title?: string;
-  fallbackTitle: string;
-}): PriceSource | undefined {
-  return (
-    normalizeExternalPriceSource(
-      {
-        url: args.preferredUrl ?? args.fallbackUrl,
-        title: args.title ?? args.fallbackTitle,
-        kind: "isbn-lookup",
-      },
-      { fallbackUrl: args.fallbackUrl },
-    ) ?? undefined
-  );
-}
-
 /** Resolve the Open Library edition record into a citation + title. */
 function readOpenLibrary(
   isbn: string,
@@ -247,15 +193,17 @@ function readOpenLibrary(
   const edition = body as OpenLibraryEdition;
   const title = typeof edition.title === "string" ? edition.title : undefined;
   // Prefer the canonical work key as the citation URL; fall back to the ISBN page.
-  const source = boundedCatalogSource({
-    preferredUrl: openLibraryCitationUrl(edition.key),
-    fallbackUrl: openLibraryUrl(isbn).replace(/\.json$/, ""),
-    title,
-    fallbackTitle: `Open Library record for ISBN ${isbn}`,
-  });
+  const url =
+    typeof edition.key === "string"
+      ? `https://openlibrary.org${edition.key}`
+      : openLibraryUrl(isbn).replace(/\.json$/, "");
   return {
-    title: source?.title,
-    source,
+    title,
+    source: {
+      url,
+      title: title ?? `Open Library record for ISBN ${isbn}`,
+      kind: "isbn-lookup",
+    },
   };
 }
 
@@ -292,17 +240,20 @@ function readGoogleBooks(
         ? list
         : undefined;
 
-  const source = boundedCatalogSource({
-    preferredUrl: googleBooksCitationUrl(info.infoLink),
-    fallbackUrl: `https://books.google.com/books?q=isbn:${encodeURIComponent(isbn)}`,
-    title,
-    fallbackTitle: `Google Books record for ISBN ${isbn}`,
-  });
+  const url =
+    typeof info.infoLink === "string" && info.infoLink.length > 0
+      ? info.infoLink
+      : `https://books.google.com/books?q=isbn:${isbn}`;
+
   return {
     matched: true,
-    title: source?.title,
+    title,
     anchorPrice,
-    source,
+    source: {
+      url,
+      title: title ?? `Google Books record for ISBN ${isbn}`,
+      kind: "isbn-lookup",
+    },
   };
 }
 
@@ -328,7 +279,7 @@ async function resolveHit(
 
   const title = gb.title ?? ol.title;
   // A "clean hit" = both APIs identified the same edition (strongest signal).
-  const cleanHit = Boolean(ol.source) && Boolean(gb.source);
+  const cleanHit = Boolean(ol.source) && gb.matched;
 
   return {
     sources,
@@ -406,27 +357,14 @@ function buildSoldGroundedResult(
   hit: ResolvedHit,
   sold: PriceResult,
 ): PriceResult {
-  // Catalog citations carry the structured ISBN identity that makes this tier
-  // truthful, so reserve their slots first. A sold provider may legitimately
-  // fill the shared ceiling on its own; retain its earliest citations in
-  // provider order instead of returning an invalid over-cap result.
-  const soldSourceSlots = Math.max(
-    0,
-    PRICE_RESULT_MAX_SOURCES - hit.sources.length,
-  );
-  return inheritTrustedSoldEvidence(
-    {
-      suggested: sold.suggested,
-      range: sold.range,
-      confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
-      sources: [...hit.sources, ...sold.sources.slice(0, soldSourceSlots)],
-      tier: "isbn-lookup",
-      ...(sold.compAgreement != null
-        ? { compAgreement: sold.compAgreement }
-        : {}),
-    },
-    sold,
-  );
+  return {
+    suggested: sold.suggested,
+    range: sold.range,
+    confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
+    sources: [...hit.sources, ...sold.sources],
+    tier: "isbn-lookup",
+    ...(sold.compAgreement != null ? { compAgreement: sold.compAgreement } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

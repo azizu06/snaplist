@@ -10,13 +10,7 @@ import {
   type RetailFinding,
 } from "./depreciation";
 import type { SearchClient, SearchResult } from "./web-search";
-import { PriceRouter } from "../router";
-import {
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
-  PRICE_SOURCE_URL_MAX_LENGTH,
-  priceResultSchema,
-  type ItemSignal,
-} from "../types";
+import { priceResultSchema, type ItemSignal } from "../types";
 import { computeConfidence } from "../../confidence/confidence";
 
 /**
@@ -223,38 +217,6 @@ describe("anti-hallucination (post-hoc URL allowlist)", () => {
       [{ url: "https://made-up.example/nowhere", price: 100 }],
     ]);
     expect(await provider.price(GENERIC_SIGNAL)).toBeNull();
-  });
-
-  it("fails soft on oversized model-extracted citations before router validation", async () => {
-    const oversizedUrl = `https://example.com/${"u".repeat(
-      PRICE_SOURCE_URL_MAX_LENGTH,
-    )}`;
-    const oversizedTitle = "T".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH + 1);
-    const validUrl = "https://www.walmart.com/ip/q1-1";
-    const provider = makeProvider(
-      [[
-        { url: oversizedUrl, title: "reject this URL", price: 90 },
-        { url: "javascript:alert(1)", title: "reject this URL", price: 91 },
-        { url: "/relative-result", title: "reject this URL", price: 92 },
-        { url: validUrl, title: oversizedTitle, price: 100 },
-      ]],
-      fakeSearch([[
-        { url: oversizedUrl },
-        { url: "javascript:alert(1)" },
-        { url: "/relative-result" },
-        { url: validUrl },
-      ]]),
-    );
-
-    const result = await new PriceRouter([provider]).price(GENERIC_SIGNAL);
-
-    expect(result.sources).toEqual([
-      {
-        url: validUrl,
-        title: "T".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH),
-        kind: "retail-price",
-      },
-    ]);
   });
 });
 

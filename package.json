@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "verify:standalone-scout": "node scripts/verify-scout-guidance-standalone.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

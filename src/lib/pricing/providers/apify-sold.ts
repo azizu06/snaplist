@@ -6,14 +6,7 @@ import {
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
 import { selectSoldCompEvidence } from "../sold-comp-matcher";
-import {
-  PRICE_SOURCE_URL_MAX_LENGTH,
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
-  boundWellFormedString,
-  type ItemSignal,
-  type PriceResult,
-  type PricingProvider,
-} from "../types";
+import type { ItemSignal, PriceResult, PricingProvider } from "../types";
 import { logEvent, type LogFields } from "../../observability";
 import {
   assertSafeEbayUrl,
@@ -143,15 +136,6 @@ export interface ApifySoldPricingProviderOptions {
   emitDiagnostic?: (event: string, fields: LogFields) => void;
 }
 
-const apifyEbaySoldProviders = new WeakSet<object>();
-
-/** Read-only constructor identity check used by the pricing router. */
-export function isApifyEbaySoldProvider(
-  provider: PricingProvider,
-): boolean {
-  return apifyEbaySoldProviders.has(provider);
-}
-
 function positiveNumber(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -204,8 +188,7 @@ function canonicalEbayItemUrl(value: unknown): string | null {
     url.password = "";
     url.search = "";
     url.hash = "";
-    const canonical = url.toString();
-    return canonical.length <= PRICE_SOURCE_URL_MAX_LENGTH ? canonical : null;
+    return url.toString();
   } catch {
     return null;
   }
@@ -248,13 +231,7 @@ export function normalizeApifySoldItems(
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const raw = value as Record<string, unknown>;
     const url = canonicalEbayItemUrl(raw.url);
-    const title =
-      typeof raw.title === "string"
-        ? boundWellFormedString(
-            raw.title.trim(),
-            PRICE_SOURCE_TITLE_MAX_LENGTH,
-          )
-        : "";
+    const title = typeof raw.title === "string" ? raw.title.trim() : "";
     const price = finitePositive(raw.soldPrice);
     const currency =
       typeof raw.soldCurrency === "string" ? raw.soldCurrency.trim().toUpperCase() : "";
@@ -289,36 +266,6 @@ export function normalizeApifySoldItems(
   }
 
   return normalized;
-}
-
-function revalidateCachedApifySoldItems(
-  cached: ApifySoldComp[] | null,
-  maxResults: number,
-): ApifySoldComp[] | null {
-  if (!Array.isArray(cached)) return null;
-  // Preserve the successful empty-response negative cache so a known-empty
-  // Actor run does not incur another paid start within the TTL.
-  if (cached.length === 0) return [];
-  const normalized = normalizeApifySoldItems(
-    cached.map((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return value;
-      }
-      const comp = value as unknown as Record<string, unknown>;
-      return {
-        url: comp.url,
-        title: comp.title,
-        soldPrice: comp.price,
-        soldCurrency: "USD",
-        condition: comp.condition,
-        endedAt: comp.soldAt,
-        isBestOfferAccepted: comp.isBestOfferAccepted,
-        priceDisclosure: comp.priceDisclosure,
-      };
-    }),
-    maxResults,
-  );
-  return normalized.length >= EBAY_SOLD_MIN_COMPS ? normalized : null;
 }
 
 /** Official SDK runner. It is constructed inertly and performs no request until called. */
@@ -484,7 +431,7 @@ export function createApifySoldPricingProvider(
   async function readCache(key: string): Promise<ApifySoldComp[] | null> {
     if (!cache) return null;
     try {
-      return revalidateCachedApifySoldItems(await cache.get(key), maxResults);
+      return await cache.get(key);
     } catch {
       emitDiagnostic("pricing.apify_sold.cache_error", { op: "get", reason: "unavailable" });
       return null;
@@ -548,7 +495,7 @@ export function createApifySoldPricingProvider(
     return pending;
   }
 
-  const provider: PricingProvider = {
+  return {
     tier: "ebay-sold",
     canHandle(signal) {
       return active && queryFor(signal) != null;
@@ -563,18 +510,14 @@ export function createApifySoldPricingProvider(
       const evidence = selectSoldCompEvidence(comps, signal);
       const weights = new Map(evidence.anchors.map(({ comp, score }) => [comp, score]));
       const clock = now?.();
-      const observedAt = clock ?? Date.now();
       const anchors = evidence.anchors.map(({ comp }) => comp);
       const fresh = clock == null ? anchors : selectFreshComps(anchors, clock, staleDays);
       if (fresh.length < EBAY_SOLD_MIN_COMPS) return null;
 
       return synthesizeSoldResult(fresh, {
         ...(clock != null ? { now: clock, halfLifeDays } : {}),
-        observedAt,
         evidenceWeight: (comp) => weights.get(comp as ApifySoldComp) ?? 1,
       });
     },
   };
-  apifyEbaySoldProviders.add(provider);
-  return provider;
 }

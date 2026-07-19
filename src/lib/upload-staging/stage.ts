@@ -28,7 +28,6 @@ export interface StageUploadEntriesInput {
 
 export interface UploadStagingDependencies {
   upload(path: string, photo: File): Promise<void>;
-  onUploadProgress?(snapshot: UploadProgressSnapshot): void | Promise<void>;
   remove(paths: string[]): Promise<void>;
   findReplay(input: PipelineReplayBatchInput): Promise<PipelineStageBatchResult>;
   stageAndEnqueue(input: PipelineStageBatchInput): Promise<PipelineStageBatchResult>;
@@ -39,38 +38,6 @@ export interface UploadStagingDependencies {
     photoPaths: string[];
   }): Promise<boolean | void>;
   resolveCleanupIntent(cleanupId: string): Promise<boolean | void>;
-}
-
-declare const uploadProgressSnapshotType: unique symbol;
-
-export type UploadProgressSnapshot = Readonly<{
-  [uploadProgressSnapshotType]: true;
-}>;
-
-export interface UploadedPhotoProgressFacts {
-  uploadSessionId: string;
-  entryIndex: number;
-  uploadedPhotoCount: number;
-  plannedPhotoCount: number | null;
-}
-
-const uploadedPhotoProgress = new WeakMap<object, UploadedPhotoProgressFacts>();
-
-function createUploadProgressSnapshot(
-  facts: UploadedPhotoProgressFacts,
-): UploadProgressSnapshot {
-  const snapshot = Object.freeze({}) as UploadProgressSnapshot;
-  uploadedPhotoProgress.set(snapshot, { ...facts });
-  return snapshot;
-}
-
-/** Producer-owned attempt facts; the completed count advances only after Storage succeeds. */
-export function uploadedPhotoProgressFacts(
-  value: unknown,
-): UploadedPhotoProgressFacts | null {
-  if (typeof value !== "object" || value === null) return null;
-  const facts = uploadedPhotoProgress.get(value);
-  return facts ? { ...facts } : null;
 }
 
 function extensionFor(photo: File): string {
@@ -113,7 +80,7 @@ export async function stageUploadEntries(
   input.entries.forEach(validateEntry);
 
   const cleanupId = crypto.randomUUID();
-  const uploads: Array<{ path: string; photo: File; entryIndex: number }> = [];
+  const uploads: Array<{ path: string; photo: File }> = [];
   const stagedEntries: PipelineStageBatchInput["entries"] = input.entries.map(
     (entry, entryIndex) => {
       const photoPaths = entry.photos.map((photo, photoIndex) => {
@@ -124,7 +91,7 @@ export async function stageUploadEntries(
           String(entryIndex),
           `${photoIndex}-${crypto.randomUUID()}.${extensionFor(photo)}`,
         ].join("/");
-        uploads.push({ path, photo, entryIndex });
+        uploads.push({ path, photo });
         return path;
       });
       return {
@@ -138,23 +105,8 @@ export async function stageUploadEntries(
   );
   const plannedPaths = uploads.map(({ path }) => path);
   const uploadedPaths: string[] = [];
-  const uploadedPhotoCounts = input.entries.map(() => 0);
   let cleanupIntentRecorded = false;
   let stagingAttempted = false;
-
-  const notifyUploadProgress = (
-    facts: UploadedPhotoProgressFacts,
-  ): void => {
-    try {
-      const observation = dependencies.onUploadProgress?.(
-        createUploadProgressSnapshot(facts),
-      );
-      void Promise.resolve(observation).catch(() => undefined);
-    } catch {
-      // Optional UI guidance observes upload truth; it never owns producer
-      // success, cleanup, or the durable staging transaction.
-    }
-  };
 
   const resolveCleanupIntent = async (): Promise<void> => {
     if (!cleanupIntentRecorded) return;
@@ -175,25 +127,9 @@ export async function stageUploadEntries(
     });
     cleanupIntentRecorded = true;
 
-    for (const [entryIndex, entry] of input.entries.entries()) {
-      notifyUploadProgress({
-        uploadSessionId: cleanupId,
-        entryIndex,
-        uploadedPhotoCount: 0,
-        plannedPhotoCount: entry.photos.length,
-      });
-    }
-
-    for (const { path, photo, entryIndex } of uploads) {
+    for (const { path, photo } of uploads) {
       await dependencies.upload(path, photo);
       uploadedPaths.push(path);
-      uploadedPhotoCounts[entryIndex] += 1;
-      notifyUploadProgress({
-        uploadSessionId: cleanupId,
-        entryIndex,
-        uploadedPhotoCount: uploadedPhotoCounts[entryIndex],
-        plannedPhotoCount: input.entries[entryIndex]?.photos.length ?? null,
-      });
     }
 
     stagingAttempted = true;

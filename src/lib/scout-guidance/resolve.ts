@@ -1,23 +1,6 @@
 import catalog from "./catalog.v1.json";
 import { z } from "zod";
 import {
-  loadedReviewSnapshotItem,
-  type ReviewSnapshot,
-} from "@/lib/pipeline/review-snapshot";
-import {
-  acceptedCaptureProgressFacts,
-  type AppendAcceptedPhotosResult,
-} from "@/lib/capture-progress";
-import {
-  uploadedPhotoProgressFacts,
-  type UploadProgressSnapshot,
-} from "@/lib/upload-staging";
-import {
-  priceResultSchema,
-  type PriceResult,
-} from "@/lib/pricing";
-import { trustedPriceEvidenceSnapshot } from "@/lib/pricing/approved-sold-provider";
-import {
   SCOUT_GUIDANCE_CONTRACT_VERSION,
   scoutGuidanceCatalogSchema,
   type ScoutGuidanceDefinition,
@@ -51,43 +34,21 @@ export class ScoutGuidanceFactError extends Error {
   readonly name = "ScoutGuidanceFactError";
 
   constructor(
-    readonly code:
-      | "untrusted-durable-item-record"
-      | "untrusted-capture-session"
-      | "untrusted-upload-progress"
-      | "untrusted-price-recommendation"
-      | "missing-item-display-name"
-      | "unsafe-item-display-name",
+    readonly code: "missing-item-display-name" | "unsafe-item-display-name",
     message: string,
   ) {
     super(message);
   }
 }
 
-declare const verifiedFactType: unique symbol;
-const verifiedFacts = new WeakSet<object>();
-const verifiedFactKeys = new WeakMap<object, ScoutGuidanceSubstitutionKey>();
-const verifiedFactGroups = new WeakMap<object, object>();
-
-type ScoutGuidanceSubstitutionKey =
-  | "capturedPhotoCount"
-  | "itemDisplayName"
-  | "soldCompCount"
-  | "windowDays"
-  | "uploadProgressSummary";
+const verifiedFactMarker: unique symbol = Symbol("verified-scout-guidance-fact");
 
 export type VerifiedScoutGuidanceFact = Readonly<{
   source: ScoutGuidanceTrustedSource;
   reference: string;
-  value: string | number | UploadProgressValue;
-  [verifiedFactType]: true;
+  value: string | number;
+  [verifiedFactMarker]: true;
 }>;
-
-type UploadProgressValue = Readonly<{
-  uploadedPhotoCount: number;
-  plannedPhotoCount: number | null;
-}>;
-type RenderedSubstitutionValue = string | number | UploadProgressValue;
 
 const uuidSchema = z.string().uuid();
 const durableItemRecordSchema = z.object({
@@ -105,213 +66,107 @@ const scoutItemDisplayNameSchema = z
   .min(1)
   .max(80)
   .refine((value) => value === value.trim())
-  .regex(/^[\p{L}\p{N}][\p{L}\p{M}\p{N} ./'’&()+#-]*$/u)
-  .refine(
-    (value) =>
-      !/\b(?:not\s+just|ignore|prompt|assistant|system|unlock|seamless|effortless|powerful)\b/i.test(
-        value,
-      ),
-  );
+  .regex(/^[\p{L}\p{N}][\p{L}\p{M}\p{N} ./'’&()+#-]*$/u);
 
 function verifiedFact(
-  key: ScoutGuidanceSubstitutionKey,
   source: ScoutGuidanceTrustedSource,
   reference: string,
-  value: string | number | UploadProgressValue,
-  group?: object,
+  value: string | number,
 ): VerifiedScoutGuidanceFact {
-  const fact = Object.freeze({
+  return Object.freeze({
     source,
     reference,
     value,
-  }) as VerifiedScoutGuidanceFact;
-  verifiedFacts.add(fact);
-  verifiedFactKeys.set(fact, key);
-  if (group) verifiedFactGroups.set(fact, group);
-  return fact;
+    [verifiedFactMarker]: true as const,
+  });
 }
 
 function isVerifiedFact(value: unknown): value is VerifiedScoutGuidanceFact {
   return (
     typeof value === "object" &&
     value !== null &&
-    verifiedFacts.has(value)
+    verifiedFactMarker in value &&
+    value[verifiedFactMarker] === true
   );
 }
 
 /**
- * Construct the only item-name fact accepted by Scout guidance from the exact
- * object returned by the tenant-scoped review snapshot RPC seam. Object
- * identity is checked before the display name and provenance are derived.
+ * Construct the only item-name fact accepted by Scout guidance from an already
+ * tenant-scoped durable item row. The display name and provenance are derived;
+ * call sites cannot label arbitrary prose as a durable record fact.
  */
-export function verifiedItemDisplayNameFromDurableRecord(
-  snapshot: ReviewSnapshot,
-): VerifiedScoutGuidanceFact {
-  const loadedItem = loadedReviewSnapshotItem(snapshot);
-  if (!loadedItem) {
-    throw new ScoutGuidanceFactError(
-      "untrusted-durable-item-record",
-      "Durable item facts must come from the tenant-scoped review snapshot loader.",
-    );
-  }
-  const durableRecord = durableItemRecordSchema.parse(loadedItem);
+export function verifiedItemDisplayNameFromDurableRecord(record: {
+  id: string;
+  review_revision: string;
+  attributes: unknown;
+}): VerifiedScoutGuidanceFact {
+  const durableRecord = durableItemRecordSchema.parse(record);
   const attributes = durableItemAttributesSchema.parse(
     durableRecord.attributes ?? {},
   );
-  // `title` is free-form generated/listing copy. Scout substitutions stay on
-  // the narrower structured-fact seam so #243 can own seller-copy policy
-  // without generated prose leaking into this deterministic catalog.
+  // Listing titles are generated copy. Scout accepts only the narrower
+  // structured identity facts so arbitrary model prose cannot cross this seam.
   const candidate =
     [attributes.brand, attributes.model].filter(Boolean).join(" ") ||
     attributes.category;
   if (!candidate) {
     throw new ScoutGuidanceFactError(
       "missing-item-display-name",
-      "The durable item has no approved display-name fact for this template.",
+      "The durable item has no bounded identity fact for Scout guidance.",
     );
   }
-  const value = scoutItemDisplayNameSchema.safeParse(candidate);
-  if (!value.success) {
+  const parsedCandidate = scoutItemDisplayNameSchema.safeParse(candidate);
+  if (!parsedCandidate.success) {
     throw new ScoutGuidanceFactError(
       "unsafe-item-display-name",
       "The durable item name is outside Scout's bounded substitution grammar.",
     );
   }
   return verifiedFact(
-    "itemDisplayName",
     "durable-item-record",
     `item:${durableRecord.id}:review-revision:${durableRecord.review_revision}`,
-    value.data,
+    parsedCandidate.data,
   );
 }
 
-export function verifiedCapturedPhotoCount(
-  result: AppendAcceptedPhotosResult,
-): VerifiedScoutGuidanceFact {
-  const input = acceptedCaptureProgressFacts(result);
-  if (!input) {
-    throw new ScoutGuidanceFactError(
-      "untrusted-capture-session",
-      "Capture facts must come from the accepted-photo progress seam.",
-    );
-  }
+export function verifiedCapturedPhotoCount(input: {
+  captureSessionId: string;
+  capturedPhotoCount: number;
+}): VerifiedScoutGuidanceFact {
   return verifiedFact(
-    "capturedPhotoCount",
     "capture-session",
     `capture-session:${uuidSchema.parse(input.captureSessionId)}`,
     input.capturedPhotoCount,
   );
 }
 
-export function verifiedPriceEvidence(recommendationInput: PriceResult): Readonly<{
+export function verifiedPriceEvidence(input: {
+  recommendationId: string;
+  soldCompCount: number;
+  windowDays: number;
+}): Readonly<{
   soldCompCount: VerifiedScoutGuidanceFact;
   windowDays: VerifiedScoutGuidanceFact;
 }> {
-  const trustedSnapshot = trustedPriceEvidenceSnapshot(recommendationInput);
-  const recommendation = priceResultSchema.safeParse(trustedSnapshot);
-  const soldSources = recommendation.success
-    ? recommendation.data.sources.filter((source) => source.kind === "sold-comp")
-    : [];
-  const uniqueSoldSourceCount = new Set(
-    soldSources.map((source) => source.url),
-  ).size;
-  const soldProviders = new Set(
-    soldSources.map((source) => source.soldProvider),
-  );
-  const observedAt = soldSources[0]?.observedAt ?? Number.NaN;
-  const oldestSoldAt = Math.min(
-    ...soldSources.map((source) => source.soldAt ?? Number.NaN),
-  );
-  const windowDays = Math.max(
-    1,
-    Math.ceil((observedAt - oldestSoldAt) / 86_400_000),
-  );
-  if (
-    !recommendation.success ||
-    soldSources.length === 0 ||
-    uniqueSoldSourceCount !== soldSources.length ||
-    soldProviders.size !== 1 ||
-    soldProviders.has(undefined) ||
-    !Number.isInteger(windowDays) ||
-    windowDays > 365 ||
-    soldSources.some(
-      (source) =>
-        source.soldAt === undefined ||
-        !Number.isFinite(source.soldAt) ||
-        source.observedAt !== observedAt ||
-        source.soldAt > observedAt,
-    )
-  ) {
-    throw new ScoutGuidanceFactError(
-      "untrusted-price-recommendation",
-      "Price facts require persisted, dated sold comps for the exact recommendation.",
-    );
-  }
-  const reference = `price-recommendation:${crypto.randomUUID()}`;
-  const group = Object.freeze({});
+  const reference = `price-recommendation:${uuidSchema.parse(input.recommendationId)}`;
   return Object.freeze({
     soldCompCount: verifiedFact(
-      "soldCompCount",
       "price-recommendation",
       reference,
-      soldSources.length,
-      group,
+      input.soldCompCount,
     ),
-    windowDays: verifiedFact(
-      "windowDays",
-      "price-recommendation",
-      reference,
-      windowDays,
-      group,
-    ),
+    windowDays: verifiedFact("price-recommendation", reference, input.windowDays),
   });
 }
 
-export function formatUploadProgressSummary(input: {
+export function verifiedUploadedPhotoCount(input: {
+  runId: string;
   uploadedPhotoCount: number;
-  plannedPhotoCount: number | null;
-}, localizedCopy: Record<string, string> = guidanceCatalog.locales[
-  guidanceCatalog.defaultLocale
-]): string {
-  const uploaded = z.number().int().min(0).max(4).parse(input.uploadedPhotoCount);
-  const planned = z.number().int().min(1).max(4).nullable().parse(
-    input.plannedPhotoCount,
-  );
-  const key =
-    planned === null
-      ? uploaded === 0
-        ? "format.upload-progress.unknown-zero"
-        : uploaded === 1
-          ? "format.upload-progress.unknown-one"
-          : "format.upload-progress.unknown-other"
-      : planned === 1
-        ? "format.upload-progress.known-one"
-        : "format.upload-progress.known-other";
-  const template = localizedCopy[key];
-  if (!template) throw new Error(`Locale is missing copy key ${key}.`);
-  return template
-    .replaceAll("{uploadedPhotoCount}", String(uploaded))
-    .replaceAll("{plannedPhotoCount}", String(planned));
-}
-
-export function verifiedUploadProgress(
-  result: UploadProgressSnapshot,
-): VerifiedScoutGuidanceFact {
-  const input = uploadedPhotoProgressFacts(result);
-  if (!input) {
-    throw new ScoutGuidanceFactError(
-      "untrusted-upload-progress",
-      "Upload facts must come from the producer-owned per-photo attempt snapshot.",
-    );
-  }
+}): VerifiedScoutGuidanceFact {
   return verifiedFact(
-    "uploadProgressSummary",
-    "upload-progress",
-    `upload-session:${uuidSchema.parse(input.uploadSessionId)}:entry:${input.entryIndex}`,
-    Object.freeze({
-      uploadedPhotoCount: input.uploadedPhotoCount,
-      plannedPhotoCount: input.plannedPhotoCount,
-    }),
+    "durable-run",
+    `run:${uuidSchema.parse(input.runId)}`,
+    input.uploadedPhotoCount,
   );
 }
 
@@ -352,9 +207,8 @@ function validatedSubstitutions(
   state: ScoutGuidanceState,
   definition: ScoutGuidanceDefinition,
   provided: Record<string, VerifiedScoutGuidanceFact>,
-): Record<string, RenderedSubstitutionValue> {
+): Record<string, string> {
   const allowedKeys = new Set(definition.substitutions.map((rule) => rule.key));
-  let relatedFactGroup: object | undefined;
   const unexpectedKey = Object.keys(provided).find((key) => !allowedKeys.has(key));
   if (unexpectedKey) {
     throw new Error(`Substitution ${unexpectedKey} is not allowed for this guidance state.`);
@@ -378,26 +232,6 @@ function validatedSubstitutions(
           rule.key,
           `Substitution ${rule.key} was not constructed at a verified fact boundary.`,
         );
-      }
-      if (verifiedFactKeys.get(substitution) !== rule.key) {
-        throw new ScoutGuidanceContractError(
-          "untrusted-substitution",
-          state,
-          rule.key,
-          `Substitution ${rule.key} was verified for a different semantic key.`,
-        );
-      }
-      if (definition.substitutions.length > 1) {
-        const factGroup = verifiedFactGroups.get(substitution);
-        if (!factGroup || (relatedFactGroup && factGroup !== relatedFactGroup)) {
-          throw new ScoutGuidanceContractError(
-            "untrusted-substitution",
-            state,
-            rule.key,
-            `Substitution ${rule.key} was verified for a different related-fact bundle.`,
-          );
-        }
-        relatedFactGroup = factGroup;
       }
       if (!rule.trustedSources.includes(substitution.source)) {
         throw new ScoutGuidanceContractError(
@@ -438,24 +272,6 @@ function validatedSubstitutions(
         );
       }
       if (
-        rule.valueType === "upload-progress" &&
-        (!isUploadProgressValue(substitution.value) ||
-          substitution.value.uploadedPhotoCount < 0 ||
-          substitution.value.uploadedPhotoCount > 4 ||
-          (substitution.value.plannedPhotoCount !== null &&
-            (substitution.value.plannedPhotoCount < 1 ||
-              substitution.value.plannedPhotoCount > 4 ||
-              substitution.value.uploadedPhotoCount >
-                substitution.value.plannedPhotoCount)))
-      ) {
-        throw new ScoutGuidanceContractError(
-          "invalid-substitution",
-          state,
-          rule.key,
-          `Substitution ${rule.key} is outside its approved bounds.`,
-        );
-      }
-      if (
         rule.referencePattern &&
         (!substitution.reference ||
           !new RegExp(rule.referencePattern).test(substitution.reference))
@@ -467,79 +283,27 @@ function validatedSubstitutions(
           `Substitution ${rule.key} is missing verified provenance.`,
         );
       }
-      const renderedValue: RenderedSubstitutionValue =
-        rule.valueType === "upload-progress" &&
-        isUploadProgressValue(substitution.value)
-          ? substitution.value
-          : rule.valueType === "integer" &&
-              typeof substitution.value === "number"
-            ? substitution.value
-            : String(substitution.value);
-      return [rule.key, renderedValue] as const;
+      return [rule.key, String(substitution.value)];
     }),
   );
 }
 
 function renderTemplate(
   template: string,
-  substitutions: Record<string, RenderedSubstitutionValue>,
-  localizedCopy: Record<string, string>,
-  resolvedLocale: string,
+  substitutions: Record<string, string>,
 ): string {
   return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (_, key: string) => {
     const value = substitutions[key];
     if (value === undefined) {
       throw new Error(`Template requested missing substitution ${key}.`);
     }
-    if (typeof value === "object") {
-      return formatUploadProgressSummary(value, localizedCopy);
-    }
-    if (
-      typeof value === "number" &&
-      (key === "soldCompCount" || key === "windowDays")
-    ) {
-      return formatPriceEvidenceUnit(
-        key,
-        value,
-        localizedCopy,
-        resolvedLocale,
-      );
-    }
-    return String(value);
+    return value;
   });
-}
-
-function formatPriceEvidenceUnit(
-  key: "soldCompCount" | "windowDays",
-  value: number,
-  localizedCopy: Record<string, string>,
-  resolvedLocale: string,
-): string {
-  const unit = key === "soldCompCount" ? "sold-comp-count" : "window-days";
-  const plural = new Intl.PluralRules(resolvedLocale).select(value);
-  const template =
-    localizedCopy[
-      `format.${unit}.${plural === "one" ? "one" : "other"}`
-    ];
-  if (!template) throw new Error(`Locale is missing ${unit} plural copy.`);
-  return template.replaceAll(`{${key}}`, String(value));
-}
-
-function isUploadProgressValue(value: unknown): value is UploadProgressValue {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "uploadedPhotoCount" in value &&
-    Number.isInteger(value.uploadedPhotoCount) &&
-    "plannedPhotoCount" in value &&
-    (value.plannedPhotoCount === null || Number.isInteger(value.plannedPhotoCount))
-  );
 }
 
 function resolveLocale(requestedLocale: string): {
   resolvedLocale: string;
   fallbackChain: string[];
-  fallbackApplied: boolean;
 } {
   let canonicalLocale: string;
   let language: string | null = null;
@@ -556,19 +320,10 @@ function resolveLocale(requestedLocale: string): {
     guidanceCatalog.defaultLocale,
   ].filter((locale, index, locales) => locale && locales.indexOf(locale) === index);
   const resolvedLocale =
-    fallbackChain.find((locale) =>
-      Object.hasOwn(guidanceCatalog.locales, locale),
-    ) ??
+    fallbackChain.find((locale) => guidanceCatalog.locales[locale]) ??
     guidanceCatalog.defaultLocale;
 
-  return {
-    resolvedLocale,
-    fallbackChain,
-    // Compare against the canonical request itself, not the filtered chain:
-    // an empty invalid request is removed from that chain before the default
-    // locale is appended, but resolving it to en-US is still a real fallback.
-    fallbackApplied: canonicalLocale !== resolvedLocale,
-  };
+  return { resolvedLocale, fallbackChain };
 }
 
 export function resolveScoutGuidance(
@@ -583,7 +338,8 @@ export function resolveScoutGuidance(
       request.contractVersion,
     );
   }
-  if (!Object.hasOwn(guidanceCatalog.states, request.state)) {
+  const definition = guidanceCatalog.states[request.state];
+  if (!definition) {
     throw new ScoutGuidanceContractError(
       "unsupported-state",
       request.state,
@@ -591,7 +347,6 @@ export function resolveScoutGuidance(
       `Unsupported Scout guidance state ${request.state}.`,
     );
   }
-  const definition = guidanceCatalog.states[request.state];
   const localeResolution = resolveLocale(request.locale);
   const locale = guidanceCatalog.locales[localeResolution.resolvedLocale];
   const substitutions = validatedSubstitutions(
@@ -599,20 +354,15 @@ export function resolveScoutGuidance(
     definition,
     request.substitutions,
   );
-  const copy = (key: string) =>
-    renderTemplate(
-      locale[key],
-      substitutions,
-      locale,
-      localeResolution.resolvedLocale,
-    );
+  const copy = (key: string) => renderTemplate(locale[key], substitutions);
 
   return {
     contractVersion: SCOUT_GUIDANCE_CONTRACT_VERSION,
     state: request.state,
     requestedLocale: request.locale,
     resolvedLocale: localeResolution.resolvedLocale,
-    localeFallbackApplied: localeResolution.fallbackApplied,
+    localeFallbackApplied:
+      localeResolution.fallbackChain[0] !== localeResolution.resolvedLocale,
     localeFallbackChain: localeResolution.fallbackChain,
     message: {
       title: copy(definition.copyKeys.title),

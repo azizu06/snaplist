@@ -1,5 +1,4 @@
 import { PriceRouter } from "./router";
-import { canonicalizeRoutedSoldEvidence } from "./approved-sold-provider";
 import type { ItemSignal, PriceResult, PricingProvider } from "./types";
 import { getTtlCache } from "./comp-cache";
 import {
@@ -99,7 +98,7 @@ function orderedSoldProvider(
       for (const provider of providers) {
         if (provider.canHandle && !provider.canHandle(signal)) continue;
         const result = await provider.price(signal);
-        if (result) return canonicalizeRoutedSoldEvidence(provider, result);
+        if (result) return result;
       }
       return null;
     },

@@ -159,8 +159,11 @@ export default async function ReviewPage({
   // Schema-validated so a malformed legacy row degrades to an empty list rather
   // than rendering broken links; optional fields normalize to null for the view.
   const parsedSources = priceSourceSchema.array().safeParse(log?.sources ?? []);
-  // PriceSource now requires absolute http(s), but retain this render-boundary
-  // allowlist as defense-in-depth for legacy rows and any future schema drift.
+  // Source URLs come from the pricing pipeline (web search / scraper / LLM), and
+  // priceSourceSchema only checks non-empty — so a hostile or hallucinated
+  // `javascript:` / `data:` URL could otherwise reach the rendered <a href> and
+  // execute on click. Allowlist http(s) here, at the render boundary, before the
+  // links reach the client (XSS defense-in-depth).
   const sources = (parsedSources.success ? parsedSources.data : [])
     .filter((s) => isHttpUrl(s.url))
     .map((s) => ({

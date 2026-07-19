@@ -1,13 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PriceRouter } from "./router";
-import {
-  PRICE_SOURCE_TITLE_MAX_LENGTH,
-  priceResultSchema,
-  type ItemSignal,
-  type PriceResult,
-  type PricingProvider,
-  type PricingTier,
-} from "./types";
+import { priceResultSchema, type ItemSignal, type PriceResult, type PricingProvider, type PricingTier } from "./types";
 
 /**
  * Test-only stub provider for exercising the router seam. Kept inline in the test
@@ -200,25 +193,5 @@ describe("PriceRouter contract & extensibility", () => {
     };
     const router = new PriceRouter([mislabeled]);
     await expect(router.price(isbnSignal)).rejects.toThrow(/tier/);
-  });
-
-  it("rejects oversized citation fields returned by a provider", async () => {
-    const oversized: PricingProvider = {
-      tier: "branded-web",
-      price: async () => ({
-        suggested: 10,
-        range: { min: 5, max: 15 },
-        confidence: 0.5,
-        sources: [{
-          url: "https://example.com/oversized",
-          title: "x".repeat(PRICE_SOURCE_TITLE_MAX_LENGTH + 1),
-        }],
-        tier: "branded-web",
-      }),
-    };
-
-    await expect(
-      new PriceRouter([oversized]).price(brandedSignal),
-    ).rejects.toThrow();
   });
 });

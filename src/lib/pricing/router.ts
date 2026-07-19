@@ -1,13 +1,4 @@
-import {
-  priceResultSchema,
-  type ItemSignal,
-  type PriceResult,
-  type PricingProvider,
-} from "./types";
-import {
-  canonicalizeRoutedSoldEvidence,
-  inheritTrustedSoldEvidence,
-} from "./approved-sold-provider";
+import type { ItemSignal, PriceResult, PricingProvider } from "./types";
 
 /**
  * The pricing router (PRD: "Pricing is a routing pipeline behind a PricingProvider
@@ -46,18 +37,14 @@ export class PriceRouter {
 
       const result = await provider.price(signal);
       if (result !== null) {
-        const parsed = priceResultSchema.parse(result);
         // A provider must stamp its own tier; a mismatch would corrupt downstream
         // logging/confidence ("which tier fired"), so fail loud rather than trust it.
-        if (parsed.tier !== provider.tier) {
+        if (result.tier !== provider.tier) {
           throw new Error(
-            `PricingProvider for tier "${provider.tier}" returned a result tagged "${parsed.tier}"`,
+            `PricingProvider for tier "${provider.tier}" returned a result tagged "${result.tier}"`,
           );
         }
-        return canonicalizeRoutedSoldEvidence(
-          provider,
-          inheritTrustedSoldEvidence(parsed, result),
-        );
+        return result;
       }
     }
 

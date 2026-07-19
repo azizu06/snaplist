@@ -1,11 +1,10 @@
 import { z } from "zod";
-import {
-  normalizeExternalPriceSource,
-  type ItemSignal,
-  type PriceResult,
-  type PriceSource,
-  type PricingProvider,
-  type PricingTier,
+import type {
+  ItemSignal,
+  PriceResult,
+  PriceSource,
+  PricingProvider,
+  PricingTier,
 } from "../types";
 import { resolveLanguageModel, resolveModelId } from "../../llm";
 
@@ -197,25 +196,6 @@ export const webCompSchema = z.object({
 });
 
 export type WebComp = z.infer<typeof webCompSchema>;
-
-function normalizeExternalWebComp(comp: unknown): WebComp | null {
-  const parsed = webCompSchema.safeParse(comp);
-  if (!parsed.success) return null;
-  // Do not truncate a URL: changing it would destroy citation integrity. Drop
-  // an oversized external citation independently so other valid comps can
-  // still price the listing. Titles are labels, so deterministic truncation
-  // preserves useful context while satisfying the shared source contract.
-  const source = normalizeExternalPriceSource({
-    url: parsed.data.url,
-    title: parsed.data.title,
-  });
-  if (source === null) return null;
-  return {
-    ...parsed.data,
-    url: source.url,
-    title: source.title,
-  };
-}
 
 const webCompListSchema = z.object({ comps: z.array(webCompSchema) });
 
@@ -569,9 +549,7 @@ async function priceViaWebAgent(
     if (results.length > 0) {
       const extracted = await deps.extractComps({ signal, query, results });
       const allowedUrls = new Set(results.map((r) => r.url));
-      for (const externalComp of extracted) {
-        const comp = normalizeExternalWebComp(externalComp);
-        if (comp === null) continue;
+      for (const comp of extracted) {
         // Anti-hallucination: a comp must cite one of THIS search's result
         // URLs, carry a positive price, and not duplicate an earlier comp.
         if (!allowedUrls.has(comp.url)) continue;

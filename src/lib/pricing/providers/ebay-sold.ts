@@ -1,11 +1,9 @@
 import { load } from "cheerio";
-import {
-  PRICE_RESULT_MAX_SOURCES,
-  normalizeExternalPriceSource,
-  type ItemSignal,
-  type PriceResult,
-  type PriceSource,
-  type PricingProvider,
+import type {
+  ItemSignal,
+  PriceResult,
+  PriceSource,
+  PricingProvider,
 } from "../types";
 import { TIGHT_AGREEMENT_MIN, spreadToAgreement } from "./web-search";
 import {
@@ -122,15 +120,6 @@ export interface EbaySoldPricingProviderOptions {
   halfLifeDays?: number;
 }
 
-const ebayPublicSoldProviders = new WeakSet<object>();
-
-/** Read-only constructor identity check used by the pricing router. */
-export function isEbayPublicSoldProvider(
-  provider: PricingProvider,
-): boolean {
-  return ebayPublicSoldProviders.has(provider);
-}
-
 // ---------------------------------------------------------------------------
 // Config (env-configurable everything — read lazily, never at import)
 // ---------------------------------------------------------------------------
@@ -143,15 +132,9 @@ export const EBAY_SOLD_USER_AGENT_DEFAULT =
 /** eBay shows up to this many results per page; one fetch is plenty of comps. */
 export const EBAY_SOLD_RESULTS_PER_PAGE = 120;
 /** Parse cap — a pathological page can't blow memory / downstream cost. */
-export const EBAY_SOLD_MAX_RESULTS = PRICE_RESULT_MAX_SOURCES;
+export const EBAY_SOLD_MAX_RESULTS = 60;
 /** Fewer than this many sold comps = "nothing useful" → decline. */
 export const EBAY_SOLD_MIN_COMPS = 2;
-
-function boundedSoldResultLimit(value: number): number {
-  return Number.isFinite(value)
-    ? Math.max(0, Math.min(Math.floor(value), PRICE_RESULT_MAX_SOURCES))
-    : EBAY_SOLD_MAX_RESULTS;
-}
 
 /**
  * Per-fetch timeout. A stalled eBay response (connection accepted, body never
@@ -269,62 +252,6 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
     throw new Error(`Unsafe eBay URL (internal/IP address): ${host}`);
   }
   return u;
-}
-
-function canonicalEbayItemUrl(
-  rawUrl: string,
-  baseUrl?: string,
-): string | null {
-  try {
-    const resolved = baseUrl ? new URL(rawUrl, baseUrl).toString() : rawUrl;
-    const itemUrl = assertSafeEbayUrl(resolved);
-    return itemUrl.pathname.toLowerCase().startsWith("/itm/")
-      ? itemUrl.toString()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function revalidateCachedSoldComps(
-  cached: EbaySoldComp[] | null,
-): EbaySoldComp[] | null {
-  if (!Array.isArray(cached)) return null;
-  const valid = cached.flatMap((comp) => {
-    if (
-      !comp ||
-      typeof comp !== "object" ||
-      typeof comp.url !== "string" ||
-      typeof comp.price !== "number" ||
-      !Number.isFinite(comp.price) ||
-      comp.price <= 0
-    ) {
-      return [];
-    }
-    const url = canonicalEbayItemUrl(comp.url);
-    if (!url) return [];
-    const source = normalizeExternalPriceSource({
-      url,
-      ...(typeof comp.title === "string" ? { title: comp.title } : {}),
-      kind: "sold-comp",
-      ...(typeof comp.soldAt === "number" &&
-      Number.isFinite(comp.soldAt) &&
-      comp.soldAt >= 0
-        ? { soldAt: comp.soldAt }
-        : {}),
-    });
-    if (!source) return [];
-    return [{
-      url: source.url,
-      title: source.title,
-      price: comp.price,
-      ...(typeof comp.condition === "string"
-        ? { condition: comp.condition }
-        : {}),
-      ...(source.soldAt !== undefined ? { soldAt: source.soldAt } : {}),
-    }];
-  });
-  return valid.length >= EBAY_SOLD_MIN_COMPS ? valid : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +455,6 @@ export function parseSoldComps(
   baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
   max: number = EBAY_SOLD_MAX_RESULTS,
 ): EbaySoldComp[] {
-  const limit = boundedSoldResultLimit(max);
   const $ = load(html);
   const comps: EbaySoldComp[] = [];
   const seen = new Set<string>();
@@ -538,7 +464,7 @@ export function parseSoldComps(
   const harvest = (sel: CardSelectors): boolean => {
     let capped = false;
     $(sel.card).each((_i, el) => {
-      if (comps.length >= limit) {
+      if (comps.length >= max) {
         capped = true;
         return false; // hit the cap — stop iterating
       }
@@ -577,15 +503,14 @@ export function parseSoldComps(
 
       const href = card.find(sel.link).first().attr("href");
       if (!href) return;
-      const resolvedUrl = canonicalEbayItemUrl(href, baseUrl);
-      if (!resolvedUrl) return;
-      const source = normalizeExternalPriceSource({
-        url: resolvedUrl,
-        title,
-        kind: "sold-comp",
-      });
-      if (source === null || seen.has(source.url)) return;
-      seen.add(source.url);
+      let url: string;
+      try {
+        url = new URL(href, baseUrl).toString();
+      } catch {
+        return;
+      }
+      if (seen.has(url)) return;
+      seen.add(url);
 
       // Card condition metadata (eBay's subtitle / SECONDARY_INFO span) — the
       // authoritative grade even when the title omits it (#56 review).
@@ -595,14 +520,13 @@ export function parseSoldComps(
 
       const soldAt = parseSoldDate(captionText);
 
-      const comp: EbaySoldComp = {
-        url: source.url,
-        title: source.title,
+      comps.push({
+        url,
+        title,
         price,
         ...(condition ? { condition } : {}),
         ...(soldAt != null ? { soldAt } : {}),
-      };
-      comps.push(comp);
+      });
     });
     return capped;
   };
@@ -884,8 +808,6 @@ export function coreComps(
 export interface SoldSynthesisOptions {
   /** Reference "now" (epoch ms). When set, the suggested price is recency-weighted. */
   now?: number;
-  /** Durable timestamp for when these citations were observed. */
-  observedAt?: number;
   /** Recency half-life in days; defaults to the freshness module default. */
   halfLifeDays?: number;
   /** Optional relevance/condition weight from the provider-neutral matcher. */
@@ -946,15 +868,9 @@ export function synthesizeSoldResult(
     url: c.url,
     title: c.title,
     kind: "sold-comp",
-    ...(c.soldAt !== undefined ? { soldAt: c.soldAt } : {}),
-    ...(opts.observedAt !== undefined
-      ? { observedAt: opts.observedAt }
-      : opts.now !== undefined
-        ? { observedAt: opts.now }
-        : {}),
   }));
 
-  const result: PriceResult = {
+  return {
     suggested: round2(suggested),
     range: { min: round2(min), max: round2(max) },
     confidence,
@@ -964,7 +880,6 @@ export function synthesizeSoldResult(
     // the sold-comp label into the ready-to-publish confidence band.
     compAgreement: agreement,
   };
-  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,9 +970,7 @@ export function createEbaySoldPricingProvider(
 ): PricingProvider {
   const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
-  const maxResults = boundedSoldResultLimit(
-    options.maxResults ?? EBAY_SOLD_MAX_RESULTS,
-  );
+  const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
   const configuredEgress = options.fetchPage
     ? { mode: "injected" as const }
     : resolveEbaySoldEgressConfig();
@@ -1129,7 +1042,7 @@ export function createEbaySoldPricingProvider(
     return comps;
   }
 
-  const provider: PricingProvider = {
+  return {
     tier: "ebay-sold",
     canHandle: identifiable,
     async price(signal: ItemSignal): Promise<PriceResult | null> {
@@ -1154,7 +1067,7 @@ export function createEbaySoldPricingProvider(
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
-          comps = revalidateCachedSoldComps(await cache.get(url));
+          comps = await cache.get(url);
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
             op: "get",
@@ -1175,9 +1088,6 @@ export function createEbaySoldPricingProvider(
           }
         }
       }
-      // A cache may outlive a deployment or be injected by a caller; reapply
-      // the provider's shared evidence ceiling even when parsing was bypassed.
-      comps = comps.slice(0, maxResults);
 
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
@@ -1191,7 +1101,6 @@ export function createEbaySoldPricingProvider(
       // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
       // then recency-weight the suggested price toward more recent sales.
       const tNow = now?.();
-      const observedAt = tNow ?? Date.now();
       const fresh =
         tNow != null ? selectFreshComps(relevant, tNow, staleDays) : relevant;
       if (fresh.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
@@ -1199,12 +1108,9 @@ export function createEbaySoldPricingProvider(
         fresh,
         {
           ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
-          observedAt,
           evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,
         },
       );
     },
   };
-  ebayPublicSoldProviders.add(provider);
-  return provider;
 }

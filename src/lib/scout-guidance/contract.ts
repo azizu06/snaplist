@@ -6,14 +6,14 @@ export const scoutGuidanceTrustedSourceSchema = z.enum([
   "capture-session",
   "durable-item-record",
   "price-recommendation",
-  "upload-progress",
+  "durable-run",
   "seller-confirmed-item",
 ]);
 
 const substitutionRuleSchema = z
   .object({
     key: z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/),
-    valueType: z.enum(["integer", "text", "upload-progress"]),
+    valueType: z.enum(["integer", "text"]),
     trustedSources: z.array(scoutGuidanceTrustedSourceSchema).min(1),
     minimum: z.number().int().optional(),
     maximum: z.number().int().optional(),
@@ -119,26 +119,6 @@ function sameVariables(actual: string[], expected: string[]): boolean {
   );
 }
 
-function canonicalLocaleTag(locale: string): string | null {
-  try {
-    return Intl.getCanonicalLocales(locale)[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-const localizedFormatKeys = [
-  "format.upload-progress.known-one",
-  "format.upload-progress.known-other",
-  "format.upload-progress.unknown-zero",
-  "format.upload-progress.unknown-one",
-  "format.upload-progress.unknown-other",
-  "format.sold-comp-count.one",
-  "format.sold-comp-count.other",
-  "format.window-days.one",
-  "format.window-days.other",
-] as const;
-
 export const scoutGuidanceCatalogSchema = z
   .object({
     contractVersion: z.literal(SCOUT_GUIDANCE_CONTRACT_VERSION),
@@ -155,36 +135,6 @@ export const scoutGuidanceCatalogSchema = z
   })
   .strict()
   .superRefine((catalog, context) => {
-    const canonicalDefaultLocale = canonicalLocaleTag(catalog.defaultLocale);
-    if (canonicalDefaultLocale === null) {
-      context.addIssue({
-        code: "custom",
-        path: ["defaultLocale"],
-        message: `Default locale ${catalog.defaultLocale} must be a valid BCP 47 language tag.`,
-      });
-    } else if (canonicalDefaultLocale !== catalog.defaultLocale) {
-      context.addIssue({
-        code: "custom",
-        path: ["defaultLocale"],
-        message: `Default locale ${catalog.defaultLocale} must use canonical form ${canonicalDefaultLocale}.`,
-      });
-    }
-    for (const locale of Object.keys(catalog.locales)) {
-      const canonicalLocale = canonicalLocaleTag(locale);
-      if (canonicalLocale === null) {
-        context.addIssue({
-          code: "custom",
-          path: ["locales", locale],
-          message: `Locale key ${locale} must be a valid BCP 47 language tag.`,
-        });
-      } else if (canonicalLocale !== locale) {
-        context.addIssue({
-          code: "custom",
-          path: ["locales", locale],
-          message: `Locale key ${locale} must use canonical form ${canonicalLocale}.`,
-        });
-      }
-    }
     const defaultCopy = catalog.locales[catalog.defaultLocale];
     if (!defaultCopy) {
       context.addIssue({
@@ -193,55 +143,6 @@ export const scoutGuidanceCatalogSchema = z
         message: "The default locale must exist in the locale catalog.",
       });
       return;
-    }
-
-    for (const copyKey of localizedFormatKeys) {
-      const defaultTemplate = defaultCopy[copyKey];
-      if (!defaultTemplate) {
-        context.addIssue({
-          code: "custom",
-          path: ["locales", catalog.defaultLocale],
-          message: `Locale ${catalog.defaultLocale} is missing copy key ${copyKey}.`,
-        });
-        continue;
-      }
-      const expected = parseTemplate(defaultTemplate);
-      if (expected.malformedBraces) {
-        context.addIssue({
-          code: "custom",
-          path: ["locales", catalog.defaultLocale, copyKey],
-          message: `Locale ${catalog.defaultLocale} copy key ${copyKey} contains malformed template braces.`,
-        });
-      }
-      for (const [locale, localizedCopy] of Object.entries(catalog.locales)) {
-        const localizedTemplate = localizedCopy[copyKey];
-        if (!localizedTemplate) {
-          context.addIssue({
-            code: "custom",
-            path: ["locales", locale],
-            message: `Locale ${locale} is missing copy key ${copyKey}.`,
-          });
-          continue;
-        }
-        const parsed = parseTemplate(localizedTemplate);
-        if (parsed.malformedBraces) {
-          context.addIssue({
-            code: "custom",
-            path: ["locales", locale, copyKey],
-            message: `Locale ${locale} copy key ${copyKey} contains malformed template braces.`,
-          });
-          continue;
-        }
-        if (!sameVariables(parsed.variables, expected.variables)) {
-          const expectedVariables =
-            [...new Set(expected.variables)].join(", ") || "(none)";
-          context.addIssue({
-            code: "custom",
-            path: ["locales", locale, copyKey],
-            message: `Locale ${locale} template ${copyKey} must use exactly approved variables: ${expectedVariables}.`,
-          });
-        }
-      }
     }
 
     for (const [state, definition] of Object.entries(catalog.states)) {

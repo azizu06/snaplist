@@ -1,81 +1,68 @@
 {
   "contractVersion": "scout-guidance-v1",
-  "locales": {
-    "en-US": {
-      "path": "docs/design/scout-guidance-locales.v1.json",
-      "locale": "en-US"
-    },
-    "es": {
-      "path": "docs/design/scout-guidance-locales.v1.json",
-      "locale": "es"
-    }
-  },
   "states": {
     "onboarding.outcome": {
       "approvedStateIds": ["ONB-01"],
       "templates": {
-        "title": "Photograph an item to check sold comps and prepare a listing.",
-        "body": "Review the price evidence and listing before you publish. No account needed to start.",
-        "accessibilityLabel": "Photograph an item to check sold comps and prepare a listing. Review the price evidence and listing before you publish. No account needed to start."
+        "title": "Photograph an item. Get real comps and a listing you control.",
+        "body": "See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
+        "accessibilityLabel": "Photograph an item. Get real comps and a listing you control. See what similar items actually sold for, then publish a listing you approve. No account needed to start."
       },
       "canonicalSubstitutions": {},
       "expected": {
-        "title": "Photograph an item to check sold comps and prepare a listing.",
-        "body": "Review the price evidence and listing before you publish. No account needed to start.",
-        "accessibilityLabel": "Photograph an item to check sold comps and prepare a listing. Review the price evidence and listing before you publish. No account needed to start."
+        "title": "Photograph an item. Get real comps and a listing you control.",
+        "body": "See what similar items actually sold for, then publish a listing you approve. No account needed to start.",
+        "accessibilityLabel": "Photograph an item. Get real comps and a listing you control. See what similar items actually sold for, then publish a listing you approve. No account needed to start."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
-        "stateId": "ONB-01",
+        "kind": "json-string-keys",
+        "path": "ios/DesignContracts/V1/snaplist-copy-catalog.json",
+        "keys": ["onboarding_headline", "onboarding_support"],
         "fragments": [
-          "Photograph an item to check sold comps and prepare a listing.",
-          "Review the price evidence and listing before you publish. No account needed to start.",
-          "Photograph an item to check sold comps and prepare a listing. Review the price evidence and listing before you publish. No account needed to start."
+          "Photograph an item. Get real comps and a listing you control.",
+          "See what similar items actually sold for, then publish a listing you approve. No account needed to start."
         ]
       }]
     },
     "onboarding.photo-primer": {
       "approvedStateIds": ["ONB-07"],
       "templates": {
-        "title": "Start with one clear photo.",
+        "title": "One clear photo is all I need to start.",
         "body": null,
-        "accessibilityLabel": "Start with one clear photo."
+        "accessibilityLabel": "One clear photo is all I need to start."
       },
       "canonicalSubstitutions": {},
       "expected": {
-        "title": "Start with one clear photo.",
+        "title": "One clear photo is all I need to start.",
         "body": null,
-        "accessibilityLabel": "Start with one clear photo."
+        "accessibilityLabel": "One clear photo is all I need to start."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
-        "stateId": "ONB-07",
-        "fragments": ["Start with one clear photo."]
+        "kind": "source-text",
+        "path": "ios/SnapList/Features/Onboarding/OnboardingDomain.swift",
+        "fragments": ["One clear photo is all I need to start."]
       }]
     },
     "onboarding.camera-denied": {
       "approvedStateIds": ["ONB-08"],
       "templates": {
         "title": "Camera access is off",
-        "body": "Enable camera access in Settings, or choose a photo from your library.",
-        "accessibilityLabel": "Camera access is off. Enable camera access in Settings, or choose a photo from your library."
+        "body": "Enable it in Settings, or pick a photo from your library instead — either way works.",
+        "accessibilityLabel": "Camera access is off. Enable it in Settings, or pick a photo from your library instead — either way works."
       },
       "canonicalSubstitutions": {},
       "expected": {
         "title": "Camera access is off",
-        "body": "Enable camera access in Settings, or choose a photo from your library.",
-        "accessibilityLabel": "Camera access is off. Enable camera access in Settings, or choose a photo from your library."
+        "body": "Enable it in Settings, or pick a photo from your library instead — either way works.",
+        "accessibilityLabel": "Camera access is off. Enable it in Settings, or pick a photo from your library instead — either way works."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
-        "stateId": "ONB-08",
+        "kind": "json-string-keys",
+        "path": "ios/DesignContracts/V1/snaplist-copy-catalog.json",
+        "keys": ["camera_denied_title", "camera_denied_support"],
         "fragments": [
           "Camera access is off",
-          "Enable camera access in Settings, or choose a photo from your library.",
-          "Camera access is off. Enable camera access in Settings, or choose a photo from your library."
+          "Enable it in Settings, or pick a photo from your library instead — either way works."
         ]
       }]
     },
@@ -83,23 +70,22 @@
       "approvedStateIds": ["ONB-09-camera"],
       "templates": {
         "title": "Ready to capture",
-        "body": "Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm.",
-        "accessibilityLabel": "Ready to capture. Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm."
+        "body": "Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it.",
+        "accessibilityLabel": "Ready to capture. Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it."
       },
       "canonicalSubstitutions": {},
       "expected": {
         "title": "Ready to capture",
-        "body": "Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm.",
-        "accessibilityLabel": "Ready to capture. Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm."
+        "body": "Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it.",
+        "accessibilityLabel": "Ready to capture. Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "kind": "json-screen-copy",
+        "path": "ios/DesignContracts/V1/snaplist-screen-specs.json",
         "stateId": "ONB-09-camera",
         "fragments": [
           "Ready to capture",
-          "Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm.",
-          "Ready to capture. Camera access is on. Frame your item when you are ready. Analysis starts only after you confirm."
+          "Camera access is on. Next you'll frame your item with light guidance — nothing is analyzed until you choose to run it."
         ]
       }]
     },
@@ -107,44 +93,42 @@
       "approvedStateIds": ["ONB-09-library"],
       "templates": {
         "title": "Photos ready",
-        "body": "Choose your item photos. Analysis starts only after you confirm.",
-        "accessibilityLabel": "Photos ready. Choose your item photos. Analysis starts only after you confirm."
+        "body": "Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose.",
+        "accessibilityLabel": "Photos ready. Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose."
       },
       "canonicalSubstitutions": {},
       "expected": {
         "title": "Photos ready",
-        "body": "Choose your item photos. Analysis starts only after you confirm.",
-        "accessibilityLabel": "Photos ready. Choose your item photos. Analysis starts only after you confirm."
+        "body": "Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose.",
+        "accessibilityLabel": "Photos ready. Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "kind": "json-screen-copy",
+        "path": "ios/DesignContracts/V1/snaplist-screen-specs.json",
         "stateId": "ONB-09-library",
         "fragments": [
           "Photos ready",
-          "Choose your item photos. Analysis starts only after you confirm.",
-          "Photos ready. Choose your item photos. Analysis starts only after you confirm."
+          "Pick your item's photos next. You'll add a little guidance before anything is analyzed — nothing runs until you choose."
         ]
       }]
     },
     "capture.initial-coaching": {
       "approvedStateIds": ["CAP-02a"],
       "templates": {
-        "title": "Start with one clear photo. Add another view if it shows a label or damage.",
+        "title": "Start with one clear photo. Add angles, labels, or damage for a stronger match.",
         "body": null,
-        "accessibilityLabel": "Start with one clear photo. Add another view if it shows a label or damage."
+        "accessibilityLabel": "Start with one clear photo. Add angles, labels, or damage for a stronger match."
       },
       "canonicalSubstitutions": {},
       "expected": {
-        "title": "Start with one clear photo. Add another view if it shows a label or damage.",
+        "title": "Start with one clear photo. Add angles, labels, or damage for a stronger match.",
         "body": null,
-        "accessibilityLabel": "Start with one clear photo. Add another view if it shows a label or damage."
+        "accessibilityLabel": "Start with one clear photo. Add angles, labels, or damage for a stronger match."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
-        "stateId": "CAP-02a",
-        "fragments": ["Start with one clear photo. Add another view if it shows a label or damage."]
+        "kind": "source-text",
+        "path": "ios/SnapList/Features/Capture/CaptureViews.swift",
+        "fragments": ["Start with one clear photo. Add angles, labels, or damage for a stronger match."]
       }]
     },
     "capture.move-closer": {
@@ -212,22 +196,23 @@
       "templates": {
         "title": "Working on your item",
         "body": "Finding recent sold comps",
-        "accessibilityLabel": "Working on your item. Finding recent sold comps. You can leave. Processing will continue."
+        "accessibilityLabel": "Working on your item. {itemDisplayName}. Finding recent sold comps. You can leave — we’ll keep working."
       },
-      "canonicalSubstitutions": {},
+      "canonicalSubstitutions": {"itemDisplayName": "Canon AE-1 film camera"},
       "expected": {
         "title": "Working on your item",
         "body": "Finding recent sold comps",
-        "accessibilityLabel": "Working on your item. Finding recent sold comps. You can leave. Processing will continue."
+        "accessibilityLabel": "Working on your item. Canon AE-1 film camera. Finding recent sold comps. You can leave — we’ll keep working."
       },
       "sources": [{
         "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "path": "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-copy-catalog.json",
         "stateId": "RUN-02",
         "fragments": [
           "Working on your item",
+          "Canon AE-1 film camera",
           "Finding recent sold comps",
-          "Working on your item. Finding recent sold comps. You can leave. Processing will continue."
+          "You can leave — we’ll keep working"
         ]
       }]
     },
@@ -235,8 +220,8 @@
       "approvedStateIds": ["S3"],
       "templates": {
         "title": "Limited evidence",
-        "body": "{soldCompCount} · {windowDays}",
-        "accessibilityLabel": "Limited evidence. {soldCompCount} · {windowDays}"
+        "body": "{soldCompCount} sold · {windowDays} days",
+        "accessibilityLabel": "Limited evidence. {soldCompCount} sold · {windowDays} days"
       },
       "canonicalSubstitutions": {"soldCompCount": "3", "windowDays": "90"},
       "expected": {
@@ -274,24 +259,25 @@
     "recovery.upload-paused": {
       "approvedStateIds": ["RUN-04"],
       "templates": {
-        "title": "Upload stopped",
-        "body": "{uploadProgressSummary}",
-        "accessibilityLabel": "Upload stopped. {uploadProgressSummary}"
+        "title": "Upload paused",
+        "body": "Your photos are safe on this device",
+        "accessibilityLabel": "Upload paused. Uploaded to SnapList. {uploadedPhotoCount} of 4 · resumes on reconnect. Your photos are safe on this device."
       },
-      "canonicalSubstitutions": {"uploadProgressSummary": "2 of 2 photos uploaded. Try again."},
+      "canonicalSubstitutions": {"uploadedPhotoCount": "2"},
       "expected": {
-        "title": "Upload stopped",
-        "body": "2 of 2 photos uploaded. Try again.",
-        "accessibilityLabel": "Upload stopped. 2 of 2 photos uploaded. Try again."
+        "title": "Upload paused",
+        "body": "Your photos are safe on this device",
+        "accessibilityLabel": "Upload paused. Uploaded to SnapList. 2 of 4 · resumes on reconnect. Your photos are safe on this device."
       },
       "sources": [{
         "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "path": "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-copy-catalog.json",
         "stateId": "RUN-04",
         "fragments": [
-          "Upload stopped",
-          "2 of 2 photos uploaded. Try again.",
-          "Upload stopped. 2 of 2 photos uploaded. Try again."
+          "Upload paused",
+          "Uploaded to SnapList",
+          "2 of 4 · resumes on reconnect",
+          "Your photos are safe on this device"
         ]
       }]
     },
@@ -299,23 +285,23 @@
       "approvedStateIds": ["RUN-05"],
       "templates": {
         "title": "Couldn’t finish this run",
-        "body": "We could not find enough pricing evidence.",
-        "accessibilityLabel": "Couldn’t finish this run. We could not find enough pricing evidence. Try again for free."
+        "body": "We hit a snag finding comps",
+        "accessibilityLabel": "Couldn’t finish this run. We hit a snag finding comps. Trying again is free."
       },
       "canonicalSubstitutions": {},
       "expected": {
         "title": "Couldn’t finish this run",
-        "body": "We could not find enough pricing evidence.",
-        "accessibilityLabel": "Couldn’t finish this run. We could not find enough pricing evidence. Try again for free."
+        "body": "We hit a snag finding comps",
+        "accessibilityLabel": "Couldn’t finish this run. We hit a snag finding comps. Trying again is free."
       },
       "sources": [{
         "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "path": "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-copy-catalog.json",
         "stateId": "RUN-05",
         "fragments": [
           "Couldn’t finish this run",
-          "We could not find enough pricing evidence.",
-          "Couldn’t finish this run. We could not find enough pricing evidence. Try again for free."
+          "We hit a snag finding comps",
+          "Trying again is free"
         ]
       }]
     },
@@ -323,71 +309,69 @@
       "approvedStateIds": ["RUN-06"],
       "templates": {
         "title": "Checking your run",
-        "body": "Confirming the status of your existing run.",
-        "accessibilityLabel": "Checking your run. Confirming the status of your existing run. No new run has started."
+        "body": "We’re confirming the run you already started — not beginning a new one.",
+        "accessibilityLabel": "Checking your run. We’re confirming the run you already started — not beginning a new one. Status unconfirmed — verifying now."
       },
       "canonicalSubstitutions": {},
       "expected": {
         "title": "Checking your run",
-        "body": "Confirming the status of your existing run.",
-        "accessibilityLabel": "Checking your run. Confirming the status of your existing run. No new run has started."
+        "body": "We’re confirming the run you already started — not beginning a new one.",
+        "accessibilityLabel": "Checking your run. We’re confirming the run you already started — not beginning a new one. Status unconfirmed — verifying now."
       },
       "sources": [{
         "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "path": "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-copy-catalog.json",
         "stateId": "RUN-06",
         "fragments": [
           "Checking your run",
-          "Confirming the status of your existing run.",
-          "Checking your run. Confirming the status of your existing run. No new run has started."
+          "We’re confirming the run you already started — not beginning a new one.",
+          "Status unconfirmed — verifying now"
         ]
       }]
     },
     "retry.automatic": {
       "approvedStateIds": ["REV-02d-retry"],
       "templates": {
-        "title": "Updating {itemDisplayName}",
-        "body": "SnapList retried the last attempt. Your guided correction is still available.",
-        "accessibilityLabel": "Updating {itemDisplayName}. SnapList retried the last attempt. Your guided correction is still available."
+        "title": "Updating for the {itemDisplayName}",
+        "body": "Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe.",
+        "accessibilityLabel": "Updating for the {itemDisplayName}. Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe."
       },
       "canonicalSubstitutions": {"itemDisplayName": "AE-1 Program"},
       "expected": {
-        "title": "Updating AE-1 Program",
-        "body": "SnapList retried the last attempt. Your guided correction is still available.",
-        "accessibilityLabel": "Updating AE-1 Program. SnapList retried the last attempt. Your guided correction is still available."
+        "title": "Updating for the AE-1 Program",
+        "body": "Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe.",
+        "accessibilityLabel": "Updating for the AE-1 Program. Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe."
       },
       "sources": [{
         "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
+        "path": "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-copy-catalog.json",
         "stateId": "REV-02d-retry",
         "fragments": [
-          "Updating AE-1 Program",
-          "SnapList retried the last attempt. Your guided correction is still available.",
-          "Updating AE-1 Program. SnapList retried the last attempt. Your guided correction is still available."
+          "Updating for the AE-1 Program",
+          "Last attempt hit a snag and retried automatically. This didn’t use your guided correction — your original draft is safe."
         ]
       }]
     },
     "empty.home": {
       "approvedStateIds": ["HOME-02"],
       "templates": {
-        "title": "Start with a photo",
-        "body": "Check sold comps and review the listing before you publish. No account needed.",
-        "accessibilityLabel": "Start with a photo. Check sold comps and review the listing before you publish. No account needed."
+        "title": "Photograph an item. Get real comps and a listing you control.",
+        "body": "Your first item is on us — no account needed to try it.",
+        "accessibilityLabel": "Photograph an item. Get real comps and a listing you control. Your first item is on us — no account needed to try it."
       },
       "canonicalSubstitutions": {},
       "expected": {
-        "title": "Start with a photo",
-        "body": "Check sold comps and review the listing before you publish. No account needed.",
-        "accessibilityLabel": "Start with a photo. Check sold comps and review the listing before you publish. No account needed."
+        "title": "Photograph an item. Get real comps and a listing you control.",
+        "body": "Your first item is on us — no account needed to try it.",
+        "accessibilityLabel": "Photograph an item. Get real comps and a listing you control. Your first item is on us — no account needed to try it."
       },
       "sources": [{
-        "kind": "json-state-copy",
-        "path": "docs/design/scout-guidance-copy-overrides.v1.json",
-        "stateId": "HOME-02",
+        "kind": "json-string-keys",
+        "path": "ios/DesignContracts/V1/snaplist-copy-catalog.json",
+        "keys": ["home_empty_headline", "home_empty_allowance"],
         "fragments": [
-          "Start with a photo",
-          "Check sold comps and review the listing before you publish. No account needed.",
-          "Start with a photo. Check sold comps and review the listing before you publish. No account needed."
+          "Photograph an item. Get real comps and a listing you control.",
+          "Your first item is on us — no account needed to try it."
         ]
       }]
     }
