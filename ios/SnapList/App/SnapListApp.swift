@@ -7,6 +7,7 @@ struct SnapListApp: App {
     @State private var onboardingModel: OnboardingFlowModel
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
+    @State private var runStore: RunDetailStore
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
 
@@ -39,7 +40,7 @@ struct SnapListApp: App {
         _router = State(
             initialValue: AppRouter(
                 initialTab: configuration.fixture.initialTab,
-                initialRoute: configuration.fixture.initialRoute,
+                initialRoute: configuration.initialRoute,
                 initialSheet: configuration.fixture.initialSheet
             )
         )
@@ -78,6 +79,14 @@ struct SnapListApp: App {
                 )
             )
         )
+        _runStore = State(
+            initialValue: RunDetailStoreFactory.make(
+                configuration: configuration,
+                apiOrigin: homeAPIOrigin,
+                authentication: homeAuthentication,
+                session: homeURLSession
+            )
+        )
     }
 
     var body: some Scene {
@@ -87,6 +96,7 @@ struct SnapListApp: App {
                 onboardingModel: onboardingModel,
                 captureFlow: captureFlow,
                 homeStore: homeStore,
+                runStore: runStore,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)
