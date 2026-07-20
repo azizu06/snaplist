@@ -60,13 +60,17 @@ terminal-fallback output may qualify when it is honest, coherent, and fully edit
 - Reserve one AI-item credit before provider-backed work begins. The reservation belongs to the
   logical complete AI item run, not an HTTP request, worker attempt, queue message delivery, process,
   or device session.
-- A logical reservation has one terminal outcome: **settled** or **restored**. Both transitions are
-  idempotent and monotonic.
+- A logical reservation settles at most once. Its accounting history is monotonic: the initial
+  reserve may settle directly or restore, and a later seller-confirmed manual retry may move that
+  same restored reservation forward to settlement without erasing the restore.
 - Settle exactly once when the usable draft transaction succeeds. Queue acknowledgement happens
   after durable success and cannot be the billing event.
-- Restore exactly once when the run fails or is canceled before a usable draft exists. A retry after
-  restoration must explicitly reserve a new complete run; delayed duplicate deliveries of the old
-  run cannot spend or restore again.
+- Restore once for each active reservation or manual-retry reclaim when the run fails or is canceled
+  before a usable draft exists. A seller-confirmed manual retry of the same logical run and immutable
+  photo set may atomically reclaim its original allowance slot on the same reservation. If another
+  run already spent that restored slot, the retry fails before changing run state or enqueueing work.
+  Replayed or concurrent retry, cancel, restore, and settlement calls cannot create another logical
+  run or reservation, reclaim twice, restore twice, or settle twice.
 - Internal model/schema retries, queue redelivery, crash recovery, resumable stage checkpoints, and
   the one included guided correction reuse the same logical reservation.
 - Cancellation or deletion after a usable draft exists does not restore the already settled credit.

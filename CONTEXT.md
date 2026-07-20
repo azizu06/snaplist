@@ -174,9 +174,12 @@ receive honest **assisted marketplace handoffs**.
   not qualify.
 - **AI-item credit** — one logical entitlement reservation for one complete AI item run. It is
   reserved before provider-backed processing, settles exactly once at **usable draft**, and is
-  restored exactly once after failure/cancellation before that point. Internal retries/recovery and
-  the one included same-item/same-photo-set guided correction reuse it; a new item, changed photo set,
-  or full re-analysis needs a new credit.
+  restored after failure/cancellation before that point. A seller-confirmed manual retry of the same
+  pipeline run and immutable photo set may reclaim the same allowance slot without creating another
+  reservation, but only while that restored slot remains available. Each reclaim either settles on
+  one usable draft or restores again, and every accounting fact moves forward. Internal
+  retries/recovery and the one included same-item/same-photo-set guided correction reuse it; a new
+  item, changed photo set, or full re-analysis needs a new credit.
 - **SnapList Pro allowance period** — for a monthly Apple product, the verified StoreKit transaction
   span `[purchaseDate, expiresDate)`. For an annual product, a server-derived monthly subperiod inside
   that signed span, anchored to verified `purchaseDate`, capped at verified `expiresDate`, and keyed

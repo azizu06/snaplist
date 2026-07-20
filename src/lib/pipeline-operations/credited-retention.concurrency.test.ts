@@ -295,7 +295,12 @@ describe.runIf(await localDatabaseReachable())(
         expect(state.status).toBe("queued");
         expect(state.photos).toEqual(fixture.initialPhotos);
         expect(state.retention_cleaned_at).toBeNull();
-        expect(state.reservation).toEqual(fixture.reservationBefore);
+        expect(state.reservation).toEqual({
+          ...fixture.reservationBefore,
+          retry_reservation_count: 1,
+          retry_restore_count: 0,
+          updated_at: state.reservation.updated_at,
+        });
       } finally {
         await retry.query("rollback").catch(() => undefined);
         await retention.query("rollback").catch(() => undefined);
