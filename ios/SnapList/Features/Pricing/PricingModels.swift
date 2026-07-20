@@ -94,17 +94,17 @@ private struct PricingEvidenceProjection: Decodable {
     struct Item: Decodable {
         let id: String
         let title: String
-        let condition: String
+        let condition: String?
     }
 
     struct Comparable: Decodable {
         let id: String
         let sourceURL: String
-        let title: String
+        let title: String?
         let price: Decimal
         let currency: String
-        let condition: String
-        let soldAt: Double
+        let condition: String?
+        let soldAt: Double?
         let kind: String
         let priceDisclosure: PricingPriceDisclosure
         let evidenceAsOf: String
@@ -122,7 +122,7 @@ private struct PricingEvidenceProjection: Decodable {
             case evidenceAsOf
         }
 
-        func domain() throws -> PricingSoldComparable {
+        func domain() throws -> PricingSoldComparable? {
             guard kind == "sold-comparable",
                   currency == "USD",
                   let sourceURL = URL(string: sourceURL),
@@ -130,6 +130,15 @@ private struct PricingEvidenceProjection: Decodable {
                   sourceURL.host != nil else {
                 throw PricingRepositoryError.invalidResponse
             }
+            let title = try PricingEvidenceProjection.displayText(
+                title,
+                fallback: "Comparable sale"
+            )
+            let condition = try PricingEvidenceProjection.displayText(
+                condition,
+                fallback: "Condition unavailable"
+            )
+            guard let soldAt else { return nil }
             return PricingSoldComparable(
                 id: id,
                 sourceURL: sourceURL,
@@ -157,7 +166,7 @@ private struct PricingEvidenceProjection: Decodable {
     var model: PricingFeatureModel {
         get throws {
             let evidenceDate = try Self.parseDate(evidenceAsOf)
-            let mappedComparables = try comparables.map { comparable in
+            let mappedComparables = try comparables.compactMap { comparable in
                 _ = try Self.parseDate(comparable.evidenceAsOf)
                 return try comparable.domain()
             }
@@ -165,7 +174,10 @@ private struct PricingEvidenceProjection: Decodable {
                 item: PricingItemSummary(
                     id: item.id.lowercased(),
                     title: item.title,
-                    condition: item.condition
+                    condition: try Self.displayText(
+                        item.condition,
+                        fallback: "Condition unavailable"
+                    )
                 ),
                 priceResult: try priceResult.validated(),
                 evidenceLevel: evidenceLevel,
@@ -193,6 +205,18 @@ private struct PricingEvidenceProjection: Decodable {
             throw PricingRepositoryError.invalidResponse
         }
         return date
+    }
+
+    private static func displayText(
+        _ value: String?,
+        fallback: String
+    ) throws -> String {
+        guard let value else { return fallback }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw PricingRepositoryError.invalidResponse
+        }
+        return trimmed
     }
 }
 
