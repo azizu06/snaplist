@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -19,6 +20,7 @@ import {
   createSupabaseGuidedCorrectionCompletionGateway,
   type GuidedCorrectionCompletionRpcClient,
 } from "@/lib/pipeline/guided-correction-completion";
+import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -62,6 +64,7 @@ let concurrentUser: ClerkTestUser;
 let paidUser: ClerkTestUser;
 let stateUser: ClerkTestUser;
 let lifecycleUser: ClerkTestUser;
+let legacyUser: ClerkTestUser;
 const queueMessageIds = new Set<string>();
 
 async function stackReachable(): Promise<boolean> {
@@ -84,17 +87,25 @@ function stageArgs(
   source: "single" | "batch" = "single",
 ) {
   const batchId = crypto.randomUUID();
+  const entries = keys.map((key, index) => ({
+    idempotency_key: key,
+    source,
+    autopilot_enabled: false,
+    photo_paths: [`${userId}/ledger/${batchId}/${index}/front.jpg`],
+    cost_basis: null,
+  }));
   return {
     p_batch_id: batchId,
     p_daily_limit: 1_000,
-    p_entries: keys.map((key, index) => ({
-      idempotency_key: key,
-      source,
-      autopilot_enabled: false,
-      photo_paths: [`${userId}/ledger/${batchId}/${index}/front.jpg`],
-      cost_basis: null,
-    })),
+    p_entries: entries,
     p_per_minute_limit: 1_000,
+    p_photo_identities: entries.map((entry) => ({
+      idempotency_key: entry.idempotency_key,
+      photo_identity_kind: "content_sha256_set_v1",
+      photo_identity_fingerprint: canonicalizeVerifiedPhotoSet([
+        createHash("sha256").update(entry.photo_paths[0]).digest("hex"),
+      ]).fingerprint,
+    })),
     p_user_id: userId,
   };
 }
@@ -156,13 +167,14 @@ beforeAll(async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  [freeUser, concurrentUser, paidUser, stateUser, lifecycleUser] =
+  [freeUser, concurrentUser, paidUser, stateUser, lifecycleUser, legacyUser] =
     await Promise.all([
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_free"),
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_concurrent"),
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_paid"),
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_state"),
       provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_lifecycle"),
+      provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "credit_legacy"),
     ]);
 });
 
@@ -179,6 +191,7 @@ afterAll(async () => {
     paidUser.id,
     stateUser.id,
     lifecycleUser.id,
+    legacyUser.id,
   ]);
 });
 
@@ -475,6 +488,15 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
     expect(paidPeriod.error).toBeNull();
 
     const settledRun = (await stage(lifecycleUser.id, ["lifecycle-settle"]))[0];
+    const { data: identityBefore } = await lifecycleUser.client
+      .from("ai_item_credit_reservations")
+      .select("photo_identity_kind, photo_identity_fingerprint")
+      .eq("pipeline_run_id", settledRun.run_id)
+      .single();
+    expect(identityBefore).toMatchObject({
+      photo_identity_kind: "content_sha256_set_v1",
+      photo_identity_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
     );
@@ -749,13 +771,16 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
     ).rejects.toThrow(/capability is unavailable/i);
     const { data: correctedReservation } = await lifecycleUser.client
       .from("ai_item_credit_reservations")
-      .select("state, guided_correction_revision, guided_correction_completed_at")
+      .select(
+        "state, guided_correction_revision, guided_correction_completed_at, photo_identity_kind, photo_identity_fingerprint",
+      )
       .eq("pipeline_run_id", settledRun.run_id)
       .single();
     expect(correctedReservation).toMatchObject({
       state: "settled",
       guided_correction_revision: editedRevision,
       guided_correction_completed_at: expect.any(String),
+      ...identityBefore,
     });
     const pricingReader = createSupabasePricingEvidenceReader(
       async () => lifecycleUser.client,
@@ -780,5 +805,84 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
         expectedReviewRevision: correctedRunId,
       }),
     ).rejects.toThrow(/guided correction is unavailable/i);
+  }, 20_000);
+
+  it("keeps a legacy run settle-compatible but fails closed for same-photo correction", async () => {
+    if (!reachable) return;
+    const verifiedArgs = stageArgs(legacyUser.id, ["legacy-correction"]);
+    const { p_photo_identities: _verifiedIdentity, ...legacyArgs } = verifiedArgs;
+    void _verifiedIdentity;
+    const staged = await admin.rpc("stage_pipeline_batch", legacyArgs);
+    expect(staged.error).toBeNull();
+    const row = (staged.data as Array<{
+      item_id: string;
+      run_id: string;
+      queue_message_id: string | number;
+    }>)[0];
+    queueMessageIds.add(String(row.queue_message_id));
+
+    const store = createSupabasePipelineWorkerStore(
+      admin as unknown as PipelineWorkerRpcClient,
+    );
+    const attempt = acquired(
+      await store.acquire({
+        runId: row.run_id,
+        messageId: String(row.queue_message_id),
+        leaseSeconds: 60,
+      }),
+    );
+    await store.checkpoint({
+      runId: row.run_id,
+      leaseToken: attempt.context.run.lease_token,
+      stage: "generating",
+      checkpoint: {
+        identified: {
+          attributes: RESULT.attributes,
+          identification: RESULT.identification,
+          model: RESULT.model,
+        },
+        priced: {
+          result: RESULT.price,
+          evidenceAsOf: "2026-07-20T08:00:00.000Z",
+        },
+        generated: { copy: RESULT.listing, model: RESULT.listingModel! },
+      },
+      leaseSeconds: 60,
+    });
+    const completion = await store.complete({
+      runId: row.run_id,
+      leaseToken: attempt.context.run.lease_token,
+      result: RESULT,
+      autopilotEnabled: false,
+    });
+
+    const { data: reservation } = await legacyUser.client
+      .from("ai_item_credit_reservations")
+      .select("state, photo_identity_kind")
+      .eq("pipeline_run_id", row.run_id)
+      .single();
+    expect(reservation).toEqual({
+      state: "settled",
+      photo_identity_kind: "legacy_path_v0",
+    });
+
+    const { data: item } = await legacyUser.client
+      .from("items")
+      .select("review_revision")
+      .eq("id", row.item_id)
+      .single();
+    const guidedCorrection = createSupabaseGuidedCorrectionCompletionGateway(
+      legacyUser.client,
+      admin as unknown as GuidedCorrectionCompletionRpcClient,
+    );
+    await expect(
+      guidedCorrection.authorize({
+        itemId: row.item_id,
+        listingId: completion.listingId,
+        runId: crypto.randomUUID(),
+        expectedRunId: row.run_id,
+        expectedReviewRevision: item?.review_revision as string,
+      }),
+    ).rejects.toThrow(/legacy photo identity.*same-photo correction/i);
   }, 20_000);
 });

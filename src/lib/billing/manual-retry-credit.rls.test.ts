@@ -423,12 +423,16 @@ describe("manual retry AI-item credit accounting", () => {
 
     const { data: restored } = await seller.client
       .from("ai_item_credit_reservations")
-      .select("id, state, restored_at")
+      .select(
+        "id, state, restored_at, photo_identity_kind, photo_identity_fingerprint",
+      )
       .eq("pipeline_run_id", run.run_id)
       .single();
     expect(restored).toMatchObject({
       state: "restored",
       restored_at: expect.any(String),
+      photo_identity_kind: "legacy_path_v0",
+      photo_identity_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
 
     const retried = await seller.client.rpc("retry_pipeline_run", {
@@ -493,7 +497,7 @@ describe("manual retry AI-item credit accounting", () => {
     const { data: settled } = await seller.client
       .from("ai_item_credit_reservations")
       .select(
-        "id, pipeline_run_id, state, restored_at, settled_at, listing_id, retry_reservation_count, retry_restore_count",
+        "id, pipeline_run_id, state, restored_at, settled_at, listing_id, retry_reservation_count, retry_restore_count, photo_identity_kind, photo_identity_fingerprint",
       )
       .eq("pipeline_run_id", run.run_id)
       .single();
@@ -506,6 +510,8 @@ describe("manual retry AI-item credit accounting", () => {
       listing_id: completed.listingId,
       retry_reservation_count: 1,
       retry_restore_count: 0,
+      photo_identity_kind: restored?.photo_identity_kind,
+      photo_identity_fingerprint: restored?.photo_identity_fingerprint,
     });
     const { count: reservationCount } = await seller.client
       .from("ai_item_credit_reservations")

@@ -25,6 +25,7 @@ import {
 } from "./service";
 import { createSupabaseGuestClaimStore } from "./store";
 import { createSupabaseGuestClaimStorage } from "./storage";
+import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -59,6 +60,7 @@ interface Fixture {
   targetPeriodId: string | null;
   reviewRevision: string;
   completedAt: string;
+  photoIdentityFingerprint: string;
   objects: Array<Omit<GuestClaimObject, "destinationPath">>;
   storageManifest: GuestRecoveryStorageManifest;
 }
@@ -145,16 +147,27 @@ async function createFixture(
       ...object,
     }),
   );
+  const photoIdentityFingerprint = canonicalizeVerifiedPhotoSet(
+    objects.map((object) => object.sha256),
+  ).fingerprint;
 
   await database.query("begin");
   try {
     await database.query(
       `insert into public.items (
          id, user_id, photos, attributes, condition, identification,
-         review_revision, review_content_revision
+         review_revision, review_content_revision,
+         photo_identity_kind, photo_identity_fingerprint
        ) values ($1, $2, $3, '{"brand":"RecoveryFixture"}'::jsonb,
-         'good', '{"kind":"fixture"}'::jsonb, $4, $4)`,
-      [itemId, guest.id, objects.map((object) => object.sourcePath), reviewRevision],
+         'good', '{"kind":"fixture"}'::jsonb, $4, $4,
+         'content_sha256_set_v1', $5)`,
+      [
+        itemId,
+        guest.id,
+        objects.map((object) => object.sourcePath),
+        reviewRevision,
+        photoIdentityFingerprint,
+      ],
     );
     await database.query(
       `insert into public.pipeline_runs (
@@ -271,6 +284,7 @@ async function createFixture(
     targetPeriodId,
     reviewRevision,
     completedAt,
+    photoIdentityFingerprint,
     objects,
     storageManifest,
   };
@@ -368,7 +382,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       `select id, pipeline_run_id, item_id, logical_run_key, state,
         reserved_at, settled_at, restored_at, settled_review_revision,
         listing_id, prediction_log_id, guided_correction_revision,
-        guided_correction_started_at, guided_correction_completed_at
+        guided_correction_started_at, guided_correction_completed_at,
+        photo_identity_kind, photo_identity_fingerprint
        from public.ai_item_credit_reservations where id = $1`,
       [fixture.reservationId],
     );
@@ -410,7 +425,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         reserved_at, settled_at, restored_at, settled_review_revision,
         listing_id, prediction_log_id, guided_correction_revision,
         guided_correction_started_at, guided_correction_completed_at,
-        user_id, allowance_period_id
+        user_id, allowance_period_id,
+        photo_identity_kind, photo_identity_fingerprint
        from public.ai_item_credit_reservations where id = $1`,
       [fixture.reservationId],
     );
@@ -418,6 +434,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       ...before.rows[0],
       user_id: fixture.target.id,
       allowance_period_id: fixture.targetPeriodId,
+      photo_identity_kind: "content_sha256_set_v1",
+      photo_identity_fingerprint: fixture.photoIdentityFingerprint,
     });
     expect(
       await database.query(

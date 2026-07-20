@@ -22,6 +22,7 @@ import {
   type PipelineWorkerRpcClient,
 } from "../pipeline-queue/worker-store";
 import type { PipelineResult } from "./types";
+import { canonicalizeVerifiedPhotoSet } from "../photo-identity/photo-set";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -53,17 +54,25 @@ async function stackReachable(): Promise<boolean> {
 
 async function seedReview(user: ClerkTestUser, label: string) {
   const batchId = crypto.randomUUID();
+  const idempotencyKey = `review-${batchId}`;
   const staged = await admin.rpc("stage_pipeline_batch", {
     p_batch_id: batchId,
     p_daily_limit: 1_000,
     p_entries: [{
-      idempotency_key: `review-${batchId}`,
+      idempotency_key: idempotencyKey,
       source: "single",
       autopilot_enabled: false,
       photo_paths: [`${user.id}/review/${batchId}/front.jpg`],
       cost_basis: null,
     }],
     p_per_minute_limit: 1_000,
+    p_photo_identities: [{
+      idempotency_key: idempotencyKey,
+      photo_identity_kind: "content_sha256_set_v1",
+      photo_identity_fingerprint: canonicalizeVerifiedPhotoSet([
+        "a".repeat(64),
+      ]).fingerprint,
+    }],
     p_user_id: user.id,
   });
   if (staged.error) throw new Error(staged.error.message);
