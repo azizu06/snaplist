@@ -16,8 +16,39 @@ const RESULT: PipelineResult = {
     suggested: 50,
     range: { min: 40, max: 60 },
     confidence: 0.5,
-    sources: [],
-    tier: "llm-only",
+    sources: [
+      {
+        url: "https://www.ebay.com/itm/sold-1",
+        title: "Sold Sony headphones",
+        kind: "sold-comp",
+      },
+      {
+        url: "https://www.ebay.com/itm/asking-1",
+        title: "Best offer accepted",
+        kind: "asking-comp",
+      },
+    ],
+    tier: "ebay-sold",
+    evidence: [
+      {
+        id: "sold-1",
+        sourceUrl: "https://www.ebay.com/itm/sold-1",
+        title: "Sold Sony headphones",
+        price: 50,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      },
+      {
+        id: "asking-1",
+        sourceUrl: "https://www.ebay.com/itm/asking-1",
+        title: "Best offer accepted",
+        price: 70,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "asking-price-not-accepted-amount",
+      },
+    ],
   },
   confidence: { score: 0.5, band: "medium", autopilotEligible: false },
   listing: {
@@ -82,22 +113,32 @@ describe("run-scoped pipeline worker store", () => {
   });
 
   it("checkpoints and completes through identity-free persistence payloads", async () => {
+    const checkpoint = {
+      identified: { attributes: RESULT.attributes, model: RESULT.model },
+      priced: { result: RESULT.price },
+    };
+    const persistedCheckpoint = {
+      ...checkpoint,
+      priced: {
+        ...checkpoint.priced,
+        evidenceAsOf: "2026-07-20T08:00:00.000Z",
+      },
+    };
     const client = rpcClient({
-      checkpoint_pipeline_run: true,
+      checkpoint_pipeline_run: persistedCheckpoint,
       complete_pipeline_run: { listingId: LISTING_ID },
     });
     const store = createSupabasePipelineWorkerStore(client);
-    const checkpoint = {
-      identified: { attributes: RESULT.attributes, model: RESULT.model },
-    };
 
-    await store.checkpoint({
-      runId: RUN_ID,
-      leaseToken: LEASE_TOKEN,
-      stage: "identifying",
-      checkpoint,
-      leaseSeconds: 300,
-    });
+    await expect(
+      store.checkpoint({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        stage: "pricing",
+        checkpoint,
+        leaseSeconds: 300,
+      }),
+    ).resolves.toEqual(persistedCheckpoint);
     await expect(
       store.complete({
         runId: RUN_ID,
@@ -110,12 +151,42 @@ describe("run-scoped pipeline worker store", () => {
     const completion = client.rpc.mock.calls.find(
       ([name]) => name === "complete_pipeline_run",
     )?.[1] as Record<string, unknown>;
+    expect(client.rpc).toHaveBeenCalledWith("checkpoint_pipeline_run", {
+      p_checkpoint: checkpoint,
+      p_lease_seconds: 300,
+      p_lease_token: LEASE_TOKEN,
+      p_run_id: RUN_ID,
+      p_stage: "pricing",
+    });
     expect(completion).not.toHaveProperty("user_id");
     expect(completion).not.toHaveProperty("item_id");
     expect(completion.p_persistence).toMatchObject({
       listing: { status: "draft" },
       prediction: { model: "vision-model", listing_model: "listing-model" },
+      pricing_snapshot: {
+        schema_version: 1,
+        item: { title: "Sony headphones", condition: "good" },
+        price_result: {
+          suggested: 50,
+          range: { min: 40, max: 60 },
+          tier: "ebay-sold",
+        },
+        evidence: [
+          expect.objectContaining({
+            id: "sold-1",
+            priceDisclosure: "displayed-sold-price",
+          }),
+        ],
+      },
     });
+    const persistence = completion.p_persistence as {
+      pricing_snapshot: {
+        price_result: { evidence?: Array<{ id: string }> };
+        evidence: Array<{ id: string }>;
+      };
+    };
+    expect(persistence.pricing_snapshot.price_result).not.toHaveProperty("evidence");
+    expect(persistence.pricing_snapshot.evidence.map(({ id }) => id)).toEqual(["sold-1"]);
   });
 
   it("uses lease-fenced failure and message-rejection RPCs", async () => {

@@ -3,6 +3,10 @@ import type { PipelineResult } from "@/lib/pipeline";
 import { createPipelineQueueEnvelope } from "./envelope";
 import { createInMemoryPipelineQueue } from "./memory";
 import type { PipelineQueue } from "./queue";
+import {
+  pipelineWorkerCheckpointSchema,
+  type PipelineWorkerCheckpointWrite,
+} from "./checkpoint";
 import type {
   PipelineAttemptFailureResult,
   PipelineRunStatus,
@@ -115,12 +119,27 @@ class AcceptanceStore implements PipelineWorkerStore {
     runId: string;
     leaseToken: string;
     stage: "identifying" | "pricing" | "generating" | "persisting";
-    checkpoint: Record<string, unknown>;
+    checkpoint: PipelineWorkerCheckpointWrite;
     leaseSeconds: number;
   }) {
     const run = this.currentLease(input.runId, input.leaseToken);
-    run.checkpoint = { ...run.checkpoint, ...input.checkpoint };
+    const candidate = {
+      ...run.checkpoint,
+      ...input.checkpoint,
+    };
+    const priced = candidate.priced as
+      | { result: PipelineResult["price"]; evidenceAsOf?: string }
+      | undefined;
+    const checkpoint = pipelineWorkerCheckpointSchema.parse({
+      ...candidate,
+      priced:
+        priced && !priced.evidenceAsOf
+          ? { ...priced, evidenceAsOf: new Date(this.now()).toISOString() }
+          : priced,
+    });
+    run.checkpoint = checkpoint;
     run.leaseExpiresAt = this.now() + input.leaseSeconds * 1_000;
+    return checkpoint;
   }
 
   async complete(input: { runId: string; leaseToken: string }) {

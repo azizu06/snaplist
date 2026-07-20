@@ -6,6 +6,11 @@ import {
 } from "./isbn";
 import { PriceRouter } from "../router";
 import { priceResultSchema, type ItemSignal, type PriceResult } from "../types";
+import type { PipelineResult } from "../../pipeline/types";
+import {
+  buildPricingEvidenceProjection,
+  buildPricingEvidenceSnapshotInput,
+} from "../../pricing-evidence";
 
 /**
  * The ISBN provider is tier 1 (`isbn-lookup`) — true structured lookup via
@@ -306,6 +311,143 @@ describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
     // top `isbn` (0.95) confidence tier (confidence/from-price.ts: hasSoldComp).
     expect(result!.sources.some((s) => s.kind === "isbn-lookup")).toBe(true);
     expect(result!.sources.some((s) => s.kind === "sold-comp")).toBe(true);
+  });
+
+  it("preserves only accepted sold anchors through the strict pricing-evidence snapshot", async () => {
+    const accepted = [
+      {
+        id: "accepted-sale-1",
+        sourceUrl: "https://www.ebay.com/itm/sold-1",
+        title: "Fantastic Mr Fox sold paperback",
+        price: 5,
+        currency: "USD",
+        condition: "Good",
+        soldAt: Date.parse("2026-07-10T12:00:00.000Z"),
+        kind: "sold-comparable" as const,
+        priceDisclosure: "displayed-sold-price" as const,
+      },
+      {
+        id: "accepted-sale-2",
+        sourceUrl: "https://www.ebay.com/itm/sold-2",
+        title: "Fantastic Mr Fox sold book",
+        price: 8,
+        currency: "USD",
+        kind: "sold-comparable" as const,
+        priceDisclosure: "displayed-sold-price" as const,
+      },
+    ];
+    const rejected = {
+      id: "rejected-asking-price",
+      sourceUrl: "https://www.ebay.com/itm/asking-only",
+      title: "Fantastic Mr Fox active listing",
+      price: 30,
+      currency: "USD",
+      kind: "sold-comparable" as const,
+      priceDisclosure: "asking-price-not-accepted-amount" as const,
+    };
+    const soldLookup = vi.fn(async () =>
+      soldResult({
+        sources: [
+          ...accepted.map((record) => ({
+            url: record.sourceUrl,
+            title: record.title,
+            kind: "sold-comp",
+          })),
+          {
+            url: rejected.sourceUrl,
+            title: rejected.title,
+            kind: "asking-comp",
+          },
+        ],
+        evidence: [...accepted, rejected],
+      }),
+    );
+    const router = new PriceRouter([
+      createIsbnPricingProvider({ fetchJson: fakeFetchJson(), soldLookup }),
+    ]);
+
+    const price = await router.price({ isbn: ISBN });
+    expect(price.evidence).toEqual(accepted);
+    const result: PipelineResult = {
+      attributes: { isbn: ISBN, title: "Fantastic Mr Fox", condition: "Good" },
+      price,
+      confidence: {
+        score: price.confidence,
+        band: "high",
+        autopilotEligible: false,
+      },
+      listing: {
+        platform: "ebay",
+        title: "Fantastic Mr Fox",
+        description: "Used paperback.",
+        fields: {},
+      },
+      model: "test-vision-model",
+      identification: {
+        label: "Fantastic Mr Fox",
+        confident: true,
+        evidence: 1,
+      },
+    };
+
+    const snapshot = buildPricingEvidenceSnapshotInput(result);
+    expect(snapshot.price_result).toMatchObject({
+      suggested: 6.5,
+      range: { min: 5, max: 8 },
+      tier: "isbn-lookup",
+    });
+    expect(snapshot.evidence).toEqual(accepted);
+
+    const evidenceAsOf = "2026-07-20T12:00:00+00:00";
+    const projection = buildPricingEvidenceProjection(
+      {
+        run_id: "11111111-1111-4111-8111-111111111111",
+        pipeline_run_id: "11111111-1111-4111-8111-111111111111",
+        run_kind: "pipeline",
+        user_id: "user_isbn",
+        item_id: "22222222-2222-4222-8222-222222222222",
+        prediction_id: "33333333-3333-4333-8333-333333333333",
+        listing_id: "44444444-4444-4444-8444-444444444444",
+        schema_version: snapshot.schema_version,
+        item: snapshot.item,
+        price_result: snapshot.price_result,
+        evidence: snapshot.evidence.map((record) => ({
+          ...record,
+          evidenceAsOf,
+        })),
+        evidence_as_of: evidenceAsOf,
+        pipeline_runs: {
+          id: "11111111-1111-4111-8111-111111111111",
+          status: "succeeded",
+          stage: "completed",
+          listing_id: "44444444-4444-4444-8444-444444444444",
+          completed_at: evidenceAsOf,
+        },
+        listings: {
+          id: "44444444-4444-4444-8444-444444444444",
+          run_id: "11111111-1111-4111-8111-111111111111",
+          item_id: "22222222-2222-4222-8222-222222222222",
+          user_id: "user_isbn",
+        },
+      },
+      {
+        userId: "user_isbn",
+        itemId: "22222222-2222-4222-8222-222222222222",
+        now: Date.parse("2026-07-20T13:00:00.000Z"),
+      },
+    );
+
+    const persistedAccepted = accepted.map((record) => ({
+      ...record,
+      evidenceAsOf,
+    }));
+    expect(projection.comparables).toEqual(persistedAccepted);
+    expect(projection.priceResult.evidence).toEqual(accepted);
+    expect(projection.priceResult).toMatchObject({
+      suggested: 6.5,
+      range: { min: 5, max: 8 },
+      tier: "isbn-lookup",
+    });
   });
 
   it("calls soldLookup with the signal, but only after a catalog identity resolves", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PipelineResult } from "@/lib/pipeline";
 import type { PipelineQueue } from "./queue";
+import { pipelineWorkerCheckpointSchema } from "./checkpoint";
 import type {
   PipelineAttemptAcquisition,
   PipelineAttemptFailureResult,
@@ -105,7 +106,16 @@ function storeWith(
   return {
     loadContext: vi.fn(),
     acquire: vi.fn(async () => acquisition),
-    checkpoint: vi.fn(async () => undefined),
+    checkpoint: vi.fn(async (input) => {
+      const priced = input.checkpoint.priced;
+      return pipelineWorkerCheckpointSchema.parse({
+        ...input.checkpoint,
+        priced:
+          priced && !priced.evidenceAsOf
+            ? { ...priced, evidenceAsOf: "2026-07-20T08:00:00.000Z" }
+            : priced,
+      });
+    }),
     complete: vi.fn(async () => ({ listingId: "66666666-6666-4666-8666-666666666666" })),
     failAttempt: vi.fn(async () => failure),
     rejectMessage: vi.fn(async () => true),

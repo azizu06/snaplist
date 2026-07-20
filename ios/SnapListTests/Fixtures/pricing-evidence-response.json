@@ -1,0 +1,83 @@
+{
+  "data": {
+    "item": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "title": "Sony WH-1000XM4",
+      "condition": "Used - Good"
+    },
+    "priceResult": {
+      "suggested": 130,
+      "range": { "min": 120, "max": 140 },
+      "confidence": 0.78,
+      "sources": [
+        {
+          "url": "https://www.ebay.com/itm/sale-1",
+          "title": "Sony WH-1000XM4 headphones",
+          "kind": "sold-comp"
+        },
+        {
+          "url": "https://www.ebay.com/itm/sale-2",
+          "title": "Sony WH-1000XM4 headset",
+          "kind": "sold-comp"
+        }
+      ],
+      "evidence": [
+        {
+          "id": "sale-1",
+          "sourceUrl": "https://www.ebay.com/itm/sale-1",
+          "title": "Sony WH-1000XM4 headphones",
+          "price": 125,
+          "currency": "USD",
+          "condition": "Pre-Owned",
+          "soldAt": 1783987200000,
+          "kind": "sold-comparable",
+          "priceDisclosure": "displayed-sold-price"
+        },
+        {
+          "id": "sale-2",
+          "sourceUrl": "https://www.ebay.com/itm/sale-2",
+          "title": "Sony WH-1000XM4 headset",
+          "price": 135,
+          "currency": "USD",
+          "kind": "sold-comparable",
+          "priceDisclosure": "displayed-sold-price"
+        }
+      ],
+      "tier": "ebay-sold",
+      "compAgreement": 0.72
+    },
+    "evidenceLevel": "limited",
+    "evidenceAsOf": "2026-07-18T12:00:00.000Z",
+    "evidenceAgeDays": 1.5,
+    "isStale": false,
+    "defaultWindow": "90D",
+    "comparables": [
+      {
+        "id": "sale-1",
+        "sourceUrl": "https://www.ebay.com/itm/sale-1",
+        "title": "Sony WH-1000XM4 headphones",
+        "price": 125,
+        "currency": "USD",
+        "condition": "Pre-Owned",
+        "soldAt": 1783987200000,
+        "kind": "sold-comparable",
+        "priceDisclosure": "displayed-sold-price",
+        "evidenceAsOf": "2026-07-18T12:00:00.000Z"
+      },
+      {
+        "id": "sale-2",
+        "sourceUrl": "https://www.ebay.com/itm/sale-2",
+        "title": "Sony WH-1000XM4 headset",
+        "price": 135,
+        "currency": "USD",
+        "kind": "sold-comparable",
+        "priceDisclosure": "displayed-sold-price",
+        "evidenceAsOf": "2026-07-18T12:00:00.000Z"
+      }
+    ],
+    "estimatedFees": 17.53,
+    "estimatedPayout": 112.47,
+    "chartBounds": { "min": 125, "max": 135 }
+  },
+  "meta": { "requestId": "req_pricing_fixture" }
+}

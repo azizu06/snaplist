@@ -357,11 +357,15 @@ function buildSoldGroundedResult(
   hit: ResolvedHit,
   sold: PriceResult,
 ): PriceResult {
+  const acceptedEvidence = sold.evidence?.filter(
+    (record) => record.priceDisclosure === "displayed-sold-price",
+  );
   return {
     suggested: sold.suggested,
     range: sold.range,
     confidence: Math.max(sold.confidence, hit.cleanHit ? 0.9 : 0.8),
     sources: [...hit.sources, ...sold.sources],
+    ...(acceptedEvidence !== undefined ? { evidence: acceptedEvidence } : {}),
     tier: "isbn-lookup",
     ...(sold.compAgreement != null ? { compAgreement: sold.compAgreement } : {}),
   };

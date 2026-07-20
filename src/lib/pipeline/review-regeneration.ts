@@ -17,14 +17,18 @@ import {
   garmentClassOf,
   listingFactAttributes,
 } from "../vision";
-import { buildPredictionLogRow, type PredictionLogRow } from "./prediction-log";
 import { attributesToSignal } from "./stub";
+import type {
+  GuidedCorrectionAttemptIdentity,
+  GuidedCorrectionCapability,
+  GuidedCorrectionCompletionGateway,
+  GuidedCorrectionCompletionInput,
+} from "./guided-correction-completion";
 import { isReviewRegenerationBlocked } from "./review-regeneration-policy";
 import { loadReviewSnapshot } from "./review-snapshot";
 import {
   extractedAttributesSchema,
   type ExtractedAttributes,
-  type Identification,
   type ListingCopy,
   type PipelineResult,
 } from "./types";
@@ -241,22 +245,14 @@ export interface ReviewRegenerationSnapshot {
   prediction: { model: string | null; autopilotEnabled: boolean | null };
 }
 
-export interface ReviewRegenerationCommit {
-  itemId: string;
-  listingId: string;
-  runId: string;
-  expectedRunId: string | null;
-  expectedReviewRevision: string;
-  attributes: ExtractedAttributes;
-  condition: string | null;
-  identification: Identification;
-  listing: ListingCopy;
-  prediction: PredictionLogRow;
-}
+export type ReviewRegenerationCommit = GuidedCorrectionCompletionInput;
 
-/** Persistence abstraction: production is one RLS-scoped RPC; tests use a fake. */
+/** Persistence abstraction: authenticated authorization plus one fixed completion. */
 export interface ReviewRegenerationStore {
   load(itemId: string): Promise<ReviewRegenerationSnapshot | null>;
+  authorize(
+    input: GuidedCorrectionAttemptIdentity,
+  ): Promise<GuidedCorrectionCapability>;
   commit(input: ReviewRegenerationCommit): Promise<void>;
 }
 
@@ -313,6 +309,14 @@ export async function regenerateReviewListing(
   const current = extractedAttributesSchema.parse(snapshot.attributes ?? {});
   const attributes = applyIdentityCorrections(current, input.corrections);
   const identification = deriveIdentification(attributes, {});
+  const runId = deps.randomUUID?.() ?? crypto.randomUUID();
+  const capability = await store.authorize({
+    itemId: input.itemId,
+    listingId: snapshot.listing.id,
+    runId,
+    expectedRunId: snapshot.listing.runId,
+    expectedReviewRevision: input.expectedReviewRevision,
+  });
   await deps.beforeModelWork?.();
   const priceItem = deps.priceItem ?? createDefaultPricer();
   const generateListing = deps.generateListing ?? defaultGenerateListing;
@@ -324,7 +328,6 @@ export async function regenerateReviewListing(
   // Manual correction is always human-controlled. The score is unchanged by this
   // choice, but eligibility is false and the transaction resets the listing to draft.
   const confidence = priceToConfidence(attributes, price, { autopilotEnabled: false });
-  const runId = deps.randomUUID?.() ?? crypto.randomUUID();
 
   const result: PipelineResult = {
     attributes,
@@ -336,23 +339,15 @@ export async function regenerateReviewListing(
     listingModel: generated.model,
     pricingModel: price.model,
   };
-  const prediction = buildPredictionLogRow("", input.itemId, result, {
-    // The RPC derives the Clerk user and overwrites this placeholder.
-    autopilotEnabled: false,
-    runId,
-  });
 
   await store.commit({
+    capabilityToken: capability.token,
     itemId: input.itemId,
     listingId: snapshot.listing.id,
     runId,
     expectedRunId: snapshot.listing.runId,
     expectedReviewRevision: input.expectedReviewRevision,
-    attributes,
-    condition: attributes.condition ?? null,
-    identification,
-    listing: generated.copy,
-    prediction,
+    result,
   });
 
   const override =
@@ -371,7 +366,7 @@ export async function regenerateReviewListing(
 /** Authenticated Supabase adapter. RLS applies to reads; the commit is one RPC txn. */
 export function createSupabaseReviewRegenerationStore(
   supabase: SupabaseClient,
-  options: { useCreditLedger?: boolean } = {},
+  guidedCorrection: GuidedCorrectionCompletionGateway,
 ): ReviewRegenerationStore {
   return {
     async load(itemId) {
@@ -401,38 +396,12 @@ export function createSupabaseReviewRegenerationStore(
       };
     },
 
+    authorize(input) {
+      return guidedCorrection.authorize(input);
+    },
+
     async commit(input) {
-      const { error } = await supabase.rpc(
-        options.useCreditLedger
-          ? "regenerate_review_listing_with_credit"
-          : "regenerate_review_listing",
-        {
-          p_item_id: input.itemId,
-          p_listing_id: input.listingId,
-          p_run_id: input.runId,
-          p_expected_run_id: input.expectedRunId,
-          p_expected_review_revision: input.expectedReviewRevision,
-          p_attributes: input.attributes,
-          p_condition: input.condition,
-          p_identification: input.identification,
-          p_listing_title: input.listing.title,
-          p_listing_description: input.listing.description,
-          p_listing_copy: input.listing.fields,
-          p_price: input.prediction.price,
-          p_price_range: input.prediction.price_range,
-          p_confidence: input.prediction.confidence,
-          p_tier_fired: input.prediction.tier_fired,
-          p_model: input.prediction.model,
-          p_listing_model: input.prediction.listing_model,
-          p_pricing_model: input.prediction.pricing_model,
-          p_sources: input.prediction.sources,
-          p_autopilot_enabled: input.prediction.autopilot_enabled,
-          p_autopilot_eligible: input.prediction.autopilot_eligible,
-        },
-      );
-      if (error) {
-        throw new Error(`Failed to save regenerated listing: ${error.message}`);
-      }
+      await guidedCorrection.complete(input);
     },
   };
 }

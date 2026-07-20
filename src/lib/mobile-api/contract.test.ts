@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { apiErrorEnvelopeSchema, mobileRunSchema } from "./contract";
+import { z } from "zod";
+import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
+import {
+  apiErrorEnvelopeSchema,
+  mobileRunSchema,
+  pricingEvidenceEnvelopeSchema,
+} from "./contract";
 
 const serverContractSource = readFileSync(
   resolve("docs/contracts/mobile-api-v1.openapi.json"),
@@ -21,7 +27,18 @@ const contract = JSON.parse(serverContractSource) as {
 };
 
 const HTTP_METHODS = new Set(["get", "post", "put", "patch", "delete"]);
-const VALID_CONTRACT_OWNER_ISSUES = new Set([17, 159, 161, 162, 168, 173, 174, 175, 241]);
+const VALID_CONTRACT_OWNER_ISSUES = new Set([
+  17,
+  159,
+  161,
+  162,
+  168,
+  173,
+  174,
+  175,
+  240,
+  241,
+]);
 
 function operations() {
   return Object.entries(contract.paths).flatMap(([path, pathItem]) =>
@@ -47,6 +64,24 @@ function primitiveSchemaAccepts(
   return false;
 }
 
+function dereferenceContractSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(dereferenceContractSchema);
+  if (!value || typeof value !== "object") return value;
+  const schema = value as Record<string, unknown>;
+  if (typeof schema.$ref === "string") {
+    const name = schema.$ref.replace("#/components/schemas/", "");
+    return dereferenceContractSchema(contract.components.schemas[name]);
+  }
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter(([key]) => key !== "pattern" || typeof schema.format !== "string")
+      .map(([key, nested]) => [
+        key === "oneOf" ? "anyOf" : key,
+        dereferenceContractSchema(nested),
+      ]),
+  );
+}
+
 describe("SwiftUI mobile HTTP contract", () => {
   it("is explicitly versioned and independent from Next.js route names", () => {
     expect(contract.info.version).toBe("1.0.0");
@@ -70,6 +105,15 @@ describe("SwiftUI mobile HTTP contract", () => {
       security: [{ ClerkBearer: [] }],
     });
     expect(contract.components.schemas).toHaveProperty("HomeEnvelope");
+    expect(contract.paths["/v1/items/{itemId}/pricing"].get).toMatchObject({
+      operationId: "getItemPricing",
+      "x-owner-issue": 240,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+    });
+    expect(contract.components.schemas).toHaveProperty("PricingEvidenceEnvelope");
+    expect(contract.components.schemas).toHaveProperty("PriceResult");
+    expect(contract.components.schemas).toHaveProperty("PricingComparable");
     expect(JSON.stringify(contract.paths["/v1/items/runs"])).toContain(
       "#/components/parameters/IdempotencyKey",
     );
@@ -96,6 +140,55 @@ describe("SwiftUI mobile HTTP contract", () => {
       ),
     ).toBe(true);
     expect(primitiveSchemaAccepts(homeSummary.properties.orders, 0)).toBe(true);
+  });
+
+  it("keeps one native decode fixture on the exact runtime pricing envelope", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve("ios/SnapListTests/Fixtures/pricing-evidence-response.json"),
+        "utf8",
+      ),
+    );
+
+    expect(() => pricingEvidenceEnvelopeSchema.parse(fixture)).not.toThrow();
+    expect(fixture.data.comparables).toHaveLength(2);
+    expect(fixture.data.comparables[1]).not.toHaveProperty("soldAt");
+  });
+
+  it("keeps zero payout valid while preserving the public nonnegative boundary", () => {
+    const boundary = JSON.parse(
+      readFileSync(
+        resolve("ios/SnapListTests/Fixtures/pricing-evidence-response.json"),
+        "utf8",
+      ),
+    );
+    boundary.data.priceResult.suggested = 0.01;
+    boundary.data.priceResult.range = { min: 0.01, max: 0.01 };
+    boundary.data.estimatedFees = 0.3;
+    boundary.data.estimatedPayout = 0;
+
+    expect(() => pricingEvidenceEnvelopeSchema.parse(boundary)).not.toThrow();
+    expect(
+      contract.components.schemas.PricingEvidenceProjection.properties,
+    ).toMatchObject({
+      estimatedPayout: { type: "number", minimum: 0 },
+    });
+
+    boundary.data.estimatedPayout = -0.01;
+    expect(() => pricingEvidenceEnvelopeSchema.parse(boundary)).toThrow();
+  });
+
+  it("keeps the item-pricing OpenAPI projection byte-for-byte aligned with runtime JSON Schema", () => {
+    const generatedRuntimeSchema = z.toJSONSchema(
+      pricingEvidenceProjectionSchema,
+    ) as Record<string, unknown>;
+    delete generatedRuntimeSchema.$schema;
+    const runtimeSchema = dereferenceContractSchema(generatedRuntimeSchema);
+    const openApiSchema = dereferenceContractSchema(
+      contract.components.schemas.PricingEvidenceProjection,
+    );
+
+    expect(openApiSchema).toEqual(runtimeSchema);
   });
 
   it("documents the standard Clerk token checks without inventing an audience", () => {

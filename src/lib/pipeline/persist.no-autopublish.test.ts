@@ -62,7 +62,25 @@ const eligiblePipeline: Pipeline = {
         suggested: 89,
         range: { min: 75, max: 105 },
         confidence: 0.92,
-        sources: [],
+        sources: [
+          {
+            url: "https://www.ebay.com/itm/game-boy-color-sold",
+            title: "Nintendo Game Boy Color sold listing",
+            kind: "sold-comp",
+          },
+        ],
+        evidence: [
+          {
+            id: "game-boy-color-sold",
+            sourceUrl: "https://www.ebay.com/itm/game-boy-color-sold",
+            title: "Nintendo Game Boy Color sold listing",
+            price: 89,
+            currency: "USD",
+            condition: "Used",
+            kind: "sold-comparable",
+            priceDisclosure: "displayed-sold-price",
+          },
+        ],
         tier: "ebay-sold",
       },
       confidence: {

@@ -4,6 +4,7 @@ import { pipeline as defaultPipeline } from "./stub";
 import { buildPredictionLogValues, logPrediction } from "./prediction-log";
 import { initialListingStatus } from "./autopilot";
 import { logEvent, timed } from "../observability";
+import { buildPricingEvidenceSnapshotInput } from "../pricing-evidence";
 
 /**
  * Persistence layer for one pipeline run — the end-to-end spine the walking
@@ -54,6 +55,7 @@ export function buildPipelinePersistencePayload(
       status: initialListingStatus(result.confidence),
     },
     prediction: buildPredictionLogValues(result, { autopilotEnabled }),
+    pricing_snapshot: buildPricingEvidenceSnapshotInput(result),
   };
 }
 

@@ -79,7 +79,7 @@ select ok(
 select ok(
   has_function_privilege(
     'authenticated',
-    'public.authorize_ai_item_guided_correction(uuid,uuid)',
+    'public.authorize_ai_item_guided_correction(uuid,uuid,uuid,uuid,uuid,text,timestamptz)',
     'execute'
   ),
   'authenticated sellers may request the fixed same-item correction authorization'
@@ -87,26 +87,22 @@ select ok(
 select ok(
   not has_function_privilege(
     'anon',
-    'public.authorize_ai_item_guided_correction(uuid,uuid)',
+    'public.authorize_ai_item_guided_correction(uuid,uuid,uuid,uuid,uuid,text,timestamptz)',
     'execute'
   ),
   'anonymous callers cannot authorize a correction'
 );
 select ok(
-  has_function_privilege(
-    'authenticated',
-    'public.regenerate_review_listing_with_credit(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean)',
-    'execute'
+  not has_function_privilege(
+    'authenticated', 'public.complete_guided_review_correction(text,jsonb)', 'execute'
   ),
-  'authenticated sellers may atomically finish the authorized correction'
+  'authenticated sellers cannot finish through the privileged completion seam'
 );
 select ok(
-  not has_function_privilege(
-    'anon',
-    'public.regenerate_review_listing_with_credit(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean)',
-    'execute'
+  has_function_privilege(
+    'service_role', 'public.complete_guided_review_correction(text,jsonb)', 'execute'
   ),
-  'anonymous callers cannot finish a correction'
+  'the fixed internal completion role may consume a correction capability'
 );
 select ok(
   not has_function_privilege(
