@@ -1,6 +1,6 @@
 begin;
 
-select plan(26);
+select plan(27);
 
 select ok(
   has_table_privilege('authenticated', 'public.pricing_evidence_snapshots', 'select'),
@@ -147,6 +147,15 @@ select ok(
     'execute'
   ),
   'authenticated correction may mint a bound short-lived capability'
+);
+select ok(
+  position(
+    'least(p_expires_at, v_now + interval ''5 minutes'')'
+    in pg_get_functiondef(
+      'public.authorize_ai_item_guided_correction(uuid,uuid,uuid,uuid,uuid,text,timestamptz)'::regprocedure
+    )
+  ) > 0,
+  'correction capability expiry is capped by the database clock'
 );
 select ok(
   not has_function_privilege(

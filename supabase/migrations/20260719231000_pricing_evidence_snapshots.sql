@@ -190,6 +190,7 @@ declare
   v_photo_set_fingerprint text;
   v_reservation public.ai_item_credit_reservations%rowtype;
   v_now timestamptz := statement_timestamp();
+  v_expires_at timestamptz;
 begin
   if coalesce(v_user_id, '') = '' then
     raise exception using errcode = '42501', message = 'Authentication required.';
@@ -198,10 +199,13 @@ begin
     or p_expected_review_revision is null
     or p_completion_run_id is not distinct from p_expected_run_id
     or p_completion_token !~ '^[A-Za-z0-9_-]{43}$'
-    or p_expires_at <= v_now
-    or p_expires_at > v_now + interval '5 minutes' then
+    or p_expires_at <= v_now then
     raise exception using errcode = '22023', message = 'Guided correction capability request is invalid.';
   end if;
+  v_expires_at := case
+    when p_expires_at is null then null
+    else least(p_expires_at, v_now + interval '5 minutes')
+  end;
 
   select item.photos into v_photo_paths
   from public.items item
@@ -259,7 +263,7 @@ begin
     v_reservation.id,
     encode(sha256(convert_to(p_completion_token, 'UTF8')), 'hex'),
     v_user_id, p_item_id, p_listing_id, p_completion_run_id,
-    p_expected_run_id, p_expected_review_revision, v_now, p_expires_at, null
+    p_expected_run_id, p_expected_review_revision, v_now, v_expires_at, null
   )
   on conflict (reservation_id) do update
   set token_hash = excluded.token_hash,
@@ -271,7 +275,7 @@ begin
       expires_at = excluded.expires_at,
       consumed_at = null;
 
-  return jsonb_build_object('expiresAt', p_expires_at);
+  return jsonb_build_object('expiresAt', v_expires_at);
 end;
 $$;
 

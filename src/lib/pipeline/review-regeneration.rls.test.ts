@@ -13,6 +13,7 @@ import {
 } from "../pricing-evidence";
 import {
   createSupabaseGuidedCorrectionCompletionGateway,
+  GUIDED_CORRECTION_CAPABILITY_TTL_MS,
   type GuidedCorrectionCompletionRpcClient,
 } from "./guided-correction-completion";
 import {
@@ -664,6 +665,35 @@ describe("review identity regeneration transaction + RLS", () => {
       "Old expired-capability",
     );
     expect(item?.review_revision).toBe(seeded.reviewRevision);
+  });
+
+  it("caps a clock-ahead capability expiry at the database five-minute maximum", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "clock-ahead-capability");
+    const commit = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      crypto.randomUUID(),
+      seeded.reviewRevision,
+    );
+    const applicationNow = Date.now() + 30_000;
+    const requestedExpiry = applicationNow + GUIDED_CORRECTION_CAPABILITY_TTL_MS;
+    const gateway = createSupabaseGuidedCorrectionCompletionGateway(
+      userA.client,
+      admin as unknown as GuidedCorrectionCompletionRpcClient,
+      { now: () => applicationNow },
+    );
+
+    const capability = await gateway.authorize({
+      itemId: commit.itemId,
+      listingId: commit.listingId,
+      runId: commit.runId,
+      expectedRunId: commit.expectedRunId,
+      expectedReviewRevision: commit.expectedReviewRevision,
+    });
+
+    expect(Date.parse(capability.expiresAt)).toBeGreaterThan(Date.now());
+    expect(Date.parse(capability.expiresAt)).toBeLessThan(requestedExpiry);
   });
 
   it("consumes one capability exactly once under concurrent completion", async () => {
