@@ -216,7 +216,7 @@ describe("SwiftUI mobile HTTP contract", () => {
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);
-    for (const issue of [17, 159, 174]) {
+    for (const issue of [17, 174]) {
       expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
     }
   });

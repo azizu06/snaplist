@@ -84,17 +84,19 @@
     "/v1/items/runs": {
       "post": {
         "operationId": "createItemRun",
-        "x-owner-issue": 159,
-        "x-related-owner-issues": [168, 174],
-        "x-implementation-status": "contract-only",
-        "security": [{ "ClerkBearer": [] }, { "GuestBearer": [] }],
+        "x-owner-issue": 334,
+        "x-related-owner-issues": [159, 333, 332],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRunRequest" } } } },
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/CreateItemRunMultipart" } } } },
         "responses": {
-          "202": { "description": "Run durably staged and enqueued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunEnvelope" } } } },
+          "200": { "description": "Exact idempotent replay of the previously committed submission", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MobileItemSubmissionEnvelope" } } } },
+          "202": { "description": "Item, allowance reservation, run, and queue message durably committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MobileItemSubmissionEnvelope" } } } },
           "400": { "$ref": "#/components/responses/InvalidRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
-          "409": { "description": "Idempotency key conflicts with another request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+          "409": { "description": "Idempotency key conflicts with different bytes, order, or cost basis", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
         }
       }
     },
@@ -246,7 +248,11 @@
       "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["billingSource", "status", "remainingItems", "periodStart", "periodEnd", "gracePeriodEnd", "transitionState", "legacyStripeStatus"], "properties": { "billingSource": { "type": "string", "enum": ["included", "storekit", "none"] }, "status": { "type": "string", "enum": ["included", "active", "grace", "billing_retry", "expired", "revoked", "refunded", "ambiguous", "unconfigured"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": ["string", "null"], "format": "date-time" }, "periodEnd": { "type": ["string", "null"], "format": "date-time" }, "gracePeriodEnd": { "type": ["string", "null"], "format": "date-time" }, "transitionState": { "type": ["string", "null"], "enum": ["not_required", "required", "reconciled", null] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "EbayOauthSessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["sessionId", "authorizationUrl", "expiresAt"], "properties": { "sessionId": { "type": "string", "format": "uuid" }, "authorizationUrl": { "type": "string", "format": "uri" }, "expiresAt": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "ResponseMeta": { "type": "object", "required": ["requestId"], "properties": { "requestId": { "type": "string" } } },
-      "CreateRunRequest": { "type": "object", "required": ["photoObjectPaths", "photoSetFingerprint"], "properties": { "photoObjectPaths": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string" } }, "photoSetFingerprint": { "type": "string" }, "costBasis": { "type": ["number", "null"], "minimum": 0 } }, "additionalProperties": false },
+      "CreateItemRunMultipart": { "type": "object", "required": ["photo"], "properties": { "photo": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "format": "binary", "description": "JPEG, PNG, or WebP image bytes" } }, "costBasis": { "type": "number", "minimum": 0 } }, "additionalProperties": false },
+      "MobileItemSubmissionPhoto": { "type": "object", "additionalProperties": false, "required": ["ordinal", "contentSha256", "byteLength", "mediaType"], "properties": { "ordinal": { "type": "integer", "minimum": 0, "maximum": 3 }, "contentSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "byteLength": { "type": "integer", "minimum": 1, "maximum": 52428800 }, "mediaType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"] } } },
+      "MobileItemSubmissionPhotoIdentity": { "type": "object", "additionalProperties": false, "required": ["kind", "fingerprint"], "properties": { "kind": { "const": "content_sha256_set_v1" }, "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+      "MobileItemSubmissionReceipt": { "type": "object", "additionalProperties": false, "required": ["itemId", "runId", "status", "stage", "photoIdentity", "photos"], "properties": { "itemId": { "type": "string", "format": "uuid" }, "runId": { "type": "string", "format": "uuid" }, "status": { "const": "queued" }, "stage": { "const": "queued" }, "photoIdentity": { "$ref": "#/components/schemas/MobileItemSubmissionPhotoIdentity" }, "photos": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/components/schemas/MobileItemSubmissionPhoto" } } } },
+      "MobileItemSubmissionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/MobileItemSubmissionReceipt" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "RunTimestamps": { "type": "object", "additionalProperties": false, "required": ["createdAt", "updatedAt", "enqueuedAt", "startedAt", "lastAttemptedAt", "nextAttemptAt", "completedAt", "retentionCleanedAt"], "properties": { "createdAt": { "type": "string", "format": "date-time" }, "updatedAt": { "type": "string", "format": "date-time" }, "enqueuedAt": { "type": ["string", "null"], "format": "date-time" }, "startedAt": { "type": ["string", "null"], "format": "date-time" }, "lastAttemptedAt": { "type": ["string", "null"], "format": "date-time" }, "nextAttemptAt": { "type": ["string", "null"], "format": "date-time" }, "completedAt": { "type": ["string", "null"], "format": "date-time" }, "retentionCleanedAt": { "type": ["string", "null"], "format": "date-time" } } },
       "RunItem": { "type": "object", "additionalProperties": false, "required": ["title", "photoCount"], "properties": { "title": { "type": "string", "minLength": 1 }, "photoCount": { "type": "integer", "minimum": 0 } } },
       "RunRequiredInput": { "type": ["object", "null"], "additionalProperties": false, "required": ["reason", "destination"], "properties": { "reason": { "type": "string", "minLength": 1 }, "destination": { "type": "string", "enum": ["identity", "photos", "listing"] } } },
