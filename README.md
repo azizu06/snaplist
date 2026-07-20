@@ -2,8 +2,8 @@
 
 Snap a photo of a resale item → get a priced, ready-to-post marketplace listing. SnapList prefers
 real sold comps when available, then falls back to cited web or depreciation evidence or a clearly
-labeled, potentially uncited LLM-only estimate, always with a confidence score. Built for resellers;
-a production-real AI-engineering showcase.
+labeled, potentially uncited LLM-only estimate, always with a confidence score. Built for resellers
+as a real product headed to market.
 
 > **Docs:** [`PRD.md`](./PRD.md) is the source of truth for what we build · [`CONTEXT.md`](./CONTEXT.md)
 > is the domain glossary · [`AGENTS.md`](./AGENTS.md) is the agent/engineering guide ·
@@ -35,8 +35,8 @@ Clearing a whole haul? **Bulk capture** takes item after item in one session thr
 pipeline and lands on a live triage list of the batch. SnapList is the seller's **control surface** —
 payment, checkout, and shipping stay on eBay; buyers never see it.
 
-This repo is built as a **production-real AI-engineering showcase**: the AI pipeline *is* the product,
-and the goal is the full stack working end-to-end in a deployed app. The
+This repo builds SnapList as a real product headed to market: the AI pipeline *is* the product, and
+the goal is average resellers using it to price and list items, with SnapList Pro as the paid tier. The
 [skills-on-display map](#skills-on-display) shows where each technique lives.
 
 ## Architecture

@@ -5,10 +5,11 @@ to work in the repo. `PROJECT_BRIEF.md` is origin/narrative context only and is 
 where they disagree.
 
 ## What this is
-A production-real AI-engineering showcase: photo of a used item → priced, ready-to-post listing →
-buyer-Q&A. The **AI pipeline is the product** for the average consumer reseller; eBay is the only
-direct launch marketplace and lives behind adapters. Advanced volume workflows are a growth path,
-not the default product posture.
+A real product headed to market: photo of a used item → priced, ready-to-post eBay listing →
+buyer-Q&A. The **AI pipeline is the product** for the average consumer reseller, who SnapList aims to
+win, keep, and monetize through SnapList Pro. eBay is the only launch marketplace and lives behind
+adapters. Cross-listing to other marketplaces and advanced volume workflows are a later growth path,
+not the launch posture. Success is real reseller usage and revenue, not a portfolio or demo.
 
 ## Non-negotiable decisions (don't relitigate without the user)
 - **Multi-tenant from day one:** Clerk auth (Supabase third-party JWTs; issue #41), text `user_id`

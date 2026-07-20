@@ -22,9 +22,10 @@ The **primary user is the average consumer reseller**. The launch flow is tuned 
 wants one item identified, priced, drafted, and published with clear human control. Advanced
 bulk/haul and volume workflows remain a growth path, not the default product posture.
 
-(Framing note: this is built as a **production-real AI-engineering showcase**. The primary success
-metric is demonstrating the full AI stack end-to-end in a polished, deployed app — not user growth.
-Market saturation is explicitly irrelevant.)
+(Framing note: this is a real product headed to market. The goal is average resellers actually using
+SnapList to price and list their items, and paying for SnapList Pro. Success is measured by real
+usage, retention, and revenue, not by a portfolio or demo narrative. The engineering still has to be
+production-grade, but that is the means, not the goal.)
 
 ## Solution
 
@@ -85,8 +86,10 @@ entitlement, settlement, and marketplace-authority semantics.
   from profile; Runs contextual from Home; bell-backed activity center.
 - Push only for draft ready, failed/needs-input run, buyer message, sold/order
   action, expired eBay connection, and failed assisted export.
-- Assisted Mercari, Facebook Marketplace, and Depop share/handoff flows ship at
-  launch but never claim direct publishing.
+- Launch is eBay-only. Cross-listing to other marketplaces is not a launch feature.
+  Assisted Mercari, Facebook Marketplace, and Depop share/handoff flows are a later
+  growth-path addition for higher-volume resellers, and even then never claim direct
+  publishing.
 - Sold-elsewhere confirmation has `Also end on eBay` selected by default while
   preserving one explicit seller confirmation.
 - Thin post-sale launch surface reflects eBay sold/paid/ship-by/shipped/delivered/
@@ -182,7 +185,7 @@ authoritative source supports it and otherwise hands that status check to eBay.
 57. As a seller, I want listing deletion to remove associated SnapList data subject to required provider/legal records.
 58. As a seller deleting my account, I want the full applicable purge while eBay-owned records remain clearly identified as eBay's responsibility.
 
-**Showcase/operator stories**
+**Builder / operator stories**
 59. As the builder, I want every pipeline run's predictions logged for evaluation.
 60. As the builder, I want an eval harness over a fixed gold set for ID accuracy, pricing sanity, and confidence calibration.
 61. As the builder, I want pricing and marketplace providers behind testable seams, so that offline fixtures prove behavior without live calls.
@@ -350,8 +353,9 @@ Routing by item signal, each result always `{ suggested, range, confidence, sour
   coherent result untouched if generation or persistence fails. Published or publishing eBay
   state is never mutable through this path.
 - v1 direct target: **eBay** (structured item specifics, keyword title, category, and the real adapter
-  target). Launch assisted handoffs target **Facebook Marketplace**, **Mercari**, and **Depop** with
-  platform-appropriate copy/photos and an honest native share/deep-link checklist. They never claim a
+  target). Launch generates for eBay only. Assisted handoffs to **Facebook Marketplace**, **Mercari**,
+  and **Depop** are a later growth-path addition, not launch scope; when built they prepare
+  platform-appropriate copy/photos and an honest native share/deep-link checklist and never claim a
   direct post. Poshmark remains a later option if the branded-apparel slice is expanded.
 - Generation is always grounded in the validated item core. Optional similar-listing examples may
   provide style and structure hints only after the evaluation gate below passes.
@@ -496,7 +500,7 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - Cross-platform unified inbox or authoritative order tracking; eBay is the only direct launch
   marketplace.
 - Sold-price *APIs* (gated eBay Marketplace Insights) and eBay **Browse** API (dropped). Sold-price *data* is obtained instead by scraping eBay's PUBLIC sold pages (ADR-0001).
-- Real users / growth / marketing as a success metric (showcase first).
+- Assisted cross-listing to Mercari, Facebook Marketplace, and Depop at launch. Launch is eBay-only; these handoffs are deferred to a later growth phase.
 - Payment, checkout, shipping (these stay on eBay).
 - A universal "price anything" guarantee — accuracy concentrates on the hero domain; generics are honestly low-confidence.
 - Automatic publish after seller-triggered identity correction — regeneration always returns to a
@@ -533,10 +537,10 @@ exercised for quality by the **eval harness** rather than brittle exact-match un
 - **Phase 2 — claim, metering, activity:** claim the guest result at Publish; monthly AI-item credit
   reservation/settlement and run-#2 SnapList Pro gate; Home/contextual Runs/activity center; bounded
   push; seller-approved buyer-reply delivery.
-- **Phase 3 — eBay authority and assisted launch marketplaces:** first seller-confirmed eBay publish;
-  two-way listing/order synchronization with visible conflicts; seller-confirmed add-tracking/
-  mark-shipped and sold-elsewhere end; Mercari/Facebook/Depop assisted handoffs; thin honest
-  post-sale status.
+- **Phase 3 — eBay authority and post-sale:** first seller-confirmed eBay publish; two-way
+  listing/order synchronization with visible conflicts; seller-confirmed add-tracking/mark-shipped
+  and sold-elsewhere end; thin honest post-sale status. Assisted cross-listing handoffs
+  (Mercari/Facebook/Depop) are deferred to a later growth phase, not launch scope.
 - **Phase 4 — measure and harden:** TestFlight cost measurement before publishing the monthly
   allowance; retention/deletion acceptance; production go-live checklist; eval/CI/observability;
   validate advanced bulk/volume work without changing the default one-item posture.

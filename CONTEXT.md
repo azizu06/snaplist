@@ -223,4 +223,4 @@ receive honest **assisted marketplace handoffs**.
 ## Actors
 - **Seller** — the SnapList user. The only human in the app.
 - **Buyer** — a person on eBay asking questions. Never a SnapList user.
-- **Builder** — Aziz, operating the project as a portfolio/showcase (eval, architecture, narrative).
+- **Builder** — Aziz, building SnapList as a real product to take to market for resellers (product direction, monetization, architecture).
