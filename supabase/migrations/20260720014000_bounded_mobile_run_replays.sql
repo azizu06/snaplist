@@ -25,7 +25,7 @@ create table private.mobile_run_operation_replays (
 );
 
 comment on table private.mobile_run_operation_replays is
-  'Principal-bound retry/cancel receipts for verified tenant-owned runs. Missing and foreign targets return the tenant-safe error without persistence. Canonical run truth remains in public.pipeline_runs.';
+  'Principal-bound retry/cancel receipts for verified tenant-owned runs, capped at 32 receipts per run. Missing and foreign targets return the tenant-safe error without persistence. Canonical run truth remains in public.pipeline_runs.';
 
 revoke all on table private.mobile_run_operation_replays
   from public, anon, authenticated, service_role;
@@ -43,6 +43,8 @@ as $$
 declare
   v_user_id text;
   v_replay private.mobile_run_operation_replays%rowtype;
+  v_replay_count integer;
+  v_replay_limit constant integer := 32;
   v_locked_run_id uuid;
   v_error_code text;
   v_error_message text;
@@ -108,6 +110,22 @@ begin
       raise exception using
         errcode = 'P0002',
         message = 'Pipeline run not found';
+    end if;
+
+    -- Fresh keys for the same verified run serialize on the run-row lock. The
+    -- count therefore cannot race another receipt insert for this run.
+    select count(*)::integer
+    into v_replay_count
+    from private.mobile_run_operation_replays replay
+    where replay.run_id = v_locked_run_id;
+
+    if v_replay_count >= v_replay_limit then
+      return jsonb_build_object(
+        'mobileRunOperationError', jsonb_build_object(
+          'code', '55000',
+          'message', 'This listing run has too many saved operation receipts'
+        )
+      );
     end if;
 
     if p_operation = 'retry' then

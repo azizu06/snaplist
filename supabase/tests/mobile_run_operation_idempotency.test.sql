@@ -1,6 +1,6 @@
 begin;
 
-select plan(28);
+select plan(32);
 
 select extensions.ok(
   to_regclass('private.mobile_run_operation_replays') is not null,
@@ -58,14 +58,16 @@ values
   ('24110000-0000-4000-8000-000000000001', 'mobile-run-a', array['mobile-run-a/cancel.jpg']),
   ('24110000-0000-4000-8000-000000000002', 'mobile-run-a', array['mobile-run-a/retry.jpg']),
   ('24110000-0000-4000-8000-000000000003', 'mobile-run-b', array['mobile-run-b/foreign.jpg']),
-  ('24110000-0000-4000-8000-000000000004', 'mobile-run-a', array['mobile-run-a/restored.jpg']);
+  ('24110000-0000-4000-8000-000000000004', 'mobile-run-a', array['mobile-run-a/restored.jpg']),
+  ('24110000-0000-4000-8000-000000000005', 'mobile-run-a', array['mobile-run-a/quota.jpg']);
 
 insert into public.pipeline_runs (id, user_id, item_id, idempotency_key)
 values
   ('24120000-0000-4000-8000-000000000001', 'mobile-run-a', '24110000-0000-4000-8000-000000000001', 'mobile-cancel'),
   ('24120000-0000-4000-8000-000000000002', 'mobile-run-a', '24110000-0000-4000-8000-000000000002', 'mobile-retry'),
   ('24120000-0000-4000-8000-000000000003', 'mobile-run-b', '24110000-0000-4000-8000-000000000003', 'mobile-foreign'),
-  ('24120000-0000-4000-8000-000000000004', 'mobile-run-a', '24110000-0000-4000-8000-000000000004', 'mobile-restored');
+  ('24120000-0000-4000-8000-000000000004', 'mobile-run-a', '24110000-0000-4000-8000-000000000004', 'mobile-restored'),
+  ('24120000-0000-4000-8000-000000000005', 'mobile-run-a', '24110000-0000-4000-8000-000000000005', 'mobile-quota');
 
 update public.pipeline_runs
 set status = 'running',
@@ -76,6 +78,44 @@ set status = 'running',
     lease_token = '24130000-0000-4000-8000-000000000001',
     lease_expires_at = statement_timestamp() + interval '1 minute'
 where id = '24120000-0000-4000-8000-000000000002';
+
+update public.pipeline_runs
+set status = 'running',
+    stage = 'pricing',
+    attempt_count = 1,
+    started_at = statement_timestamp(),
+    last_attempted_at = statement_timestamp(),
+    lease_token = '24130000-0000-4000-8000-000000000005',
+    lease_expires_at = statement_timestamp() + interval '1 minute'
+where id = '24120000-0000-4000-8000-000000000005';
+update public.pipeline_runs
+set status = 'failed',
+    failure_code = 'provider_unavailable',
+    safe_failure_message = 'The quota fixture is retryable.',
+    completed_at = statement_timestamp(),
+    lease_token = null,
+    lease_expires_at = null
+where id = '24120000-0000-4000-8000-000000000005';
+
+insert into private.mobile_run_operation_replays (
+  user_id,
+  idempotency_key,
+  requested_run_id,
+  run_id,
+  operation,
+  result
+)
+select
+  'mobile-run-a',
+  (
+    '24149999-0000-4000-8000-'
+    || lpad(receipt_number::text, 12, '0')
+  )::uuid,
+  '24120000-0000-4000-8000-000000000005',
+  '24120000-0000-4000-8000-000000000005',
+  'retry',
+  '{"mobileRunOperationError":{"code":"55000","message":"The stored retry result must remain durable"}}'::jsonb
+from generate_series(1, 32) receipt_number;
 
 update public.pipeline_runs
 set status = 'running',
@@ -396,9 +436,51 @@ select extensions.is(
     select count(*)::integer
     from private.mobile_run_operation_replays
     where user_id = 'mobile-run-a'
+      and run_id <> '24120000-0000-4000-8000-000000000005'
   ),
   6,
   'only six verified owner-bound intents were recorded across success and stable rejection paths'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"mobile-run-a","role":"authenticated"}',
+  true
+);
+select extensions.is(
+  public.apply_mobile_run_operation(
+    '24120000-0000-4000-8000-000000000005',
+    'retry',
+    '24149999-0000-4000-8000-000000000001'
+  ) #>> '{mobileRunOperationError,message}',
+  'The stored retry result must remain durable',
+  'an existing key still replays its exact durable result at the per-run ceiling'
+);
+select extensions.is(
+  public.apply_mobile_run_operation(
+    '24120000-0000-4000-8000-000000000005',
+    'retry',
+    '24149998-0000-4000-8000-000000000001'
+  ) #>> '{mobileRunOperationError,message}',
+  'This listing run has too many saved operation receipts',
+  'a fresh key at the per-run ceiling returns the bounded-storage conflict'
+);
+select extensions.is(
+  (select status from public.pipeline_runs where id = '24120000-0000-4000-8000-000000000005'),
+  'failed',
+  'the ceiling rejection occurs before the canonical retry mutation'
+);
+
+reset role;
+select extensions.is(
+  (
+    select count(*)::integer
+    from private.mobile_run_operation_replays
+    where run_id = '24120000-0000-4000-8000-000000000005'
+  ),
+  32,
+  'the ceiling rejection does not persist a thirty-third receipt'
 );
 
 select * from finish();

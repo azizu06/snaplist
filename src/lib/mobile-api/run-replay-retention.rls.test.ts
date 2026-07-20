@@ -36,9 +36,13 @@ let foreignUserId = "";
 let cancelItemId = "";
 let retryItemId = "";
 let foreignItemId = "";
+let quotaItemId = "";
+let concurrentQuotaItemId = "";
 let cancelRunId = "";
 let retryRunId = "";
 let foreignRunId = "";
+let quotaRunId = "";
+let concurrentQuotaRunId = "";
 
 async function applyOperation(
   client: Client,
@@ -103,9 +107,13 @@ beforeAll(async () => {
   cancelItemId = randomUUID();
   retryItemId = randomUUID();
   foreignItemId = randomUUID();
+  quotaItemId = randomUUID();
+  concurrentQuotaItemId = randomUUID();
   cancelRunId = randomUUID();
   retryRunId = randomUUID();
   foreignRunId = randomUUID();
+  quotaRunId = randomUUID();
+  concurrentQuotaRunId = randomUUID();
 
   await admin.query(
     `insert into public.items (id, user_id, photos)
@@ -145,6 +153,34 @@ beforeAll(async () => {
     ],
   );
   await admin.query(
+    `insert into public.items (id, user_id, photos)
+     values
+       ($1::uuid, $3, array[$4::text]),
+       ($2::uuid, $3, array[$5::text])`,
+    [
+      quotaItemId,
+      concurrentQuotaItemId,
+      ownerUserId,
+      `${ownerUserId}/quota.jpg`,
+      `${ownerUserId}/concurrent-quota.jpg`,
+    ],
+  );
+  await admin.query(
+    `insert into public.pipeline_runs (id, user_id, item_id, idempotency_key)
+     values
+       ($1::uuid, $3, $4::uuid, $6),
+       ($2::uuid, $3, $5::uuid, $7)`,
+    [
+      quotaRunId,
+      concurrentQuotaRunId,
+      ownerUserId,
+      quotaItemId,
+      concurrentQuotaItemId,
+      `quota-${quotaRunId}`,
+      `concurrent-quota-${concurrentQuotaRunId}`,
+    ],
+  );
+  await admin.query(
     `update public.pipeline_runs
      set status = 'running',
          stage = 'pricing',
@@ -153,8 +189,8 @@ beforeAll(async () => {
          last_attempted_at = statement_timestamp(),
          lease_token = gen_random_uuid(),
          lease_expires_at = statement_timestamp() + interval '1 minute'
-     where id = $1::uuid`,
-    [retryRunId],
+     where id = any($1::uuid[])`,
+    [[retryRunId, quotaRunId]],
   );
   await admin.query(
     `update public.pipeline_runs
@@ -164,8 +200,8 @@ beforeAll(async () => {
          completed_at = statement_timestamp(),
          lease_token = null,
          lease_expires_at = null
-     where id = $1::uuid`,
-    [retryRunId],
+     where id = any($1::uuid[])`,
+    [[retryRunId, quotaRunId]],
   );
 });
 
@@ -176,9 +212,9 @@ afterAll(async () => {
     await admin.query(
       `select pgmq.delete('pipeline_jobs', queue_message_id)
        from public.pipeline_runs
-       where id = $1::uuid
+       where id = any($1::uuid[])
          and queue_message_id is not null`,
-      [retryRunId],
+      [[retryRunId, quotaRunId, concurrentQuotaRunId]],
     );
     await admin.query(
       `delete from private.mobile_run_operation_replays
@@ -187,7 +223,13 @@ afterAll(async () => {
     );
     await admin.query(
       "delete from public.items where id = any($1::uuid[])",
-      [[cancelItemId, retryItemId, foreignItemId]],
+      [[
+        cancelItemId,
+        retryItemId,
+        foreignItemId,
+        quotaItemId,
+        concurrentQuotaItemId,
+      ]],
     );
   } finally {
     await Promise.all([
@@ -348,5 +390,140 @@ describe("mobile run replay receipt retention", () => {
       [ownerUserId, [cancelKey, retryKey]],
     );
     expect(retained.rows[0]).toEqual({ count: "2", verified_count: "2" });
+  });
+
+  it("bounds fresh owned-run receipts and serializes different keys at the ceiling", async () => {
+    if (!reachable) return;
+
+    const replayLimit = 32;
+    const quotaKeys = Array.from({ length: replayLimit }, () => randomUUID());
+    const storedResult = {
+      mobileRunOperationError: {
+        code: "55000",
+        message: "The stored retry result must remain durable",
+      },
+    };
+    await admin.query(
+      `insert into private.mobile_run_operation_replays (
+         user_id,
+         idempotency_key,
+         requested_run_id,
+         run_id,
+         operation,
+         result
+       )
+       select $1, receipt_key, $2::uuid, $2::uuid, 'retry', $4::jsonb
+       from unnest($3::uuid[]) as receipt_key`,
+      [ownerUserId, quotaRunId, quotaKeys, JSON.stringify(storedResult)],
+    );
+
+    const rejectedRetryKey = randomUUID();
+    const rejectedRetry = await applyOperation(
+      owner,
+      ownerUserId,
+      quotaRunId,
+      "retry",
+      rejectedRetryKey,
+    );
+    const replayedOldest = await applyOperation(
+      owner,
+      ownerUserId,
+      quotaRunId,
+      "retry",
+      quotaKeys[0]!,
+    );
+
+    expect(rejectedRetry).toEqual({
+      mobileRunOperationError: {
+        code: "55000",
+        message: "This listing run has too many saved operation receipts",
+      },
+    });
+    expect(replayedOldest).toEqual(storedResult);
+    const cappedRun = await admin.query<{ count: string; status: string }>(
+      `select count(replay.idempotency_key)::text as count, run.status
+       from public.pipeline_runs run
+       left join private.mobile_run_operation_replays replay
+         on replay.run_id = run.id
+       where run.id = $1::uuid
+       group by run.status`,
+      [quotaRunId],
+    );
+    expect(cappedRun.rows[0]).toEqual({ count: "32", status: "failed" });
+
+    const boundaryKeys = Array.from(
+      { length: replayLimit - 1 },
+      () => randomUUID(),
+    );
+    await admin.query(
+      `insert into private.mobile_run_operation_replays (
+         user_id,
+         idempotency_key,
+         requested_run_id,
+         run_id,
+         operation,
+         result
+       )
+       select $1, receipt_key, $2::uuid, $2::uuid, 'retry', $4::jsonb
+       from unnest($3::uuid[]) as receipt_key`,
+      [
+        ownerUserId,
+        concurrentQuotaRunId,
+        boundaryKeys,
+        JSON.stringify(storedResult),
+      ],
+    );
+    const concurrentKeys = [randomUUID(), randomUUID()];
+    const concurrentResults = await Promise.all([
+      applyOperation(
+        owner,
+        ownerUserId,
+        concurrentQuotaRunId,
+        "cancel",
+        concurrentKeys[0]!,
+      ),
+      applyOperation(
+        ownerConcurrent,
+        ownerUserId,
+        concurrentQuotaRunId,
+        "cancel",
+        concurrentKeys[1]!,
+      ),
+    ]);
+
+    expect(concurrentResults).toContainEqual({
+      mobileRunOperationError: {
+        code: "55000",
+        message: "This listing run has too many saved operation receipts",
+      },
+    });
+    expect(concurrentResults).toContainEqual(
+      expect.objectContaining({
+        runId: concurrentQuotaRunId,
+        status: "canceled",
+      }),
+    );
+    const concurrentBoundary = await admin.query<{
+      count: string;
+      new_key_count: string;
+      status: string;
+    }>(
+      `select count(replay.idempotency_key)::text as count,
+              count(replay.idempotency_key) filter (
+                where replay.idempotency_key = any($2::uuid[])
+              )::text as new_key_count,
+              run.status
+       from public.pipeline_runs run
+       left join private.mobile_run_operation_replays replay
+         on replay.run_id = run.id
+       where run.id = $1::uuid
+       group by run.status`,
+      [concurrentQuotaRunId, concurrentKeys],
+    );
+    expect(concurrentBoundary.rows[0]).toEqual({
+      count: "32",
+      new_key_count: "1",
+      status: "canceled",
+    });
   });
 });

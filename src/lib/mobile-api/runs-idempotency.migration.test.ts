@@ -33,6 +33,10 @@ describe("mobile durable-run mutation idempotency migration", () => {
     expect(migration).toMatch(
       /if v_locked_run_id is null then[\s\S]*return v_result;[\s\S]*end if;[\s\S]*insert into private\.mobile_run_operation_replays/i,
     );
+    expect(migration).toMatch(/v_replay_limit constant integer := 32/i);
+    expect(migration).toMatch(
+      /from public\.pipeline_runs[\s\S]*for update[\s\S]*count\(\*\)[\s\S]*v_replay_count >= v_replay_limit[\s\S]*too many saved operation receipts[\s\S]*public\.retry_pipeline_run\(p_run_id\)/i,
+    );
   });
 
   it("preserves #278 retention-first retry ordering", () => {
