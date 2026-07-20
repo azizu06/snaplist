@@ -508,6 +508,16 @@ describe("review identity regeneration transaction + RLS", () => {
       ...commit,
       capabilityToken: token,
     });
+    const confidenceDivergence = structuredClone(rpcCommit) as typeof rpcCommit & {
+      pricing_snapshot: { price_result: { confidence: number } };
+    };
+    confidenceDivergence.pricing_snapshot.price_result.confidence = 0.01;
+    const missingConfidence = structuredClone(rpcCommit) as unknown as {
+      prediction: Record<string, unknown>;
+      pricing_snapshot: { price_result: Record<string, unknown> };
+    };
+    delete missingConfidence.prediction.confidence;
+    delete missingConfidence.pricing_snapshot.price_result.confidence;
     const ownerItemIds = [owner.itemId, sibling.itemId];
     const ownerBefore = await correctionState(userA, ownerItemIds);
     const foreignBefore = await correctionState(userB, [foreign.itemId]);
@@ -579,6 +589,18 @@ describe("review identity regeneration transaction + RLS", () => {
           expected_review_revision: crypto.randomUUID(),
         },
         message: /capability binding mismatch/i,
+      },
+      {
+        name: "snapshot confidence diverges from the canonical prediction",
+        capabilityToken: token,
+        commit: confidenceDivergence,
+        message: /guided correction persistence is incoherent/i,
+      },
+      {
+        name: "snapshot and prediction both omit confidence",
+        capabilityToken: token,
+        commit: missingConfidence,
+        message: /invalid guided correction completion/i,
       },
     ];
 

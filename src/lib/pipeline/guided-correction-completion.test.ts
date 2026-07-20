@@ -25,7 +25,7 @@ const result: PipelineResult = {
   price: {
     suggested: 199,
     range: { min: 180, max: 220 },
-    confidence: 0.85,
+    confidence: 0.31,
     sources: [{ url: "HTTPS://example.com:443/valid", kind: "sold-comp" }],
     tier: "ebay-sold",
     evidence: [
@@ -186,6 +186,7 @@ describe("guided correction completion gateway", () => {
           expected_review_revision: "00000000-0000-4000-8000-000000000005",
           pricing_snapshot: expect.objectContaining({
             item: { title: "Sony WH-1000XM5", condition: "good" },
+            price_result: expect.objectContaining({ confidence: 0.85 }),
             evidence: [
               expect.objectContaining({
                 sourceUrl: "HTTPS://example.com:443/valid",

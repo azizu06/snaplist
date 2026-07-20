@@ -352,6 +352,7 @@ begin
     or jsonb_typeof(v_prediction->'price_range') is distinct from 'object'
     or jsonb_typeof(v_prediction->'sources') is distinct from 'array'
     or (v_prediction->>'price')::numeric <= 0
+    or jsonb_typeof(v_prediction->'confidence') is distinct from 'number'
     or (v_prediction->>'confidence')::numeric not between 0 and 1
     or (v_prediction->>'autopilot_enabled')::boolean is distinct from false
     or (v_prediction->>'autopilot_eligible')::boolean is distinct from false
@@ -359,6 +360,8 @@ begin
     or (v_snapshot->>'schema_version')::integer is distinct from 1
     or jsonb_typeof(v_snapshot->'item') is distinct from 'object'
     or jsonb_typeof(v_snapshot->'price_result') is distinct from 'object'
+    or jsonb_typeof(v_snapshot #> '{price_result,confidence}') is distinct from 'number'
+    or (v_snapshot #>> '{price_result,confidence}')::numeric not between 0 and 1
     or v_snapshot->'price_result' ? 'evidence'
     or not private.pricing_evidence_rows_coarse(v_snapshot->'evidence')
     or octet_length(v_snapshot::text) > 262144 then
@@ -398,6 +401,7 @@ begin
     or v_snapshot #> '{price_result,suggested}' is distinct from v_prediction->'price'
     or v_snapshot #> '{price_result,range,min}' is distinct from v_prediction #> '{price_range,low}'
     or v_snapshot #> '{price_result,range,max}' is distinct from v_prediction #> '{price_range,high}'
+    or v_snapshot #> '{price_result,confidence}' is distinct from v_prediction->'confidence'
     or v_snapshot #>> '{price_result,tier}' is distinct from v_prediction->>'tier_fired'
     or v_snapshot #> '{price_result,sources}' is distinct from v_prediction->'sources' then
     raise exception using errcode = '22023', message = 'Guided correction persistence is incoherent';
@@ -590,6 +594,10 @@ begin
   if (v_snapshot->>'schema_version')::integer is distinct from 1
     or jsonb_typeof(v_snapshot->'item') is distinct from 'object'
     or jsonb_typeof(v_snapshot->'price_result') is distinct from 'object'
+    or jsonb_typeof(v_snapshot #> '{price_result,confidence}') is distinct from 'number'
+    or (v_snapshot #>> '{price_result,confidence}')::numeric not between 0 and 1
+    or jsonb_typeof(p_persistence #> '{prediction,confidence}') is distinct from 'number'
+    or (p_persistence #>> '{prediction,confidence}')::numeric not between 0 and 1
     or v_snapshot->'price_result' ? 'evidence'
     or not private.pricing_evidence_rows_coarse(v_snapshot->'evidence')
     or octet_length(v_snapshot::text) > 262144 then
@@ -601,6 +609,8 @@ begin
       is distinct from p_persistence #> '{prediction,price_range,low}'
     or v_snapshot #> '{price_result,range,max}'
       is distinct from p_persistence #> '{prediction,price_range,high}'
+    or v_snapshot #> '{price_result,confidence}'
+      is distinct from p_persistence #> '{prediction,confidence}'
     or v_snapshot #>> '{price_result,tier}'
       is distinct from p_persistence #>> '{prediction,tier_fired}'
     or v_snapshot #> '{price_result,sources}'

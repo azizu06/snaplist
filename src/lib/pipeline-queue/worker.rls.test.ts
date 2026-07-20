@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { PipelineResult } from "@/lib/pipeline";
+import { buildPipelinePersistencePayload } from "@/lib/pipeline/persist";
 import {
   cleanupClerkTestUsers,
   provisionClerkTestUser,
@@ -374,6 +375,71 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       checkpoint: generated,
       leaseSeconds: 60,
     });
+
+    const incoherentPersistence = structuredClone(
+      buildPipelinePersistencePayload(RESULT, true),
+    );
+    incoherentPersistence.pricing_snapshot.price_result.confidence =
+      RESULT.price.confidence;
+    const missingConfidencePersistence = structuredClone(
+      buildPipelinePersistencePayload(RESULT, true),
+    ) as unknown as {
+      prediction: Record<string, unknown>;
+      pricing_snapshot: { price_result: Record<string, unknown> };
+    };
+    delete missingConfidencePersistence.prediction.confidence;
+    delete missingConfidencePersistence.pricing_snapshot.price_result.confidence;
+    const rejectedConfidencePayloads = [
+      {
+        persistence: incoherentPersistence,
+        message: /pipeline persistence is incoherent/i,
+      },
+      {
+        persistence: missingConfidencePersistence,
+        message: /invalid pricing evidence snapshot/i,
+      },
+    ];
+    for (const rejected of rejectedConfidencePayloads) {
+      const completion = await admin.rpc("complete_pipeline_run", {
+        p_run_id: runA,
+        p_lease_token: resumed.context.run.lease_token,
+        p_persistence: rejected.persistence,
+      });
+      expect(completion.error?.message).toMatch(rejected.message);
+    }
+    const [
+      runAfterRejectedConfidence,
+      listingsAfterRejectedConfidence,
+      logsAfterRejectedConfidence,
+      snapshotsAfterRejectedConfidence,
+    ] =
+      await Promise.all([
+        userA.client
+          .from("pipeline_runs")
+          .select("status,stage")
+          .eq("id", runA)
+          .single(),
+        userA.client
+          .from("listings")
+          .select("id")
+          .eq("run_id", runA),
+        userA.client
+          .from("prediction_logs")
+          .select("id")
+          .eq("run_id", runA),
+        userA.client
+          .from("pricing_evidence_snapshots")
+          .select("run_id")
+          .eq("run_id", runA),
+      ]);
+    expect(runAfterRejectedConfidence.data).toEqual({
+      status: "running",
+      stage: "generating",
+    });
+    expect(listingsAfterRejectedConfidence.data).toEqual([]);
+    expect(logsAfterRejectedConfidence.data).toEqual([]);
+    expect(snapshotsAfterRejectedConfidence.data).toEqual([]);
+
     await store.complete({
       runId: runA,
       leaseToken: resumed.context.run.lease_token,
@@ -399,7 +465,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         userA.client.from("prediction_logs").select("id, item_id, run_id").eq("run_id", runA),
         userA.client
           .from("pricing_evidence_snapshots")
-          .select("run_id,pipeline_run_id,run_kind,user_id,item_id,listing_id,prediction_id,schema_version,evidence,evidence_as_of")
+          .select("run_id,pipeline_run_id,run_kind,user_id,item_id,listing_id,prediction_id,schema_version,price_result,evidence,evidence_as_of")
           .eq("run_id", runA),
         userB.client.from("pipeline_runs").select("id").eq("id", runA),
         userB.client.from("pricing_evidence_snapshots").select("run_id").eq("run_id", runA),
@@ -438,6 +504,10 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         evidenceAsOf: snapshots![0]!.evidence_as_of,
       }),
     ]);
+    expect(
+      (snapshots?.[0]?.price_result as { confidence?: number } | undefined)
+        ?.confidence,
+    ).toBe(RESULT.confidence.score);
     expect(bVisible).toEqual([]);
     expect(bSnapshotVisible).toEqual([]);
 
@@ -446,6 +516,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       reader.forItem({ userId: userA.id, bearerToken: "test", itemId: itemA }),
     ).resolves.toMatchObject({
       item: { id: itemA },
+      priceResult: { confidence: RESULT.confidence.score },
       evidenceLevel: "limited",
       defaultWindow: "90D",
       comparables: [

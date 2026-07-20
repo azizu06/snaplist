@@ -73,4 +73,26 @@ describe("pricing-evidence snapshot migration", () => {
     expect(migration).toMatch(/v_checkpointed_at timestamptz := statement_timestamp\(\)/i);
     expect(migration).toMatch(/returning checkpoint into v_checkpoint/i);
   });
+
+  it("rejects snapshot confidence that diverges from the canonical prediction", () => {
+    expect(
+      [
+        ...migration.matchAll(
+          /jsonb_typeof\(v_snapshot #> '\{price_result,confidence\}'\)/gi,
+        ),
+      ],
+    ).toHaveLength(2);
+    expect(migration).toMatch(
+      /jsonb_typeof\(v_prediction->'confidence'\)/i,
+    );
+    expect(migration).toMatch(
+      /jsonb_typeof\(p_persistence #> '\{prediction,confidence\}'\)/i,
+    );
+    expect(migration).toMatch(
+      /v_snapshot #> '\{price_result,confidence\}'[\s\S]{0,160}v_prediction->'confidence'/i,
+    );
+    expect(migration).toMatch(
+      /v_snapshot #> '\{price_result,confidence\}'[\s\S]{0,180}p_persistence #> '\{prediction,confidence\}'/i,
+    );
+  });
 });
