@@ -3,6 +3,48 @@ import type { MobileItemSubmissionReceipt } from "./contract";
 import { createMobileItemSubmissionHandler } from "./http";
 
 describe("POST /v1/items/runs", () => {
+  it.each([
+    ["allowance_denied", "snaplist-pro-required", 403, "forbidden"],
+    ["rate_limited", "per-minute-capacity-reached", 429, "rate_limited"],
+  ] as const)(
+    "maps the existing %s staging outcome to a truthful typed response",
+    async (kind, reason, status, code) => {
+      const handler = createMobileItemSubmissionHandler({
+        requestId: () => "req_policy",
+        itemSubmission: {
+          async resolvePrincipal(bearerToken) {
+            return { kind: "clerk", userId: "user_native", bearerToken };
+          },
+          async submit() {
+            throw Object.assign(new Error(reason), {
+              code: "mobile_item_submission_denied" as const,
+              kind,
+              reason,
+            });
+          },
+        },
+      });
+      const body = new FormData();
+      body.append("photo", new File([
+        new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer,
+      ], "item.jpg", { type: "image/jpeg" }));
+
+      const response = await handler(new Request("http://localhost/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer signed-jwt",
+          "idempotency-key": "33400000-0000-4000-8000-000000000010",
+        },
+        body,
+      }));
+
+      expect(response.status).toBe(status);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code, details: { reason }, requestId: "req_policy" },
+      });
+    },
+  );
+
   it("recovers one ambiguous multipart submission and rejects changed bytes, order, or cost", async () => {
     const idempotencyKey = "33400000-0000-4000-8000-000000000001";
     const runId = "33400000-0000-4000-8000-000000000002";

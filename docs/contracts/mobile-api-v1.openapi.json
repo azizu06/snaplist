@@ -95,7 +95,9 @@
           "202": { "description": "Item, allowance reservation, run, and queue message durably committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MobileItemSubmissionEnvelope" } } } },
           "400": { "$ref": "#/components/responses/InvalidRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Existing AI-item credit policy denied this submission; error.details.reason is stable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "409": { "description": "Idempotency key conflicts with different bytes, order, or cost basis", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "429": { "description": "Existing daily or per-minute submission capacity was reached; error.details.reason is stable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
           "503": { "$ref": "#/components/responses/Unavailable" }
         }
       }

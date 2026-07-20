@@ -8,6 +8,8 @@ import {
 } from "@/test/exclusive-resource-lock";
 import { cleanupClerkTestUsers, mintUserJwt } from "@/lib/supabase/test-users";
 import { createMobileItemSubmissionHandler } from "./http";
+import { createMobileItemSubmissionOperations } from "./service";
+import { createSupabaseMobileItemSubmissionStaging } from "./store";
 
 vi.mock("server-only", () => ({}));
 
@@ -22,8 +24,10 @@ let admin: SupabaseClient;
 let lease: ExclusiveTestResourceLease;
 let ownerId = "";
 let foreignId = "";
+let recoveryId = "";
 let ownerToken = "";
 let foreignToken = "";
+let recoveryToken = "";
 let itemId = "";
 let runId = "";
 let queueMessageId = "";
@@ -79,9 +83,11 @@ beforeAll(async () => {
   });
   ownerId = `user_test_mobile_submit_owner_${Date.now()}`;
   foreignId = `user_test_mobile_submit_foreign_${Date.now()}`;
-  [ownerToken, foreignToken] = await Promise.all([
+  recoveryId = `user_test_mobile_submit_recovery_${Date.now()}`;
+  [ownerToken, foreignToken, recoveryToken] = await Promise.all([
     mintUserJwt(ownerId),
     mintUserJwt(foreignId),
+    mintUserJwt(recoveryId),
   ]);
   reachable = true;
 });
@@ -90,13 +96,13 @@ afterAll(async () => {
   if (!reachable) return;
   const residue = await database.query<{ queue_message_id: string | null; storage_path: string | null }>(
     `select run.queue_message_id::text queue_message_id, null::text storage_path
-     from public.pipeline_runs run where run.user_id = $1
+     from public.pipeline_runs run where run.user_id = any($1::text[])
      union all
      select null::text, object.name
      from storage.objects object
      where object.bucket_id = 'photos'
-       and object.name like $1 || '/pipeline-staging/%'`,
-    [ownerId],
+       and split_part(object.name, '/', 1) = any($1::text[])`,
+    [[ownerId, foreignId, recoveryId]],
   );
   const messageIds = new Set([
     ...residue.rows.flatMap((row) => row.queue_message_id ? [row.queue_message_id] : []),
@@ -112,16 +118,127 @@ afterAll(async () => {
     ),
   );
   if (paths.size > 0) await admin.storage.from("photos").remove([...paths]);
-  await cleanupClerkTestUsers(admin, [ownerId, foreignId]);
+  await cleanupClerkTestUsers(admin, [ownerId, foreignId, recoveryId]);
   await database.query(
-    "delete from private.pipeline_staging_cleanup_intents where user_id = any($1::text[])",
-    [[ownerId, foreignId]],
+    `delete from private.pipeline_staging_cleanup_intents
+     where user_id = any($1::text[])`,
+    [[ownerId, foreignId, recoveryId]],
+  );
+  await database.query(
+    `delete from private.mobile_item_submissions
+     where user_id = any($1::text[])`,
+    [[ownerId, foreignId, recoveryId]],
   );
   await database.end();
   await lease.release();
 });
 
 describe("authenticated mobile item submission against local Supabase", () => {
+  it("binds a failed pre-commit attempt, rejects changed cost, and resumes exact bytes", async () => {
+    if (!reachable) return;
+    const staging = createSupabaseMobileItemSubmissionStaging(admin);
+    const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+      accessToken: async () => recoveryToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const bucket = tenant.storage.from("photos");
+    const failingSubmitter = createMobileItemSubmissionOperations({
+      async resolvePrincipal(token) {
+        return { kind: "clerk", userId: recoveryId, bearerToken: token };
+      },
+      limits: { dailyLimit: 0, perMinuteLimit: 20 },
+      staging,
+      storageFor: () => ({
+        async upload(path, bytes, mediaType) {
+          const { error } = await bucket.upload(path, bytes, {
+            contentType: mediaType,
+            upsert: false,
+          });
+          if (error) throw error;
+        },
+        async download(path) {
+          const { data, error } = await bucket.download(path);
+          if (error) throw error;
+          return {
+            bytes: new Uint8Array(await data.arrayBuffer()),
+            mediaType: data.type,
+          };
+        },
+      }),
+    });
+    const failingHandler = createMobileItemSubmissionHandler({
+      itemSubmission: failingSubmitter,
+      requestId: () => crypto.randomUUID(),
+    });
+    const key = crypto.randomUUID();
+
+    expect((await failingHandler(request(recoveryToken, key, multipart()))).status).toBe(503);
+    const abandoned = await database.query<{
+      uploading: number;
+      committed: number;
+      runs: number;
+      credit_reservations: number;
+      usage_reservations: number;
+      queue_messages: number;
+      cleanup_intents: number;
+      objects: number;
+    }>(
+      `select
+         (select count(*)::integer from private.mobile_item_submissions
+          where user_id = $1 and idempotency_key = $2::uuid and state = 'uploading') uploading,
+         (select count(*)::integer from private.mobile_item_submissions
+          where user_id = $1 and idempotency_key = $2::uuid and state = 'committed') committed,
+         (select count(*)::integer from public.pipeline_runs
+          where user_id = $1 and idempotency_key = $2::text) runs,
+         (select count(*)::integer from public.ai_item_credit_reservations reservation
+          join public.pipeline_runs run on run.id = reservation.pipeline_run_id
+          where run.user_id = $1 and run.idempotency_key = $2::text) credit_reservations,
+         (select count(*)::integer from private.pipeline_run_usage_reservations usage
+          join public.pipeline_runs run on run.id = usage.run_id
+          where run.user_id = $1 and run.idempotency_key = $2::text) usage_reservations,
+         (select count(*)::integer from pgmq.q_pipeline_jobs message
+          join public.pipeline_runs run on run.queue_message_id = message.msg_id
+          where run.user_id = $1 and run.idempotency_key = $2::text) queue_messages,
+         (select count(*)::integer from private.pipeline_staging_cleanup_intents
+          where user_id = $1 and batch_id = $2::uuid) cleanup_intents,
+         (select count(*)::integer from storage.objects
+          where bucket_id = 'photos' and split_part(name, '/', 1) = $1) objects`,
+      [recoveryId, key],
+    );
+    expect(abandoned.rows[0]).toEqual({
+      uploading: 1,
+      committed: 0,
+      runs: 0,
+      credit_reservations: 0,
+      usage_reservations: 0,
+      queue_messages: 0,
+      cleanup_intents: 1,
+      objects: 2,
+    });
+    expect((await failingHandler(request(recoveryToken, key, multipart("13.00")))).status).toBe(409);
+
+    const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
+    const recoverySubmitter = createConfiguredMobileItemSubmissionOperations({
+      supabaseURL: SUPABASE_URL,
+      publishableKey: PUBLISHABLE_KEY!,
+      secretKey: SECRET_KEY!,
+    });
+    const recoveryHandler = createMobileItemSubmissionHandler({
+      requestId: () => crypto.randomUUID(),
+      itemSubmission: {
+        async resolvePrincipal(token) {
+          return { kind: "clerk", userId: recoveryId, bearerToken: token };
+        },
+        submit: recoverySubmitter.submit,
+      },
+    });
+    const recovered = await recoveryHandler(request(recoveryToken, key, multipart()));
+    expect(recovered.status).toBe(202);
+    await expect(recovered.json()).resolves.toMatchObject({
+      data: { runId: expect.stringMatching(/^[0-9a-f-]{36}$/) },
+    });
+  });
+
   it("recovers an ambiguous response with one atomic reservation and queue message", async () => {
     if (!reachable) return;
     const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
@@ -214,5 +331,22 @@ describe("authenticated mobile item submission against local Supabase", () => {
     ]);
     expect(foreignItems.data).toEqual([]);
     expect(foreignRuns.data).toEqual([]);
+
+    const owner = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+      accessToken: async () => ownerToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const ownerRead = await owner.storage.from("photos").download(storagePaths[0]!);
+    expect(ownerRead.error).toBeNull();
+    const foreignRead = await foreign.storage.from("photos").download(storagePaths[0]!);
+    expect(foreignRead.data).toBeNull();
+    expect(foreignRead.error).not.toBeNull();
+    const foreignWrite = await foreign.storage.from("photos").upload(
+      `${ownerId}/pipeline-staging/${crypto.randomUUID()}/0/foreign.jpg`,
+      jpeg,
+      { contentType: "image/jpeg", upsert: false },
+    );
+    expect(foreignWrite.data).toBeNull();
+    expect(foreignWrite.error).not.toBeNull();
   });
 });

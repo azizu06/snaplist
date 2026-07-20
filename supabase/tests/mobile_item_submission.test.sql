@@ -1,6 +1,6 @@
 begin;
 
-select plan(13);
+select plan(18);
 
 select has_table(
   'private', 'mobile_item_submissions',
@@ -17,6 +17,14 @@ select has_column(
 select has_column(
   'private', 'mobile_item_submissions', 'cleanup_id',
   'replay truth links the pre-upload cleanup intent'
+);
+select has_column(
+  'private', 'mobile_item_submissions', 'state',
+  'submission truth distinguishes resumable upload from committed receipt'
+);
+select has_column(
+  'private', 'mobile_item_submissions', 'cost_basis',
+  'the pre-upload binding retains the cost-sensitive input'
 );
 
 select ok(
@@ -49,9 +57,30 @@ select has_function(
   'producer has a fixed replay lookup'
 );
 select has_function(
+  'public', 'begin_mobile_item_submission',
+  array['text', 'uuid', 'text', 'uuid', 'uuid', 'numeric', 'jsonb'],
+  'producer atomically binds uploading truth and cleanup intent'
+);
+select has_function(
   'public', 'commit_mobile_item_submission',
   array['text', 'uuid', 'text', 'uuid', 'uuid', 'numeric', 'integer', 'integer', 'jsonb', 'jsonb'],
   'producer has one fixed atomic commit'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.begin_mobile_item_submission(text,uuid,text,uuid,uuid,numeric,jsonb)',
+    'execute'
+  ),
+  'service role may invoke the fixed pre-upload binding'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.begin_mobile_item_submission(text,uuid,text,uuid,uuid,numeric,jsonb)',
+    'execute'
+  ),
+  'seller tokens cannot bind server submission truth'
 );
 select ok(
   has_function_privilege(

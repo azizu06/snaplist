@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   MobileItemSubmissionConflictError,
+  MobileItemSubmissionDeniedError,
   MAX_MOBILE_ITEM_PHOTO_BYTES,
   mobileItemSubmissionReceiptSchema,
 } from "./contract";
@@ -11,8 +12,8 @@ import type {
 
 type MobileItemSubmissionRpcName =
   | "find_mobile_item_submission"
+  | "begin_mobile_item_submission"
   | "commit_mobile_item_submission"
-  | "record_pipeline_staging_cleanup_intent"
   | "resolve_pipeline_staging_cleanup_intent";
 
 interface RpcResult {
@@ -52,6 +53,31 @@ const submissionRowSchema = z
 
 function rpcData(operation: string, result: RpcResult): unknown {
   if (result.error) {
+    const allowanceReason = result.error.message.match(
+      /AI item credit unavailable: (snaplist-pro-required|storekit-entitlement-unavailable|monthly-allowance-reached)/i,
+    )?.[1]?.toLowerCase();
+    if (allowanceReason) {
+      throw new MobileItemSubmissionDeniedError(
+        "allowance_denied",
+        z.enum([
+          "snaplist-pro-required",
+          "storekit-entitlement-unavailable",
+          "monthly-allowance-reached",
+        ]).parse(allowanceReason),
+      );
+    }
+    if (/Pipeline daily capacity reached/i.test(result.error.message)) {
+      throw new MobileItemSubmissionDeniedError(
+        "rate_limited",
+        "daily-capacity-reached",
+      );
+    }
+    if (/Pipeline per-minute capacity reached/i.test(result.error.message)) {
+      throw new MobileItemSubmissionDeniedError(
+        "rate_limited",
+        "per-minute-capacity-reached",
+      );
+    }
     if (
       /mobile item submission idempotency conflict|pipeline cleanup intent conflicts/i.test(
         result.error.message,
@@ -110,14 +136,17 @@ export function createSupabaseMobileItemSubmissionStaging(
       return rows[0] ? receiptFromRow(rows[0]) : null;
     },
 
-    async recordCleanupIntent(input) {
-      const result = await client.rpc("record_pipeline_staging_cleanup_intent", {
+    async beginSubmission(input) {
+      const result = await client.rpc("begin_mobile_item_submission", {
         p_batch_id: z.string().uuid().parse(input.batchId),
         p_cleanup_id: z.string().uuid().parse(input.cleanupId),
-        p_photo_paths: z.array(z.string().min(1).max(1_024)).min(1).max(4).parse(input.photoPaths),
+        p_cost_basis: input.costBasis,
+        p_idempotency_key: z.string().uuid().parse(input.idempotencyKey),
+        p_photo_receipts: toRpcPhotoReceipts(input.photoReceipts),
+        p_request_fingerprint: z.string().regex(/^[0-9a-f]{64}$/).parse(input.requestFingerprint),
         p_user_id: z.string().min(1).max(255).parse(input.userId),
       });
-      return z.boolean().parse(rpcData("cleanup registration", result));
+      return z.boolean().parse(rpcData("uploading submission binding", result));
     },
 
     async resolveCleanupIntent(cleanupId) {

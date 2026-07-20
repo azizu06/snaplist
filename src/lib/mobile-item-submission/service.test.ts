@@ -74,8 +74,8 @@ describe("mobile item submission HTTP composition", () => {
       })),
       staging: {
         findSubmission: vi.fn(async () => null),
-        recordCleanupIntent: vi.fn(async () => {
-          events.push("cleanup-recorded");
+        beginSubmission: vi.fn(async () => {
+          events.push("submission-bound");
           return true;
         }),
         resolveCleanupIntent: vi.fn(async () => {
@@ -93,7 +93,7 @@ describe("mobile item submission HTTP composition", () => {
     const response = await handler(multipartRequest());
 
     expect(response.status).toBe(202);
-    expect(events[0]).toBe("cleanup-recorded");
+    expect(events[0]).toBe("submission-bound");
     expect(events.filter((event) => event.startsWith("upload:"))).toHaveLength(2);
     expect(events.filter((event) => event.startsWith("download:"))).toHaveLength(2);
     expect(events.indexOf("commit")).toBeGreaterThan(

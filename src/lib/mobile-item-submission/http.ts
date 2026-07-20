@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  isMobileItemSubmissionDenied,
   isMobileItemSubmissionConflict,
   mobileItemSubmissionEnvelopeSchema,
   prepareMobileItemSubmission,
@@ -22,10 +23,11 @@ function json(body: unknown, status: number): Response {
 function errorResponse(
   requestId: string,
   status: number,
-  code: "unauthorized" | "invalid_request" | "method_not_allowed" | "conflict" | "internal_error",
+  code: "unauthorized" | "forbidden" | "invalid_request" | "method_not_allowed" | "conflict" | "rate_limited" | "internal_error",
   message: string,
+  details?: Record<string, unknown>,
 ): Response {
-  return json({ error: { code, message, requestId } }, status);
+  return json({ error: { code, message, requestId, ...(details ? { details } : {}) } }, status);
 }
 
 function bearerToken(request: Request): string | null {
@@ -98,6 +100,24 @@ export function createMobileItemSubmissionHandler(
           409,
           "conflict",
           "The Idempotency-Key is already bound to another item submission.",
+        );
+      }
+      if (isMobileItemSubmissionDenied(error)) {
+        if (error.kind === "allowance_denied") {
+          return errorResponse(
+            requestId,
+            403,
+            "forbidden",
+            "An AI-item credit is not available for this submission.",
+            { reason: error.reason },
+          );
+        }
+        return errorResponse(
+          requestId,
+          429,
+          "rate_limited",
+          "The submission capacity limit has been reached.",
+          { reason: error.reason },
         );
       }
       dependencies.reportError?.("mobile-item-submission.commit", error);

@@ -23,11 +23,14 @@ export interface MobileItemSubmissionStaging {
     idempotencyKey: string;
     requestFingerprint: string;
   }): Promise<MobileItemSubmissionReceipt | null>;
-  recordCleanupIntent(input: {
+  beginSubmission(input: {
     cleanupId: string;
     userId: string;
+    idempotencyKey: string;
+    requestFingerprint: string;
     batchId: string;
-    photoPaths: string[];
+    costBasis: number | null;
+    photoReceipts: StoredMobileSubmissionPhotoReceipt[];
   }): Promise<boolean | void>;
   resolveCleanupIntent(cleanupId: string): Promise<boolean | void>;
   commitSubmission(input: {
@@ -171,11 +174,14 @@ export function createMobileItemSubmissionOperations(
         plannedReceipt(input.principal, batchId, photo),
       );
 
-      await composition.staging.recordCleanupIntent({
+      await composition.staging.beginSubmission({
         cleanupId,
         userId: input.principal.userId,
+        idempotencyKey: input.idempotencyKey,
+        requestFingerprint: input.requestFingerprint,
         batchId,
-        photoPaths: photoReceipts.map((receipt) => receipt.storagePath),
+        costBasis: input.costBasis,
+        photoReceipts,
       });
 
       const storage = composition.storageFor(input.principal);

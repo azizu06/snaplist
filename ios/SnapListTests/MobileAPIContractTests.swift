@@ -31,6 +31,25 @@ final class MobileAPIContractTests: XCTestCase {
         }
     }
 
+    func testMobileItemSubmissionReceiptFixtureDecodesTheExactRun() throws {
+        let root = try contractResourceRoot(for: .baseV1)
+        let data = try Data(contentsOf: root.appendingPathComponent(
+            "mobile-item-submission-response.json"
+        ))
+        let envelope = try JSONDecoder().decode(
+            MobileItemSubmissionEnvelope.self,
+            from: data
+        )
+
+        XCTAssertEqual(
+            envelope.data.runId.uuidString.lowercased(),
+            "33450000-0000-4000-8000-000000000003"
+        )
+        XCTAssertEqual(envelope.data.status, "queued")
+        XCTAssertEqual(envelope.data.photoIdentity.kind, "content_sha256_set_v1")
+        XCTAssertEqual(envelope.data.photos.count, 1)
+    }
+
     func testServerEntitlementParsesPostgresDatesWithAndWithoutFractions() {
         let payload = AiItemEntitlementEnvelope.DataPayload(
             billingSource: .storeKit,

@@ -115,6 +115,45 @@ export function isMobileItemSubmissionConflict(
   );
 }
 
+export type MobileItemSubmissionDenialKind =
+  | "allowance_denied"
+  | "rate_limited";
+
+export type MobileItemSubmissionDenialReason =
+  | "snaplist-pro-required"
+  | "storekit-entitlement-unavailable"
+  | "monthly-allowance-reached"
+  | "daily-capacity-reached"
+  | "per-minute-capacity-reached";
+
+export class MobileItemSubmissionDeniedError extends Error {
+  readonly code = "mobile_item_submission_denied" as const;
+
+  constructor(
+    readonly kind: MobileItemSubmissionDenialKind,
+    readonly reason: MobileItemSubmissionDenialReason,
+  ) {
+    super(`Mobile item submission denied: ${reason}`);
+    this.name = "MobileItemSubmissionDeniedError";
+  }
+}
+
+export function isMobileItemSubmissionDenied(error: unknown): error is
+  Error & {
+    code: "mobile_item_submission_denied";
+    kind: MobileItemSubmissionDenialKind;
+    reason: MobileItemSubmissionDenialReason;
+  } {
+  return (
+    error instanceof Error &&
+    (error as Partial<MobileItemSubmissionDeniedError>).code ===
+      "mobile_item_submission_denied" &&
+    ["allowance_denied", "rate_limited"].includes(
+      (error as Partial<MobileItemSubmissionDeniedError>).kind ?? "",
+    )
+  );
+}
+
 function sniffMediaType(bytes: Uint8Array): MobileSubmissionMediaType | null {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     return "image/jpeg";

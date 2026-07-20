@@ -25,7 +25,9 @@ describe("mobile item submission OpenAPI", () => {
       responses: {
         "200": expect.any(Object),
         "202": expect.any(Object),
+        "403": expect.any(Object),
         "409": expect.any(Object),
+        "429": expect.any(Object),
         "503": expect.any(Object),
       },
     });
@@ -45,5 +47,22 @@ describe("mobile item submission OpenAPI", () => {
     expect(contract.components.schemas.MobileItemSubmissionReceipt).toMatchObject({
       required: expect.arrayContaining(["runId", "photoIdentity", "photos"]),
     });
+  });
+
+  it("keeps the native contract inventory and receipt fixture aligned", () => {
+    const nativeModels = readFileSync(
+      "ios/SnapList/Core/API/MobileAPIModels.swift",
+      "utf8",
+    );
+    const fixture = JSON.parse(readFileSync(
+      "ios/DesignContracts/V1/mobile-item-submission-response.json",
+      "utf8",
+    ));
+
+    expect(nativeModels).not.toMatch(/case createItemRun/);
+    expect(nativeModels).toContain("struct MobileItemSubmissionEnvelope");
+    expect(fixture.data.runId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fixture.data.photoIdentity.kind).toBe("content_sha256_set_v1");
+    expect(fixture.data.photos).toHaveLength(1);
   });
 });
