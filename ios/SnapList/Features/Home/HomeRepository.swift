@@ -230,6 +230,7 @@ private struct HomeProjectionPayload: Decodable {
             case draft
             case sold
             case needsAttention
+            case resolvedConversation
 
             var domain: HomeListingLifecycle {
                 switch self {
@@ -237,6 +238,7 @@ private struct HomeProjectionPayload: Decodable {
                 case .draft: .draft
                 case .sold: .sold
                 case .needsAttention: .needsAttention
+                case .resolvedConversation: .resolvedConversation
                 }
             }
         }
@@ -247,6 +249,31 @@ private struct HomeProjectionPayload: Decodable {
         let statusLabel: String
         let detail: String
         let price: String?
+        let destination: Destination?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, title, lifecycle, statusLabel, detail, price, destination
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            guard container.contains(.destination) else {
+                throw DecodingError.keyNotFound(
+                    CodingKeys.destination,
+                    .init(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "Home listing destination must be present, even when null."
+                    )
+                )
+            }
+            id = try container.decode(UUID.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            lifecycle = try container.decode(Lifecycle.self, forKey: .lifecycle)
+            statusLabel = try container.decode(String.self, forKey: .statusLabel)
+            detail = try container.decode(String.self, forKey: .detail)
+            price = try container.decodeIfPresent(String.self, forKey: .price)
+            destination = try container.decodeIfPresent(Destination.self, forKey: .destination)
+        }
     }
 
     var model: HomeModel {
@@ -289,7 +316,8 @@ private struct HomeProjectionPayload: Decodable {
                     lifecycle: $0.lifecycle.domain,
                     statusLabel: $0.statusLabel,
                     detail: $0.detail,
-                    price: $0.price
+                    price: $0.price,
+                    destination: $0.destination?.domain
                 )
             },
             recentSearches: recentSearches

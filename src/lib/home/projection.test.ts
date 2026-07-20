@@ -5,6 +5,275 @@ import {
 } from "./projection";
 
 describe("native Seller Home projection", () => {
+  it("exposes an actionable buyer question to Home search with its exact conversation destination", () => {
+    const updatedAt = "2026-07-20T05:00:00.000Z";
+    const itemID = "29600000-0000-4000-8000-000000000001";
+    const listingID = "29600000-0000-4000-8000-000000000002";
+    const conversationID = "29600000-0000-4000-8000-000000000003";
+
+    const projection = assembleHomeProjection({
+      notifications: [
+        {
+          id: "29600000-0000-4000-8000-000000000004",
+          user_id: "user_native",
+          kind: "buyer_message",
+          title: "New question on Keychron K4 Mechanical Keyboard",
+          body: "Does it work on Mac?",
+          item_id: itemID,
+          listing_id: listingID,
+          source_message_id: conversationID,
+          read_at: null,
+          created_at: updatedAt,
+        },
+      ],
+      unreadNotificationCount: 1,
+      activeListingCount: 1,
+      draftListingCount: 0,
+      runs: [],
+      listings: [
+        {
+          id: listingID,
+          user_id: "user_native",
+          item_id: itemID,
+          title: "Keychron K4 Mechanical Keyboard",
+          status: "published",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          listed_price: 96,
+        },
+      ],
+      items: [
+        {
+          id: itemID,
+          user_id: "user_native",
+          attributes: { brand: "Keychron", model: "K4 Mechanical Keyboard" },
+          photos: [],
+          price_override: null,
+          cost_basis: null,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      predictions: [],
+      messageRoots: [
+        {
+          id: conversationID,
+          user_id: "user_native",
+          item_id: itemID,
+          listing_id: listingID,
+          direction: "inbound",
+          marketplace: "ebay",
+          body: "Does it work on Mac?",
+          status: "drafted",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      messageReplies: [],
+      now: new Date("2026-07-20T06:00:00.000Z"),
+    } as Parameters<typeof assembleHomeProjection>[0]);
+
+    expect(projection.listings).toContainEqual({
+      id: conversationID,
+      title: "Keychron K4 Mechanical Keyboard",
+      lifecycle: "needsAttention",
+      statusLabel: "Buyer question",
+      detail: "eBay · “Does it work on Mac?”",
+      price: "$96",
+      destination: { kind: "conversation", id: conversationID },
+    });
+  });
+
+  it("moves a delivered buyer conversation out of attention and keeps it in All as Replied", () => {
+    const updatedAt = "2026-07-20T05:00:00.000Z";
+    const itemID = "29600000-0000-4000-8000-000000000011";
+    const listingID = "29600000-0000-4000-8000-000000000012";
+    const conversationID = "29600000-0000-4000-8000-000000000013";
+
+    const projection = assembleHomeProjection({
+      notifications: [
+        {
+          id: "29600000-0000-4000-8000-000000000014",
+          user_id: "user_native",
+          kind: "buyer_message",
+          title: "New question on Keychron K4 Mechanical Keyboard",
+          body: "Does it work on Mac?",
+          item_id: itemID,
+          listing_id: listingID,
+          source_message_id: conversationID,
+          read_at: null,
+          created_at: updatedAt,
+        },
+      ],
+      unreadNotificationCount: 0,
+      activeListingCount: 1,
+      draftListingCount: 0,
+      runs: [],
+      listings: [
+        {
+          id: listingID,
+          user_id: "user_native",
+          item_id: itemID,
+          title: "Keychron K4 Mechanical Keyboard",
+          status: "published",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          listed_price: 96,
+        },
+      ],
+      items: [
+        {
+          id: itemID,
+          user_id: "user_native",
+          attributes: { brand: "Keychron", model: "K4 Mechanical Keyboard" },
+          photos: [],
+          price_override: null,
+          cost_basis: null,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      predictions: [],
+      messageRoots: [
+        {
+          id: conversationID,
+          user_id: "user_native",
+          item_id: itemID,
+          listing_id: listingID,
+          direction: "inbound",
+          marketplace: "ebay",
+          body: "Does it work on Mac?",
+          status: "sent",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      messageReplies: [
+        {
+          id: "29600000-0000-4000-8000-000000000017",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "pending",
+          external_delivery_id: null,
+          sent_at: "2026-07-20T05:30:00.000Z",
+          created_at: "2026-07-20T05:30:00.000Z",
+          updated_at: "2026-07-20T05:30:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000018",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "sending",
+          external_delivery_id: null,
+          sent_at: "2026-07-20T05:40:00.000Z",
+          created_at: "2026-07-20T05:40:00.000Z",
+          updated_at: "2026-07-20T05:40:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000019",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "failed",
+          external_delivery_id: null,
+          sent_at: "2026-07-20T05:50:00.000Z",
+          created_at: "2026-07-20T05:50:00.000Z",
+          updated_at: "2026-07-20T05:50:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000020",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "delivered",
+          external_delivery_id: null,
+          sent_at: "2026-07-20T05:30:00.000Z",
+          created_at: "2026-07-20T05:30:00.000Z",
+          updated_at: "2026-07-20T05:30:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000015",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: null,
+          marketplace: "ebay",
+          delivery_status: "delivered",
+          external_delivery_id: "ebay-reply-older",
+          sent_at: "2026-07-20T03:00:00.000Z",
+          created_at: "2026-07-20T03:00:00.000Z",
+          updated_at: "2026-07-20T03:00:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000016",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "delivered",
+          external_delivery_id: "ebay-reply-latest",
+          sent_at: "2026-07-20T05:00:00.000Z",
+          created_at: "2026-07-20T05:00:00.000Z",
+          updated_at: "2026-07-20T05:00:00.000Z",
+        },
+      ],
+      now: new Date("2026-07-20T06:00:00.000Z"),
+    } as Parameters<typeof assembleHomeProjection>[0]);
+
+    expect(projection.attention).toEqual([]);
+    expect(projection.listings).toContainEqual({
+      id: conversationID,
+      title: "Keychron K4 Mechanical Keyboard",
+      lifecycle: "resolvedConversation",
+      statusLabel: "Replied",
+      detail: "eBay · You replied 1h ago",
+      price: "$96",
+      destination: { kind: "conversation", id: conversationID },
+    });
+  });
+
+  it("omits a buyer notification when its tenant-owned conversation root is unavailable", () => {
+    const projection = assembleHomeProjection({
+      notifications: [
+        {
+          id: "29600000-0000-4000-8000-000000000024",
+          user_id: "user_native",
+          kind: "buyer_message",
+          title: "New buyer question",
+          body: "Is this still available?",
+          item_id: "29600000-0000-4000-8000-000000000021",
+          listing_id: "29600000-0000-4000-8000-000000000022",
+          source_message_id: "29600000-0000-4000-8000-000000000023",
+          read_at: null,
+          created_at: "2026-07-20T05:00:00.000Z",
+        },
+      ],
+      unreadNotificationCount: 1,
+      activeListingCount: 0,
+      draftListingCount: 0,
+      runs: [],
+      listings: [],
+      items: [],
+      predictions: [],
+      messageRoots: [],
+      messageReplies: [],
+    });
+
+    expect(projection.attention).toEqual([]);
+    expect(projection.listings).toEqual([]);
+  });
+
   it("maps durable RLS rows into one truthful typed Home model", () => {
     const updatedAt = "2026-07-17T13:00:00.000Z";
     const itemID = "20800000-0000-4000-8000-000000000040";
@@ -87,6 +356,21 @@ describe("native Seller Home projection", () => {
           created_at: updatedAt,
         },
       ],
+      messageRoots: [
+        {
+          id: "20800000-0000-4000-8000-000000000045",
+          user_id: "user_native",
+          item_id: itemID,
+          listing_id: listingID,
+          direction: "inbound",
+          marketplace: "ebay",
+          body: "Does the light meter work?",
+          status: "drafted",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      messageReplies: [],
     });
 
     expect(projection).toMatchObject({
@@ -122,6 +406,15 @@ describe("native Seller Home projection", () => {
           lifecycle: "active",
           statusLabel: "Live",
           price: "$210",
+        },
+        {
+          id: "20800000-0000-4000-8000-000000000045",
+          lifecycle: "needsAttention",
+          statusLabel: "Buyer question",
+          destination: {
+            kind: "conversation",
+            id: "20800000-0000-4000-8000-000000000045",
+          },
         },
       ],
     });
@@ -187,6 +480,175 @@ describe("native Seller Home projection", () => {
       "order",
       "limit",
     ]);
+  });
+
+  it("reads only the deduplicated notification conversation roots and their canonical replies", async () => {
+    const updatedAt = "2026-07-20T05:00:00.000Z";
+    const itemID = "29600000-0000-4000-8000-000000000031";
+    const listingID = "29600000-0000-4000-8000-000000000032";
+    const conversationID = "29600000-0000-4000-8000-000000000033";
+    const messageQueryCalls: string[] = [];
+    const notification = {
+      id: "29600000-0000-4000-8000-000000000034",
+      user_id: "user_native",
+      kind: "buyer_message",
+      title: "New question on Keychron K4 Mechanical Keyboard",
+      body: "Does it work on Mac?",
+      item_id: itemID,
+      listing_id: listingID,
+      source_message_id: conversationID,
+      read_at: null,
+      created_at: updatedAt,
+    };
+    const client = makeProjectionClient({
+      notifications: [notification, { ...notification, id: "29600000-0000-4000-8000-000000000035" }],
+      listings: [
+        {
+          id: listingID,
+          user_id: "user_native",
+          item_id: itemID,
+          title: "Keychron K4 Mechanical Keyboard",
+          status: "published",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          listed_price: 96,
+        },
+      ],
+      items: [
+        {
+          id: itemID,
+          user_id: "user_native",
+          attributes: { brand: "Keychron", model: "K4 Mechanical Keyboard" },
+          photos: [],
+          price_override: null,
+          cost_basis: null,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      messageRoots: [
+        {
+          id: conversationID,
+          user_id: "user_native",
+          item_id: itemID,
+          listing_id: listingID,
+          direction: "inbound",
+          marketplace: "ebay",
+          body: "Does it work on Mac?",
+          status: "drafted",
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      deliveredReplies: [
+        {
+          id: "29600000-0000-4000-8000-000000000036",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "failed",
+          external_delivery_id: null,
+          sent_at: "2026-07-20T05:50:00.000Z",
+          created_at: "2026-07-20T05:50:00.000Z",
+          updated_at: "2026-07-20T05:50:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000037",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "followup",
+          marketplace: "ebay",
+          delivery_status: "delivered",
+          external_delivery_id: "ebay-followup",
+          sent_at: "2026-07-20T05:40:00.000Z",
+          created_at: "2026-07-20T05:40:00.000Z",
+          updated_at: "2026-07-20T05:40:00.000Z",
+        },
+        {
+          id: "29600000-0000-4000-8000-000000000038",
+          user_id: "user_native",
+          reply_to: conversationID,
+          direction: "outbound",
+          reply_kind: "reply",
+          marketplace: "ebay",
+          delivery_status: "delivered",
+          external_delivery_id: "ebay-canonical",
+          sent_at: "2026-07-20T05:00:00.000Z",
+          created_at: "2026-07-20T05:00:00.000Z",
+          updated_at: "2026-07-20T05:00:00.000Z",
+        },
+      ],
+      messageQueryCalls,
+    });
+    const reader = createSupabaseHomeProjectionReader(() => client as never);
+
+    const projection = await reader.forSeller({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+
+    expect(projection.listings.filter((listing) => listing.destination)).toEqual([
+      expect.objectContaining({
+        id: conversationID,
+        lifecycle: "resolvedConversation",
+        statusLabel: "Replied",
+      }),
+    ]);
+    expect(messageQueryCalls).toEqual([
+      "messages:select:id,user_id,item_id,listing_id,direction,marketplace,body,status,created_at,updated_at",
+      `messages:in:id:${conversationID}`,
+      "messages:eq:direction:inbound",
+      "messages:limit:1",
+      "messages:select:id,user_id,reply_to,direction,reply_kind,marketplace,delivery_status,external_delivery_id,sent_at,created_at,updated_at",
+      `messages:in:reply_to:${conversationID}`,
+      "messages:eq:direction:outbound",
+      "messages:eq:delivery_status:delivered",
+      "messages:or:reply_kind.is.null,reply_kind.eq.reply",
+      "messages:order:sent_at:descending",
+      "messages:limit:1",
+    ]);
+  });
+
+  it("fails the Home reader closed if a conversation row crosses the verified tenant boundary", async () => {
+    const conversationID = "29600000-0000-4000-8000-000000000043";
+    const client = makeProjectionClient({
+      notifications: [
+        {
+          id: "29600000-0000-4000-8000-000000000044",
+          user_id: "user_native",
+          kind: "buyer_message",
+          title: "New buyer question",
+          body: "Is this still available?",
+          item_id: null,
+          listing_id: null,
+          source_message_id: conversationID,
+          read_at: null,
+          created_at: "2026-07-20T05:00:00.000Z",
+        },
+      ],
+      messageRoots: [
+        {
+          id: conversationID,
+          user_id: "user_foreign",
+          item_id: null,
+          listing_id: null,
+          direction: "inbound",
+          marketplace: "ebay",
+          body: "Is this still available?",
+          status: "drafted",
+          created_at: "2026-07-20T05:00:00.000Z",
+          updated_at: "2026-07-20T05:00:00.000Z",
+        },
+      ],
+    });
+    const reader = createSupabaseHomeProjectionReader(() => client as never);
+
+    await expect(
+      reader.forSeller({ userId: "user_native", bearerToken: "signed-jwt" }),
+    ).rejects.toThrow("Home projection crossed the verified tenant boundary.");
   });
 
   it("returns the exact unread count even when the presentation slice exceeds twenty", async () => {
@@ -431,6 +893,7 @@ type FakeQuery = {
   eq: (column: string, value: unknown) => FakeQuery;
   in: (column: string, values: unknown[]) => FakeQuery;
   order: (column: string, options?: unknown) => FakeQuery;
+  or: (filters: string) => FakeQuery;
   limit: (count: number) => Promise<QueryResult>;
   is: (column: string, value: unknown) => Promise<QueryResult>;
 };
@@ -441,6 +904,7 @@ function makeQuery(result: QueryResult): FakeQuery {
   query.eq = () => query;
   query.in = () => query;
   query.order = () => query;
+  query.or = () => query;
   query.limit = async () => result;
   query.is = async () => result;
   return query;
@@ -459,6 +923,9 @@ function makeProjectionClient(input: {
   forbidHistoricalProjectionReads?: boolean;
   currentItemProjection?: unknown;
   rpcCalls?: Array<{ name: string; arguments_: unknown }>;
+  messageRoots?: unknown[];
+  deliveredReplies?: unknown[];
+  messageQueryCalls?: string[];
 }) {
   return {
     async rpc(name: string, arguments_?: unknown) {
@@ -532,6 +999,75 @@ function makeProjectionClient(input: {
             };
           }
           return { data: (input.listings ?? []).slice(0, count), error: null };
+        };
+        return query;
+      }
+      if (table === "messages") {
+        let inColumn = "";
+        let inValues: unknown[] = [];
+        const equalityFilters = new Map<string, unknown>();
+        let orFilter = "";
+        let orderColumn = "";
+        let orderAscending = true;
+        const query = makeQuery({ data: [], error: null });
+        query.select = (columns = "") => {
+          input.messageQueryCalls?.push(`messages:select:${columns}`);
+          return query;
+        };
+        query.in = (column, values) => {
+          inColumn = column;
+          inValues = values;
+          input.messageQueryCalls?.push(`messages:in:${column}:${values.join(",")}`);
+          return query;
+        };
+        query.eq = (column, value) => {
+          equalityFilters.set(column, value);
+          input.messageQueryCalls?.push(`messages:eq:${column}:${String(value)}`);
+          return query;
+        };
+        query.or = (filters) => {
+          orFilter = filters;
+          input.messageQueryCalls?.push(`messages:or:${filters}`);
+          return query;
+        };
+        query.order = (column, options) => {
+          orderColumn = column;
+          orderAscending = !(
+            options &&
+            typeof options === "object" &&
+            "ascending" in options &&
+            options.ascending === false
+          );
+          input.messageQueryCalls?.push(
+            `messages:order:${column}:${orderAscending ? "ascending" : "descending"}`,
+          );
+          return query;
+        };
+        query.limit = async (count) => {
+          input.messageQueryCalls?.push(`messages:limit:${count}`);
+          const source = inColumn === "id" ? (input.messageRoots ?? []) : (input.deliveredReplies ?? []);
+          const rows = source
+            .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object")
+            .filter((row) => inValues.includes(row[inColumn]))
+            .filter((row) =>
+              [...equalityFilters].every(([column, value]) => row[column] === value),
+            )
+            .filter((row) =>
+              orFilter === "reply_kind.is.null,reply_kind.eq.reply"
+                ? row.reply_kind == null || row.reply_kind === "reply"
+                : true,
+            )
+            .sort((left, right) => {
+              if (!orderColumn) return 0;
+              const comparison = String(left[orderColumn] ?? "").localeCompare(
+                String(right[orderColumn] ?? ""),
+              );
+              return orderAscending ? comparison : -comparison;
+            });
+          return {
+            data: rows.slice(0, count),
+            error: null,
+          };
         };
         return query;
       }
