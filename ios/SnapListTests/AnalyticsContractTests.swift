@@ -525,6 +525,55 @@ final class AnalyticsContractTests: XCTestCase {
         XCTAssertEqual(factory.creationCount, 1)
     }
 
+    func testMarkerWriteFailureStillPurgesResetsAndBlocksSameTokenRegrant() throws {
+        let configuration = try postHogConfiguration(token: "phc_issue292_marker_failure")
+        let consent = InMemoryAnalyticsConsentStore(consent: .granted)
+        let lifecycle = ThrowingAnalyticsTransportLifecycleStore()
+        let originalAnonymousID = UUID(
+            uuidString: "29200000-0000-4000-8000-000000000001"
+        )!
+        let identity = InMemoryAnalyticsIdentityStore(
+            identity: AnalyticsIdentity(
+                anonymousID: originalAnonymousID,
+                clerkUserID: "user_issue292"
+            )
+        )
+        let purger = FailingFirstRecordingPostHogDataPurger()
+        let factory = RecordingPostHogTransportFactory()
+        let client = PostHogAnalyticsClient(
+            configuration: configuration,
+            consentStore: consent,
+            dedupeStore: InMemoryAnalyticsDedupeStore(),
+            identityStore: identity,
+            lifecycleStore: lifecycle,
+            dataPurger: purger,
+            transportFactory: factory
+        )
+
+        XCTAssertThrowsError(try client.setConsent(.denied)) { error in
+            XCTAssertEqual(
+                error as? ThrowingAnalyticsTransportLifecycleStore.Failure,
+                .markerWrite
+            )
+        }
+        XCTAssertEqual(consent.consent, .denied)
+        XCTAssertEqual(purger.attempts, 1)
+        XCTAssertNotEqual(identity.identity.anonymousID, originalAnonymousID)
+        XCTAssertNil(identity.identity.clerkUserID)
+        XCTAssertTrue(try XCTUnwrap(factory.transports.first).isClosed)
+        XCTAssertEqual(factory.creationCount, 1)
+
+        XCTAssertThrowsError(try client.setConsent(.granted)) { error in
+            XCTAssertEqual(
+                error as? ThrowingAnalyticsTransportLifecycleStore.Failure,
+                .cleanupProofWrite
+            )
+        }
+        XCTAssertEqual(consent.consent, .denied)
+        XCTAssertEqual(purger.attempts, 2)
+        XCTAssertEqual(factory.creationCount, 1)
+    }
+
     func testSuccessfulRevokePurgesBeforeReturningAndRegrantUsesFreshState() throws {
         let configuration = try postHogConfiguration(token: "phc_issue271_success")
         let consent = InMemoryAnalyticsConsentStore(consent: .granted)
@@ -1209,6 +1258,27 @@ private final class ThrowingPostHogDataPurger: PostHogDurableDataPurging {
     }
 }
 
+private final class ThrowingAnalyticsTransportLifecycleStore:
+    AnalyticsTransportLifecycleStoring
+{
+    enum Failure: Error, Equatable {
+        case markerWrite
+        case cleanupProofWrite
+    }
+
+    func requiresPurge(for configuration: AnalyticsPostHogConfiguration) -> Bool {
+        false
+    }
+
+    func markPurgeRequired(for configuration: AnalyticsPostHogConfiguration) throws {
+        throw Failure.markerWrite
+    }
+
+    func markPurged(for configuration: AnalyticsPostHogConfiguration) throws {
+        throw Failure.cleanupProofWrite
+    }
+}
+
 private final class RecordingPostHogDataPurger: PostHogDurableDataPurging {
     private let lock = NSLock()
     private var attemptCount = 0
@@ -1217,6 +1287,25 @@ private final class RecordingPostHogDataPurger: PostHogDurableDataPurging {
 
     func purge(configuration: AnalyticsPostHogConfiguration) throws {
         lock.withLock { attemptCount += 1 }
+    }
+}
+
+private final class FailingFirstRecordingPostHogDataPurger: PostHogDurableDataPurging {
+    enum Failure: Error { case expected }
+
+    private let lock = NSLock()
+    private var attemptCount = 0
+
+    var attempts: Int { lock.withLock { attemptCount } }
+
+    func purge(configuration: AnalyticsPostHogConfiguration) throws {
+        let attempt = lock.withLock {
+            attemptCount += 1
+            return attemptCount
+        }
+        if attempt == 1 {
+            throw Failure.expected
+        }
     }
 }
 

@@ -684,15 +684,32 @@ final class PostHogAnalyticsClient: AnalyticsClient, @unchecked Sendable {
         transport = nil
         purgeRequiredInProcess = true
         consentStore.setConsent(consent)
-        try lifecycleStore.markPurgeRequired(for: configuration)
+
+        let markerFailure: (any Error)?
+        do {
+            try lifecycleStore.markPurgeRequired(for: configuration)
+            markerFailure = nil
+        } catch {
+            markerFailure = error
+        }
+
+        let purgeFailure: (any Error)?
         do {
             try dataPurger.purge(configuration: configuration)
-            identityStore.reset()
-            try lifecycleStore.markPurged(for: configuration)
-            purgeRequiredInProcess = false
+            purgeFailure = nil
         } catch {
-            throw error
+            purgeFailure = error
         }
+        identityStore.reset()
+
+        if let markerFailure {
+            throw markerFailure
+        }
+        if let purgeFailure {
+            throw purgeFailure
+        }
+        try lifecycleStore.markPurged(for: configuration)
+        purgeRequiredInProcess = false
     }
 
     private func grantConsent(transitionTicket: UInt64) throws {
