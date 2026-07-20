@@ -60,7 +60,8 @@ final class HomeUITests: XCTestCase {
         pricing.tap()
 
         XCTAssertTrue(
-            app.otherElements["pricing.route.loaded"].waitForExistence(timeout: 3)
+            app.descendants(matching: .any)["pricing.route.loaded"]
+                .waitForExistence(timeout: 3)
         )
     }
 
