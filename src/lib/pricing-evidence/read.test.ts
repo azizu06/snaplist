@@ -103,6 +103,25 @@ describe("pricing-evidence read projection", () => {
     expect(projection.chartBounds).toEqual({ min: 120, max: 140 });
   });
 
+  it("keeps a USD 0.01 recommendation schema-valid when its estimated fee is larger", () => {
+    const subFee = row();
+    subFee.price_result.suggested = 0.01;
+    subFee.price_result.range = { min: 0.01, max: 0.01 };
+
+    const projection = buildPricingEvidenceProjection(subFee, {
+      userId: subFee.user_id,
+      itemId: subFee.item_id,
+      now: Date.parse("2026-07-20T00:00:00.000Z"),
+    });
+
+    expect(projection.priceResult.suggested).toBe(0.01);
+    expect(projection.estimatedFees).toBe(0.3);
+    expect(projection.estimatedPayout).toBe(0);
+    expect(projection.comparables.every(({ currency }) => currency === "USD")).toBe(
+      true,
+    );
+  });
+
   it("accepts research before completion and rejects evidence from after completion", () => {
     const completedLater = row();
     completedLater.pipeline_runs.completed_at = "2026-07-18T12:30:00+00:00";

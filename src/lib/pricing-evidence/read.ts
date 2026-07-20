@@ -189,7 +189,10 @@ export function buildPricingEvidenceProjection(
     defaultWindow: strong ? "60D" : "90D",
     comparables,
     estimatedFees,
-    estimatedPayout: cents(row.price_result.suggested - estimatedFees),
+    estimatedPayout: Math.max(
+      0,
+      cents(row.price_result.suggested - estimatedFees),
+    ),
     chartBounds:
       minimum != null && maximum != null && minimum < maximum
         ? { min: minimum, max: maximum }
