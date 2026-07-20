@@ -185,6 +185,58 @@ final class AnalyticsContractTests: XCTestCase {
         )
     }
 
+    func testPostHogConfigurationRejectsInvalidMetadataBeforeTransportCreation() throws {
+        let invalidMetadata = [
+            AnalyticsMetadata(
+                environment: .testFlight,
+                appVersion: "private-version",
+                build: "306"
+            ),
+            AnalyticsMetadata(
+                environment: .testFlight,
+                appVersion: "1.2.3",
+                build: String(repeating: "9", count: 13)
+            ),
+            AnalyticsMetadata(
+                environment: .testFlight,
+                appVersion: "1.2.3",
+                build: "306A"
+            ),
+        ]
+        let factory = RecordingRealPostHogTransportFactory()
+        var clients: [PostHogAnalyticsClient] = []
+
+        for (index, metadata) in invalidMetadata.enumerated() {
+            let configuration = AnalyticsPostHogConfiguration(
+                metadata: metadata,
+                projectToken: "phc_issue306_metadata_\(index)",
+                host: URL(string: "https://127.0.0.1:1")!
+            )
+            XCTAssertNil(configuration)
+            guard let configuration else { continue }
+            let client = PostHogAnalyticsClient(
+                configuration: configuration,
+                consentStore: InMemoryAnalyticsConsentStore(consent: .granted),
+                dedupeStore: InMemoryAnalyticsDedupeStore(),
+                identityStore: InMemoryAnalyticsIdentityStore(),
+                lifecycleStore: InMemoryAnalyticsTransportLifecycleStore(),
+                dataPurger: try XCTUnwrap(FileSystemPostHogDataPurger()),
+                transportFactory: factory
+            )
+            client.identify(clerkUserID: "user_issue306")
+            client.finishPendingWorkForTesting()
+            clients.append(client)
+        }
+        defer {
+            for client in clients {
+                try? client.setConsent(.denied)
+            }
+        }
+
+        XCTAssertEqual(factory.creationCount, 0)
+        XCTAssertTrue(factory.transports.isEmpty)
+    }
+
     func testRuntimeConfigurationRejectsCrossEnvironmentMetadata() throws {
         XCTAssertNil(
             AnalyticsRuntimeConfiguration(

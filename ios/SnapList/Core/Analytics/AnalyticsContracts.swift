@@ -11,6 +11,16 @@ struct AnalyticsMetadata: Equatable, Sendable {
     let appVersion: String
     let build: String
 
+    var isCanonical: Bool {
+        appVersion.range(
+            of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#,
+            options: .regularExpression
+        ) != nil && build.range(
+            of: #"^[0-9]{1,12}$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
     static func resolve(
         environment: AnalyticsEnvironment,
         bundle: Bundle = .main
@@ -23,19 +33,15 @@ struct AnalyticsMetadata: Equatable, Sendable {
         infoDictionary: [String: Any]
     ) -> AnalyticsMetadata? {
         guard let appVersion = infoDictionary["CFBundleShortVersionString"] as? String,
-              let build = infoDictionary["CFBundleVersion"] as? String,
-              appVersion.range(
-                of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#,
-                options: .regularExpression
-              ) != nil,
-              build.range(of: #"^[0-9]{1,12}$"#, options: .regularExpression) != nil else {
+              let build = infoDictionary["CFBundleVersion"] as? String else {
             return nil
         }
-        return AnalyticsMetadata(
+        let metadata = AnalyticsMetadata(
             environment: environment,
             appVersion: appVersion,
             build: build
         )
+        return metadata.isCanonical ? metadata : nil
     }
 }
 
