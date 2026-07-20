@@ -103,6 +103,35 @@ enum AppFullScreen: String, Identifiable {
     var id: String { rawValue }
 }
 
+enum RunDeepLink: Equatable, Sendable {
+    case run(UUID)
+
+    init?(url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.user == nil,
+              components.password == nil,
+              components.port == nil,
+              components.query == nil,
+              components.fragment == nil else {
+            return nil
+        }
+        let path = url.pathComponents.filter { $0 != "/" }
+        let rawID: String?
+        switch (components.scheme?.lowercased(), components.host?.lowercased()) {
+        case ("snaplist", "runs") where path.count == 1:
+            rawID = path.first
+        case ("https", let host)
+            where ["snaplist.dev", "www.snaplist.dev"].contains(host) && path.count == 2:
+            guard path.first == "runs" else { return nil }
+            rawID = path.last
+        default:
+            return nil
+        }
+        guard let rawID, let id = UUID(uuidString: rawID) else { return nil }
+        self = .run(id)
+    }
+}
+
 @MainActor
 @Observable
 final class AppRouter {
@@ -148,6 +177,19 @@ final class AppRouter {
         var current = path(for: selectedTab)
         current.append(route)
         setPath(current, for: selectedTab)
+    }
+
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        guard let deepLink = RunDeepLink(url: url) else { return false }
+        switch deepLink {
+        case .run(let runID):
+            selectedTab = .home
+            presentedSheet = nil
+            presentedFullScreen = nil
+            setPath([.home(.run(runID))], for: .home)
+        }
+        return true
     }
 
     func handleCaptureRestoration(_ restoration: CaptureRestoration) {
