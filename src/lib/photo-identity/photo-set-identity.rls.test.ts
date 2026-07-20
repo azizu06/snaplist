@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { Client } from "pg";
 
 import {
   cleanupClerkTestUsers,
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
+import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -14,6 +16,10 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DATABASE_URL = resolveLocalTestDatabaseUrl(
+  process.env.SUPABASE_TEST_DB_URL ??
+    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+);
 
 const PHOTO_SET_KIND = "content_sha256_set_v1";
 const PHOTO_SET_FINGERPRINT =
@@ -37,6 +43,58 @@ async function stackReachable(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function connectDatabase(applicationName: string): Promise<Client> {
+  const client = new Client({
+    application_name: applicationName,
+    connectionString: DATABASE_URL,
+    connectionTimeoutMillis: 1_000,
+  });
+  await client.connect();
+  await client.query("set statement_timeout = '10s'");
+  return client;
+}
+
+async function assumeServiceRole(client: Client): Promise<void> {
+  await client.query(
+    "select set_config('request.jwt.claims', $1, true)",
+    [JSON.stringify({ role: "service_role" })],
+  );
+  await client.query("set local role service_role");
+}
+
+async function waitForAdvisoryBlock(
+  observer: Client,
+  loserPid: number,
+  winnerPid: number,
+): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = await observer.query<{
+      blockers: number[];
+      waiting_on_advisory: boolean;
+    }>(
+      `select
+         pg_blocking_pids($1) as blockers,
+         exists (
+           select 1 from pg_locks
+           where pid = $1
+             and locktype = 'advisory'
+             and not granted
+         ) as waiting_on_advisory`,
+      [loserPid],
+    );
+    const state = result.rows[0];
+    if (
+      state?.waiting_on_advisory &&
+      state.blockers.includes(winnerPid)
+    ) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Verified staging loser never blocked behind legacy winner");
 }
 
 beforeAll(async () => {
@@ -140,55 +198,129 @@ describe("versioned photo-set identity persistence", () => {
     expect(mutation.error).toMatchObject({ code: "23514" });
   });
 
-  it("serializes concurrent conflicting verified identities without accepting the loser", async () => {
+  it("rejects a verified replay after it blocks behind an uncommitted legacy winner", async () => {
     if (!reachable) return;
     const idempotencyKey = `photo-identity-race-${crypto.randomUUID()}`;
     const batchId = crypto.randomUUID();
-    const entry = {
-      idempotency_key: idempotencyKey,
-      source: "single",
-      autopilot_enabled: false,
-      photo_paths: [`${concurrentSeller.id}/verified/race.jpg`],
-      cost_basis: null,
-    };
-    const fingerprints = ["a".repeat(64), "b".repeat(64)];
-    const results = await Promise.all(fingerprints.map((fingerprint) =>
-      admin.rpc("stage_pipeline_batch", {
-        p_user_id: concurrentSeller.id,
-        p_batch_id: batchId,
-        p_entries: [entry],
-        p_daily_limit: 10,
-        p_per_minute_limit: 10,
-        p_photo_identities: [{
-          idempotency_key: idempotencyKey,
-          photo_identity_kind: PHOTO_SET_KIND,
-          photo_identity_fingerprint: fingerprint,
-        }],
-      })
-    ));
+    const photoPath = `${concurrentSeller.id}/verified/race.jpg`;
+    const winner = await connectDatabase("issue-333-legacy-winner");
+    const loser = await connectDatabase("issue-333-verified-loser");
+    const observer = await connectDatabase("issue-333-lock-observer");
 
-    const winningIndexes = results.flatMap((result, index) =>
-      result.error ? [] : [index]
-    );
-    expect(winningIndexes).toHaveLength(1);
-    expect(results.filter((result) => result.error)).toEqual([
-      expect.objectContaining({ error: expect.objectContaining({ code: "23514" }) }),
-    ]);
+    try {
+      await winner.query("begin");
+      await assumeServiceRole(winner);
+      const winnerPid = (
+        await winner.query<{ pid: number }>("select pg_backend_pid() as pid")
+      ).rows[0]!.pid;
+      const staged = await winner.query<{
+        item_id: string;
+        queue_message_id: string;
+        run_id: string;
+      }>(
+        `select item_id, queue_message_id::text, run_id
+         from public.stage_pipeline_batch(
+           $1,
+           $2::uuid,
+           jsonb_build_array(jsonb_build_object(
+             'idempotency_key', $3::text,
+             'source', 'single',
+             'autopilot_enabled', false,
+             'photo_paths', jsonb_build_array($4::text),
+             'cost_basis', null
+           )),
+           10,
+           10
+         )`,
+        [concurrentSeller.id, batchId, idempotencyKey, photoPath],
+      );
+      const receipt = staged.rows[0]!;
+      queueMessageIds.add(receipt.queue_message_id);
 
-    const winner = results[winningIndexes[0]];
-    const receipt = (winner.data as Array<{
-      queue_message_id: string | number;
-      run_id: string;
-    }>)[0];
-    queueMessageIds.add(String(receipt.queue_message_id));
-    const { data: run } = await concurrentSeller.client
-      .from("pipeline_runs")
-      .select("photo_identity_kind, photo_identity_fingerprint")
-      .eq("id", receipt.run_id)
-      .single();
-    expect(run).toEqual({
-      photo_identity_kind: PHOTO_SET_KIND,
-      photo_identity_fingerprint: fingerprints[winningIndexes[0]],
-    });
+      await loser.query("begin");
+      await assumeServiceRole(loser);
+      const loserPid = (
+        await loser.query<{ pid: number }>("select pg_backend_pid() as pid")
+      ).rows[0]!.pid;
+      const loserOutcome = loser.query(
+        `select * from public.stage_pipeline_batch(
+           $1,
+           $2::uuid,
+           jsonb_build_array(jsonb_build_object(
+             'idempotency_key', $3::text,
+             'source', 'single',
+             'autopilot_enabled', false,
+             'photo_paths', jsonb_build_array($4::text),
+             'cost_basis', null
+           )),
+           10,
+           10,
+           jsonb_build_array(jsonb_build_object(
+             'idempotency_key', $3::text,
+             'photo_identity_kind', 'content_sha256_set_v1',
+             'photo_identity_fingerprint', $5::text
+           ))
+         )`,
+        [
+          concurrentSeller.id,
+          batchId,
+          idempotencyKey,
+          photoPath,
+          PHOTO_SET_FINGERPRINT,
+        ],
+      ).then(
+        (value) => ({ error: null, value }),
+        (error: unknown) => ({ error, value: null }),
+      );
+
+      await waitForAdvisoryBlock(observer, loserPid, winnerPid);
+      await winner.query("commit");
+
+      const loserResult = await loserOutcome;
+      expect(loserResult.value).toBeNull();
+      expect(loserResult.error).toMatchObject({ code: "23514" });
+      await loser.query("rollback");
+
+      const durable = await observer.query<{
+        items: number;
+        legacy_runs: number;
+        queue_messages: number;
+        reservations: number;
+        usage_reservations: number;
+      }>(
+        `select
+           (select count(*)::integer from public.items
+            where user_id = $1) as items,
+           (select count(*)::integer from public.pipeline_runs
+            where user_id = $1
+              and idempotency_key = $2
+              and photo_identity_kind = 'legacy_path_v0') as legacy_runs,
+           (select count(*)::integer from pgmq.q_pipeline_jobs
+            where msg_id = $3::bigint) as queue_messages,
+           (select count(*)::integer
+            from public.ai_item_credit_reservations
+            where pipeline_run_id = $4::uuid) as reservations,
+           (select count(*)::integer
+            from private.pipeline_run_usage_reservations
+            where run_id = $4::uuid) as usage_reservations`,
+        [
+          concurrentSeller.id,
+          idempotencyKey,
+          receipt.queue_message_id,
+          receipt.run_id,
+        ],
+      );
+      expect(durable.rows[0]).toEqual({
+        items: 1,
+        legacy_runs: 1,
+        queue_messages: 1,
+        reservations: 1,
+        usage_reservations: 1,
+      });
+    } finally {
+      await winner.query("rollback").catch(() => undefined);
+      await loser.query("rollback").catch(() => undefined);
+      await Promise.all([winner.end(), loser.end(), observer.end()]);
+    }
   });
 });
