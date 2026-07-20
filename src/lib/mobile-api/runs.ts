@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { itemLabel } from "@/lib/ui/item-label";
-import { mobileRunSchema, type MobileRun } from "./contract";
+import {
+  mobileRunCollectionSchema,
+  mobileRunSchema,
+  type MobileRun,
+  type MobileRunCollection,
+} from "./contract";
 
 export interface MobileRunRequest {
   runId: string;
@@ -13,11 +18,22 @@ export interface MobileRunMutationRequest extends MobileRunRequest {
   idempotencyKey: string;
 }
 
+export interface MobileRunHistoryRequest {
+  userId: string;
+  bearerToken: string;
+  limit: number;
+  cursor?: string;
+}
+
 /** Tenant-scoped adapter over the canonical #161 durable-run operations. */
 export interface MobileRunOperations {
   get(input: MobileRunRequest): Promise<MobileRun | null>;
   retry(input: MobileRunMutationRequest): Promise<MobileRun>;
   cancel(input: MobileRunMutationRequest): Promise<MobileRun>;
+}
+
+export interface MobileRunHistoryReader {
+  list(input: MobileRunHistoryRequest): Promise<MobileRunCollection>;
 }
 
 export interface MobileRunDataError {
@@ -31,6 +47,10 @@ interface MobileRunDataResult<T> {
 }
 
 export interface MobileRunDataClient {
+  listRunCursors(input: {
+    limit: number;
+    before?: { updatedAt: string; runId: string };
+  }): PromiseLike<MobileRunDataResult<unknown[]>>;
   readRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readItem(itemId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readRetryProjection(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
@@ -47,6 +67,7 @@ export interface MobileRunDataClient {
 export class MobileRunNotFoundError extends Error {}
 export class MobileRunConflictError extends Error {}
 export class MobileRunUnavailableError extends Error {}
+export class MobileRunInvalidCursorError extends Error {}
 
 const requestSchema = z
   .object({
@@ -59,6 +80,46 @@ const requestSchema = z
 const mutationRequestSchema = requestSchema.extend({
   idempotencyKey: z.string().uuid(),
 }).strict();
+
+const historyRequestSchema = z
+  .object({
+    userId: z.string().min(1),
+    bearerToken: z.string().min(1),
+    limit: z.number().int().min(1).max(50),
+    cursor: z.string().min(1).optional(),
+  })
+  .strict();
+
+const cursorPayloadSchema = z
+  .object({
+    updatedAt: z.string().datetime({ offset: true }),
+    runId: z.string().uuid(),
+  })
+  .strict();
+
+const runCursorRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    updated_at: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+function encodeCursor(payload: z.infer<typeof cursorPayloadSchema>): string {
+  return btoa(JSON.stringify(cursorPayloadSchema.parse(payload)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+function decodeCursor(cursor: string): z.infer<typeof cursorPayloadSchema> {
+  try {
+    const base64 = cursor.replaceAll("-", "+").replaceAll("_", "/");
+    const padding = "=".repeat((4 - (base64.length % 4)) % 4);
+    return cursorPayloadSchema.parse(JSON.parse(atob(base64 + padding)));
+  } catch {
+    throw new MobileRunInvalidCursorError();
+  }
+}
 
 const runRowSchema = z
   .object({
@@ -219,8 +280,35 @@ function durableMutationFailure(data: unknown): void {
 
 export function createMobileRunOperations(
   clientForBearer: (bearerToken: string) => MobileRunDataClient | Promise<MobileRunDataClient>,
-): MobileRunOperations {
+): MobileRunOperations & MobileRunHistoryReader {
   return {
+    async list(rawInput) {
+      const input = historyRequestSchema.parse(rawInput);
+      const before = input.cursor ? decodeCursor(input.cursor) : undefined;
+      const client = await clientForBearer(input.bearerToken);
+      const rawRows = requireData(
+        "run history",
+        await client.listRunCursors({ limit: input.limit + 1, before }),
+      );
+      if (!rawRows) {
+        throw new MobileRunUnavailableError("Run history was unavailable");
+      }
+      const cursorRows = z.array(runCursorRowSchema).parse(rawRows);
+      const pageRows = cursorRows.slice(0, input.limit);
+      const projected = await Promise.all(
+        pageRows.map((row) => readCanonicalRun(client, row.id, input.userId)),
+      );
+      const runs = projected.filter((run): run is MobileRun => run !== null);
+      const boundary = cursorRows.length > input.limit ? pageRows.at(-1) : undefined;
+
+      return mobileRunCollectionSchema.parse({
+        runs,
+        nextCursor: boundary
+          ? encodeCursor({ updatedAt: boundary.updated_at, runId: boundary.id })
+          : null,
+      });
+    },
+
     async get(rawInput) {
       const input = requestSchema.parse(rawInput);
       const client = await clientForBearer(input.bearerToken);
@@ -276,6 +364,20 @@ export function createSupabaseMobileRunDataClient(
   client: SupabaseClient,
 ): MobileRunDataClient {
   return {
+    listRunCursors(input) {
+      let query = client
+        .from("pipeline_runs")
+        .select("id,updated_at")
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: false });
+      if (input.before) {
+        const { updatedAt, runId } = input.before;
+        query = query.or(
+          `updated_at.lt.${updatedAt},and(updated_at.eq.${updatedAt},id.lt.${runId})`,
+        );
+      }
+      return query.limit(input.limit);
+    },
     readRun(runId) {
       return client
         .from("pipeline_runs")
@@ -315,7 +417,7 @@ export function createSupabaseMobileRunDataClient(
 export function createConfiguredSupabaseMobileRunOperations(input: {
   supabaseURL: string;
   anonKey: string;
-}): MobileRunOperations {
+}): MobileRunOperations & MobileRunHistoryReader {
   return createMobileRunOperations((bearerToken) =>
     createSupabaseMobileRunDataClient(
       createClient(input.supabaseURL, input.anonKey, {

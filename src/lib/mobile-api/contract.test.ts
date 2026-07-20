@@ -5,6 +5,7 @@ import { z } from "zod";
 import { pricingEvidenceProjectionSchema } from "@/lib/pricing-evidence";
 import {
   apiErrorEnvelopeSchema,
+  mobileRunCollectionEnvelopeSchema,
   mobileRunSchema,
   pricingEvidenceEnvelopeSchema,
 } from "./contract";
@@ -288,6 +289,49 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(JSON.stringify(contract.components.schemas.PipelineRun)).not.toMatch(
       /percentage|progress|eta/i,
     );
+  });
+
+  it("documents #342 run history and decodes the strict native collection fixture", () => {
+    expect(contract.paths["/v1/runs"].get).toMatchObject({
+      operationId: "listRuns",
+      "x-owner-issue": 342,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
+      responses: {
+        "200": {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/RunCollectionEnvelope" },
+            },
+          },
+        },
+      },
+    });
+    expect(contract.components.schemas.RunCollection).toMatchObject({
+      additionalProperties: false,
+      required: ["runs", "nextCursor"],
+      properties: {
+        runs: {
+          type: "array",
+          maxItems: 50,
+          items: { $ref: "#/components/schemas/PipelineRun" },
+        },
+        nextCursor: { type: ["string", "null"] },
+      },
+    });
+
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve("ios/SnapListTests/Fixtures/run-history-response.json"),
+        "utf8",
+      ),
+    );
+    expect(() => mobileRunCollectionEnvelopeSchema.parse(fixture)).not.toThrow();
+    expect(fixture.data.runs.map((run: { id: string }) => run.id)).toEqual([
+      "34200000-0000-4000-8000-000000000002",
+      "34200000-0000-4000-8000-000000000001",
+    ]);
+    expect(fixture.data.nextCursor).toBeNull();
   });
 
   it("keeps the implemented run OpenAPI schema aligned with runtime Zod", () => {

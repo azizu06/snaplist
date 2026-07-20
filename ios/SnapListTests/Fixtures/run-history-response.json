@@ -1,0 +1,79 @@
+{
+  "data": {
+    "runs": [
+      {
+        "id": "34200000-0000-4000-8000-000000000002",
+        "itemId": "34200000-0000-4000-8000-000000000012",
+        "listingId": null,
+        "status": "running",
+        "stage": "pricing",
+        "attemptCount": 1,
+        "maxAttempts": 3,
+        "schemaVersion": 1,
+        "timestamps": {
+          "createdAt": "2026-07-20T19:59:00.000Z",
+          "updatedAt": "2026-07-20T20:00:00.000Z",
+          "enqueuedAt": "2026-07-20T19:59:01.000Z",
+          "startedAt": "2026-07-20T19:59:05.000Z",
+          "lastAttemptedAt": "2026-07-20T19:59:05.000Z",
+          "nextAttemptAt": null,
+          "completedAt": null,
+          "retentionCleanedAt": null
+        },
+        "item": { "title": "Canon AE-1", "photoCount": 2 },
+        "requiredInput": null,
+        "terminalOutcome": null,
+        "safeFailure": null,
+        "allowance": "reserved",
+        "legalActions": {
+          "canRetry": false,
+          "canCancel": true,
+          "canOpenReview": false,
+          "canStartNewCapture": false
+        },
+        "lastMeaningfulUpdateAt": "2026-07-20T20:00:00.000Z",
+        "retentionCleanedAt": null
+      },
+      {
+        "id": "34200000-0000-4000-8000-000000000001",
+        "itemId": "34200000-0000-4000-8000-000000000011",
+        "listingId": null,
+        "status": "failed",
+        "stage": "pricing",
+        "attemptCount": 3,
+        "maxAttempts": 3,
+        "schemaVersion": 1,
+        "timestamps": {
+          "createdAt": "2026-07-20T19:58:00.000Z",
+          "updatedAt": "2026-07-20T20:00:00.000Z",
+          "enqueuedAt": "2026-07-20T19:58:01.000Z",
+          "startedAt": "2026-07-20T19:58:05.000Z",
+          "lastAttemptedAt": "2026-07-20T19:59:30.000Z",
+          "nextAttemptAt": null,
+          "completedAt": "2026-07-20T20:00:00.000Z",
+          "retentionCleanedAt": null
+        },
+        "item": { "title": "Nikon FM2", "photoCount": 1 },
+        "requiredInput": null,
+        "terminalOutcome": "failed",
+        "safeFailure": {
+          "reason": "This run couldn’t finish",
+          "detail": "Price research timed out.",
+          "retryable": true,
+          "workPreserved": true
+        },
+        "allowance": "restored",
+        "legalActions": {
+          "canRetry": true,
+          "canCancel": false,
+          "canOpenReview": false,
+          "canStartNewCapture": false
+        },
+        "lastMeaningfulUpdateAt": "2026-07-20T20:00:00.000Z",
+        "retentionCleanedAt": null
+      }
+    ],
+    "nextCursor": null
+  },
+  "meta": { "requestId": "req_342_native_fixture" }
+}

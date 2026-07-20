@@ -225,6 +225,79 @@ describe("mobile API v1 provider-neutral handler", () => {
     });
   });
 
+  it("rejects an empty run-history cursor before reading tenant data", async () => {
+    const list = vi.fn().mockResolvedValue({ runs: [], nextCursor: null });
+    const response = await handler({ runHistory: { list } })(
+      new Request("http://localhost/v1/runs?cursor=", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("bounds run-history pages before reading tenant data", async () => {
+    const list = vi.fn();
+    for (const limit of ["0", "51", "1.5", "not-a-number"]) {
+      const response = await handler({ runHistory: { list } })(
+        new Request(`http://localhost/v1/runs?limit=${limit}`, {
+          headers: { authorization: "Bearer signed-jwt" },
+        }),
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("authenticates run history before invoking the tenant reader", async () => {
+    const list = vi.fn();
+    const missing = await handler({ runHistory: { list } })(
+      new Request("http://localhost/v1/runs"),
+    );
+    const forged = await handler({
+      authenticate: vi.fn().mockRejectedValue(new Error("forged bearer")),
+      runHistory: { list },
+    })(
+      new Request("http://localhost/v1/runs", {
+        headers: { authorization: "Bearer forged" },
+      }),
+    );
+
+    expect(missing.status).toBe(401);
+    expect(forged.status).toBe(401);
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("fails run history closed without leaking private adapter errors", async () => {
+    const reportError = vi.fn();
+    const response = await handler({
+      reportError,
+      runHistory: {
+        list: vi.fn().mockRejectedValue(new Error("private database detail")),
+      },
+    })(
+      new Request("http://localhost/v1/runs", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    const body = await response.text();
+    expect(body).not.toContain("private database detail");
+    expect(JSON.parse(body)).toEqual({
+      error: {
+        code: "internal_error",
+        message: "Run history is temporarily unavailable.",
+        requestId: "req_test",
+      },
+    });
+    expect(reportError).toHaveBeenCalledWith(
+      "mobile-api.run-history",
+      expect.any(Error),
+    );
+  });
+
   it("retries the same logical run with the caller's stable idempotency key", async () => {
     const retry = vi.fn().mockResolvedValue({
       id: "24100000-0000-4000-8000-000000000001",

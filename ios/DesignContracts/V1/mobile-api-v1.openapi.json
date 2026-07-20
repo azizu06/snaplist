@@ -98,6 +98,25 @@
         }
       }
     },
+    "/v1/runs": {
+      "get": {
+        "operationId": "listRuns",
+        "x-owner-issue": 342,
+        "x-related-owner-issues": [211, 318],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 } },
+          { "name": "cursor", "in": "query", "required": false, "schema": { "type": "string", "minLength": 1 }, "description": "Opaque continuation over descending updatedAt and exact run UUID." }
+        ],
+        "responses": {
+          "200": { "description": "Bounded canonical tenant-owned durable-run history", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunCollectionEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
     "/v1/runs/{runId}": {
       "parameters": [{ "$ref": "#/components/parameters/RunId" }],
       "get": {
@@ -253,6 +272,8 @@
       "RunSafeFailure": { "type": ["object", "null"], "additionalProperties": false, "required": ["reason", "detail", "retryable", "workPreserved"], "properties": { "reason": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "retryable": { "type": "boolean" }, "workPreserved": { "type": "boolean" } } },
       "RunLegalActions": { "type": "object", "additionalProperties": false, "required": ["canRetry", "canCancel", "canOpenReview", "canStartNewCapture"], "properties": { "canRetry": { "type": "boolean" }, "canCancel": { "type": "boolean" }, "canOpenReview": { "type": "boolean" }, "canStartNewCapture": { "type": "boolean" } } },
       "RunEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PipelineRun" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "RunCollection": { "type": "object", "additionalProperties": false, "required": ["runs", "nextCursor"], "properties": { "runs": { "type": "array", "maxItems": 50, "items": { "$ref": "#/components/schemas/PipelineRun" } }, "nextCursor": { "type": ["string", "null"], "minLength": 1 } } },
+      "RunCollectionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/RunCollection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "PipelineRun": { "type": "object", "additionalProperties": false, "required": ["id", "itemId", "listingId", "status", "stage", "attemptCount", "maxAttempts", "schemaVersion", "timestamps", "requiredInput", "terminalOutcome", "safeFailure", "allowance", "legalActions", "lastMeaningfulUpdateAt", "retentionCleanedAt"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemId": { "type": "string", "format": "uuid" }, "listingId": { "type": ["string", "null"], "format": "uuid" }, "status": { "type": "string", "enum": ["queued", "running", "retrying", "succeeded", "failed", "canceled"] }, "stage": { "type": "string", "enum": ["queued", "identifying", "pricing", "generating", "persisting", "completed"] }, "attemptCount": { "type": "integer", "minimum": 0 }, "maxAttempts": { "type": "integer", "minimum": 1 }, "schemaVersion": { "const": 1 }, "timestamps": { "$ref": "#/components/schemas/RunTimestamps" }, "item": { "oneOf": [{ "$ref": "#/components/schemas/RunItem" }, { "type": "null" }] }, "requiredInput": { "$ref": "#/components/schemas/RunRequiredInput" }, "terminalOutcome": { "type": ["string", "null"], "enum": ["succeeded", "failed", "canceled", null] }, "safeFailure": { "$ref": "#/components/schemas/RunSafeFailure" }, "allowance": { "type": "string", "enum": ["reserved", "settled", "restored", "unchanged"] }, "legalActions": { "$ref": "#/components/schemas/RunLegalActions" }, "lastMeaningfulUpdateAt": { "type": "string", "format": "date-time" }, "retentionCleanedAt": { "type": ["string", "null"], "format": "date-time" } } },
       "WorkerSummaryEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/WorkerSummary" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "WorkerSummary": { "type": "object", "required": ["claimed", "succeeded", "retrying", "failed", "skipped"], "properties": { "claimed": { "type": "integer", "minimum": 0 }, "succeeded": { "type": "integer", "minimum": 0 }, "retrying": { "type": "integer", "minimum": 0 }, "failed": { "type": "integer", "minimum": 0 }, "skipped": { "type": "integer", "minimum": 0 } } }

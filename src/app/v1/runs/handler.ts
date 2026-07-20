@@ -34,6 +34,11 @@ const handler = createMobileApiHandler({
     if (!userId) throw new Error("The verified Clerk token has no subject.");
     return { userId };
   },
+  runHistory: {
+    list(input) {
+      return configuredRunOperations().list(input);
+    },
+  },
   runOperations: {
     get(input) {
       return configuredRunOperations().get(input);

@@ -10,14 +10,13 @@ import {
   createConfiguredSupabaseMobileRunOperations,
 } from "./runs";
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
+import { resolveTenantServerTestApiKey } from "@/test/supabase-test-credentials";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL
   ?? process.env.NEXT_PUBLIC_SUPABASE_URL
   ?? "http://127.0.0.1:54321";
-const ANON_KEY =
-  process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SECRET_API_KEY = resolveTenantServerTestApiKey();
 const DATABASE_URL = resolveLocalTestDatabaseUrl(
   process.env.SUPABASE_TEST_DB_URL
     ?? "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
@@ -34,11 +33,11 @@ let itemA = "";
 let runA = "";
 
 async function stackReachable(): Promise<boolean> {
-  if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
+  if (!SECRET_API_KEY) return false;
   try {
     return (
       await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-        headers: { apikey: ANON_KEY },
+        headers: { apikey: SECRET_API_KEY },
         signal: AbortSignal.timeout(2_000),
       })
     ).ok;
@@ -65,7 +64,7 @@ async function waitForDatabaseBlock(observer: Client, blockedPid: number): Promi
 beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
-  admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
+  admin = createClient(SUPABASE_URL, SECRET_API_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   userAId = `user_test_mobile_run_a_${Date.now()}`;
@@ -74,7 +73,7 @@ beforeAll(async () => {
     mintUserJwt(userAId),
     mintUserJwt(userBId),
   ]);
-  userAClient = createClient(SUPABASE_URL, ANON_KEY!, {
+  userAClient = createClient(SUPABASE_URL, SECRET_API_KEY!, {
     accessToken: async () => userAToken,
   });
   const { data: item, error: itemError } = await userAClient
@@ -132,11 +131,11 @@ describe("mobile durable-run RLS adapter", () => {
     if (!reachable) return;
     const owner = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
-      anonKey: ANON_KEY!,
+      anonKey: SECRET_API_KEY!,
     });
     const foreign = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
-      anonKey: ANON_KEY!,
+      anonKey: SECRET_API_KEY!,
     });
 
     await expect(owner.get({
@@ -181,7 +180,7 @@ describe("mobile durable-run RLS adapter", () => {
     if (!reachable) return;
     const operations = createConfiguredSupabaseMobileRunOperations({
       supabaseURL: SUPABASE_URL,
-      anonKey: ANON_KEY!,
+      anonKey: SECRET_API_KEY!,
     });
     const base = { runId: runA, userId: userAId, bearerToken: userAToken };
     const cancelKey = crypto.randomUUID();
@@ -377,7 +376,7 @@ describe("mobile durable-run RLS adapter", () => {
       const fixtureToken = await mintUserJwt(fixtureUser);
       const operations = createConfiguredSupabaseMobileRunOperations({
         supabaseURL: SUPABASE_URL,
-        anonKey: ANON_KEY!,
+        anonKey: SECRET_API_KEY!,
       });
       await expect(operations.get({
         runId,
@@ -403,6 +402,10 @@ describe("mobile durable-run RLS adapter", () => {
       ).catch(() => undefined);
       await setup.query("delete from public.items where id = $1::uuid", [itemId])
         .catch(() => undefined);
+      await setup.query(
+        "delete from public.ai_item_allowance_periods where id = $1::uuid",
+        [allowanceId],
+      ).catch(() => undefined);
       await Promise.all([setup.end(), worker.end(), retry.end(), observer.end()]);
     }
   });

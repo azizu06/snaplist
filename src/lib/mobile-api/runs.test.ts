@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MobileRunConflictError,
+  MobileRunInvalidCursorError,
   MobileRunNotFoundError,
   MobileRunUnavailableError,
   createMobileRunOperations,
@@ -37,6 +38,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
 
 function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunDataClient {
   return {
+    listRunCursors: vi.fn().mockResolvedValue({ data: [], error: null }),
     readRun: vi.fn().mockResolvedValue({ data: runRow(), error: null }),
     readItem: vi.fn().mockResolvedValue({
       data: {
@@ -58,6 +60,20 @@ function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunData
 }
 
 describe("mobile durable-run operations", () => {
+  it("rejects a malformed history cursor before creating a tenant client", async () => {
+    const clientForBearer = vi.fn();
+
+    await expect(
+      createMobileRunOperations(clientForBearer).list({
+        userId: "user_native",
+        bearerToken: "signed-jwt",
+        limit: 20,
+        cursor: "not-a-valid-cursor",
+      }),
+    ).rejects.toBeInstanceOf(MobileRunInvalidCursorError);
+    expect(clientForBearer).not.toHaveBeenCalled();
+  });
+
   it("maps the authenticated RLS row into the full provider-neutral run detail", async () => {
     const client = {
       readRun: vi.fn().mockResolvedValue({

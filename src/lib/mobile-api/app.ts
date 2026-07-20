@@ -4,7 +4,9 @@ import type { HomeProjectionReader } from "@/lib/home/projection";
 import type { PricingEvidenceReader } from "@/lib/pricing-evidence";
 import {
   MobileRunConflictError,
+  MobileRunInvalidCursorError,
   MobileRunNotFoundError,
+  type MobileRunHistoryReader,
   type MobileRunOperations,
 } from "./runs";
 import { z } from "zod";
@@ -19,6 +21,7 @@ import {
   apiErrorEnvelopeSchema,
   healthEnvelopeSchema,
   homeProjectionEnvelopeSchema,
+  mobileRunCollectionEnvelopeSchema,
   mobileRunEnvelopeSchema,
   pricingEvidenceEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
@@ -53,6 +56,8 @@ export interface MobileApiDependencies {
   subscriptionBridge?: NativeSubscriptionBridge;
   /** Read-only RLS projection for the native Seller Home. */
   homeProjection?: HomeProjectionReader;
+  /** Bounded authenticated collection of canonical tenant-owned durable runs. */
+  runHistory?: MobileRunHistoryReader;
   /** Authenticated, tenant/RLS-scoped view of canonical #161 durable-run truth. */
   runOperations?: MobileRunOperations;
   /** Immutable, run-coherent RLS pricing evidence for native item detail. */
@@ -200,6 +205,99 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Home is temporarily unavailable.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/runs`) {
+      if (request.method !== "GET") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const url = new URL(request.url);
+      const limit = z.coerce.number().int().min(1).max(50).safeParse(
+        url.searchParams.get("limit") ?? 20,
+      );
+      const rawCursor = url.searchParams.get("cursor");
+      const cursor = rawCursor?.trim();
+      if (rawCursor !== null && !cursor) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid run-history cursor is required.",
+        );
+      }
+      if (!limit.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid run-history limit is required.",
+        );
+      }
+
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.runHistory) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Run history is temporarily unavailable.",
+        );
+      }
+      try {
+        const history = await dependencies.runHistory.list({
+          userId: principal.userId,
+          bearerToken: token,
+          limit: limit.data,
+          cursor,
+        });
+        return json(
+          mobileRunCollectionEnvelopeSchema.parse({
+            data: history,
+            meta: { requestId },
+          }),
+        );
+      } catch (error) {
+        if (error instanceof MobileRunInvalidCursorError) {
+          return errorResponse(
+            requestId,
+            400,
+            "invalid_request",
+            "A valid run-history cursor is required.",
+          );
+        }
+        dependencies.reportError?.("mobile-api.run-history", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "Run history is temporarily unavailable.",
         );
       }
     }
