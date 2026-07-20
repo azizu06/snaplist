@@ -64,6 +64,7 @@ enum FutureBoundary: String, Hashable {
 
 enum HomeRoute: Hashable {
     case run(UUID)
+    case pricing(UUID)
     case order(UUID)
     case conversation(UUID)
     case publishIssue(UUID)
@@ -88,6 +89,15 @@ extension HomeAttentionDestination {
         case .publishIssue(let id): .publishIssue(id)
         case .draft(let id): .draft(id)
         }
+    }
+}
+
+extension HomeAttentionTask {
+    var route: HomeRoute {
+        if kind == .pricing, case .draft(let itemID) = destination {
+            return .pricing(itemID)
+        }
+        return destination.route
     }
 }
 

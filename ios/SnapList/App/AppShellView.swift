@@ -8,6 +8,7 @@ struct AppShellView: View {
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
     @Bindable var runStore: RunDetailStore
+    let pricingRepository: any PricingRepository
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -174,6 +175,8 @@ struct AppShellView: View {
             switch route {
             case .run(let runID):
                 RunDetailView(runID: runID, store: runStore)
+            case .pricing(let itemID):
+                PricingRouteView(itemID: itemID, repository: pricingRepository)
             default:
                 HomeRouteBoundaryView(route: route)
             }
@@ -307,6 +310,7 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             service: UnavailableRunService(),
             bearerToken: { "preview-bearer" }
         ),
+        pricingRepository: PricingFixtureRepository(model: PricingFeatureFixtures.limited),
         configuration: .preview
     )
 }

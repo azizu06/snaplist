@@ -3,6 +3,68 @@ import SwiftUI
 import UIKit
 
 @MainActor
+struct PricingRouteView: View {
+    let itemID: UUID
+    let repository: any PricingRepository
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var loadState = PricingRouteLoadState.loading
+
+    var body: some View {
+        Group {
+            switch loadState {
+            case .loading:
+                ProgressView("Finding recent sold listings for this item…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("pricing.loading")
+            case .loaded(let model):
+                PricingFeatureView(
+                    model: model,
+                    actions: PricingFeatureActions(
+                        retryRefresh: { Task { await load() } },
+                        dismissPricing: { dismiss() }
+                    )
+                )
+            case .failed:
+                VStack(spacing: 16) {
+                    Text("Couldn’t load pricing evidence")
+                        .snapListTypography(.displayTitle)
+                    Text("Your price, cost, and any edits are saved. This didn’t change anything — try again.")
+                        .snapListTypography(.body)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+                        .multilineTextAlignment(.center)
+                    Button("Try again") {
+                        Task { await load() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: SnapListMetrics.minimumTouchTarget)
+                }
+                .padding(SnapListMetrics.screenGutter)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("pricing.load-failed")
+            }
+        }
+        .background(SnapListColorToken.canvas.color.ignoresSafeArea())
+        .task(id: itemID) { await load() }
+    }
+
+    private func load() async {
+        loadState = .loading
+        do {
+            loadState = .loaded(try await repository.fetchPricing(itemID: itemID))
+        } catch {
+            loadState = .failed
+        }
+    }
+}
+
+private enum PricingRouteLoadState {
+    case loading
+    case loaded(PricingFeatureModel)
+    case failed
+}
+
+@MainActor
 struct PricingFeatureView: View {
     @StateObject private var store: PricingFeatureStore
     private let forceReducedMotion: Bool

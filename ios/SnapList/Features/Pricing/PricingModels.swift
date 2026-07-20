@@ -1,6 +1,201 @@
 import Combine
 import Foundation
 
+protocol PricingRepository {
+    func fetchPricing(itemID: UUID) async throws -> PricingFeatureModel
+}
+
+enum PricingRepositoryError: Error, Equatable {
+    case operationUnavailable
+    case invalidResponse
+    case httpStatus(Int)
+}
+
+struct AuthenticatedServerPricingRepository: PricingRepository {
+    let apiOrigin: URL
+    let authentication: any HomeAuthenticationProviding
+    let session: URLSession
+
+    func fetchPricing(itemID: UUID) async throws -> PricingFeatureModel {
+        let token = try await authentication.bearerToken()
+        let path = "/v1/items/\(itemID.uuidString)/pricing"
+        var request = URLRequest(url: apiOrigin.appending(path: path))
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else {
+            throw PricingRepositoryError.invalidResponse
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            if response.statusCode == 404 || response.statusCode == 503 {
+                throw PricingRepositoryError.operationUnavailable
+            }
+            throw PricingRepositoryError.httpStatus(response.statusCode)
+        }
+
+        do {
+            let projection = try JSONDecoder()
+                .decode(PricingEvidenceEnvelope.self, from: data)
+                .data
+            guard projection.item.id.caseInsensitiveCompare(itemID.uuidString) == .orderedSame else {
+                throw PricingRepositoryError.invalidResponse
+            }
+            return try projection.model
+        } catch let error as PricingRepositoryError {
+            throw error
+        } catch {
+            throw PricingRepositoryError.invalidResponse
+        }
+    }
+}
+
+struct PricingFixtureRepository: PricingRepository {
+    let model: PricingFeatureModel
+
+    func fetchPricing(itemID: UUID) async throws -> PricingFeatureModel {
+        model
+    }
+}
+
+struct UnavailablePricingRepository: PricingRepository {
+    func fetchPricing(itemID: UUID) async throws -> PricingFeatureModel {
+        throw PricingRepositoryError.operationUnavailable
+    }
+}
+
+enum PricingRepositoryFactory {
+    static func make(
+        configuration: LaunchConfiguration,
+        apiOrigin: URL? = HomeRepositoryFactory.defaultAPIOrigin,
+        authentication: any HomeAuthenticationProviding,
+        session: URLSession = .shared
+    ) -> any PricingRepository {
+#if DEBUG
+        if configuration.usesZeroNetworkFixtures {
+            return PricingFixtureRepository(model: PricingFeatureFixtures.limited)
+        }
+#endif
+        guard let apiOrigin else { return UnavailablePricingRepository() }
+        return AuthenticatedServerPricingRepository(
+            apiOrigin: apiOrigin,
+            authentication: authentication,
+            session: session
+        )
+    }
+}
+
+private struct PricingEvidenceEnvelope: Decodable {
+    let data: PricingEvidenceProjection
+}
+
+private struct PricingEvidenceProjection: Decodable {
+    struct Item: Decodable {
+        let id: String
+        let title: String
+        let condition: String
+    }
+
+    struct Comparable: Decodable {
+        let id: String
+        let sourceURL: String
+        let title: String
+        let price: Decimal
+        let currency: String
+        let condition: String
+        let soldAt: Double
+        let kind: String
+        let priceDisclosure: PricingPriceDisclosure
+        let evidenceAsOf: String
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case sourceURL = "sourceUrl"
+            case title
+            case price
+            case currency
+            case condition
+            case soldAt
+            case kind
+            case priceDisclosure
+            case evidenceAsOf
+        }
+
+        func domain() throws -> PricingSoldComparable {
+            guard kind == "sold-comparable",
+                  currency == "USD",
+                  let sourceURL = URL(string: sourceURL),
+                  ["http", "https"].contains(sourceURL.scheme?.lowercased()),
+                  sourceURL.host != nil else {
+                throw PricingRepositoryError.invalidResponse
+            }
+            return PricingSoldComparable(
+                id: id,
+                sourceURL: sourceURL,
+                title: title,
+                price: price,
+                condition: condition,
+                soldAt: Date(timeIntervalSince1970: soldAt / 1_000),
+                priceDisclosure: priceDisclosure
+            )
+        }
+    }
+
+    let item: Item
+    let priceResult: PricingPriceResultDTO
+    let evidenceLevel: PricingEvidenceLevel
+    let evidenceAsOf: String
+    let evidenceAgeDays: Double
+    let isStale: Bool
+    let defaultWindow: PricingEvidenceWindow
+    let comparables: [Comparable]
+    let estimatedFees: Decimal
+    let estimatedPayout: Decimal
+    let chartBounds: PricingPriceRange?
+
+    var model: PricingFeatureModel {
+        get throws {
+            let evidenceDate = try Self.parseDate(evidenceAsOf)
+            let mappedComparables = try comparables.map { comparable in
+                _ = try Self.parseDate(comparable.evidenceAsOf)
+                return try comparable.domain()
+            }
+            return try PricingFeatureModel(
+                item: PricingItemSummary(
+                    id: item.id.lowercased(),
+                    title: item.title,
+                    condition: item.condition
+                ),
+                priceResult: try priceResult.validated(),
+                evidenceLevel: evidenceLevel,
+                evidenceAsOf: evidenceDate,
+                defaultWindow: defaultWindow,
+                comparables: mappedComparables,
+                estimatedPayout: estimatedPayout,
+                refreshState: isStale
+                    ? .failed(message: "Sold evidence could not be refreshed.")
+                    : .current,
+                estimatedFees: estimatedFees,
+                chartBounds: chartBounds
+            )
+        }
+    }
+
+    private static func parseDate(_ value: String) throws -> Date {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+
+        let wholeSeconds = ISO8601DateFormatter()
+        wholeSeconds.formatOptions = [.withInternetDateTime]
+        guard let date = wholeSeconds.date(from: value) else {
+            throw PricingRepositoryError.invalidResponse
+        }
+        return date
+    }
+}
+
 enum PricingTier: String, Codable, CaseIterable {
     case isbnLookup = "isbn-lookup"
     case ebaySold = "ebay-sold"

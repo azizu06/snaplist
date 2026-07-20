@@ -560,7 +560,7 @@ private struct HomeAttentionCard: View {
         VStack(spacing: 0) {
             ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
                 HomeAttentionRow(task: task) {
-                    openRoute(task.destination.route)
+                    openRoute(task.route)
                 }
                 if index < tasks.count - 1 {
                     Divider().padding(.leading, 78)
@@ -828,6 +828,7 @@ private extension HomeRoute {
     var identifier: String {
         switch self {
         case .run: "run"
+        case .pricing: "pricing"
         case .order: "order"
         case .conversation: "conversation"
         case .publishIssue: "publish-issue"
@@ -841,6 +842,7 @@ private extension HomeRoute {
     var title: String {
         switch self {
         case .run: "Run"
+        case .pricing: "Pricing"
         case .order: "Order"
         case .conversation: "Conversation"
         case .publishIssue: "Publish issue"
@@ -854,6 +856,7 @@ private extension HomeRoute {
     var systemImage: String {
         switch self {
         case .run: "sparkles"
+        case .pricing: "chart.line.uptrend.xyaxis"
         case .order, .orders: "shippingbox"
         case .conversation: "bubble.left.and.bubble.right"
         case .publishIssue: "exclamationmark.triangle"

@@ -8,6 +8,7 @@ struct SnapListApp: App {
     @State private var captureFlow: CaptureFlowModel
     @State private(set) var homeStore: HomeStore
     @State private var runStore: RunDetailStore
+    private let pricingRepository: any PricingRepository
     private let configuration: LaunchConfiguration
     private let dependencies: AppDependencies
 
@@ -37,6 +38,12 @@ struct SnapListApp: App {
     ) {
         self.configuration = configuration
         self.dependencies = AppDependencies.make(configuration: configuration)
+        self.pricingRepository = PricingRepositoryFactory.make(
+            configuration: configuration,
+            apiOrigin: homeAPIOrigin,
+            authentication: homeAuthentication,
+            session: homeURLSession
+        )
         _router = State(
             initialValue: AppRouter(
                 initialTab: configuration.fixture.initialTab,
@@ -97,6 +104,7 @@ struct SnapListApp: App {
                 captureFlow: captureFlow,
                 homeStore: homeStore,
                 runStore: runStore,
+                pricingRepository: pricingRepository,
                 configuration: configuration
             )
                 .environment(\.appDependencies, dependencies)

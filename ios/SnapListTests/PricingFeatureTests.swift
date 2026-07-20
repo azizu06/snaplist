@@ -2,6 +2,47 @@ import XCTest
 @testable import SnapList
 
 final class PricingFeatureTests: XCTestCase {
+    @MainActor
+    func testHomePricingAttentionReachesAuthenticatedProductionPricingRoute() async throws {
+        let itemID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let session = makePricingURLSession { request in
+            XCTAssertEqual(request.url?.path, "/v1/items/\(itemID.uuidString)/pricing")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer signed-jwt")
+            return (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                try Self.pricingEvidenceFixture()
+            )
+        }
+        let repository = AuthenticatedServerPricingRepository(
+            apiOrigin: URL(string: "http://127.0.0.1:3001")!,
+            authentication: PricingTestAuthentication(token: "signed-jwt"),
+            session: session
+        )
+        let task = HomeAttentionTask(
+            id: UUID(uuidString: "20900000-0000-4000-8000-000000000002")!,
+            itemTitle: "Sony WH-1000XM4",
+            kind: .pricing,
+            status: "Weak price evidence",
+            detail: "Only one disclosed sold comp found",
+            actionLabel: "Review price",
+            destination: .draft(itemID)
+        )
+
+        XCTAssertEqual(task.route, .pricing(itemID))
+
+        let model = try await repository.fetchPricing(itemID: itemID)
+
+        XCTAssertEqual(model.item.id, itemID.uuidString.lowercased())
+        XCTAssertEqual(model.priceResult.suggested, 130)
+        XCTAssertEqual(model.snapshot(for: .ninetyDays).comparables.map(\.id), ["sale-1"])
+    }
+
     func testCanonicalPriceResultDTOMapsWithoutChangingProviderTruth() throws {
         let json = """
         {
@@ -260,6 +301,54 @@ final class PricingFeatureTests: XCTestCase {
             )
         )
     }
+
+    private func makePricingURLSession(
+        handler: @escaping @Sendable (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> URLSession {
+        PricingURLProtocolStub.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PricingURLProtocolStub.self]
+        return URLSession(configuration: configuration)
+    }
+
+    private static func pricingEvidenceFixture() throws -> Data {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let fixture = testFile
+            .deletingLastPathComponent()
+            .appending(path: "Fixtures/pricing-evidence-response.json")
+        return try Data(contentsOf: fixture)
+    }
+}
+
+private struct PricingTestAuthentication: HomeAuthenticationProviding {
+    let token: String
+
+    func bearerToken() async throws -> String { token }
+}
+
+private final class PricingURLProtocolStub: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var handler:
+        (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: PricingRepositoryError.operationUnavailable)
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
 
 private func makeMinimalFeatureModel() throws -> PricingFeatureModel {
