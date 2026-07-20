@@ -102,7 +102,7 @@ private extension DurableRun {
         case .failed:
             "Couldn’t finish"
         case .canceled:
-            "You canceled this run"
+            "Processing stopped"
         }
     }
 }

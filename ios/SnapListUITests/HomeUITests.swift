@@ -95,6 +95,10 @@ final class HomeUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts[expectation.status].exists)
             XCTAssertFalse(app.staticTexts["Working on your item"].exists)
             XCTAssertFalse(app.staticTexts["Researching pricing evidence"].exists)
+            if expectation.fixture == "canceled" {
+                XCTAssertTrue(app.staticTexts["Processing stopped"].exists)
+                XCTAssertFalse(app.staticTexts["You canceled this run"].exists)
+            }
             app.terminate()
         }
     }
