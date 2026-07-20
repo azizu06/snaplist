@@ -367,6 +367,7 @@ describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
     ]);
 
     const price = await router.price({ isbn: ISBN });
+    expect(price.evidence).toEqual(accepted);
     const result: PipelineResult = {
       attributes: { isbn: ISBN, title: "Fantastic Mr Fox", condition: "Good" },
       price,
@@ -395,10 +396,7 @@ describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
       range: { min: 5, max: 8 },
       tier: "isbn-lookup",
     });
-    expect(snapshot.evidence.map((record) => record.id)).toEqual([
-      "accepted-sale-1",
-      "accepted-sale-2",
-    ]);
+    expect(snapshot.evidence).toEqual(accepted);
 
     const evidenceAsOf = "2026-07-20T12:00:00+00:00";
     const projection = buildPricingEvidenceProjection(
@@ -439,14 +437,12 @@ describe("ISBN provider — sold-comp grounding (#2 confidence lever)", () => {
       },
     );
 
-    expect(projection.comparables.map((record) => record.id)).toEqual([
-      "accepted-sale-1",
-      "accepted-sale-2",
-    ]);
-    expect(projection.priceResult.evidence?.map((record) => record.id)).toEqual([
-      "accepted-sale-1",
-      "accepted-sale-2",
-    ]);
+    const persistedAccepted = accepted.map((record) => ({
+      ...record,
+      evidenceAsOf,
+    }));
+    expect(projection.comparables).toEqual(persistedAccepted);
+    expect(projection.priceResult.evidence).toEqual(accepted);
     expect(projection.priceResult).toMatchObject({
       suggested: 6.5,
       range: { min: 5, max: 8 },
