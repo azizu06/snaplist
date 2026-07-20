@@ -74,6 +74,8 @@ async function waitForAdvisoryBlock(
     const result = await observer.query<{
       blockers: number[];
       waiting_on_advisory: boolean;
+      winner_in_transaction: boolean;
+      winner_seller_advisory_locks: number;
     }>(
       `select
          pg_blocking_pids($1) as blockers,
@@ -82,13 +84,26 @@ async function waitForAdvisoryBlock(
            where pid = $1
              and locktype = 'advisory'
              and not granted
-         ) as waiting_on_advisory`,
-      [loserPid],
+         ) as waiting_on_advisory,
+         coalesce((
+           select activity.xact_start is not null
+             and activity.state = 'idle in transaction'
+           from pg_stat_activity activity
+           where activity.pid = $2
+         ), false) as winner_in_transaction,
+         (select count(*)::integer
+          from pg_locks
+          where pid = $2
+            and locktype = 'advisory'
+            and granted) as winner_seller_advisory_locks`,
+      [loserPid, winnerPid],
     );
     const state = result.rows[0];
     if (
       state?.waiting_on_advisory &&
-      state.blockers.includes(winnerPid)
+      state.blockers.includes(winnerPid) &&
+      state.winner_in_transaction &&
+      state.winner_seller_advisory_locks >= 2
     ) {
       return;
     }
@@ -278,12 +293,17 @@ describe("versioned photo-set identity persistence", () => {
 
       const loserResult = await loserOutcome;
       expect(loserResult.value).toBeNull();
-      expect(loserResult.error).toMatchObject({ code: "23514" });
+      expect(loserResult.error).toMatchObject({
+        code: "23514",
+        message:
+          "Pipeline idempotency key conflicts with verified photo identity",
+      });
       await loser.query("rollback");
 
       const durable = await observer.query<{
         items: number;
         legacy_runs: number;
+        verified_runs: number;
         queue_messages: number;
         reservations: number;
         usage_reservations: number;
@@ -295,24 +315,34 @@ describe("versioned photo-set identity persistence", () => {
             where user_id = $1
               and idempotency_key = $2
               and photo_identity_kind = 'legacy_path_v0') as legacy_runs,
-           (select count(*)::integer from pgmq.q_pipeline_jobs
-            where msg_id = $3::bigint) as queue_messages,
+           (select count(*)::integer from public.pipeline_runs
+            where user_id = $1
+              and idempotency_key = $2
+              and photo_identity_kind = 'content_sha256_set_v1') as verified_runs,
+           (select count(*)::integer
+            from (
+              select message from pgmq.q_pipeline_jobs
+              union all
+              select message from pgmq.a_pipeline_jobs
+            ) queued_or_archived
+            where queued_or_archived.message->>'run_id' = $3::text
+           ) as queue_messages,
            (select count(*)::integer
             from public.ai_item_credit_reservations
-            where pipeline_run_id = $4::uuid) as reservations,
+            where pipeline_run_id = $3::uuid) as reservations,
            (select count(*)::integer
             from private.pipeline_run_usage_reservations
-            where run_id = $4::uuid) as usage_reservations`,
+            where run_id = $3::uuid) as usage_reservations`,
         [
           concurrentSeller.id,
           idempotencyKey,
-          receipt.queue_message_id,
           receipt.run_id,
         ],
       );
       expect(durable.rows[0]).toEqual({
         items: 1,
         legacy_runs: 1,
+        verified_runs: 0,
         queue_messages: 1,
         reservations: 1,
         usage_reservations: 1,
