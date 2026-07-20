@@ -236,6 +236,46 @@ final class PricingFeatureTests: XCTestCase {
         XCTAssertNil(store.selectedComparable)
     }
 
+    @MainActor
+    func testSelectedComparablePreservesOriginAndRequiresAnExplicitProviderBoundary() {
+        var openedSources: [URL] = []
+        let store = PricingFeatureStore(
+            model: PricingFeatureFixtures.strong,
+            actions: PricingFeatureActions(
+                openSource: { openedSources.append($0) }
+            )
+        )
+
+        store.showAllComparables()
+        store.selectComparable(id: "strong-03")
+
+        XCTAssertEqual(
+            store.navigationPath,
+            [.allComparables, .selectedComparable(id: "strong-03")]
+        )
+
+        store.showProviderBoundary()
+
+        XCTAssertEqual(
+            store.navigationPath,
+            [
+                .allComparables,
+                .selectedComparable(id: "strong-03"),
+                .providerBoundary(id: "strong-03")
+            ]
+        )
+        XCTAssertTrue(openedSources.isEmpty)
+
+        store.openSelectedSource()
+        XCTAssertEqual(openedSources.count, 1)
+        XCTAssertEqual(openedSources.first, store.selectedComparable?.sourceURL)
+
+        store.goBack()
+        store.goBack()
+        XCTAssertEqual(store.navigationPath, [.allComparables])
+        XCTAssertEqual(store.route, .allComparables)
+    }
+
     func testNoAndLimitedEvidenceRemainExplicit() {
         let empty = PricingFeatureFixtures.noEvidence.snapshot(for: .all)
         XCTAssertEqual(empty.soldCount, 0)
