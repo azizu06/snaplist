@@ -71,6 +71,14 @@ enum RunDetailStoreFactory {
                 FixtureRunService(runs: [.loadedDetail])
             case .refresh:
                 FixtureRunService(runs: [.loadedDetail, .refreshedDetail])
+            case .failed:
+                FixtureRunService(runs: [.failedDetail])
+            case .canceled:
+                FixtureRunService(runs: [.canceledDetail])
+            case .completed:
+                FixtureRunService(runs: [.completedDetail])
+            case .reviewable:
+                FixtureRunService(runs: [.reviewableDetail])
             case .unavailable, .none:
                 UnavailableRunService()
             }
@@ -109,15 +117,27 @@ private actor FixtureRunService: RunServing {
 }
 
 private extension DurableRun {
-    static let loadedDetail = fixture(stage: .pricing)
-    static let refreshedDetail = fixture(stage: .generating)
+    static let loadedDetail = fixture(status: .running, stage: .pricing)
+    static let refreshedDetail = fixture(status: .running, stage: .generating)
+    static let failedDetail = fixture(status: .failed, stage: .pricing)
+    static let canceledDetail = fixture(status: .canceled, stage: .generating)
+    static let completedDetail = fixture(status: .succeeded, stage: .completed)
+    static let reviewableDetail = fixture(
+        status: .succeeded,
+        stage: .completed,
+        canOpenReview: true
+    )
 
-    static func fixture(stage: DurableRunStage) -> DurableRun {
+    static func fixture(
+        status: DurableRunStatus,
+        stage: DurableRunStage,
+        canOpenReview: Bool = false
+    ) -> DurableRun {
         DurableRun(
             id: UUID(uuidString: "20800000-0000-4000-8000-000000000020")!,
             itemID: UUID(uuidString: "20800000-0000-4000-8000-000000000021")!,
             listingID: nil,
-            status: .running,
+            status: status,
             stage: stage,
             attemptCount: 1,
             maxAttempts: 3,
@@ -140,7 +160,7 @@ private extension DurableRun {
             legalActions: RunActionTruth(
                 canRetry: false,
                 canCancel: false,
-                canOpenReview: false,
+                canOpenReview: canOpenReview,
                 canStartNewCapture: false
             ),
             lastMeaningfulUpdateAt: "2026-07-20T12:01:00.000Z",

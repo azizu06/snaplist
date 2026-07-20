@@ -107,6 +107,10 @@ enum RunDetailFixture: String, Equatable {
     case unavailable
     case loaded
     case refresh
+    case failed
+    case canceled
+    case completed
+    case reviewable
 }
 
 struct LaunchConfiguration: Equatable {

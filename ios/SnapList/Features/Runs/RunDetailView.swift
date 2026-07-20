@@ -55,7 +55,7 @@ struct RunDetailView: View {
     @ViewBuilder
     private func loadedContent(_ run: DurableRun) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Working on your item")
+            Text(run.sellerFacingHeading)
                 .snapListTypography(.metadata)
                 .foregroundStyle(SnapListColorToken.textSecondary.color)
 
@@ -69,7 +69,7 @@ struct RunDetailView: View {
                 .snapListTypography(.status)
                 .foregroundStyle(SnapListColorToken.action.color)
 
-            Text(run.stage.sellerFacingLabel)
+            Text(run.sellerFacingDetail)
                 .snapListTypography(.body)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)
         }
@@ -80,6 +80,30 @@ struct RunDetailView: View {
 
     private var isLoading: Bool {
         store.state == .loading
+    }
+}
+
+private extension DurableRun {
+    var sellerFacingHeading: String {
+        switch status {
+        case .queued, .running, .retrying: "Working on your item"
+        case .succeeded: "Run completed"
+        case .failed: "Run failed"
+        case .canceled: "Run canceled"
+        }
+    }
+
+    var sellerFacingDetail: String {
+        switch status {
+        case .queued, .running, .retrying:
+            stage.sellerFacingActiveLabel
+        case .succeeded:
+            legalActions.canOpenReview ? "Ready to review" : "Review unavailable"
+        case .failed:
+            "Couldn’t finish"
+        case .canceled:
+            "You canceled this run"
+        }
     }
 }
 
@@ -107,14 +131,14 @@ private extension DurableRunStatus {
 }
 
 private extension DurableRunStage {
-    var sellerFacingLabel: String {
+    var sellerFacingActiveLabel: String {
         switch self {
         case .queued: "Waiting to start"
         case .identifying: "Identifying your item"
-        case .pricing: "Finding recent sold comps"
+        case .pricing: "Researching pricing evidence"
         case .generating: "Writing your listing"
         case .persisting: "Saving your listing"
-        case .completed: "Ready to review"
+        case .completed: "Checking run status"
         }
     }
 }

@@ -126,7 +126,7 @@ final class HomeUITests: XCTestCase {
     func testRunDetailRefreshIsAccessibleAndReplacesServerTruth() {
         let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=refresh"])
         app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
-        XCTAssertTrue(app.staticTexts["Finding recent sold comps"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Researching pricing evidence"].waitForExistence(timeout: 3))
 
         let refresh = app.buttons["Refresh"]
         XCTAssertTrue(refresh.exists)
