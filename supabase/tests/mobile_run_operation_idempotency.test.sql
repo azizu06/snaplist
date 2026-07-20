@@ -1,6 +1,22 @@
 begin;
 
-select plan(34);
+select plan(35);
+
+create function pg_temp.explain_mobile_run_replay_count()
+returns jsonb
+language plpgsql
+as $function$
+declare
+  query_plan jsonb;
+begin
+  execute 'explain (analyze, buffers, format json)
+    select count(*)::integer
+    from private.mobile_run_operation_replays replay
+    where replay.run_id = ''24120000-0000-4000-8000-000000000005'''
+    into query_plan;
+  return query_plan;
+end;
+$function$;
 
 select extensions.ok(
   to_regclass('private.mobile_run_operation_replays') is not null,
@@ -116,6 +132,44 @@ select
   'retry',
   '{"mobileRunOperationError":{"code":"55000","message":"The stored retry result must remain durable"}}'::jsonb
 from generate_series(1, 32) receipt_number;
+
+set local enable_seqscan = off;
+select extensions.ok(
+  (
+    with recursive run_led_indexes as (
+      select index_relation.relname as index_name
+      from pg_index index_info
+      join pg_class table_relation
+        on table_relation.oid = index_info.indrelid
+      join pg_namespace table_namespace
+        on table_namespace.oid = table_relation.relnamespace
+      join pg_class index_relation
+        on index_relation.oid = index_info.indexrelid
+      where table_namespace.nspname = 'private'
+        and table_relation.relname = 'mobile_run_operation_replays'
+        and index_info.indisvalid
+        and index_info.indisready
+        and pg_get_indexdef(index_info.indexrelid, 1, true) = 'run_id'
+    ),
+    plan_nodes(node) as (
+      select pg_temp.explain_mobile_run_replay_count()->0->'Plan'
+      union all
+      select child.node
+      from plan_nodes as parent
+      cross join lateral jsonb_array_elements(
+        coalesce(parent.node->'Plans', '[]'::jsonb)
+      ) as child(node)
+    )
+    select exists (
+      select 1
+      from run_led_indexes run_index
+      join plan_nodes
+        on plan_nodes.node->>'Index Name' = run_index.index_name
+    )
+  ),
+  'the verified-run receipt count uses a valid index led by run_id for bounded counts and cascade cleanup'
+);
+reset enable_seqscan;
 
 update public.pipeline_runs
 set status = 'running',
