@@ -257,7 +257,7 @@ export function assembleHomeProjection(rows: HomeProjectionRows): HomeProjection
         id: activeRun.id,
         itemTitle: itemTitles.get(activeRun.item_id) ?? "Your item",
         stageLabel: stagePresentation(activeRun.stage),
-        reassurance: "You can leave — we’ll notify you when it’s ready.",
+        reassurance: "You can leave. We’ll notify you when it’s ready.",
         progress: null,
       }
     : null;
