@@ -539,6 +539,24 @@ struct PricingDraftHandoff: Equatable {
     let costBasis: Decimal?
 }
 
+enum PricingCostBasisInput: Equatable {
+    case clear
+    case value(Decimal)
+    case invalid
+
+    static func parse(_ input: String) -> PricingCostBasisInput {
+        let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return .clear }
+        guard let value = Decimal(
+            string: normalized,
+            locale: Locale(identifier: "en_US_POSIX")
+        ) else {
+            return .invalid
+        }
+        return .value(value)
+    }
+}
+
 @MainActor
 final class PricingRouteDraftState: ObservableObject {
     @Published private(set) var priceOverride: Decimal?

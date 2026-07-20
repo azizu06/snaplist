@@ -1068,37 +1068,43 @@ private struct PricingMoneyEntrySheet: View {
 
     private func save() {
         let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Decimal(
-            string: normalized,
-            locale: Locale(identifier: "en_US_POSIX")
-        ) else {
-            validationMessage = "Enter a valid dollar amount."
-            UIAccessibility.post(
-                notification: .announcement,
-                argument: validationMessage
-            )
-            return
-        }
-
         let didSave: Bool
         switch mode {
         case .manualPrice:
+            guard let value = Decimal(
+                string: normalized,
+                locale: Locale(identifier: "en_US_POSIX")
+            ) else {
+                announceValidation("Enter a valid dollar amount.")
+                return
+            }
             didSave = store.saveManualPrice(value)
         case .costBasis:
-            didSave = store.saveCostBasis(value)
+            switch PricingCostBasisInput.parse(input) {
+            case .clear:
+                didSave = store.saveCostBasis(nil)
+            case .value(let value):
+                didSave = store.saveCostBasis(value)
+            case .invalid:
+                announceValidation("Enter a valid dollar amount.")
+                return
+            }
         }
 
         if didSave {
             dismiss()
         } else {
-            validationMessage = mode == .manualPrice
-                ? "Price must be greater than zero."
-                : "Cost cannot be negative."
-            UIAccessibility.post(
-                notification: .announcement,
-                argument: validationMessage
+            announceValidation(
+                mode == .manualPrice
+                    ? "Price must be greater than zero."
+                    : "Cost cannot be negative."
             )
         }
+    }
+
+    private func announceValidation(_ message: String) {
+        validationMessage = message
+        UIAccessibility.post(notification: .announcement, argument: message)
     }
 }
 
