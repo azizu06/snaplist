@@ -629,7 +629,9 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       p_persistence: incompletePersistence,
       p_run_id: incoherentRun.run_id,
     });
-    expect(incomplete.error?.message).toBe("Pipeline persistence is incoherent");
+    expect(incomplete.error?.message).toBe(
+      "AI-item credit requires one coherent editable draft revision",
+    );
     const { data: stillReserved } = await lifecycleUser.client
       .from("ai_item_credit_reservations")
       .select("state")

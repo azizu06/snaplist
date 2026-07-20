@@ -8,6 +8,7 @@ import {
 import type { ReviewRegenerationCommit } from "./review-regeneration";
 import {
   buildPricingEvidenceSnapshotInput,
+  createSupabasePricingEvidenceReader,
   pricingEvidenceSnapshotInputSchema,
 } from "../pricing-evidence";
 import {
@@ -233,6 +234,90 @@ async function commitCorrection(
   await gateway.complete({ ...commit, capabilityToken: capability.token });
 }
 
+async function buildCompletionRpcCommit(
+  user: ClerkTestUser,
+  commit: ReviewRegenerationCommit,
+): Promise<Record<string, unknown>> {
+  let captured: unknown;
+  const captureClient: GuidedCorrectionCompletionRpcClient = {
+    async rpc(_functionName, args) {
+      captured = args.p_commit;
+      return { data: true, error: null };
+    },
+  };
+  await createSupabaseGuidedCorrectionCompletionGateway(
+    user.client,
+    captureClient,
+  ).complete(commit);
+  if (!captured || typeof captured !== "object" || Array.isArray(captured)) {
+    throw new Error("Guided correction completion commit was not constructed.");
+  }
+  return captured as Record<string, unknown>;
+}
+
+async function correctionState(user: ClerkTestUser, itemIds: string[]) {
+  const [items, listings, predictions, reservations, periods, snapshots] =
+    await Promise.all([
+      user.client
+        .from("items")
+        .select(
+          "id,attributes,condition,identification,price_override,review_revision,review_content_revision",
+        )
+        .in("id", itemIds)
+        .order("id"),
+      user.client
+        .from("listings")
+        .select(
+          "id,item_id,title,description,copy,status,run_id,source_review_revision",
+        )
+        .in("item_id", itemIds)
+        .order("id"),
+      user.client
+        .from("prediction_logs")
+        .select(
+          "id,item_id,run_id,extracted_attrs,price,price_range,confidence,tier_fired,sources",
+        )
+        .in("item_id", itemIds)
+        .order("id"),
+      user.client
+        .from("ai_item_credit_reservations")
+        .select(
+          "id,item_id,state,guided_correction_revision,guided_correction_started_at,guided_correction_completed_at,settled_at,updated_at",
+        )
+        .in("item_id", itemIds)
+        .order("id"),
+      user.client
+        .from("ai_item_allowance_periods")
+        .select("id,source,period_key,state,allowance,updated_at")
+        .order("id"),
+      user.client
+        .from("pricing_evidence_snapshots")
+        .select(
+          "run_id,item_id,prediction_id,listing_id,price_result,evidence,evidence_as_of",
+        )
+        .in("item_id", itemIds)
+        .order("run_id"),
+    ]);
+  for (const response of [
+    items,
+    listings,
+    predictions,
+    reservations,
+    periods,
+    snapshots,
+  ]) {
+    expect(response.error).toBeNull();
+  }
+  return {
+    items: items.data,
+    listings: listings.data,
+    predictions: predictions.data,
+    reservations: reservations.data,
+    periods: periods.data,
+    snapshots: snapshots.data,
+  };
+}
+
 beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
@@ -338,7 +423,7 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(exports ?? []).toHaveLength(0);
   });
 
-  it("accepts strict-reader-valid URL and Unicode evidence at the authenticated correction seam", async () => {
+  it("accepts strict-reader-valid URL, Unicode, and JS whitespace at the authenticated correction seam", async () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "reader-valid-evidence");
     const runId = crypto.randomUUID();
@@ -353,7 +438,8 @@ describe("review identity regeneration transaction + RLS", () => {
       kind: "sold-comp" as const,
     };
     const title = "界".repeat(167);
-    commit.result.identification!.label = title;
+    commit.result.identification!.label = `\u00a0${title}\u00a0`;
+    commit.result.attributes.condition = "\u00a0good\u00a0";
     commit.result.price.sources = [source];
     commit.result.price.evidence = (commit.result.price.evidence ?? []).map(
       (record) => ({ ...record, id: source.url, sourceUrl: source.url }),
@@ -363,17 +449,145 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(
       pricingEvidenceSnapshotInputSchema.safeParse(snapshot).success,
     ).toBe(true);
+    expect(snapshot.item).toEqual({ title, condition: "good" });
 
     await expect(commitCorrection(userA, commit)).resolves.toBeUndefined();
   });
 
-  it("revokes the authenticated raw-snapshot writer", async () => {
+  it("rejects malformed and mismatched capabilities at the real role without mutation", async () => {
     if (!reachable) return;
-    const rawWriter = await userA.client.rpc(
-      "regenerate_review_listing_with_credit_and_evidence",
-      {},
+    const owner = await seedReview(userA, "capability-owner");
+    const sibling = await seedReview(userA, "capability-sibling");
+    const foreign = await seedReview(userB, "capability-foreign");
+    const token = `${crypto.randomUUID().replaceAll("-", "")}A`.padEnd(43, "A");
+    const randomToken = `${crypto.randomUUID().replaceAll("-", "")}B`.padEnd(
+      43,
+      "B",
     );
-    expect(rawWriter.error).not.toBeNull();
+    const runId = crypto.randomUUID();
+    const authorization = await userA.client.rpc(
+      "authorize_ai_item_guided_correction",
+      {
+        p_completion_run_id: runId,
+        p_completion_token: token,
+        p_expires_at: new Date(Date.now() + 4 * 60_000).toISOString(),
+        p_expected_review_revision: owner.reviewRevision,
+        p_expected_run_id: originalRunIds.get(owner.itemId),
+        p_item_id: owner.itemId,
+        p_listing_id: owner.listingId,
+      },
+    );
+    expect(authorization.error).toBeNull();
+
+    const commit = commitFor(
+      owner.itemId,
+      owner.listingId,
+      runId,
+      owner.reviewRevision,
+    );
+    const rpcCommit = await buildCompletionRpcCommit(userA, {
+      ...commit,
+      capabilityToken: token,
+    });
+    const ownerItemIds = [owner.itemId, sibling.itemId];
+    const ownerBefore = await correctionState(userA, ownerItemIds);
+    const foreignBefore = await correctionState(userB, [foreign.itemId]);
+    const pricingReader = createSupabasePricingEvidenceReader(
+      async () => userA.client,
+    );
+    const readNow = Date.now() + 1_000;
+    const priorEvidence = await pricingReader.forItem({
+      userId: userA.id,
+      bearerToken: "test",
+      itemId: owner.itemId,
+      now: readNow,
+    });
+    expect(priorEvidence).toMatchObject({
+      item: { id: owner.itemId },
+      priceResult: { suggested: 100, tier: "llm-only" },
+    });
+
+    const attempts: Array<{
+      name: string;
+      capabilityToken: string;
+      commit: Record<string, unknown>;
+      message: RegExp;
+    }> = [
+      {
+        name: "malformed token",
+        capabilityToken: "short",
+        commit: structuredClone(rpcCommit),
+        message: /invalid guided correction completion/i,
+      },
+      {
+        name: "random token",
+        capabilityToken: randomToken,
+        commit: structuredClone(rpcCommit),
+        message: /capability is unavailable/i,
+      },
+      {
+        name: "cross-tenant item",
+        capabilityToken: token,
+        commit: { ...structuredClone(rpcCommit), item_id: foreign.itemId },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-item",
+        capabilityToken: token,
+        commit: { ...structuredClone(rpcCommit), item_id: sibling.itemId },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-completion-run",
+        capabilityToken: token,
+        commit: { ...structuredClone(rpcCommit), run_id: crypto.randomUUID() },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-prior-run",
+        capabilityToken: token,
+        commit: {
+          ...structuredClone(rpcCommit),
+          expected_run_id: crypto.randomUUID(),
+        },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-revision",
+        capabilityToken: token,
+        commit: {
+          ...structuredClone(rpcCommit),
+          expected_review_revision: crypto.randomUUID(),
+        },
+        message: /capability binding mismatch/i,
+      },
+    ];
+
+    for (const attempt of attempts) {
+      const response = await admin.rpc("complete_guided_review_correction", {
+        p_completion_token: attempt.capabilityToken,
+        p_commit: attempt.commit,
+      });
+      expect({ name: attempt.name, message: response.error?.message }).toEqual({
+        name: attempt.name,
+        message: expect.stringMatching(attempt.message),
+      });
+    }
+
+    await expect(correctionState(userA, ownerItemIds)).resolves.toEqual(
+      ownerBefore,
+    );
+    await expect(correctionState(userB, [foreign.itemId])).resolves.toEqual(
+      foreignBefore,
+    );
+    await expect(
+      pricingReader.forItem({
+        userId: userA.id,
+        bearerToken: "test",
+        itemId: owner.itemId,
+        now: readNow,
+      }),
+    ).resolves.toEqual(priorEvidence);
   });
 
   it("rejects an expired capability without mutating review state", async () => {

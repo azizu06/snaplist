@@ -1,6 +1,6 @@
 begin;
 
-select plan(24);
+select plan(26);
 
 select ok(
   has_table_privilege('authenticated', 'public.pricing_evidence_snapshots', 'select'),
@@ -125,6 +125,20 @@ select ok(
     'execute'
   ),
   'the credit correction seam without evidence is retired'
+);
+select is(
+  to_regprocedure(
+    'public.regenerate_review_listing_with_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)'
+  ),
+  null::regprocedure,
+  'the authenticated raw-snapshot correction writer is absent from the catalog'
+);
+select is(
+  to_regprocedure(
+    'public.regenerate_review_listing_with_credit_and_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)'
+  ),
+  null::regprocedure,
+  'the authenticated raw-snapshot credit writer is absent from the catalog'
 );
 select ok(
   has_function_privilege(

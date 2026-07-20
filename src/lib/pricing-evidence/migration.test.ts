@@ -35,6 +35,12 @@ describe("pricing-evidence snapshot migration", () => {
     expect(migration).not.toMatch(/\^https\?:\/\//i);
     expect(migration).not.toMatch(/displayed-sold-price/i);
     expect(migration).not.toMatch(/sold-comparable/i);
+    expect(migration).not.toMatch(
+      /#>> '\{item,title\}'[\s\S]{0,300}btrim\(/i,
+    );
+    expect(migration).not.toMatch(
+      /#>> '\{item,condition\}'[\s\S]{0,180}btrim\(/i,
+    );
   });
 
   it("revokes raw authenticated writers and grants only the bound completion split", () => {

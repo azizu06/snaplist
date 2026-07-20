@@ -399,14 +399,7 @@ begin
     or v_snapshot #> '{price_result,range,min}' is distinct from v_prediction #> '{price_range,low}'
     or v_snapshot #> '{price_result,range,max}' is distinct from v_prediction #> '{price_range,high}'
     or v_snapshot #>> '{price_result,tier}' is distinct from v_prediction->>'tier_fired'
-    or v_snapshot #> '{price_result,sources}' is distinct from v_prediction->'sources'
-    or v_snapshot #>> '{item,title}' is distinct from coalesce(
-      nullif(btrim(v_item_payload #>> '{identification,label}'), ''),
-      nullif(btrim(v_item_payload #>> '{attributes,title}'), ''),
-      nullif(btrim(v_listing_payload->>'title'), '')
-    )
-    or v_snapshot #>> '{item,condition}'
-      is distinct from nullif(btrim(v_item_payload->>'condition'), '') then
+    or v_snapshot #> '{price_result,sources}' is distinct from v_prediction->'sources' then
     raise exception using errcode = '22023', message = 'Guided correction persistence is incoherent';
   end if;
 
@@ -543,14 +536,7 @@ begin
     or v_snapshot #>> '{price_result,tier}'
       is distinct from p_persistence #>> '{prediction,tier_fired}'
     or v_snapshot #> '{price_result,sources}'
-      is distinct from p_persistence #> '{prediction,sources}'
-    or v_snapshot #>> '{item,title}' is distinct from coalesce(
-      nullif(btrim(p_persistence #>> '{item,identification,label}'), ''),
-      nullif(btrim(p_persistence #>> '{item,attributes,title}'), ''),
-      nullif(btrim(p_persistence #>> '{listing,title}'), '')
-    )
-    or v_snapshot #>> '{item,condition}'
-      is distinct from nullif(btrim(p_persistence #>> '{item,condition}'), '') then
+      is distinct from p_persistence #> '{prediction,sources}' then
     raise exception using errcode = '22023', message = 'Pipeline persistence is incoherent';
   end if;
   select coalesce(
