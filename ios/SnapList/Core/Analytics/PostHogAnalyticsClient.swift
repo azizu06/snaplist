@@ -15,7 +15,8 @@ struct AnalyticsPostHogConfiguration: Equatable, Sendable {
         maxQueueSize: Int = 64
     ) {
         let tokenPattern = #"^[A-Za-z0-9_-]{1,256}$"#
-        guard projectToken.range(of: tokenPattern, options: .regularExpression) != nil,
+        guard metadata.isCanonical,
+              projectToken.range(of: tokenPattern, options: .regularExpression) != nil,
               host.scheme == "https",
               host.host != nil,
               host.path.isEmpty || host.path == "/",
