@@ -17,8 +17,10 @@ const environmentKeys = [
   "CLERK_SECRET_KEY",
   "CLERK_AUTHORIZED_PARTIES",
   "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_SECRET_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
 
 beforeEach(() => {
@@ -94,6 +96,36 @@ describe("production mobile item submission route", () => {
     }));
     await expect(response.json()).resolves.toMatchObject({
       data: { runId: "33430000-0000-4000-8000-000000000003" },
+    });
+  });
+
+  it("accepts the documented Supabase env names when they contain current keys", async () => {
+    delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    delete process.env.SUPABASE_SECRET_KEY;
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_documented";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_documented";
+    const body = new FormData();
+    body.append(
+      "photo",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], "item.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+
+    const response = await POST(new Request("https://snaplist.example/v1/items/runs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer signed-release-jwt",
+        "idempotency-key": "33430000-0000-4000-8000-000000000001",
+      },
+      body,
+    }));
+
+    expect(response.status).toBe(202);
+    expect(createConfiguredMobileItemSubmissionOperations).toHaveBeenCalledWith({
+      supabaseURL: "https://project.supabase.co",
+      publishableKey: "sb_publishable_documented",
+      secretKey: "sb_secret_documented",
     });
   });
 });

@@ -42,4 +42,10 @@ describe("mobile item submission migration", () => {
       /grant\s+(?:select|insert|update|delete|all)[\s\S]*private\.mobile_item_submissions/i,
     );
   });
+
+  it("renews exact pending cleanup protection before replay can upload", () => {
+    expect(migration).toMatch(
+      /if v_submission\.state = 'uploading' then[\s\S]*record_pipeline_staging_cleanup_intent[\s\S]*update private\.pipeline_staging_cleanup_intents[\s\S]*cleanup_after[\s\S]*interval '24 hours'[\s\S]*return false/i,
+    );
+  });
 });

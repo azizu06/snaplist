@@ -240,6 +240,23 @@ begin
       perform public.record_pipeline_staging_cleanup_intent(
         p_cleanup_id, p_user_id, p_batch_id, v_photo_paths
       );
+      -- The recorder locks and validates the exact existing intent. Renew it in
+      -- this same transaction before returning control to Storage so retention
+      -- cannot claim a stale replay intent between begin and commit.
+      update private.pipeline_staging_cleanup_intents intent
+      set cleanup_after = greatest(
+        intent.cleanup_after,
+        statement_timestamp() + interval '24 hours'
+      )
+      where intent.cleanup_id = p_cleanup_id
+        and intent.user_id = p_user_id
+        and intent.batch_id = p_batch_id
+        and intent.photo_paths is not distinct from v_photo_paths;
+      if not found then
+        raise exception using
+          errcode = '55000',
+          message = 'Durable mobile photo cleanup renewal is required';
+      end if;
     end if;
     return false;
   end if;

@@ -1,6 +1,6 @@
 begin;
 
-select plan(18);
+select plan(23);
 
 select has_table(
   'private', 'mobile_item_submissions',
@@ -111,6 +111,91 @@ select ok(
     'service_role', 'private.mobile_item_submissions', 'select'
   ),
   'the service role has no generic submission-ledger access'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"role":"service_role","sub":"mobile-submission-round-3"}',
+  true
+);
+
+select lives_ok(
+  $$
+    select public.begin_mobile_item_submission(
+      'user_test_mobile_submission_round_3',
+      '33460000-0000-4000-8000-000000000001'::uuid,
+      repeat('d', 64),
+      '33460000-0000-4000-8000-000000000001'::uuid,
+      '33460000-0000-4000-8000-000000000002'::uuid,
+      null,
+      jsonb_build_array(jsonb_build_object(
+        'ordinal', 0,
+        'storage_path',
+          'user_test_mobile_submission_round_3/pipeline-staging/'
+          || '33460000-0000-4000-8000-000000000001/0/'
+          || repeat('c', 64) || '.jpg',
+        'content_sha256', repeat('c', 64),
+        'byte_length', 4,
+        'media_type', 'image/jpeg'
+      ))
+    )
+  $$,
+  'the first request durably binds an uploading submission and cleanup intent'
+);
+
+update private.pipeline_staging_cleanup_intents intent
+set created_at = statement_timestamp() - interval '25 hours',
+    cleanup_after = statement_timestamp() - interval '1 hour'
+where intent.cleanup_id = '33460000-0000-4000-8000-000000000002'::uuid;
+
+select lives_ok(
+  $$
+    select public.begin_mobile_item_submission(
+      'user_test_mobile_submission_round_3',
+      '33460000-0000-4000-8000-000000000001'::uuid,
+      repeat('d', 64),
+      '33460000-0000-4000-8000-000000000001'::uuid,
+      '33460000-0000-4000-8000-000000000002'::uuid,
+      null,
+      jsonb_build_array(jsonb_build_object(
+        'ordinal', 0,
+        'storage_path',
+          'user_test_mobile_submission_round_3/pipeline-staging/'
+          || '33460000-0000-4000-8000-000000000001/0/'
+          || repeat('c', 64) || '.jpg',
+        'content_sha256', repeat('c', 64),
+        'byte_length', 4,
+        'media_type', 'image/jpeg'
+      ))
+    )
+  $$,
+  'exact pending replay renews the expired cleanup intent atomically'
+);
+
+select cmp_ok(
+  (
+    select intent.cleanup_after
+    from private.pipeline_staging_cleanup_intents intent
+    where intent.cleanup_id = '33460000-0000-4000-8000-000000000002'::uuid
+  ),
+  '>',
+  statement_timestamp() + interval '23 hours',
+  'pending replay protects the exact paths for a fresh retention window'
+);
+
+select is(
+  (public.prepare_pipeline_retention(25)->>'storageJobsQueued')::integer,
+  0,
+  'retention cannot queue replay paths for deletion after renewal'
+);
+
+select ok(
+  exists (
+    select 1
+    from private.pipeline_staging_cleanup_intents intent
+    where intent.cleanup_id = '33460000-0000-4000-8000-000000000002'::uuid
+  ),
+  'the renewed cleanup intent remains durable until submission commit'
 );
 
 select * from finish();
