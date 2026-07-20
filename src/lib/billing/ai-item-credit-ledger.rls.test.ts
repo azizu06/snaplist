@@ -15,6 +15,10 @@ import {
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
 import { createSupabasePricingEvidenceReader } from "@/lib/pricing-evidence";
+import {
+  createSupabaseGuidedCorrectionCompletionGateway,
+  type GuidedCorrectionCompletionRpcClient,
+} from "@/lib/pipeline/guided-correction-completion";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -625,7 +629,9 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       p_persistence: incompletePersistence,
       p_run_id: incoherentRun.run_id,
     });
-    expect(incomplete.error?.message).toMatch(/coherent editable draft revision/i);
+    expect(incomplete.error?.message).toBe(
+      "AI-item credit requires one coherent editable draft revision",
+    );
     const { data: stillReserved } = await lifecycleUser.client
       .from("ai_item_credit_reservations")
       .select("state")
@@ -641,22 +647,22 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       safeFailureMessage: "The generated listing did not pass validation.",
     });
 
-    const firstAuthorization = await lifecycleUser.client.rpc(
-      "authorize_ai_item_guided_correction",
-      {
-        p_item_id: settledRun.item_id,
-        p_expected_review_revision: settled?.settled_review_revision,
-      },
+    const guidedCorrection = createSupabaseGuidedCorrectionCompletionGateway(
+      lifecycleUser.client,
+      admin as unknown as GuidedCorrectionCompletionRpcClient,
     );
-    expect(firstAuthorization).toMatchObject({ data: true, error: null });
-    const repeatedAuthorization = await lifecycleUser.client.rpc(
-      "authorize_ai_item_guided_correction",
-      {
-        p_item_id: settledRun.item_id,
-        p_expected_review_revision: settled?.settled_review_revision,
-      },
-    );
-    expect(repeatedAuthorization).toMatchObject({ data: false, error: null });
+    const firstCorrectionRunId = crypto.randomUUID();
+    const firstAuthorization = await guidedCorrection.authorize({
+      itemId: settledRun.item_id,
+      listingId: completion.listingId,
+      runId: firstCorrectionRunId,
+      expectedRunId: settledRun.run_id,
+      expectedReviewRevision: settled?.settled_review_revision as string,
+    });
+    expect(firstAuthorization).toMatchObject({
+      token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      expiresAt: expect.any(String),
+    });
 
     const editedRevision = crypto.randomUUID();
     const editAfterAuthorization = await lifecycleUser.client.rpc("save_review_edits", {
@@ -672,59 +678,69 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       p_listing_description: "The seller changed the review before model work committed.",
     });
     expect(editAfterAuthorization.error).toBeNull();
-    const reboundAuthorization = await lifecycleUser.client.rpc(
-      "authorize_ai_item_guided_correction",
-      {
-        p_item_id: settledRun.item_id,
-        p_expected_review_revision: editedRevision,
-      },
-    );
-    expect(reboundAuthorization).toMatchObject({ data: true, error: null });
-
     const correctedRunId = crypto.randomUUID();
-    const correction = await lifecycleUser.client.rpc(
-      "regenerate_review_listing_with_credit_and_evidence",
-      {
-        p_item_id: settledRun.item_id,
-        p_listing_id: completion.listingId,
-        p_run_id: correctedRunId,
-        p_expected_run_id: settledRun.run_id,
-        p_expected_review_revision: editedRevision,
-        p_attributes: { ...RESULT.attributes, model: "WH-1000XM5" },
-        p_condition: "good",
-        p_identification: {
-          label: "Sony WH-1000XM5",
-          confident: true,
-          evidence: 2,
-        },
-        p_listing_title: "Sony WH-1000XM5 Headphones",
-        p_listing_description: "Corrected model in good used condition.",
-        p_listing_copy: RESULT.listing.fields,
-        p_price: 199,
-        p_price_range: { low: 180, high: 220 },
-        p_confidence: 0.85,
-        p_tier_fired: "llm-only",
-        p_model: "offline-vision",
-        p_listing_model: "offline-listing",
-        p_pricing_model: null,
-        p_sources: [],
-        p_autopilot_enabled: false,
-        p_autopilot_eligible: true,
-        p_pricing_snapshot: {
-          schema_version: 1,
-          item: { title: "Sony WH-1000XM5", condition: "good" },
-          price_result: {
-            suggested: 199,
-            range: { min: 180, max: 220 },
-            confidence: 0.85,
-            sources: [],
-            tier: "llm-only",
-          },
-          evidence: [],
-        },
+    const reboundAuthorization = await guidedCorrection.authorize({
+      itemId: settledRun.item_id,
+      listingId: completion.listingId,
+      runId: correctedRunId,
+      expectedRunId: settledRun.run_id,
+      expectedReviewRevision: editedRevision,
+    });
+    await expect(
+      guidedCorrection.complete({
+        capabilityToken: firstAuthorization.token,
+        itemId: settledRun.item_id,
+        listingId: completion.listingId,
+        runId: firstCorrectionRunId,
+        expectedRunId: settledRun.run_id,
+        expectedReviewRevision: settled?.settled_review_revision as string,
+        result: RESULT,
+      }),
+    ).rejects.toThrow(/capability is unavailable/i);
+    const correctedResult: PipelineResult = {
+      ...RESULT,
+      attributes: { ...RESULT.attributes, model: "WH-1000XM5" },
+      identification: {
+        label: "Sony WH-1000XM5",
+        confident: true,
+        evidence: 1,
       },
-    );
-    expect(correction.error).toBeNull();
+      price: {
+        suggested: 199,
+        range: { min: 180, max: 220 },
+        confidence: 0.85,
+        sources: [],
+        tier: "llm-only",
+      },
+      confidence: { score: 0.85, band: "high", autopilotEligible: false },
+      listing: {
+        ...RESULT.listing,
+        title: "Sony WH-1000XM5 Headphones",
+        description: "Corrected model in good used condition.",
+      },
+    };
+    await expect(
+      guidedCorrection.complete({
+        capabilityToken: reboundAuthorization.token,
+        itemId: settledRun.item_id,
+        listingId: completion.listingId,
+        runId: correctedRunId,
+        expectedRunId: settledRun.run_id,
+        expectedReviewRevision: editedRevision,
+        result: correctedResult,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      guidedCorrection.complete({
+        capabilityToken: reboundAuthorization.token,
+        itemId: settledRun.item_id,
+        listingId: completion.listingId,
+        runId: correctedRunId,
+        expectedRunId: settledRun.run_id,
+        expectedReviewRevision: editedRevision,
+        result: correctedResult,
+      }),
+    ).rejects.toThrow(/capability is unavailable/i);
     const { data: correctedReservation } = await lifecycleUser.client
       .from("ai_item_credit_reservations")
       .select("state, guided_correction_revision, guided_correction_completed_at")
@@ -749,13 +765,14 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
       comparables: [],
       evidenceLevel: "limited",
     });
-    const secondCorrection = await lifecycleUser.client.rpc(
-      "authorize_ai_item_guided_correction",
-      {
-        p_item_id: settledRun.item_id,
-        p_expected_review_revision: correctedRunId,
-      },
-    );
-    expect(secondCorrection.error?.message).toMatch(/guided correction is unavailable/i);
+    await expect(
+      guidedCorrection.authorize({
+        itemId: settledRun.item_id,
+        listingId: completion.listingId,
+        runId: crypto.randomUUID(),
+        expectedRunId: correctedRunId,
+        expectedReviewRevision: correctedRunId,
+      }),
+    ).rejects.toThrow(/guided correction is unavailable/i);
   }, 20_000);
 });

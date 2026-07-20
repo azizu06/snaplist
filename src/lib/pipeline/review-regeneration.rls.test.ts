@@ -5,10 +5,22 @@ import {
   provisionClerkTestUser,
   type ClerkTestUser,
 } from "../supabase/test-users";
+import type { ReviewRegenerationCommit } from "./review-regeneration";
 import {
-  createSupabaseReviewRegenerationStore,
-  type ReviewRegenerationCommit,
-} from "./review-regeneration";
+  buildPricingEvidenceSnapshotInput,
+  createSupabasePricingEvidenceReader,
+  pricingEvidenceSnapshotInputSchema,
+} from "../pricing-evidence";
+import {
+  createSupabaseGuidedCorrectionCompletionGateway,
+  type GuidedCorrectionCompletionRpcClient,
+} from "./guided-correction-completion";
+import {
+  createSupabasePipelineWorkerStore,
+  type PipelineAttemptAcquisition,
+  type PipelineWorkerRpcClient,
+} from "../pipeline-queue/worker-store";
+import type { PipelineResult } from "./types";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -22,6 +34,8 @@ let reachable = false;
 let admin: SupabaseClient;
 let userA: ClerkTestUser;
 let userB: ClerkTestUser;
+const queueMessageIds = new Set<string>();
+const originalRunIds = new Map<string, string>();
 
 async function stackReachable(): Promise<boolean> {
   if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
@@ -37,38 +51,105 @@ async function stackReachable(): Promise<boolean> {
 }
 
 async function seedReview(user: ClerkTestUser, label: string) {
-  const { data: item, error: itemError } = await user.client
-    .from("items")
-    .insert({
-      user_id: user.id,
-      attributes: { brand: `Old ${label}`, category: "electronics", condition: "fair" },
-      condition: "fair",
-      price_override: 222,
-    })
-    .select("id, review_revision")
-    .single();
-  if (itemError || !item) throw new Error(itemError?.message ?? "item seed failed");
-
-  const { data: listing, error: listingError } = await user.client
-    .from("listings")
-    .insert({
-      user_id: user.id,
-      item_id: item.id,
+  const batchId = crypto.randomUUID();
+  const staged = await admin.rpc("stage_pipeline_batch", {
+    p_batch_id: batchId,
+    p_daily_limit: 1_000,
+    p_entries: [{
+      idempotency_key: `review-${batchId}`,
+      source: "single",
+      autopilot_enabled: false,
+      photo_paths: [`${user.id}/review/${batchId}/front.jpg`],
+      cost_basis: null,
+    }],
+    p_per_minute_limit: 1_000,
+    p_user_id: user.id,
+  });
+  if (staged.error) throw new Error(staged.error.message);
+  const row = (staged.data as Array<{
+    item_id: string;
+    run_id: string;
+    queue_message_id: string | number;
+  }>)[0];
+  queueMessageIds.add(String(row.queue_message_id));
+  const worker = createSupabasePipelineWorkerStore(
+    admin as unknown as PipelineWorkerRpcClient,
+  );
+  const acquisition = await worker.acquire({
+    runId: row.run_id,
+    messageId: String(row.queue_message_id),
+    leaseSeconds: 60,
+  });
+  expect(acquisition.kind).toBe("acquired");
+  const attempt = acquisition as Extract<
+    PipelineAttemptAcquisition,
+    { kind: "acquired" }
+  >;
+  const result: PipelineResult = {
+    attributes: { brand: `Old ${label}`, category: "electronics", condition: "fair" },
+    identification: { label: `Old ${label}`, confident: true, evidence: 1 },
+    price: {
+      suggested: 100,
+      range: { min: 80, max: 120 },
+      confidence: 0.7,
+      sources: [],
+      tier: "llm-only",
+    },
+    confidence: { score: 0.7, band: "medium", autopilotEligible: false },
+    listing: {
       platform: "ebay",
       title: `Old ${label} listing`,
       description: "Old coherent copy",
-      copy: {},
-      status: "draft",
-    })
-    .select("id")
+      fields: {},
+    },
+    model: "test-vision",
+    listingModel: "test-listing",
+  };
+  await worker.checkpoint({
+    runId: row.run_id,
+    leaseToken: attempt.context.run.lease_token,
+    stage: "generating",
+    checkpoint: {
+      identified: {
+        attributes: result.attributes,
+        identification: result.identification,
+        model: result.model,
+      },
+      priced: result.price,
+      generated: { copy: result.listing, model: result.listingModel! },
+    },
+    leaseSeconds: 60,
+  });
+  const completion = await worker.complete({
+    runId: row.run_id,
+    leaseToken: attempt.context.run.lease_token,
+    result,
+    autopilotEnabled: false,
+  });
+  const { data: item } = await user.client
+    .from("items")
+    .select("review_revision")
+    .eq("id", row.item_id)
     .single();
-  if (listingError || !listing) {
-    throw new Error(listingError?.message ?? "listing seed failed");
-  }
+  const reviewRevision = crypto.randomUUID();
+  const edit = await user.client.rpc("save_review_edits", {
+    p_item_id: row.item_id,
+    p_listing_id: completion.listingId,
+    p_expected_review_revision: item?.review_revision,
+    p_new_review_revision: reviewRevision,
+    p_attributes: result.attributes,
+    p_condition: "fair",
+    p_price_override: 222,
+    p_cost_basis: null,
+    p_listing_title: `Old ${label} listing`,
+    p_listing_description: "Old coherent copy",
+  });
+  if (edit.error) throw new Error(edit.error.message);
+  originalRunIds.set(row.item_id, row.run_id);
   return {
-    itemId: item.id as string,
-    listingId: listing.id as string,
-    reviewRevision: item.review_revision as string,
+    itemId: row.item_id,
+    listingId: completion.listingId,
+    reviewRevision,
   };
 }
 
@@ -77,7 +158,7 @@ function commitFor(
   listingId: string,
   runId: string,
   expectedReviewRevision: string,
-  expectedRunId: string | null = null,
+  expectedRunId: string | null = originalRunIds.get(itemId) ?? null,
 ): ReviewRegenerationCommit {
   const attributes = {
     brand: "Sony",
@@ -89,52 +170,32 @@ function commitFor(
     title: "Sony WH-1000XM4",
   };
   return {
+    capabilityToken: "A".repeat(43),
     itemId,
     listingId,
     runId,
     expectedRunId,
     expectedReviewRevision,
-    attributes,
-    condition: "good",
-    identification: {
-      label: "Sony WH-1000XM4",
-      confident: true,
-      evidence: 1,
-    },
-    listing: {
-      platform: "ebay",
-      title: "Sony WH-1000XM4 Wireless Headphones",
-      description: "Corrected coherent copy",
-      fields: { itemSpecifics: { Brand: "Sony", Model: "WH-1000XM4" } },
-    },
-    prediction: {
-      user_id: "",
-      item_id: itemId,
-      run_id: runId,
-      extracted_attrs: attributes,
-      price: 165,
-      price_range: { low: 145, high: 185 },
-      confidence: 0.85,
-      tier_fired: "ebay-sold",
-      model: "vision-model",
-      listing_model: "listing-model",
-      pricing_model: null,
-      sources: [{ url: "https://www.ebay.com/itm/1", kind: "sold-comp" }],
-      autopilot_enabled: false,
-      autopilot_eligible: false,
-    },
-    pricingSnapshot: {
-      schema_version: 1,
-      item: { title: "Sony WH-1000XM4", condition: "good" },
-      price_result: {
+    result: {
+      attributes,
+      identification: {
+        label: "Sony WH-1000XM4",
+        confident: true,
+        evidence: 1,
+      },
+      listing: {
+        platform: "ebay",
+        title: "Sony WH-1000XM4 Wireless Headphones",
+        description: "Corrected coherent copy",
+        fields: { itemSpecifics: { Brand: "Sony", Model: "WH-1000XM4" } },
+      },
+      price: {
         suggested: 165,
         range: { min: 145, max: 185 },
         confidence: 0.85,
         sources: [{ url: "https://www.ebay.com/itm/1", kind: "sold-comp" }],
         tier: "ebay-sold",
-      },
-      evidence: [
-        {
+        evidence: [{
           id: "https://www.ebay.com/itm/1",
           sourceUrl: "https://www.ebay.com/itm/1",
           price: 165,
@@ -142,9 +203,118 @@ function commitFor(
           condition: "good",
           kind: "sold-comparable",
           priceDisclosure: "displayed-sold-price",
-        },
-      ],
+        }],
+      },
+      confidence: { score: 0.85, band: "high", autopilotEligible: false },
+      model: "vision-model",
+      listingModel: "listing-model",
     },
+  };
+}
+
+function guidedGateway(user: ClerkTestUser) {
+  return createSupabaseGuidedCorrectionCompletionGateway(
+    user.client,
+    admin as unknown as GuidedCorrectionCompletionRpcClient,
+  );
+}
+
+async function commitCorrection(
+  user: ClerkTestUser,
+  commit: ReviewRegenerationCommit,
+): Promise<void> {
+  const gateway = guidedGateway(user);
+  const capability = await gateway.authorize({
+    itemId: commit.itemId,
+    listingId: commit.listingId,
+    runId: commit.runId,
+    expectedRunId: commit.expectedRunId,
+    expectedReviewRevision: commit.expectedReviewRevision,
+  });
+  await gateway.complete({ ...commit, capabilityToken: capability.token });
+}
+
+async function buildCompletionRpcCommit(
+  user: ClerkTestUser,
+  commit: ReviewRegenerationCommit,
+): Promise<Record<string, unknown>> {
+  let captured: unknown;
+  const captureClient: GuidedCorrectionCompletionRpcClient = {
+    async rpc(_functionName, args) {
+      captured = args.p_commit;
+      return { data: true, error: null };
+    },
+  };
+  await createSupabaseGuidedCorrectionCompletionGateway(
+    user.client,
+    captureClient,
+  ).complete(commit);
+  if (!captured || typeof captured !== "object" || Array.isArray(captured)) {
+    throw new Error("Guided correction completion commit was not constructed.");
+  }
+  return captured as Record<string, unknown>;
+}
+
+async function correctionState(user: ClerkTestUser, itemIds: string[]) {
+  const [items, listings, predictions, reservations, periods, snapshots] =
+    await Promise.all([
+      user.client
+        .from("items")
+        .select(
+          "id,attributes,condition,identification,price_override,review_revision,review_content_revision",
+        )
+        .in("id", itemIds)
+        .order("id"),
+      user.client
+        .from("listings")
+        .select(
+          "id,item_id,title,description,copy,status,run_id,source_review_revision",
+        )
+        .in("item_id", itemIds)
+        .order("id"),
+      user.client
+        .from("prediction_logs")
+        .select(
+          "id,item_id,run_id,extracted_attrs,price,price_range,confidence,tier_fired,sources",
+        )
+        .in("item_id", itemIds)
+        .order("id"),
+      user.client
+        .from("ai_item_credit_reservations")
+        .select(
+          "id,item_id,state,guided_correction_revision,guided_correction_started_at,guided_correction_completed_at,settled_at,updated_at",
+        )
+        .in("item_id", itemIds)
+        .order("id"),
+      user.client
+        .from("ai_item_allowance_periods")
+        .select("id,source,period_key,state,allowance,updated_at")
+        .order("id"),
+      user.client
+        .from("pricing_evidence_snapshots")
+        .select(
+          "run_id,item_id,prediction_id,listing_id,price_result,evidence,evidence_as_of",
+        )
+        .in("item_id", itemIds)
+        .order("run_id"),
+    ]);
+  for (const response of [
+    items,
+    listings,
+    predictions,
+    reservations,
+    periods,
+    snapshots,
+  ]) {
+    expect(response.error).toBeNull();
+  }
+  return {
+    items: items.data,
+    listings: listings.data,
+    predictions: predictions.data,
+    reservations: reservations.data,
+    periods: periods.data,
+    snapshots: snapshots.data,
   };
 }
 
@@ -158,10 +328,31 @@ beforeAll(async () => {
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "review_regen_a"),
     provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "review_regen_b"),
   ]);
+  const now = Date.now();
+  for (const user of [userA, userB]) {
+    const period = await admin.rpc("record_verified_storekit_ai_item_period", {
+      p_allowance: 100,
+      p_event_created_at: new Date(now).toISOString(),
+      p_event_id: crypto.randomUUID(),
+      p_expires_date: new Date(now + 30 * 24 * 60 * 60 * 1_000).toISOString(),
+      p_grace_expires_date: null,
+      p_original_transaction_id: `review-${user.id}`,
+      p_period_key: `review-${crypto.randomUUID()}`,
+      p_period_start: new Date(now - 60_000).toISOString(),
+      p_state: "active",
+      p_user_id: user.id,
+    });
+    if (period.error) throw new Error(period.error.message);
+  }
 });
 
 afterAll(async () => {
   if (!reachable) return;
+  await Promise.all(
+    [...queueMessageIds].map((messageId) =>
+      admin.rpc("ack_pipeline_message", { p_message_id: messageId }),
+    ),
+  );
   await cleanupClerkTestUsers(admin, [userA.id, userB.id]);
 });
 
@@ -189,7 +380,8 @@ describe("review identity regeneration transaction + RLS", () => {
     });
     expect(exportSeedError).toBeNull();
     const runId = crypto.randomUUID();
-    await createSupabaseReviewRegenerationStore(userA.client).commit(
+    await commitCorrection(
+      userA,
       commitFor(seeded.itemId, seeded.listingId, runId, seeded.reviewRevision),
     );
 
@@ -231,7 +423,256 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(exports ?? []).toHaveLength(0);
   });
 
-  it("rejects pricing evidence that diverges from the corrected prediction and rolls back", async () => {
+  it("accepts strict-reader-valid URL, Unicode, and JS whitespace at the authenticated correction seam", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "reader-valid-evidence");
+    const runId = crypto.randomUUID();
+    const commit = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      runId,
+      seeded.reviewRevision,
+    );
+    const source = {
+      url: "HTTPS://example.com:443/valid",
+      kind: "sold-comp" as const,
+    };
+    const title = "界".repeat(167);
+    commit.result.identification!.label = `\u00a0${title}\u00a0`;
+    commit.result.attributes.condition = "\u00a0good\u00a0";
+    commit.result.price.sources = [source];
+    commit.result.price.evidence = (commit.result.price.evidence ?? []).map(
+      (record) => ({ ...record, id: source.url, sourceUrl: source.url }),
+    );
+    const snapshot = buildPricingEvidenceSnapshotInput(commit.result);
+
+    expect(
+      pricingEvidenceSnapshotInputSchema.safeParse(snapshot).success,
+    ).toBe(true);
+    expect(snapshot.item).toEqual({ title, condition: "good" });
+
+    await expect(commitCorrection(userA, commit)).resolves.toBeUndefined();
+
+    const pricingReader = createSupabasePricingEvidenceReader(
+      async () => userA.client,
+    );
+    await expect(
+      pricingReader.forItem({
+        userId: userA.id,
+        bearerToken: "test",
+        itemId: seeded.itemId,
+        now: Date.now() + 1_000,
+      }),
+    ).resolves.toMatchObject({
+      item: { id: seeded.itemId, title, condition: "good" },
+      priceResult: { suggested: 165, sources: [source] },
+      comparables: [expect.objectContaining({ sourceUrl: source.url })],
+    });
+  });
+
+  it("rejects malformed and mismatched capabilities at the real role without mutation", async () => {
+    if (!reachable) return;
+    const owner = await seedReview(userA, "capability-owner");
+    const sibling = await seedReview(userA, "capability-sibling");
+    const foreign = await seedReview(userB, "capability-foreign");
+    const token = `${crypto.randomUUID().replaceAll("-", "")}A`.padEnd(43, "A");
+    const randomToken = `${crypto.randomUUID().replaceAll("-", "")}B`.padEnd(
+      43,
+      "B",
+    );
+    const runId = crypto.randomUUID();
+    const authorization = await userA.client.rpc(
+      "authorize_ai_item_guided_correction",
+      {
+        p_completion_run_id: runId,
+        p_completion_token: token,
+        p_expires_at: new Date(Date.now() + 4 * 60_000).toISOString(),
+        p_expected_review_revision: owner.reviewRevision,
+        p_expected_run_id: originalRunIds.get(owner.itemId),
+        p_item_id: owner.itemId,
+        p_listing_id: owner.listingId,
+      },
+    );
+    expect(authorization.error).toBeNull();
+
+    const commit = commitFor(
+      owner.itemId,
+      owner.listingId,
+      runId,
+      owner.reviewRevision,
+    );
+    const rpcCommit = await buildCompletionRpcCommit(userA, {
+      ...commit,
+      capabilityToken: token,
+    });
+    const ownerItemIds = [owner.itemId, sibling.itemId];
+    const ownerBefore = await correctionState(userA, ownerItemIds);
+    const foreignBefore = await correctionState(userB, [foreign.itemId]);
+    const pricingReader = createSupabasePricingEvidenceReader(
+      async () => userA.client,
+    );
+    const readNow = Date.now() + 1_000;
+    const priorEvidence = await pricingReader.forItem({
+      userId: userA.id,
+      bearerToken: "test",
+      itemId: owner.itemId,
+      now: readNow,
+    });
+    expect(priorEvidence).toMatchObject({
+      item: { id: owner.itemId },
+      priceResult: { suggested: 100, tier: "llm-only" },
+    });
+
+    const attempts: Array<{
+      name: string;
+      capabilityToken: string;
+      commit: Record<string, unknown>;
+      message: RegExp;
+    }> = [
+      {
+        name: "malformed token",
+        capabilityToken: "short",
+        commit: structuredClone(rpcCommit),
+        message: /invalid guided correction completion/i,
+      },
+      {
+        name: "random token",
+        capabilityToken: randomToken,
+        commit: structuredClone(rpcCommit),
+        message: /capability is unavailable/i,
+      },
+      {
+        name: "cross-tenant item",
+        capabilityToken: token,
+        commit: { ...structuredClone(rpcCommit), item_id: foreign.itemId },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-item",
+        capabilityToken: token,
+        commit: { ...structuredClone(rpcCommit), item_id: sibling.itemId },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-completion-run",
+        capabilityToken: token,
+        commit: { ...structuredClone(rpcCommit), run_id: crypto.randomUUID() },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-prior-run",
+        capabilityToken: token,
+        commit: {
+          ...structuredClone(rpcCommit),
+          expected_run_id: crypto.randomUUID(),
+        },
+        message: /capability binding mismatch/i,
+      },
+      {
+        name: "cross-revision",
+        capabilityToken: token,
+        commit: {
+          ...structuredClone(rpcCommit),
+          expected_review_revision: crypto.randomUUID(),
+        },
+        message: /capability binding mismatch/i,
+      },
+    ];
+
+    for (const attempt of attempts) {
+      const response = await admin.rpc("complete_guided_review_correction", {
+        p_completion_token: attempt.capabilityToken,
+        p_commit: attempt.commit,
+      });
+      expect({ name: attempt.name, message: response.error?.message }).toEqual({
+        name: attempt.name,
+        message: expect.stringMatching(attempt.message),
+      });
+    }
+
+    await expect(correctionState(userA, ownerItemIds)).resolves.toEqual(
+      ownerBefore,
+    );
+    await expect(correctionState(userB, [foreign.itemId])).resolves.toEqual(
+      foreignBefore,
+    );
+    await expect(
+      pricingReader.forItem({
+        userId: userA.id,
+        bearerToken: "test",
+        itemId: owner.itemId,
+        now: readNow,
+      }),
+    ).resolves.toEqual(priorEvidence);
+  });
+
+  it("rejects an expired capability without mutating review state", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "expired-capability");
+    const token = "B".repeat(43);
+    const runId = crypto.randomUUID();
+    const authorization = await userA.client.rpc(
+      "authorize_ai_item_guided_correction",
+      {
+        p_completion_run_id: runId,
+        p_completion_token: token,
+        p_expires_at: new Date(Date.now() + 1_500).toISOString(),
+        p_expected_review_revision: seeded.reviewRevision,
+        p_expected_run_id: originalRunIds.get(seeded.itemId),
+        p_item_id: seeded.itemId,
+        p_listing_id: seeded.listingId,
+      },
+    );
+    expect(authorization.error).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 1_700));
+    const expired = await admin.rpc("complete_guided_review_correction", {
+      p_completion_token: token,
+      p_commit: {},
+    });
+    expect(expired.error?.message).toMatch(/capability is unavailable/i);
+    const { data: item } = await userA.client
+      .from("items")
+      .select("attributes, review_revision")
+      .eq("id", seeded.itemId)
+      .single();
+    expect((item?.attributes as { brand?: string })?.brand).toBe(
+      "Old expired-capability",
+    );
+    expect(item?.review_revision).toBe(seeded.reviewRevision);
+  });
+
+  it("consumes one capability exactly once under concurrent completion", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "concurrent-capability");
+    const commit = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      crypto.randomUUID(),
+      seeded.reviewRevision,
+    );
+    const gateway = guidedGateway(userA);
+    const capability = await gateway.authorize({
+      itemId: commit.itemId,
+      listingId: commit.listingId,
+      runId: commit.runId,
+      expectedRunId: commit.expectedRunId,
+      expectedReviewRevision: commit.expectedReviewRevision,
+    });
+    const completion = { ...commit, capabilityToken: capability.token };
+    const results = await Promise.allSettled([
+      gateway.complete(completion),
+      gateway.complete(completion),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const { data: logs } = await userA.client
+      .from("prediction_logs")
+      .select("id")
+      .eq("run_id", commit.runId);
+    expect(logs ?? []).toHaveLength(1);
+  });
+
+  it("rejects evidence divergent from cited sources before privileged completion", async () => {
     if (!reachable) return;
     const seeded = await seedReview(userA, "divergent-evidence");
     const runId = crypto.randomUUID();
@@ -241,11 +682,11 @@ describe("review identity regeneration transaction + RLS", () => {
       runId,
       seeded.reviewRevision,
     );
-    divergent.pricingSnapshot.price_result.suggested = 175;
+    divergent.result.price.evidence![0].sourceUrl = "https://example.com/divergent";
 
-    await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(divergent),
-    ).rejects.toThrow(/pricing evidence snapshot/i);
+    await expect(commitCorrection(userA, divergent)).rejects.toThrow(
+      /match a cited source URL/i,
+    );
 
     const [{ data: item }, { data: listing }, { data: logs }] = await Promise.all([
       userA.client
@@ -266,23 +707,24 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(item?.condition).toBe("fair");
     expect(listing).toMatchObject({
       title: "Old divergent-evidence listing",
-      run_id: null,
+      run_id: originalRunIds.get(seeded.itemId),
     });
     expect(logs ?? []).toHaveLength(0);
   });
 
-  it("rejects another tenant and rolls back an earlier item update in the RPC", async () => {
+  it("rolls back item/listing mutations when a cross-tenant run collision fails later", async () => {
     if (!reachable) return;
     const owner = await seedReview(userA, "rollback-owner");
     const foreign = await seedReview(userB, "foreign");
-    const runId = crypto.randomUUID();
+    const runId = originalRunIds.get(foreign.itemId)!;
 
-    // user A owns the item but NOT this listing id. The function updates the item
-    // first, then the listing ownership predicate fails and raises. PostgreSQL must
-    // roll the preceding item update back with the rest of the statement.
+    // Authorization is correctly bound to A's item/listing. The supplied new run
+    // identity already belongs to B's prediction, so the transaction fails only
+    // after its item/listing updates and must roll those earlier writes back.
     await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(
-        commitFor(owner.itemId, foreign.listingId, runId, owner.reviewRevision),
+      commitCorrection(
+        userA,
+        commitFor(owner.itemId, owner.listingId, runId, owner.reviewRevision),
       ),
     ).rejects.toThrow();
 
@@ -318,8 +760,8 @@ describe("review identity regeneration transaction + RLS", () => {
       firstRunId,
       seeded.reviewRevision,
     );
-    first.attributes.brand = "Newest identity";
-    await createSupabaseReviewRegenerationStore(userA.client).commit(first);
+    first.result.attributes.brand = "Newest identity";
+    await commitCorrection(userA, first);
 
     const staleRunId = crypto.randomUUID();
     const stale = commitFor(
@@ -328,10 +770,8 @@ describe("review identity regeneration transaction + RLS", () => {
       staleRunId,
       seeded.reviewRevision,
     );
-    stale.attributes.brand = "Stale identity";
-    await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(stale),
-    ).rejects.toThrow(/review changed/i);
+    stale.result.attributes.brand = "Stale identity";
+    await expect(commitCorrection(userA, stale)).rejects.toThrow(/review changed/i);
 
     const [{ data: item }, { data: listing }, { data: staleLogs }] = await Promise.all([
       userA.client.from("items").select("attributes").eq("id", seeded.itemId).single(),
@@ -353,11 +793,9 @@ describe("review identity regeneration transaction + RLS", () => {
       runId,
       seeded.reviewRevision,
     );
-    invalid.prediction.price = 0;
+    invalid.result.price.suggested = 0;
 
-    await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(invalid),
-    ).rejects.toThrow(/price is invalid/i);
+    await expect(commitCorrection(userA, invalid)).rejects.toThrow();
 
     const [{ data: item }, { data: listing }, { data: logs }] = await Promise.all([
       userA.client
@@ -382,7 +820,7 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(listing).toMatchObject({
       title: "Old zero-price listing",
       description: "Old coherent copy",
-      run_id: null,
+      run_id: originalRunIds.get(seeded.itemId),
     });
     expect(logs ?? []).toHaveLength(0);
   });
@@ -400,7 +838,8 @@ describe("review identity regeneration transaction + RLS", () => {
       .eq("id", live.listingId);
     expect(liveStateError).toBeNull();
     await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(
+      commitCorrection(
+        userA,
         commitFor(
           live.itemId,
           live.listingId,
@@ -413,12 +852,13 @@ describe("review identity regeneration transaction + RLS", () => {
     const publishing = await seedReview(userA, "publishing-claim");
     const claim = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: publishing.listingId,
-      p_expected_run_id: null,
+      p_expected_run_id: originalRunIds.get(publishing.itemId),
       p_expected_review_revision: publishing.reviewRevision,
     });
     expect(claim.error).toBeNull();
     await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(
+      commitCorrection(
+        userA,
         commitFor(
           publishing.itemId,
           publishing.listingId,
@@ -696,7 +1136,7 @@ describe("review identity regeneration transaction + RLS", () => {
     const seeded = await seedReview(userA, "publish-revision");
     const claim = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
-      p_expected_run_id: null,
+      p_expected_run_id: originalRunIds.get(seeded.itemId),
       p_expected_review_revision: seeded.reviewRevision,
     });
     expect(claim.error).toBeNull();
@@ -990,7 +1430,8 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(staleSave.error?.code).toBe("P0002");
 
     await expect(
-      createSupabaseReviewRegenerationStore(userA.client).commit(
+      commitCorrection(
+        userA,
         commitFor(
           seeded.itemId,
           seeded.listingId,
@@ -1028,7 +1469,7 @@ describe("review identity regeneration transaction + RLS", () => {
 
     const first = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
-      p_expected_run_id: null,
+      p_expected_run_id: originalRunIds.get(seeded.itemId),
       p_expected_review_revision: seeded.reviewRevision,
     });
     expect(first.error).toBeNull();
@@ -1036,7 +1477,7 @@ describe("review identity regeneration transaction + RLS", () => {
 
     const overlapping = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
-      p_expected_run_id: null,
+      p_expected_run_id: originalRunIds.get(seeded.itemId),
       p_expected_review_revision: seeded.reviewRevision,
     });
     expect(overlapping.error?.code).toBe("P0002");
@@ -1051,7 +1492,7 @@ describe("review identity regeneration transaction + RLS", () => {
 
     const recovered = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
-      p_expected_run_id: null,
+      p_expected_run_id: originalRunIds.get(seeded.itemId),
       p_expected_review_revision: first.data.claimId as string,
     });
     expect(recovered.error).toBeNull();
@@ -1092,7 +1533,7 @@ describe("review identity regeneration transaction + RLS", () => {
 
     const claim = await userA.client.rpc("begin_ebay_publish", {
       p_listing_id: seeded.listingId,
-      p_expected_run_id: null,
+      p_expected_run_id: originalRunIds.get(seeded.itemId),
       p_expected_review_revision: edited.data,
     });
     expect(claim.error).toBeNull();

@@ -1,6 +1,6 @@
 begin;
 
-select plan(21);
+select plan(26);
 
 select ok(
   has_table_privilege('authenticated', 'public.pricing_evidence_snapshots', 'select'),
@@ -88,7 +88,7 @@ select ok(
 select ok(
   not has_function_privilege(
     'service_role',
-    'private.pricing_evidence_rows_valid(jsonb)',
+    'private.pricing_evidence_rows_coarse(jsonb)',
     'execute'
   ),
   'worker identity cannot invoke the private evidence validator directly'
@@ -126,21 +126,55 @@ select ok(
   ),
   'the credit correction seam without evidence is retired'
 );
-select ok(
-  has_function_privilege(
-    'authenticated',
-    'public.regenerate_review_listing_with_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)',
-    'execute'
+select is(
+  to_regprocedure(
+    'public.regenerate_review_listing_with_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)'
   ),
-  'authenticated correction persists its pricing snapshot atomically'
+  null::regprocedure,
+  'the authenticated raw-snapshot correction writer is absent from the catalog'
+);
+select is(
+  to_regprocedure(
+    'public.regenerate_review_listing_with_credit_and_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)'
+  ),
+  null::regprocedure,
+  'the authenticated raw-snapshot credit writer is absent from the catalog'
 );
 select ok(
   has_function_privilege(
     'authenticated',
-    'public.regenerate_review_listing_with_credit_and_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)',
+    'public.authorize_ai_item_guided_correction(uuid,uuid,uuid,uuid,uuid,text,timestamptz)',
     'execute'
   ),
-  'included guided correction persists its pricing snapshot atomically'
+  'authenticated correction may mint a bound short-lived capability'
+);
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.authorize_ai_item_guided_correction(uuid,uuid,uuid,uuid,uuid,text,timestamptz)',
+    'execute'
+  ),
+  'anonymous callers cannot mint correction capabilities'
+);
+select ok(
+  has_function_privilege(
+    'service_role', 'public.complete_guided_review_correction(text,jsonb)', 'execute'
+  ),
+  'the internal role may invoke only the fixed correction completion'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated', 'public.complete_guided_review_correction(text,jsonb)', 'execute'
+  ),
+  'authenticated callers cannot invoke privileged completion'
+);
+select ok(
+  not has_table_privilege(
+    'service_role', 'private.guided_correction_completion_capabilities', 'select'
+  ) and not has_table_privilege(
+    'authenticated', 'private.guided_correction_completion_capabilities', 'select'
+  ),
+  'capability digests are inaccessible outside fixed functions'
 );
 
 select * from finish();

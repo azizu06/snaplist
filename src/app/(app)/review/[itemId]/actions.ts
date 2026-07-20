@@ -11,6 +11,8 @@ import {
   parseIdentityCorrections,
   regenerateReviewListing,
 } from "@/lib/pipeline/review-regeneration";
+import { createSupabaseGuidedCorrectionCompletionGateway } from "@/lib/pipeline/guided-correction-completion";
+import { createInternalGuidedCorrectionCompletionRpcClient } from "@/lib/pipeline/guided-correction-internal";
 import { isReviewRegenerationBlocked } from "@/lib/pipeline/review-regeneration-policy";
 import { buildPredictionLogRow } from "@/lib/pipeline/prediction-log";
 import { extractedAttributesSchema, type PipelineResult } from "@/lib/pipeline/types";
@@ -223,24 +225,15 @@ export async function regenerateCorrectedIdentity(formData: FormData) {
   }
 
   try {
+    const guidedCorrection = createSupabaseGuidedCorrectionCompletionGateway(
+      supabase,
+      createInternalGuidedCorrectionCompletionRpcClient(),
+    );
     const result = await regenerateReviewListing(
-      createSupabaseReviewRegenerationStore(supabase, { useCreditLedger: true }),
+      createSupabaseReviewRegenerationStore(supabase, guidedCorrection),
       { itemId: id, expectedReviewRevision, corrections },
       {
         async beforeModelWork() {
-          // This is a reuse authorization, not a second reservation. The fixed
-          // RPC binds the one included correction to the settled revision and
-          // unchanged photo fingerprint before any provider-backed work begins.
-          const { error } = await supabase.rpc(
-            "authorize_ai_item_guided_correction",
-            {
-              p_item_id: id,
-              p_expected_review_revision: expectedReviewRevision,
-            },
-          );
-          if (error) {
-            throw new Error(`Guided correction unavailable: ${error.message}`);
-          }
           await recordPipelineRunAndMaybeAlert();
         },
       },

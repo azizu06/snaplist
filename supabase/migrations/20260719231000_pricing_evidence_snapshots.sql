@@ -1,68 +1,27 @@
 -- Issue #240: preserve the exact accepted sold evidence for one durable run and
 -- expose it through tenant RLS without ever reconstructing facts from citations.
 
-create or replace function private.pricing_evidence_rows_valid(p_evidence jsonb)
+create or replace function private.pricing_evidence_rows_coarse(p_evidence jsonb)
 returns boolean
 language plpgsql
 immutable
 security definer
 set search_path = ''
 as $$
-declare
-  v_row jsonb;
 begin
   if jsonb_typeof(p_evidence) is distinct from 'array'
     or jsonb_array_length(p_evidence) > 60
     or octet_length(p_evidence::text) > 131072 then
     return false;
   end if;
-
-  for v_row in select value from jsonb_array_elements(p_evidence)
-  loop
-    if jsonb_typeof(v_row) is distinct from 'object'
-      or not (v_row ?& array[
-        'id', 'sourceUrl', 'price', 'currency', 'kind', 'priceDisclosure'
-      ])
-      or jsonb_typeof(v_row->'id') is distinct from 'string'
-      or char_length(v_row->>'id') not between 1 and 2048
-      or jsonb_typeof(v_row->'sourceUrl') is distinct from 'string'
-      or char_length(v_row->>'sourceUrl') not between 1 and 2048
-      or (v_row->>'sourceUrl') !~ '^https?://[^[:space:]]+$'
-      or jsonb_typeof(v_row->'price') is distinct from 'number'
-      or (v_row->>'price')::numeric <= 0
-      or jsonb_typeof(v_row->'currency') is distinct from 'string'
-      or (v_row->>'currency') !~ '^[A-Z]{3}$'
-      or v_row->>'kind' is distinct from 'sold-comparable'
-      or v_row->>'priceDisclosure' is distinct from 'displayed-sold-price'
-      or (
-        v_row ? 'title'
-        and (
-          jsonb_typeof(v_row->'title') is distinct from 'string'
-          or char_length(v_row->>'title') not between 1 and 500
-        )
-      )
-      or (
-        v_row ? 'condition'
-        and (
-          jsonb_typeof(v_row->'condition') is distinct from 'string'
-          or char_length(v_row->>'condition') not between 1 and 120
-        )
-      )
-      or (
-        v_row ? 'soldAt'
-        and (
-          jsonb_typeof(v_row->'soldAt') is distinct from 'number'
-          or (v_row->>'soldAt')::numeric < 0
-        )
-      ) then
-      return false;
-    end if;
-  end loop;
-  return true;
+  return not exists (
+    select 1 from jsonb_array_elements(p_evidence) row_value
+    where jsonb_typeof(row_value) is distinct from 'object'
+  );
 end;
 $$;
 
-revoke all on function private.pricing_evidence_rows_valid(jsonb)
+revoke all on function private.pricing_evidence_rows_coarse(jsonb)
   from public, anon, authenticated, service_role;
 
 create unique index if not exists pipeline_runs_id_item_user_id_idx
@@ -94,15 +53,6 @@ create table public.pricing_evidence_snapshots (
   ),
   constraint pricing_evidence_snapshots_item_check check (
     jsonb_typeof(item) = 'object'
-    and jsonb_typeof(item->'title') = 'string'
-    and char_length(item->>'title') between 1 and 500
-    and (
-      not (item ? 'condition')
-      or (
-        jsonb_typeof(item->'condition') = 'string'
-        and char_length(item->>'condition') between 1 and 120
-      )
-    )
     and octet_length(item::text) <= 4096
   ),
   constraint pricing_evidence_snapshots_price_result_check check (
@@ -111,7 +61,7 @@ create table public.pricing_evidence_snapshots (
     and octet_length(price_result::text) <= 65536
   ),
   constraint pricing_evidence_snapshots_evidence_check
-    check (private.pricing_evidence_rows_valid(evidence)),
+    check (private.pricing_evidence_rows_coarse(evidence)),
   constraint pricing_evidence_snapshots_run_fkey
     foreign key (pipeline_run_id, item_id, user_id)
     references public.pipeline_runs (id, item_id, user_id)
@@ -169,238 +119,46 @@ create trigger prevent_pricing_evidence_snapshot_update
 before update on public.pricing_evidence_snapshots
 for each row execute function private.prevent_pricing_evidence_snapshot_update();
 
-create or replace function private.persist_review_pricing_evidence_snapshot(
-  p_user_id text,
-  p_item_id uuid,
-  p_listing_id uuid,
-  p_run_id uuid,
-  p_snapshot jsonb
-)
-returns void
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_prediction_id uuid;
-  v_item_title text;
-  v_item_condition text;
-  v_price numeric;
-  v_price_range jsonb;
-  v_confidence numeric;
-  v_tier_fired text;
-  v_pricing_model text;
-  v_sources jsonb;
-  v_evidence jsonb;
-  v_evidence_as_of timestamptz := statement_timestamp();
-begin
-  if coalesce(p_user_id, '') = ''
-    or public.clerk_user_id() is distinct from p_user_id then
-    raise exception using errcode = '42501', message = 'Review pricing authorization is required';
-  end if;
-  if jsonb_typeof(p_snapshot) is distinct from 'object'
-    or (p_snapshot->>'schema_version')::integer is distinct from 1
-    or jsonb_typeof(p_snapshot->'item') is distinct from 'object'
-    or jsonb_typeof(p_snapshot->'price_result') is distinct from 'object'
-    or p_snapshot->'price_result' ? 'evidence'
-    or not private.pricing_evidence_rows_valid(p_snapshot->'evidence') then
-    raise exception using errcode = '22023', message = 'Invalid review pricing evidence snapshot';
-  end if;
-  if exists (
-    select 1
-    from jsonb_array_elements(p_snapshot->'evidence') evidence_row
-    where not exists (
-      select 1
-      from jsonb_array_elements(p_snapshot #> '{price_result,sources}') source_row
-      where source_row->>'url' = evidence_row->>'sourceUrl'
-    )
-  ) then
-    raise exception using errcode = '22023', message = 'Review pricing evidence is not grounded in cited sources';
-  end if;
+-- The authenticated browser never receives a raw persistence seam. It may only
+-- mint one short-lived opaque capability after the existing settled-credit and
+-- unchanged-photo correction authority succeeds. Only a SHA-256 digest is kept.
+create unique index if not exists ai_item_credit_reservations_id_user_item_idx
+  on public.ai_item_credit_reservations (id, user_id, item_id);
 
-  select
-    prediction.id,
-    coalesce(
-      nullif(btrim(item.identification->>'label'), ''),
-      nullif(btrim(item.attributes->>'title'), ''),
-      nullif(btrim(listing.title), '')
-    ),
-    nullif(btrim(item.condition), ''),
-    prediction.price,
-    prediction.price_range,
-    prediction.confidence,
-    prediction.tier_fired,
-    prediction.pricing_model,
-    prediction.sources
-  into
-    v_prediction_id,
-    v_item_title,
-    v_item_condition,
-    v_price,
-    v_price_range,
-    v_confidence,
-    v_tier_fired,
-    v_pricing_model,
-    v_sources
-  from public.prediction_logs prediction
-  join public.items item
-    on item.id = prediction.item_id
-   and item.user_id = prediction.user_id
-  join public.listings listing
-    on listing.id = p_listing_id
-   and listing.item_id = prediction.item_id
-   and listing.user_id = prediction.user_id
-   and listing.run_id = prediction.run_id
-  where prediction.run_id = p_run_id
-    and prediction.item_id = p_item_id
-    and prediction.user_id = p_user_id
-    and listing.status = 'draft';
-  if not found then
-    raise exception using errcode = '55000', message = 'Review pricing run is incoherent';
-  end if;
-  if nullif(btrim(p_snapshot #>> '{item,title}'), '') is distinct from v_item_title
-    or nullif(btrim(p_snapshot #>> '{item,condition}'), '') is distinct from v_item_condition
-    or (p_snapshot #>> '{price_result,suggested}')::numeric is distinct from v_price
-    or (p_snapshot #>> '{price_result,range,min}')::numeric
-      is distinct from (v_price_range->>'low')::numeric
-    or (p_snapshot #>> '{price_result,range,max}')::numeric
-      is distinct from (v_price_range->>'high')::numeric
-    or (p_snapshot #>> '{price_result,confidence}')::numeric is distinct from v_confidence
-    or p_snapshot #>> '{price_result,tier}' is distinct from v_tier_fired
-    or p_snapshot #> '{price_result,sources}' is distinct from v_sources
-    or (
-      v_pricing_model is null
-      and p_snapshot->'price_result' ? 'model'
-    )
-    or (
-      v_pricing_model is not null
-      and p_snapshot #>> '{price_result,model}' is distinct from v_pricing_model
-    ) then
-    raise exception using errcode = '22023', message = 'Review pricing evidence snapshot diverges from persisted recommendation';
-  end if;
-
-  select coalesce(
-    jsonb_agg(
-      evidence_row.value || jsonb_build_object('evidenceAsOf', v_evidence_as_of)
-      order by evidence_row.ordinality
-    ),
-    '[]'::jsonb
+create table private.guided_correction_completion_capabilities (
+  reservation_id uuid primary key,
+  token_hash text not null unique,
+  user_id text not null,
+  item_id uuid not null,
+  listing_id uuid not null,
+  completion_run_id uuid not null unique,
+  expected_run_id uuid,
+  expected_review_revision uuid not null,
+  created_at timestamptz not null default statement_timestamp(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  constraint guided_correction_capability_reservation_fkey
+    foreign key (reservation_id, user_id, item_id)
+    references public.ai_item_credit_reservations (id, user_id, item_id)
+    on delete cascade,
+  constraint guided_correction_capability_listing_fkey
+    foreign key (listing_id, item_id, user_id)
+    references public.listings (id, item_id, user_id)
+    on delete cascade,
+  constraint guided_correction_capability_hash_check
+    check (token_hash ~ '^[0-9a-f]{64}$'),
+  constraint guided_correction_capability_expiry_check check (
+    expires_at > created_at and expires_at <= created_at + interval '5 minutes'
+  ),
+  constraint guided_correction_capability_consumed_check check (
+    consumed_at is null or consumed_at >= created_at
   )
-  into v_evidence
-  from jsonb_array_elements(p_snapshot->'evidence') with ordinality evidence_row;
+);
 
-  insert into public.pricing_evidence_snapshots (
-    run_id, pipeline_run_id, run_kind, user_id, item_id,
-    prediction_id, listing_id, schema_version,
-    item, price_result, evidence, evidence_as_of
-  ) values (
-    p_run_id, null, 'review-correction', p_user_id, p_item_id,
-    v_prediction_id, p_listing_id, 1,
-    p_snapshot->'item', p_snapshot->'price_result', v_evidence, v_evidence_as_of
-  );
-end;
-$$;
+revoke all on table private.guided_correction_completion_capabilities
+  from public, anon, authenticated, service_role;
 
-revoke all on function private.persist_review_pricing_evidence_snapshot(
-  text, uuid, uuid, uuid, jsonb
-) from public, anon, authenticated, service_role;
-
-create or replace function public.regenerate_review_listing_with_evidence(
-  p_item_id uuid,
-  p_listing_id uuid,
-  p_run_id uuid,
-  p_expected_run_id uuid,
-  p_expected_review_revision uuid,
-  p_attributes jsonb,
-  p_condition text,
-  p_identification jsonb,
-  p_listing_title text,
-  p_listing_description text,
-  p_listing_copy jsonb,
-  p_price numeric,
-  p_price_range jsonb,
-  p_confidence numeric,
-  p_tier_fired text,
-  p_model text,
-  p_listing_model text,
-  p_pricing_model text,
-  p_sources jsonb,
-  p_autopilot_enabled boolean,
-  p_autopilot_eligible boolean,
-  p_pricing_snapshot jsonb
-)
-returns void
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_user_id text := public.clerk_user_id();
-begin
-  if coalesce(v_user_id, '') = '' then
-    raise exception using errcode = '42501', message = 'Authentication required.';
-  end if;
-  perform public.regenerate_review_listing(
-    p_item_id, p_listing_id, p_run_id, p_expected_run_id,
-    p_expected_review_revision, p_attributes, p_condition, p_identification,
-    p_listing_title, p_listing_description, p_listing_copy, p_price,
-    p_price_range, p_confidence, p_tier_fired, p_model, p_listing_model,
-    p_pricing_model, p_sources, p_autopilot_enabled, p_autopilot_eligible
-  );
-  perform private.persist_review_pricing_evidence_snapshot(
-    v_user_id, p_item_id, p_listing_id, p_run_id, p_pricing_snapshot
-  );
-end;
-$$;
-
-create or replace function public.regenerate_review_listing_with_credit_and_evidence(
-  p_item_id uuid,
-  p_listing_id uuid,
-  p_run_id uuid,
-  p_expected_run_id uuid,
-  p_expected_review_revision uuid,
-  p_attributes jsonb,
-  p_condition text,
-  p_identification jsonb,
-  p_listing_title text,
-  p_listing_description text,
-  p_listing_copy jsonb,
-  p_price numeric,
-  p_price_range jsonb,
-  p_confidence numeric,
-  p_tier_fired text,
-  p_model text,
-  p_listing_model text,
-  p_pricing_model text,
-  p_sources jsonb,
-  p_autopilot_enabled boolean,
-  p_autopilot_eligible boolean,
-  p_pricing_snapshot jsonb
-)
-returns void
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_user_id text := public.clerk_user_id();
-begin
-  if coalesce(v_user_id, '') = '' then
-    raise exception using errcode = '42501', message = 'Authentication required.';
-  end if;
-  perform public.regenerate_review_listing_with_credit(
-    p_item_id, p_listing_id, p_run_id, p_expected_run_id,
-    p_expected_review_revision, p_attributes, p_condition, p_identification,
-    p_listing_title, p_listing_description, p_listing_copy, p_price,
-    p_price_range, p_confidence, p_tier_fired, p_model, p_listing_model,
-    p_pricing_model, p_sources, p_autopilot_enabled, p_autopilot_eligible
-  );
-  perform private.persist_review_pricing_evidence_snapshot(
-    v_user_id, p_item_id, p_listing_id, p_run_id, p_pricing_snapshot
-  );
-end;
-$$;
-
+-- Retire every authenticated writer that accepted a pricing snapshot directly.
 revoke execute on function public.regenerate_review_listing(
   uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
   jsonb, numeric, text, text, text, text, jsonb, boolean, boolean
@@ -409,22 +167,326 @@ revoke execute on function public.regenerate_review_listing_with_credit(
   uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
   jsonb, numeric, text, text, text, text, jsonb, boolean, boolean
 ) from authenticated;
-revoke all on function public.regenerate_review_listing_with_evidence(
-  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
-  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
-) from public, anon;
-grant execute on function public.regenerate_review_listing_with_evidence(
-  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
-  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
+
+drop function if exists public.authorize_ai_item_guided_correction(uuid, uuid);
+
+create or replace function public.authorize_ai_item_guided_correction(
+  p_item_id uuid,
+  p_listing_id uuid,
+  p_completion_run_id uuid,
+  p_expected_run_id uuid,
+  p_expected_review_revision uuid,
+  p_completion_token text,
+  p_expires_at timestamptz
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+  v_photo_paths text[];
+  v_photo_set_fingerprint text;
+  v_reservation public.ai_item_credit_reservations%rowtype;
+  v_now timestamptz := statement_timestamp();
+begin
+  if coalesce(v_user_id, '') = '' then
+    raise exception using errcode = '42501', message = 'Authentication required.';
+  end if;
+  if p_item_id is null or p_listing_id is null or p_completion_run_id is null
+    or p_expected_review_revision is null
+    or p_completion_run_id is not distinct from p_expected_run_id
+    or p_completion_token !~ '^[A-Za-z0-9_-]{43}$'
+    or p_expires_at <= v_now
+    or p_expires_at > v_now + interval '5 minutes' then
+    raise exception using errcode = '22023', message = 'Guided correction capability request is invalid.';
+  end if;
+
+  select item.photos into v_photo_paths
+  from public.items item
+  where item.id = p_item_id
+    and item.user_id = v_user_id
+    and item.review_revision is not distinct from p_expected_review_revision
+  for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Review changed. Reload and try again.';
+  end if;
+
+  perform 1 from public.listings listing
+  where listing.id = p_listing_id
+    and listing.item_id = p_item_id
+    and listing.user_id = v_user_id
+    and listing.platform = 'ebay'
+    and listing.run_id is not distinct from p_expected_run_id
+    and listing.status is distinct from 'published'
+    and listing.ebay_listing_id is null
+    and listing.ebay_status is distinct from 'publishing'
+    and listing.ebay_status is distinct from 'published'
+  for update;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
+  end if;
+
+  v_photo_set_fingerprint := encode(
+    sha256(convert_to(array_to_json(v_photo_paths)::text, 'UTF8')), 'hex'
+  );
+  select * into v_reservation
+  from public.ai_item_credit_reservations reservation
+  where reservation.user_id = v_user_id
+    and reservation.item_id = p_item_id
+    and reservation.state = 'settled'
+    and reservation.photo_set_fingerprint = v_photo_set_fingerprint
+  order by reservation.settled_at desc
+  limit 1
+  for update;
+  if not found or v_reservation.guided_correction_completed_at is not null then
+    raise exception using errcode = 'P0001', message = 'The included guided correction is unavailable.';
+  end if;
+
+  update public.ai_item_credit_reservations
+  set guided_correction_revision = p_expected_review_revision,
+      guided_correction_started_at = v_now,
+      updated_at = v_now
+  where id = v_reservation.id
+    and guided_correction_completed_at is null;
+
+  insert into private.guided_correction_completion_capabilities (
+    reservation_id, token_hash, user_id, item_id, listing_id,
+    completion_run_id, expected_run_id, expected_review_revision,
+    created_at, expires_at, consumed_at
+  ) values (
+    v_reservation.id,
+    encode(sha256(convert_to(p_completion_token, 'UTF8')), 'hex'),
+    v_user_id, p_item_id, p_listing_id, p_completion_run_id,
+    p_expected_run_id, p_expected_review_revision, v_now, p_expires_at, null
+  )
+  on conflict (reservation_id) do update
+  set token_hash = excluded.token_hash,
+      listing_id = excluded.listing_id,
+      completion_run_id = excluded.completion_run_id,
+      expected_run_id = excluded.expected_run_id,
+      expected_review_revision = excluded.expected_review_revision,
+      created_at = excluded.created_at,
+      expires_at = excluded.expires_at,
+      consumed_at = null;
+
+  return jsonb_build_object('expiresAt', p_expires_at);
+end;
+$$;
+
+revoke all on function public.authorize_ai_item_guided_correction(
+  uuid, uuid, uuid, uuid, uuid, text, timestamptz
+) from public, anon, service_role;
+grant execute on function public.authorize_ai_item_guided_correction(
+  uuid, uuid, uuid, uuid, uuid, text, timestamptz
 ) to authenticated;
-revoke all on function public.regenerate_review_listing_with_credit_and_evidence(
-  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
-  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
-) from public, anon;
-grant execute on function public.regenerate_review_listing_with_credit_and_evidence(
-  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
-  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
-) to authenticated;
+
+create or replace function public.complete_guided_review_correction(
+  p_completion_token text,
+  p_commit jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_cap private.guided_correction_completion_capabilities%rowtype;
+  v_reservation public.ai_item_credit_reservations%rowtype;
+  v_item public.items%rowtype;
+  v_listing public.listings%rowtype;
+  v_item_payload jsonb;
+  v_listing_payload jsonb;
+  v_prediction jsonb;
+  v_snapshot jsonb;
+  v_prediction_id uuid;
+  v_evidence jsonb;
+  v_now timestamptz := statement_timestamp();
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Guided correction completion authorization is required';
+  end if;
+  if p_completion_token !~ '^[A-Za-z0-9_-]{43}$'
+    or jsonb_typeof(p_commit) is distinct from 'object'
+    or octet_length(p_commit::text) > 524288 then
+    raise exception using errcode = '22023', message = 'Invalid guided correction completion';
+  end if;
+
+  select * into v_cap
+  from private.guided_correction_completion_capabilities capability
+  where capability.token_hash = encode(
+    sha256(convert_to(p_completion_token, 'UTF8')), 'hex'
+  )
+  for update;
+  if not found or v_cap.consumed_at is not null or v_cap.expires_at <= v_now then
+    raise exception using errcode = 'P0001', message = 'Guided correction capability is unavailable';
+  end if;
+  if p_commit->>'item_id' is distinct from v_cap.item_id::text
+    or p_commit->>'listing_id' is distinct from v_cap.listing_id::text
+    or p_commit->>'run_id' is distinct from v_cap.completion_run_id::text
+    or p_commit->>'expected_run_id' is distinct from v_cap.expected_run_id::text
+    or p_commit->>'expected_review_revision'
+      is distinct from v_cap.expected_review_revision::text then
+    raise exception using errcode = '42501', message = 'Guided correction capability binding mismatch';
+  end if;
+
+  v_item_payload := p_commit->'item';
+  v_listing_payload := p_commit->'listing';
+  v_prediction := p_commit->'prediction';
+  v_snapshot := p_commit->'pricing_snapshot';
+  if jsonb_typeof(v_item_payload) is distinct from 'object'
+    or jsonb_typeof(v_item_payload->'attributes') is distinct from 'object'
+    or jsonb_typeof(v_item_payload->'identification') is distinct from 'object'
+    or octet_length(v_item_payload::text) > 131072
+    or jsonb_typeof(v_listing_payload) is distinct from 'object'
+    or octet_length(v_listing_payload::text) > 131072
+    or v_listing_payload->>'platform' is distinct from 'ebay'
+    or nullif(btrim(v_listing_payload->>'title'), '') is null
+    or char_length(v_listing_payload->>'title') > 80
+    or nullif(btrim(v_listing_payload->>'description'), '') is null
+    or jsonb_typeof(v_listing_payload->'copy') is distinct from 'object'
+    or jsonb_typeof(v_prediction) is distinct from 'object'
+    or octet_length(v_prediction::text) > 131072
+    or jsonb_typeof(v_prediction->'extracted_attrs') is distinct from 'object'
+    or jsonb_typeof(v_prediction->'price_range') is distinct from 'object'
+    or jsonb_typeof(v_prediction->'sources') is distinct from 'array'
+    or (v_prediction->>'price')::numeric <= 0
+    or (v_prediction->>'confidence')::numeric not between 0 and 1
+    or (v_prediction->>'autopilot_enabled')::boolean is distinct from false
+    or (v_prediction->>'autopilot_eligible')::boolean is distinct from false
+    or jsonb_typeof(v_snapshot) is distinct from 'object'
+    or (v_snapshot->>'schema_version')::integer is distinct from 1
+    or jsonb_typeof(v_snapshot->'item') is distinct from 'object'
+    or jsonb_typeof(v_snapshot->'price_result') is distinct from 'object'
+    or v_snapshot->'price_result' ? 'evidence'
+    or not private.pricing_evidence_rows_coarse(v_snapshot->'evidence')
+    or octet_length(v_snapshot::text) > 262144 then
+    raise exception using errcode = '22023', message = 'Invalid guided correction completion';
+  end if;
+
+  perform 1
+  from public.ai_item_credit_reservations reservation
+  join public.items item
+    on item.id = reservation.item_id and item.user_id = reservation.user_id
+  join public.listings listing
+    on listing.id = v_cap.listing_id
+   and listing.item_id = item.id and listing.user_id = item.user_id
+  where reservation.id = v_cap.reservation_id
+    and reservation.user_id = v_cap.user_id
+    and reservation.item_id = v_cap.item_id
+    and reservation.state = 'settled'
+    and reservation.guided_correction_revision
+      is not distinct from v_cap.expected_review_revision
+    and reservation.guided_correction_completed_at is null
+    and reservation.photo_set_fingerprint = encode(
+      sha256(convert_to(array_to_json(item.photos)::text, 'UTF8')), 'hex'
+    )
+    and item.review_revision is not distinct from v_cap.expected_review_revision
+    and listing.platform = 'ebay'
+    and listing.run_id is not distinct from v_cap.expected_run_id
+    and listing.status is distinct from 'published'
+    and listing.ebay_listing_id is null
+    and listing.ebay_status is distinct from 'publishing'
+    and listing.ebay_status is distinct from 'published'
+  for update of reservation, item, listing;
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Guided correction authority changed';
+  end if;
+
+  if v_prediction->'extracted_attrs' is distinct from v_item_payload->'attributes'
+    or v_snapshot #> '{price_result,suggested}' is distinct from v_prediction->'price'
+    or v_snapshot #> '{price_result,range,min}' is distinct from v_prediction #> '{price_range,low}'
+    or v_snapshot #> '{price_result,range,max}' is distinct from v_prediction #> '{price_range,high}'
+    or v_snapshot #>> '{price_result,tier}' is distinct from v_prediction->>'tier_fired'
+    or v_snapshot #> '{price_result,sources}' is distinct from v_prediction->'sources' then
+    raise exception using errcode = '22023', message = 'Guided correction persistence is incoherent';
+  end if;
+
+  update public.items
+  set attributes = v_item_payload->'attributes',
+      condition = v_item_payload->>'condition',
+      identification = v_item_payload->'identification',
+      review_revision = v_cap.completion_run_id,
+      review_content_revision = v_cap.completion_run_id
+  where id = v_cap.item_id and user_id = v_cap.user_id;
+
+  update public.listings
+  set title = v_listing_payload->>'title',
+      description = v_listing_payload->>'description',
+      copy = v_listing_payload->'copy',
+      status = 'draft',
+      run_id = v_cap.completion_run_id,
+      source_review_revision = v_cap.completion_run_id,
+      ebay_publish_claim_id = null,
+      ebay_publish_claimed_at = null
+  where id = v_cap.listing_id
+    and item_id = v_cap.item_id and user_id = v_cap.user_id
+    and run_id is not distinct from v_cap.expected_run_id
+    and status is distinct from 'published'
+    and ebay_listing_id is null
+    and ebay_status is distinct from 'publishing'
+    and ebay_status is distinct from 'published';
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Editable eBay listing not found.';
+  end if;
+
+  insert into public.prediction_logs (
+    user_id, item_id, run_id, extracted_attrs, price, price_range, confidence,
+    tier_fired, model, listing_model, pricing_model, sources,
+    autopilot_enabled, autopilot_eligible
+  ) values (
+    v_cap.user_id, v_cap.item_id, v_cap.completion_run_id,
+    v_prediction->'extracted_attrs', (v_prediction->>'price')::numeric,
+    v_prediction->'price_range', (v_prediction->>'confidence')::numeric,
+    v_prediction->>'tier_fired', v_prediction->>'model',
+    v_prediction->>'listing_model', v_prediction->>'pricing_model',
+    v_prediction->'sources', false, false
+  ) returning id into v_prediction_id;
+
+  delete from public.listings
+  where item_id = v_cap.item_id and user_id = v_cap.user_id
+    and platform in ('facebook', 'mercari');
+
+  select coalesce(
+    jsonb_agg(
+      evidence_row.value || jsonb_build_object('evidenceAsOf', v_now)
+      order by evidence_row.ordinality
+    ), '[]'::jsonb
+  ) into v_evidence
+  from jsonb_array_elements(v_snapshot->'evidence') with ordinality evidence_row;
+
+  insert into public.pricing_evidence_snapshots (
+    run_id, pipeline_run_id, run_kind, user_id, item_id,
+    prediction_id, listing_id, schema_version,
+    item, price_result, evidence, evidence_as_of
+  ) values (
+    v_cap.completion_run_id, null, 'review-correction', v_cap.user_id,
+    v_cap.item_id, v_prediction_id, v_cap.listing_id, 1,
+    v_snapshot->'item', v_snapshot->'price_result', v_evidence, v_now
+  );
+
+  update public.ai_item_credit_reservations
+  set guided_correction_completed_at = v_now, updated_at = v_now
+  where id = v_cap.reservation_id and guided_correction_completed_at is null;
+  if not found then
+    raise exception using errcode = '55000', message = 'Guided correction completion was already recorded.';
+  end if;
+
+  update private.guided_correction_completion_capabilities
+  set consumed_at = v_now
+  where reservation_id = v_cap.reservation_id and consumed_at is null;
+  if not found then
+    raise exception using errcode = '55000', message = 'Guided correction capability was already consumed.';
+  end if;
+  return true;
+end;
+$$;
+
+revoke all on function public.complete_guided_review_correction(text, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.complete_guided_review_correction(text, jsonb)
+  to service_role;
 
 create or replace function public.complete_pipeline_run(
   p_run_id uuid,
@@ -461,19 +523,21 @@ begin
     or jsonb_typeof(v_snapshot->'item') is distinct from 'object'
     or jsonb_typeof(v_snapshot->'price_result') is distinct from 'object'
     or v_snapshot->'price_result' ? 'evidence'
-    or not private.pricing_evidence_rows_valid(v_snapshot->'evidence') then
+    or not private.pricing_evidence_rows_coarse(v_snapshot->'evidence')
+    or octet_length(v_snapshot::text) > 262144 then
     raise exception using errcode = '22023', message = 'Invalid pricing evidence snapshot';
   end if;
-  if exists (
-    select 1
-    from jsonb_array_elements(v_snapshot->'evidence') evidence_row
-    where not exists (
-      select 1
-      from jsonb_array_elements(v_snapshot #> '{price_result,sources}') source_row
-      where source_row->>'url' = evidence_row->>'sourceUrl'
-    )
-  ) then
-    raise exception using errcode = '22023', message = 'Pricing evidence is not grounded in cited sources';
+  if v_snapshot #> '{price_result,suggested}'
+      is distinct from p_persistence #> '{prediction,price}'
+    or v_snapshot #> '{price_result,range,min}'
+      is distinct from p_persistence #> '{prediction,price_range,low}'
+    or v_snapshot #> '{price_result,range,max}'
+      is distinct from p_persistence #> '{prediction,price_range,high}'
+    or v_snapshot #>> '{price_result,tier}'
+      is distinct from p_persistence #>> '{prediction,tier_fired}'
+    or v_snapshot #> '{price_result,sources}'
+      is distinct from p_persistence #> '{prediction,sources}' then
+    raise exception using errcode = '22023', message = 'Pipeline persistence is incoherent';
   end if;
   select coalesce(
     jsonb_agg(
