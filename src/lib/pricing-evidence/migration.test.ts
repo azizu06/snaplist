@@ -59,4 +59,18 @@ describe("pricing-evidence snapshot migration", () => {
     expect(migration).toMatch(/v_listing_id/i);
     expect(migration).toMatch(/status = 'succeeded'/i);
   });
+
+  it("uses the database clock when the first priced checkpoint becomes durable", () => {
+    expect(migration).toMatch(
+      /drop function if exists public\.checkpoint_pipeline_run\(uuid, uuid, text, jsonb, integer\)/i,
+    );
+    expect(migration).toMatch(
+      /create function public\.checkpoint_pipeline_run[\s\S]+returns jsonb/i,
+    );
+    expect(migration).toMatch(
+      /not \(checkpoint \? 'priced'\)[\s\S]+jsonb_set\([\s\S]+\{priced,evidenceAsOf\}[\s\S]+to_jsonb\(v_checkpointed_at\)/i,
+    );
+    expect(migration).toMatch(/v_checkpointed_at timestamptz := statement_timestamp\(\)/i);
+    expect(migration).toMatch(/returning checkpoint into v_checkpoint/i);
+  });
 });

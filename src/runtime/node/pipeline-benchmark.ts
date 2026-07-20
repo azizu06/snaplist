@@ -157,7 +157,7 @@ export async function runOfflinePipelineBenchmark(input: {
   };
 
   const workerRpc: PipelineWorkerRpcClient = {
-    async rpc(functionName) {
+    async rpc(functionName, args) {
       sampleRss();
       if (functionName === "claim_pipeline_run_attempt") {
         return {
@@ -197,7 +197,21 @@ export async function runOfflinePipelineBenchmark(input: {
       }
       if (functionName === "checkpoint_pipeline_run") {
         counters.checkpoints += 1;
-        return { data: true, error: null };
+        const checkpoint = args.p_checkpoint as Record<string, unknown>;
+        const priced = checkpoint.priced as Record<string, unknown> | undefined;
+        return {
+          data:
+            priced && !priced.evidenceAsOf
+              ? {
+                  ...checkpoint,
+                  priced: {
+                    ...priced,
+                    evidenceAsOf: "2026-07-16T20:00:01.000Z",
+                  },
+                }
+              : checkpoint,
+          error: null,
+        };
       }
       if (functionName === "complete_pipeline_run") {
         counters.completedRuns += 1;

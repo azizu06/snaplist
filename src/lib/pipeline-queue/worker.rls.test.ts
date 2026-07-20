@@ -29,8 +29,7 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ORIGINAL_EVIDENCE_AS_OF = "2026-07-20T08:00:00.000Z";
-const NEW_EVIDENCE_AS_OF = "2026-07-20T09:00:00.000Z";
+const UNTRUSTED_WORKER_EVIDENCE_AS_OF = "2099-07-20T08:00:00.000Z";
 
 const RESULT: PipelineResult = {
   attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
@@ -314,7 +313,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       ...identified,
       priced: {
         result: RESULT.price,
-        evidenceAsOf: ORIGINAL_EVIDENCE_AS_OF,
+        evidenceAsOf: UNTRUSTED_WORKER_EVIDENCE_AS_OF,
       },
     };
     await store.checkpoint({
@@ -324,13 +323,16 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       checkpoint: identified,
       leaseSeconds: 1,
     });
-    await store.checkpoint({
+    const canonicalPriced = await store.checkpoint({
       runId: runA,
       leaseToken: first.context.run.lease_token,
       stage: "pricing",
       checkpoint: priced,
       leaseSeconds: 1,
     });
+    expect(canonicalPriced.priced?.evidenceAsOf).not.toBe(
+      UNTRUSTED_WORKER_EVIDENCE_AS_OF,
+    );
 
     await sleep(1_100);
     const resumed = acquired(
@@ -338,6 +340,9 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     );
     expect(resumed.context.run.attempt_count).toBe(2);
     expect(resumed.context.run.lease_token).not.toBe(first.context.run.lease_token);
+    expect(resumed.context.run.checkpoint.priced?.evidenceAsOf).toBe(
+      canonicalPriced.priced!.evidenceAsOf,
+    );
 
     await expect(
       store.checkpoint({
@@ -350,7 +355,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     ).rejects.toThrow(/stale/i);
 
     const generated = {
-      ...priced,
+      ...resumed.context.run.checkpoint,
       generated: { copy: RESULT.listing, model: RESULT.listingModel! },
     };
     await expect(
@@ -400,8 +405,8 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         userB.client.from("pricing_evidence_snapshots").select("run_id").eq("run_id", runA),
       ]);
     expect(run).toMatchObject({ status: "succeeded", stage: "completed", attempt_count: 2 });
-    expect(Date.parse(run!.completed_at)).toBeGreaterThan(
-      Date.parse(ORIGINAL_EVIDENCE_AS_OF),
+    expect(Date.parse(run!.completed_at)).toBeGreaterThanOrEqual(
+      Date.parse(canonicalPriced.priced!.evidenceAsOf),
     );
     expect(listings).toHaveLength(1);
     expect(listings?.[0]).toMatchObject({ item_id: itemA, run_id: runA, status: "queued" });
@@ -419,7 +424,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       schema_version: 1,
     });
     expect(Date.parse(snapshots![0]!.evidence_as_of)).toBe(
-      Date.parse(ORIGINAL_EVIDENCE_AS_OF),
+      Date.parse(canonicalPriced.priced!.evidenceAsOf),
     );
     expect(snapshots?.[0]?.evidence).toEqual([
       expect.objectContaining({
@@ -481,10 +486,10 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       ...identified,
       priced: {
         result: RESULT.price,
-        evidenceAsOf: NEW_EVIDENCE_AS_OF,
+        evidenceAsOf: UNTRUSTED_WORKER_EVIDENCE_AS_OF,
       },
     };
-    await store.checkpoint({
+    const canonicalNewPriced = await store.checkpoint({
       runId: runAdvance,
       leaseToken: newAttempt.context.run.lease_token,
       stage: "pricing",
@@ -496,7 +501,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       leaseToken: newAttempt.context.run.lease_token,
       stage: "generating",
       checkpoint: {
-        ...newPriced,
+        ...canonicalNewPriced,
         generated: { copy: RESULT.listing, model: RESULT.listingModel! },
       },
       leaseSeconds: 60,
@@ -514,14 +519,14 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       .eq("run_id", runAdvance);
     expect(newSnapshots).toHaveLength(1);
     expect(Date.parse(newSnapshots![0]!.evidence_as_of)).toBe(
-      Date.parse(NEW_EVIDENCE_AS_OF),
+      Date.parse(canonicalNewPriced.priced!.evidenceAsOf),
     );
     expect(newSnapshots![0]!.evidence).toEqual([
       expect.objectContaining({ evidenceAsOf: newSnapshots![0]!.evidence_as_of }),
       expect.objectContaining({ evidenceAsOf: newSnapshots![0]!.evidence_as_of }),
     ]);
-    expect(Date.parse(NEW_EVIDENCE_AS_OF)).toBeGreaterThan(
-      Date.parse(ORIGINAL_EVIDENCE_AS_OF),
+    expect(Date.parse(canonicalNewPriced.priced!.evidenceAsOf)).toBeGreaterThan(
+      Date.parse(canonicalPriced.priced!.evidenceAsOf),
     );
   }, 15_000);
 

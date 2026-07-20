@@ -2,6 +2,7 @@ import type { PipelineResult } from "@/lib/pipeline";
 import type { VisionPipelineStages } from "@/lib/vision";
 import {
   pipelineWorkerCheckpointSchema,
+  pipelineWorkerCheckpointWriteSchema,
   type PipelineWorkerCheckpoint,
 } from "./checkpoint";
 import type { PipelineWorkerContext } from "./worker-store";
@@ -46,8 +47,13 @@ export function createDurableVisionPipelineProcessor(
 
       if (!checkpoint.identified) {
         const identified = await stages.identify({ photos: context.item.photos });
-        checkpoint = pipelineWorkerCheckpointSchema.parse({ ...checkpoint, identified });
-        await onCheckpoint("identifying", checkpoint);
+        const candidate = pipelineWorkerCheckpointWriteSchema.parse({
+          ...checkpoint,
+          identified,
+        });
+        checkpoint = pipelineWorkerCheckpointSchema.parse(
+          await onCheckpoint("identifying", candidate),
+        );
       }
       const identified = checkpoint.identified;
       if (!identified) {
@@ -59,14 +65,18 @@ export function createDurableVisionPipelineProcessor(
       }
 
       if (!checkpoint.priced) {
-        const priced = {
-          result: await stages.price({
-            attributes: identified.attributes,
-          }),
-          evidenceAsOf: new Date().toISOString(),
-        };
-        checkpoint = pipelineWorkerCheckpointSchema.parse({ ...checkpoint, priced });
-        await onCheckpoint("pricing", checkpoint);
+        const priced = await stages.price({
+          attributes: identified.attributes,
+        });
+        const candidate = pipelineWorkerCheckpointWriteSchema.parse({
+          ...checkpoint,
+          priced: {
+            result: priced,
+          },
+        });
+        checkpoint = pipelineWorkerCheckpointSchema.parse(
+          await onCheckpoint("pricing", candidate),
+        );
       }
       const priced = checkpoint.priced;
 
@@ -74,8 +84,13 @@ export function createDurableVisionPipelineProcessor(
         const generated = await stages.generate({
           attributes: identified.attributes,
         });
-        checkpoint = pipelineWorkerCheckpointSchema.parse({ ...checkpoint, generated });
-        await onCheckpoint("generating", checkpoint);
+        const candidate = pipelineWorkerCheckpointWriteSchema.parse({
+          ...checkpoint,
+          generated,
+        });
+        checkpoint = pipelineWorkerCheckpointSchema.parse(
+          await onCheckpoint("generating", candidate),
+        );
       }
       const generated = checkpoint.generated;
 

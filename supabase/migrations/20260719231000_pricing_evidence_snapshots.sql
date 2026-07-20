@@ -488,6 +488,73 @@ revoke all on function public.complete_guided_review_correction(text, jsonb)
 grant execute on function public.complete_guided_review_correction(text, jsonb)
   to service_role;
 
+drop function if exists public.checkpoint_pipeline_run(uuid, uuid, text, jsonb, integer);
+
+create function public.checkpoint_pipeline_run(
+  p_run_id uuid,
+  p_lease_token uuid,
+  p_stage text,
+  p_checkpoint jsonb,
+  p_lease_seconds integer
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_checkpoint jsonb;
+  v_checkpointed_at timestamptz := statement_timestamp();
+begin
+  if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
+    raise exception using errcode = '42501', message = 'Pipeline worker authorization is required';
+  end if;
+  if p_stage not in ('identifying', 'pricing', 'generating', 'persisting')
+    or p_lease_seconds not between 1 and 3600
+    or jsonb_typeof(p_checkpoint) is distinct from 'object'
+    or octet_length(p_checkpoint::text) > 262144
+    or not (p_checkpoint ? 'identified')
+    or (p_stage in ('pricing', 'generating', 'persisting')
+      and jsonb_typeof(p_checkpoint #> '{priced,result}') is distinct from 'object')
+    or (p_stage in ('generating', 'persisting') and not (p_checkpoint ? 'generated')) then
+    raise exception using errcode = '22023', message = 'Invalid pipeline checkpoint';
+  end if;
+
+  update public.pipeline_runs
+  set stage = p_stage,
+      checkpoint = case
+        when not (checkpoint ? 'priced') and p_checkpoint ? 'priced' then
+          jsonb_set(
+            p_checkpoint,
+            '{priced,evidenceAsOf}',
+            to_jsonb(v_checkpointed_at),
+            true
+          )
+        else p_checkpoint
+      end,
+      lease_expires_at = now() + make_interval(secs => p_lease_seconds),
+      last_attempted_at = now()
+  where id = p_run_id
+    and status = 'running'
+    and lease_token = p_lease_token
+    and lease_expires_at > now()
+    and p_checkpoint @> checkpoint
+  returning checkpoint into v_checkpoint;
+
+  if not found then
+    raise exception using
+      errcode = '55000',
+      message = 'Pipeline worker lease is stale or checkpoint regressed';
+  end if;
+  return v_checkpoint;
+end;
+$$;
+
+revoke all on function public.checkpoint_pipeline_run(uuid, uuid, text, jsonb, integer)
+  from public, anon, authenticated;
+grant execute on function public.checkpoint_pipeline_run(uuid, uuid, text, jsonb, integer)
+  to service_role;
+
 create or replace function public.complete_pipeline_run(
   p_run_id uuid,
   p_lease_token uuid,
