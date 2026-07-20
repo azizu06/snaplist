@@ -315,6 +315,40 @@ struct DurableRun: Identifiable, Decodable, Equatable, Sendable {
     }
 }
 
+struct RunHistoryPage: Decodable, Equatable, Sendable {
+    let runs: [DurableRun]
+    let nextCursor: String?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case runs
+        case nextCursor
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
+        runs = try values.decode([DurableRun].self, forKey: .runs)
+        nextCursor = try values.decodeRequiredIfPresent(String.self, forKey: .nextCursor)
+        try values.require(runs.count <= 50, forKey: .runs)
+        try values.require(nextCursor?.isEmpty != true, forKey: .nextCursor)
+    }
+}
+
+struct RunHistoryEnvelope: Decodable, Equatable {
+    let data: RunHistoryPage
+    let meta: ResponseMeta
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case data
+        case meta
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.runContractContainer(keyedBy: CodingKeys.self)
+        data = try values.decode(RunHistoryPage.self, forKey: .data)
+        meta = try values.decode(ResponseMeta.self, forKey: .meta)
+    }
+}
+
 private struct RunContractCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int? = nil

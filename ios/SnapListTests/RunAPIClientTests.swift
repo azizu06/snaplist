@@ -3,6 +3,26 @@ import XCTest
 @testable import SnapList
 
 final class RunAPIClientTests: XCTestCase {
+    func testCheckedInRunHistoryFixtureDecodesThroughProductionContract() throws {
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/run-history-response.json")
+        let envelope = try JSONDecoder().decode(
+            RunHistoryEnvelope.self,
+            from: Data(contentsOf: fixtureURL)
+        )
+
+        XCTAssertEqual(
+            envelope.data.runs.map(\.id),
+            [
+                UUID(uuidString: "34200000-0000-4000-8000-000000000002")!,
+                UUID(uuidString: "34200000-0000-4000-8000-000000000001")!
+            ]
+        )
+        XCTAssertNil(envelope.data.nextCursor)
+        XCTAssertEqual(envelope.meta.requestId, "req_342_native_fixture")
+    }
+
     func testServerLegalActionsOverrideClientStatusInference() async throws {
         let runID = UUID(uuidString: "31700000-0000-4000-8000-000000000001")!
         let session = makeSession { request in
