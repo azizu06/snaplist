@@ -60,6 +60,75 @@ comment on column public.ai_item_credit_reservations.retry_reservation_count is
 comment on column public.ai_item_credit_reservations.retry_restore_count is
   'Monotonic count of reclaimed manual retry allowances restored after another pre-draft failure or cancellation.';
 
+-- manual-retry-upgrade-backfill:begin
+-- Before this migration, retry_pipeline_run could requeue a restored credited
+-- run without reclaiming its allowance. Those unambiguously active retries
+-- must enter the new ledger with one active reclaim or settlement would strand
+-- them after deployment. Fail the migration instead of overbooking a period if
+-- an already-started retry and a later reservation currently compete for the
+-- same restored slot.
+do $$
+begin
+  if exists (
+    select 1
+    from public.ai_item_allowance_periods period
+    where (
+      select count(*)
+      from public.ai_item_credit_reservations reservation
+      join public.pipeline_runs run
+        on run.id = reservation.pipeline_run_id
+       and run.user_id = reservation.user_id
+       and run.item_id = reservation.item_id
+      where reservation.allowance_period_id = period.id
+        and reservation.state = 'restored'
+        and reservation.retry_reservation_count = 0
+        and reservation.retry_restore_count = 0
+        and run.status in ('queued', 'running', 'retrying')
+        and run.capture_input is not null
+        and run.listing_id is null
+        and run.completed_at is null
+        and run.retention_cleaned_at is null
+    ) > greatest(
+      period.allowance::bigint - (
+        select count(*)
+        from public.ai_item_credit_reservations reservation
+        where reservation.allowance_period_id = period.id
+          and (
+            reservation.state in ('reserved', 'settled')
+            or (
+              reservation.state = 'restored'
+              and reservation.retry_reservation_count
+                > reservation.retry_restore_count
+            )
+          )
+      ),
+      0::bigint
+    )
+  ) then
+    raise exception using
+      errcode = '55000',
+      message = 'Cannot reconcile active manual retries without overbooking an AI-item allowance period';
+  end if;
+end;
+$$;
+
+update public.ai_item_credit_reservations reservation
+set retry_reservation_count = 1,
+    updated_at = statement_timestamp()
+from public.pipeline_runs run
+where run.id = reservation.pipeline_run_id
+  and run.user_id = reservation.user_id
+  and run.item_id = reservation.item_id
+  and reservation.state = 'restored'
+  and reservation.retry_reservation_count = 0
+  and reservation.retry_restore_count = 0
+  and run.status in ('queued', 'running', 'retrying')
+  and run.capture_input is not null
+  and run.listing_id is null
+  and run.completed_at is null
+  and run.retention_cleaned_at is null;
+-- manual-retry-upgrade-backfill:end
+
 create or replace function private.enforce_ai_item_credit_transition()
 returns trigger
 language plpgsql

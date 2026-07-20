@@ -38,6 +38,19 @@ describe("manual retry AI-item credit reconciliation migration", () => {
     );
   });
 
+  it("reconciles active retries from the pre-migration RPC without overbooking", () => {
+    expect(migration).toMatch(/manual-retry-upgrade-backfill:begin/i);
+    expect(migration).toMatch(
+      /run\.status in \('queued', 'running', 'retrying'\)[\s\S]*run\.capture_input is not null[\s\S]*run\.listing_id is null[\s\S]*run\.completed_at is null/i,
+    );
+    expect(migration).toMatch(
+      /Cannot reconcile active manual retries without overbooking an AI-item allowance period/i,
+    );
+    expect(migration).toMatch(
+      /update public\.ai_item_credit_reservations reservation[\s\S]*set retry_reservation_count = 1[\s\S]*from public\.pipeline_runs run/i,
+    );
+  });
+
   it("counts active retry reclaims in reservations and entitlement reads", () => {
     expect(migration).toMatch(
       /create or replace function private\.reserve_ai_item_credit_for_pipeline_run\(\)[\s\S]*retry_reservation_count > reservation\.retry_restore_count/i,
