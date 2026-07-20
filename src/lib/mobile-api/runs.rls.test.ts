@@ -104,6 +104,17 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!reachable) return;
+  const database = new Client({ connectionString: DATABASE_URL });
+  await database.connect();
+  try {
+    await database.query(
+      `delete from private.mobile_run_operation_replays
+       where user_id = any($1::text[])`,
+      [[userAId, userBId]],
+    );
+  } finally {
+    await database.end();
+  }
   await cleanupClerkTestUsers(admin, [userAId, userBId]);
 });
 
@@ -149,6 +160,21 @@ describe("mobile durable-run RLS adapter", () => {
       bearerToken: userBToken,
       idempotencyKey: crypto.randomUUID(),
     })).rejects.toBeInstanceOf(MobileRunNotFoundError);
+
+    const missingRunId = crypto.randomUUID();
+    const missingKey = crypto.randomUUID();
+    const missingInput = {
+      runId: missingRunId,
+      userId: userBId,
+      bearerToken: userBToken,
+      idempotencyKey: missingKey,
+    };
+    await expect(foreign.retry(missingInput)).rejects.toBeInstanceOf(
+      MobileRunNotFoundError,
+    );
+    await expect(foreign.retry(missingInput)).rejects.toBeInstanceOf(
+      MobileRunNotFoundError,
+    );
   });
 
   it("replays cancel and retry on one logical run without deleting its photos", async () => {
@@ -324,11 +350,17 @@ describe("mobile durable-run RLS adapter", () => {
       const result = await retryPromise;
       await retry.query("commit");
 
-      expect(result.rows[0]?.value).toMatchObject({
-        mobileRunOperationError: { code: "55000" },
-      });
-      const finalState = await setup.query<{ reservation_state: string; status: string }>(
-        `select run.status, reservation.state as reservation_state
+      expect(result.rows[0]?.value).toMatchObject({ status: "queued" });
+      const finalState = await setup.query<{
+        reservation_state: string;
+        retry_reservation_count: number;
+        retry_restore_count: number;
+        status: string;
+      }>(
+        `select run.status,
+                reservation.state as reservation_state,
+                reservation.retry_reservation_count,
+                reservation.retry_restore_count
          from public.pipeline_runs run
          join public.ai_item_credit_reservations reservation
            on reservation.pipeline_run_id = run.id
@@ -337,7 +369,9 @@ describe("mobile durable-run RLS adapter", () => {
       );
       expect(finalState.rows[0]).toEqual({
         reservation_state: "restored",
-        status: "failed",
+        retry_reservation_count: 1,
+        retry_restore_count: 0,
+        status: "queued",
       });
     } finally {
       await worker.query("rollback").catch(() => undefined);
@@ -349,12 +383,99 @@ describe("mobile durable-run RLS adapter", () => {
         [runId],
       ).catch(() => undefined);
       await setup.query(
-        "delete from private.mobile_run_operation_replays where run_id = $1::uuid",
+        "delete from private.mobile_run_operation_replays where requested_run_id = $1::uuid",
         [runId],
       ).catch(() => undefined);
       await setup.query("delete from public.items where id = $1::uuid", [itemId])
         .catch(() => undefined);
       await Promise.all([setup.end(), worker.end(), retry.end(), observer.end()]);
+    }
+  });
+
+  it("waits on the retention fence before locking a run for retry", async () => {
+    if (!reachable) return;
+    const fixtureUser = `user_test_mobile_retention_order_${Date.now()}`;
+    const itemId = crypto.randomUUID();
+    const runId = crypto.randomUUID();
+    const retryKey = crypto.randomUUID();
+    const setup = new Client({ connectionString: DATABASE_URL });
+    const retention = new Client({ connectionString: DATABASE_URL });
+    const retry = new Client({ connectionString: DATABASE_URL });
+    const observer = new Client({ connectionString: DATABASE_URL });
+    await Promise.all([setup.connect(), retention.connect(), retry.connect(), observer.connect()]);
+
+    try {
+      await setup.query(
+        `insert into public.items (id, user_id, photos)
+         values ($1::uuid, $2, array[$3::text])`,
+        [itemId, fixtureUser, `${fixtureUser}/items/front.jpg`],
+      );
+      await setup.query(
+        `insert into public.pipeline_runs (id, user_id, item_id, idempotency_key)
+         values ($1::uuid, $2, $3::uuid, $4)`,
+        [runId, fixtureUser, itemId, `mobile-retention-${runId}`],
+      );
+      await setup.query(
+        `update public.pipeline_runs
+         set status = 'failed',
+             failure_code = 'provider_unavailable',
+             safe_failure_message = 'The listing could not be prepared.',
+             completed_at = statement_timestamp()
+         where id = $1::uuid`,
+        [runId],
+      );
+
+      await retention.query("begin");
+      await retention.query(
+        `select pg_advisory_xact_lock(
+           hashtextextended('snaplist:pipeline-retention', 0)
+         )`,
+      );
+
+      await retry.query("begin");
+      await retry.query("select set_config('request.jwt.claims', $1, true)", [
+        JSON.stringify({ sub: fixtureUser, role: "authenticated" }),
+      ]);
+      await retry.query("set local role authenticated");
+      const retryPid = await retry.query<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      const retryPromise = retry.query<{ value: Record<string, unknown> }>(
+        `select public.apply_mobile_run_operation($1::uuid, 'retry', $2::uuid) as value`,
+        [runId, retryKey],
+      );
+      await waitForDatabaseBlock(observer, retryPid.rows[0]!.pid);
+
+      await expect(
+        retention.query(
+          `select id
+           from public.pipeline_runs
+           where id = $1::uuid
+           for update nowait`,
+          [runId],
+        ),
+      ).resolves.toMatchObject({ rowCount: 1 });
+      await retention.query("commit");
+
+      const result = await retryPromise;
+      await retry.query("commit");
+      expect(result.rows[0]?.value).toMatchObject({ status: "queued" });
+    } finally {
+      await retention.query("rollback").catch(() => undefined);
+      await retry.query("rollback").catch(() => undefined);
+      await setup.query(
+        `select pgmq.delete('pipeline_jobs', queue_message_id)
+         from public.pipeline_runs
+         where id = $1::uuid and queue_message_id is not null`,
+        [runId],
+      ).catch(() => undefined);
+      await setup.query(
+        "delete from private.mobile_run_operation_replays where requested_run_id = $1::uuid",
+        [runId],
+      ).catch(() => undefined);
+      await setup.query("delete from public.items where id = $1::uuid", [itemId])
+        .catch(() => undefined);
+      await Promise.all([setup.end(), retention.end(), retry.end(), observer.end()]);
     }
   });
 });

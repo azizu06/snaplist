@@ -147,8 +147,7 @@ async function readCanonicalRun(
   const terminalOutcome = ["succeeded", "failed", "canceled"].includes(run.status)
     ? run.status as "succeeded" | "failed" | "canceled"
     : null;
-  const canRetry = allowance !== "restored"
-    && !expired
+  const canRetry = !expired
     && run.listing_id === null
     && (run.status === "failed" || run.status === "canceled");
   const canCancel = run.listing_id === null
@@ -201,7 +200,7 @@ async function readCanonicalRun(
 
 function mutationFailure(error: MobileRunDataError): never {
   if (error.code === "P0002") throw new MobileRunNotFoundError();
-  if (error.code === "55000" || error.code === "23514") {
+  if (error.code === "P0001" || error.code === "55000" || error.code === "23514") {
     throw new MobileRunConflictError();
   }
   throw new MobileRunUnavailableError("Durable-run mutation failed");

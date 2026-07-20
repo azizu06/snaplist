@@ -245,7 +245,7 @@ describe("mobile durable-run operations", () => {
     expect(client.cancelRun).toHaveBeenCalledOnce();
   });
 
-  it("does not advertise retry after #168 has restored the run credit", async () => {
+  it("advertises retry after #278 made restored-credit reclaim canonical", async () => {
     const client = dataClient({
       readRun: vi.fn().mockResolvedValue({
         data: runRow({
@@ -269,13 +269,14 @@ describe("mobile durable-run operations", () => {
       }),
     ).resolves.toMatchObject({
       allowance: "restored",
-      legalActions: { canRetry: false },
-      safeFailure: { retryable: false },
+      legalActions: { canRetry: true },
+      safeFailure: { retryable: true },
     });
   });
 
   it.each([
     ["P0002", MobileRunNotFoundError],
+    ["P0001", MobileRunConflictError],
     ["55000", MobileRunConflictError],
     ["23514", MobileRunConflictError],
     ["XX000", MobileRunUnavailableError],
