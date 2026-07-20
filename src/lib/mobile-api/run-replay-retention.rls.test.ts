@@ -73,6 +73,80 @@ async function applyOperation(
   }
 }
 
+async function backendPid(client: Client): Promise<number> {
+  const result = await client.query<{ pid: number }>(
+    "select pg_backend_pid() as pid",
+  );
+  return result.rows[0]!.pid;
+}
+
+async function waitForBothOperationsToBlock(
+  firstPid: number,
+  secondPid: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await admin.query<{ waiting_count: number }>(
+      `select count(*)::integer as waiting_count
+       from pg_stat_activity
+       where pid = any($1::integer[])
+         and state = 'active'
+         and wait_event_type = 'Lock'`,
+      [[firstPid, secondPid]],
+    );
+    if (result.rows[0]?.waiting_count === 2) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Both rejected operations did not reach the replay lock boundary");
+}
+
+async function installRejectedReceiptBarrier(runId: string): Promise<void> {
+  await uninstallRejectedReceiptBarrier();
+  await admin.query(
+    `create table private.issue_301_replay_test_barrier (
+       run_id uuid primary key
+     )`,
+  );
+  await admin.query(
+    `insert into private.issue_301_replay_test_barrier (run_id)
+     values ($1::uuid)`,
+    [runId],
+  );
+  await admin.query(
+    `create function private.block_issue_301_replay_insert()
+     returns trigger
+     language plpgsql
+     set search_path = ''
+     as $function$
+     begin
+       if exists (
+         select 1
+         from private.issue_301_replay_test_barrier barrier
+         where barrier.run_id = new.run_id
+       ) then
+         perform pg_advisory_xact_lock(
+           hashtextextended('issue-301:rejected-receipt-barrier', 0)
+         );
+       end if;
+       return new;
+     end;
+     $function$`,
+  );
+  await admin.query(
+    `create trigger issue_301_replay_test_barrier
+     before insert on private.mobile_run_operation_replays
+     for each row execute function private.block_issue_301_replay_insert()`,
+  );
+}
+
+async function uninstallRejectedReceiptBarrier(): Promise<void> {
+  await admin.query(
+    `drop trigger if exists issue_301_replay_test_barrier
+       on private.mobile_run_operation_replays;
+     drop function if exists private.block_issue_301_replay_insert();
+     drop table if exists private.issue_301_replay_test_barrier`,
+  );
+}
+
 beforeAll(async () => {
   admin = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
   owner = new Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2_000 });
@@ -190,7 +264,7 @@ beforeAll(async () => {
          lease_token = gen_random_uuid(),
          lease_expires_at = statement_timestamp() + interval '1 minute'
      where id = any($1::uuid[])`,
-    [[retryRunId, quotaRunId]],
+    [[retryRunId, quotaRunId, concurrentQuotaRunId]],
   );
   await admin.query(
     `update public.pipeline_runs
@@ -201,7 +275,7 @@ beforeAll(async () => {
          lease_token = null,
          lease_expires_at = null
      where id = any($1::uuid[])`,
-    [[retryRunId, quotaRunId]],
+    [[retryRunId, quotaRunId, concurrentQuotaRunId]],
   );
 });
 
@@ -392,7 +466,7 @@ describe("mobile run replay receipt retention", () => {
     expect(retained.rows[0]).toEqual({ count: "2", verified_count: "2" });
   });
 
-  it("bounds fresh owned-run receipts and serializes different keys at the ceiling", async () => {
+  it("bounds fresh receipts and serializes two canonical rejections at the ceiling", async () => {
     if (!reachable) return;
 
     const replayLimit = 32;
@@ -474,35 +548,58 @@ describe("mobile run replay receipt retention", () => {
       ],
     );
     const concurrentKeys = [randomUUID(), randomUUID()];
-    const concurrentResults = await Promise.all([
-      applyOperation(
-        owner,
-        ownerUserId,
-        concurrentQuotaRunId,
-        "cancel",
-        concurrentKeys[0]!,
-      ),
-      applyOperation(
-        ownerConcurrent,
-        ownerUserId,
-        concurrentQuotaRunId,
-        "cancel",
-        concurrentKeys[1]!,
-      ),
+    const [ownerPid, ownerConcurrentPid] = await Promise.all([
+      backendPid(owner),
+      backendPid(ownerConcurrent),
     ]);
-
-    expect(concurrentResults).toContainEqual({
-      mobileRunOperationError: {
-        code: "55000",
-        message: "This listing run has too many saved operation receipts",
-      },
-    });
-    expect(concurrentResults).toContainEqual(
-      expect.objectContaining({
-        runId: concurrentQuotaRunId,
-        status: "canceled",
-      }),
+    await installRejectedReceiptBarrier(concurrentQuotaRunId);
+    await admin.query(
+      `select pg_advisory_lock(
+         hashtextextended('issue-301:rejected-receipt-barrier', 0)
+       )`,
     );
+
+    let concurrentResults: MobileRunOperationResult[] = [];
+    try {
+      const pendingResults = Promise.all([
+        applyOperation(
+          owner,
+          ownerUserId,
+          concurrentQuotaRunId,
+          "cancel",
+          concurrentKeys[0]!,
+        ),
+        applyOperation(
+          ownerConcurrent,
+          ownerUserId,
+          concurrentQuotaRunId,
+          "cancel",
+          concurrentKeys[1]!,
+        ),
+      ]);
+      let barrierError: unknown;
+      try {
+        await waitForBothOperationsToBlock(ownerPid, ownerConcurrentPid);
+      } catch (error) {
+        barrierError = error;
+      } finally {
+        await admin.query(
+          `select pg_advisory_unlock(
+             hashtextextended('issue-301:rejected-receipt-barrier', 0)
+           )`,
+        );
+      }
+      concurrentResults = await pendingResults;
+      if (barrierError) throw barrierError;
+    } finally {
+      await admin.query(
+        `select pg_advisory_unlock(
+           hashtextextended('issue-301:rejected-receipt-barrier', 0)
+         )`,
+      );
+      await uninstallRejectedReceiptBarrier();
+    }
+
     const concurrentBoundary = await admin.query<{
       count: string;
       new_key_count: string;
@@ -523,7 +620,19 @@ describe("mobile run replay receipt retention", () => {
     expect(concurrentBoundary.rows[0]).toEqual({
       count: "32",
       new_key_count: "1",
-      status: "canceled",
+      status: "failed",
+    });
+    expect(concurrentResults).toContainEqual({
+      mobileRunOperationError: {
+        code: "55000",
+        message: "This listing run has too many saved operation receipts",
+      },
+    });
+    expect(concurrentResults).toContainEqual({
+      mobileRunOperationError: {
+        code: "55000",
+        message: "This listing run cannot be canceled",
+      },
     });
   });
 });
