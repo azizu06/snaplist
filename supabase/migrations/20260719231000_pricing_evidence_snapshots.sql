@@ -74,6 +74,8 @@ create unique index if not exists listings_id_item_user_id_idx
 
 create table public.pricing_evidence_snapshots (
   run_id uuid primary key,
+  pipeline_run_id uuid,
+  run_kind text not null,
   user_id text not null,
   item_id uuid not null,
   prediction_id uuid not null,
@@ -86,6 +88,10 @@ create table public.pricing_evidence_snapshots (
 
   constraint pricing_evidence_snapshots_schema_version_check
     check (schema_version = 1),
+  constraint pricing_evidence_snapshots_run_kind_check check (
+    (run_kind = 'pipeline' and pipeline_run_id = run_id)
+    or (run_kind = 'review-correction' and pipeline_run_id is null)
+  ),
   constraint pricing_evidence_snapshots_item_check check (
     jsonb_typeof(item) = 'object'
     and jsonb_typeof(item->'title') = 'string'
@@ -107,7 +113,7 @@ create table public.pricing_evidence_snapshots (
   constraint pricing_evidence_snapshots_evidence_check
     check (private.pricing_evidence_rows_valid(evidence)),
   constraint pricing_evidence_snapshots_run_fkey
-    foreign key (run_id, item_id, user_id)
+    foreign key (pipeline_run_id, item_id, user_id)
     references public.pipeline_runs (id, item_id, user_id)
     on delete cascade,
   constraint pricing_evidence_snapshots_prediction_fkey
@@ -125,7 +131,7 @@ create table public.pricing_evidence_snapshots (
 );
 
 comment on table public.pricing_evidence_snapshots is
-  'Immutable tenant-owned pricing recommendation and accepted sold evidence for one coherent durable pipeline run.';
+  'Immutable tenant-owned pricing recommendation and accepted sold evidence for one coherent pipeline or guided-correction run.';
 comment on column public.pricing_evidence_snapshots.evidence_as_of is
   'One server timestamp applied to every accepted evidence row in this immutable snapshot.';
 
@@ -162,6 +168,263 @@ revoke all on function private.prevent_pricing_evidence_snapshot_update()
 create trigger prevent_pricing_evidence_snapshot_update
 before update on public.pricing_evidence_snapshots
 for each row execute function private.prevent_pricing_evidence_snapshot_update();
+
+create or replace function private.persist_review_pricing_evidence_snapshot(
+  p_user_id text,
+  p_item_id uuid,
+  p_listing_id uuid,
+  p_run_id uuid,
+  p_snapshot jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_prediction_id uuid;
+  v_item_title text;
+  v_item_condition text;
+  v_price numeric;
+  v_price_range jsonb;
+  v_confidence numeric;
+  v_tier_fired text;
+  v_pricing_model text;
+  v_sources jsonb;
+  v_evidence jsonb;
+  v_evidence_as_of timestamptz := statement_timestamp();
+begin
+  if coalesce(p_user_id, '') = ''
+    or public.clerk_user_id() is distinct from p_user_id then
+    raise exception using errcode = '42501', message = 'Review pricing authorization is required';
+  end if;
+  if jsonb_typeof(p_snapshot) is distinct from 'object'
+    or (p_snapshot->>'schema_version')::integer is distinct from 1
+    or jsonb_typeof(p_snapshot->'item') is distinct from 'object'
+    or jsonb_typeof(p_snapshot->'price_result') is distinct from 'object'
+    or p_snapshot->'price_result' ? 'evidence'
+    or not private.pricing_evidence_rows_valid(p_snapshot->'evidence') then
+    raise exception using errcode = '22023', message = 'Invalid review pricing evidence snapshot';
+  end if;
+  if exists (
+    select 1
+    from jsonb_array_elements(p_snapshot->'evidence') evidence_row
+    where not exists (
+      select 1
+      from jsonb_array_elements(p_snapshot #> '{price_result,sources}') source_row
+      where source_row->>'url' = evidence_row->>'sourceUrl'
+    )
+  ) then
+    raise exception using errcode = '22023', message = 'Review pricing evidence is not grounded in cited sources';
+  end if;
+
+  select
+    prediction.id,
+    coalesce(
+      nullif(btrim(item.identification->>'label'), ''),
+      nullif(btrim(item.attributes->>'title'), ''),
+      nullif(btrim(listing.title), '')
+    ),
+    nullif(btrim(item.condition), ''),
+    prediction.price,
+    prediction.price_range,
+    prediction.confidence,
+    prediction.tier_fired,
+    prediction.pricing_model,
+    prediction.sources
+  into
+    v_prediction_id,
+    v_item_title,
+    v_item_condition,
+    v_price,
+    v_price_range,
+    v_confidence,
+    v_tier_fired,
+    v_pricing_model,
+    v_sources
+  from public.prediction_logs prediction
+  join public.items item
+    on item.id = prediction.item_id
+   and item.user_id = prediction.user_id
+  join public.listings listing
+    on listing.id = p_listing_id
+   and listing.item_id = prediction.item_id
+   and listing.user_id = prediction.user_id
+   and listing.run_id = prediction.run_id
+  where prediction.run_id = p_run_id
+    and prediction.item_id = p_item_id
+    and prediction.user_id = p_user_id
+    and listing.status = 'draft';
+  if not found then
+    raise exception using errcode = '55000', message = 'Review pricing run is incoherent';
+  end if;
+  if nullif(btrim(p_snapshot #>> '{item,title}'), '') is distinct from v_item_title
+    or nullif(btrim(p_snapshot #>> '{item,condition}'), '') is distinct from v_item_condition
+    or (p_snapshot #>> '{price_result,suggested}')::numeric is distinct from v_price
+    or (p_snapshot #>> '{price_result,range,min}')::numeric
+      is distinct from (v_price_range->>'low')::numeric
+    or (p_snapshot #>> '{price_result,range,max}')::numeric
+      is distinct from (v_price_range->>'high')::numeric
+    or (p_snapshot #>> '{price_result,confidence}')::numeric is distinct from v_confidence
+    or p_snapshot #>> '{price_result,tier}' is distinct from v_tier_fired
+    or p_snapshot #> '{price_result,sources}' is distinct from v_sources
+    or (
+      v_pricing_model is null
+      and p_snapshot->'price_result' ? 'model'
+    )
+    or (
+      v_pricing_model is not null
+      and p_snapshot #>> '{price_result,model}' is distinct from v_pricing_model
+    ) then
+    raise exception using errcode = '22023', message = 'Review pricing evidence snapshot diverges from persisted recommendation';
+  end if;
+
+  select coalesce(
+    jsonb_agg(
+      evidence_row.value || jsonb_build_object('evidenceAsOf', v_evidence_as_of)
+      order by evidence_row.ordinality
+    ),
+    '[]'::jsonb
+  )
+  into v_evidence
+  from jsonb_array_elements(p_snapshot->'evidence') with ordinality evidence_row;
+
+  insert into public.pricing_evidence_snapshots (
+    run_id, pipeline_run_id, run_kind, user_id, item_id,
+    prediction_id, listing_id, schema_version,
+    item, price_result, evidence, evidence_as_of
+  ) values (
+    p_run_id, null, 'review-correction', p_user_id, p_item_id,
+    v_prediction_id, p_listing_id, 1,
+    p_snapshot->'item', p_snapshot->'price_result', v_evidence, v_evidence_as_of
+  );
+end;
+$$;
+
+revoke all on function private.persist_review_pricing_evidence_snapshot(
+  text, uuid, uuid, uuid, jsonb
+) from public, anon, authenticated, service_role;
+
+create or replace function public.regenerate_review_listing_with_evidence(
+  p_item_id uuid,
+  p_listing_id uuid,
+  p_run_id uuid,
+  p_expected_run_id uuid,
+  p_expected_review_revision uuid,
+  p_attributes jsonb,
+  p_condition text,
+  p_identification jsonb,
+  p_listing_title text,
+  p_listing_description text,
+  p_listing_copy jsonb,
+  p_price numeric,
+  p_price_range jsonb,
+  p_confidence numeric,
+  p_tier_fired text,
+  p_model text,
+  p_listing_model text,
+  p_pricing_model text,
+  p_sources jsonb,
+  p_autopilot_enabled boolean,
+  p_autopilot_eligible boolean,
+  p_pricing_snapshot jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+begin
+  if coalesce(v_user_id, '') = '' then
+    raise exception using errcode = '42501', message = 'Authentication required.';
+  end if;
+  perform public.regenerate_review_listing(
+    p_item_id, p_listing_id, p_run_id, p_expected_run_id,
+    p_expected_review_revision, p_attributes, p_condition, p_identification,
+    p_listing_title, p_listing_description, p_listing_copy, p_price,
+    p_price_range, p_confidence, p_tier_fired, p_model, p_listing_model,
+    p_pricing_model, p_sources, p_autopilot_enabled, p_autopilot_eligible
+  );
+  perform private.persist_review_pricing_evidence_snapshot(
+    v_user_id, p_item_id, p_listing_id, p_run_id, p_pricing_snapshot
+  );
+end;
+$$;
+
+create or replace function public.regenerate_review_listing_with_credit_and_evidence(
+  p_item_id uuid,
+  p_listing_id uuid,
+  p_run_id uuid,
+  p_expected_run_id uuid,
+  p_expected_review_revision uuid,
+  p_attributes jsonb,
+  p_condition text,
+  p_identification jsonb,
+  p_listing_title text,
+  p_listing_description text,
+  p_listing_copy jsonb,
+  p_price numeric,
+  p_price_range jsonb,
+  p_confidence numeric,
+  p_tier_fired text,
+  p_model text,
+  p_listing_model text,
+  p_pricing_model text,
+  p_sources jsonb,
+  p_autopilot_enabled boolean,
+  p_autopilot_eligible boolean,
+  p_pricing_snapshot jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := public.clerk_user_id();
+begin
+  if coalesce(v_user_id, '') = '' then
+    raise exception using errcode = '42501', message = 'Authentication required.';
+  end if;
+  perform public.regenerate_review_listing_with_credit(
+    p_item_id, p_listing_id, p_run_id, p_expected_run_id,
+    p_expected_review_revision, p_attributes, p_condition, p_identification,
+    p_listing_title, p_listing_description, p_listing_copy, p_price,
+    p_price_range, p_confidence, p_tier_fired, p_model, p_listing_model,
+    p_pricing_model, p_sources, p_autopilot_enabled, p_autopilot_eligible
+  );
+  perform private.persist_review_pricing_evidence_snapshot(
+    v_user_id, p_item_id, p_listing_id, p_run_id, p_pricing_snapshot
+  );
+end;
+$$;
+
+revoke execute on function public.regenerate_review_listing(
+  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
+  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean
+) from authenticated;
+revoke execute on function public.regenerate_review_listing_with_credit(
+  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
+  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean
+) from authenticated;
+revoke all on function public.regenerate_review_listing_with_evidence(
+  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
+  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
+) from public, anon;
+grant execute on function public.regenerate_review_listing_with_evidence(
+  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
+  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
+) to authenticated;
+revoke all on function public.regenerate_review_listing_with_credit_and_evidence(
+  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
+  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
+) from public, anon;
+grant execute on function public.regenerate_review_listing_with_credit_and_evidence(
+  uuid, uuid, uuid, uuid, uuid, jsonb, text, jsonb, text, text, jsonb, numeric,
+  jsonb, numeric, text, text, text, text, jsonb, boolean, boolean, jsonb
+) to authenticated;
 
 create or replace function public.complete_pipeline_run(
   p_run_id uuid,
@@ -329,10 +592,12 @@ begin
   end if;
 
   insert into public.pricing_evidence_snapshots (
-    run_id, user_id, item_id, prediction_id, listing_id, schema_version,
+    run_id, pipeline_run_id, run_kind, user_id, item_id,
+    prediction_id, listing_id, schema_version,
     item, price_result, evidence, evidence_as_of
   ) values (
-    v_run.id, v_run.user_id, v_run.item_id, v_prediction_id, v_listing_id,
+    v_run.id, v_run.id, 'pipeline', v_run.user_id, v_run.item_id,
+    v_prediction_id, v_listing_id,
     1, v_snapshot->'item', v_snapshot->'price_result', v_evidence,
     v_evidence_as_of
   );

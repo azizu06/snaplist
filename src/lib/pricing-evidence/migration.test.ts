@@ -14,7 +14,9 @@ describe("pricing-evidence snapshot migration", () => {
   it("creates one run-bound tenant row with immutable authenticated access", () => {
     expect(migration).toMatch(/create table public\.pricing_evidence_snapshots/i);
     expect(migration).toMatch(/run_id uuid primary key/i);
-    expect(migration).toMatch(/foreign key \(run_id, item_id, user_id\)[\s\S]*pipeline_runs/i);
+    expect(migration).toMatch(/foreign key \(pipeline_run_id, item_id, user_id\)[\s\S]*pipeline_runs/i);
+    expect(migration).toMatch(/run_kind = 'review-correction'/i);
+    expect(migration).toMatch(/regenerate_review_listing_with_credit_and_evidence/i);
     expect(migration).toMatch(/foreign key \(listing_id, item_id, user_id\)[\s\S]*listings/i);
     expect(migration).not.toMatch(/foreign key \(listing_id, run_id, item_id, user_id\)/i);
     expect(migration).toMatch(/enable row level security/i);

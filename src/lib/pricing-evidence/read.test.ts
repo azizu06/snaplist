@@ -36,6 +36,8 @@ function row() {
   };
   return {
     run_id: "11111111-1111-4111-8111-111111111111",
+    pipeline_run_id: "11111111-1111-4111-8111-111111111111",
+    run_kind: "pipeline" as "pipeline" | "review-correction",
     user_id: "user_a",
     item_id: "22222222-2222-4222-8222-222222222222",
     prediction_id: "33333333-3333-4333-8333-333333333333",
@@ -174,8 +176,6 @@ describe("pricing-evidence read projection", () => {
       "22222222-2222-4222-8222-222222222222",
     ]);
     expect(calls).toContainEqual(["eq", "user_id", "user_a"]);
-    expect(calls).toContainEqual(["eq", "pipeline_runs.status", "succeeded"]);
-    expect(calls).toContainEqual(["eq", "pipeline_runs.stage", "completed"]);
     expect(calls).toContainEqual(["order", "evidence_as_of", { ascending: false }]);
     expect(calls).toContainEqual(["order", "run_id", { ascending: false }]);
     expect(calls).toContainEqual(["limit", 1]);
@@ -208,6 +208,17 @@ describe("pricing-evidence read projection", () => {
         itemId: rebound.item_id,
       }),
     ).toThrow(/coherent|run/i);
+
+    const correction = row();
+    correction.run_kind = "review-correction";
+    correction.pipeline_run_id = null as never;
+    correction.pipeline_runs = null as never;
+    expect(() =>
+      buildPricingEvidenceProjection(correction, {
+        userId: correction.user_id,
+        itemId: correction.item_id,
+      }),
+    ).not.toThrow();
 
     const duplicated = row();
     (duplicated.price_result as typeof duplicated.price_result & { evidence: unknown[] }).evidence = [

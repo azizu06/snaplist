@@ -683,7 +683,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
 
     const correctedRunId = crypto.randomUUID();
     const correction = await lifecycleUser.client.rpc(
-      "regenerate_review_listing_with_credit",
+      "regenerate_review_listing_with_credit_and_evidence",
       {
         p_item_id: settledRun.item_id,
         p_listing_id: completion.listingId,
@@ -701,7 +701,7 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
         p_listing_description: "Corrected model in good used condition.",
         p_listing_copy: RESULT.listing.fields,
         p_price: 199,
-        p_price_range: { min: 180, max: 220 },
+        p_price_range: { low: 180, high: 220 },
         p_confidence: 0.85,
         p_tier_fired: "llm-only",
         p_model: "offline-vision",
@@ -710,6 +710,18 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
         p_sources: [],
         p_autopilot_enabled: false,
         p_autopilot_eligible: true,
+        p_pricing_snapshot: {
+          schema_version: 1,
+          item: { title: "Sony WH-1000XM5", condition: "good" },
+          price_result: {
+            suggested: 199,
+            range: { min: 180, max: 220 },
+            confidence: 0.85,
+            sources: [],
+            tier: "llm-only",
+          },
+          evidence: [],
+        },
       },
     );
     expect(correction.error).toBeNull();
@@ -732,7 +744,11 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
         bearerToken: "test",
         itemId: settledRun.item_id,
       }),
-    ).rejects.toThrow(/coherent|run/i);
+    ).resolves.toMatchObject({
+      priceResult: { suggested: 199, tier: "llm-only" },
+      comparables: [],
+      evidenceLevel: "limited",
+    });
     const secondCorrection = await lifecycleUser.client.rpc(
       "authorize_ai_item_guided_correction",
       {

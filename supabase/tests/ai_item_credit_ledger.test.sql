@@ -95,15 +95,15 @@ select ok(
 select ok(
   has_function_privilege(
     'authenticated',
-    'public.regenerate_review_listing_with_credit(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean)',
+    'public.regenerate_review_listing_with_credit_and_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)',
     'execute'
   ),
-  'authenticated sellers may atomically finish the authorized correction'
+  'authenticated sellers may atomically finish the authorized correction with pricing evidence'
 );
 select ok(
   not has_function_privilege(
     'anon',
-    'public.regenerate_review_listing_with_credit(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean)',
+    'public.regenerate_review_listing_with_credit_and_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)',
     'execute'
   ),
   'anonymous callers cannot finish a correction'
