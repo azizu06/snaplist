@@ -25,6 +25,7 @@ import {
 } from "./service";
 import { createSupabaseGuestClaimStore } from "./store";
 import { createSupabaseGuestClaimStorage } from "./storage";
+import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -59,6 +60,8 @@ interface Fixture {
   targetPeriodId: string | null;
   reviewRevision: string;
   completedAt: string;
+  photoIdentityKind: "content_sha256_set_v1" | "legacy_path_v0";
+  photoIdentityFingerprint: string;
   objects: Array<Omit<GuestClaimObject, "destinationPath">>;
   storageManifest: GuestRecoveryStorageManifest;
 }
@@ -99,6 +102,7 @@ async function createFixture(
     photoContents?: string[];
     completedAt?: string;
     targetHasIncludedPeriod?: boolean;
+    verifiedIdentity?: boolean;
   } = {},
 ): Promise<Fixture> {
   const [guest, target] = await Promise.all([
@@ -145,16 +149,36 @@ async function createFixture(
       ...object,
     }),
   );
+  const legacyPathFingerprint = createHash("sha256")
+    .update(JSON.stringify(objects.map((object) => object.sourcePath)))
+    .digest("hex");
+  const photoIdentityKind = options.verifiedIdentity === false
+    ? "legacy_path_v0"
+    : "content_sha256_set_v1";
+  const photoIdentityFingerprint = photoIdentityKind === "legacy_path_v0"
+    ? legacyPathFingerprint
+    : canonicalizeVerifiedPhotoSet(
+        objects.map((object) => object.sha256),
+      ).fingerprint;
 
   await database.query("begin");
   try {
     await database.query(
       `insert into public.items (
          id, user_id, photos, attributes, condition, identification,
-         review_revision, review_content_revision
+         review_revision, review_content_revision,
+         photo_identity_kind, photo_identity_fingerprint
        ) values ($1, $2, $3, '{"brand":"RecoveryFixture"}'::jsonb,
-         'good', '{"kind":"fixture"}'::jsonb, $4, $4)`,
-      [itemId, guest.id, objects.map((object) => object.sourcePath), reviewRevision],
+         'good', '{"kind":"fixture"}'::jsonb, $4, $4,
+         $5, $6)`,
+      [
+        itemId,
+        guest.id,
+        objects.map((object) => object.sourcePath),
+        reviewRevision,
+        photoIdentityKind,
+        photoIdentityFingerprint,
+      ],
     );
     await database.query(
       `insert into public.pipeline_runs (
@@ -201,9 +225,6 @@ async function createFixture(
         [targetPeriodId, target.id],
       );
     }
-    const fingerprint = createHash("sha256")
-      .update(JSON.stringify(objects.map((object) => object.sourcePath)))
-      .digest("hex");
     await database.query(
       `insert into public.ai_item_credit_reservations (
          id, user_id, pipeline_run_id, item_id, allowance_period_id,
@@ -217,7 +238,7 @@ async function createFixture(
         itemId,
         guestPeriodId,
         `guest-recovery-${label}-${runId}`,
-        fingerprint,
+        legacyPathFingerprint,
         completedAt,
         reviewRevision,
         draftId,
@@ -271,6 +292,8 @@ async function createFixture(
     targetPeriodId,
     reviewRevision,
     completedAt,
+    photoIdentityKind,
+    photoIdentityFingerprint,
     objects,
     storageManifest,
   };
@@ -363,12 +386,14 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
     if (!reachable) return;
     const fixture = await createFixture("claim", {
       targetHasIncludedPeriod: true,
+      verifiedIdentity: false,
     });
     const before = await database.query(
       `select id, pipeline_run_id, item_id, logical_run_key, state,
         reserved_at, settled_at, restored_at, settled_review_revision,
         listing_id, prediction_log_id, guided_correction_revision,
-        guided_correction_started_at, guided_correction_completed_at
+        guided_correction_started_at, guided_correction_completed_at,
+        photo_identity_kind, photo_identity_fingerprint
        from public.ai_item_credit_reservations where id = $1`,
       [fixture.reservationId],
     );
@@ -410,7 +435,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
         reserved_at, settled_at, restored_at, settled_review_revision,
         listing_id, prediction_log_id, guided_correction_revision,
         guided_correction_started_at, guided_correction_completed_at,
-        user_id, allowance_period_id
+        user_id, allowance_period_id,
+        photo_identity_kind, photo_identity_fingerprint
        from public.ai_item_credit_reservations where id = $1`,
       [fixture.reservationId],
     );
@@ -418,6 +444,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       ...before.rows[0],
       user_id: fixture.target.id,
       allowance_period_id: fixture.targetPeriodId,
+      photo_identity_kind: fixture.photoIdentityKind,
+      photo_identity_fingerprint: fixture.photoIdentityFingerprint,
     });
     expect(
       await database.query(
@@ -586,6 +614,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
          (select user_id from public.prediction_logs where id = $2) as corrected_prediction_user,
          (select run_id from public.listings where id = $3) as draft_run_id,
          (select state from public.ai_item_credit_reservations where id = $4) as reservation_state,
+         (select photo_identity_kind from public.ai_item_credit_reservations where id = $4) as photo_identity_kind,
+         (select photo_identity_fingerprint from public.ai_item_credit_reservations where id = $4) as photo_identity_fingerprint,
          (select count(*)::integer from public.ai_item_credit_reservations where id = $4) as reservation_count`,
       [
         fixture.predictionId,
@@ -599,6 +629,8 @@ describe("guest recovery live DB/RLS and private Storage boundary", () => {
       corrected_prediction_user: fixture.target.id,
       draft_run_id: correctedRunId,
       reservation_state: "settled",
+      photo_identity_kind: fixture.photoIdentityKind,
+      photo_identity_fingerprint: fixture.photoIdentityFingerprint,
       reservation_count: 1,
     });
   }, 20_000);

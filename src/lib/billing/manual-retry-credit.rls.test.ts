@@ -14,6 +14,7 @@ import {
   type ClerkTestUser,
 } from "@/lib/supabase/test-users";
 import { resolveLocalTestDatabaseUrl } from "@/test/exclusive-resource-lock";
+import { canonicalizeVerifiedPhotoSet } from "@/lib/photo-identity/photo-set";
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL ??
@@ -107,9 +108,11 @@ function acquired(
 async function stageRun(
   key: string,
   owner: ClerkTestUser = seller,
+  verifiedIdentity = false,
 ): Promise<StagedRun> {
   const batchId = crypto.randomUUID();
-  const staged = await admin.rpc("stage_pipeline_batch", {
+  const photoPath = `${owner.id}/manual-retry/${batchId}/front.jpg`;
+  const args = {
     p_batch_id: batchId,
     p_daily_limit: 1_000,
     p_entries: [
@@ -117,13 +120,23 @@ async function stageRun(
         idempotency_key: key,
         source: "single",
         autopilot_enabled: false,
-        photo_paths: [`${owner.id}/manual-retry/${batchId}/front.jpg`],
+        photo_paths: [photoPath],
         cost_basis: null,
       },
     ],
     p_per_minute_limit: 1_000,
     p_user_id: owner.id,
-  });
+    ...(verifiedIdentity ? {
+      p_photo_identities: [{
+        idempotency_key: key,
+        photo_identity_kind: "content_sha256_set_v1",
+        photo_identity_fingerprint: canonicalizeVerifiedPhotoSet([
+          "a".repeat(64),
+        ]).fingerprint,
+      }],
+    } : {}),
+  };
+  const staged = await admin.rpc("stage_pipeline_batch", args);
   if (staged.error) throw new Error(staged.error.message);
   const run = (staged.data as StagedRun[])[0];
   queueMessageIds.add(String(run.queue_message_id));
@@ -401,7 +414,7 @@ describe("manual retry AI-item credit accounting", () => {
 
   it("settles the same restored reservation after a failed run is retried", async () => {
     if (!reachable) return;
-    const run = await stageRun("manual-retry-after-failure");
+    const run = await stageRun("manual-retry-after-failure", seller, true);
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
     );
@@ -423,12 +436,16 @@ describe("manual retry AI-item credit accounting", () => {
 
     const { data: restored } = await seller.client
       .from("ai_item_credit_reservations")
-      .select("id, state, restored_at")
+      .select(
+        "id, state, restored_at, photo_identity_kind, photo_identity_fingerprint",
+      )
       .eq("pipeline_run_id", run.run_id)
       .single();
     expect(restored).toMatchObject({
       state: "restored",
       restored_at: expect.any(String),
+      photo_identity_kind: "content_sha256_set_v1",
+      photo_identity_fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
 
     const retried = await seller.client.rpc("retry_pipeline_run", {
@@ -493,7 +510,7 @@ describe("manual retry AI-item credit accounting", () => {
     const { data: settled } = await seller.client
       .from("ai_item_credit_reservations")
       .select(
-        "id, pipeline_run_id, state, restored_at, settled_at, listing_id, retry_reservation_count, retry_restore_count",
+        "id, pipeline_run_id, state, restored_at, settled_at, listing_id, retry_reservation_count, retry_restore_count, photo_identity_kind, photo_identity_fingerprint",
       )
       .eq("pipeline_run_id", run.run_id)
       .single();
@@ -506,6 +523,8 @@ describe("manual retry AI-item credit accounting", () => {
       listing_id: completed.listingId,
       retry_reservation_count: 1,
       retry_restore_count: 0,
+      photo_identity_kind: restored?.photo_identity_kind,
+      photo_identity_fingerprint: restored?.photo_identity_fingerprint,
     });
     const { count: reservationCount } = await seller.client
       .from("ai_item_credit_reservations")

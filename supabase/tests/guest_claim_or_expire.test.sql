@@ -69,7 +69,8 @@ grant select, insert, update on guest_claim_results to service_role;
 
 insert into public.items (
   id, user_id, photos, attributes, condition, identification,
-  review_revision, review_content_revision
+  review_revision, review_content_revision,
+  photo_identity_kind, photo_identity_fingerprint
 ) values
   (
     '10000000-0000-4000-8000-000000000001',
@@ -79,7 +80,9 @@ insert into public.items (
     'good',
     '{"kind":"fixture"}'::jsonb,
     '80000000-0000-4000-8000-000000000001',
-    '80000000-0000-4000-8000-000000000001'
+    '80000000-0000-4000-8000-000000000001',
+    'content_sha256_set_v1',
+    encode(sha256(convert_to(repeat('b', 64), 'UTF8')), 'hex')
   ),
   (
     '10000000-0000-4000-8000-000000000002',
@@ -89,7 +92,12 @@ insert into public.items (
     'good',
     '{"kind":"fixture"}'::jsonb,
     '80000000-0000-4000-8000-000000000002',
-    '80000000-0000-4000-8000-000000000002'
+    '80000000-0000-4000-8000-000000000002',
+    'legacy_path_v0',
+    encode(sha256(convert_to(
+      array_to_json(array['guest_pgtap_expire/items/front.enc'])::text,
+      'UTF8'
+    )), 'hex')
   ),
   (
     '10000000-0000-4000-8000-000000000003',
@@ -99,7 +107,12 @@ insert into public.items (
     null,
     null,
     '80000000-0000-4000-8000-000000000003',
-    '80000000-0000-4000-8000-000000000003'
+    '80000000-0000-4000-8000-000000000003',
+    'legacy_path_v0',
+    encode(sha256(convert_to(
+      array_to_json(array['guest_pgtap_claim/items/restored.enc'])::text,
+      'UTF8'
+    )), 'hex')
   );
 
 insert into public.pipeline_runs (
