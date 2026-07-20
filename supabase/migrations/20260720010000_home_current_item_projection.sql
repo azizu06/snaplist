@@ -11,6 +11,50 @@ create index prediction_logs_home_latest_priced_idx
   on public.prediction_logs (user_id, item_id, created_at desc, id desc)
   where price is not null;
 
+-- Source revision is part of the existing Home DTO contract. Preserve its
+-- all-history meaning without aggregating the retained tables: each lookup is
+-- tenant-prefixed and stops after the newest visible row.
+create index items_home_revision_idx
+  on public.items (user_id, (greatest(created_at, updated_at)) desc);
+
+create index listings_home_ebay_revision_idx
+  on public.listings (user_id, (greatest(created_at, updated_at)) desc)
+  where platform = 'ebay';
+
+create index prediction_logs_home_revision_idx
+  on public.prediction_logs (user_id, created_at desc);
+
+create view private.home_source_revision
+with (security_invoker = true)
+as
+  select greatest(
+    (
+      select greatest(item.created_at, item.updated_at)
+      from public.items as item
+      where item.user_id = public.clerk_user_id()
+      order by greatest(item.created_at, item.updated_at) desc
+      limit 1
+    ),
+    (
+      select greatest(listing.created_at, listing.updated_at)
+      from public.listings as listing
+      where listing.user_id = public.clerk_user_id()
+        and listing.platform = 'ebay'
+      order by greatest(listing.created_at, listing.updated_at) desc
+      limit 1
+    ),
+    (
+      select prediction.created_at
+      from public.prediction_logs as prediction
+      where prediction.user_id = public.clerk_user_id()
+      order by prediction.created_at desc
+      limit 1
+    )
+  ) as history_revision_at;
+
+revoke all on private.home_source_revision from public, anon;
+grant select on private.home_source_revision to authenticated;
+
 create or replace function public.get_home_current_item_projection()
 returns jsonb
 language sql
@@ -68,18 +112,8 @@ as $function$
        )
   ),
   history_revision as (
-    select max(source.revision_at) as revision_at
-    from (
-      select greatest(item.created_at, item.updated_at) as revision_at
-      from public.items as item
-      union all
-      select greatest(listing.created_at, listing.updated_at) as revision_at
-      from public.listings as listing
-      where listing.platform = 'ebay'
-      union all
-      select prediction.created_at as revision_at
-      from public.prediction_logs as prediction
-    ) as source
+    select revision.history_revision_at as revision_at
+    from private.home_source_revision as revision
   )
   select jsonb_build_object(
     'history_revision_at', (select revision_at from history_revision),

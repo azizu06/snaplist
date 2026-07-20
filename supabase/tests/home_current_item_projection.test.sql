@@ -1,6 +1,20 @@
 begin;
 
-select plan(17);
+select plan(18);
+
+create function pg_temp.explain_home_source_revision()
+returns jsonb
+language plpgsql
+as $function$
+declare
+  query_plan jsonb;
+begin
+  execute 'explain (analyze, buffers, format json)
+    select history_revision_at from private.home_source_revision'
+    into query_plan;
+  return query_plan;
+end;
+$function$;
 
 select extensions.has_function(
   'public',
@@ -31,8 +45,11 @@ select extensions.is(
   'Home projection cannot accept a caller-supplied tenant id'
 );
 select extensions.ok(
-  to_regclass('public.prediction_logs_home_latest_priced_idx') is not null,
-  'latest usable Home price has a bounded newest-first index'
+  to_regclass('public.prediction_logs_home_latest_priced_idx') is not null
+    and to_regclass('public.items_home_revision_idx') is not null
+    and to_regclass('public.listings_home_ebay_revision_idx') is not null
+    and to_regclass('public.prediction_logs_home_revision_idx') is not null,
+  'latest usable price and exact source revision have bounded indexes'
 );
 select extensions.ok(
   has_function_privilege(
@@ -121,7 +138,8 @@ insert into public.listings (
     '2026-07-17T17:00:00Z'
   );
 
--- Retained evaluation history for the visible item must not cross the RPC.
+-- Retained evaluation history for the visible item must not cross the RPC or
+-- force the source-revision branch to scan the full corpus.
 insert into public.prediction_logs (
   user_id, item_id, price, listing_model, created_at
 )
@@ -131,7 +149,7 @@ select
   series.value,
   'offline-listing',
   '2026-07-16T00:00:00Z'::timestamptz + (series.value * interval '1 second')
-from generate_series(1, 250) as series(value);
+from generate_series(1, 2000) as series(value);
 
 insert into public.prediction_logs (
   id, user_id, item_id, price, listing_model, created_at
@@ -197,7 +215,7 @@ select extensions.is(
 select extensions.is(
   jsonb_array_length(public.get_home_current_item_projection()->'predictions'),
   1,
-  '250 retained predictions reduce to one current-item price row'
+  '2,000 retained predictions reduce to one current-item price row'
 );
 select extensions.is(
   (
@@ -235,6 +253,38 @@ select extensions.ok(
     = '2026-07-17T16:00:00Z'::timestamptz,
   'source revision preserves tenant A historical change semantics'
 );
+
+set local enable_seqscan = off;
+select extensions.ok(
+  (
+    with recursive plan_nodes(node) as (
+      select pg_temp.explain_home_source_revision()->0->'Plan'
+      union all
+      select child.node
+      from plan_nodes as parent
+      cross join lateral jsonb_array_elements(
+        coalesce(parent.node->'Plans', '[]'::jsonb)
+      ) as child(node)
+    ),
+    bounded_revision_reads as (
+      select
+        node->>'Index Name' as index_name,
+        (node->>'Actual Rows')::numeric as actual_rows
+      from plan_nodes
+      where node->>'Index Name' in (
+        'items_home_revision_idx',
+        'listings_home_ebay_revision_idx',
+        'prediction_logs_home_revision_idx'
+      )
+    )
+    select
+      count(distinct index_name) = 3
+      and count(distinct index_name) filter (where actual_rows <= 1) = 3
+    from bounded_revision_reads
+  ),
+  'source revision reads at most one indexed row from each retained history table'
+);
+reset enable_seqscan;
 
 select set_config(
   'request.jwt.claims',
