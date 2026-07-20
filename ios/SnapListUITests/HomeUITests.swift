@@ -44,6 +44,26 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Run unavailable"].waitForExistence(timeout: 2))
     }
 
+    func testPricingAttentionLoadsTheProductionPricingRoute() {
+        let app = launch("HOME-03")
+        let scroll = app.scrollViews.firstMatch
+        let pricing = app.buttons[
+            "home.attention.20800000-0000-4000-8000-000000000006"
+        ]
+
+        scrollUntilFullyVisible(
+            scroll,
+            element: pricing,
+            in: app,
+            maximumSwipes: 12
+        )
+        pricing.tap()
+
+        XCTAssertTrue(
+            app.otherElements["pricing.route.loaded"].waitForExistence(timeout: 3)
+        )
+    }
+
     func testRunDetailUsesSystemBackAndReturnsToExactHomeOpener() {
         let app = launch("HOME-01")
         let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
