@@ -122,7 +122,7 @@ private struct PricingEvidenceProjection: Decodable {
             case evidenceAsOf
         }
 
-        func domain() throws -> PricingSoldComparable? {
+        func domain() throws -> PricingSoldComparable {
             guard kind == "sold-comparable",
                   currency == "USD",
                   let sourceURL = URL(string: sourceURL),
@@ -138,14 +138,13 @@ private struct PricingEvidenceProjection: Decodable {
                 condition,
                 fallback: "Condition unavailable"
             )
-            guard let soldAt else { return nil }
             return PricingSoldComparable(
                 id: id,
                 sourceURL: sourceURL,
                 title: title,
                 price: price,
                 condition: condition,
-                soldAt: Date(timeIntervalSince1970: soldAt / 1_000),
+                soldAt: soldAt.map { Date(timeIntervalSince1970: $0 / 1_000) },
                 priceDisclosure: priceDisclosure
             )
         }
@@ -166,7 +165,7 @@ private struct PricingEvidenceProjection: Decodable {
     var model: PricingFeatureModel {
         get throws {
             let evidenceDate = try Self.parseDate(evidenceAsOf)
-            let mappedComparables = try comparables.compactMap { comparable in
+            let mappedComparables = try comparables.map { comparable in
                 _ = try Self.parseDate(comparable.evidenceAsOf)
                 return try comparable.domain()
             }
@@ -358,7 +357,7 @@ struct PricingSoldComparable: Equatable, Identifiable {
     let title: String
     let price: Decimal
     let condition: String
-    let soldAt: Date
+    let soldAt: Date?
     let priceDisclosure: PricingPriceDisclosure
 }
 
@@ -454,7 +453,8 @@ struct PricingFeatureModel: Equatable {
         let disclosedSales = try comparables
             .filter { $0.priceDisclosure == .displayedSoldPrice }
             .map { comparable in
-                guard comparable.price >= 0, comparable.soldAt <= evidenceAsOf else {
+                guard comparable.price >= 0,
+                      comparable.soldAt.map({ $0 <= evidenceAsOf }) ?? true else {
                     throw PricingContractError.invalidComparable(comparable.id)
                 }
                 guard sourceURLs.contains(comparable.sourceURL) else {
@@ -479,24 +479,35 @@ struct PricingFeatureModel: Equatable {
         let visible = comparables
             .filter { comparable in
                 guard let days = window.dayCount else { return true }
-                let age = evidenceAsOf.timeIntervalSince(comparable.soldAt)
+                guard let soldAt = comparable.soldAt else { return true }
+                let age = evidenceAsOf.timeIntervalSince(soldAt)
                 return age <= Double(days) * 86_400
             }
             .sorted { lhs, rhs in
-                if lhs.soldAt == rhs.soldAt { return lhs.id < rhs.id }
-                return lhs.soldAt > rhs.soldAt
+                switch (lhs.soldAt, rhs.soldAt) {
+                case let (left?, right?) where left != right:
+                    return left > right
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    return lhs.id < rhs.id
+                }
             }
         let prices = visible.map(\.price).sorted()
 
         return PricingEvidenceSnapshot(
             window: window,
             comparables: visible,
-            chartPoints: visible.map {
-                PricingChartPoint(
-                    comparableID: $0.id,
-                    soldAt: $0.soldAt,
-                    price: $0.price
-                )
+            chartPoints: visible.compactMap { comparable in
+                comparable.soldAt.map {
+                    PricingChartPoint(
+                        comparableID: comparable.id,
+                        soldAt: $0,
+                        price: comparable.price
+                    )
+                }
             },
             median: prices.median,
             soldRange: prices.first.flatMap { minimum in
@@ -504,7 +515,7 @@ struct PricingFeatureModel: Equatable {
                     PricingPriceRange(min: minimum, max: maximum)
                 }
             },
-            lastSaleAt: visible.first?.soldAt
+            lastSaleAt: visible.compactMap(\.soldAt).first
         )
     }
 

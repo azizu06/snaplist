@@ -219,10 +219,14 @@ private struct PricingOverviewView: View {
         guard store.snapshot.soldCount > 0 else {
             return "No disclosed sold prices fall in this window. Try a wider range."
         }
+        let missingDateCount = store.snapshot.soldCount - store.snapshot.chartPoints.count
+        let missingDateCopy = missingDateCount > 0
+            ? " \(missingDateCount) sold record\(missingDateCount == 1 ? " has" : "s have") no sold date, so \(missingDateCount == 1 ? "it is" : "they are") listed below but not plotted."
+            : ""
         if store.model.evidenceLevel == .limited {
-            return "Range is wide because sales are sparse — only \(store.snapshot.soldCount) found. Drag the chart to inspect a sale, or tap one below."
+            return "Range is wide because sales are sparse — only \(store.snapshot.soldCount) found. Drag the chart to inspect a dated sale, or tap one below.\(missingDateCopy)"
         }
-        return "Each point is one real eBay sold price. Drag the chart to inspect a sale, or tap one below."
+        return "Each point is one real eBay sold price. Drag the chart to inspect a dated sale, or tap one below.\(missingDateCopy)"
     }
 }
 
@@ -347,6 +351,9 @@ private struct PricingRecommendationSummary: View {
         guard let days = store.selectedWindow.dayCount else {
             return "\(store.snapshot.soldCount) sold · all dates"
         }
+        if store.snapshot.chartPoints.count != store.snapshot.soldCount {
+            return "\(store.snapshot.soldCount) sold · \(store.snapshot.chartPoints.count) dated in \(days) days"
+        }
         let suffix = store.model.evidenceLevel == .strong ? " · not asking" : ""
         return "\(store.snapshot.soldCount) sold · \(days) days\(suffix)"
     }
@@ -437,12 +444,13 @@ private struct PricingEvidenceChart: View {
                         .clipShape(.capsule)
                 }
 
-            if let selected = store.selectedComparable {
-                RuleMark(x: .value("Selected sold date", selected.soldAt))
+            if let selected = store.selectedComparable,
+               let soldAt = selected.soldAt {
+                RuleMark(x: .value("Selected sold date", soldAt))
                     .foregroundStyle(SnapListColorToken.textTertiary.color.opacity(0.7))
 
                 PointMark(
-                    x: .value("Selected sold date", selected.soldAt),
+                    x: .value("Selected sold date", soldAt),
                     y: .value("Selected sold price", selected.price.doubleValue)
                 )
                 .symbolSize(pointSize * pointSize * 3)
@@ -497,8 +505,8 @@ private struct PricingEvidenceChart: View {
         .frame(height: 150)
     }
 
-    private var points: [PricingSoldComparable] {
-        store.snapshot.comparables.sorted { $0.soldAt < $1.soldAt }
+    private var points: [PricingChartPoint] {
+        store.snapshot.chartPoints.sorted { $0.soldAt < $1.soldAt }
     }
 
     private var chartBounds: PricingPriceRange {
@@ -527,9 +535,10 @@ private struct PricingEvidenceChart: View {
     }
 
     private func nearestComparable(to date: Date) -> PricingSoldComparable? {
-        points.min {
+        guard let point = points.min(by: {
             abs($0.soldAt.timeIntervalSince(date)) < abs($1.soldAt.timeIntervalSince(date))
-        }
+        }) else { return nil }
+        return store.model.comparable(id: point.comparableID)
     }
 
     private var accessibilitySummary: String {
@@ -656,7 +665,11 @@ private struct PricingComparableRow: View {
         .accessibilityLabel(
             "Sold \(PricingDate.spoken(comparable.soldAt)), \(comparable.condition), \(PricingMoney.spoken(comparable.price))"
         )
-        .accessibilityHint("Selects this sale and shows the same record on the chart.")
+        .accessibilityHint(
+            comparable.soldAt == nil
+                ? "Selects this sale. It is not plotted because its sold date is unavailable."
+                : "Selects this sale and shows the same record on the chart."
+        )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("pricing.comp.\(comparable.id)")
     }
@@ -724,7 +737,11 @@ private struct PricingAllComparablesView: View {
     }
 
     private var windowDescription: String {
-        store.selectedWindow.dayCount.map { "last \($0) days" } ?? "all dates"
+        guard let days = store.selectedWindow.dayCount else { return "all dates" }
+        if store.snapshot.chartPoints.count != store.snapshot.soldCount {
+            return "\(store.snapshot.chartPoints.count) dated in last \(days) days"
+        }
+        return "last \(days) days"
     }
 }
 
@@ -1002,7 +1019,7 @@ enum PricingAccessibility {
               let range = snapshot.soldRange else {
             return "No disclosed sold prices in the selected window."
         }
-        var summary = "\(snapshot.soldCount) disclosed sold prices. Median \(PricingMoney.spoken(median)). Range \(PricingMoney.spoken(range.min)) to \(PricingMoney.spoken(range.max))."
+        var summary = "\(snapshot.soldCount) disclosed sold prices. \(snapshot.chartPoints.count) dated sales appear on the chart. Median \(PricingMoney.spoken(median)). Range \(PricingMoney.spoken(range.min)) to \(PricingMoney.spoken(range.max))."
         if let selectedComparable {
             summary += " Selected: sold \(PricingDate.spoken(selectedComparable.soldAt)), \(selectedComparable.condition), \(PricingMoney.spoken(selectedComparable.price))."
         }
@@ -1049,12 +1066,14 @@ enum PricingMoney {
 }
 
 private enum PricingDate {
-    static func short(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.abbreviated).day())
+    static func short(_ date: Date?) -> String {
+        guard let date else { return "date unavailable" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
     }
 
-    static func spoken(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.wide).day().year())
+    static func spoken(_ date: Date?) -> String {
+        guard let date else { return "date unavailable" }
+        return date.formatted(.dateTime.month(.wide).day().year())
     }
 }
 
