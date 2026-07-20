@@ -570,10 +570,11 @@ struct PricingFeatureActions {
     }
 }
 
-enum PricingFeatureRoute: Equatable {
+enum PricingFeatureRoute: Hashable {
     case overview
     case allComparables
     case selectedComparable(id: String)
+    case providerBoundary(id: String)
 }
 
 enum PricingFeatureSheet: String, Identifiable {
@@ -589,7 +590,7 @@ final class PricingFeatureStore: ObservableObject {
     let actions: PricingFeatureActions
 
     @Published var selectedWindow: PricingEvidenceWindow
-    @Published var route: PricingFeatureRoute = .overview
+    @Published var navigationPath: [PricingFeatureRoute] = []
     @Published var presentedSheet: PricingFeatureSheet?
     @Published private(set) var effectivePrice: Decimal
     @Published private(set) var costBasis: Decimal?
@@ -607,8 +608,19 @@ final class PricingFeatureStore: ObservableObject {
     }
 
     var selectedComparable: PricingSoldComparable? {
-        guard case .selectedComparable(let id) = route else { return nil }
-        return model.comparable(id: id)
+        for route in navigationPath.reversed() {
+            switch route {
+            case .selectedComparable(let id), .providerBoundary(let id):
+                return model.comparable(id: id)
+            case .overview, .allComparables:
+                continue
+            }
+        }
+        return nil
+    }
+
+    var route: PricingFeatureRoute {
+        navigationPath.last ?? .overview
     }
 
     var estimatedProfit: Decimal? {
@@ -617,23 +629,44 @@ final class PricingFeatureStore: ObservableObject {
 
     func selectWindow(_ window: PricingEvidenceWindow) {
         selectedWindow = window
-        if case .selectedComparable(let id) = route,
+        if let id = selectedComparable?.id,
            !snapshot.comparables.contains(where: { $0.id == id }) {
-            route = .overview
+            navigationPath = []
         }
     }
 
     func showAllComparables() {
-        route = .allComparables
+        navigationPath = [.allComparables]
     }
 
     func selectComparable(id: String) {
         guard snapshot.comparables.contains(where: { $0.id == id }) else { return }
-        route = .selectedComparable(id: id)
+        let destination = PricingFeatureRoute.selectedComparable(id: id)
+        if route == .allComparables {
+            navigationPath.append(destination)
+        } else {
+            navigationPath = [destination]
+        }
     }
 
     func showOverview() {
-        route = .overview
+        navigationPath = []
+    }
+
+    func showProviderBoundary() {
+        guard let selectedComparable else { return }
+        navigationPath.append(.providerBoundary(id: selectedComparable.id))
+    }
+
+    func openSelectedSource() {
+        guard case .providerBoundary = route,
+              let selectedComparable else { return }
+        actions.openSource(selectedComparable.sourceURL)
+    }
+
+    func goBack() {
+        guard !navigationPath.isEmpty else { return }
+        navigationPath.removeLast()
     }
 
     @discardableResult
@@ -675,9 +708,6 @@ final class PricingFeatureStore: ObservableObject {
         )
     }
 
-    func open(_ comparable: PricingSoldComparable) {
-        actions.openSource(comparable.sourceURL)
-    }
 }
 
 private extension Decimal {

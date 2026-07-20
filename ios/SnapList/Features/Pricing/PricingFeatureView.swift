@@ -76,19 +76,31 @@ struct PricingFeatureView: View {
         forceReducedMotion: Bool = false
     ) {
         let store = PricingFeatureStore(model: model, actions: actions)
-        store.route = initialRoute
+        store.navigationPath = initialRoute == .overview ? [] : [initialRoute]
         _store = StateObject(wrappedValue: store)
         self.forceReducedMotion = forceReducedMotion
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $store.navigationPath) {
             PricingOverviewView(
                 store: store,
                 forceReducedMotion: forceReducedMotion
             )
-            .navigationDestination(isPresented: allComparablesPresented) {
-                PricingAllComparablesView(store: store)
+            .navigationDestination(for: PricingFeatureRoute.self) { route in
+                switch route {
+                case .overview:
+                    PricingOverviewView(
+                        store: store,
+                        forceReducedMotion: forceReducedMotion
+                    )
+                case .allComparables:
+                    PricingAllComparablesView(store: store)
+                case .selectedComparable(let id):
+                    PricingSelectedComparableView(store: store, comparableID: id)
+                case .providerBoundary(let id):
+                    PricingProviderBoundaryView(store: store, comparableID: id)
+                }
             }
         }
         .background(SnapListColorToken.canvas.color.ignoresSafeArea())
@@ -103,19 +115,6 @@ struct PricingFeatureView: View {
         }
     }
 
-    private var allComparablesPresented: Binding<Bool> {
-        Binding(
-            get: {
-                if case .allComparables = store.route { return true }
-                return false
-            },
-            set: { isPresented in
-                if !isPresented, case .allComparables = store.route {
-                    store.showOverview()
-                }
-            }
-        )
-    }
 }
 
 private struct PricingOverviewView: View {
@@ -458,7 +457,7 @@ private struct PricingEvidenceChart: View {
                 .annotation(position: .top, spacing: 8) {
                     PricingSelectedComparableCallout(
                         comparable: selected,
-                        openSource: { store.open(selected) }
+                        openSource: store.showProviderBoundary
                     )
                 }
             }
@@ -571,6 +570,87 @@ private struct PricingSelectedComparableCallout: View {
         .clipShape(.rect(cornerRadius: 10))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
         .accessibilityElement(children: .contain)
+    }
+}
+
+private struct PricingSelectedComparableView: View {
+    @ObservedObject var store: PricingFeatureStore
+    let comparableID: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PricingProductSummary(model: store.model)
+
+                if let comparable = store.model.comparable(id: comparableID) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Sold \(PricingDate.short(comparable.soldAt)) · \(comparable.condition)")
+                            .snapListTypography(.rowTitle)
+                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        Text(PricingMoney.exact(comparable.price))
+                            .font(.system(.largeTitle, design: .default, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(SnapListColorToken.inkPrimary.color)
+                        Text(comparable.title)
+                            .snapListTypography(.body)
+                            .foregroundStyle(SnapListColorToken.textSecondary.color)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(SnapListColorToken.groupingFill.color)
+                    .clipShape(.rect(cornerRadius: 14))
+
+                    SnapListPrimaryButton(
+                        title: "View original sold listing on eBay",
+                        action: store.showProviderBoundary
+                    )
+                    .accessibilityLabel(
+                        "View original sold listing on eBay, sold \(PricingDate.spoken(comparable.soldAt)), \(PricingMoney.spoken(comparable.price))"
+                    )
+                }
+            }
+            .padding(SnapListMetrics.screenGutter)
+        }
+        .background(SnapListColorToken.canvas.color.ignoresSafeArea())
+        .navigationTitle("Pricing")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("pricing.selected-comparable")
+    }
+}
+
+private struct PricingProviderBoundaryView: View {
+    @ObservedObject var store: PricingFeatureStore
+    let comparableID: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("View original on eBay")
+                    .snapListTypography(.displayTitle)
+
+                SnapListChip("Leaves SnapList", systemImage: "arrow.up.right", variant: .neutral)
+
+                if let comparable = store.model.comparable(id: comparableID) {
+                    Text("Sold \(PricingDate.short(comparable.soldAt)) · \(comparable.condition) · \(PricingMoney.exact(comparable.price))")
+                        .snapListTypography(.body)
+                        .foregroundStyle(SnapListColorToken.inkPrimary.color)
+
+                    Text("SnapList shows real completed sales. We don’t change the listing — this is a read-only reference.")
+                        .snapListTypography(.body)
+                        .foregroundStyle(SnapListColorToken.textSecondary.color)
+
+                    SnapListPrimaryButton(
+                        title: "Open on eBay",
+                        action: store.openSelectedSource
+                    )
+                }
+            }
+            .padding(SnapListMetrics.screenGutter)
+        }
+        .background(SnapListColorToken.canvas.color.ignoresSafeArea())
+        .navigationTitle("eBay sold listing")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("pricing.provider-boundary")
     }
 }
 
