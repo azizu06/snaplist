@@ -10,10 +10,14 @@ import {
   acquireExclusiveTestResource,
   type ExclusiveTestResourceLease,
 } from "@/test/exclusive-resource-lock";
+import { resolveTenantServerTestApiKey } from "@/test/supabase-test-credentials";
 
 const URL = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321";
-const ANON = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const ANON =
+  process.env.SUPABASE_PUBLISHABLE_KEY ??
+  process.env.SUPABASE_ANON_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SERVER_API_KEY = resolveTenantServerTestApiKey();
 const DELETION_QUEUE_HOOK_TIMEOUT_MS = 70_000;
 let reachable = false;
 let admin: SupabaseClient;
@@ -25,7 +29,7 @@ let bStoragePath: string | null = null;
 let deletionQueueLease: ExclusiveTestResourceLease | undefined;
 
 beforeAll(async () => {
-  if (!ANON || !SERVICE) return;
+  if (!ANON || !SERVER_API_KEY) return;
   try {
     const health = await fetch(`${URL}/auth/v1/health`, { headers: { apikey: ANON }, signal: AbortSignal.timeout(2_000) });
     reachable = health.ok;
@@ -34,7 +38,7 @@ beforeAll(async () => {
   deletionQueueLease = await acquireExclusiveTestResource(
     `local-db:message-photo-object-deletion-queue:${URL}`,
   );
-  admin = createClient(URL, SERVICE, { auth: { persistSession: false } });
+  admin = createClient(URL, SERVER_API_KEY, { auth: { persistSession: false } });
   [a, b] = await Promise.all([
     provisionClerkTestUser(URL, ANON, "attachment_a"),
     provisionClerkTestUser(URL, ANON, "attachment_b"),
@@ -43,11 +47,11 @@ beforeAll(async () => {
     mintUserJwt(a.id),
     mintUserJwt(b.id),
   ]);
-  aServer = createClient(URL, SERVICE!, {
+  aServer = createClient(URL, SERVER_API_KEY, {
     accessToken: async () => aJwt,
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  bServer = createClient(URL, SERVICE!, {
+  bServer = createClient(URL, SERVER_API_KEY, {
     accessToken: async () => bJwt,
     auth: { persistSession: false, autoRefreshToken: false },
   });
