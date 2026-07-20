@@ -1,6 +1,26 @@
 import Foundation
 
 struct AnalyticsSanitizer: Sendable {
+    private static let metadataPropertyNames: Set<String> = [
+        "environment",
+        "app_version",
+        "app_build",
+    ]
+    static let approvedEventNames: Set<String> = Set(EventSchema.approved.keys)
+        .union(["screen viewed"])
+    static let approvedPropertyNamesByEvent: [String: Set<String>] = {
+        var values = EventSchema.approved.mapValues {
+            Set($0.keys).union(metadataPropertyNames)
+        }
+        values["screen viewed"] = [
+            "screen",
+            "environment",
+            "app_version",
+            "app_build",
+        ]
+        return values
+    }()
+
     func sanitize(
         screen: AnalyticsScreen,
         metadata: AnalyticsMetadata
