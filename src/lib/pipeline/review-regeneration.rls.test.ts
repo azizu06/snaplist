@@ -452,6 +452,22 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(snapshot.item).toEqual({ title, condition: "good" });
 
     await expect(commitCorrection(userA, commit)).resolves.toBeUndefined();
+
+    const pricingReader = createSupabasePricingEvidenceReader(
+      async () => userA.client,
+    );
+    await expect(
+      pricingReader.forItem({
+        userId: userA.id,
+        bearerToken: "test",
+        itemId: seeded.itemId,
+        now: Date.now() + 1_000,
+      }),
+    ).resolves.toMatchObject({
+      item: { id: seeded.itemId, title, condition: "good" },
+      priceResult: { suggested: 165, sources: [source] },
+      comparables: [expect.objectContaining({ sourceUrl: source.url })],
+    });
   });
 
   it("rejects malformed and mismatched capabilities at the real role without mutation", async () => {
