@@ -68,7 +68,16 @@ describe("standalone Node mobile runtime", () => {
       };
       return query;
     });
-    const clientForBearer = vi.fn().mockReturnValue({ from });
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        history_revision_at: null,
+        listings: [],
+        items: [],
+        predictions: [],
+      },
+      error: null,
+    });
+    const clientForBearer = vi.fn().mockReturnValue({ from, rpc });
     const homeProjection = createSupabaseHomeProjectionReader(
       clientForBearer as never,
     );
@@ -104,10 +113,8 @@ describe("standalone Node mobile runtime", () => {
       "pipeline_runs",
       "listings",
       "listings",
-      "listings",
-      "items",
-      "prediction_logs",
     ]);
+    expect(rpc).toHaveBeenCalledWith("get_home_current_item_projection");
     await expect(response.json()).resolves.toEqual({
       data: {
         revision: 0,

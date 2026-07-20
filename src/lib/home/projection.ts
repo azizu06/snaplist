@@ -122,7 +122,53 @@ interface HomeProjectionRows {
   listings: HomeListingRow[];
   items: HomeItemRow[];
   predictions: HomePredictionRow[];
+  historyRevisionAt?: string | null;
 }
+
+const homeCurrentItemProjectionSchema = z
+  .object({
+    history_revision_at: z.string().datetime({ offset: true }).nullable(),
+    listings: z.array(
+      z
+        .object({
+          id: uuid,
+          user_id: z.string().min(1),
+          item_id: uuid,
+          title: z.string().nullable(),
+          status: z.string().min(1),
+          created_at: z.string().datetime({ offset: true }),
+          updated_at: z.string().datetime({ offset: true }),
+          listed_price: z.unknown(),
+        })
+        .strict(),
+    ),
+    items: z.array(
+      z
+        .object({
+          id: uuid,
+          user_id: z.string().min(1),
+          attributes: z.unknown(),
+          photos: z.array(z.string()),
+          price_override: z.unknown(),
+          cost_basis: z.unknown(),
+          created_at: z.string().datetime({ offset: true }),
+          updated_at: z.string().datetime({ offset: true }),
+        })
+        .strict(),
+    ),
+    predictions: z.array(
+      z
+        .object({
+          id: uuid,
+          user_id: z.string().min(1),
+          item_id: uuid,
+          price: z.unknown(),
+          created_at: z.string().datetime({ offset: true }),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 
 function money(value: number | null): string | null {
   if (value == null || !Number.isFinite(value) || value <= 0) return null;
@@ -174,6 +220,7 @@ function stagePresentation(stage: PipelineProgressRun["stage"]): string {
 
 function timestampRevision(rows: HomeProjectionRows): number {
   const timestamps = [
+    ...(rows.historyRevisionAt ? [rows.historyRevisionAt] : []),
     ...rows.notifications.map((row) => row.created_at),
     ...rows.runs.map((row) => row.updated_at),
     ...rows.listings.flatMap((row) => [row.created_at as string, row.updated_at]),
@@ -284,23 +331,6 @@ function assertTenantRows(userId: string, rows: Array<{ user_id?: string }>): vo
   }
 }
 
-async function readAllPages<Row>(
-  readPage: (
-    from: number,
-    to: number,
-  ) => PromiseLike<{ data: Row[] | null; error: unknown | null }>,
-): Promise<{ data: Row[]; error: unknown | null }> {
-  const pageSize = 100;
-  const data: Row[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const result = await readPage(from, from + pageSize - 1);
-    if (result.error) return { data, error: result.error };
-    const page = result.data ?? [];
-    data.push(...page);
-    if (page.length < pageSize) return { data, error: null };
-  }
-}
-
 export function createSupabaseHomeProjectionReader(
   clientForBearer: (bearerToken: string) => SupabaseClient | Promise<SupabaseClient>,
 ): HomeProjectionReader {
@@ -313,9 +343,7 @@ export function createSupabaseHomeProjectionReader(
         runResult,
         activeListingCountResult,
         draftListingCountResult,
-        listingResult,
-        itemResult,
-        predictionResult,
+        currentItemProjectionResult,
       ] =
         await Promise.all([
           client
@@ -345,31 +373,7 @@ export function createSupabaseHomeProjectionReader(
             .eq("platform", "ebay")
             .in("status", ["draft", "queued"])
             .limit(1),
-          readAllPages<HomeListingRow>((from, to) =>
-            client
-              .from("listings")
-              .select("id,user_id,item_id,title,status,created_at,updated_at,listed_price")
-              .eq("platform", "ebay")
-              .order("created_at", { ascending: false })
-              .order("id", { ascending: false })
-              .range(from, to),
-          ),
-          readAllPages<HomeItemRow>((from, to) =>
-            client
-              .from("items")
-              .select("id,user_id,attributes,photos,price_override,cost_basis,created_at,updated_at")
-              .order("created_at", { ascending: false })
-              .order("id", { ascending: false })
-              .range(from, to),
-          ),
-          readAllPages<HomePredictionRow>((from, to) =>
-            client
-              .from("prediction_logs")
-              .select("id,user_id,item_id,price,created_at")
-              .order("created_at", { ascending: false })
-              .order("id", { ascending: false })
-              .range(from, to),
-          ),
+          client.rpc("get_home_current_item_projection"),
         ]);
       const failed = [
         notificationResult.error,
@@ -377,9 +381,7 @@ export function createSupabaseHomeProjectionReader(
         runResult.error,
         activeListingCountResult.error,
         draftListingCountResult.error,
-        listingResult.error,
-        itemResult.error,
-        predictionResult.error,
+        currentItemProjectionResult.error,
       ].find(Boolean);
       if (failed) throw new Error("Home projection read failed.");
       if (unreadNotificationResult.count == null) {
@@ -391,9 +393,12 @@ export function createSupabaseHomeProjectionReader(
 
       const notifications = (notificationResult.data ?? []) as HomeNotificationRow[];
       const runs = (runResult.data ?? []).map((row) => pipelineProgressRunSchema.parse(row));
-      const listings = (listingResult.data ?? []) as unknown as HomeListingRow[];
-      const items = (itemResult.data ?? []) as unknown as HomeItemRow[];
-      const predictions = (predictionResult.data ?? []) as HomePredictionRow[];
+      const currentItems = homeCurrentItemProjectionSchema.parse(
+        currentItemProjectionResult.data,
+      );
+      const listings = currentItems.listings as HomeListingRow[];
+      const items = currentItems.items as HomeItemRow[];
+      const predictions = currentItems.predictions as HomePredictionRow[];
       assertTenantRows(userId, [
         ...notifications,
         ...runs,
@@ -410,6 +415,7 @@ export function createSupabaseHomeProjectionReader(
         listings,
         items,
         predictions,
+        historyRevisionAt: currentItems.history_revision_at,
       });
     },
   };

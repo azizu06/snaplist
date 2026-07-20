@@ -210,9 +210,10 @@ describe("native Seller Home projection", () => {
     expect(projection.unreadNotificationCount).toBe(27);
   });
 
-  it("uses exact global summary counts and paginates the complete searchable corpus", async () => {
+  it("uses exact global counts and the complete current corpus from one bounded projection", async () => {
     const timestamp = "2026-07-17T13:00:00.000Z";
     const queryCalls: string[] = [];
+    const rpcCalls: Array<{ name: string; arguments_: unknown }> = [];
     const items = Array.from({ length: 103 }, (_, index) => ({
       id: `20800000-0000-4000-8001-${String(index + 1).padStart(12, "0")}`,
       user_id: "user_native",
@@ -242,6 +243,7 @@ describe("native Seller Home projection", () => {
       activeCount: 101,
       draftCount: 2,
       queryCalls,
+      rpcCalls,
     });
     const reader = createSupabaseHomeProjectionReader(() => client as never);
 
@@ -257,49 +259,20 @@ describe("native Seller Home projection", () => {
         listing.title.toLowerCase().includes("globally searchable vintage lens"),
       ),
     ).toBe(true);
-    expect(queryCalls).toEqual(
-      expect.arrayContaining([
-        "listings:count:published",
-        "listings:count:draft,queued",
-        "listings:range:0-99",
-        "listings:range:100-199",
-        "items:range:0-99",
-        "items:range:100-199",
-      ]),
-    );
+    expect(queryCalls).toEqual([
+      "listings:count:published",
+      "listings:count:draft,queued",
+    ]);
+    expect(rpcCalls).toEqual([
+      { name: "get_home_current_item_projection", arguments_: undefined },
+    ]);
   });
 
-  it("paginates prediction logs in a unique newest-first order", async () => {
-    const queryCalls: string[] = [];
-    const predictionPageIDs: string[] = [];
+  it("uses the bounded projection's deterministic latest prediction", async () => {
     const targetItemID = "20800000-0000-4000-8004-999999999999";
     const timestamp = "2026-07-17T13:00:00.000Z";
-    const predictions = Array.from({ length: 99 }, (_, index) => ({
-      id: `20800000-0000-4000-8003-${String(index + 1).padStart(12, "0")}`,
-      user_id: "user_native",
-      item_id: `20800000-0000-4000-8004-${String(index + 1).padStart(12, "0")}`,
-      price: index + 1,
-      created_at: timestamp,
-    })).concat([
-      {
-        id: "20800000-0000-4000-8003-999999999998",
-        user_id: "user_native",
-        item_id: targetItemID,
-        price: 100,
-        created_at: timestamp,
-      },
-      {
-        id: "20800000-0000-4000-8003-999999999999",
-        user_id: "user_native",
-        item_id: targetItemID,
-        price: 200,
-        created_at: timestamp,
-      },
-    ]);
+    const rpcCalls: Array<{ name: string; arguments_: unknown }> = [];
     const client = makeProjectionClient({
-      predictions,
-      predictionPageIDs,
-      queryCalls,
       items: [
         {
           id: targetItemID,
@@ -325,6 +298,43 @@ describe("native Seller Home projection", () => {
         },
       ],
       activeCount: 1,
+      rpcCalls,
+      currentItemProjection: {
+        history_revision_at: timestamp,
+        items: [
+          {
+            id: targetItemID,
+            user_id: "user_native",
+            attributes: { brand: "Boundary", model: "price" },
+            photos: [],
+            price_override: null,
+            cost_basis: null,
+            created_at: timestamp,
+            updated_at: timestamp,
+          },
+        ],
+        listings: [
+          {
+            id: "20800000-0000-4000-8005-999999999999",
+            user_id: "user_native",
+            item_id: targetItemID,
+            title: "Boundary price",
+            status: "published",
+            created_at: timestamp,
+            updated_at: timestamp,
+            listed_price: null,
+          },
+        ],
+        predictions: [
+          {
+            id: "20800000-0000-4000-8003-999999999999",
+            user_id: "user_native",
+            item_id: targetItemID,
+            price: 200,
+            created_at: timestamp,
+          },
+        ],
+      },
     });
     const reader = createSupabaseHomeProjectionReader(() => client as never);
 
@@ -333,23 +343,91 @@ describe("native Seller Home projection", () => {
       bearerToken: "signed-jwt",
     });
 
-    expect.soft(
-      queryCalls.filter((call) => call.startsWith("prediction_logs:")),
-    ).toEqual([
-      "prediction_logs:select:id,user_id,item_id,price,created_at",
-      "prediction_logs:order:created_at:desc",
-      "prediction_logs:order:id:desc",
-      "prediction_logs:range:0-99",
-      "prediction_logs:select:id,user_id,item_id,price,created_at",
-      "prediction_logs:order:created_at:desc",
-      "prediction_logs:order:id:desc",
-      "prediction_logs:range:100-199",
-    ]);
-    expect.soft(predictionPageIDs).toHaveLength(predictions.length);
-    expect.soft(new Set(predictionPageIDs).size).toBe(predictions.length);
     expect(projection.listings.find((listing) => listing.id === targetItemID)?.price).toBe(
       "$200",
     );
+    expect(rpcCalls).toEqual([
+      { name: "get_home_current_item_projection", arguments_: undefined },
+    ]);
+  });
+
+  it("reads the current Home item set without paging retained history", async () => {
+    const timestamp = "2026-07-17T13:00:00.000Z";
+    const itemID = "20800000-0000-4000-8006-000000000001";
+    const rpcCalls: Array<{ name: string; arguments_: unknown }> = [];
+    const historicalPredictions = Array.from({ length: 250 }, (_, index) => ({
+      id: `20800000-0000-4000-8007-${String(index + 1).padStart(12, "0")}`,
+      user_id: "user_native",
+      item_id: `20800000-0000-4000-8008-${String(index + 1).padStart(12, "0")}`,
+      price: index + 1,
+      created_at: timestamp,
+    }));
+    const client = makeProjectionClient({
+      activeCount: 0,
+      draftCount: 1,
+      forbidHistoricalProjectionReads: true,
+      predictions: historicalPredictions,
+      rpcCalls,
+      currentItemProjection: {
+        history_revision_at: timestamp,
+        items: [
+          {
+            id: itemID,
+            user_id: "user_native",
+            attributes: { brand: "Canon", model: "AE-1" },
+            photos: [],
+            price_override: null,
+            cost_basis: null,
+            created_at: timestamp,
+            updated_at: timestamp,
+          },
+        ],
+        listings: [
+          {
+            id: "20800000-0000-4000-8006-000000000002",
+            user_id: "user_native",
+            item_id: itemID,
+            title: "Canon AE-1 film camera",
+            status: "draft",
+            created_at: timestamp,
+            updated_at: timestamp,
+            listed_price: null,
+          },
+        ],
+        predictions: [
+          {
+            id: "20800000-0000-4000-8006-000000000003",
+            user_id: "user_native",
+            item_id: itemID,
+            price: 205,
+            created_at: timestamp,
+          },
+        ],
+      },
+    });
+    const reader = createSupabaseHomeProjectionReader(() => client as never);
+
+    const projection = await reader.forSeller({
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+
+    expect(projection).toMatchObject({
+      sellerState: "active",
+      summary: { active: 0, drafts: 1, orders: null },
+      listings: [
+        {
+          id: itemID,
+          title: "Canon AE-1",
+          lifecycle: "draft",
+          statusLabel: "Draft",
+          price: "$205",
+        },
+      ],
+    });
+    expect(rpcCalls).toEqual([
+      { name: "get_home_current_item_projection", arguments_: undefined },
+    ]);
   });
 });
 
@@ -390,9 +468,30 @@ function makeProjectionClient(input: {
   activeCount?: number;
   draftCount?: number;
   queryCalls?: string[];
+  forbidHistoricalProjectionReads?: boolean;
+  currentItemProjection?: unknown;
+  rpcCalls?: Array<{ name: string; arguments_: unknown }>;
 }) {
   return {
+    async rpc(name: string, arguments_?: unknown) {
+      input.rpcCalls?.push({ name, arguments_ });
+      return {
+        data: input.currentItemProjection ?? {
+          history_revision_at: null,
+          listings: input.listings ?? [],
+          items: input.items ?? [],
+          predictions: input.predictions ?? [],
+        },
+        error: null,
+      };
+    },
     from(table: string) {
+      if (
+        input.forbidHistoricalProjectionReads &&
+        ["items", "prediction_logs"].includes(table)
+      ) {
+        throw new Error(`Home attempted an unbounded ${table} history read.`);
+      }
       if (table === "pipeline_runs" && input.pipelineRuns) return input.pipelineRuns();
       if (table === "notifications") {
         let isExactCount = false;
@@ -415,6 +514,9 @@ function makeProjectionClient(input: {
         const query = makeQuery({ data: input.listings ?? [], error: null });
         query.select = (_columns, options) => {
           exactCount = options?.head === true && options.count === "exact";
+          if (input.forbidHistoricalProjectionReads && !exactCount) {
+            throw new Error("Home attempted an unbounded listings history read.");
+          }
           return query;
         };
         query.eq = (column, value) => {
