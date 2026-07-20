@@ -970,13 +970,19 @@ private struct PricingActionTray: View {
         if let profit = store.estimatedProfit {
             return "Estimated profit: \(PricingMoney.exact(profit))"
         }
-        if store.model.evidenceLevel == .limited {
-            return "Est. payout: ~\(PricingMoney.whole(store.model.estimatedPayout))"
+        guard let payout = store.currentEstimatedPayout else {
+            return "Payout needs recalculation"
         }
-        return "Estimated payout: \(PricingMoney.exact(store.model.estimatedPayout))"
+        if store.model.evidenceLevel == .limited {
+            return "Est. payout: ~\(PricingMoney.whole(payout))"
+        }
+        return "Estimated payout: \(PricingMoney.exact(payout))"
     }
 
     private var payoutSupport: String {
+        if store.currentEstimatedPayout == nil {
+            return "Your price changed. Estimated payout will return after an authoritative recalculation."
+        }
         if let fees = store.model.estimatedFees {
             return "After est. eBay fees (\(PricingMoney.exact(fees))). Add what you paid to see profit."
         }

@@ -667,8 +667,13 @@ final class PricingFeatureStore: ObservableObject {
         navigationPath.last ?? .overview
     }
 
+    var currentEstimatedPayout: Decimal? {
+        usesManualPriceOverride ? nil : model.estimatedPayout
+    }
+
     var estimatedProfit: Decimal? {
-        costBasis.map { model.estimatedPayout - $0 }
+        guard let currentEstimatedPayout, let costBasis else { return nil }
+        return currentEstimatedPayout - costBasis
     }
 
     func selectWindow(_ window: PricingEvidenceWindow) {
