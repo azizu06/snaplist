@@ -60,6 +60,8 @@ enum FutureBoundary: String, Hashable {
     case activity
     case run
     case draft
+    case guidedCorrection
+    case pricingHelp
 }
 
 enum HomeRoute: Hashable {

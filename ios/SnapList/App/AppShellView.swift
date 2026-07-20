@@ -176,7 +176,11 @@ struct AppShellView: View {
             case .run(let runID):
                 RunDetailView(runID: runID, store: runStore)
             case .pricing(let itemID):
-                PricingRouteView(itemID: itemID, repository: pricingRepository)
+                PricingRouteView(
+                    itemID: itemID,
+                    repository: pricingRepository,
+                    navigate: { router.navigate(to: .future($0)) }
+                )
             default:
                 HomeRouteBoundaryView(route: route)
             }

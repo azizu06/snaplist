@@ -539,6 +539,50 @@ struct PricingDraftHandoff: Equatable {
     let costBasis: Decimal?
 }
 
+@MainActor
+final class PricingRouteDraftState: ObservableObject {
+    @Published private(set) var priceOverride: Decimal?
+    @Published private(set) var costBasis: Decimal?
+    @Published private(set) var draftHandoff: PricingDraftHandoff?
+
+    func savePriceOverride(_ value: Decimal) {
+        priceOverride = value
+    }
+
+    func saveCostBasis(_ value: Decimal?) {
+        costBasis = value
+    }
+
+    func prepareDraftHandoff(_ handoff: PricingDraftHandoff) {
+        draftHandoff = handoff
+    }
+}
+
+enum PricingRouteActionComposition {
+    @MainActor
+    static func make(
+        draftState: PricingRouteDraftState,
+        openSource: @escaping (URL) -> Void,
+        navigate: @escaping (FutureBoundary) -> Void,
+        retry: @escaping () -> Void,
+        dismiss: @escaping () -> Void
+    ) -> PricingFeatureActions {
+        PricingFeatureActions(
+            savePriceOverride: draftState.savePriceOverride,
+            saveCostBasis: draftState.saveCostBasis,
+            continueToDraft: { handoff in
+                draftState.prepareDraftHandoff(handoff)
+                navigate(.draft)
+            },
+            openSource: openSource,
+            retryRefresh: retry,
+            requestGuidedCorrection: { navigate(.guidedCorrection) },
+            dismissPricing: dismiss,
+            showPricingHelp: { navigate(.pricingHelp) }
+        )
+    }
+}
+
 struct PricingFeatureActions {
     let savePriceOverride: (Decimal) -> Void
     let saveCostBasis: (Decimal?) -> Void

@@ -75,6 +75,8 @@ struct FoundationDestinationView: View {
         case .activity: "Activity"
         case .run: "Run"
         case .draft: "Draft"
+        case .guidedCorrection: "Guided correction"
+        case .pricingHelp: "Pricing help"
         }
     }
 }

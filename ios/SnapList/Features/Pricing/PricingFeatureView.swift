@@ -6,9 +6,12 @@ import UIKit
 struct PricingRouteView: View {
     let itemID: UUID
     let repository: any PricingRepository
+    let navigate: (FutureBoundary) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var loadState = PricingRouteLoadState.loading
+    @StateObject private var draftState = PricingRouteDraftState()
 
     var body: some View {
         Group {
@@ -20,9 +23,12 @@ struct PricingRouteView: View {
             case .loaded(let model):
                 PricingFeatureView(
                     model: model,
-                    actions: PricingFeatureActions(
-                        retryRefresh: { Task { await load() } },
-                        dismissPricing: { dismiss() }
+                    actions: PricingRouteActionComposition.make(
+                        draftState: draftState,
+                        openSource: { _ = openURL($0) },
+                        navigate: navigate,
+                        retry: { Task { await load() } },
+                        dismiss: { dismiss() }
                     )
                 )
             case .failed:
