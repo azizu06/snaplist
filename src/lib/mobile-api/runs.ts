@@ -33,7 +33,7 @@ interface MobileRunDataResult<T> {
 export interface MobileRunDataClient {
   readRun(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
   readItem(itemId: string): PromiseLike<MobileRunDataResult<unknown>>;
-  readReservation(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
+  readRetryProjection(runId: string): PromiseLike<MobileRunDataResult<unknown>>;
   retryRun(
     runId: string,
     idempotencyKey: string,
@@ -92,8 +92,11 @@ const itemRowSchema = z
   })
   .strict();
 
-const reservationRowSchema = z
-  .object({ state: z.enum(["reserved", "settled", "restored"]) })
+const retryProjectionRowSchema = z
+  .object({
+    effective_allowance: z.enum(["reserved", "settled", "restored", "unchanged"]),
+    can_retry: z.boolean(),
+  })
   .strict();
 
 const mutationRejectionSchema = z
@@ -129,9 +132,9 @@ async function readCanonicalRun(
     throw new MobileRunUnavailableError("Run detail crossed the verified tenant boundary");
   }
 
-  const [rawItemResult, rawReservationResult] = await Promise.all([
+  const [rawItemResult, rawProjectionResult] = await Promise.all([
     client.readItem(run.item_id),
-    client.readReservation(run.id),
+    client.readRetryProjection(run.id),
   ]);
   const rawItem = requireData("run item", rawItemResult);
   if (!rawItem) throw new MobileRunUnavailableError("Run item was unavailable");
@@ -139,15 +142,18 @@ async function readCanonicalRun(
   if (item.id !== run.item_id || item.user_id !== userId) {
     throw new MobileRunUnavailableError("Run item crossed the verified tenant boundary");
   }
-  const rawReservation = requireData("run allowance", rawReservationResult);
-  const allowance = rawReservation
-    ? reservationRowSchema.parse(rawReservation).state
-    : "unchanged";
+  const rawProjection = requireData("run retry projection", rawProjectionResult);
+  if (!rawProjection) {
+    throw new MobileRunUnavailableError("Run retry projection was unavailable");
+  }
+  const retryProjection = retryProjectionRowSchema.parse(rawProjection);
+  const allowance = retryProjection.effective_allowance;
   const expired = run.retention_cleaned_at !== null;
   const terminalOutcome = ["succeeded", "failed", "canceled"].includes(run.status)
     ? run.status as "succeeded" | "failed" | "canceled"
     : null;
-  const canRetry = !expired
+  const canRetry = retryProjection.can_retry
+    && !expired
     && run.listing_id === null
     && (run.status === "failed" || run.status === "canceled");
   const canCancel = run.listing_id === null
@@ -284,11 +290,9 @@ export function createSupabaseMobileRunDataClient(
         .eq("id", itemId)
         .maybeSingle();
     },
-    readReservation(runId) {
+    readRetryProjection(runId) {
       return client
-        .from("ai_item_credit_reservations")
-        .select("state")
-        .eq("pipeline_run_id", runId)
+        .rpc("get_pipeline_run_retry_projection", { p_run_id: runId })
         .maybeSingle();
     },
     retryRun(runId, idempotencyKey) {

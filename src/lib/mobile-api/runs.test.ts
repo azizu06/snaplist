@@ -47,8 +47,8 @@ function dataClient(overrides: Partial<MobileRunDataClient> = {}): MobileRunData
       },
       error: null,
     }),
-    readReservation: vi.fn().mockResolvedValue({
-      data: { state: "reserved" },
+    readRetryProjection: vi.fn().mockResolvedValue({
+      data: { effective_allowance: "reserved", can_retry: false },
       error: null,
     }),
     retryRun: vi.fn().mockResolvedValue({ data: { status: "queued" }, error: null }),
@@ -92,8 +92,8 @@ describe("mobile durable-run operations", () => {
         },
         error: null,
       }),
-      readReservation: vi.fn().mockResolvedValue({
-        data: { state: "reserved" },
+      readRetryProjection: vi.fn().mockResolvedValue({
+        data: { effective_allowance: "reserved", can_retry: false },
         error: null,
       }),
       retryRun: vi.fn(),
@@ -171,6 +171,13 @@ describe("mobile durable-run operations", () => {
           }),
           error: null,
         }),
+        readRetryProjection: vi.fn().mockResolvedValue({
+          data: {
+            effective_allowance: canRetry ? "restored" : "reserved",
+            can_retry: canRetry,
+          },
+          error: null,
+        }),
       });
 
       const result = await createMobileRunOperations(async () => client).get({
@@ -245,34 +252,44 @@ describe("mobile durable-run operations", () => {
     expect(client.cancelRun).toHaveBeenCalledOnce();
   });
 
-  it("advertises retry after #278 made restored-credit reclaim canonical", async () => {
-    const client = dataClient({
-      readRun: vi.fn().mockResolvedValue({
-        data: runRow({
-          status: "failed",
-          safe_failure_message: "Price research timed out.",
-          completed_at: "2026-07-19T18:02:00.000Z",
+  it.each([
+    ["active reclaim", "reserved", false],
+    ["exhausted capacity", "restored", false],
+    ["eligible restored credit", "restored", true],
+  ] as const)(
+    "uses the canonical #291 projection for %s",
+    async (_scenario, effectiveAllowance, canRetry) => {
+      const client = dataClient({
+        readRun: vi.fn().mockResolvedValue({
+          data: runRow({
+            status: "failed",
+            safe_failure_message: "Price research timed out.",
+            completed_at: "2026-07-19T18:02:00.000Z",
+          }),
+          error: null,
         }),
-        error: null,
-      }),
-      readReservation: vi.fn().mockResolvedValue({
-        data: { state: "restored" },
-        error: null,
-      }),
-    });
+        readRetryProjection: vi.fn().mockResolvedValue({
+          data: {
+            effective_allowance: effectiveAllowance,
+            can_retry: canRetry,
+          },
+          error: null,
+        }),
+      });
 
-    await expect(
-      createMobileRunOperations(async () => client).get({
-        runId: RUN_ID,
-        userId: "user_native",
-        bearerToken: "signed-jwt",
-      }),
-    ).resolves.toMatchObject({
-      allowance: "restored",
-      legalActions: { canRetry: true },
-      safeFailure: { retryable: true },
-    });
-  });
+      await expect(
+        createMobileRunOperations(async () => client).get({
+          runId: RUN_ID,
+          userId: "user_native",
+          bearerToken: "signed-jwt",
+        }),
+      ).resolves.toMatchObject({
+        allowance: effectiveAllowance,
+        legalActions: { canRetry },
+        safeFailure: { retryable: canRetry },
+      });
+    },
+  );
 
   it.each([
     ["P0002", MobileRunNotFoundError],
@@ -346,7 +363,15 @@ describe("mobile durable-run operations", () => {
       eq: vi.fn(() => query),
       maybeSingle,
     };
-    const rpc = vi.fn().mockResolvedValue({ data: {}, error: null });
+    const projectionMaybeSingle = vi.fn().mockResolvedValue({
+      data: { effective_allowance: "reserved", can_retry: false },
+      error: null,
+    });
+    const rpc = vi.fn((name: string) =>
+      name === "get_pipeline_run_retry_projection"
+        ? { maybeSingle: projectionMaybeSingle }
+        : Promise.resolve({ data: {}, error: null })
+    );
     const supabase = {
       from: vi.fn(() => query),
       rpc,
@@ -355,7 +380,7 @@ describe("mobile durable-run operations", () => {
 
     await client.readRun(RUN_ID);
     await client.readItem(ITEM_ID);
-    await client.readReservation(RUN_ID);
+    await client.readRetryProjection(RUN_ID);
     const retryKey = "24100000-0000-4000-8000-000000000003";
     const cancelKey = "24100000-0000-4000-8000-000000000004";
     await client.retryRun(RUN_ID, retryKey);
@@ -363,16 +388,15 @@ describe("mobile durable-run operations", () => {
 
     expect(supabase.from).toHaveBeenNthCalledWith(1, "pipeline_runs");
     expect(supabase.from).toHaveBeenNthCalledWith(2, "items");
-    expect(supabase.from).toHaveBeenNthCalledWith(
-      3,
-      "ai_item_credit_reservations",
-    );
-    expect(rpc).toHaveBeenNthCalledWith(1, "apply_mobile_run_operation", {
+    expect(rpc).toHaveBeenNthCalledWith(1, "get_pipeline_run_retry_projection", {
+      p_run_id: RUN_ID,
+    });
+    expect(rpc).toHaveBeenNthCalledWith(2, "apply_mobile_run_operation", {
       p_idempotency_key: retryKey,
       p_operation: "retry",
       p_run_id: RUN_ID,
     });
-    expect(rpc).toHaveBeenNthCalledWith(2, "apply_mobile_run_operation", {
+    expect(rpc).toHaveBeenNthCalledWith(3, "apply_mobile_run_operation", {
       p_idempotency_key: cancelKey,
       p_operation: "cancel",
       p_run_id: RUN_ID,

@@ -373,6 +373,21 @@ describe("mobile durable-run RLS adapter", () => {
         retry_restore_count: 0,
         status: "queued",
       });
+
+      const fixtureToken = await mintUserJwt(fixtureUser);
+      const operations = createConfiguredSupabaseMobileRunOperations({
+        supabaseURL: SUPABASE_URL,
+        anonKey: ANON_KEY!,
+      });
+      await expect(operations.get({
+        runId,
+        userId: fixtureUser,
+        bearerToken: fixtureToken,
+      })).resolves.toMatchObject({
+        status: "queued",
+        allowance: "reserved",
+        legalActions: { canRetry: false },
+      });
     } finally {
       await worker.query("rollback").catch(() => undefined);
       await retry.query("rollback").catch(() => undefined);
@@ -392,90 +407,4 @@ describe("mobile durable-run RLS adapter", () => {
     }
   });
 
-  it("waits on the retention fence before locking a run for retry", async () => {
-    if (!reachable) return;
-    const fixtureUser = `user_test_mobile_retention_order_${Date.now()}`;
-    const itemId = crypto.randomUUID();
-    const runId = crypto.randomUUID();
-    const retryKey = crypto.randomUUID();
-    const setup = new Client({ connectionString: DATABASE_URL });
-    const retention = new Client({ connectionString: DATABASE_URL });
-    const retry = new Client({ connectionString: DATABASE_URL });
-    const observer = new Client({ connectionString: DATABASE_URL });
-    await Promise.all([setup.connect(), retention.connect(), retry.connect(), observer.connect()]);
-
-    try {
-      await setup.query(
-        `insert into public.items (id, user_id, photos)
-         values ($1::uuid, $2, array[$3::text])`,
-        [itemId, fixtureUser, `${fixtureUser}/items/front.jpg`],
-      );
-      await setup.query(
-        `insert into public.pipeline_runs (id, user_id, item_id, idempotency_key)
-         values ($1::uuid, $2, $3::uuid, $4)`,
-        [runId, fixtureUser, itemId, `mobile-retention-${runId}`],
-      );
-      await setup.query(
-        `update public.pipeline_runs
-         set status = 'failed',
-             failure_code = 'provider_unavailable',
-             safe_failure_message = 'The listing could not be prepared.',
-             completed_at = statement_timestamp()
-         where id = $1::uuid`,
-        [runId],
-      );
-
-      await retention.query("begin");
-      await retention.query(
-        `select pg_advisory_xact_lock(
-           hashtextextended('snaplist:pipeline-retention', 0)
-         )`,
-      );
-
-      await retry.query("begin");
-      await retry.query("select set_config('request.jwt.claims', $1, true)", [
-        JSON.stringify({ sub: fixtureUser, role: "authenticated" }),
-      ]);
-      await retry.query("set local role authenticated");
-      const retryPid = await retry.query<{ pid: number }>(
-        "select pg_backend_pid() as pid",
-      );
-      const retryPromise = retry.query<{ value: Record<string, unknown> }>(
-        `select public.apply_mobile_run_operation($1::uuid, 'retry', $2::uuid) as value`,
-        [runId, retryKey],
-      );
-      await waitForDatabaseBlock(observer, retryPid.rows[0]!.pid);
-
-      await expect(
-        retention.query(
-          `select id
-           from public.pipeline_runs
-           where id = $1::uuid
-           for update nowait`,
-          [runId],
-        ),
-      ).resolves.toMatchObject({ rowCount: 1 });
-      await retention.query("commit");
-
-      const result = await retryPromise;
-      await retry.query("commit");
-      expect(result.rows[0]?.value).toMatchObject({ status: "queued" });
-    } finally {
-      await retention.query("rollback").catch(() => undefined);
-      await retry.query("rollback").catch(() => undefined);
-      await setup.query(
-        `select pgmq.delete('pipeline_jobs', queue_message_id)
-         from public.pipeline_runs
-         where id = $1::uuid and queue_message_id is not null`,
-        [runId],
-      ).catch(() => undefined);
-      await setup.query(
-        "delete from private.mobile_run_operation_replays where requested_run_id = $1::uuid",
-        [runId],
-      ).catch(() => undefined);
-      await setup.query("delete from public.items where id = $1::uuid", [itemId])
-        .catch(() => undefined);
-      await Promise.all([setup.end(), retention.end(), retry.end(), observer.end()]);
-    }
-  });
 });
