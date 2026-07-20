@@ -113,6 +113,7 @@ describe("mobile API v1 provider-neutral handler", () => {
             statusLabel: "Live",
             detail: "eBay · Listed",
             price: "$210",
+            destination: null,
           },
         ],
         recentSearches: [],

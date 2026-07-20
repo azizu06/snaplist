@@ -13,6 +13,12 @@ import {
 } from "@/lib/pipeline-progress";
 
 const uuid = z.string().uuid();
+const homeDestinationSchema = z
+  .object({
+    kind: z.enum(["order", "conversation", "publishIssue", "draft"]),
+    id: uuid,
+  })
+  .strict();
 
 export const homeProjectionSchema = z
   .object({
@@ -35,12 +41,7 @@ export const homeProjectionSchema = z
           status: z.string().min(1),
           detail: z.string().min(1),
           actionLabel: z.string().min(1),
-          destination: z
-            .object({
-              kind: z.enum(["order", "conversation", "publishIssue", "draft"]),
-              id: uuid,
-            })
-            .strict(),
+          destination: homeDestinationSchema,
         })
         .strict(),
     ),
@@ -62,10 +63,17 @@ export const homeProjectionSchema = z
         .object({
           id: uuid,
           title: z.string().min(1),
-          lifecycle: z.enum(["active", "draft", "sold", "needsAttention"]),
+          lifecycle: z.enum([
+            "active",
+            "draft",
+            "sold",
+            "needsAttention",
+            "resolvedConversation",
+          ]),
           statusLabel: z.string().min(1),
           detail: z.string().min(1),
           price: z.string().min(1).nullable(),
+          destination: homeDestinationSchema.nullable(),
         })
         .strict(),
     ),
@@ -113,6 +121,33 @@ interface HomePredictionRow {
   created_at: string;
 }
 
+interface HomeMessageRootRow {
+  id: string;
+  user_id: string;
+  item_id: string | null;
+  listing_id: string | null;
+  direction: string;
+  marketplace: string;
+  body: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface HomeMessageReplyRow {
+  id: string;
+  user_id: string;
+  reply_to: string | null;
+  direction: string;
+  reply_kind: string | null;
+  marketplace: string;
+  delivery_status: string | null;
+  external_delivery_id: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface HomeProjectionRows {
   notifications: HomeNotificationRow[];
   unreadNotificationCount: number;
@@ -122,6 +157,9 @@ interface HomeProjectionRows {
   listings: HomeListingRow[];
   items: HomeItemRow[];
   predictions: HomePredictionRow[];
+  messageRoots?: HomeMessageRootRow[];
+  messageReplies?: HomeMessageReplyRow[];
+  now?: Date;
   historyRevisionAt?: string | null;
 }
 
@@ -180,6 +218,47 @@ function money(value: number | null): string | null {
   }).format(value);
 }
 
+const HOME_MESSAGE_PREVIEW_CODEPOINTS = 120;
+
+function messagePreview(body: string): string | null {
+  const normalized = body.replace(/\s+/gu, " ").trim();
+  if (!normalized) return null;
+  const codepoints = Array.from(normalized);
+  if (codepoints.length <= HOME_MESSAGE_PREVIEW_CODEPOINTS) return normalized;
+  return `${codepoints.slice(0, HOME_MESSAGE_PREVIEW_CODEPOINTS - 1).join("")}…`;
+}
+
+function marketplaceLabel(marketplace: string): string | null {
+  switch (marketplace) {
+    case "ebay":
+      return "eBay";
+    case "simulated":
+      return "Simulated";
+    default:
+      return null;
+  }
+}
+
+function replyTimeLabel(sentAt: string, now: Date): string | null {
+  const sentAtMilliseconds = Date.parse(sentAt);
+  const nowMilliseconds = now.getTime();
+  if (!Number.isFinite(sentAtMilliseconds) || !Number.isFinite(nowMilliseconds)) return null;
+  const elapsedSeconds = Math.max(0, Math.floor((nowMilliseconds - sentAtMilliseconds) / 1_000));
+  if (elapsedSeconds < 60) return "just now";
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays}d ago`;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(sentAtMilliseconds));
+}
+
 function listingPresentation(status: string): Pick<HomeProjection["listings"][number], "lifecycle" | "statusLabel" | "detail"> {
   switch (status) {
     case "published":
@@ -226,6 +305,8 @@ function timestampRevision(rows: HomeProjectionRows): number {
     ...rows.listings.flatMap((row) => [row.created_at as string, row.updated_at]),
     ...rows.items.flatMap((row) => [row.created_at as string, row.updated_at]),
     ...rows.predictions.map((row) => row.created_at),
+    ...(rows.messageRoots ?? []).flatMap((row) => [row.created_at, row.updated_at]),
+    ...(rows.messageReplies ?? []).flatMap((row) => [row.created_at, row.updated_at]),
   ];
   return timestamps.reduce((latest, value) => {
     const parsed = Date.parse(value);
@@ -240,14 +321,91 @@ export function assembleHomeProjection(rows: HomeProjectionRows): HomeProjection
     latestPrice: latestPricePerItem(rows.predictions),
     thumbUrlFor: () => null,
   });
-  const listings = dashboardRows
+  const listingRows = dashboardRows
     .filter((row) => row.status !== "archived")
     .map((row) => ({
       id: row.itemId,
       title: row.title,
       ...listingPresentation(row.status),
       price: money(row.price),
+      destination: null,
     }));
+  const dashboardRowsByItem = new Map(dashboardRows.map((row) => [row.itemId, row]));
+  const messageRootsByID = new Map(
+    (rows.messageRoots ?? []).map((message) => [message.id, message]),
+  );
+  const newestDeliveredReplyByRoot = new Map<string, HomeMessageReplyRow>();
+  for (const reply of rows.messageReplies ?? []) {
+    if (
+      !reply.reply_to ||
+      reply.direction !== "outbound" ||
+      (reply.reply_kind !== null && reply.reply_kind !== "reply") ||
+      reply.delivery_status !== "delivered" ||
+      !reply.sent_at
+    ) {
+      continue;
+    }
+    const root = messageRootsByID.get(reply.reply_to);
+    if (
+      !root ||
+      reply.user_id !== root.user_id ||
+      reply.marketplace !== root.marketplace ||
+      (reply.marketplace === "ebay" && !reply.external_delivery_id)
+    ) {
+      continue;
+    }
+    const existing = newestDeliveredReplyByRoot.get(root.id);
+    if (!existing?.sent_at || Date.parse(reply.sent_at) > Date.parse(existing.sent_at)) {
+      newestDeliveredReplyByRoot.set(root.id, reply);
+    }
+  }
+  const seenBuyerRoots = new Set<string>();
+  const actionableBuyerRoots = new Set<string>();
+  const buyerRows = rows.notifications.flatMap<HomeProjection["listings"][number]>((notification) => {
+    if (
+      notification.kind !== "buyer_message" ||
+      !notification.source_message_id ||
+      seenBuyerRoots.has(notification.source_message_id)
+    ) {
+      return [];
+    }
+    const root = messageRootsByID.get(notification.source_message_id);
+    const item = root?.item_id ? dashboardRowsByItem.get(root.item_id) : undefined;
+    const marketplace = root ? marketplaceLabel(root.marketplace) : null;
+    const preview = root ? messagePreview(root.body) : null;
+    if (
+      !root ||
+      root.user_id !== notification.user_id ||
+      root.direction !== "inbound" ||
+      root.status === "externally_answered" ||
+      root.status === "provider_unavailable" ||
+      !item ||
+      !marketplace ||
+      !preview
+    ) {
+      return [];
+    }
+    const deliveredReply = newestDeliveredReplyByRoot.get(root.id);
+    const repliedAt = deliveredReply?.sent_at
+      ? replyTimeLabel(deliveredReply.sent_at, rows.now ?? new Date())
+      : null;
+    if (!repliedAt) actionableBuyerRoots.add(root.id);
+    seenBuyerRoots.add(root.id);
+    return [
+      {
+        id: root.id,
+        title: item.title,
+        lifecycle: repliedAt ? ("resolvedConversation" as const) : ("needsAttention" as const),
+        statusLabel: repliedAt ? "Replied" : "Buyer question",
+        detail: repliedAt
+          ? `${marketplace} · You replied ${repliedAt}`
+          : `${marketplace} · “${preview}”`,
+        price: money(item.price),
+        destination: { kind: "conversation" as const, id: root.id },
+      },
+    ];
+  });
+  const listings = [...listingRows, ...buyerRows];
   const activeRun = rows.runs.find((run) =>
     ["queued", "running", "retrying"].includes(run.status),
   );
@@ -263,6 +421,7 @@ export function assembleHomeProjection(rows: HomeProjectionRows): HomeProjection
     : null;
   const attention = rows.notifications.flatMap<HomeProjection["attention"][number]>((notification) => {
     if (notification.kind === "buyer_message" && notification.source_message_id) {
+      if (!actionableBuyerRoots.has(notification.source_message_id)) return [];
       return [
         {
           id: notification.id,
@@ -399,12 +558,56 @@ export function createSupabaseHomeProjectionReader(
       const listings = currentItems.listings as HomeListingRow[];
       const items = currentItems.items as HomeItemRow[];
       const predictions = currentItems.predictions as HomePredictionRow[];
+      const sourceMessageIDs = [
+        ...new Set(
+          notifications.flatMap((notification) =>
+            notification.kind === "buyer_message" && notification.source_message_id
+              ? [notification.source_message_id]
+              : [],
+          ),
+        ),
+      ];
+      let messageRoots: HomeMessageRootRow[] = [];
+      let canonicalDeliveredReplies: HomeMessageReplyRow[] = [];
+      if (sourceMessageIDs.length > 0) {
+        const messageRootResult = await client
+          .from("messages")
+          .select(
+            "id,user_id,item_id,listing_id,direction,marketplace,body,status,created_at,updated_at",
+          )
+          .in("id", sourceMessageIDs)
+          .eq("direction", "inbound")
+          .limit(sourceMessageIDs.length);
+        if (messageRootResult.error) throw new Error("Home conversation projection read failed.");
+        messageRoots = (messageRootResult.data ?? []) as HomeMessageRootRow[];
+        const rootIDs = [...new Set(messageRoots.map((root) => root.id))];
+        if (rootIDs.length > 0) {
+          const deliveredReplyResult = await client
+            .from("messages")
+            .select(
+              "id,user_id,reply_to,direction,reply_kind,marketplace,delivery_status,external_delivery_id,sent_at,created_at,updated_at",
+            )
+            .in("reply_to", rootIDs)
+            .eq("direction", "outbound")
+            .eq("delivery_status", "delivered")
+            .or("reply_kind.is.null,reply_kind.eq.reply")
+            .order("sent_at", { ascending: false })
+            .limit(rootIDs.length);
+          if (deliveredReplyResult.error) {
+            throw new Error("Home conversation projection read failed.");
+          }
+          canonicalDeliveredReplies = (deliveredReplyResult.data ??
+            []) as HomeMessageReplyRow[];
+        }
+      }
       assertTenantRows(userId, [
         ...notifications,
         ...runs,
         ...listings,
         ...items,
         ...predictions,
+        ...messageRoots,
+        ...canonicalDeliveredReplies,
       ]);
       return assembleHomeProjection({
         notifications,
@@ -415,6 +618,8 @@ export function createSupabaseHomeProjectionReader(
         listings,
         items,
         predictions,
+        messageRoots,
+        messageReplies: canonicalDeliveredReplies,
         historyRevisionAt: currentItems.history_revision_at,
       });
     },

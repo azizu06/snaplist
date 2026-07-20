@@ -51,6 +51,7 @@ final class HomeFeatureTests: XCTestCase {
             model.listings(matching: "", filter: .needsAttention).map(\.id),
             [headphones.id]
         )
+        XCTAssertEqual(activeCamera.route, .listing(activeCamera.id))
     }
 
     func testStoreReconnectsWithBoundedBackoffAfterRealtimeFailures() async {
@@ -151,6 +152,164 @@ final class HomeFeatureTests: XCTestCase {
         XCTAssertEqual(app.homeStore.loadState, .loaded)
         XCTAssertEqual(app.homeStore.model?.revision, 41)
         XCTAssertEqual(app.homeStore.model?.listings.first?.title, "Canon AE-1 film camera")
+    }
+
+    func testAuthenticatedHomeDecodesActionableBuyerConversationDestination() async throws {
+        let conversationID = UUID(
+            uuidString: "29600000-0000-4000-8000-000000000063"
+        )!
+        let session = makeHomeURLSession { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"""
+                {
+                  "data": {
+                    "revision": 63,
+                    "sellerState": "active",
+                    "unreadNotificationCount": 1,
+                    "summary": { "active": 1, "drafts": 0, "orders": null },
+                    "attention": [],
+                    "currentRun": null,
+                    "readyToFinish": [],
+                    "listings": [{
+                      "id": "29600000-0000-4000-8000-000000000063",
+                      "title": "Keychron K4 Mechanical Keyboard",
+                      "lifecycle": "needsAttention",
+                      "statusLabel": "Buyer question",
+                      "detail": "eBay · “Does it work on Mac?”",
+                      "price": "$96",
+                      "destination": {
+                        "kind": "conversation",
+                        "id": "29600000-0000-4000-8000-000000000063"
+                      }
+                    }],
+                    "recentSearches": []
+                  },
+                  "meta": { "requestId": "req_home_buyer" }
+                }
+                """#.utf8)
+            )
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            homeAuthentication: ClerkHomeAuthentication(
+                session: TestClerkSessionToken(token: "signed-jwt")
+            ),
+            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
+            homeURLSession: session
+        )
+
+        await app.homeStore.load()
+        app.homeStore.stopUpdates()
+
+        let result = try XCTUnwrap(app.homeStore.model?.listings.first)
+        XCTAssertEqual(result.lifecycle, .needsAttention)
+        XCTAssertEqual(result.route, .conversation(conversationID))
+        XCTAssertEqual(
+            app.homeStore.model?.listings(matching: "keychron", filter: .needsAttention),
+            [result]
+        )
+    }
+
+    func testAuthenticatedHomeKeepsResolvedBuyerConversationInAllOnly() async throws {
+        let conversationID = UUID(
+            uuidString: "29600000-0000-4000-8000-000000000064"
+        )!
+        let session = makeHomeURLSession { request in
+            (
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"""
+                {
+                  "data": {
+                    "revision": 64,
+                    "sellerState": "active",
+                    "unreadNotificationCount": 0,
+                    "summary": { "active": 1, "drafts": 0, "orders": null },
+                    "attention": [],
+                    "currentRun": null,
+                    "readyToFinish": [],
+                    "listings": [{
+                      "id": "29600000-0000-4000-8000-000000000064",
+                      "title": "Keychron K4 Mechanical Keyboard",
+                      "lifecycle": "resolvedConversation",
+                      "statusLabel": "Replied",
+                      "detail": "eBay · You replied 1h ago",
+                      "price": "$96",
+                      "destination": {
+                        "kind": "conversation",
+                        "id": "29600000-0000-4000-8000-000000000064"
+                      }
+                    }],
+                    "recentSearches": []
+                  },
+                  "meta": { "requestId": "req_home_resolved_buyer" }
+                }
+                """#.utf8)
+            )
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            homeAuthentication: ClerkHomeAuthentication(
+                session: TestClerkSessionToken(token: "signed-jwt")
+            ),
+            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
+            homeURLSession: session
+        )
+
+        await app.homeStore.load()
+        app.homeStore.stopUpdates()
+
+        let result = try XCTUnwrap(app.homeStore.model?.listings.first)
+        XCTAssertEqual(result.lifecycle, .resolvedConversation)
+        XCTAssertEqual(result.route, .conversation(conversationID))
+        XCTAssertEqual(app.homeStore.model?.listings(matching: "keychron", filter: .all), [result])
+        XCTAssertEqual(
+            app.homeStore.model?.listings(matching: "keychron", filter: .needsAttention),
+            []
+        )
+    }
+
+    func testAuthenticatedHomeRejectsListingWithoutRequiredNullableDestination() async {
+        let payload = Self.releaseHomeEnvelope.replacingOccurrences(
+            of: ",\n        \"destination\": null",
+            with: ""
+        )
+        XCTAssertFalse(payload.contains("\"destination\""))
+        let session = makeHomeURLSession { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(payload.utf8)
+            )
+        }
+        let app = SnapListApp(
+            configuration: .standard,
+            homeAuthentication: ClerkHomeAuthentication(
+                session: TestClerkSessionToken(token: "signed-jwt")
+            ),
+            homeAPIOrigin: URL(string: "http://127.0.0.1:3001")!,
+            homeURLSession: session
+        )
+
+        await app.homeStore.load()
+        app.homeStore.stopUpdates()
+
+        XCTAssertNil(app.homeStore.model)
+        XCTAssertEqual(app.homeStore.loadState, .failed(.temporarilyUnavailable))
     }
 
     func testStandardSnapListAppCompositionKeepsServerFailureHonest() async {
@@ -319,7 +478,8 @@ final class HomeFeatureTests: XCTestCase {
             "lifecycle": "active",
             "statusLabel": "Live",
             "detail": "eBay · Listed",
-            "price": "$210"
+            "price": "$210",
+            "destination": null
           }
         ],
         "recentSearches": []

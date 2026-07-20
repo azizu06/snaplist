@@ -55,6 +55,7 @@ enum HomeListingLifecycle: String, CaseIterable, Hashable, Sendable {
     case draft
     case sold
     case needsAttention
+    case resolvedConversation
 }
 
 struct HomeListing: Identifiable, Hashable, Sendable {
@@ -64,6 +65,29 @@ struct HomeListing: Identifiable, Hashable, Sendable {
     let statusLabel: String
     let detail: String
     let price: String?
+    let destination: HomeAttentionDestination?
+
+    init(
+        id: UUID,
+        title: String,
+        lifecycle: HomeListingLifecycle,
+        statusLabel: String,
+        detail: String,
+        price: String?,
+        destination: HomeAttentionDestination? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.lifecycle = lifecycle
+        self.statusLabel = statusLabel
+        self.detail = detail
+        self.price = price
+        self.destination = destination
+    }
+
+    var route: HomeRoute {
+        destination?.route ?? .listing(id)
+    }
 }
 
 enum HomeFilter: String, CaseIterable, Identifiable, Hashable, Sendable {

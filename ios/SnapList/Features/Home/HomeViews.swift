@@ -721,7 +721,7 @@ private struct HomeListingList: View {
         VStack(spacing: 0) {
             ForEach(Array(listings.enumerated()), id: \.element.id) { index, listing in
                 Button {
-                    openRoute(.listing(listing.id))
+                    openRoute(listing.route)
                 } label: {
                     HStack(spacing: 12) {
                         HomeProductPlaceholder(systemImage: listing.lifecycle.productSystemImage, size: 52)
@@ -890,13 +890,13 @@ private extension HomeListingLifecycle {
         case .active: "camera"
         case .draft: "shippingbox"
         case .sold: "tshirt"
-        case .needsAttention: "headphones"
+        case .needsAttention, .resolvedConversation: "headphones"
         }
     }
 
     var badgeForeground: Color {
         switch self {
-        case .active: SnapListColorToken.durableSuccess.color
+        case .active, .resolvedConversation: SnapListColorToken.durableSuccess.color
         case .draft: Color(hex: "#3B4A66")
         case .sold: SnapListColorToken.textSecondary.color
         case .needsAttention: Color(hex: "#B23B1E")
@@ -905,7 +905,7 @@ private extension HomeListingLifecycle {
 
     var badgeBackground: Color {
         switch self {
-        case .active: Color(hex: "#E6F4EC")
+        case .active, .resolvedConversation: Color(hex: "#E6F4EC")
         case .draft: Color(hex: "#EAEFFB")
         case .sold: Color(hex: "#F0F1F3")
         case .needsAttention: Color(hex: "#FBEDE9")
