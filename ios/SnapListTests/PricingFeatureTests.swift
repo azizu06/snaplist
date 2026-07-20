@@ -276,6 +276,45 @@ final class PricingFeatureTests: XCTestCase {
         XCTAssertEqual(store.route, .allComparables)
     }
 
+    @MainActor
+    func testProductionPricingActionsCrossRealDraftSourceAndTypedRouteBoundaries() {
+        let draftState = PricingRouteDraftState()
+        var openedSources: [URL] = []
+        var destinations: [FutureBoundary] = []
+        var retryCount = 0
+        var dismissCount = 0
+        let actions = PricingRouteActionComposition.make(
+            draftState: draftState,
+            openSource: { openedSources.append($0) },
+            navigate: { destinations.append($0) },
+            retry: { retryCount += 1 },
+            dismiss: { dismissCount += 1 }
+        )
+        let handoff = PricingDraftHandoff(
+            itemID: "item-1",
+            effectivePrice: 61.24,
+            costBasis: 20.56
+        )
+        let source = URL(string: "https://www.ebay.com/itm/strong-03")!
+
+        actions.savePriceOverride(61.24)
+        actions.saveCostBasis(20.56)
+        actions.continueToDraft(handoff)
+        actions.openSource(source)
+        actions.requestGuidedCorrection()
+        actions.showPricingHelp()
+        actions.retryRefresh()
+        actions.dismissPricing()
+
+        XCTAssertEqual(draftState.priceOverride, 61.24)
+        XCTAssertEqual(draftState.costBasis, 20.56)
+        XCTAssertEqual(draftState.draftHandoff, handoff)
+        XCTAssertEqual(openedSources, [source])
+        XCTAssertEqual(destinations, [.draft, .guidedCorrection, .pricingHelp])
+        XCTAssertEqual(retryCount, 1)
+        XCTAssertEqual(dismissCount, 1)
+    }
+
     func testNoAndLimitedEvidenceRemainExplicit() {
         let empty = PricingFeatureFixtures.noEvidence.snapshot(for: .all)
         XCTAssertEqual(empty.soldCount, 0)
