@@ -21,6 +21,16 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
 
 import { config, proxy } from "./proxy";
 
+async function dispatchThroughProxy(request: NextRequest): Promise<Response> {
+  const matcher = new RegExp(`^${config.matcher[0]}$`);
+  if (!matcher.test(request.nextUrl.pathname)) {
+    return new Response(null, { status: 200 });
+  }
+  const response = await proxy(request, {} as NextFetchEvent);
+  if (!response) throw new Error("Expected the proxy to return a response");
+  return response;
+}
+
 describe("auth proxy", () => {
   afterEach(() => {
     delete process.env.CRON_SECRET;
@@ -53,5 +63,27 @@ describe("auth proxy", () => {
     expect(matcher.test("/v1/home/")).toBe(false);
     expect(matcher.test("/v1/home-other")).toBe(true);
     expect(matcher.test("/dashboard")).toBe(true);
+  });
+
+  it("lets the exact native item pricing route own bearer authentication without changing web login", async () => {
+    const itemId = "22222222-2222-4222-8222-222222222222";
+
+    const pricingResponse = await dispatchThroughProxy(
+      new NextRequest(`https://snaplist.test/v1/items/${itemId}/pricing`),
+    );
+    const dashboardResponse = await dispatchThroughProxy(
+      new NextRequest("https://snaplist.test/dashboard"),
+    );
+    const adjacentApiResponse = await dispatchThroughProxy(
+      new NextRequest(`https://snaplist.test/v1/items/${itemId}/pricing/history`),
+    );
+
+    expect(pricingResponse.status).toBe(200);
+    expect(pricingResponse.headers.get("location")).toBeNull();
+    expect(dashboardResponse.status).toBe(307);
+    expect(dashboardResponse.headers.get("location")).toBe(
+      "https://snaplist.test/login?next=%2Fdashboard",
+    );
+    expect(adjacentApiResponse.status).toBe(307);
   });
 });

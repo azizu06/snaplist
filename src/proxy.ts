@@ -45,6 +45,6 @@ export const config = {
     // Native clients self-authenticate this exact read-only route with a Clerk
     // bearer. Keep it outside cookie middleware so missing web configuration
     // cannot turn its own 401/503 contract into a redirect or framework 500.
-    "/((?!_next/static|_next/image|favicon.ico|v1/home(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|v1/home(?:/|$)|v1/items/[^/]+/pricing/?$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
   ],
 };
