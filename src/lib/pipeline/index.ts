@@ -57,3 +57,9 @@ export {
   type ReviewRegenerationSnapshot,
   type ReviewRegenerationStore,
 } from "./review-regeneration";
+export {
+  createSupabaseGuidedCorrectionCompletionGateway,
+  GUIDED_CORRECTION_CAPABILITY_TTL_MS,
+  type GuidedCorrectionCapability,
+  type GuidedCorrectionCompletionGateway,
+} from "./guided-correction-completion";

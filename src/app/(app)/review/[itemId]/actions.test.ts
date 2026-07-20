@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
     specs: [],
   })),
   createStore: vi.fn(() => ({})),
+  createGateway: vi.fn(() => ({ authorize: vi.fn(), complete: vi.fn() })),
+  createInternalCompletionClient: vi.fn(() => ({ rpc: vi.fn() })),
   regenerate: vi.fn(),
   rateLimitAllows: vi.fn(async () => true),
   recordPipelineRunAndMaybeAlert: vi.fn(async () => undefined),
@@ -37,6 +39,13 @@ vi.mock("@/lib/pipeline/review-regeneration", () => ({
   parseIdentityCorrections: mocks.parseIdentityCorrections,
   createSupabaseReviewRegenerationStore: mocks.createStore,
   regenerateReviewListing: mocks.regenerate,
+}));
+vi.mock("@/lib/pipeline/guided-correction-completion", () => ({
+  createSupabaseGuidedCorrectionCompletionGateway: mocks.createGateway,
+}));
+vi.mock("@/lib/pipeline/guided-correction-internal", () => ({
+  createInternalGuidedCorrectionCompletionRpcClient:
+    mocks.createInternalCompletionClient,
 }));
 vi.mock("@/lib/abuse", () => ({
   rateLimitAllows: mocks.rateLimitAllows,
@@ -94,17 +103,16 @@ describe("regenerateCorrectedIdentity", () => {
     );
 
     expect(mocks.recordPipelineRunAndMaybeAlert).toHaveBeenCalledTimes(1);
+    expect(mocks.createInternalCompletionClient).toHaveBeenCalledTimes(1);
+    expect(mocks.createGateway).toHaveBeenCalledWith(
+      expect.objectContaining({ rpc: mocks.rpc }),
+      expect.anything(),
+    );
     expect(mocks.createStore).toHaveBeenCalledWith(
       expect.objectContaining({ rpc: mocks.rpc }),
-      { useCreditLedger: true },
+      expect.objectContaining({ authorize: expect.any(Function), complete: expect.any(Function) }),
     );
-    expect(mocks.rpc).toHaveBeenCalledWith(
-      "authorize_ai_item_guided_correction",
-      {
-        p_item_id: "item-1",
-        p_expected_review_revision: "00000000-0000-4000-8000-000000000001",
-      },
-    );
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.regenerate).toHaveBeenCalledTimes(1);
     expect(mocks.regenerate).toHaveBeenCalledWith(
       expect.anything(),
@@ -117,16 +125,15 @@ describe("regenerateCorrectedIdentity", () => {
   });
 
   it("does not start provider work when the included correction is unavailable", async () => {
-    mocks.rpc.mockResolvedValueOnce({
-      data: null,
-      error: { message: "The included guided correction is unavailable." },
-    });
+    mocks.regenerate.mockRejectedValueOnce(
+      new Error("The included guided correction is unavailable."),
+    );
 
     await expect(regenerateCorrectedIdentity(correctionForm())).rejects.toThrow(
       /REDIRECT:/,
     );
 
-    expect(mocks.rpc).toHaveBeenCalledOnce();
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.recordPipelineRunAndMaybeAlert).not.toHaveBeenCalled();
   });
 

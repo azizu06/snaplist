@@ -26,6 +26,7 @@ const generated: ListingCopy = {
 const REVIEW_REVISION = "00000000-0000-4000-8000-000000000124";
 
 function store(): ReviewRegenerationStore & {
+  authorize: ReturnType<typeof vi.fn>;
   commit: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -54,6 +55,10 @@ function store(): ReviewRegenerationStore & {
         model: "vision-model",
         autopilotEnabled: true,
       },
+    })),
+    authorize: vi.fn(async () => ({
+      token: "a".repeat(43),
+      expiresAt: "2026-07-20T15:05:00+00:00",
     })),
     commit: vi.fn(async () => undefined),
   };
@@ -192,6 +197,16 @@ describe("regenerateReviewListing", () => {
       },
     );
 
+    expect(persistence.authorize).toHaveBeenCalledWith({
+      itemId: "item-1",
+      listingId: "listing-1",
+      runId: "00000000-0000-4000-8000-000000000126",
+      expectedRunId: "00000000-0000-4000-8000-000000000125",
+      expectedReviewRevision: REVIEW_REVISION,
+    });
+    expect(persistence.authorize.mock.invocationCallOrder[0]).toBeLessThan(
+      beforeModelWork.mock.invocationCallOrder[0]!,
+    );
     expect(beforeModelWork).toHaveBeenCalledTimes(1);
     expect(beforeModelWork.mock.invocationCallOrder[0]).toBeLessThan(
       priceItem.mock.invocationCallOrder[0]!,
@@ -216,24 +231,21 @@ describe("regenerateReviewListing", () => {
     expect(persistence.commit).toHaveBeenCalledTimes(1);
     expect(persistence.commit).toHaveBeenCalledWith(
       expect.objectContaining({
+        capabilityToken: "a".repeat(43),
         runId: "00000000-0000-4000-8000-000000000126",
         expectedRunId: "00000000-0000-4000-8000-000000000125",
         expectedReviewRevision: REVIEW_REVISION,
         itemId: "item-1",
         listingId: "listing-1",
-        attributes: expect.objectContaining({
-          brand: "Sony",
-          model: "WH-1000XM4",
-          condition: "like-new",
-          title: "Sony WH-1000XM4",
-        }),
-        condition: "like-new",
-        listing: generated,
-        prediction: expect.objectContaining({
-          run_id: "00000000-0000-4000-8000-000000000126",
-          price: 165,
-          sources: soldPrice.sources,
-          extracted_attrs: expect.objectContaining({ model: "WH-1000XM4" }),
+        result: expect.objectContaining({
+          attributes: expect.objectContaining({
+            brand: "Sony",
+            model: "WH-1000XM4",
+            condition: "like-new",
+            title: "Sony WH-1000XM4",
+          }),
+          listing: generated,
+          price: soldPrice,
         }),
       }),
     );
@@ -396,11 +408,13 @@ describe("regenerateReviewListing", () => {
     });
     expect(persistence.commit).toHaveBeenCalledWith(
       expect.objectContaining({
-        attributes: expect.objectContaining({
-          measurements: expect.arrayContaining([
-            expect.objectContaining({ name: "pit_to_pit", confirmed: false }),
-            expect.objectContaining({ name: "length", confirmed: true }),
-          ]),
+        result: expect.objectContaining({
+          attributes: expect.objectContaining({
+            measurements: expect.arrayContaining([
+              expect.objectContaining({ name: "pit_to_pit", confirmed: false }),
+              expect.objectContaining({ name: "length", confirmed: true }),
+            ]),
+          }),
         }),
       }),
     );
