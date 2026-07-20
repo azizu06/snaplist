@@ -9,7 +9,20 @@ const migration = readFileSync(
   "utf8",
 );
 
+const nullOperationGuardMigration = readFileSync(
+  resolve(
+    "supabase/migrations/20260720070000_reject_null_mobile_run_operation.sql",
+  ),
+  "utf8",
+);
+
 describe("mobile durable-run mutation idempotency migration", () => {
+  it("rejects a null operation through the public invalid-input contract", () => {
+    expect(nullOperationGuardMigration).toMatch(
+      /p_operation is null[\s\S]*errcode = '22023'[\s\S]*message = 'Invalid mobile run operation'/i,
+    );
+  });
+
   it("binds one tenant key to one run operation before invoking #161", () => {
     expect(migration).toMatch(
       /create table private\.mobile_run_operation_replays/i,

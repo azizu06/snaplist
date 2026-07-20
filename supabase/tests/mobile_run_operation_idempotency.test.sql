@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(34);
 
 select extensions.ok(
   to_regclass('private.mobile_run_operation_replays') is not null,
@@ -181,6 +181,45 @@ set status = 'failed',
     lease_token = null,
     lease_expires_at = null
 where id = '24120000-0000-4000-8000-000000000002';
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"mobile-run-a","role":"authenticated"}',
+  true
+);
+
+select extensions.throws_ok(
+  $$select public.apply_mobile_run_operation(
+    '24120000-0000-4000-8000-000000000004',
+    null,
+    '24140000-0000-4000-8000-000000000009'
+  )$$,
+  '22023',
+  'Invalid mobile run operation',
+  'a null authenticated operation is rejected as invalid input'
+);
+
+reset role;
+select extensions.results_eq(
+  $$
+    select
+      run.status,
+      run.queue_message_id,
+      reservation.retry_reservation_count,
+      count(replay.idempotency_key)::bigint as replay_count
+    from public.pipeline_runs run
+    join public.ai_item_credit_reservations reservation
+      on reservation.pipeline_run_id = run.id
+    left join private.mobile_run_operation_replays replay
+      on replay.run_id = run.id
+      and replay.idempotency_key = '24140000-0000-4000-8000-000000000009'
+    where run.id = '24120000-0000-4000-8000-000000000004'
+    group by run.status, run.queue_message_id, reservation.retry_reservation_count
+  $$,
+  $$values ('failed'::text, null::bigint, 0::integer, 0::bigint)$$,
+  'a null operation leaves run, queue, accounting, and replay truth unchanged'
+);
 
 set local role authenticated;
 select set_config(
