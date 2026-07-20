@@ -31,6 +31,8 @@ struct PricingRouteView: View {
                         dismiss: { dismiss() }
                     )
                 )
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("pricing.route.loaded")
             case .failed:
                 VStack(spacing: 16) {
                     Text("Couldn’t load pricing evidence")
