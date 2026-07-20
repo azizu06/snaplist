@@ -40,7 +40,9 @@ final class PricingFeatureTests: XCTestCase {
 
         XCTAssertEqual(model.item.id, itemID.uuidString.lowercased())
         XCTAssertEqual(model.priceResult.suggested, 130)
-        XCTAssertEqual(model.snapshot(for: .ninetyDays).comparables.map(\.id), ["sale-1"])
+        let snapshot = model.snapshot(for: .ninetyDays)
+        XCTAssertEqual(snapshot.comparables.map(\.id), ["sale-1", "sale-2"])
+        XCTAssertEqual(snapshot.chartPoints.map(\.comparableID), ["sale-1"])
     }
 
     func testCanonicalPriceResultDTOMapsWithoutChangingProviderTruth() throws {
