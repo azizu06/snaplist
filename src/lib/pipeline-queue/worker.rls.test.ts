@@ -29,6 +29,8 @@ const SUPABASE_URL =
 const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const ORIGINAL_EVIDENCE_AS_OF = "2026-07-20T08:00:00.000Z";
+const NEW_EVIDENCE_AS_OF = "2026-07-20T09:00:00.000Z";
 
 const RESULT: PipelineResult = {
   attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
@@ -120,9 +122,11 @@ let itemB = "";
 let itemAOther = "";
 let runA = "";
 let runB = "";
+let runAdvance = "";
 let runRetry = "";
 let messageA = "";
 let messageB = "";
+let messageAdvance = "";
 let messageRetry = "";
 let queueLease: ExclusiveTestResourceLease | undefined;
 const messageIds = new Set<string>();
@@ -175,6 +179,7 @@ beforeAll(async () => {
   const [
     { data: aRun, error: aRunError },
     { data: bRun, error: bRunError },
+    { data: advanceRun, error: advanceRunError },
     { data: retryRun, error: retryRunError },
   ] = await Promise.all([
     userA.client
@@ -196,6 +201,15 @@ beforeAll(async () => {
       })
       .select("id")
       .single(),
+    userB.client
+      .from("pipeline_runs")
+      .insert({
+        user_id: userB.id,
+        item_id: itemB,
+        idempotency_key: `worker-advance-${Date.now()}`,
+      })
+      .select("id")
+      .single(),
     userA.client
       .from("pipeline_runs")
       .insert({
@@ -208,20 +222,23 @@ beforeAll(async () => {
   ]);
   expect(aRunError).toBeNull();
   expect(bRunError).toBeNull();
+  expect(advanceRunError).toBeNull();
   expect(retryRunError).toBeNull();
   runA = aRun!.id;
   runB = bRun!.id;
+  runAdvance = advanceRun!.id;
   runRetry = retryRun!.id;
 
   const queue = createSupabasePgmqPipelineQueue(
     admin as unknown as PipelineQueueRpcClient,
   );
-  [messageA, messageB, messageRetry] = await Promise.all([
+  [messageA, messageB, messageAdvance, messageRetry] = await Promise.all([
     queue.enqueue(createPipelineQueueEnvelope(runA)),
     queue.enqueue(createPipelineQueueEnvelope(runB)),
+    queue.enqueue(createPipelineQueueEnvelope(runAdvance)),
     queue.enqueue(createPipelineQueueEnvelope(runRetry)),
   ]);
-  messageIds.add(messageA).add(messageB).add(messageRetry);
+  messageIds.add(messageA).add(messageB).add(messageAdvance).add(messageRetry);
 });
 
 afterAll(async () => {
@@ -274,7 +291,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     expect(bRun).toEqual({ status: "queued", attempt_count: 0 });
   });
 
-  it("fences a stale lease, resumes checkpoints, and persists exactly one draft/log", async () => {
+  it("preserves priced research time through retry and advances it only for a new pricing pass", async () => {
     if (!reachable) return;
     const store = createSupabasePipelineWorkerStore(
       admin as unknown as PipelineWorkerRpcClient,
@@ -285,6 +302,35 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     await expect(
       store.acquire({ runId: runA, messageId: messageA, leaseSeconds: 60 }),
     ).resolves.toMatchObject({ kind: "deferred" });
+
+    const identified = {
+      identified: {
+        attributes: RESULT.attributes,
+        identification: RESULT.identification,
+        model: RESULT.model,
+      },
+    };
+    const priced = {
+      ...identified,
+      priced: {
+        result: RESULT.price,
+        evidenceAsOf: ORIGINAL_EVIDENCE_AS_OF,
+      },
+    };
+    await store.checkpoint({
+      runId: runA,
+      leaseToken: first.context.run.lease_token,
+      stage: "identifying",
+      checkpoint: identified,
+      leaseSeconds: 1,
+    });
+    await store.checkpoint({
+      runId: runA,
+      leaseToken: first.context.run.lease_token,
+      stage: "pricing",
+      checkpoint: priced,
+      leaseSeconds: 1,
+    });
 
     await sleep(1_100);
     const resumed = acquired(
@@ -303,25 +349,10 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       }),
     ).rejects.toThrow(/stale/i);
 
-    const identified = {
-      identified: {
-        attributes: RESULT.attributes,
-        identification: RESULT.identification,
-        model: RESULT.model,
-      },
-    };
-    const priced = { ...identified, priced: RESULT.price };
     const generated = {
       ...priced,
       generated: { copy: RESULT.listing, model: RESULT.listingModel! },
     };
-    await store.checkpoint({
-      runId: runA,
-      leaseToken: resumed.context.run.lease_token,
-      stage: "identifying",
-      checkpoint: identified,
-      leaseSeconds: 60,
-    });
     await expect(
       store.checkpoint({
         runId: runA,
@@ -331,13 +362,6 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         leaseSeconds: 60,
       }),
     ).rejects.toThrow(/checkpoint/i);
-    await store.checkpoint({
-      runId: runA,
-      leaseToken: resumed.context.run.lease_token,
-      stage: "pricing",
-      checkpoint: priced,
-      leaseSeconds: 60,
-    });
     await store.checkpoint({
       runId: runA,
       leaseToken: resumed.context.run.lease_token,
@@ -363,7 +387,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       await Promise.all([
         userA.client
           .from("pipeline_runs")
-          .select("status, stage, listing_id, attempt_count")
+          .select("status, stage, listing_id, attempt_count, completed_at")
           .eq("id", runA)
           .single(),
         userA.client.from("listings").select("id, item_id, run_id, status").eq("run_id", runA),
@@ -376,6 +400,9 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         userB.client.from("pricing_evidence_snapshots").select("run_id").eq("run_id", runA),
       ]);
     expect(run).toMatchObject({ status: "succeeded", stage: "completed", attempt_count: 2 });
+    expect(Date.parse(run!.completed_at)).toBeGreaterThan(
+      Date.parse(ORIGINAL_EVIDENCE_AS_OF),
+    );
     expect(listings).toHaveLength(1);
     expect(listings?.[0]).toMatchObject({ item_id: itemA, run_id: runA, status: "queued" });
     expect(logs).toHaveLength(1);
@@ -391,16 +418,19 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       prediction_id: logs?.[0]?.id,
       schema_version: 1,
     });
+    expect(Date.parse(snapshots![0]!.evidence_as_of)).toBe(
+      Date.parse(ORIGINAL_EVIDENCE_AS_OF),
+    );
     expect(snapshots?.[0]?.evidence).toEqual([
       expect.objectContaining({
         id: "worker-sold-1",
         priceDisclosure: "displayed-sold-price",
-        evidenceAsOf: snapshots?.[0]?.evidence_as_of,
+        evidenceAsOf: snapshots![0]!.evidence_as_of,
       }),
       expect.objectContaining({
         id: "worker-sold-2",
         priceDisclosure: "displayed-sold-price",
-        evidenceAsOf: snapshots?.[0]?.evidence_as_of,
+        evidenceAsOf: snapshots![0]!.evidence_as_of,
       }),
     ]);
     expect(bVisible).toEqual([]);
@@ -439,6 +469,60 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     await expect(
       store.acquire({ runId: runA, messageId: messageA, leaseSeconds: 60 }),
     ).resolves.toEqual({ kind: "terminal", status: "succeeded" });
+
+    const newAttempt = acquired(
+      await store.acquire({
+        runId: runAdvance,
+        messageId: messageAdvance,
+        leaseSeconds: 60,
+      }),
+    );
+    const newPriced = {
+      ...identified,
+      priced: {
+        result: RESULT.price,
+        evidenceAsOf: NEW_EVIDENCE_AS_OF,
+      },
+    };
+    await store.checkpoint({
+      runId: runAdvance,
+      leaseToken: newAttempt.context.run.lease_token,
+      stage: "pricing",
+      checkpoint: newPriced,
+      leaseSeconds: 60,
+    });
+    await store.checkpoint({
+      runId: runAdvance,
+      leaseToken: newAttempt.context.run.lease_token,
+      stage: "generating",
+      checkpoint: {
+        ...newPriced,
+        generated: { copy: RESULT.listing, model: RESULT.listingModel! },
+      },
+      leaseSeconds: 60,
+    });
+    await store.complete({
+      runId: runAdvance,
+      leaseToken: newAttempt.context.run.lease_token,
+      result: RESULT,
+      autopilotEnabled: false,
+    });
+
+    const { data: newSnapshots } = await userB.client
+      .from("pricing_evidence_snapshots")
+      .select("evidence,evidence_as_of")
+      .eq("run_id", runAdvance);
+    expect(newSnapshots).toHaveLength(1);
+    expect(Date.parse(newSnapshots![0]!.evidence_as_of)).toBe(
+      Date.parse(NEW_EVIDENCE_AS_OF),
+    );
+    expect(newSnapshots![0]!.evidence).toEqual([
+      expect.objectContaining({ evidenceAsOf: newSnapshots![0]!.evidence_as_of }),
+      expect.objectContaining({ evidenceAsOf: newSnapshots![0]!.evidence_as_of }),
+    ]);
+    expect(Date.parse(NEW_EVIDENCE_AS_OF)).toBeGreaterThan(
+      Date.parse(ORIGINAL_EVIDENCE_AS_OF),
+    );
   }, 15_000);
 
   it("persists transient retry backoff, then an honest terminal failure", async () => {

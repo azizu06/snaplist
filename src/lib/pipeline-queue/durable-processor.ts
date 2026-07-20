@@ -59,9 +59,12 @@ export function createDurableVisionPipelineProcessor(
       }
 
       if (!checkpoint.priced) {
-        const priced = await stages.price({
-          attributes: identified.attributes,
-        });
+        const priced = {
+          result: await stages.price({
+            attributes: identified.attributes,
+          }),
+          evidenceAsOf: new Date().toISOString(),
+        };
         checkpoint = pipelineWorkerCheckpointSchema.parse({ ...checkpoint, priced });
         await onCheckpoint("pricing", checkpoint);
       }
@@ -86,7 +89,7 @@ export function createDurableVisionPipelineProcessor(
 
       return stages.assemble({
         identified,
-        price: priced,
+        price: priced.result,
         generated,
         autopilotEnabled: context.run.autopilot_enabled,
       });

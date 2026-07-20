@@ -506,7 +506,8 @@ declare
   v_autopilot_enabled boolean;
   v_snapshot jsonb;
   v_evidence jsonb;
-  v_evidence_as_of timestamptz := statement_timestamp();
+  v_evidence_as_of timestamptz;
+  v_completed_at timestamptz := statement_timestamp();
 begin
   if coalesce(auth.jwt()->>'role', '') <> 'service_role' then
     raise exception using errcode = '42501', message = 'Pipeline worker authorization is required';
@@ -539,17 +540,6 @@ begin
       is distinct from p_persistence #> '{prediction,sources}' then
     raise exception using errcode = '22023', message = 'Pipeline persistence is incoherent';
   end if;
-  select coalesce(
-    jsonb_agg(
-      evidence_row.value
-      || jsonb_build_object('evidenceAsOf', v_evidence_as_of)
-      order by evidence_row.ordinality
-    ),
-    '[]'::jsonb
-  )
-  into v_evidence
-  from jsonb_array_elements(v_snapshot->'evidence') with ordinality evidence_row;
-
   v_listing_status := p_persistence #>> '{listing,status}';
   if v_listing_status not in ('draft', 'queued') then
     raise exception using errcode = '22023', message = 'Pipeline worker may create drafts only';
@@ -578,6 +568,21 @@ begin
     or not (v_run.checkpoint ? 'generated') then
     raise exception using errcode = '55000', message = 'Pipeline worker checkpoints are incomplete';
   end if;
+  if jsonb_typeof(v_run.checkpoint #> '{priced,evidenceAsOf}') is distinct from 'string' then
+    raise exception using errcode = '22023', message = 'Pipeline pricing checkpoint is invalid';
+  end if;
+  v_evidence_as_of := (v_run.checkpoint #>> '{priced,evidenceAsOf}')::timestamptz;
+
+  select coalesce(
+    jsonb_agg(
+      evidence_row.value
+      || jsonb_build_object('evidenceAsOf', v_evidence_as_of)
+      order by evidence_row.ordinality
+    ),
+    '[]'::jsonb
+  )
+  into v_evidence
+  from jsonb_array_elements(v_snapshot->'evidence') with ordinality evidence_row;
 
   update public.pipeline_runs set stage = 'persisting' where id = p_run_id;
 
@@ -670,7 +675,7 @@ begin
   set listing_id = v_listing_id,
       status = 'succeeded',
       stage = 'completed',
-      completed_at = v_evidence_as_of,
+      completed_at = v_completed_at,
       failure_code = null,
       safe_failure_message = null,
       next_attempt_at = null,

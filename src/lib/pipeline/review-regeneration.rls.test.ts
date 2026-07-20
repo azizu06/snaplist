@@ -115,7 +115,10 @@ async function seedReview(user: ClerkTestUser, label: string) {
         identification: result.identification,
         model: result.model,
       },
-      priced: result.price,
+      priced: {
+        result: result.price,
+        evidenceAsOf: "2026-07-20T08:00:00.000Z",
+      },
       generated: { copy: result.listing, model: result.listingModel! },
     },
     leaseSeconds: 60,

@@ -103,6 +103,28 @@ describe("pricing-evidence read projection", () => {
     expect(projection.chartBounds).toEqual({ min: 120, max: 140 });
   });
 
+  it("accepts research before completion and rejects evidence from after completion", () => {
+    const completedLater = row();
+    completedLater.pipeline_runs.completed_at = "2026-07-18T12:30:00+00:00";
+    expect(() =>
+      buildPricingEvidenceProjection(completedLater, {
+        userId: completedLater.user_id,
+        itemId: completedLater.item_id,
+        now: Date.parse("2026-07-20T00:00:00.000Z"),
+      }),
+    ).not.toThrow();
+
+    const completedBeforeResearch = row();
+    completedBeforeResearch.pipeline_runs.completed_at = "2026-07-18T11:59:59+00:00";
+    expect(() =>
+      buildPricingEvidenceProjection(completedBeforeResearch, {
+        userId: completedBeforeResearch.user_id,
+        itemId: completedBeforeResearch.item_id,
+        now: Date.parse("2026-07-20T00:00:00.000Z"),
+      }),
+    ).toThrow(/coherent|timestamp/i);
+  });
+
   it("selects only the latest completed snapshot through the seller bearer client", async () => {
     const calls: unknown[][] = [];
     const older = row();

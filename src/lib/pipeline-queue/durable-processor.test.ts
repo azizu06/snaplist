@@ -30,6 +30,8 @@ const GENERATED = {
   },
   model: "listing-model",
 };
+const EVIDENCE_AS_OF = "2026-07-20T08:00:00.000Z";
+const PRICED = { result: PRICE, evidenceAsOf: EVIDENCE_AS_OF };
 
 function workerContext(checkpoint: PipelineWorkerCheckpoint): PipelineWorkerContext {
   return {
@@ -90,7 +92,7 @@ describe("durable vision pipeline processor", () => {
     const processor = createDurableVisionPipelineProcessor(pipeline);
 
     const result = await processor.process({
-      context: workerContext({ identified: IDENTIFIED, priced: PRICE }),
+      context: workerContext({ identified: IDENTIFIED, priced: PRICED }),
       onCheckpoint: async (stage, checkpoint) => {
         saved.push([stage, checkpoint]);
       },
@@ -99,8 +101,34 @@ describe("durable vision pipeline processor", () => {
     expect(pipeline.identify).not.toHaveBeenCalled();
     expect(pipeline.price).not.toHaveBeenCalled();
     expect(pipeline.generate).toHaveBeenCalledOnce();
-    expect(saved).toEqual([["generating", { identified: IDENTIFIED, priced: PRICE, generated: GENERATED }]]);
+    expect(saved).toEqual([
+      ["generating", { identified: IDENTIFIED, priced: PRICED, generated: GENERATED }],
+    ]);
     expect(result.listing.title).toMatch(/Sony/);
+  });
+
+  it("timestamps a genuine pricing pass before persisting its checkpoint", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(EVIDENCE_AS_OF);
+    try {
+      const pipeline = stages();
+      const saved: Array<[string, PipelineWorkerCheckpoint]> = [];
+      const processor = createDurableVisionPipelineProcessor(pipeline);
+
+      await processor.process({
+        context: workerContext({ identified: IDENTIFIED }),
+        onCheckpoint: async (stage, checkpoint) => {
+          saved.push([stage, checkpoint]);
+        },
+      });
+
+      expect(saved[0]).toEqual([
+        "pricing",
+        { identified: IDENTIFIED, priced: PRICED },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses only run-derived photo paths and the stored configuration snapshot", async () => {

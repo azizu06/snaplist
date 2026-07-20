@@ -21,10 +21,17 @@ export const generatedPipelineStageSchema = z
   })
   .strict();
 
+export const pricedPipelineStageSchema = z
+  .object({
+    result: priceResultSchema,
+    evidenceAsOf: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
 export const pipelineWorkerCheckpointSchema = z
   .object({
     identified: identifiedPipelineStageSchema.optional(),
-    priced: priceResultSchema.optional(),
+    priced: pricedPipelineStageSchema.optional(),
     generated: generatedPipelineStageSchema.optional(),
   })
   .strict()
@@ -46,5 +53,6 @@ export const pipelineWorkerCheckpointSchema = z
   });
 
 export type IdentifiedPipelineStage = z.infer<typeof identifiedPipelineStageSchema>;
+export type PricedPipelineStage = z.infer<typeof pricedPipelineStageSchema>;
 export type GeneratedPipelineStage = z.infer<typeof generatedPipelineStageSchema>;
 export type PipelineWorkerCheckpoint = z.infer<typeof pipelineWorkerCheckpointSchema>;

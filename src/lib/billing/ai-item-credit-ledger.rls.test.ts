@@ -520,7 +520,10 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
           identification: RESULT.identification,
           model: RESULT.model,
         },
-        priced: RESULT.price,
+        priced: {
+          result: RESULT.price,
+          evidenceAsOf: "2026-07-20T08:00:00.000Z",
+        },
         generated: { copy: RESULT.listing, model: RESULT.listingModel! },
       },
       leaseSeconds: 60,
@@ -617,7 +620,10 @@ describe("AI-item credit ledger DB/RLS boundary", () => {
           identification: RESULT.identification,
           model: RESULT.model,
         },
-        priced: RESULT.price,
+        priced: {
+          result: RESULT.price,
+          evidenceAsOf: "2026-07-20T08:00:00.000Z",
+        },
         generated: { copy: RESULT.listing, model: RESULT.listingModel! },
       },
       leaseSeconds: 60,

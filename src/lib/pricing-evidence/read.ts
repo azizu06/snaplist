@@ -132,7 +132,7 @@ export function buildPricingEvidenceProjection(
     row.run_id !== row.listings.run_id ||
     row.item_id !== row.listings.item_id ||
     row.user_id !== row.listings.user_id ||
-    evidenceAsOfMs !== completedAtMs
+    evidenceAsOfMs > completedAtMs
   ) {
     throw new PricingEvidenceSnapshotError(
       "Pricing evidence snapshot crossed a coherent tenant or run boundary.",
