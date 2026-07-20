@@ -74,7 +74,53 @@ final class HomeUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Processing"].exists)
-        XCTAssertTrue(app.staticTexts["Finding recent sold comps"].exists)
+        XCTAssertTrue(app.staticTexts["Researching pricing evidence"].exists)
+        XCTAssertFalse(app.staticTexts["Finding recent sold comps"].exists)
+    }
+
+    func testTerminalRunStatusDominatesStaleActiveStageCopy() {
+        let expectations = [
+            (fixture: "failed", heading: "Run failed", status: "Failed"),
+            (fixture: "canceled", heading: "Run canceled", status: "Canceled")
+        ]
+
+        for expectation in expectations {
+            let app = launch(
+                "HOME-01",
+                extraArguments: ["--run-detail-fixture=\(expectation.fixture)"]
+            )
+            app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+
+            XCTAssertTrue(app.staticTexts[expectation.heading].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.staticTexts[expectation.status].exists)
+            XCTAssertFalse(app.staticTexts["Working on your item"].exists)
+            XCTAssertFalse(app.staticTexts["Researching pricing evidence"].exists)
+            app.terminate()
+        }
+    }
+
+    func testCompletedRunOffersReviewCopyOnlyWhenServerAllowsIt() {
+        let unavailable = launch(
+            "HOME-01",
+            extraArguments: ["--run-detail-fixture=completed"]
+        )
+        unavailable.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+
+        XCTAssertTrue(unavailable.staticTexts["Run completed"].waitForExistence(timeout: 3))
+        XCTAssertTrue(unavailable.staticTexts["Review unavailable"].exists)
+        XCTAssertFalse(unavailable.staticTexts["Ready to review"].exists)
+        XCTAssertFalse(unavailable.staticTexts["Working on your item"].exists)
+        unavailable.terminate()
+
+        let reviewable = launch(
+            "HOME-01",
+            extraArguments: ["--run-detail-fixture=reviewable"]
+        )
+        reviewable.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+
+        XCTAssertTrue(reviewable.staticTexts["Run completed"].waitForExistence(timeout: 3))
+        XCTAssertTrue(reviewable.staticTexts["Ready to review"].exists)
+        XCTAssertFalse(reviewable.staticTexts["Review unavailable"].exists)
     }
 
     func testRunDetailRefreshIsAccessibleAndReplacesServerTruth() {
