@@ -325,13 +325,32 @@ function pipelineWithConfidence(
 ): Pipeline {
   return {
     async run() {
+      const sourceUrl = "https://www.ebay.com/itm/sony-wh-1000xm4-sold";
       return {
         attributes: { brand: "Sony", model: "WH-1000XM4", condition: "good" },
         price: {
           suggested: 180,
           range: { min: 150, max: 210 },
           confidence: confidence.score,
-          sources: [],
+          sources: [
+            {
+              url: sourceUrl,
+              title: "Sony WH-1000XM4 sold listing",
+              kind: "sold-comp",
+            },
+          ],
+          evidence: [
+            {
+              id: "sony-wh-1000xm4-sold",
+              sourceUrl,
+              title: "Sony WH-1000XM4 sold listing",
+              price: 180,
+              currency: "USD",
+              condition: "good",
+              kind: "sold-comparable",
+              priceDisclosure: "displayed-sold-price",
+            },
+          ],
           tier: "isbn-lookup",
         },
         confidence,
