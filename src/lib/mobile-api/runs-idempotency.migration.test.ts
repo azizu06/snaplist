@@ -31,7 +31,7 @@ describe("mobile durable-run mutation idempotency migration", () => {
       /requested_run_id,[\s\S]*run_id,[\s\S]*p_run_id,[\s\S]*v_locked_run_id/i,
     );
     expect(migration).toMatch(
-      /if v_locked_run_id is null then[\s\S]*return v_result;[\s\S]*end if;[\s\S]*insert into private\.mobile_run_operation_replays/i,
+      /for update;[\s\S]*?if not found then\s*return jsonb_build_object\([\s\S]*'P0002'[\s\S]*end if;\s*select count\(\*\)::integer[\s\S]*begin\s*if p_operation = 'retry'[\s\S]*exception[\s\S]*insert into private\.mobile_run_operation_replays/i,
     );
     expect(migration).toMatch(/v_replay_limit constant integer := 32/i);
     expect(migration).toMatch(

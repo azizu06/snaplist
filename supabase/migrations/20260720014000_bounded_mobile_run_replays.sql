@@ -87,47 +87,51 @@ begin
     return v_replay.result;
   end if;
 
+  -- Preserve #227/#278 retention-first retry ordering. The canonical retry
+  -- reacquires this transaction-scoped lock, then performs #278 credit
+  -- reclaim inside the failed/canceled -> queued transition.
+  if p_operation = 'retry' then
+    perform pg_advisory_xact_lock(
+      hashtextextended('snaplist:pipeline-retention', 0)
+    );
+  end if;
+
+  -- Keep the verified-run linearization lock outside the caught exception
+  -- subtransaction. A canonical rejection may roll back that inner block, but
+  -- cannot release this lock before its durable receipt is inserted below.
+  select run.id
+  into v_locked_run_id
+  from public.pipeline_runs run
+  where run.id = p_run_id
+    and run.user_id = v_user_id
+  for update;
+
+  -- Missing and foreign targets intentionally share the same deterministic
+  -- response but are not durable domain receipts.
+  if not found then
+    return jsonb_build_object(
+      'mobileRunOperationError', jsonb_build_object(
+        'code', 'P0002',
+        'message', 'Pipeline run not found'
+      )
+    );
+  end if;
+
+  select count(*)::integer
+  into v_replay_count
+  from private.mobile_run_operation_replays replay
+  where replay.run_id = v_locked_run_id;
+
+  if v_replay_count >= v_replay_limit then
+    return jsonb_build_object(
+      'mobileRunOperationError', jsonb_build_object(
+        'code', '55000',
+        'message', 'This listing run has too many saved operation receipts'
+      )
+    );
+  end if;
+
   begin
-    -- Preserve #227/#278 retention-first retry ordering. The canonical retry
-    -- reacquires this transaction-scoped lock, then performs #278 credit
-    -- reclaim inside the failed/canceled -> queued transition.
-    if p_operation = 'retry' then
-      perform pg_advisory_xact_lock(
-        hashtextextended('snaplist:pipeline-retention', 0)
-      );
-    end if;
-
-    -- Establish one linearization point with terminal worker transitions before
-    -- invoking the canonical #161 operation.
-    select run.id
-    into v_locked_run_id
-    from public.pipeline_runs run
-    where run.id = p_run_id
-      and run.user_id = v_user_id
-    for update;
-
-    if not found then
-      raise exception using
-        errcode = 'P0002',
-        message = 'Pipeline run not found';
-    end if;
-
-    -- Fresh keys for the same verified run serialize on the run-row lock. The
-    -- count therefore cannot race another receipt insert for this run.
-    select count(*)::integer
-    into v_replay_count
-    from private.mobile_run_operation_replays replay
-    where replay.run_id = v_locked_run_id;
-
-    if v_replay_count >= v_replay_limit then
-      return jsonb_build_object(
-        'mobileRunOperationError', jsonb_build_object(
-          'code', '55000',
-          'message', 'This listing run has too many saved operation receipts'
-        )
-      );
-    end if;
-
     if p_operation = 'retry' then
       v_result := public.retry_pipeline_run(p_run_id);
     else
@@ -145,14 +149,6 @@ begin
         )
       );
   end;
-
-  -- Missing and foreign targets intentionally share the same deterministic
-  -- response but are not durable domain receipts. This prevents authenticated
-  -- random-target requests from growing private storage without weakening the
-  -- verified-run idempotency boundary below.
-  if v_locked_run_id is null then
-    return v_result;
-  end if;
 
   insert into private.mobile_run_operation_replays (
     user_id,
