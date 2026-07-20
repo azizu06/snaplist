@@ -1,4 +1,5 @@
 import type { NextFetchEvent } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,14 +22,12 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
 
 import { config, proxy } from "./proxy";
 
-async function dispatchThroughProxy(request: NextRequest): Promise<Response> {
-  const matcher = new RegExp(`^${config.matcher[0]}$`);
-  if (!matcher.test(request.nextUrl.pathname)) {
-    return new Response(null, { status: 200 });
-  }
-  const response = await proxy(request, {} as NextFetchEvent);
-  if (!response) throw new Error("Expected the proxy to return a response");
-  return response;
+function doesProxyMatch(pathname: string): boolean {
+  return unstable_doesMiddlewareMatch({
+    config,
+    nextConfig: {},
+    url: `https://snaplist.test${pathname}`,
+  });
 }
 
 describe("auth proxy", () => {
@@ -57,33 +56,29 @@ describe("auth proxy", () => {
   });
 
   it("keeps only the self-authenticating Home route outside cookie middleware", () => {
-    const matcher = new RegExp(`^${config.matcher[0]}$`);
-
-    expect(matcher.test("/v1/home")).toBe(false);
-    expect(matcher.test("/v1/home/")).toBe(false);
-    expect(matcher.test("/v1/home-other")).toBe(true);
-    expect(matcher.test("/dashboard")).toBe(true);
+    expect(doesProxyMatch("/v1/home")).toBe(false);
+    expect(doesProxyMatch("/v1/home/")).toBe(false);
+    expect(doesProxyMatch("/v1/home-other")).toBe(true);
+    expect(doesProxyMatch("/dashboard")).toBe(true);
   });
 
   it("lets the exact native item pricing route own bearer authentication without changing web login", async () => {
     const itemId = "22222222-2222-4222-8222-222222222222";
 
-    const pricingResponse = await dispatchThroughProxy(
-      new NextRequest(`https://snaplist.test/v1/items/${itemId}/pricing`),
-    );
-    const dashboardResponse = await dispatchThroughProxy(
-      new NextRequest("https://snaplist.test/dashboard"),
-    );
-    const adjacentApiResponse = await dispatchThroughProxy(
-      new NextRequest(`https://snaplist.test/v1/items/${itemId}/pricing/history`),
-    );
+    expect(doesProxyMatch(`/v1/items/${itemId}/pricing`)).toBe(false);
+    expect(doesProxyMatch(`/v1/items/${itemId}/pricing/`)).toBe(false);
+    expect(doesProxyMatch(`/v1/items/${itemId}/pricing/history`)).toBe(true);
 
-    expect(pricingResponse.status).toBe(200);
-    expect(pricingResponse.headers.get("location")).toBeNull();
+    const dashboardResponse = await proxy(
+      new NextRequest("https://snaplist.test/dashboard"),
+      {} as NextFetchEvent,
+    );
+    if (!dashboardResponse) {
+      throw new Error("Expected the proxy to return a response");
+    }
     expect(dashboardResponse.status).toBe(307);
     expect(dashboardResponse.headers.get("location")).toBe(
       "https://snaplist.test/login?next=%2Fdashboard",
     );
-    expect(adjacentApiResponse.status).toBe(307);
   });
 });
