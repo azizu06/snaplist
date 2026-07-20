@@ -1,11 +1,31 @@
 import Foundation
 
 struct AnalyticsSanitizer: Sendable {
+    private static let metadataPropertyNames: Set<String> = [
+        "environment",
+        "app_version",
+        "app_build",
+    ]
+    static let approvedEventNames: Set<String> = Set(EventSchema.approved.keys)
+        .union(["screen viewed"])
+    static let approvedPropertyNamesByEvent: [String: Set<String>] = {
+        var values = EventSchema.approved.mapValues {
+            Set($0.keys).union(metadataPropertyNames)
+        }
+        values["screen viewed"] = [
+            "screen",
+            "environment",
+            "app_version",
+            "app_build",
+        ]
+        return values
+    }()
+
     func sanitize(
         screen: AnalyticsScreen,
         metadata: AnalyticsMetadata
     ) -> AnalyticsPayload? {
-        guard isValidMetadata(metadata) else { return nil }
+        guard metadata.isCanonical else { return nil }
         return AnalyticsPayload(
             name: "screen viewed",
             properties: [
@@ -98,7 +118,7 @@ struct AnalyticsSanitizer: Sendable {
               case let .string(eventID) = properties["event_id"],
               UUID(uuidString: eventID) != nil,
               schema.allows(properties),
-              isValidMetadata(metadata) else {
+              metadata.isCanonical else {
             return nil
         }
 
@@ -113,17 +133,6 @@ struct AnalyticsSanitizer: Sendable {
         sanitized["app_build"] = metadata.build
         return AnalyticsPayload(name: eventName, properties: sanitized)
     }
-
-    private func isValidMetadata(_ metadata: AnalyticsMetadata) -> Bool {
-        metadata.appVersion.range(
-            of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#,
-            options: .regularExpression
-        ) != nil && metadata.build.range(
-            of: #"^[0-9]{1,12}$"#,
-            options: .regularExpression
-        ) != nil
-    }
-
 }
 
 private struct EventSchema {
