@@ -22,7 +22,8 @@ const PHOTO_SET_FINGERPRINT =
 let reachable = false;
 let admin: SupabaseClient;
 let seller: ClerkTestUser;
-let queueMessageId: string | undefined;
+let concurrentSeller: ClerkTestUser;
+const queueMessageIds = new Set<string>();
 
 async function stackReachable(): Promise<boolean> {
   if (!ANON_KEY || !SERVICE_ROLE_KEY) return false;
@@ -44,15 +45,18 @@ beforeAll(async () => {
   admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  seller = await provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "photo_identity");
+  [seller, concurrentSeller] = await Promise.all([
+    provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "photo_identity"),
+    provisionClerkTestUser(SUPABASE_URL, ANON_KEY!, "photo_identity_concurrent"),
+  ]);
 });
 
 afterAll(async () => {
   if (!reachable) return;
-  if (queueMessageId) {
+  for (const queueMessageId of queueMessageIds) {
     await admin.rpc("ack_pipeline_message", { p_message_id: queueMessageId });
   }
-  await cleanupClerkTestUsers(admin, [seller.id]);
+  await cleanupClerkTestUsers(admin, [seller.id, concurrentSeller.id]);
 });
 
 describe("versioned photo-set identity persistence", () => {
@@ -92,7 +96,7 @@ describe("versioned photo-set identity persistence", () => {
       run_id: string;
       queue_message_id: string | number;
     }>)[0];
-    queueMessageId = String(receipt.queue_message_id);
+    queueMessageIds.add(String(receipt.queue_message_id));
 
     const replay = await admin.rpc("stage_pipeline_batch", stageArgs);
     expect(replay).toMatchObject({ error: null, data: staged.data });
@@ -134,5 +138,57 @@ describe("versioned photo-set identity persistence", () => {
       .update({ photo_identity_fingerprint: "f".repeat(64) })
       .eq("id", receipt.item_id);
     expect(mutation.error).toMatchObject({ code: "23514" });
+  });
+
+  it("serializes concurrent conflicting verified identities without accepting the loser", async () => {
+    if (!reachable) return;
+    const idempotencyKey = `photo-identity-race-${crypto.randomUUID()}`;
+    const batchId = crypto.randomUUID();
+    const entry = {
+      idempotency_key: idempotencyKey,
+      source: "single",
+      autopilot_enabled: false,
+      photo_paths: [`${concurrentSeller.id}/verified/race.jpg`],
+      cost_basis: null,
+    };
+    const fingerprints = ["a".repeat(64), "b".repeat(64)];
+    const results = await Promise.all(fingerprints.map((fingerprint) =>
+      admin.rpc("stage_pipeline_batch", {
+        p_user_id: concurrentSeller.id,
+        p_batch_id: batchId,
+        p_entries: [entry],
+        p_daily_limit: 10,
+        p_per_minute_limit: 10,
+        p_photo_identities: [{
+          idempotency_key: idempotencyKey,
+          photo_identity_kind: PHOTO_SET_KIND,
+          photo_identity_fingerprint: fingerprint,
+        }],
+      })
+    ));
+
+    const winningIndexes = results.flatMap((result, index) =>
+      result.error ? [] : [index]
+    );
+    expect(winningIndexes).toHaveLength(1);
+    expect(results.filter((result) => result.error)).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ code: "23514" }) }),
+    ]);
+
+    const winner = results[winningIndexes[0]];
+    const receipt = (winner.data as Array<{
+      queue_message_id: string | number;
+      run_id: string;
+    }>)[0];
+    queueMessageIds.add(String(receipt.queue_message_id));
+    const { data: run } = await concurrentSeller.client
+      .from("pipeline_runs")
+      .select("photo_identity_kind, photo_identity_fingerprint")
+      .eq("id", receipt.run_id)
+      .single();
+    expect(run).toEqual({
+      photo_identity_kind: PHOTO_SET_KIND,
+      photo_identity_fingerprint: fingerprints[winningIndexes[0]],
+    });
   });
 });

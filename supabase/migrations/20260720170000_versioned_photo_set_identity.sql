@@ -421,6 +421,27 @@ begin
     p_per_minute_limit
   ) staged;
 
+  -- The delegated staging seam acquires the seller's quota/advisory locks. A
+  -- concurrent verified or legacy caller may have created the run after the
+  -- optimistic check above, so revalidate while those transaction locks are
+  -- still held before returning any replay receipt.
+  if exists (
+    select 1
+    from jsonb_array_elements(p_photo_identities) identity_row(value)
+    left join public.pipeline_runs run
+      on run.user_id = p_user_id
+     and run.idempotency_key = identity_row.value->>'idempotency_key'
+    where run.id is null
+      or run.photo_identity_kind
+        is distinct from identity_row.value->>'photo_identity_kind'
+      or run.photo_identity_fingerprint
+        is distinct from identity_row.value->>'photo_identity_fingerprint'
+  ) then
+    raise exception using
+      errcode = '23514',
+      message = 'Pipeline idempotency key conflicts with verified photo identity';
+  end if;
+
   perform set_config('snaplist.verified_photo_identities', '', true);
 end;
 $$;

@@ -82,7 +82,14 @@ async function stageCreditedRun(label: string): Promise<CreditedRunFixture> {
            'cost_basis', null
          )),
          100,
-         100
+         100,
+         jsonb_build_array(jsonb_build_object(
+           'idempotency_key', $3::text,
+           'photo_identity_kind', 'content_sha256_set_v1',
+           'photo_identity_fingerprint', encode(
+             sha256(convert_to(repeat('a', 64), 'UTF8')), 'hex'
+           )
+         ))
        )`,
       [userId, randomUUID(), `issue-227-${label}`, photo],
     );
@@ -431,6 +438,12 @@ describe.runIf(await localDatabaseReachable())(
         expect(state.reservation.photo_set_fingerprint).toBe(
           fixture.reservationBefore.photo_set_fingerprint,
         );
+        expect(state.reservation.photo_identity_kind).toBe(
+          "content_sha256_set_v1",
+        );
+        expect(state.reservation.photo_identity_fingerprint).toBe(
+          fixture.reservationBefore.photo_identity_fingerprint,
+        );
       } finally {
         await settlement.query("rollback").catch(() => undefined);
         await retention.query("rollback").catch(() => undefined);
@@ -475,6 +488,12 @@ describe.runIf(await localDatabaseReachable())(
         expect(state.reservation.state).toBe("restored");
         expect(state.reservation.photo_set_fingerprint).toBe(
           fixture.reservationBefore.photo_set_fingerprint,
+        );
+        expect(state.reservation.photo_identity_kind).toBe(
+          "content_sha256_set_v1",
+        );
+        expect(state.reservation.photo_identity_fingerprint).toBe(
+          fixture.reservationBefore.photo_identity_fingerprint,
         );
       } finally {
         await restoration.query("rollback").catch(() => undefined);
