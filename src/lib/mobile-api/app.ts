@@ -1,6 +1,11 @@
 import type { PipelineWorker } from "@/lib/pipeline-queue/composition";
 import type { NativeSubscriptionBridge } from "@/lib/billing";
 import type { HomeProjectionReader } from "@/lib/home/projection";
+import {
+  MobileRunConflictError,
+  MobileRunNotFoundError,
+  type MobileRunOperations,
+} from "./runs";
 import { z } from "zod";
 import {
   GuestClaimIdempotencyConflictError,
@@ -13,6 +18,7 @@ import {
   apiErrorEnvelopeSchema,
   healthEnvelopeSchema,
   homeProjectionEnvelopeSchema,
+  mobileRunEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
   guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
@@ -45,6 +51,8 @@ export interface MobileApiDependencies {
   subscriptionBridge?: NativeSubscriptionBridge;
   /** Read-only RLS projection for the native Seller Home. */
   homeProjection?: HomeProjectionReader;
+  /** Authenticated, tenant/RLS-scoped view of canonical #161 durable-run truth. */
+  runOperations?: MobileRunOperations;
   workerSecret?: string;
   requestId?: () => string;
   reportError?: (context: string, error: unknown) => void;
@@ -80,8 +88,8 @@ function errorResponse(
 
 /**
  * Web-standard HTTP module shared by a Node process and any future framework
- * adapter. It contains transport policy only; durable pipeline behavior stays
- * behind PipelineWorker.consume().
+ * adapter. It contains transport policy only; durable behavior stays behind
+ * injected, narrowly scoped capabilities.
  */
 export function createMobileApiHandler(
   dependencies: MobileApiDependencies,
@@ -188,6 +196,127 @@ export function createMobileApiHandler(
           503,
           "internal_error",
           "Home is temporarily unavailable.",
+        );
+      }
+    }
+
+    const runRouteMatch = pathname.match(
+      /^\/v1\/runs\/([^/]+)(?:\/(retry|cancel))?$/,
+    );
+    if (runRouteMatch) {
+      const action = runRouteMatch[2] as "retry" | "cancel" | undefined;
+      const expectedMethod = action ? "POST" : "GET";
+      if (request.method !== expectedMethod) {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+
+      const parsedRunId = z.string().uuid().safeParse(runRouteMatch[1]);
+      const idempotencyKey = action
+        ? z.string().uuid().safeParse(
+            request.headers.get("idempotency-key")?.trim(),
+          )
+        : null;
+      if (!parsedRunId.success || (idempotencyKey && !idempotencyKey.success)) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          parsedRunId.success
+            ? "A valid Idempotency-Key is required."
+            : "A valid run ID is required.",
+        );
+      }
+
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+
+      const unavailableMessage = action
+        ? `Run ${action === "retry" ? "retry" : "cancellation"} is temporarily unavailable.`
+        : "Run status is temporarily unavailable.";
+      if (!dependencies.runOperations) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          unavailableMessage,
+        );
+      }
+
+      try {
+        const baseInput = {
+          runId: parsedRunId.data,
+          userId: principal.userId,
+          bearerToken: token,
+        };
+        const run = action
+          ? await dependencies.runOperations[action]({
+              ...baseInput,
+              idempotencyKey: idempotencyKey!.data,
+            })
+          : await dependencies.runOperations.get(baseInput);
+        if (!run) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "This run is unavailable.",
+          );
+        }
+        return json(
+          mobileRunEnvelopeSchema.parse({ data: run, meta: { requestId } }),
+          action === "retry" ? 202 : 200,
+        );
+      } catch (error) {
+        if (error instanceof MobileRunNotFoundError) {
+          return errorResponse(
+            requestId,
+            404,
+            "not_found",
+            "This run is unavailable.",
+          );
+        }
+        if (error instanceof MobileRunConflictError) {
+          return errorResponse(
+            requestId,
+            409,
+            "conflict",
+            "The run changed. Refresh its latest status before trying again.",
+          );
+        }
+        dependencies.reportError?.(
+          `mobile-api.run-${action ?? "detail"}`,
+          error,
+        );
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          unavailableMessage,
         );
       }
     }

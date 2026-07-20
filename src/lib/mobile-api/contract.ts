@@ -58,6 +58,72 @@ export const homeProjectionEnvelopeSchema = z
   .object({ data: homeProjectionSchema, meta: apiMetaSchema })
   .strict();
 
+const nullableTimestampSchema = z.string().datetime({ offset: true }).nullable();
+
+export const mobileRunSchema = z
+  .object({
+    id: z.string().uuid(),
+    itemId: z.string().uuid(),
+    listingId: z.string().uuid().nullable(),
+    status: z.enum(["queued", "running", "retrying", "succeeded", "failed", "canceled"]),
+    stage: z.enum(["queued", "identifying", "pricing", "generating", "persisting", "completed"]),
+    attemptCount: z.number().int().nonnegative(),
+    maxAttempts: z.number().int().positive(),
+    schemaVersion: z.literal(1),
+    timestamps: z
+      .object({
+        createdAt: z.string().datetime({ offset: true }),
+        updatedAt: z.string().datetime({ offset: true }),
+        enqueuedAt: nullableTimestampSchema,
+        startedAt: nullableTimestampSchema,
+        lastAttemptedAt: nullableTimestampSchema,
+        nextAttemptAt: nullableTimestampSchema,
+        completedAt: nullableTimestampSchema,
+        retentionCleanedAt: nullableTimestampSchema,
+      })
+      .strict(),
+    item: z
+      .object({ title: z.string().min(1), photoCount: z.number().int().nonnegative() })
+      .strict()
+      .nullable()
+      .optional(),
+    requiredInput: z
+      .object({
+        reason: z.string().min(1),
+        destination: z.enum(["identity", "photos", "listing"]),
+      })
+      .strict()
+      .nullable(),
+    terminalOutcome: z.enum(["succeeded", "failed", "canceled"]).nullable(),
+    safeFailure: z
+      .object({
+        reason: z.string().min(1),
+        detail: z.string().min(1),
+        retryable: z.boolean(),
+        workPreserved: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+    allowance: z.enum(["reserved", "settled", "restored", "unchanged"]),
+    legalActions: z
+      .object({
+        canRetry: z.boolean(),
+        canCancel: z.boolean(),
+        canOpenReview: z.boolean(),
+        canStartNewCapture: z.boolean(),
+      })
+      .strict(),
+    lastMeaningfulUpdateAt: z.string().datetime({ offset: true }),
+    retentionCleanedAt: nullableTimestampSchema,
+  })
+  .strict();
+
+export type MobileRun = z.infer<typeof mobileRunSchema>;
+
+export const mobileRunEnvelopeSchema = z
+  .object({ data: mobileRunSchema, meta: apiMetaSchema })
+  .strict();
+
 export const revenueCatConfigurationEnvelopeSchema = z
   .object({
     data: z

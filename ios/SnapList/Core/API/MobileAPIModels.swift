@@ -92,17 +92,13 @@ struct AiItemEntitlementEnvelope: Codable, Equatable {
 enum ContractOnlyOperation: String, CaseIterable, Codable {
     case verifyGuestAttestation
     case createItemRun
-    case getRun
-    case retryRun
-    case cancelRun
     case createEbayOauthSession
     case completeEbayOauthCallback
 
     var ownerIssue: Int {
         switch self {
         case .verifyGuestAttestation: 174
-        case .createItemRun, .getRun: 159
-        case .retryRun, .cancelRun: 161
+        case .createItemRun: 159
         case .createEbayOauthSession, .completeEbayOauthCallback: 17
         }
     }

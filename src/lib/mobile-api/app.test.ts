@@ -4,6 +4,7 @@ import {
   GuestClaimIdempotencyConflictError,
   GuestClaimInProgressError,
 } from "@/lib/guest-recovery/service";
+import { MobileRunConflictError, MobileRunNotFoundError } from "./runs";
 import { createMobileApiHandler } from "./app";
 
 const summary = {
@@ -161,6 +162,327 @@ describe("mobile API v1 provider-neutral handler", () => {
     );
     expect(unavailable.status).toBe(503);
     expect(JSON.stringify(await unavailable.json())).not.toContain("database unavailable");
+  });
+
+  it("returns one authenticated tenant-owned durable run through the provider-neutral seam", async () => {
+    const get = vi.fn().mockResolvedValue({
+      id: "24100000-0000-4000-8000-000000000001",
+      itemId: "24100000-0000-4000-8000-000000000002",
+      listingId: null,
+      status: "running",
+      stage: "pricing",
+      attemptCount: 1,
+      maxAttempts: 3,
+      schemaVersion: 1,
+      timestamps: {
+        createdAt: "2026-07-19T18:00:00.000Z",
+        updatedAt: "2026-07-19T18:01:00.000Z",
+        enqueuedAt: "2026-07-19T18:00:01.000Z",
+        startedAt: "2026-07-19T18:00:10.000Z",
+        lastAttemptedAt: "2026-07-19T18:00:10.000Z",
+        nextAttemptAt: null,
+        completedAt: null,
+        retentionCleanedAt: null,
+      },
+      requiredInput: null,
+      terminalOutcome: null,
+      safeFailure: null,
+      allowance: "reserved",
+      legalActions: {
+        canRetry: false,
+        canCancel: true,
+        canOpenReview: false,
+        canStartNewCapture: false,
+      },
+      lastMeaningfulUpdateAt: "2026-07-19T18:01:00.000Z",
+      retentionCleanedAt: null,
+    });
+    const authenticate = vi.fn().mockResolvedValue({ userId: "user_native" });
+
+    const response = await handler({
+      authenticate,
+      runOperations: { get, retry: vi.fn(), cancel: vi.fn() },
+    })(
+      new Request(
+        "http://localhost/v1/runs/24100000-0000-4000-8000-000000000001",
+        { headers: { authorization: "Bearer signed-jwt" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledWith("signed-jwt");
+    expect(get).toHaveBeenCalledWith({
+      runId: "24100000-0000-4000-8000-000000000001",
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: { status: "running", stage: "pricing" },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("retries the same logical run with the caller's stable idempotency key", async () => {
+    const retry = vi.fn().mockResolvedValue({
+      id: "24100000-0000-4000-8000-000000000001",
+      itemId: "24100000-0000-4000-8000-000000000002",
+      listingId: null,
+      status: "queued",
+      stage: "queued",
+      attemptCount: 3,
+      maxAttempts: 6,
+      schemaVersion: 1,
+      timestamps: {
+        createdAt: "2026-07-19T18:00:00.000Z",
+        updatedAt: "2026-07-19T18:02:00.000Z",
+        enqueuedAt: "2026-07-19T18:02:00.000Z",
+        startedAt: "2026-07-19T18:00:10.000Z",
+        lastAttemptedAt: "2026-07-19T18:00:10.000Z",
+        nextAttemptAt: null,
+        completedAt: null,
+        retentionCleanedAt: null,
+      },
+      requiredInput: null,
+      terminalOutcome: null,
+      safeFailure: null,
+      allowance: "reserved",
+      legalActions: {
+        canRetry: false,
+        canCancel: true,
+        canOpenReview: false,
+        canStartNewCapture: false,
+      },
+      lastMeaningfulUpdateAt: "2026-07-19T18:02:00.000Z",
+      retentionCleanedAt: null,
+    });
+
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_native" }),
+      runOperations: { get: vi.fn(), retry, cancel: vi.fn() },
+    })(
+      new Request(
+        "http://localhost/v1/runs/24100000-0000-4000-8000-000000000001/retry",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-jwt",
+            "idempotency-key": "24100000-0000-4000-8000-000000000003",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(202);
+    expect(retry).toHaveBeenCalledWith({
+      runId: "24100000-0000-4000-8000-000000000001",
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      idempotencyKey: "24100000-0000-4000-8000-000000000003",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: { id: "24100000-0000-4000-8000-000000000001", status: "queued" },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("cancels the same logical run and returns only the confirmed terminal truth", async () => {
+    const cancel = vi.fn().mockResolvedValue({
+      id: "24100000-0000-4000-8000-000000000001",
+      itemId: "24100000-0000-4000-8000-000000000002",
+      listingId: null,
+      status: "canceled",
+      stage: "pricing",
+      attemptCount: 1,
+      maxAttempts: 3,
+      schemaVersion: 1,
+      timestamps: {
+        createdAt: "2026-07-19T18:00:00.000Z",
+        updatedAt: "2026-07-19T18:03:00.000Z",
+        enqueuedAt: null,
+        startedAt: "2026-07-19T18:00:10.000Z",
+        lastAttemptedAt: "2026-07-19T18:00:10.000Z",
+        nextAttemptAt: null,
+        completedAt: "2026-07-19T18:03:00.000Z",
+        retentionCleanedAt: null,
+      },
+      requiredInput: null,
+      terminalOutcome: "canceled",
+      safeFailure: null,
+      allowance: "restored",
+      legalActions: {
+        canRetry: true,
+        canCancel: false,
+        canOpenReview: false,
+        canStartNewCapture: false,
+      },
+      lastMeaningfulUpdateAt: "2026-07-19T18:03:00.000Z",
+      retentionCleanedAt: null,
+    });
+
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_native" }),
+      runOperations: { get: vi.fn(), retry: vi.fn(), cancel },
+    })(
+      new Request(
+        "http://localhost/v1/runs/24100000-0000-4000-8000-000000000001/cancel",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-jwt",
+            "idempotency-key": "24100000-0000-4000-8000-000000000004",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(cancel).toHaveBeenCalledWith({
+      runId: "24100000-0000-4000-8000-000000000001",
+      userId: "user_native",
+      bearerToken: "signed-jwt",
+      idempotencyKey: "24100000-0000-4000-8000-000000000004",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      data: { status: "canceled", terminalOutcome: "canceled", allowance: "restored" },
+      meta: { requestId: "req_test" },
+    });
+  });
+
+  it("hides missing and cross-tenant mutation targets behind the same not-found envelope", async () => {
+    const response = await handler({
+      runOperations: {
+        get: vi.fn(),
+        retry: vi.fn().mockRejectedValue(new MobileRunNotFoundError()),
+        cancel: vi.fn(),
+      },
+    })(
+      new Request(
+        "http://localhost/v1/runs/24100000-0000-4000-8000-000000000001/retry",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-jwt",
+            "idempotency-key": "24100000-0000-4000-8000-000000000003",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "not_found",
+        message: "This run is unavailable.",
+        requestId: "req_test",
+      },
+    });
+  });
+
+  it("maps stale or illegal durable-run transitions to a stable conflict envelope", async () => {
+    for (const action of ["retry", "cancel"] as const) {
+      const response = await handler({
+        runOperations: {
+          get: vi.fn(),
+          retry: vi.fn().mockRejectedValue(new MobileRunConflictError()),
+          cancel: vi.fn().mockRejectedValue(new MobileRunConflictError()),
+        },
+      })(
+        new Request(
+          `http://localhost/v1/runs/24100000-0000-4000-8000-000000000001/${action}`,
+          {
+            method: "POST",
+            headers: {
+              authorization: "Bearer signed-jwt",
+              "idempotency-key": "24100000-0000-4000-8000-000000000003",
+            },
+          },
+        ),
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "conflict",
+          message: "The run changed. Refresh its latest status before trying again.",
+          requestId: "req_test",
+        },
+      });
+    }
+  });
+
+  it("rejects missing or forged auth, malformed run IDs, and invalid mutation keys before access", async () => {
+    const get = vi.fn();
+    const retry = vi.fn();
+    const cancel = vi.fn();
+    const runOperations = { get, retry, cancel };
+
+    const missingAuth = await handler({ runOperations })(
+      new Request("http://localhost/v1/runs/24100000-0000-4000-8000-000000000001"),
+    );
+    expect(missingAuth.status).toBe(401);
+
+    const forgedAuth = await handler({
+      authenticate: vi.fn().mockRejectedValue(new Error("forged bearer")),
+      runOperations,
+    })(
+      new Request("http://localhost/v1/runs/24100000-0000-4000-8000-000000000001", {
+        headers: { authorization: "Bearer forged" },
+      }),
+    );
+    expect(forgedAuth.status).toBe(401);
+
+    const malformedRun = await handler({ runOperations })(
+      new Request("http://localhost/v1/runs/not-a-uuid", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+    expect(malformedRun.status).toBe(400);
+
+    const invalidKey = await handler({ runOperations })(
+      new Request(
+        "http://localhost/v1/runs/24100000-0000-4000-8000-000000000001/cancel",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer signed-jwt",
+            "idempotency-key": "not-a-uuid",
+          },
+        },
+      ),
+    );
+    expect(invalidKey.status).toBe(400);
+
+    expect(get).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("fails run operations closed with stable envelopes and no private error detail", async () => {
+    const reportError = vi.fn();
+    const response = await handler({
+      reportError,
+      runOperations: {
+        get: vi.fn().mockRejectedValue(new Error("service role database detail")),
+        retry: vi.fn(),
+        cancel: vi.fn(),
+      },
+    })(
+      new Request("http://localhost/v1/runs/24100000-0000-4000-8000-000000000001", {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({
+      error: {
+        code: "internal_error",
+        message: "Run status is temporarily unavailable.",
+        requestId: "req_test",
+      },
+    });
+    expect(body).not.toContain("service role");
+    expect(reportError).toHaveBeenCalledWith("mobile-api.run-detail", expect.any(Error));
   });
 
   it("binds RevenueCat only to the verified Clerk principal and ignores a body user id", async () => {
