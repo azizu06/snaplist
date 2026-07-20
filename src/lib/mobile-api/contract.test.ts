@@ -155,6 +155,29 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(fixture.data.comparables[1]).not.toHaveProperty("soldAt");
   });
 
+  it("keeps zero payout valid while preserving the public nonnegative boundary", () => {
+    const boundary = JSON.parse(
+      readFileSync(
+        resolve("ios/SnapListTests/Fixtures/pricing-evidence-response.json"),
+        "utf8",
+      ),
+    );
+    boundary.data.priceResult.suggested = 0.01;
+    boundary.data.priceResult.range = { min: 0.01, max: 0.01 };
+    boundary.data.estimatedFees = 0.3;
+    boundary.data.estimatedPayout = 0;
+
+    expect(() => pricingEvidenceEnvelopeSchema.parse(boundary)).not.toThrow();
+    expect(
+      contract.components.schemas.PricingEvidenceProjection.properties,
+    ).toMatchObject({
+      estimatedPayout: { type: "number", minimum: 0 },
+    });
+
+    boundary.data.estimatedPayout = -0.01;
+    expect(() => pricingEvidenceEnvelopeSchema.parse(boundary)).toThrow();
+  });
+
   it("keeps the item-pricing OpenAPI projection byte-for-byte aligned with runtime JSON Schema", () => {
     const generatedRuntimeSchema = z.toJSONSchema(
       pricingEvidenceProjectionSchema,
