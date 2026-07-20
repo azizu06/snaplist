@@ -239,7 +239,9 @@ struct HomeFeatureView: View {
                     HomeListingList(listings: model.recentListings, openRoute: openRoute)
                 }
 
-                Color.clear.frame(height: 24)
+                Color.clear.frame(
+                    height: SnapListMetrics.dockHeight + SnapListMetrics.dockBottomInset
+                )
             }
         }
         .scrollIndicators(.hidden)
