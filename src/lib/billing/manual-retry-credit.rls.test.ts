@@ -71,6 +71,7 @@ let concurrentSeller: ClerkTestUser;
 let upgradeSeller: ClerkTestUser;
 let upgradeConflictSeller: ClerkTestUser;
 let upgradeOverlapSeller: ClerkTestUser;
+let retryProjectionSeller: ClerkTestUser;
 const queueMessageIds = new Set<string>();
 
 function upgradeBackfillSql(): string {
@@ -256,6 +257,7 @@ beforeAll(async () => {
     upgradeSeller,
     upgradeConflictSeller,
     upgradeOverlapSeller,
+    retryProjectionSeller,
   ] = await Promise.all([
     provisionClerkTestUser(
       SUPABASE_URL,
@@ -287,6 +289,11 @@ beforeAll(async () => {
       ANON_KEY!,
       "manual_retry_credit_upgrade_overlap",
     ),
+    provisionClerkTestUser(
+      SUPABASE_URL,
+      ANON_KEY!,
+      "manual_retry_credit_projection",
+    ),
   ]);
 });
 
@@ -304,12 +311,94 @@ afterAll(async () => {
     upgradeSeller.id,
     upgradeConflictSeller.id,
     upgradeOverlapSeller.id,
+    retryProjectionSeller.id,
   ];
   await cleanupClerkTestUsers(admin, userIds);
   await cleanupManualRetryAllowancePeriods(userIds);
 });
 
 describe("manual retry AI-item credit accounting", () => {
+  it("projects effective allowance and Retry from canonical reclaim truth", async () => {
+    if (!reachable) return;
+    const run = await stageRun(
+      "manual-retry-effective-projection",
+      retryProjectionSeller,
+    );
+    const store = createSupabasePipelineWorkerStore(
+      admin as unknown as PipelineWorkerRpcClient,
+    );
+    const failedAttempt = acquired(
+      await store.acquire({
+        runId: run.run_id,
+        messageId: String(run.queue_message_id),
+        leaseSeconds: 60,
+      }),
+    );
+    await store.failAttempt({
+      runId: run.run_id,
+      leaseToken: failedAttempt.context.run.lease_token,
+      retryable: false,
+      retryAfterSeconds: 1,
+      failureCode: "invalid_pipeline_result",
+      safeFailureMessage: "The generated listing did not pass validation.",
+    });
+
+    const restoredProjection = await retryProjectionSeller.client.rpc(
+      "get_pipeline_run_retry_projection",
+      { p_run_id: run.run_id },
+    );
+    expect(restoredProjection).toMatchObject({
+      error: null,
+      data: [{ effective_allowance: "restored", can_retry: true }],
+    });
+
+    const retried = await retryProjectionSeller.client.rpc(
+      "retry_pipeline_run",
+      { p_run_id: run.run_id },
+    );
+    expect(retried).toMatchObject({ error: null, data: { status: "queued" } });
+    queueMessageIds.add(String(retried.data.queueMessageId));
+
+    const activeProjection = await retryProjectionSeller.client.rpc(
+      "get_pipeline_run_retry_projection",
+      { p_run_id: run.run_id },
+    );
+    expect(activeProjection).toMatchObject({
+      error: null,
+      data: [{ effective_allowance: "reserved", can_retry: false }],
+    });
+
+    const canceled = await retryProjectionSeller.client.rpc(
+      "cancel_pipeline_run",
+      { p_run_id: run.run_id },
+    );
+    expect(canceled).toMatchObject({ error: null, data: { status: "canceled" } });
+    await stageRun(
+      "manual-retry-effective-projection-competing",
+      retryProjectionSeller,
+    );
+
+    const exhaustedProjection = await retryProjectionSeller.client.rpc(
+      "get_pipeline_run_retry_projection",
+      { p_run_id: run.run_id },
+    );
+    expect(exhaustedProjection).toMatchObject({
+      error: null,
+      data: [{ effective_allowance: "restored", can_retry: false }],
+    });
+    const rejectedRetry = await retryProjectionSeller.client.rpc(
+      "retry_pipeline_run",
+      { p_run_id: run.run_id },
+    );
+    expect(rejectedRetry.error).toMatchObject({ code: "P0001" });
+
+    const foreignProjection = await seller.client.rpc(
+      "get_pipeline_run_retry_projection",
+      { p_run_id: run.run_id },
+    );
+    expect(foreignProjection).toMatchObject({ error: null, data: [] });
+  }, 20_000);
+
   it("settles the same restored reservation after a failed run is retried", async () => {
     if (!reachable) return;
     const run = await stageRun("manual-retry-after-failure");
