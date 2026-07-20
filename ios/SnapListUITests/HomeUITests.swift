@@ -1,6 +1,9 @@
 import XCTest
 
 final class HomeUITests: XCTestCase {
+    // The UI-test target cannot import the app's internal design tokens.
+    private let sellerHomeV15DockHeight: CGFloat = 66
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
@@ -106,17 +109,28 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["header.account"].exists)
     }
 
-    func testHomeContentClearsTheFloatingDockWhenScrolled() {
+    func testFinalListingRowClearsTheFloatingDockWhenScrolled() {
         let app = launch("HOME-01")
-        let scroll = app.scrollViews.firstMatch
+        let scroll = app.scrollViews["home.active"]
+        let finalListing = app.buttons[
+            "home.listing.20800000-0000-4000-8000-000000000041"
+        ]
 
         XCTAssertTrue(scroll.waitForExistence(timeout: 3))
-        scroll.swipeUp()
-        scroll.swipeUp()
+        XCTAssertTrue(app.buttons["dock.capture"].waitForExistence(timeout: 3))
+        scrollUntilFullyVisible(
+            scroll,
+            element: finalListing,
+            in: app,
+            maximumSwipes: 16
+        )
 
-        let recent = app.staticTexts["Recent listings"]
-        XCTAssertTrue(recent.waitForExistence(timeout: 2))
-        XCTAssertLessThan(recent.frame.maxY, app.buttons["dock.capture"].frame.minY)
+        let viewport = unobscuredScrollViewport(scroll, in: app)
+        XCTAssertTrue(finalListing.isHittable)
+        XCTAssertTrue(
+            isFullyVisible(finalListing.frame, within: viewport),
+            "Final listing frame \(finalListing.frame) must fit within the unobscured scroll viewport \(viewport)."
+        )
     }
 
     private func launch(
@@ -131,5 +145,76 @@ final class HomeUITests: XCTestCase {
         ] + extraArguments
         app.launch()
         return app
+    }
+
+    private func scrollUntilFullyVisible(
+        _ scrollView: XCUIElement,
+        element: XCUIElement,
+        in app: XCUIApplication,
+        maximumSwipes: Int,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 3), file: file, line: line)
+        let viewport = unobscuredScrollViewport(scrollView, in: app)
+
+        for _ in 0..<maximumSwipes {
+            if element.exists {
+                let frame = element.frame
+                if isFullyVisible(frame, within: viewport), element.isHittable {
+                    return
+                }
+                if frame.minY < viewport.minY {
+                    nudge(scrollView, upward: false)
+                    continue
+                }
+            }
+            nudge(scrollView, upward: true)
+        }
+
+        XCTAssertTrue(element.exists, "Final listing never appeared.", file: file, line: line)
+        XCTAssertTrue(element.isHittable, "Final listing never became hittable.", file: file, line: line)
+        XCTAssertTrue(
+            isFullyVisible(element.frame, within: viewport),
+            "Final listing never became fully visible after \(maximumSwipes) swipes. Frame: \(element.frame), viewport: \(viewport)",
+            file: file,
+            line: line
+        )
+    }
+
+    private func nudge(_ scrollView: XCUIElement, upward: Bool) {
+        let startY = upward ? 0.68 : 0.32
+        let endY = upward ? 0.48 : 0.52
+        let start = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
+        let end = scrollView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY))
+        start.press(forDuration: 0.05, thenDragTo: end)
+    }
+
+    private func unobscuredScrollViewport(
+        _ scrollView: XCUIElement,
+        in app: XCUIApplication
+    ) -> CGRect {
+        let scrollViewport = scrollView.frame.intersection(app.windows.firstMatch.frame)
+        let dock = app.buttons["dock.capture"]
+        let dockTop = dock.exists
+            ? dock.frame.midY - (sellerHomeV15DockHeight / 2)
+            : scrollViewport.maxY
+        let unobscuredMaxY = dock.exists
+            ? min(scrollViewport.maxY, dockTop)
+            : scrollViewport.maxY
+
+        return CGRect(
+            x: scrollViewport.minX,
+            y: scrollViewport.minY,
+            width: scrollViewport.width,
+            height: max(0, unobscuredMaxY - scrollViewport.minY)
+        )
+    }
+
+    private func isFullyVisible(_ frame: CGRect, within viewport: CGRect) -> Bool {
+        frame.minX >= viewport.minX
+            && frame.maxX <= viewport.maxX
+            && frame.minY >= viewport.minY
+            && frame.maxY <= viewport.maxY
     }
 }
