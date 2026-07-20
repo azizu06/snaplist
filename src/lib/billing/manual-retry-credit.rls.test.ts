@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { Client } from "pg";
+import { Client, type QueryResult } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { PipelineResult } from "@/lib/pipeline";
@@ -70,6 +70,7 @@ let otherSeller: ClerkTestUser;
 let concurrentSeller: ClerkTestUser;
 let upgradeSeller: ClerkTestUser;
 let upgradeConflictSeller: ClerkTestUser;
+let upgradeOverlapSeller: ClerkTestUser;
 const queueMessageIds = new Set<string>();
 
 function upgradeBackfillSql(): string {
@@ -128,13 +129,20 @@ async function stageRun(
   return run;
 }
 
-async function simulateLegacyManualRetry(runId: string): Promise<string> {
+async function simulateLegacyManualRetry(
+  runId: string,
+  bypassRetryCreditTrigger = false,
+): Promise<string> {
   const database = new Client({
     application_name: "issue-278-upgrade-path",
     connectionString: DATABASE_URL,
   });
   try {
     await database.connect();
+    if (bypassRetryCreditTrigger) {
+      await database.query("begin");
+      await database.query("set local session_replication_role = replica");
+    }
     const legacyRetry = await database.query<{ queue_message_id: string }>(
       `with retry_message as (
          select run.id,
@@ -169,8 +177,14 @@ async function simulateLegacyManualRetry(runId: string): Promise<string> {
     if (messageId === "") {
       throw new Error("Legacy manual retry simulation did not queue the run");
     }
+    if (bypassRetryCreditTrigger) await database.query("commit");
     queueMessageIds.add(messageId);
     return messageId;
+  } catch (error) {
+    if (bypassRetryCreditTrigger) {
+      await database.query("rollback").catch(() => undefined);
+    }
+    throw error;
   } finally {
     await database.end().catch(() => undefined);
   }
@@ -208,6 +222,27 @@ async function cleanupManualRetryAllowancePeriods(
   }
 }
 
+async function waitForApplicationLock(
+  observer: Client,
+  applicationName: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const waiting = await observer.query<{ waiting: boolean }>(
+      `select exists (
+         select 1
+         from pg_stat_activity
+         where application_name = $1
+           and state = 'active'
+           and wait_event_type = 'Lock'
+       ) as waiting`,
+      [applicationName],
+    );
+    if (waiting.rows[0]?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${applicationName} to reach the DDL fence`);
+}
+
 beforeAll(async () => {
   reachable = await stackReachable();
   if (!reachable) return;
@@ -220,6 +255,7 @@ beforeAll(async () => {
     concurrentSeller,
     upgradeSeller,
     upgradeConflictSeller,
+    upgradeOverlapSeller,
   ] = await Promise.all([
     provisionClerkTestUser(
       SUPABASE_URL,
@@ -246,6 +282,11 @@ beforeAll(async () => {
       ANON_KEY!,
       "manual_retry_credit_upgrade_conflict",
     ),
+    provisionClerkTestUser(
+      SUPABASE_URL,
+      ANON_KEY!,
+      "manual_retry_credit_upgrade_overlap",
+    ),
   ]);
 });
 
@@ -262,6 +303,7 @@ afterAll(async () => {
     concurrentSeller.id,
     upgradeSeller.id,
     upgradeConflictSeller.id,
+    upgradeOverlapSeller.id,
   ];
   await cleanupClerkTestUsers(admin, userIds);
   await cleanupManualRetryAllowancePeriods(userIds);
@@ -625,6 +667,91 @@ describe("manual retry AI-item credit accounting", () => {
     }
   }, 20_000);
 
+  it("reclaims a retry that waits behind the migration trigger fence", async () => {
+    if (!reachable) return;
+    const run = await stageRun(
+      "manual-retry-upgrade-overlap",
+      upgradeOverlapSeller,
+    );
+    const store = createSupabasePipelineWorkerStore(
+      admin as unknown as PipelineWorkerRpcClient,
+    );
+    const failedAttempt = acquired(
+      await store.acquire({
+        runId: run.run_id,
+        messageId: String(run.queue_message_id),
+        leaseSeconds: 60,
+      }),
+    );
+    await store.failAttempt({
+      runId: run.run_id,
+      leaseToken: failedAttempt.context.run.lease_token,
+      retryable: false,
+      retryAfterSeconds: 1,
+      failureCode: "invalid_pipeline_result",
+      safeFailureMessage: "The generated listing did not pass validation.",
+    });
+
+    const migration = new Client({
+      application_name: "issue-278-migration-trigger-fence",
+      connectionString: DATABASE_URL,
+    });
+    const retry = new Client({
+      application_name: "issue-278-overlap-retry",
+      connectionString: DATABASE_URL,
+    });
+    let retryCall:
+      | Promise<QueryResult<{ value: Record<string, unknown> }>>
+      | undefined;
+    try {
+      await Promise.all([migration.connect(), retry.connect()]);
+      await migration.query("begin");
+      await migration.query(
+        "lock table public.pipeline_runs in share row exclusive mode",
+      );
+      await retry.query("begin");
+      await retry.query(
+        "select set_config('request.jwt.claims', $1, true)",
+        [JSON.stringify({ role: "authenticated", sub: upgradeOverlapSeller.id })],
+      );
+      await retry.query("set local role authenticated");
+
+      retryCall = retry.query<{ value: Record<string, unknown> }>(
+        "select public.retry_pipeline_run($1::uuid) as value",
+        [run.run_id],
+      );
+      await waitForApplicationLock(migration, "issue-278-overlap-retry");
+      await migration.query("commit");
+
+      const retried = await retryCall;
+      await retry.query("commit");
+      const retryValue = retried.rows[0]?.value;
+      expect(retryValue).toMatchObject({ status: "queued" });
+      const retryMessageId = String(retryValue?.queueMessageId);
+      expect(retryMessageId).not.toBe("undefined");
+      queueMessageIds.add(retryMessageId);
+
+      const { data: reservation } = await upgradeOverlapSeller.client
+        .from("ai_item_credit_reservations")
+        .select("state, retry_reservation_count, retry_restore_count")
+        .eq("pipeline_run_id", run.run_id)
+        .single();
+      expect(reservation).toEqual({
+        state: "restored",
+        retry_reservation_count: 1,
+        retry_restore_count: 0,
+      });
+    } finally {
+      await migration.query("rollback").catch(() => undefined);
+      if (retryCall) await retryCall.catch(() => undefined);
+      await retry.query("rollback").catch(() => undefined);
+      await Promise.all([
+        migration.end().catch(() => undefined),
+        retry.end().catch(() => undefined),
+      ]);
+    }
+  }, 20_000);
+
   it("reconciles a retry already active when the migration starts", async () => {
     if (!reachable) return;
     const run = await stageRun("manual-retry-upgrade", upgradeSeller);
@@ -647,7 +774,7 @@ describe("manual retry AI-item credit accounting", () => {
       safeFailureMessage: "The generated listing did not pass validation.",
     });
 
-    const retryMessageId = await simulateLegacyManualRetry(run.run_id);
+    const retryMessageId = await simulateLegacyManualRetry(run.run_id, true);
     const retryAttempt = acquired(
       await store.acquire({
         runId: run.run_id,
@@ -741,7 +868,7 @@ describe("manual retry AI-item credit accounting", () => {
       failureCode: "invalid_pipeline_result",
       safeFailureMessage: "The generated listing did not pass validation.",
     });
-    await simulateLegacyManualRetry(run.run_id);
+    await simulateLegacyManualRetry(run.run_id, true);
 
     const competing = await stageRun(
       "manual-retry-upgrade-conflict-competing",

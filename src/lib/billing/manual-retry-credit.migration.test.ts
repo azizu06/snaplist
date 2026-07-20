@@ -34,12 +34,27 @@ describe("manual retry AI-item credit reconciliation migration", () => {
     expect(migration).toMatch(/hashtextextended\('ai-item-credit:' \|\| v_user_id/i);
     expect(migration).toMatch(/restored-allowance-reused/i);
     expect(migration).toMatch(
-      /pg_advisory_xact_lock\([\s\S]*snaplist:pipeline-retention[\s\S]*for update[\s\S]*perform private\.reserve_ai_item_credit_for_manual_retry\(v_run\.id\)[\s\S]*update public\.pipeline_runs[\s\S]*pgmq\.send/i,
+      /create or replace function private\.reserve_ai_item_credit_before_manual_retry_requeue\(\)[\s\S]*perform private\.reserve_ai_item_credit_for_manual_retry\(new\.id\)/i,
+    );
+    expect(migration).toMatch(
+      /create trigger reserve_ai_item_credit_before_manual_retry_requeue[\s\S]*before update of status on public\.pipeline_runs[\s\S]*old\.status in \('failed', 'canceled'\)[\s\S]*new\.status = 'queued'/i,
+    );
+    expect(migration).toMatch(
+      /create or replace function public\.retry_pipeline_run[\s\S]*pg_advisory_xact_lock\([\s\S]*snaplist:pipeline-retention[\s\S]*for update[\s\S]*update public\.pipeline_runs[\s\S]*pgmq\.send/i,
     );
   });
 
   it("reconciles active retries from the pre-migration RPC without overbooking", () => {
-    expect(migration).toMatch(/manual-retry-upgrade-backfill:begin/i);
+    const trigger = migration.indexOf(
+      "create trigger reserve_ai_item_credit_before_manual_retry_requeue",
+    );
+    const backfill = migration.indexOf("manual-retry-upgrade-backfill:begin");
+    const retryRpc = migration.indexOf(
+      "create or replace function public.retry_pipeline_run",
+    );
+    expect(trigger).toBeGreaterThan(-1);
+    expect(backfill).toBeGreaterThan(trigger);
+    expect(retryRpc).toBeGreaterThan(backfill);
     expect(migration).toMatch(
       /run\.status in \('queued', 'running', 'retrying'\)[\s\S]*run\.capture_input is not null[\s\S]*run\.listing_id is null[\s\S]*run\.completed_at is null/i,
     );
