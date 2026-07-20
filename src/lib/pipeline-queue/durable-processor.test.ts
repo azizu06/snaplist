@@ -5,6 +5,10 @@ import {
   createDurableVisionPipelineProcessor,
   type PipelineWorkerCheckpoint,
 } from "./durable-processor";
+import {
+  pipelineWorkerCheckpointSchema,
+  type PipelineWorkerCheckpointWrite,
+} from "./checkpoint";
 import type { PipelineWorkerContext } from "./worker-store";
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
@@ -30,6 +34,9 @@ const GENERATED = {
   },
   model: "listing-model",
 };
+const EVIDENCE_AS_OF = "2026-07-20T08:00:00.000Z";
+const AHEAD_WORKER_CLOCK = "2099-07-20T08:00:00.000Z";
+const PRICED = { result: PRICE, evidenceAsOf: EVIDENCE_AS_OF };
 
 function workerContext(checkpoint: PipelineWorkerCheckpoint): PipelineWorkerContext {
   return {
@@ -83,24 +90,72 @@ function stages(): VisionPipelineStages & Record<string, ReturnType<typeof vi.fn
   } as unknown as VisionPipelineStages & Record<string, ReturnType<typeof vi.fn>>;
 }
 
+async function persistTestCheckpoint(
+  _stage: string,
+  checkpoint: PipelineWorkerCheckpointWrite,
+): Promise<PipelineWorkerCheckpoint> {
+  return pipelineWorkerCheckpointSchema.parse({
+    ...checkpoint,
+    priced:
+      checkpoint.priced && !checkpoint.priced.evidenceAsOf
+        ? { ...checkpoint.priced, evidenceAsOf: EVIDENCE_AS_OF }
+        : checkpoint.priced,
+  });
+}
+
 describe("durable vision pipeline processor", () => {
   it("resumes after persisted identify and price stages without repeating provider work", async () => {
     const pipeline = stages();
-    const saved: Array<[string, PipelineWorkerCheckpoint]> = [];
+    const saved: Array<[string, PipelineWorkerCheckpointWrite]> = [];
     const processor = createDurableVisionPipelineProcessor(pipeline);
 
     const result = await processor.process({
-      context: workerContext({ identified: IDENTIFIED, priced: PRICE }),
+      context: workerContext({ identified: IDENTIFIED, priced: PRICED }),
       onCheckpoint: async (stage, checkpoint) => {
         saved.push([stage, checkpoint]);
+        return persistTestCheckpoint(stage, checkpoint);
       },
     });
 
     expect(pipeline.identify).not.toHaveBeenCalled();
     expect(pipeline.price).not.toHaveBeenCalled();
     expect(pipeline.generate).toHaveBeenCalledOnce();
-    expect(saved).toEqual([["generating", { identified: IDENTIFIED, priced: PRICE, generated: GENERATED }]]);
+    expect(saved).toEqual([
+      ["generating", { identified: IDENTIFIED, priced: PRICED, generated: GENERATED }],
+    ]);
     expect(result.listing.title).toMatch(/Sony/);
+  });
+
+  it("continues from the database-authoritative priced checkpoint when the worker clock is ahead", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AHEAD_WORKER_CLOCK);
+    try {
+      const pipeline = stages();
+      const saved: Array<[string, PipelineWorkerCheckpointWrite]> = [];
+      const processor = createDurableVisionPipelineProcessor(pipeline);
+
+      await processor.process({
+        context: workerContext({ identified: IDENTIFIED }),
+        onCheckpoint: async (stage, checkpoint) => {
+          saved.push([stage, checkpoint]);
+          if (stage === "pricing") {
+            return pipelineWorkerCheckpointSchema.parse({
+              ...checkpoint,
+              priced: { ...checkpoint.priced!, evidenceAsOf: EVIDENCE_AS_OF },
+            });
+          }
+          return persistTestCheckpoint(stage, checkpoint);
+        },
+      });
+
+      expect(saved[0]).toEqual([
+        "pricing",
+        { identified: IDENTIFIED, priced: { result: PRICE } },
+      ]);
+      expect(saved[1]?.[1].priced?.evidenceAsOf).toBe(EVIDENCE_AS_OF);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses only run-derived photo paths and the stored configuration snapshot", async () => {
@@ -111,7 +166,7 @@ describe("durable vision pipeline processor", () => {
 
     const result = await processor.process({
       context: ctx,
-      onCheckpoint: async () => undefined,
+      onCheckpoint: persistTestCheckpoint,
     });
 
     expect(pipeline.identify).toHaveBeenCalledWith({ photos: ["user_a/photo.jpg"] });
@@ -128,7 +183,7 @@ describe("durable vision pipeline processor", () => {
     ctx.item.photos = ["user_b/forged.jpg"];
 
     await expect(
-      processor.process({ context: ctx, onCheckpoint: async () => undefined }),
+      processor.process({ context: ctx, onCheckpoint: persistTestCheckpoint }),
     ).rejects.toMatchObject({ code: "invalid_run_photos", retryable: false });
     expect(pipeline.identify).not.toHaveBeenCalled();
   });
@@ -140,7 +195,7 @@ describe("durable vision pipeline processor", () => {
     ctx.item.photos = ["user_a/../user_b/forged.jpg"];
 
     await expect(
-      processor.process({ context: ctx, onCheckpoint: async () => undefined }),
+      processor.process({ context: ctx, onCheckpoint: persistTestCheckpoint }),
     ).rejects.toMatchObject({ code: "invalid_run_photos", retryable: false });
     expect(pipeline.identify).not.toHaveBeenCalled();
   });

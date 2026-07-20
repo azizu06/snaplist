@@ -6,7 +6,9 @@ import {
 } from "@/lib/pipeline";
 import {
   pipelineWorkerCheckpointSchema,
+  pipelineWorkerCheckpointWriteSchema,
   type PipelineWorkerCheckpoint,
+  type PipelineWorkerCheckpointWrite,
 } from "./checkpoint";
 
 export const pipelineRunStatusSchema = z.enum([
@@ -121,9 +123,9 @@ export interface PipelineWorkerStore {
     runId: string;
     leaseToken: string;
     stage: Exclude<PipelineRunStage, "queued" | "completed">;
-    checkpoint: PipelineWorkerCheckpoint;
+    checkpoint: PipelineWorkerCheckpointWrite;
     leaseSeconds: number;
-  }): Promise<void>;
+  }): Promise<PipelineWorkerCheckpoint>;
   complete(input: {
     runId: string;
     leaseToken: string;
@@ -183,7 +185,7 @@ export function createSupabasePipelineWorkerStore(
           runId: z.string().uuid(),
           leaseToken: z.string().uuid(),
           stage: pipelineRunStageSchema.exclude(["queued", "completed"]),
-          checkpoint: pipelineWorkerCheckpointSchema,
+          checkpoint: pipelineWorkerCheckpointWriteSchema,
           leaseSeconds: leaseSecondsSchema,
         })
         .strict()
@@ -195,7 +197,7 @@ export function createSupabasePipelineWorkerStore(
         p_run_id: parsed.runId,
         p_stage: parsed.stage,
       });
-      z.literal(true).parse(rpcData("checkpoint", result));
+      return pipelineWorkerCheckpointSchema.parse(rpcData("checkpoint", result));
     },
 
     async complete(input) {

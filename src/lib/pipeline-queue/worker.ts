@@ -3,7 +3,10 @@ import type { PipelineResult } from "@/lib/pipeline";
 import { PIPELINE_OPERATIONS_POLICY } from "@/lib/pipeline-operations/policy";
 import { pipelineQueueEnvelopeSchema } from "./envelope";
 import type { PipelineQueue } from "./queue";
-import type { PipelineWorkerCheckpoint } from "./checkpoint";
+import type {
+  PipelineWorkerCheckpoint,
+  PipelineWorkerCheckpointWrite,
+} from "./checkpoint";
 import type {
   PipelineRunStage,
   PipelineWorkerContext,
@@ -15,8 +18,8 @@ export interface DurablePipelineProcessor {
     context: PipelineWorkerContext;
     onCheckpoint: (
       stage: Exclude<PipelineRunStage, "queued" | "completed" | "persisting">,
-      checkpoint: PipelineWorkerCheckpoint,
-    ) => Promise<void>;
+      checkpoint: PipelineWorkerCheckpointWrite,
+    ) => Promise<PipelineWorkerCheckpoint>;
   }): Promise<PipelineResult>;
 }
 
@@ -149,7 +152,7 @@ export async function consumePipelineQueue(
       const result = await dependencies.processor.process({
         context,
         onCheckpoint: async (stage, checkpoint) => {
-          await dependencies.runs.checkpoint({
+          const persisted = await dependencies.runs.checkpoint({
             runId: context.run.id,
             leaseToken: context.run.lease_token,
             stage,
@@ -160,6 +163,7 @@ export async function consumePipelineQueue(
             message.id,
             config.visibilityTimeoutSeconds,
           );
+          return persisted;
         },
       });
       await dependencies.runs.complete({

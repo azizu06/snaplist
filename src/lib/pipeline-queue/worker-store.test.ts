@@ -113,22 +113,32 @@ describe("run-scoped pipeline worker store", () => {
   });
 
   it("checkpoints and completes through identity-free persistence payloads", async () => {
+    const checkpoint = {
+      identified: { attributes: RESULT.attributes, model: RESULT.model },
+      priced: { result: RESULT.price },
+    };
+    const persistedCheckpoint = {
+      ...checkpoint,
+      priced: {
+        ...checkpoint.priced,
+        evidenceAsOf: "2026-07-20T08:00:00.000Z",
+      },
+    };
     const client = rpcClient({
-      checkpoint_pipeline_run: true,
+      checkpoint_pipeline_run: persistedCheckpoint,
       complete_pipeline_run: { listingId: LISTING_ID },
     });
     const store = createSupabasePipelineWorkerStore(client);
-    const checkpoint = {
-      identified: { attributes: RESULT.attributes, model: RESULT.model },
-    };
 
-    await store.checkpoint({
-      runId: RUN_ID,
-      leaseToken: LEASE_TOKEN,
-      stage: "identifying",
-      checkpoint,
-      leaseSeconds: 300,
-    });
+    await expect(
+      store.checkpoint({
+        runId: RUN_ID,
+        leaseToken: LEASE_TOKEN,
+        stage: "pricing",
+        checkpoint,
+        leaseSeconds: 300,
+      }),
+    ).resolves.toEqual(persistedCheckpoint);
     await expect(
       store.complete({
         runId: RUN_ID,
@@ -141,6 +151,13 @@ describe("run-scoped pipeline worker store", () => {
     const completion = client.rpc.mock.calls.find(
       ([name]) => name === "complete_pipeline_run",
     )?.[1] as Record<string, unknown>;
+    expect(client.rpc).toHaveBeenCalledWith("checkpoint_pipeline_run", {
+      p_checkpoint: checkpoint,
+      p_lease_seconds: 300,
+      p_lease_token: LEASE_TOKEN,
+      p_run_id: RUN_ID,
+      p_stage: "pricing",
+    });
     expect(completion).not.toHaveProperty("user_id");
     expect(completion).not.toHaveProperty("item_id");
     expect(completion.p_persistence).toMatchObject({
