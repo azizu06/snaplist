@@ -19,7 +19,7 @@ protocol AnalyticsClient {
     func screen(_ screen: AnalyticsScreen)
     func identify(clerkUserID: String)
     func reset()
-    func setConsent(_ consent: AnalyticsConsent)
+    func setConsent(_ consent: AnalyticsConsent) throws
     func flush()
 }
 
@@ -81,7 +81,7 @@ protocol AnalyticsDebugSinking: AnyObject {
     func record(_ record: AnalyticsDebugRecord) throws
 }
 
-private final class AnalyticsSerialExecutor: @unchecked Sendable {
+final class AnalyticsSerialExecutor: @unchecked Sendable {
     private let consentTransitionDidSubmit: @Sendable (AnalyticsConsent) -> Void
     private let consentTransitionDidEnterSerializedBoundary: @Sendable (AnalyticsConsent) -> Void
     private let key = DispatchSpecificKey<Void>()
@@ -110,22 +110,20 @@ private final class AnalyticsSerialExecutor: @unchecked Sendable {
 
     func serializeConsentTransition(
         _ consent: AnalyticsConsent,
-        operation: @escaping @Sendable () -> Void
-    ) {
+        operation: @escaping @Sendable () throws -> Void
+    ) throws {
         if DispatchQueue.getSpecific(key: key) != nil {
             consentTransitionDidSubmit(consent)
             consentTransitionDidEnterSerializedBoundary(consent)
-            operation()
+            try operation()
             return
         }
 
-        let workItem = DispatchWorkItem { [consentTransitionDidEnterSerializedBoundary] in
-            consentTransitionDidEnterSerializedBoundary(consent)
-            operation()
-        }
-        queue.async(execute: workItem)
         consentTransitionDidSubmit(consent)
-        workItem.wait()
+        try queue.sync { [consentTransitionDidEnterSerializedBoundary] in
+            consentTransitionDidEnterSerializedBoundary(consent)
+            try operation()
+        }
     }
 }
 
@@ -223,7 +221,7 @@ final class DebugAnalyticsClient: AnalyticsClient, @unchecked Sendable {
     }
 
     func setConsent(_ consent: AnalyticsConsent) {
-        executor.serializeConsentTransition(consent) { [self] in
+        try? executor.serializeConsentTransition(consent) { [self] in
             consentStore.setConsent(consent)
         }
     }
@@ -261,7 +259,7 @@ private final class ClosureAnalyticsDebugSink: AnalyticsDebugSinking {
     }
 }
 
-private extension AnalyticsEvent {
+extension AnalyticsEvent {
     var eventID: UUID {
         switch self {
         case let .guestRunStarted(eventID, _),
