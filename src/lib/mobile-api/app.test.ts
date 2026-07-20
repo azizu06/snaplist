@@ -4,6 +4,9 @@ import {
   GuestClaimIdempotencyConflictError,
   GuestClaimInProgressError,
 } from "@/lib/guest-recovery/service";
+import { buildPipelinePersistencePayload } from "@/lib/pipeline/persist";
+import type { PipelineResult } from "@/lib/pipeline/types";
+import { buildPricingEvidenceProjection } from "@/lib/pricing-evidence";
 import { MobileRunConflictError, MobileRunNotFoundError } from "./runs";
 import { createMobileApiHandler } from "./app";
 
@@ -563,6 +566,84 @@ describe("mobile API v1 provider-neutral handler", () => {
       },
       meta: { requestId: "req_test" },
     });
+  });
+
+  it("returns persisted composite confidence when the provider score differs", async () => {
+    const result: PipelineResult = {
+      attributes: {
+        title: "Sony WH-1000XM4",
+        condition: "Used - Good",
+      },
+      price: {
+        suggested: 130,
+        range: { min: 120, max: 140 },
+        confidence: 0.17,
+        sources: [],
+        tier: "llm-only",
+      },
+      confidence: {
+        score: 0.84,
+        band: "high",
+        autopilotEligible: false,
+      },
+      listing: {
+        platform: "ebay",
+        title: "Sony WH-1000XM4",
+        description: "Seller-ready listing",
+        fields: {},
+      },
+      model: "test-identification-model",
+    };
+    const persisted = buildPipelinePersistencePayload(result).pricing_snapshot;
+    const evidenceAsOf = "2026-07-20T12:00:00+00:00";
+    const runId = "11111111-1111-4111-8111-111111111111";
+    const itemId = "22222222-2222-4222-8222-222222222222";
+    const listingId = "33333333-3333-4333-8333-333333333333";
+    const projection = buildPricingEvidenceProjection(
+      {
+        run_id: runId,
+        pipeline_run_id: runId,
+        run_kind: "pipeline",
+        user_id: "user_native",
+        item_id: itemId,
+        prediction_id: "44444444-4444-4444-8444-444444444444",
+        listing_id: listingId,
+        ...persisted,
+        evidence_as_of: evidenceAsOf,
+        pipeline_runs: {
+          id: runId,
+          status: "succeeded",
+          stage: "completed",
+          listing_id: listingId,
+          completed_at: evidenceAsOf,
+        },
+        listings: {
+          id: listingId,
+          run_id: runId,
+          item_id: itemId,
+          user_id: "user_native",
+        },
+      },
+      {
+        userId: "user_native",
+        itemId,
+        now: Date.parse(evidenceAsOf),
+      },
+    );
+
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "user_native" }),
+      pricingEvidence: { forItem: vi.fn().mockResolvedValue(projection) },
+    })(
+      new Request(`http://localhost/v1/items/${itemId}/pricing`, {
+        headers: { authorization: "Bearer signed-jwt" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.priceResult.confidence).toBe(result.confidence.score);
+    expect(body.data.priceResult.confidence).not.toBe(result.price.confidence);
   });
 
   it("binds RevenueCat only to the verified Clerk principal and ignores a body user id", async () => {

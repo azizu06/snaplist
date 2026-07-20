@@ -66,7 +66,10 @@ export function buildPricingEvidenceSnapshotInput(
   const acceptedEvidence = evidence.filter(
     (record) => record.priceDisclosure === "displayed-sold-price",
   );
-  const priceResult = { ...result.price };
+  const priceResult = {
+    ...result.price,
+    confidence: result.confidence.score,
+  };
   delete priceResult.evidence;
   const title =
     result.identification?.label.trim() ||
