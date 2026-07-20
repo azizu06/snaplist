@@ -1,6 +1,6 @@
 begin;
 
-select plan(17);
+select plan(21);
 
 select ok(
   has_table_privilege('authenticated', 'public.pricing_evidence_snapshots', 'select'),
@@ -108,6 +108,39 @@ select ok(
     'execute'
   ),
   'authenticated sellers cannot invoke durable completion'
+);
+
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.regenerate_review_listing(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean)',
+    'execute'
+  ),
+  'the correction seam without evidence is retired'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.regenerate_review_listing_with_credit(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean)',
+    'execute'
+  ),
+  'the credit correction seam without evidence is retired'
+);
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.regenerate_review_listing_with_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)',
+    'execute'
+  ),
+  'authenticated correction persists its pricing snapshot atomically'
+);
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.regenerate_review_listing_with_credit_and_evidence(uuid,uuid,uuid,uuid,uuid,jsonb,text,jsonb,text,text,jsonb,numeric,jsonb,numeric,text,text,text,text,jsonb,boolean,boolean,jsonb)',
+    'execute'
+  ),
+  'included guided correction persists its pricing snapshot atomically'
 );
 
 select * from finish();

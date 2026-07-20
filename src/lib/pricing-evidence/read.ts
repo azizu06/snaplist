@@ -21,6 +21,8 @@ export const PRICING_EVIDENCE_STRONG_MINIMUM = 4;
 export const pricingEvidenceSnapshotRowSchema = z
   .object({
     run_id: uuid,
+    pipeline_run_id: uuid.nullable(),
+    run_kind: z.enum(["pipeline", "review-correction"]),
     user_id: z.string().min(1),
     item_id: uuid,
     prediction_id: uuid,
@@ -43,7 +45,8 @@ export const pricingEvidenceSnapshotRowSchema = z
         listing_id: uuid,
         completed_at: isoDateTime,
       })
-      .strict(),
+      .strict()
+      .nullable(),
     listings: z
       .object({
         id: uuid,
@@ -109,12 +112,22 @@ export function buildPricingEvidenceProjection(
   }
   const row = parsed.data;
   const evidenceAsOfMs = Date.parse(row.evidence_as_of);
-  const completedAtMs = Date.parse(row.pipeline_runs.completed_at);
+  const completedAtMs = row.pipeline_runs
+    ? Date.parse(row.pipeline_runs.completed_at)
+    : evidenceAsOfMs;
+  const pipelineCoherent =
+    row.run_kind === "pipeline" &&
+    row.pipeline_run_id === row.run_id &&
+    row.pipeline_runs?.id === row.run_id &&
+    row.pipeline_runs.listing_id === row.listing_id;
+  const correctionCoherent =
+    row.run_kind === "review-correction" &&
+    row.pipeline_run_id == null &&
+    row.pipeline_runs == null;
   if (
     row.user_id !== input.userId ||
     row.item_id !== input.itemId ||
-    row.run_id !== row.pipeline_runs.id ||
-    row.listing_id !== row.pipeline_runs.listing_id ||
+    (!pipelineCoherent && !correctionCoherent) ||
     row.listing_id !== row.listings.id ||
     row.run_id !== row.listings.run_id ||
     row.item_id !== row.listings.item_id ||
@@ -195,12 +208,10 @@ export function createSupabasePricingEvidenceReader(
       const { data, error } = await client
         .from("pricing_evidence_snapshots")
         .select(
-          "run_id,user_id,item_id,prediction_id,listing_id,schema_version,item,price_result,evidence,evidence_as_of,pipeline_runs!inner(id,status,stage,listing_id,completed_at),listings!inner(id,run_id,item_id,user_id)",
+          "run_id,pipeline_run_id,run_kind,user_id,item_id,prediction_id,listing_id,schema_version,item,price_result,evidence,evidence_as_of,pipeline_runs(id,status,stage,listing_id,completed_at),listings!inner(id,run_id,item_id,user_id)",
         )
         .eq("item_id", itemId)
         .eq("user_id", userId)
-        .eq("pipeline_runs.status", "succeeded")
-        .eq("pipeline_runs.stage", "completed")
         .order("evidence_as_of", { ascending: false })
         .order("run_id", { ascending: false })
         .limit(1);

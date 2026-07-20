@@ -13,6 +13,10 @@ import {
 import { createDefaultPricer } from "../pricing/default-pricer";
 import type { ItemSignal, PriceResult } from "../pricing";
 import {
+  buildPricingEvidenceSnapshotInput,
+  type PricingEvidenceSnapshotInput,
+} from "../pricing-evidence";
+import {
   deriveIdentification,
   garmentClassOf,
   listingFactAttributes,
@@ -252,6 +256,7 @@ export interface ReviewRegenerationCommit {
   identification: Identification;
   listing: ListingCopy;
   prediction: PredictionLogRow;
+  pricingSnapshot: PricingEvidenceSnapshotInput;
 }
 
 /** Persistence abstraction: production is one RLS-scoped RPC; tests use a fake. */
@@ -353,6 +358,7 @@ export async function regenerateReviewListing(
     identification,
     listing: generated.copy,
     prediction,
+    pricingSnapshot: buildPricingEvidenceSnapshotInput(result),
   });
 
   const override =
@@ -404,8 +410,8 @@ export function createSupabaseReviewRegenerationStore(
     async commit(input) {
       const { error } = await supabase.rpc(
         options.useCreditLedger
-          ? "regenerate_review_listing_with_credit"
-          : "regenerate_review_listing",
+          ? "regenerate_review_listing_with_credit_and_evidence"
+          : "regenerate_review_listing_with_evidence",
         {
           p_item_id: input.itemId,
           p_listing_id: input.listingId,
@@ -428,6 +434,7 @@ export function createSupabaseReviewRegenerationStore(
           p_sources: input.prediction.sources,
           p_autopilot_enabled: input.prediction.autopilot_enabled,
           p_autopilot_eligible: input.prediction.autopilot_eligible,
+          p_pricing_snapshot: input.pricingSnapshot,
         },
       );
       if (error) {

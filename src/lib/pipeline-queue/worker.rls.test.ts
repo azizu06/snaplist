@@ -370,7 +370,7 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         userA.client.from("prediction_logs").select("id, item_id, run_id").eq("run_id", runA),
         userA.client
           .from("pricing_evidence_snapshots")
-          .select("run_id,user_id,item_id,listing_id,prediction_id,schema_version,evidence,evidence_as_of")
+          .select("run_id,pipeline_run_id,run_kind,user_id,item_id,listing_id,prediction_id,schema_version,evidence,evidence_as_of")
           .eq("run_id", runA),
         userB.client.from("pipeline_runs").select("id").eq("id", runA),
         userB.client.from("pricing_evidence_snapshots").select("run_id").eq("run_id", runA),
@@ -383,6 +383,8 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     expect(snapshots).toHaveLength(1);
     expect(snapshots?.[0]).toMatchObject({
       run_id: runA,
+      pipeline_run_id: runA,
+      run_kind: "pipeline",
       user_id: userA.id,
       item_id: itemA,
       listing_id: listings?.[0]?.id,

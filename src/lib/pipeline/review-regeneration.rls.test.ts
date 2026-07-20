@@ -123,6 +123,28 @@ function commitFor(
       autopilot_enabled: false,
       autopilot_eligible: false,
     },
+    pricingSnapshot: {
+      schema_version: 1,
+      item: { title: "Sony WH-1000XM4", condition: "good" },
+      price_result: {
+        suggested: 165,
+        range: { min: 145, max: 185 },
+        confidence: 0.85,
+        sources: [{ url: "https://www.ebay.com/itm/1", kind: "sold-comp" }],
+        tier: "ebay-sold",
+      },
+      evidence: [
+        {
+          id: "https://www.ebay.com/itm/1",
+          sourceUrl: "https://www.ebay.com/itm/1",
+          price: 165,
+          currency: "USD",
+          condition: "good",
+          kind: "sold-comparable",
+          priceDisclosure: "displayed-sold-price",
+        },
+      ],
+    },
   };
 }
 
@@ -207,6 +229,46 @@ describe("review identity regeneration transaction + RLS", () => {
     expect(logs).toHaveLength(1);
     expect(Number(logs?.[0]?.price)).toBe(165);
     expect(exports ?? []).toHaveLength(0);
+  });
+
+  it("rejects pricing evidence that diverges from the corrected prediction and rolls back", async () => {
+    if (!reachable) return;
+    const seeded = await seedReview(userA, "divergent-evidence");
+    const runId = crypto.randomUUID();
+    const divergent = commitFor(
+      seeded.itemId,
+      seeded.listingId,
+      runId,
+      seeded.reviewRevision,
+    );
+    divergent.pricingSnapshot.price_result.suggested = 175;
+
+    await expect(
+      createSupabaseReviewRegenerationStore(userA.client).commit(divergent),
+    ).rejects.toThrow(/pricing evidence snapshot/i);
+
+    const [{ data: item }, { data: listing }, { data: logs }] = await Promise.all([
+      userA.client
+        .from("items")
+        .select("attributes, condition")
+        .eq("id", seeded.itemId)
+        .single(),
+      userA.client
+        .from("listings")
+        .select("title, run_id")
+        .eq("id", seeded.listingId)
+        .single(),
+      userA.client.from("prediction_logs").select("id").eq("run_id", runId),
+    ]);
+    expect((item?.attributes as { brand?: string })?.brand).toBe(
+      "Old divergent-evidence",
+    );
+    expect(item?.condition).toBe("fair");
+    expect(listing).toMatchObject({
+      title: "Old divergent-evidence listing",
+      run_id: null,
+    });
+    expect(logs ?? []).toHaveLength(0);
   });
 
   it("rejects another tenant and rolls back an earlier item update in the RPC", async () => {
