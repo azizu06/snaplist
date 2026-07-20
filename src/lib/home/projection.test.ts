@@ -355,18 +355,10 @@ describe("native Seller Home projection", () => {
     const timestamp = "2026-07-17T13:00:00.000Z";
     const itemID = "20800000-0000-4000-8006-000000000001";
     const rpcCalls: Array<{ name: string; arguments_: unknown }> = [];
-    const historicalPredictions = Array.from({ length: 250 }, (_, index) => ({
-      id: `20800000-0000-4000-8007-${String(index + 1).padStart(12, "0")}`,
-      user_id: "user_native",
-      item_id: `20800000-0000-4000-8008-${String(index + 1).padStart(12, "0")}`,
-      price: index + 1,
-      created_at: timestamp,
-    }));
     const client = makeProjectionClient({
       activeCount: 0,
       draftCount: 1,
       forbidHistoricalProjectionReads: true,
-      predictions: historicalPredictions,
       rpcCalls,
       currentItemProjection: {
         history_revision_at: timestamp,
@@ -438,7 +430,6 @@ type FakeQuery = {
   in: (column: string, values: unknown[]) => FakeQuery;
   order: (column: string, options?: unknown) => FakeQuery;
   limit: (count: number) => Promise<QueryResult>;
-  range: (from: number, to: number) => Promise<QueryResult>;
   is: (column: string, value: unknown) => Promise<QueryResult>;
 };
 
@@ -449,10 +440,6 @@ function makeQuery(result: QueryResult): FakeQuery {
   query.in = () => query;
   query.order = () => query;
   query.limit = async () => result;
-  query.range = async (from, to) => ({
-    ...result,
-    data: result.data?.slice(from, to + 1) ?? null,
-  });
   query.is = async () => result;
   return query;
 }
@@ -464,7 +451,6 @@ function makeProjectionClient(input: {
   listings?: unknown[];
   items?: unknown[];
   predictions?: unknown[];
-  predictionPageIDs?: string[];
   activeCount?: number;
   draftCount?: number;
   queryCalls?: string[];
@@ -544,73 +530,6 @@ function makeProjectionClient(input: {
             };
           }
           return { data: (input.listings ?? []).slice(0, count), error: null };
-        };
-        const range = query.range;
-        query.range = async (from, to) => {
-          input.queryCalls?.push(`listings:range:${from}-${to}`);
-          return range(from, to);
-        };
-        return query;
-      }
-      if (table === "items") {
-        const query = makeQuery({ data: input.items ?? [], error: null });
-        query.limit = async (count) => ({
-          data: (input.items ?? []).slice(0, count),
-          error: null,
-        });
-        const range = query.range;
-        query.range = async (from, to) => {
-          input.queryCalls?.push(`items:range:${from}-${to}`);
-          return range(from, to);
-        };
-        return query;
-      }
-      if (table === "prediction_logs") {
-        type Prediction = {
-          id: string;
-          item_id: string;
-          created_at: string;
-        };
-        const orders: Array<{ column: string; ascending: boolean }> = [];
-        const query = makeQuery({ data: input.predictions ?? [], error: null });
-        query.select = (columns) => {
-          input.queryCalls?.push(`prediction_logs:select:${columns}`);
-          return query;
-        };
-        query.order = (column, options) => {
-          const ascending = (options as { ascending?: boolean } | undefined)?.ascending;
-          orders.push({ column, ascending: ascending !== false });
-          input.queryCalls?.push(
-            `prediction_logs:order:${column}:${ascending === false ? "desc" : "asc"}`,
-          );
-          return query;
-        };
-        query.range = async (from, to) => {
-          input.queryCalls?.push(`prediction_logs:range:${from}-${to}`);
-          const compare = (left: Prediction, right: Prediction) => {
-            for (const order of orders) {
-              const leftValue = left[order.column as keyof Prediction];
-              const rightValue = right[order.column as keyof Prediction];
-              const comparison = leftValue.localeCompare(rightValue);
-              if (comparison !== 0) return order.ascending ? comparison : -comparison;
-            }
-            return 0;
-          };
-          const ordered = [...(input.predictions ?? [])] as Prediction[];
-          ordered.sort(compare);
-          if (from > 0 && !orders.some((order) => order.column === "id")) {
-            for (let start = 0; start < ordered.length; ) {
-              let end = start + 1;
-              while (end < ordered.length && compare(ordered[start], ordered[end]) === 0) {
-                end += 1;
-              }
-              ordered.splice(start, end - start, ...ordered.slice(start, end).reverse());
-              start = end;
-            }
-          }
-          const page = ordered.slice(from, to + 1);
-          input.predictionPageIDs?.push(...page.map((prediction) => prediction.id));
-          return { data: page, error: null };
         };
         return query;
       }
