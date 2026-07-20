@@ -41,7 +41,92 @@ final class HomeUITests: XCTestCase {
         ).firstMatch
         XCTAssertTrue(run.waitForExistence(timeout: 2))
         run.tap()
-        XCTAssertTrue(app.staticTexts["route.run.title"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Run unavailable"].waitForExistence(timeout: 2))
+    }
+
+    func testRunDetailUsesSystemBackAndReturnsToExactHomeOpener() {
+        let app = launch("HOME-01")
+        let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
+
+        XCTAssertTrue(opener.waitForExistence(timeout: 3))
+        opener.tap()
+
+        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 2))
+        let back = app.buttons["Back"]
+        XCTAssertTrue(back.exists)
+        back.tap()
+
+        XCTAssertTrue(opener.waitForExistence(timeout: 2))
+        XCTAssertTrue(opener.isHittable)
+    }
+
+    func testRunDetailShowsFactualUnavailableState() {
+        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=unavailable"])
+        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+
+        XCTAssertTrue(app.staticTexts["Run unavailable"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["We couldn’t load this run."].exists)
+    }
+
+    func testRunDetailShowsLoadedItemAndStageTruth() {
+        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
+        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+
+        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Processing"].exists)
+        XCTAssertTrue(app.staticTexts["Finding recent sold comps"].exists)
+    }
+
+    func testRunDetailRefreshIsAccessibleAndReplacesServerTruth() {
+        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=refresh"])
+        app.buttons["home.run.20800000-0000-4000-8000-000000000020"].tap()
+        XCTAssertTrue(app.staticTexts["Finding recent sold comps"].waitForExistence(timeout: 3))
+
+        let refresh = app.buttons["Refresh"]
+        XCTAssertTrue(refresh.exists)
+        XCTAssertTrue(refresh.isHittable)
+        XCTAssertGreaterThanOrEqual(refresh.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(refresh.frame.height, 44)
+        refresh.tap()
+
+        XCTAssertTrue(app.staticTexts["Writing your listing"].waitForExistence(timeout: 3))
+    }
+
+    func testExactCustomRunDeepLinkOpensDetailAndBackReturnsHome() {
+        let app = launch("HOME-01", extraArguments: ["--run-detail-fixture=loaded"])
+        let opener = app.buttons["home.run.20800000-0000-4000-8000-000000000020"]
+        XCTAssertTrue(opener.waitForExistence(timeout: 3))
+
+        app.open(
+            URL(string: "snaplist://runs/20800000-0000-4000-8000-000000000020")!
+        )
+
+        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].waitForExistence(timeout: 3))
+        app.buttons["Back"].tap()
+        XCTAssertTrue(opener.waitForExistence(timeout: 2))
+    }
+
+    func testRun02VisualStateUsesTheCanonicalDetailRouteShell() {
+        let app = launch("RUN-02")
+
+        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].exists)
+        XCTAssertTrue(app.buttons["Refresh"].isHittable)
+    }
+
+    func testRun02RouteShellReflowsAtAccessibility3WithReducedMotion() {
+        let app = launch(
+            "RUN-02",
+            extraArguments: ["--dynamic-type=accessibility3", "--reduced-motion"]
+        )
+
+        XCTAssertTrue(app.otherElements["run.detail"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Canon AE-1 film camera"].exists)
+
+        let refresh = app.buttons["Refresh"]
+        XCTAssertTrue(refresh.isHittable)
+        XCTAssertGreaterThanOrEqual(refresh.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(refresh.frame.height, 44)
     }
 
     func testNewSellerStartsTheExistingCaptureFlow() {

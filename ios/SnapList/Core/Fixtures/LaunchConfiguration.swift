@@ -103,7 +103,17 @@ enum FoundationFixture: String, CaseIterable {
     }
 }
 
+enum RunDetailFixture: String, Equatable {
+    case unavailable
+    case loaded
+    case refresh
+}
+
 struct LaunchConfiguration: Equatable {
+    static let runDetailFixtureID = UUID(
+        uuidString: "20800000-0000-4000-8000-000000000020"
+    )!
+
     var fixture: FoundationFixture
     var visualState: ApprovedVisualStateID?
     var forceReducedMotion: Bool
@@ -114,6 +124,7 @@ struct LaunchConfiguration: Equatable {
     var resetOnboardingProgress: Bool
     var stagedLibraryPhotoFixtureCount: Int?
     var usesRestoredCaptureFixture: Bool
+    var runDetailFixture: RunDetailFixture?
 
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
@@ -125,7 +136,8 @@ struct LaunchConfiguration: Equatable {
         cameraAuthorizationFixture: nil,
         resetOnboardingProgress: false,
         stagedLibraryPhotoFixtureCount: nil,
-        usesRestoredCaptureFixture: false
+        usesRestoredCaptureFixture: false,
+        runDetailFixture: nil
     )
 
     static let preview = LaunchConfiguration(
@@ -138,7 +150,8 @@ struct LaunchConfiguration: Equatable {
         cameraAuthorizationFixture: .authorized,
         resetOnboardingProgress: false,
         stagedLibraryPhotoFixtureCount: nil,
-        usesRestoredCaptureFixture: false
+        usesRestoredCaptureFixture: false,
+        runDetailFixture: .loaded
     )
 
     static func parse(arguments: [String]) -> LaunchConfiguration {
@@ -168,11 +181,17 @@ struct LaunchConfiguration: Equatable {
                 let value = String(argument.dropFirst("--visual-state=".count))
                 configuration.visualState = ApprovedVisualStateID(rawValue: value)
                 configuration.usesZeroNetworkFixtures = true
+                if configuration.visualState == .runDetail {
+                    configuration.runDetailFixture = .loaded
+                }
             } else if argument.hasPrefix("--camera-status=") {
                 let value = String(argument.dropFirst("--camera-status=".count))
                 configuration.cameraAuthorizationFixture = CameraAuthorizationStatus(rawValue: value)
             } else if argument == "--dynamic-type=accessibility3" {
                 configuration.dynamicTypeSize = .accessibility3
+            } else if argument.hasPrefix("--run-detail-fixture=") {
+                let value = String(argument.dropFirst("--run-detail-fixture=".count))
+                configuration.runDetailFixture = RunDetailFixture(rawValue: value)
             }
         }
 
@@ -184,6 +203,13 @@ struct LaunchConfiguration: Equatable {
             return visualState.ownerIssue == 206
         }
         return fixture == .onboarding
+    }
+
+    var initialRoute: AppRoute? {
+        if visualState == .runDetail {
+            return .home(.run(Self.runDetailFixtureID))
+        }
+        return fixture.initialRoute
     }
 
     var initialOnboardingState: OnboardingFlowState {

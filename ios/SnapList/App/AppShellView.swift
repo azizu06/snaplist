@@ -7,6 +7,7 @@ struct AppShellView: View {
     @Bindable var onboardingModel: OnboardingFlowModel
     @Bindable var captureFlow: CaptureFlowModel
     @Bindable var homeStore: HomeStore
+    @Bindable var runStore: RunDetailStore
     let configuration: LaunchConfiguration
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -26,7 +27,7 @@ struct AppShellView: View {
 #if DEBUG
                 if visualState.ownerIssue == 207 {
                     CaptureVisualStateView(state: visualState)
-                } else if visualState.ownerIssue == 208 {
+                } else if visualState.ownerIssue == 208 || visualState == .runDetail {
                     shell
                 } else {
                     VisualStateBoundaryPlaceholder(state: visualState)
@@ -39,6 +40,9 @@ struct AppShellView: View {
             }
         }
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
+        .onOpenURL { url in
+            router.open(url)
+        }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,
                   captureFlow.hasCompletedRestoration else { return }
@@ -168,8 +172,8 @@ struct AppShellView: View {
             FoundationDestinationView(destination: .activity)
         case .home(let route):
             switch route {
-            case .run:
-                FoundationDestinationView(destination: .run)
+            case .run(let runID):
+                RunDetailView(runID: runID, store: runStore)
             default:
                 HomeRouteBoundaryView(route: route)
             }
@@ -299,6 +303,10 @@ private struct OptionalDynamicTypeModifier: ViewModifier {
             store: dependencies.captureDraftStore
         ),
         homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
+        runStore: RunDetailStore(
+            service: UnavailableRunService(),
+            bearerToken: { "preview-bearer" }
+        ),
         configuration: .preview
     )
 }
