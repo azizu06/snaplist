@@ -91,6 +91,36 @@ describe("production item pricing route composition", () => {
     );
 
     expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "unauthorized",
+        message: "Authentication is required.",
+        requestId: expect.any(String),
+      },
+    });
+    expect(forItem).not.toHaveBeenCalled();
+  });
+
+  it("returns the documented JSON 401 before verification when authorization is missing", async () => {
+    const response = await GET(
+      new Request(`https://snaplist.example/v1/items/${itemId}/pricing`),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "unauthorized",
+        message: "Authentication is required.",
+        requestId: expect.any(String),
+      },
+    });
+    expect(verifyToken).not.toHaveBeenCalled();
     expect(forItem).not.toHaveBeenCalled();
   });
 });

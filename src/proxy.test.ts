@@ -1,4 +1,5 @@
 import type { NextFetchEvent } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +21,14 @@ vi.mock("@clerk/nextjs/server", async (importOriginal) => {
 });
 
 import { config, proxy } from "./proxy";
+
+function doesProxyMatch(pathname: string): boolean {
+  return unstable_doesMiddlewareMatch({
+    config,
+    nextConfig: {},
+    url: `https://snaplist.test${pathname}`,
+  });
+}
 
 describe("auth proxy", () => {
   afterEach(() => {
@@ -47,11 +56,29 @@ describe("auth proxy", () => {
   });
 
   it("keeps only the self-authenticating Home route outside cookie middleware", () => {
-    const matcher = new RegExp(`^${config.matcher[0]}$`);
+    expect(doesProxyMatch("/v1/home")).toBe(false);
+    expect(doesProxyMatch("/v1/home/")).toBe(false);
+    expect(doesProxyMatch("/v1/home-other")).toBe(true);
+    expect(doesProxyMatch("/dashboard")).toBe(true);
+  });
 
-    expect(matcher.test("/v1/home")).toBe(false);
-    expect(matcher.test("/v1/home/")).toBe(false);
-    expect(matcher.test("/v1/home-other")).toBe(true);
-    expect(matcher.test("/dashboard")).toBe(true);
+  it("lets the exact native item pricing route own bearer authentication without changing web login", async () => {
+    const itemId = "22222222-2222-4222-8222-222222222222";
+
+    expect(doesProxyMatch(`/v1/items/${itemId}/pricing`)).toBe(false);
+    expect(doesProxyMatch(`/v1/items/${itemId}/pricing/`)).toBe(false);
+    expect(doesProxyMatch(`/v1/items/${itemId}/pricing/history`)).toBe(true);
+
+    const dashboardResponse = await proxy(
+      new NextRequest("https://snaplist.test/dashboard"),
+      {} as NextFetchEvent,
+    );
+    if (!dashboardResponse) {
+      throw new Error("Expected the proxy to return a response");
+    }
+    expect(dashboardResponse.status).toBe(307);
+    expect(dashboardResponse.headers.get("location")).toBe(
+      "https://snaplist.test/login?next=%2Fdashboard",
+    );
   });
 });
