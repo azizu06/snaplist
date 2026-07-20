@@ -215,6 +215,20 @@ final class PricingFeatureTests: XCTestCase {
     }
 
     @MainActor
+    func testManualPriceOverrideWithholdsStalePayoutAndProfit() throws {
+        let store = PricingFeatureStore(model: try makeMinimalFeatureModel())
+
+        XCTAssertEqual(store.currentEstimatedPayout, 49.75)
+        XCTAssertTrue(store.saveCostBasis(20))
+        XCTAssertEqual(store.estimatedProfit, 29.75)
+
+        XCTAssertTrue(store.saveManualPrice(61.24))
+
+        XCTAssertNil(store.currentEstimatedPayout)
+        XCTAssertNil(store.estimatedProfit)
+    }
+
+    @MainActor
     func testSelectionAlwaysResolvesToTheSameVisibleSoldRecord() {
         let store = PricingFeatureStore(model: PricingFeatureFixtures.strong)
 
