@@ -228,6 +228,14 @@ final class PricingFeatureTests: XCTestCase {
         XCTAssertNil(store.estimatedProfit)
     }
 
+    func testCostInputDistinguishesClearFromZeroAndInvalidText() {
+        XCTAssertEqual(PricingCostBasisInput.parse(""), .clear)
+        XCTAssertEqual(PricingCostBasisInput.parse("  \n"), .clear)
+        XCTAssertEqual(PricingCostBasisInput.parse("0"), .value(0))
+        XCTAssertEqual(PricingCostBasisInput.parse("20.56"), .value(20.56))
+        XCTAssertEqual(PricingCostBasisInput.parse("twenty"), .invalid)
+    }
+
     @MainActor
     func testSelectionAlwaysResolvesToTheSameVisibleSoldRecord() {
         let store = PricingFeatureStore(model: PricingFeatureFixtures.strong)
