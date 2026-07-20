@@ -97,6 +97,7 @@ describe("native Seller Home projection", () => {
         id: "20800000-0000-4000-8000-000000000043",
         itemTitle: "Canon AE-1",
         stageLabel: "Finding recent sold comps",
+        reassurance: "You can leave. We’ll notify you when it’s ready.",
         progress: null,
       },
       attention: [
@@ -124,6 +125,7 @@ describe("native Seller Home projection", () => {
         },
       ],
     });
+    expect(projection.currentRun?.reassurance).not.toMatch(/[—–]/u);
   });
 
   it("filters active durable runs before applying the recent-run limit", async () => {
