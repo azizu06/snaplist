@@ -121,7 +121,7 @@ const contractSchema = z
             .strict(),
           z
             .object({
-              input: z.literal("valid-canonical"),
+              input: z.literal("EN-us"),
               normalizedLanguage: z.literal("en-US"),
               transcriptOutcome: z.literal("transcribed"),
             })
@@ -339,11 +339,23 @@ describe("voice-context V1 authority", () => {
         transcriptOutcome: "transcribed",
       },
       {
-        input: "valid-canonical",
+        input: "EN-us",
         normalizedLanguage: "en-US",
         transcriptOutcome: "transcribed",
       },
     ]);
+    const canonicalizedLanguage =
+      contract.transcription.languageNormalizationMatrix.find(
+        ({ input }) => input === "EN-us",
+      );
+    expect(canonicalizedLanguage).toEqual({
+      input: "EN-us",
+      normalizedLanguage: "en-US",
+      transcriptOutcome: "transcribed",
+    });
+    expect(canonicalizedLanguage?.normalizedLanguage).not.toBe(
+      canonicalizedLanguage?.input,
+    );
     expect(contract.authority).toEqual({
       provenance: "seller_voice",
       verification: "unverified",

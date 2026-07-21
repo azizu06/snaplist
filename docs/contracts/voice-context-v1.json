@@ -79,7 +79,7 @@
       { "input": "missing", "normalizedLanguage": null, "transcriptOutcome": "transcribed" },
       { "input": "invalid", "normalizedLanguage": null, "transcriptOutcome": "transcribed" },
       { "input": "oversized", "normalizedLanguage": null, "transcriptOutcome": "transcribed" },
-      { "input": "valid-canonical", "normalizedLanguage": "en-US", "transcriptOutcome": "transcribed" }
+      { "input": "EN-us", "normalizedLanguage": "en-US", "transcriptOutcome": "transcribed" }
     ],
     "providerConstructedByCaller": false,
     "providerModelFrozenByContract": false
