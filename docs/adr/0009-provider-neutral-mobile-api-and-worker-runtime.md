@@ -6,6 +6,12 @@
   upgrade trigger; no hosting or billing change occurs in #195
 - **Preserved owners:** #17, #159, #161, #162, #168, #173, and #174
 
+> **Lean-MVP scope amendment (2026-07-21):** ADR-0008/#349 is product authority for Scan and
+> Trophy Wall. The retained v1 OpenAPI describes current runtime compatibility, not native
+> navigation authority: `/v1/home` is a legacy projection, and the four-photo submission maximum is
+> an implementation gap owned by #352. Optional voice context is owned by #351. These gaps do not
+> authorize the retired Home dashboard or let documentation claim the lean target is already shipped.
+
 ## Context
 
 SnapList is becoming a native SwiftUI product. The existing trusted HTTP surfaces are Next.js route

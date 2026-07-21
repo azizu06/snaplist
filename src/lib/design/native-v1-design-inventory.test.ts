@@ -34,6 +34,13 @@ type NativeDesignInventory = {
   retired_run_rev_delta: Record<string, unknown>;
   superseded_state_families: Array<Record<string, unknown>>;
   retired_state_ids_with_production_provenance: string[];
+  retained_runtime_contracts: Array<{
+    path: string;
+    status: string;
+    legacy_home_projection_is_navigation_authority: boolean;
+    photo_maximum: { current: number; target: number; owner_issue: number };
+    voice_context_owner_issue: number;
+  }>;
   implementation_states: unknown[];
   stop_rules: string[];
 };
@@ -129,6 +136,57 @@ describe("lean native design authority contract", () => {
         "autonomous_marketplace_actions",
       ]),
     );
+  });
+
+  it("classifies retained runtime contracts as implementation gaps, not product authority", () => {
+    const inventory = readInventory();
+
+    expect(inventory.retained_runtime_contracts).toEqual([
+      {
+        path: "docs/contracts/mobile-api-v1.openapi.json",
+        status: "current_runtime_contract_with_lean_mvp_gaps",
+        legacy_home_projection_is_navigation_authority: false,
+        photo_maximum: { current: 4, target: 5, owner_issue: 352 },
+        voice_context_owner_issue: 351,
+      },
+      {
+        path: "ios/DesignContracts/V1/mobile-api-v1.openapi.json",
+        status: "mirrored_runtime_contract_with_lean_mvp_gaps",
+        legacy_home_projection_is_navigation_authority: false,
+        photo_maximum: { current: 4, target: 5, owner_issue: 352 },
+        voice_context_owner_issue: 351,
+      },
+    ]);
+
+    for (const retained of inventory.retained_runtime_contracts) {
+      const contract = JSON.parse(readFileSync(resolve(retained.path), "utf8")) as {
+        paths: Record<string, unknown>;
+        components: {
+          schemas: {
+            MobileItemSubmissionReceipt: {
+              properties: { photos: { maxItems: number } };
+            };
+          };
+        };
+        "x-snaplist-product-authority": Record<string, unknown>;
+      };
+      expect(contract.paths).toHaveProperty("/v1/home");
+      expect(
+        contract.components.schemas.MobileItemSubmissionReceipt.properties.photos
+          .maxItems,
+      ).toBe(retained.photo_maximum.current);
+      expect(contract["x-snaplist-product-authority"]).toEqual({
+        status: "retained_runtime_contract_with_lean_mvp_gaps",
+        leanMvpAuthority: "PRD.md and ADR-0008",
+        legacyHomeProjectionIsPrimaryNavigationAuthority: false,
+        photoMaximumImplementationGap: {
+          current: 4,
+          target: 5,
+          ownerIssue: 352,
+        },
+        voiceContextImplementationGapOwnerIssue: 351,
+      });
+    }
   });
 
   it("keeps the canonical handoff explicit about retired launch concepts", () => {

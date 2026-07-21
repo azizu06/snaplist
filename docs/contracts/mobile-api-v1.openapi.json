@@ -1,5 +1,12 @@
 {
   "openapi": "3.1.0",
+  "x-snaplist-product-authority": {
+    "status": "retained_runtime_contract_with_lean_mvp_gaps",
+    "leanMvpAuthority": "PRD.md and ADR-0008",
+    "legacyHomeProjectionIsPrimaryNavigationAuthority": false,
+    "photoMaximumImplementationGap": {"current": 4, "target": 5, "ownerIssue": 352},
+    "voiceContextImplementationGapOwnerIssue": 351
+  },
   "info": {
     "title": "SnapList Mobile API",
     "version": "1.0.0",

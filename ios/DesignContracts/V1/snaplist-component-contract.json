@@ -1,102 +1,27 @@
 {
-  "version": "lean-scan-trophy-wall-authority-v2",
-  "authority": {
-    "epic": 349,
-    "documentation_issue": 350,
-    "swiftui_implementation_authorized": false,
-    "redirected_high_fidelity_design_required": true
+  "version": "retired-approved-families-v1",
+  "status": "historical_component_evidence_only",
+  "supersededByIssue": 349,
+  "authorizesSwiftUIImplementation": false,
+  "currentProductBoundary": {
+    "primaryDestinations": ["Scan", "Trophy Wall"],
+    "settingsEntry": "profile avatar",
+    "finalGeometryCopyAndInteractions": "awaiting redirected versioned high-fidelity design package"
   },
-  "components": {
-    "floating_dock": {
-      "anatomy": ["Scan", "Trophy Wall"],
-      "metrics": {"left_right_inset": 14, "bottom": 12, "height": 66, "radius": 26, "icon": 24, "label": 12},
-      "material_token": "shadows_and_materials.floating_dock",
-      "states": ["selected", "quiet"],
-      "rules": ["Exactly two primary destinations", "No separate Runs destination", "No activity destination", "Hide while keyboard is visible", "Selected destination uses aria-current/page equivalent"]
-    },
-    "top_header": {
-      "anatomy": ["SnapList wordmark", "Profile avatar"],
-      "metrics": {"status_bar_height": 54, "avatar_target": [44, 44]},
-      "routes": {"avatar": "Settings"}
-    },
-    "button": {
-      "primary": {"height": 54, "radius": 27, "fill": "#3665F3", "font": {"size": 16, "weight": 700}, "active_scale": 0.99},
-      "secondary": {"height": 50, "radius": 25, "border": "1px #D3D6DB", "font": {"size": 15.5, "weight": 600}},
-      "tertiary": {"minimum_target": [44, 44], "foreground": "#3665F3"},
-      "row_pill": {"minimum_height": 44, "font": {"size": 13, "weight": 600}}
-    },
-    "seller_row": {
-      "thumbnail": {"width": 56, "height": 56, "radius": 12},
-      "text": {"title": "row_title", "status_size": 13, "meta_size": 12},
-      "divider": {"token": "strokes.divider", "leading_inset": 82},
-      "card": {"border": "1px #ECEDEF", "radius": 16},
-      "variants": ["attention", "ready_to_finish", "recent_listing"],
-      "status_rule": "Always pair an icon with words."
-    },
-    "chip": {
-      "radius": 999,
-      "font": {"size": 12, "weight": 600},
-      "padding": {"vertical": 4, "horizontal": 10},
-      "variants": {
-        "info": {"fill": "#E4ECFF", "foreground": "#3665F3"},
-        "evidence_strong_source": {"fill": "#EDF1FD", "foreground": "#0031E9", "implementation_foreground": "#3665F3"},
-        "caution": {"fill": "#FBF3E7", "foreground": "#9A6A1B"},
-        "neutral": {"fill": "#F2F3F5", "foreground": "#55585C"}
-      },
-      "filter_target_minimum": [44, 44],
-      "selection_rule": "Expose pressed/selected semantics in addition to fill."
-    },
-    "bottom_sheet": {
-      "top_radius": 26,
-      "grabber": [38, 5],
-      "close_target": [44, 44],
-      "scrim": "rgba(16,18,20,0.42)",
-      "uses": ["CAP-01 launcher", "marketplace explanation", "sign in", "add cost", "set price"]
-    },
-    "native_permission_alert": {
-      "width": 272,
-      "radius": 14,
-      "material_token": "shadows_and_materials.permission_alert",
-      "action_height": 48,
-      "actions": ["Don't Allow", "Allow"],
-      "truth_rule": "Never counterfeit a granted camera authorization."
-    },
-    "pricing_chart": {
-      "plot_viewbox_height": 150,
-      "plot_y_range": [22, 126],
-      "axis_font_size": 12,
-      "axis_color": "#6B6E73",
-      "suggested_line": "dashed",
-      "point_rule": "Every point is a real sold listing represented by the fixture; point count equals stated sold count.",
-      "filters": ["30D", "60D", "90D", "All"]
-    },
-    "pricing_comp_row": {
-      "thumbnail": [42, 42],
-      "thumbnail_radius": 9,
-      "title_size": 13.5,
-      "meta_size": 12,
-      "price_size": 15,
-      "figure_variant": "tabular-nums"
-    },
-    "camera_guidance": {
-      "scene": "edge-to-edge cover",
-      "framing": "adaptive corner strokes",
-      "feedback": "one restrained blue material pill with icon and words",
-      "phrases": ["Move closer", "Whole item is in frame"],
-      "forbidden": ["amber ordinary coaching", "green ordinary coaching", "item crop", "letterbox", "photo seam"]
-    },
-    "scout": {
-      "placement": "free-standing beside a separate text bubble",
-      "forbidden": ["recolor", "crop", "rotate", "mask", "rectangular background", "routine list row", "dock"],
-      "sizes": {"onboarding_hero": 184, "denied": 152, "handoff": 140, "app_icon_mark": 104, "helper": 82, "price_limited": 72}
-    },
-    "trophy_wall_in_progress": {
-      "fill": "#F7F9FC",
-      "border": "#E3E8F2",
-      "radius": 16,
-      "required": ["item thumbnail", "plain-language current state", "local/server identity merge without duplication"],
-      "allowed_states": ["pending upload", "accepted", "analyzing", "ready to review", "needs retry", "published to eBay", "export pack prepared/shared"],
-      "forbidden": ["queue terminology", "worker terminology", "lease terminology", "provider terminology", "fabricated percentage", "fabricated ETA"]
-    }
-  }
+  "retiredContent": {
+    "status": "intentionally removed from active contract",
+    "includes": [
+      "five-tab dock geometry",
+      "Seller Home rows and attention variants",
+      "activity header and bell",
+      "CAP-01 launcher composition",
+      "screen-specific sheets, charts, and Scout placements"
+    ],
+    "historicalSource": "snaplist-implementation-fidelity-package-v1-2026-07-16.zip"
+  },
+  "stopRules": [
+    "Do not infer component anatomy, geometry, copy, or navigation from the retired V1 package.",
+    "Do not begin SwiftUI composition until the redirected design package and owning issue are approved.",
+    "Preserve Dynamic Type, VoiceOver, Reduced Motion, non-color status cues, and minimum 44-by-44-point targets in the future approved contract."
+  ]
 }
