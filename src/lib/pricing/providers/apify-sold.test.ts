@@ -288,6 +288,77 @@ describe("createApifySoldPricingProvider", () => {
     await expect(provider.price(SIGNAL)).resolves.toBeNull();
   });
 
+  it("rejects hostile cached rows without starting the Actor", async () => {
+    const runActor = successfulRun([]);
+    const cache: TtlCache<ApifySoldComp[]> = {
+      get: async () => [
+        {
+          url: "https://evil.example/itm/poisoned-a",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 170,
+        },
+        {
+          url: "https://www.ebay.com/help/poisoned-b",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 190,
+        },
+        {
+          url: "/itm/poisoned-c",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 175,
+        },
+        {
+          url: "itm/poisoned-d",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 185,
+        },
+      ],
+      set: async () => undefined,
+    };
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      runActor,
+      cache,
+    });
+
+    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    expect(runActor).not.toHaveBeenCalled();
+  });
+
+  it("normalizes canonical cached rows without starting the Actor", async () => {
+    const runActor = successfulRun([]);
+    const cache: TtlCache<ApifySoldComp[]> = {
+      get: async () => [
+        {
+          url: "https://www.ebay.com/itm/cache-a?hash=item-a#fragment",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 170,
+        },
+        {
+          url: "https://www.ebay.com/itm/cache-b?hash=item-b#fragment",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 190,
+        },
+      ],
+      set: async () => undefined,
+    };
+    const provider = createApifySoldPricingProvider({
+      enabled: true,
+      token: "secret",
+      runActor,
+      cache,
+    });
+
+    const result = await provider.price(SIGNAL);
+
+    expect(result?.sources.map(({ url }) => url)).toEqual([
+      "https://www.ebay.com/itm/cache-a",
+      "https://www.ebay.com/itm/cache-b",
+    ]);
+    expect(runActor).not.toHaveBeenCalled();
+  });
+
   it("caches successful empty and usable responses so repeat pricing does not start another paid run", async () => {
     const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
     const emptyRun = successfulRun([]);

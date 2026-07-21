@@ -9,9 +9,10 @@ import { selectSoldCompEvidence } from "../sold-comp-matcher";
 import type { ItemSignal, PriceResult, PricingProvider } from "../types";
 import { logEvent, type LogFields } from "../../observability";
 import {
-  assertSafeEbayUrl,
   buildSoldSearchQuery,
+  canonicalEbayItemUrl,
   EBAY_SOLD_MIN_COMPS,
+  normalizeEbaySoldCompUrls,
   synthesizeSoldResult,
   type EbaySoldComp,
 } from "./ebay-sold";
@@ -177,21 +178,6 @@ function conditionFromId(value: unknown): string | undefined {
   if (id === 6000) return "Acceptable";
   if (id === 7000) return "For parts or not working";
   return undefined;
-}
-
-function canonicalEbayItemUrl(value: unknown): string | null {
-  if (typeof value !== "string" || !value.trim()) return null;
-  try {
-    const url = assertSafeEbayUrl(value.trim());
-    if (!url.pathname.toLowerCase().startsWith("/itm/")) return null;
-    url.username = "";
-    url.password = "";
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 function finitePositive(value: unknown): number | null {
@@ -507,7 +493,8 @@ export function createApifySoldPricingProvider(
       const comps = await loadComps(query);
       if (comps == null) return null;
 
-      const evidence = selectSoldCompEvidence(comps, signal);
+      const normalizedComps = normalizeEbaySoldCompUrls(comps);
+      const evidence = selectSoldCompEvidence(normalizedComps, signal);
       const weights = new Map(evidence.anchors.map(({ comp, score }) => [comp, score]));
       const clock = now?.();
       const anchors = evidence.anchors.map(({ comp }) => comp);

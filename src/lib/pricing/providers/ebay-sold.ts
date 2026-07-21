@@ -254,6 +254,40 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
   return u;
 }
 
+/**
+ * Normalize one untrusted sold-listing URL through the canonical eBay item
+ * boundary. Only HTTPS ebay.com hosts with an `/itm/` identity survive; query
+ * and fragment data are not evidence and are removed from the citation.
+ */
+export function canonicalEbayItemUrl(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = assertSafeEbayUrl(value.trim());
+    if (!url.pathname.toLowerCase().startsWith("/itm/")) return null;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeEbaySoldCompUrls(
+  comps: readonly EbaySoldComp[],
+): EbaySoldComp[] {
+  const seen = new Set<string>();
+  const normalized: EbaySoldComp[] = [];
+  for (const comp of comps) {
+    const url = canonicalEbayItemUrl(comp.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    normalized.push({ ...comp, url });
+  }
+  return normalized;
+}
+
 // ---------------------------------------------------------------------------
 // Query formulation + parsing — deterministic, pure, total
 // ---------------------------------------------------------------------------
@@ -1104,7 +1138,8 @@ export function createEbaySoldPricingProvider(
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
-      const evidence = selectSoldCompEvidence(comps, signal);
+      const normalizedComps = normalizeEbaySoldCompUrls(comps);
+      const evidence = selectSoldCompEvidence(normalizedComps, signal);
       const relevant = evidence.anchors.map((entry) => entry.comp);
       const evidenceWeights = new Map(
         evidence.anchors.map((entry) => [entry.comp, entry.score]),

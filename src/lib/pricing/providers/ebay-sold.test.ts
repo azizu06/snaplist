@@ -850,6 +850,26 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(fetchPage.urls[0]).toContain("Sony");
   });
 
+  it("rejects hostile freshly fetched rows through the same sold-item boundary", async () => {
+    const hostileHtml = `<ul class="srp-results">
+      <li class="s-item">
+        <a class="s-item__link" href="https://evil.example/itm/poisoned-a"><div class="s-item__title">Sony WH-1000XM4 Wireless Headphones</div></a>
+        <span class="s-item__price">$170.00</span>
+        <div class="s-item__caption"><span>Sold May 1, 2026</span></div>
+      </li>
+      <li class="s-item">
+        <a class="s-item__link" href="https://www.ebay.com/help/poisoned-b"><div class="s-item__title">Sony WH-1000XM4 Wireless Headphones</div></a>
+        <span class="s-item__price">$190.00</span>
+        <div class="s-item__caption"><span>Sold May 2, 2026</span></div>
+      </li>
+    </ul>`;
+    const fetchPage = fakeFetch(hostileHtml);
+    const provider = createEbaySoldPricingProvider({ fetchPage });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(1);
+  });
+
   it("declines (null) — never throws — when the page fetch is blocked", async () => {
     const fetchPage = blockedFetch();
     const provider = createEbaySoldPricingProvider({ fetchPage });
@@ -960,6 +980,48 @@ describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
     const result = await router.price(BRANDED_SIGNAL);
     expect(result.tier).toBe("branded-web");
   });
+
+  it("falls through without hostile evidence when every cached sold row is rejected", async () => {
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => [
+        {
+          url: "https://evil.example/itm/poisoned-a",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 170,
+        },
+        {
+          url: "https://www.ebay.com/help/poisoned-b",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 190,
+        },
+        {
+          url: "/itm/poisoned-c",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 175,
+        },
+        {
+          url: "itm/poisoned-d",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 185,
+        },
+      ],
+      set: async () => undefined,
+    };
+    const ebaySold = createEbaySoldPricingProvider({
+      fetchPage: fakeFetch(FIXTURE_HTML),
+      cache,
+    });
+    const result = await new PriceRouter([declineIsbn, ebaySold, brandedStub]).price(
+      BRANDED_SIGNAL,
+    );
+
+    expect(result).toMatchObject({ tier: "branded-web", suggested: 150 });
+    expect(result.sources).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ url: expect.stringContaining("poisoned") }),
+      ]),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1086,67 @@ describe("parseSoldComps — sale-date capture (#59)", () => {
 });
 
 describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
+  it("rejects hostile cached rows before they can produce sold authority", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => [
+        {
+          url: "https://evil.example/itm/poisoned-a",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 170,
+        },
+        {
+          url: "https://www.ebay.com/help/poisoned-b",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 190,
+        },
+        {
+          url: "/itm/poisoned-c",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 175,
+        },
+        {
+          url: "itm/poisoned-d",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 185,
+        },
+      ],
+      set: async () => undefined,
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
+  it("normalizes canonical cached rows without fetching", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => [
+        {
+          url: "https://www.ebay.com/itm/cache-a?hash=item-a#fragment",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 170,
+        },
+        {
+          url: "https://www.ebay.com/itm/cache-b?hash=item-b#fragment",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 190,
+        },
+      ],
+      set: async () => undefined,
+    };
+    const provider = createEbaySoldPricingProvider({ fetchPage, cache });
+
+    const result = await provider.price(BRANDED_SIGNAL);
+
+    expect(result?.sources.map(({ url }) => url)).toEqual([
+      "https://www.ebay.com/itm/cache-a",
+      "https://www.ebay.com/itm/cache-b",
+    ]);
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
   it("cache-miss → fetch; cache-hit within TTL → reuse (no second fetch)", async () => {
     const fetchPage = fakeFetch(FIXTURE_HTML);
     const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
