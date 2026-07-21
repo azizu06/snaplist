@@ -1,0 +1,25 @@
+{
+  "source_commit": "b01d9b4d59b884392434d65675943e276fd2a5e8",
+  "status": "repository_archive_integrity",
+  "files": [
+    {"path": "ARCHIVE-NOTICE.md", "sha256": "d69900c82ce8fb6d360eb012053292e2f9b670212c30f3ba00b6a5660be8ea34"},
+    {"path": "CAMERA-MASCOT-SYSTEM.md", "sha256": "b1aa3d6b024e76a9e5575cee58b8215e588840faf584480f2bc794cce871f6fa"},
+    {"path": "CLAUDE-DESIGN-CONTRACT-EXTRACT.txt", "sha256": "cb1ee6f8dfc170f94031909988ebb0d5033699bf6ebf2829c6f456aea046c189"},
+    {"path": "GLOBAL-CONTRACT-POINTERS.md", "sha256": "f3ede96514cf90aa41938cd494caf0b1e6e4c6209b11102c71d773e83b3e6f57"},
+    {"path": "README-FIRST.md", "sha256": "355ceffd8cb59aba92aeb692f5f8b8da0670173cb8a3e02e189c9e159140a08d"},
+    {"path": "SOURCE-MANIFEST.json", "sha256": "e455de5897334eb824b5b9ef1e41f392817aaa362094f7d982b73d7548301d7a"},
+    {"path": "mobile-api-v1.openapi.json", "sha256": "943e8be5b782aee8a5164dc8c3dbaf847031ab5ea39ec78fd04edd89c71628f2"},
+    {"path": "mobile-item-submission-response.json", "sha256": "e6e78804476ab90ff22d716e4442726a9c8d6196fcab1b51bbbf4f3efa4b12bb"},
+    {"path": "snaplist-asset-manifest.json", "sha256": "de6524141fb994da0f897bab9704f2fde08a5f9969f83bcf0b9b104eb544ce22"},
+    {"path": "snaplist-component-contract.json", "sha256": "51bb381e843556ba4ac9a157d3f6ae29031fcc8486bdae05816893e9cbf6825c"},
+    {"path": "snaplist-copy-catalog.json", "sha256": "233c27b9ea20a21c2ebbedc893120c052abb3647c7e8ab4f6f357b0f3aecc340"},
+    {"path": "snaplist-design-tokens.json", "sha256": "63427894ddb9f862613a797318d52cb307b52e4f887792b5ad9b5f4b73794384"},
+    {"path": "snaplist-interaction-routes.json", "sha256": "170b4ad052bcb5acbff1b32a32c45e34f9f44fcf8e25ad57c31922ebf33081fe"},
+    {"path": "snaplist-screen-specs.json", "sha256": "f595c08382b2ea77b42ed928d7d755eeee69ca76594c21a901bd6f36308ea795"},
+    {"path": "snaplist-swiftui-mapping-notes.md", "sha256": "8a35afe6d35397dd5fb9baff8a127924ab361209d3e251010cb47f537a5c737f"},
+    {"path": "snaplist-visual-regression-manifest.json", "sha256": "b92895936bd1ff2c1b0354ee92721160f057941a4bab0cebbabb22a060ca42d6"},
+    {"path": "../../V1/assets/pose-01-coaching-photo.png", "sha256": "997a00086c5a68111578fd6d040b2451e31c909d8616bbdabd8b938df643dd63"},
+    {"path": "../../V1/assets/pose-01-uncertain.png", "sha256": "97842333f24334530240466e2b8cf0ccf64b7f36918ef0c152db237b87e4e03c"},
+    {"path": "../../V1/assets/pose-03-review-photo.png", "sha256": "34c8cb19456f809535cf824f91f622bf5dd4cd860921ac1bf70601dae62de24b"}
+  ]
+}

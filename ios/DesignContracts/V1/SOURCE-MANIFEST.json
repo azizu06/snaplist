@@ -13,7 +13,9 @@
     "packagePath": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
     "packageSHA256": "13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415",
     "verifiedAt": "2026-07-16",
-    "retainedAsEvidence": true
+    "retainedAsEvidence": true,
+    "repositoryArchive": "ios/DesignContracts/Retired/V1-2026-07-16",
+    "binaryAssets": "ios/DesignContracts/V1/assets"
   },
   "supersededScope": [
     "five-tab navigation",

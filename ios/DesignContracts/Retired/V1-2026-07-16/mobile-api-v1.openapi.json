@@ -1,0 +1,269 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SnapList Mobile API",
+    "version": "1.0.0",
+    "description": "Provider-neutral HTTP contract for the native SwiftUI client. Contract-only operations are owned by the linked follow-up issue until implemented."
+  },
+  "servers": [{ "url": "{origin}", "variables": { "origin": { "default": "http://127.0.0.1:3001" } } }],
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "x-implementation-status": "proof",
+        "responses": { "200": { "description": "Runtime is accepting requests", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthEnvelope" } } } } }
+      }
+    },
+    "/v1/session": {
+      "get": {
+        "operationId": "getSession",
+        "x-implementation-status": "proof",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Verified Clerk subject used by Supabase RLS", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/home": {
+      "get": {
+        "operationId": "getHome",
+        "x-owner-issue": 208,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Tenant-scoped Seller Home projection from durable server truth", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HomeEnvelope" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "description": "The read-only Home projection is temporarily unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+        }
+      }
+    },
+    "/v1/items/{itemId}/pricing": {
+      "parameters": [{ "name": "itemId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "get": {
+        "operationId": "getItemPricing",
+        "x-owner-issue": 240,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": {
+          "200": { "description": "Latest coherent immutable tenant-scoped pricing evidence snapshot", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PricingEvidenceEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/guest/attestations": {
+      "post": {
+        "operationId": "verifyGuestAttestation",
+        "x-owner-issue": 174,
+        "x-implementation-status": "contract-only",
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["attestation", "challenge"], "properties": { "attestation": { "type": "string" }, "challenge": { "type": "string" } } } } } },
+        "responses": { "202": { "description": "Attestation accepted for server verification", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GuestAttestationEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
+      }
+    },
+    "/v1/guest/claims": {
+      "post": {
+        "operationId": "claimGuestDraft",
+        "x-owner-issue": 175,
+        "x-related-owner-issues": [174, 181],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }, { "name": "X-SnapList-Guest-Handoff", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Opaque handoff verified by issue #174. It contains no client-defined deadline or account owner." }],
+        "responses": {
+          "200": { "description": "Stable claimed or expired outcome. Either terminal outcome requires local encrypted recovery deletion.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GuestClaimEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/InvalidRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/items/runs": {
+      "post": {
+        "operationId": "createItemRun",
+        "x-owner-issue": 334,
+        "x-related-owner-issues": [159, 333, 332],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/CreateItemRunMultipart" } } } },
+        "responses": {
+          "200": { "description": "Exact idempotent replay of the previously committed submission", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MobileItemSubmissionEnvelope" } } } },
+          "202": { "description": "Item, allowance reservation, run, and queue message durably committed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MobileItemSubmissionEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Existing AI-item credit policy denied this submission; error.details.reason is stable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "409": { "description": "Idempotency key conflicts with different bytes, order, or cost basis", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "429": { "description": "Existing daily or per-minute submission capacity was reached; error.details.reason is stable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/runs/{runId}": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }],
+      "get": {
+        "operationId": "getRun",
+        "x-owner-issue": 241,
+        "x-related-owner-issues": [159, 161, 168, 175],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": { "200": { "description": "Canonical tenant-owned durable run", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/v1/runs/{runId}/retry": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+      "post": {
+        "operationId": "retryRun",
+        "x-owner-issue": 241,
+        "x-related-owner-issues": [161, 168],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": { "202": { "description": "Legal retry committed for the same logical run; response is a canonical refresh", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/v1/runs/{runId}/cancel": {
+      "parameters": [{ "$ref": "#/components/parameters/RunId" }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+      "post": {
+        "operationId": "cancelRun",
+        "x-owner-issue": 241,
+        "x-related-owner-issues": [161, 168],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": { "200": { "description": "Legal cancellation committed; response confirms canonical preserved run truth", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+      }
+    },
+    "/v1/billing/revenuecat/identity": {
+      "post": {
+        "operationId": "bindRevenueCatIdentity",
+        "x-owner-issue": 173,
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": { "200": { "description": "Server-bound RevenueCat configuration for the verified Clerk principal; no request user id is accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RevenueCatConfigurationEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/v1/entitlements/ai-items": {
+      "get": {
+        "operationId": "getAiItemEntitlement",
+        "x-owner-issue": 168,
+        "x-related-owner-issues": [173],
+        "x-implementation-status": "implemented",
+        "security": [{ "ClerkBearer": [] }],
+        "responses": { "200": { "description": "Server-authoritative allowance period and remaining items", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AiItemEntitlementEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/v1/ebay/oauth/sessions": {
+      "post": {
+        "operationId": "createEbayOauthSession",
+        "x-owner-issue": 17,
+        "x-implementation-status": "contract-only",
+        "security": [{ "ClerkBearer": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "responses": { "201": { "description": "Server-created OAuth state and authorization URL; provider tokens never transit SwiftUI", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayOauthSessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/v1/ebay/oauth/callback": {
+      "get": {
+        "operationId": "completeEbayOauthCallback",
+        "x-owner-issue": 17,
+        "x-implementation-status": "contract-only",
+        "parameters": [
+          { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "code", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "error", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": { "303": { "description": "Redirects to an app universal link carrying only an opaque completion result" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
+      }
+    },
+    "/v1/webhooks/revenuecat": {
+      "post": {
+        "operationId": "receiveRevenueCatWebhook",
+        "x-owner-issue": 173,
+        "x-implementation-status": "implemented",
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Operator-configured exact secret value" },
+          { "name": "X-RevenueCat-Webhook-Signature", "in": "header", "required": true, "schema": { "type": "string" }, "description": "HMAC timestamp and digest over the raw JSON body" }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "description": "RevenueCat lifecycle event; verified before tenant mapping or parsing" } } } },
+        "responses": { "200": { "description": "Verified and applied, reconciled, duplicated, or intentionally ignored" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
+      }
+    },
+    "/internal/v1/pipeline/consume": {
+      "post": {
+        "operationId": "consumePipelineQueue",
+        "x-owner-issue": 162,
+        "x-implementation-status": "proof",
+        "security": [{ "InternalBearer": [] }],
+        "responses": { "200": { "description": "One bounded consume pass", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WorkerSummaryEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ClerkBearer": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT", "description": "Server verifies Clerk issuer, signature, expiry, and subject, and enforces configured authorized-party validation when an azp claim is present. The same token is forwarded only to an RLS-scoped Supabase client." },
+      "GuestBearer": { "type": "http", "scheme": "bearer", "description": "Opaque, short-lived guest capability minted only after App Attest verification." },
+      "InternalBearer": { "type": "http", "scheme": "bearer", "description": "Scheduler/worker secret or stronger platform identity; never available to SwiftUI." }
+    },
+    "parameters": {
+      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "format": "uuid" }, "description": "Stable per logical mutation; replay returns the original result and never creates another run, credit, or provider action." },
+      "RunId": { "name": "runId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+    },
+    "responses": {
+      "Unauthorized": { "description": "Missing or invalid authentication", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+      "InvalidRequest": { "description": "Invalid or illegal state transition", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+      "Conflict": { "description": "The durable run changed or the requested transition is not legal", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+      "Unavailable": { "description": "The server could not complete the operation safely; retry is permitted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } },
+      "NotFound": { "description": "Resource absent or hidden by tenant isolation", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
+    },
+    "schemas": {
+      "ErrorEnvelope": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code", "message", "requestId"], "properties": { "code": { "type": "string", "enum": ["unauthorized", "forbidden", "invalid_request", "not_found", "method_not_allowed", "conflict", "rate_limited", "internal_error"] }, "message": { "type": "string" }, "requestId": { "type": "string" }, "details": { "type": "object", "additionalProperties": true } } } } },
+      "HealthEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["apiVersion", "status"], "properties": { "apiVersion": { "const": "v1" }, "status": { "const": "ok" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "SessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "HomeEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/HomeProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "HomeProjection": { "type": "object", "additionalProperties": false, "required": ["revision", "sellerState", "unreadNotificationCount", "summary", "attention", "currentRun", "readyToFinish", "listings", "recentSearches"], "properties": { "revision": { "type": "integer", "minimum": 0 }, "sellerState": { "type": "string", "enum": ["active", "newSeller"] }, "unreadNotificationCount": { "type": "integer", "minimum": 0 }, "summary": { "$ref": "#/components/schemas/HomeSummary" }, "attention": { "type": "array", "items": { "$ref": "#/components/schemas/HomeAttentionTask" } }, "currentRun": { "oneOf": [{ "$ref": "#/components/schemas/HomeCurrentRun" }, { "type": "null" }] }, "readyToFinish": { "type": "array", "items": { "$ref": "#/components/schemas/HomeFinishItem" } }, "listings": { "type": "array", "items": { "$ref": "#/components/schemas/HomeListing" } }, "recentSearches": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },
+      "HomeSummary": { "type": "object", "additionalProperties": false, "required": ["active", "drafts", "orders"], "properties": { "active": { "type": "integer", "minimum": 0 }, "drafts": { "type": "integer", "minimum": 0 }, "orders": { "type": ["integer", "null"], "minimum": 0 } } },
+      "HomeAttentionTask": { "type": "object", "additionalProperties": false, "required": ["id", "itemTitle", "kind", "status", "detail", "actionLabel", "destination"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemTitle": { "type": "string", "minLength": 1 }, "kind": { "type": "string", "enum": ["shipping", "message", "offer", "warning", "pricing"] }, "status": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "actionLabel": { "type": "string", "minLength": 1 }, "destination": { "$ref": "#/components/schemas/HomeDestination" } } },
+      "HomeDestination": { "type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": { "kind": { "type": "string", "enum": ["order", "conversation", "publishIssue", "draft"] }, "id": { "type": "string", "format": "uuid" } } },
+      "HomeCurrentRun": { "type": "object", "additionalProperties": false, "required": ["id", "itemTitle", "stageLabel", "reassurance", "progress"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemTitle": { "type": "string", "minLength": 1 }, "stageLabel": { "type": "string", "minLength": 1 }, "reassurance": { "type": "string", "minLength": 1 }, "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 1 } } },
+      "HomeFinishItem": { "type": "object", "additionalProperties": false, "required": ["id", "title", "detail"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 } } },
+      "HomeListing": { "type": "object", "additionalProperties": false, "required": ["id", "title", "lifecycle", "statusLabel", "detail", "price", "destination"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1 }, "lifecycle": { "type": "string", "enum": ["active", "draft", "sold", "needsAttention", "resolvedConversation"] }, "statusLabel": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "price": { "type": ["string", "null"] }, "destination": { "oneOf": [{ "$ref": "#/components/schemas/HomeDestination" }, { "type": "null" }] } } },
+      "PricingEvidenceEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PricingEvidenceProjection" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "PricingEvidenceProjection": { "type": "object", "additionalProperties": false, "required": ["item", "priceResult", "evidenceLevel", "evidenceAsOf", "evidenceAgeDays", "isStale", "defaultWindow", "comparables", "estimatedFees", "estimatedPayout", "chartBounds"], "properties": { "item": { "$ref": "#/components/schemas/PricingItem" }, "priceResult": { "$ref": "#/components/schemas/PriceResult" }, "evidenceLevel": { "type": "string", "enum": ["strong", "limited"] }, "evidenceAsOf": { "type": "string", "format": "date-time" }, "evidenceAgeDays": { "type": "number", "minimum": 0 }, "isStale": { "type": "boolean" }, "defaultWindow": { "type": "string", "enum": ["60D", "90D"] }, "comparables": { "type": "array", "maxItems": 60, "items": { "$ref": "#/components/schemas/PricingComparable" } }, "estimatedFees": { "type": "number", "minimum": 0 }, "estimatedPayout": { "type": "number", "minimum": 0 }, "chartBounds": { "oneOf": [{ "$ref": "#/components/schemas/PricingChartBounds" }, { "type": "null" }] } } },
+      "PricingItem": { "type": "object", "additionalProperties": false, "required": ["id", "title"], "properties": { "id": { "type": "string", "format": "uuid" }, "title": { "type": "string", "minLength": 1, "maxLength": 500 }, "condition": { "type": "string", "minLength": 1, "maxLength": 120 } } },
+      "PriceResult": { "type": "object", "additionalProperties": false, "required": ["suggested", "range", "confidence", "sources", "tier"], "properties": { "suggested": { "type": "number", "minimum": 0 }, "range": { "$ref": "#/components/schemas/PriceRange" }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "sources": { "type": "array", "items": { "$ref": "#/components/schemas/PriceSource" } }, "evidence": { "type": "array", "maxItems": 60, "items": { "$ref": "#/components/schemas/PricingEvidenceRecord" } }, "tier": { "type": "string", "enum": ["isbn-lookup", "ebay-sold", "upc-aided-web", "branded-web", "depreciation", "llm-only"] }, "model": { "type": "string" }, "compAgreement": { "type": "number", "minimum": 0, "maximum": 1 } } },
+      "PriceRange": { "type": "object", "additionalProperties": false, "required": ["min", "max"], "properties": { "min": { "type": "number", "minimum": 0 }, "max": { "type": "number", "minimum": 0 } } },
+      "PricingChartBounds": { "type": "object", "additionalProperties": false, "required": ["min", "max"], "properties": { "min": { "type": "number", "minimum": 0 }, "max": { "type": "number", "exclusiveMinimum": 0 } } },
+      "PriceSource": { "type": "object", "additionalProperties": false, "required": ["url"], "properties": { "url": { "type": "string", "format": "uri", "maxLength": 2048 }, "title": { "type": "string" }, "kind": { "type": "string" } } },
+      "PricingEvidenceRecord": { "type": "object", "additionalProperties": false, "required": ["id", "sourceUrl", "price", "currency", "kind", "priceDisclosure"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 2048 }, "sourceUrl": { "type": "string", "format": "uri", "maxLength": 2048 }, "title": { "type": "string", "minLength": 1, "maxLength": 500 }, "price": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000000 }, "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }, "condition": { "type": "string", "minLength": 1, "maxLength": 120 }, "soldAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }, "kind": { "type": "string", "const": "sold-comparable" }, "priceDisclosure": { "type": "string", "enum": ["displayed-sold-price", "asking-price-not-accepted-amount"] } } },
+      "PricingComparable": { "type": "object", "additionalProperties": false, "required": ["id", "sourceUrl", "price", "currency", "kind", "priceDisclosure", "evidenceAsOf"], "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 2048 }, "sourceUrl": { "type": "string", "format": "uri", "maxLength": 2048 }, "title": { "type": "string", "minLength": 1, "maxLength": 500 }, "price": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000000 }, "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }, "condition": { "type": "string", "minLength": 1, "maxLength": 120 }, "soldAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }, "kind": { "type": "string", "const": "sold-comparable" }, "priceDisclosure": { "type": "string", "const": "displayed-sold-price" }, "evidenceAsOf": { "type": "string", "format": "date-time" } } },
+      "GuestAttestationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["attestationId", "status"], "properties": { "attestationId": { "type": "string", "format": "uuid" }, "status": { "const": "pending_verification" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "EncryptedGuestRecoveryArtifact": { "type": "object", "required": ["version", "algorithm", "keyId", "keyEnvelope", "nonce", "tag", "ciphertext"], "properties": { "version": { "const": 1 }, "algorithm": { "const": "aes-256-gcm" }, "keyId": { "type": "string" }, "keyEnvelope": { "type": "string" }, "nonce": { "type": "string" }, "tag": { "type": "string" }, "ciphertext": { "type": "string" } }, "additionalProperties": false },
+      "GuestClaimStorageEncryption": { "type": "object", "required": ["algorithm", "keyId", "nonce", "tag"], "properties": { "algorithm": { "const": "aes-256-gcm" }, "keyId": { "type": "string" }, "nonce": { "type": "string" }, "tag": { "type": "string" } }, "additionalProperties": false },
+      "GuestClaimVerifiedObject": { "type": "object", "required": ["destinationPath", "sha256", "byteLength", "encryption"], "properties": { "destinationPath": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "byteLength": { "type": "integer", "minimum": 1, "maximum": 52428800 }, "encryption": { "$ref": "#/components/schemas/GuestClaimStorageEncryption" } }, "additionalProperties": false },
+      "GuestClaimAccountRecovery": { "type": "object", "required": ["encryptedArtifact", "storageManifest"], "properties": { "encryptedArtifact": { "$ref": "#/components/schemas/EncryptedGuestRecoveryArtifact" }, "storageManifest": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/components/schemas/GuestClaimVerifiedObject" } } }, "additionalProperties": false },
+      "GuestClaimClaimedOutcome": { "type": "object", "required": ["outcome", "itemId", "runId", "draftId", "purgeLocalRecovery", "accountRecovery"], "properties": { "outcome": { "const": "claimed" }, "itemId": { "type": "string", "format": "uuid" }, "runId": { "type": "string", "format": "uuid" }, "draftId": { "type": "string", "format": "uuid" }, "purgeLocalRecovery": { "const": true }, "accountRecovery": { "$ref": "#/components/schemas/GuestClaimAccountRecovery" } }, "additionalProperties": false },
+      "GuestClaimExpiredOutcome": { "type": "object", "required": ["outcome", "itemId", "runId", "draftId", "purgeLocalRecovery"], "properties": { "outcome": { "const": "expired" }, "itemId": { "type": "string", "format": "uuid" }, "runId": { "type": "string", "format": "uuid" }, "draftId": { "type": "string", "format": "uuid" }, "purgeLocalRecovery": { "const": true } }, "additionalProperties": false },
+      "GuestClaimEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "oneOf": [{ "$ref": "#/components/schemas/GuestClaimClaimedOutcome" }, { "$ref": "#/components/schemas/GuestClaimExpiredOutcome" }] }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "RevenueCatConfigurationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["configured", "appUserId"], "properties": { "configured": { "type": "boolean" }, "appUserId": { "type": "string" }, "publicSdkKey": { "type": "string" }, "entitlementId": { "type": "string" }, "monthlyProductId": { "type": "string" }, "offeringId": { "type": "string" }, "transitionState": { "type": "string", "enum": ["not_required", "required", "reconciled"] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["billingSource", "status", "remainingItems", "periodStart", "periodEnd", "gracePeriodEnd", "transitionState", "legacyStripeStatus"], "properties": { "billingSource": { "type": "string", "enum": ["included", "storekit", "none"] }, "status": { "type": "string", "enum": ["included", "active", "grace", "billing_retry", "expired", "revoked", "refunded", "ambiguous", "unconfigured"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": ["string", "null"], "format": "date-time" }, "periodEnd": { "type": ["string", "null"], "format": "date-time" }, "gracePeriodEnd": { "type": ["string", "null"], "format": "date-time" }, "transitionState": { "type": ["string", "null"], "enum": ["not_required", "required", "reconciled", null] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "EbayOauthSessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["sessionId", "authorizationUrl", "expiresAt"], "properties": { "sessionId": { "type": "string", "format": "uuid" }, "authorizationUrl": { "type": "string", "format": "uri" }, "expiresAt": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "ResponseMeta": { "type": "object", "required": ["requestId"], "properties": { "requestId": { "type": "string" } } },
+      "CreateItemRunMultipart": { "type": "object", "required": ["photo"], "properties": { "photo": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "format": "binary", "description": "JPEG, PNG, or WebP image bytes" } }, "costBasis": { "type": "number", "minimum": 0 } }, "additionalProperties": false },
+      "MobileItemSubmissionPhoto": { "type": "object", "additionalProperties": false, "required": ["ordinal", "contentSha256", "byteLength", "mediaType"], "properties": { "ordinal": { "type": "integer", "minimum": 0, "maximum": 3 }, "contentSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "byteLength": { "type": "integer", "minimum": 1, "maximum": 52428800 }, "mediaType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"] } } },
+      "MobileItemSubmissionPhotoIdentity": { "type": "object", "additionalProperties": false, "required": ["kind", "fingerprint"], "properties": { "kind": { "const": "content_sha256_set_v1" }, "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+      "MobileItemSubmissionReceipt": { "type": "object", "additionalProperties": false, "required": ["itemId", "runId", "status", "stage", "photoIdentity", "photos"], "properties": { "itemId": { "type": "string", "format": "uuid" }, "runId": { "type": "string", "format": "uuid" }, "status": { "const": "queued" }, "stage": { "const": "queued" }, "photoIdentity": { "$ref": "#/components/schemas/MobileItemSubmissionPhotoIdentity" }, "photos": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/components/schemas/MobileItemSubmissionPhoto" } } } },
+      "MobileItemSubmissionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/MobileItemSubmissionReceipt" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "RunTimestamps": { "type": "object", "additionalProperties": false, "required": ["createdAt", "updatedAt", "enqueuedAt", "startedAt", "lastAttemptedAt", "nextAttemptAt", "completedAt", "retentionCleanedAt"], "properties": { "createdAt": { "type": "string", "format": "date-time" }, "updatedAt": { "type": "string", "format": "date-time" }, "enqueuedAt": { "type": ["string", "null"], "format": "date-time" }, "startedAt": { "type": ["string", "null"], "format": "date-time" }, "lastAttemptedAt": { "type": ["string", "null"], "format": "date-time" }, "nextAttemptAt": { "type": ["string", "null"], "format": "date-time" }, "completedAt": { "type": ["string", "null"], "format": "date-time" }, "retentionCleanedAt": { "type": ["string", "null"], "format": "date-time" } } },
+      "RunItem": { "type": "object", "additionalProperties": false, "required": ["title", "photoCount"], "properties": { "title": { "type": "string", "minLength": 1 }, "photoCount": { "type": "integer", "minimum": 0 } } },
+      "RunRequiredInput": { "type": ["object", "null"], "additionalProperties": false, "required": ["reason", "destination"], "properties": { "reason": { "type": "string", "minLength": 1 }, "destination": { "type": "string", "enum": ["identity", "photos", "listing"] } } },
+      "RunSafeFailure": { "type": ["object", "null"], "additionalProperties": false, "required": ["reason", "detail", "retryable", "workPreserved"], "properties": { "reason": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "retryable": { "type": "boolean" }, "workPreserved": { "type": "boolean" } } },
+      "RunLegalActions": { "type": "object", "additionalProperties": false, "required": ["canRetry", "canCancel", "canOpenReview", "canStartNewCapture"], "properties": { "canRetry": { "type": "boolean" }, "canCancel": { "type": "boolean" }, "canOpenReview": { "type": "boolean" }, "canStartNewCapture": { "type": "boolean" } } },
+      "RunEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/PipelineRun" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "PipelineRun": { "type": "object", "additionalProperties": false, "required": ["id", "itemId", "listingId", "status", "stage", "attemptCount", "maxAttempts", "schemaVersion", "timestamps", "requiredInput", "terminalOutcome", "safeFailure", "allowance", "legalActions", "lastMeaningfulUpdateAt", "retentionCleanedAt"], "properties": { "id": { "type": "string", "format": "uuid" }, "itemId": { "type": "string", "format": "uuid" }, "listingId": { "type": ["string", "null"], "format": "uuid" }, "status": { "type": "string", "enum": ["queued", "running", "retrying", "succeeded", "failed", "canceled"] }, "stage": { "type": "string", "enum": ["queued", "identifying", "pricing", "generating", "persisting", "completed"] }, "attemptCount": { "type": "integer", "minimum": 0 }, "maxAttempts": { "type": "integer", "minimum": 1 }, "schemaVersion": { "const": 1 }, "timestamps": { "$ref": "#/components/schemas/RunTimestamps" }, "item": { "oneOf": [{ "$ref": "#/components/schemas/RunItem" }, { "type": "null" }] }, "requiredInput": { "$ref": "#/components/schemas/RunRequiredInput" }, "terminalOutcome": { "type": ["string", "null"], "enum": ["succeeded", "failed", "canceled", null] }, "safeFailure": { "$ref": "#/components/schemas/RunSafeFailure" }, "allowance": { "type": "string", "enum": ["reserved", "settled", "restored", "unchanged"] }, "legalActions": { "$ref": "#/components/schemas/RunLegalActions" }, "lastMeaningfulUpdateAt": { "type": "string", "format": "date-time" }, "retentionCleanedAt": { "type": ["string", "null"], "format": "date-time" } } },
+      "WorkerSummaryEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "$ref": "#/components/schemas/WorkerSummary" }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "WorkerSummary": { "type": "object", "required": ["claimed", "succeeded", "retrying", "failed", "skipped"], "properties": { "claimed": { "type": "integer", "minimum": 0 }, "succeeded": { "type": "integer", "minimum": 0 }, "retrying": { "type": "integer", "minimum": 0 }, "failed": { "type": "integer", "minimum": 0 }, "skipped": { "type": "integer", "minimum": 0 } } }
+    }
+  }
+}

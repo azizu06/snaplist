@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 type NativeDesignInventory = {
@@ -136,6 +137,21 @@ describe("lean native design authority contract", () => {
         "autonomous_marketplace_actions",
       ]),
     );
+  });
+
+  it("keeps the retired V1 text package and shared assets checksum-verifiable", () => {
+    const archiveRoot = resolve("ios/DesignContracts/Retired/V1-2026-07-16");
+    const manifest = JSON.parse(
+      readFileSync(resolve(archiveRoot, "ARCHIVE-MANIFEST.json"), "utf8"),
+    ) as { files: Array<{ path: string; sha256: string }> };
+
+    for (const file of manifest.files) {
+      const retainedPath = resolve(archiveRoot, file.path);
+      const digest = createHash("sha256")
+        .update(readFileSync(retainedPath))
+        .digest("hex");
+      expect(digest, file.path).toBe(file.sha256);
+    }
   });
 
   it("classifies retained runtime contracts as implementation gaps, not product authority", () => {

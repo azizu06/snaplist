@@ -66,7 +66,9 @@
     "sha256": "13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415",
     "status": "superseded_by_issue_349",
     "historical_evidence_retained": true,
-    "authorizes_new_implementation": false
+    "authorizes_new_implementation": false,
+    "repository_archive": "ios/DesignContracts/Retired/V1-2026-07-16",
+    "binary_assets": "ios/DesignContracts/V1/assets"
   },
   "retired_run_rev_delta": {
     "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",

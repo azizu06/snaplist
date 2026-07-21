@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -94,6 +94,18 @@ const inventory = JSON.parse(
   retired_state_ids_with_production_provenance: string[];
   implementation_states: unknown[];
 };
+const assetManifests = [
+  "ios/DesignContracts/V1/snaplist-asset-manifest.json",
+  "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-asset-manifest.json",
+].map((manifestPath) => ({
+  manifestPath,
+  manifest: JSON.parse(readFileSync(resolve(manifestPath), "utf8")) as {
+    scout: Array<{
+      file: string;
+      allowed?: Array<{ state: string }>;
+    }>;
+  },
+}));
 describe("Scout guidance catalog contract", () => {
   it("validates the checked-in provider-neutral V1 catalog", () => {
     expect(scoutGuidanceCatalogSchema.parse(catalog)).toEqual(catalog);
@@ -241,6 +253,34 @@ describe("Scout guidance catalog contract", () => {
       false,
     );
     expect(inventory.implementation_states).toEqual([]);
+    const allowedPlacements = new Map<string, Set<string>>();
+    for (const { manifestPath, manifest } of assetManifests) {
+      for (const asset of manifest.scout) {
+        const assetName = asset.file.split("/").at(-1) ?? asset.file;
+        const states = allowedPlacements.get(assetName) ?? new Set<string>();
+        for (const placement of asset.allowed ?? []) states.add(placement.state);
+        allowedPlacements.set(assetName, states);
+
+        const manifestDirectory = resolve(manifestPath, "..");
+        const manifestAssetPath = resolve(manifestDirectory, asset.file);
+        const sharedV1AssetPath = resolve(
+          "ios/DesignContracts/V1/assets",
+          assetName,
+        );
+        const resolvedPackageAssetPath = resolve(
+          manifestDirectory,
+          "..",
+          "assets",
+          assetName,
+        );
+        expect(
+          existsSync(manifestAssetPath) ||
+            existsSync(sharedV1AssetPath) ||
+            existsSync(resolvedPackageAssetPath),
+          `${asset.file} must exist in its manifest package or the retained V1 asset directory`,
+        ).toBe(true);
+      }
+    }
     for (const [state, definition] of Object.entries(catalog.states) as Array<
       [
         string,
@@ -254,6 +294,16 @@ describe("Scout guidance catalog contract", () => {
         expect(
           retiredStateIds.has(approvedStateId),
           `${state} must retain explicit provenance for retired state ${approvedStateId}`,
+        ).toBe(true);
+        if (!definition.guide.scoutAsset) continue;
+        const placementState = approvedStateId.startsWith("ONB-09-")
+          ? "ONB-09"
+          : approvedStateId.startsWith("CAP-02")
+            ? "CAP-02"
+            : approvedStateId;
+        expect(
+          allowedPlacements.get(definition.guide.scoutAsset)?.has(placementState),
+          `${definition.guide.scoutAsset} must retain approved placement provenance for ${approvedStateId}`,
         ).toBe(true);
       }
       expect(definition.guide).toMatchObject({

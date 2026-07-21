@@ -16,11 +16,13 @@ Current product authority:
 - eBay as the only direct-publish destination;
 - Facebook Marketplace, Mercari, and Depop as prepared/shared export packs only.
 
-The original design tokens, screen specs, routes, copy, assets, screenshots, and checksums are retained
-only to preserve historical evidence. They do not authorize implementation, visual-regression
-acceptance, or inference of adjacent states. In particular, do not recreate Home/Listings/central
-Capture/Inbox/Insights navigation, activity center, separate Runs, buyer messaging, analytics,
-post-sale operations, bulk/haul posture, barcode-only capture, or garment measurements.
+The original design tokens, screen specs, routes, copy, manifests, and checksums are retained in the
+repository at [`../Retired/V1-2026-07-16`](../Retired/V1-2026-07-16/ARCHIVE-NOTICE.md); the original
+PNG assets remain byte-for-byte in this package's `assets/` directory. They are historical evidence
+only and do not authorize implementation, visual-regression acceptance, or inference of adjacent
+states. In particular, do not recreate Home/Listings/central Capture/Inbox/Insights navigation,
+activity center, separate Runs, buyer messaging, analytics, post-sale operations, bulk/haul posture,
+barcode-only capture, or garment measurements.
 
 Final SwiftUI composition waits for the redirected versioned high-fidelity design package and its
 owning issue. Preserve the existing RLS, App Attest, durable pipeline/recovery, credit, effective-price,
