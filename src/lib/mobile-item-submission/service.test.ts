@@ -10,11 +10,21 @@ const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x01, 0x02]);
 const PNG = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02, 0x03, 0x04,
 ]);
+const WEBP = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46, 0x01, 0x02, 0x03, 0x04, 0x57, 0x45, 0x42, 0x50,
+]);
 
 function multipartRequest(): Request {
   const body = new FormData();
   body.append("photo", new File([JPEG], "front.jpg", { type: "image/jpeg" }));
   body.append("photo", new File([PNG], "back.png", { type: "image/png" }));
+  body.append("photo", new File([WEBP], "side.webp", { type: "image/webp" }));
+  body.append("photo", new File([
+    new Uint8Array([...JPEG, 0x03]),
+  ], "detail.jpg", { type: "image/jpeg" }));
+  body.append("photo", new File([
+    new Uint8Array([...PNG, 0x05]),
+  ], "label.png", { type: "image/png" }));
   body.set("costBasis", "12.34");
   return new Request("http://localhost/v1/items/runs", {
     method: "POST",
@@ -94,8 +104,8 @@ describe("mobile item submission HTTP composition", () => {
 
     expect(response.status).toBe(202);
     expect(events[0]).toBe("submission-bound");
-    expect(events.filter((event) => event.startsWith("upload:"))).toHaveLength(2);
-    expect(events.filter((event) => event.startsWith("download:"))).toHaveLength(2);
+    expect(events.filter((event) => event.startsWith("upload:"))).toHaveLength(5);
+    expect(events.filter((event) => event.startsWith("download:"))).toHaveLength(5);
     expect(events.indexOf("commit")).toBeGreaterThan(
       Math.max(...events.map((event, index) => event.startsWith("download:") ? index : -1)),
     );
@@ -120,6 +130,9 @@ describe("mobile item submission HTTP composition", () => {
           contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
         }),
         expect.objectContaining({ ordinal: 1, mediaType: "image/png" }),
+        expect.objectContaining({ ordinal: 2, mediaType: "image/webp" }),
+        expect.objectContaining({ ordinal: 3, mediaType: "image/jpeg" }),
+        expect.objectContaining({ ordinal: 4, mediaType: "image/png" }),
       ],
     }));
     const body = JSON.stringify(await response.json());

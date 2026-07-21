@@ -30,12 +30,14 @@ let recoveryId = "";
 let abandonedId = "";
 let preparationFirstId = "";
 let replayFirstId = "";
+let concurrentId = "";
 let ownerToken = "";
 let foreignToken = "";
 let recoveryToken = "";
 let abandonedToken = "";
 let preparationFirstToken = "";
 let replayFirstToken = "";
+let concurrentToken = "";
 let itemId = "";
 let runId = "";
 let queueMessageId = "";
@@ -43,6 +45,10 @@ let storagePaths: string[] = [];
 
 const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const fiveJpegs = Array.from(
+  { length: 5 },
+  (_, ordinal) => new Uint8Array([...jpeg, ordinal]),
+);
 
 function multipart(costBasis = "12.50", reverse = false): FormData {
   const body = new FormData();
@@ -51,6 +57,30 @@ function multipart(costBasis = "12.50", reverse = false): FormData {
     : [[jpeg, "front.jpg", "image/jpeg"], [png, "back.png", "image/png"]];
   for (const [bytes, name, type] of photos as Array<[Uint8Array, string, string]>) {
     body.append("photo", new File([new Uint8Array(bytes).buffer], name, { type }));
+  }
+  body.append("costBasis", costBasis);
+  return body;
+}
+
+function fivePhotoMultipart(
+  costBasis = "12.50",
+  order = [0, 1, 2, 3, 4],
+  changedOrdinal: number | null = null,
+): FormData {
+  const body = new FormData();
+  const photos = [
+    [fiveJpegs[0], "front.jpg", "image/jpeg"],
+    [fiveJpegs[1], "left.jpg", "image/jpeg"],
+    [fiveJpegs[2], "back.jpg", "image/jpeg"],
+    [fiveJpegs[3], "right.jpg", "image/jpeg"],
+    [fiveJpegs[4], "detail.jpg", "image/jpeg"],
+  ] as const;
+  for (const ordinal of order) {
+    const [originalBytes, name, type] = photos[ordinal]!;
+    const bytes = changedOrdinal === ordinal
+      ? new Uint8Array([...originalBytes, 0xff])
+      : originalBytes;
+    body.append("photo", new File([bytes.buffer], name, { type }));
   }
   body.append("costBasis", costBasis);
   return body;
@@ -316,6 +346,7 @@ beforeAll(async () => {
   abandonedId = `user_test_mobile_submit_abandoned_${Date.now()}`;
   preparationFirstId = `user_test_mobile_submit_prepare_first_${Date.now()}`;
   replayFirstId = `user_test_mobile_submit_replay_first_${Date.now()}`;
+  concurrentId = `user_test_mobile_submit_concurrent_${Date.now()}`;
   [
     ownerToken,
     foreignToken,
@@ -323,6 +354,7 @@ beforeAll(async () => {
     abandonedToken,
     preparationFirstToken,
     replayFirstToken,
+    concurrentToken,
   ] = await Promise.all([
     mintUserJwt(ownerId),
     mintUserJwt(foreignId),
@@ -330,6 +362,7 @@ beforeAll(async () => {
     mintUserJwt(abandonedId),
     mintUserJwt(preparationFirstId),
     mintUserJwt(replayFirstId),
+    mintUserJwt(concurrentId),
   ]);
   reachable = true;
 });
@@ -351,6 +384,7 @@ afterAll(async () => {
       abandonedId,
       preparationFirstId,
       replayFirstId,
+      concurrentId,
     ]],
   );
   const messageIds = new Set([
@@ -374,6 +408,7 @@ afterAll(async () => {
     abandonedId,
     preparationFirstId,
     replayFirstId,
+    concurrentId,
   ];
   await cleanupClerkTestUsers(admin, testUserIds);
   await database.query(
@@ -899,6 +934,94 @@ describe("authenticated mobile item submission against local Supabase", () => {
     }
   });
 
+  it("serializes competing five-photo order under one durable run", async () => {
+    if (!reachable) return;
+    const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
+    const submitter = createConfiguredMobileItemSubmissionOperations({
+      supabaseURL: SUPABASE_URL,
+      publishableKey: PUBLISHABLE_KEY!,
+      secretKey: SECRET_KEY!,
+    });
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => crypto.randomUUID(),
+      itemSubmission: {
+        async resolvePrincipal(token) {
+          if (token !== concurrentToken) throw new Error("invalid test principal");
+          return { kind: "clerk", userId: concurrentId, bearerToken: token };
+        },
+        submit: submitter.submit,
+      },
+    });
+    const key = crypto.randomUUID();
+    const orders = [[0, 1, 2, 3, 4], [4, 3, 2, 1, 0]];
+    const responses = await Promise.all(orders.map((order) =>
+      handler(request(concurrentToken, key, fivePhotoMultipart("12.50", order))),
+    ));
+    expect(responses.map((response) => response.status).sort()).toEqual([202, 409]);
+
+    const acceptedIndex = responses.findIndex((response) => response.status === 202);
+    const accepted = await responses[acceptedIndex]!.json();
+    expect(accepted.data.photos.map((photo: { ordinal: number }) => photo.ordinal)).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
+    const winningOrder = orders[acceptedIndex]!;
+    const durable = await database.query<{
+      item_id: string;
+      run_id: string;
+      items: number;
+      runs: number;
+      credit_reservations: number;
+      usage_reservations: number;
+      queue_messages: number;
+      cleanup_intents: number;
+      ledger_rows: number;
+      storage_objects: number;
+      photo_paths: string[];
+    }>(
+      `select
+         submission.item_id::text,
+         submission.run_id::text,
+         (select count(*)::integer from public.items item where item.id = submission.item_id and item.user_id = submission.user_id) items,
+         (select count(*)::integer from public.pipeline_runs run where run.id = submission.run_id and run.user_id = submission.user_id) runs,
+         (select count(*)::integer from public.ai_item_credit_reservations reservation where reservation.pipeline_run_id = submission.run_id) credit_reservations,
+         (select count(*)::integer from private.pipeline_run_usage_reservations reservation where reservation.run_id = submission.run_id) usage_reservations,
+         (select count(*)::integer from pgmq.q_pipeline_jobs message where message.message->>'run_id' = submission.run_id::text) queue_messages,
+         (select count(*)::integer from private.pipeline_staging_cleanup_intents intent where intent.user_id = submission.user_id) cleanup_intents,
+         (select count(*)::integer from private.mobile_item_submissions ledger where ledger.user_id = submission.user_id and ledger.idempotency_key = submission.idempotency_key) ledger_rows,
+         (select count(*)::integer from storage.objects object where object.bucket_id = 'photos' and split_part(object.name, '/', 1) = submission.user_id) storage_objects,
+         (select item.photos from public.items item where item.id = submission.item_id) photo_paths
+       from private.mobile_item_submissions submission
+       where submission.user_id = $1 and submission.idempotency_key = $2::uuid`,
+      [concurrentId, key],
+    );
+    expect(durable.rows).toHaveLength(1);
+    expect(durable.rows[0]).toMatchObject({
+      item_id: accepted.data.itemId,
+      run_id: accepted.data.runId,
+      items: 1,
+      runs: 1,
+      credit_reservations: 1,
+      usage_reservations: 1,
+      queue_messages: 1,
+      cleanup_intents: 0,
+      ledger_rows: 1,
+      storage_objects: 5,
+    });
+    expect(durable.rows[0]!.photo_paths).toHaveLength(5);
+
+    const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+      accessToken: async () => concurrentToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    for (const [ordinal, path] of durable.rows[0]!.photo_paths.entries()) {
+      const stored = await tenant.storage.from("photos").download(path);
+      expect(stored.error).toBeNull();
+      expect(new Uint8Array(await stored.data!.arrayBuffer())).toEqual(
+        fiveJpegs[winningOrder[ordinal]!],
+      );
+    }
+  });
+
   it("recovers an ambiguous response with one atomic reservation and queue message", async () => {
     if (!reachable) return;
     const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
@@ -927,8 +1050,8 @@ describe("authenticated mobile item submission against local Supabase", () => {
     });
     const key = crypto.randomUUID();
 
-    expect((await handler(request(ownerToken, key, multipart()))).status).toBe(503);
-    const replay = await handler(request(ownerToken, key, multipart()));
+    expect((await handler(request(ownerToken, key, fivePhotoMultipart()))).status).toBe(503);
+    const replay = await handler(request(ownerToken, key, fivePhotoMultipart()));
     expect(replay.status).toBe(200);
     const envelope = await replay.json();
     itemId = envelope.data.itemId;
@@ -937,14 +1060,17 @@ describe("authenticated mobile item submission against local Supabase", () => {
     expect(envelope.data).not.toHaveProperty("userId");
     expect(JSON.stringify(envelope.data)).not.toContain("pipeline-staging");
 
-    expect((await handler(request(ownerToken, key, multipart("12.50", true)))).status).toBe(409);
-    expect((await handler(request(ownerToken, key, multipart("13.00")))).status).toBe(409);
-    const changedBytes = multipart();
-    changedBytes.delete("photo");
-    changedBytes.append("photo", new File([new Uint8Array([...jpeg, 0])], "changed.jpg", {
-      type: "image/jpeg",
-    }));
-    expect((await handler(request(ownerToken, key, changedBytes))).status).toBe(409);
+    expect((await handler(request(
+      ownerToken,
+      key,
+      fivePhotoMultipart("12.50", [4, 3, 2, 1, 0]),
+    ))).status).toBe(409);
+    expect((await handler(request(ownerToken, key, fivePhotoMultipart("13.00")))).status).toBe(409);
+    expect((await handler(request(
+      ownerToken,
+      key,
+      fivePhotoMultipart("12.50", [0, 1, 2, 3, 4], 2),
+    ))).status).toBe(409);
 
     const durable = await database.query<{
       items: number;
@@ -954,6 +1080,7 @@ describe("authenticated mobile item submission against local Supabase", () => {
       queue_messages: number;
       cleanup_intents: number;
       ledger_rows: number;
+      storage_objects: number;
       queue_message_id: string;
       photo_paths: string[];
     }>(
@@ -965,6 +1092,8 @@ describe("authenticated mobile item submission against local Supabase", () => {
          (select count(*)::integer from pgmq.q_pipeline_jobs where message->>'run_id' = $3::text) queue_messages,
          (select count(*)::integer from private.pipeline_staging_cleanup_intents where user_id = $1) cleanup_intents,
          (select count(*)::integer from private.mobile_item_submissions where user_id = $1 and idempotency_key = $4::uuid) ledger_rows,
+         (select count(*)::integer from storage.objects object
+          where object.bucket_id = 'photos' and split_part(object.name, '/', 1) = $1) storage_objects,
          (select queue_message_id::text from private.mobile_item_submissions where user_id = $1 and idempotency_key = $4::uuid) queue_message_id,
          (select photos from public.items where id = $2::uuid) photo_paths`,
       [ownerId, itemId, runId, key],
@@ -977,9 +1106,14 @@ describe("authenticated mobile item submission against local Supabase", () => {
       queue_messages: 1,
       cleanup_intents: 0,
       ledger_rows: 1,
+      storage_objects: 5,
     });
     queueMessageId = durable.rows[0]!.queue_message_id;
     storagePaths = durable.rows[0]!.photo_paths;
+    expect(storagePaths).toHaveLength(5);
+    expect(storagePaths.map((path) => Number(path.split("/").at(-1)!.split("-")[0]))).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
 
     const foreign = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
       accessToken: async () => foreignToken,
@@ -996,8 +1130,11 @@ describe("authenticated mobile item submission against local Supabase", () => {
       accessToken: async () => ownerToken,
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const ownerRead = await owner.storage.from("photos").download(storagePaths[0]!);
-    expect(ownerRead.error).toBeNull();
+    for (const [ordinal, path] of storagePaths.entries()) {
+      const ownerRead = await owner.storage.from("photos").download(path);
+      expect(ownerRead.error).toBeNull();
+      expect(new Uint8Array(await ownerRead.data!.arrayBuffer())).toEqual(fiveJpegs[ordinal]);
+    }
     const foreignRead = await foreign.storage.from("photos").download(storagePaths[0]!);
     expect(foreignRead.data).toBeNull();
     expect(foreignRead.error).not.toBeNull();

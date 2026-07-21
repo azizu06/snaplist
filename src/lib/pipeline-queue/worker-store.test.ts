@@ -89,7 +89,10 @@ describe("run-scoped pipeline worker store", () => {
       item: {
         id: ITEM_ID,
         user_id: "user_a",
-        photos: ["user_a/photo.jpg"],
+        photos: Array.from(
+          { length: 5 },
+          (_, ordinal) => `user_a/photo-${ordinal}.jpg`,
+        ),
         attributes: {},
         condition: null,
         cost_basis: null,
@@ -105,6 +108,13 @@ describe("run-scoped pipeline worker store", () => {
     await expect(
       store.acquire({ runId: RUN_ID, messageId: "41", leaseSeconds: 300 }),
     ).resolves.toEqual({ kind: "acquired", context });
+    expect(context.item.photos).toEqual([
+      "user_a/photo-0.jpg",
+      "user_a/photo-1.jpg",
+      "user_a/photo-2.jpg",
+      "user_a/photo-3.jpg",
+      "user_a/photo-4.jpg",
+    ]);
     expect(client.rpc).toHaveBeenCalledWith("claim_pipeline_run_attempt", {
       p_lease_seconds: 300,
       p_message_id: "41",

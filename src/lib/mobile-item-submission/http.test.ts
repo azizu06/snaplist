@@ -1,8 +1,71 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MobileItemSubmissionReceipt } from "./contract";
+import type {
+  MobileItemSubmissionOperations,
+  MobileItemSubmissionReceipt,
+} from "./contract";
 import { createMobileItemSubmissionHandler } from "./http";
 
 describe("POST /v1/items/runs", () => {
+  it("accepts one and five verified photos and rejects zero or six before durable submission", async () => {
+    const submit = vi.fn(async (
+      input: Parameters<MobileItemSubmissionOperations["submit"]>[0],
+    ) => ({
+      outcome: "created" as const,
+      receipt: {
+        itemId: "35200000-0000-4000-8000-000000000001",
+        runId: "35200000-0000-4000-8000-000000000002",
+        status: "queued" as const,
+        stage: "queued" as const,
+        photoIdentity: {
+          kind: "content_sha256_set_v1" as const,
+          fingerprint: "a".repeat(64),
+        },
+        photos: input.photos.map(
+          ({ ordinal, contentSha256, byteLength, mediaType }) => ({
+            ordinal,
+            contentSha256,
+            byteLength,
+            mediaType,
+          }),
+        ),
+      },
+    }));
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => "req_photo_count",
+      itemSubmission: {
+        async resolvePrincipal(bearerToken) {
+          return { kind: "verifiedGuest", userId: "guest_352", bearerToken };
+        },
+        submit,
+      },
+    });
+    const request = (photoCount: number) => {
+      const body = new FormData();
+      for (let ordinal = 0; ordinal < photoCount; ordinal += 1) {
+        body.append("photo", new File([
+          new Uint8Array([0xff, 0xd8, 0xff, ordinal]).buffer,
+        ], `photo-${ordinal}.jpg`, { type: "image/jpeg" }));
+      }
+      return new Request("http://localhost/v1/items/runs", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer verified-guest-capability",
+          "idempotency-key": `35200000-0000-4000-8000-00000000000${photoCount}`,
+        },
+        body,
+      });
+    };
+
+    expect((await handler(request(1))).status).toBe(202);
+    expect((await handler(request(5))).status).toBe(202);
+    expect((await handler(request(0))).status).toBe(400);
+    expect((await handler(request(6))).status).toBe(400);
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls[1][0].photos.map((photo) => photo.ordinal)).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
+  });
+
   it.each([
     ["allowance_denied", "snaplist-pro-required", 403, "forbidden"],
     ["rate_limited", "per-minute-capacity-reached", 429, "rate_limited"],

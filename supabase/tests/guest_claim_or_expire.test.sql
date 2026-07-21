@@ -1,6 +1,6 @@
 begin;
 
-select plan(64);
+select plan(67);
 
 select ok(
   to_regclass('private.guest_draft_recoveries') is not null,
@@ -75,14 +75,25 @@ insert into public.items (
   (
     '10000000-0000-4000-8000-000000000001',
     'guest_pgtap_claim',
-    array['guest_pgtap_claim/items/front.enc'],
+    array[
+      'guest_pgtap_claim/items/photo-0.enc',
+      'guest_pgtap_claim/items/photo-1.enc',
+      'guest_pgtap_claim/items/photo-2.enc',
+      'guest_pgtap_claim/items/photo-3.enc',
+      'guest_pgtap_claim/items/photo-4.enc'
+    ],
     '{"brand":"Fixture"}'::jsonb,
     'good',
     '{"kind":"fixture"}'::jsonb,
     '80000000-0000-4000-8000-000000000001',
     '80000000-0000-4000-8000-000000000001',
     'content_sha256_set_v1',
-    encode(sha256(convert_to(repeat('b', 64), 'UTF8')), 'hex')
+    encode(sha256(convert_to(
+      repeat('b', 64) || E'\n' || repeat('c', 64) || E'\n'
+      || repeat('d', 64) || E'\n' || repeat('e', 64) || E'\n'
+      || repeat('f', 64),
+      'UTF8'
+    )), 'hex')
   ),
   (
     '10000000-0000-4000-8000-000000000002',
@@ -264,7 +275,13 @@ insert into public.ai_item_credit_reservations (
     '50000000-0000-4000-8000-000000000001',
     'guest-pgtap-claim',
     encode(sha256(convert_to(
-      array_to_json(array['guest_pgtap_claim/items/front.enc'])::text,
+      array_to_json(array[
+        'guest_pgtap_claim/items/photo-0.enc',
+        'guest_pgtap_claim/items/photo-1.enc',
+        'guest_pgtap_claim/items/photo-2.enc',
+        'guest_pgtap_claim/items/photo-3.enc',
+        'guest_pgtap_claim/items/photo-4.enc'
+      ])::text,
       'UTF8'
     )), 'hex'),
     'settled',
@@ -480,17 +497,26 @@ insert into guest_claim_results values (
     '20000000-0000-4000-8000-000000000001',
     repeat('a', 64),
     '{"version":1,"algorithm":"aes-256-gcm","keyId":"fixture","keyEnvelope":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","nonce":"AgICAgICAgICAgIC","tag":"AwMDAwMDAwMDAwMDAwMDAw==","ciphertext":"ZW5jcnlwdGVkLWRyYWZ0"}'::jsonb,
-    jsonb_build_array(jsonb_build_object(
-      'sourcePath', 'guest_pgtap_claim/items/front.enc',
-      'sha256', repeat('b', 64),
-      'byteLength', 128,
-      'encryption', jsonb_build_object(
-        'algorithm', 'aes-256-gcm',
-        'keyId', 'fixture',
-        'nonce', 'BAQEBAQEBAQEBAQE',
-        'tag', 'BQUFBQUFBQUFBQUFBQUFBQ=='
-      )
-    ))
+    (
+      select jsonb_agg(jsonb_build_object(
+        'sourcePath', format('guest_pgtap_claim/items/photo-%s.enc', ordinal),
+        'sha256', repeat(chr(98 + ordinal), 64),
+        'byteLength', 128 + ordinal,
+        'encryption', jsonb_build_object(
+          'algorithm', 'aes-256-gcm',
+          'keyId', 'fixture',
+          'nonce', encode(decode(
+            repeat(lpad(to_hex(ordinal + 4), 2, '0'), 12),
+            'hex'
+          ), 'base64'),
+          'tag', encode(decode(
+            repeat(lpad(to_hex(ordinal + 16), 2, '0'), 16),
+            'hex'
+          ), 'base64')
+        )
+      ) order by ordinal)
+      from generate_series(0, 4) ordinal
+    )
   )
 );
 
@@ -498,6 +524,15 @@ select is(
   (select payload->>'outcome' from guest_claim_results where label = 'registered'),
   'recoverable',
   'durable registration returns the recoverable result'
+);
+select is(
+  (
+    select storage_object_count
+    from private.guest_draft_recoveries
+    where id = '70000000-0000-4000-8000-000000000001'
+  ),
+  5,
+  'durable guest recovery preserves five encrypted Storage objects'
 );
 select is(
   (
@@ -554,6 +589,14 @@ select is(
   (select payload->>'outcome' from guest_claim_results where label = 'begun'),
   'copy_required',
   'claim starts with a private Storage copy plan'
+);
+select is(
+  (
+    select jsonb_array_length(payload->'objects')
+    from guest_claim_results where label = 'begun'
+  ),
+  5,
+  'the account claim plan preserves all five ordered objects'
 );
 select is(
   (
@@ -700,18 +743,13 @@ insert into guest_claim_results values (
       select (payload->>'claimLeaseToken')::uuid
       from guest_claim_results where label = 'begun-retry'
     ),
-    jsonb_build_array(jsonb_build_object(
-      'destinationPath', (
-        select payload #>> '{objects,0,destinationPath}'
-        from guest_claim_results where label = 'begun-retry'
-      ),
-      'sha256', repeat('b', 64),
-      'byteLength', 128,
-      'encryption', (
-        select payload #> '{objects,0,encryption}'
-        from guest_claim_results where label = 'begun-retry'
-      )
-    ))
+    (
+      select jsonb_agg(object.value - 'sourcePath' order by object.position)
+      from guest_claim_results result,
+        jsonb_array_elements(result.payload->'objects')
+          with ordinality object(value, position)
+      where result.label = 'begun-retry'
+    )
   )
 );
 set constraints all immediate;
@@ -720,6 +758,14 @@ select is(
   (select payload->>'outcome' from guest_claim_results where label = 'completed'),
   'claimed',
   'verified Storage completes one authoritative claim'
+);
+select is(
+  (
+    select jsonb_array_length(payload #> '{accountRecovery,storageManifest}')
+    from guest_claim_results where label = 'completed'
+  ),
+  5,
+  'claimed recovery retains all five account-owned decrypt descriptors'
 );
 select is(
   (
@@ -858,8 +904,8 @@ select is(
     where source_type = 'guest_recovery'
       and source_id = '70000000-0000-4000-8000-000000000001'
   ),
-  'guest_pgtap_claim/items/front.enc',
-  'only the guest source path enters bounded cleanup'
+  'guest_pgtap_claim/items/photo-0.enc',
+  'the first ordered guest source path enters bounded cleanup'
 );
 select is(
   public.resolve_guest_recovery_outcome(

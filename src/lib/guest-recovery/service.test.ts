@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   GuestClaimStorageError,
   claimGuestRecovery,
+  guestClaimStartSchema,
   guestClaimTerminalOutcomeSchema,
   type GuestClaimStore,
   type GuestClaimStorage,
@@ -111,6 +112,35 @@ function storage(
 }
 
 describe("guest claim-or-expire orchestrator", () => {
+  it("preserves five ordered objects through guest claim and account recovery contracts", () => {
+    const objects = Array.from({ length: 5 }, (_, ordinal) => ({
+      sourcePath: `guest_fixture/items/photo-${ordinal}.enc`,
+      destinationPath: `user_account/items/photo-${ordinal}.enc`,
+      sha256: ordinal.toString(16).repeat(64),
+      byteLength: 128 + ordinal,
+      encryption: {
+        ...objectEncryption,
+        nonce: Buffer.alloc(12, ordinal + 10).toString("base64"),
+        tag: Buffer.alloc(16, ordinal + 20).toString("base64"),
+      },
+    }));
+
+    const parsedStart = guestClaimStartSchema.parse({ ...plan, objects });
+    expect(parsedStart.outcome).toBe("copy_required");
+    if (parsedStart.outcome !== "copy_required") throw new Error("Expected copy plan.");
+    expect(parsedStart.objects).toEqual(objects);
+    expect(guestClaimTerminalOutcomeSchema.parse({
+      ...terminal,
+      accountRecovery: {
+        encryptedArtifact,
+        storageManifest: objects.map(({ sourcePath: _sourcePath, ...object }) => {
+          void _sourcePath;
+          return object;
+        }),
+      },
+    }).outcome).toBe("claimed");
+  });
+
   it("requires a claimed retry to carry the account-owned recovery contract after local purge", () => {
     const { accountRecovery: _missing, ...withoutRecovery } = terminal;
     void _missing;

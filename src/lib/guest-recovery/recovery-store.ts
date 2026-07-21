@@ -3,6 +3,7 @@ import {
   encryptedGuestRecoveryArtifactSchema,
   guestRecoveryObjectEncryptionSchema,
   guestRecoveryTerminalOutcomeSchema,
+  MAX_GUEST_RECOVERY_PHOTOS,
 } from "./service";
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
@@ -28,7 +29,7 @@ export const guestRecoveryStorageManifestSchema = z
       .strict(),
   )
   .min(1)
-  .max(4)
+  .max(MAX_GUEST_RECOVERY_PHOTOS)
   .superRefine((objects, context) => {
     if (new Set(objects.map((object) => object.sourcePath)).size !== objects.length) {
       context.addIssue({

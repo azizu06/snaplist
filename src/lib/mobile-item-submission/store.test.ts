@@ -13,6 +13,57 @@ const photoReceipts = [
 ];
 
 describe("fixed mobile item submission RPC capability", () => {
+  it("projects five ordered verified receipts from the fixed atomic commit capability", async () => {
+    const receipts = Array.from({ length: 5 }, (_, ordinal) => ({
+      ordinal,
+      storagePath:
+        `guest_352/pipeline-staging/35220000-0000-4000-8000-000000000001/0/${ordinal}-photo.jpg`,
+      contentSha256: ordinal.toString(16).repeat(64),
+      byteLength: ordinal + 4,
+      mediaType: "image/jpeg" as const,
+    }));
+    const staging = createSupabaseMobileItemSubmissionStaging({
+      rpc: vi.fn(async () => ({
+        data: [{
+          item_id: "35220000-0000-4000-8000-000000000002",
+          run_id: "35220000-0000-4000-8000-000000000003",
+          queue_message_id: 52,
+          photo_identity_kind: "content_sha256_set_v1",
+          photo_identity_fingerprint: "f".repeat(64),
+          photo_receipts: receipts.map((receipt) => ({
+            ordinal: receipt.ordinal,
+            storage_path: receipt.storagePath,
+            content_sha256: receipt.contentSha256,
+            byte_length: receipt.byteLength,
+            media_type: receipt.mediaType,
+          })),
+          is_replay: false,
+        }],
+        error: null,
+      })),
+    });
+
+    const result = await staging.commitSubmission({
+      userId: "guest_352",
+      idempotencyKey: "35220000-0000-4000-8000-000000000001",
+      requestFingerprint: "e".repeat(64),
+      batchId: "35220000-0000-4000-8000-000000000001",
+      cleanupId: "35220000-0000-4000-8000-000000000004",
+      costBasis: null,
+      dailyLimit: 15,
+      perMinuteLimit: 20,
+      photoIdentity: {
+        kind: "content_sha256_set_v1",
+        fingerprint: "f".repeat(64),
+      },
+      photoReceipts: receipts,
+    });
+
+    expect(result.receipt.photos.map((photo) => photo.ordinal)).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
+  });
+
   it.each([
     ["AI item credit unavailable: snaplist-pro-required", "allowance_denied", "snaplist-pro-required"],
     ["AI item credit unavailable: storekit-entitlement-unavailable", "allowance_denied", "storekit-entitlement-unavailable"],

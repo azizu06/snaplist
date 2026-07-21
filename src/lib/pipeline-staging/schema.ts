@@ -8,12 +8,15 @@ const storagePathSchema = z
     message: "Photo paths must be private Storage object paths, not URLs",
   });
 
+const MAX_SINGLE_ITEM_PHOTOS = 5;
+const MAX_BATCH_ITEM_PHOTOS = 4;
+
 export const pipelineStageEntrySchema = z
   .object({
     idempotencyKey: z.string().min(1).max(128),
     source: z.enum(["single", "batch"]),
     autopilotEnabled: z.boolean(),
-    photoPaths: z.array(storagePathSchema).min(1).max(4),
+    photoPaths: z.array(storagePathSchema).min(1).max(MAX_SINGLE_ITEM_PHOTOS),
     costBasis: z.number().finite().nonnegative().nullable(),
   })
   .strict();
@@ -30,6 +33,16 @@ export const pipelineStageBatchInputSchema = z
   .superRefine((input, context) => {
     const keys = new Set<string>();
     for (const [index, entry] of input.entries.entries()) {
+      if (
+        entry.source === "batch" &&
+        entry.photoPaths.length > MAX_BATCH_ITEM_PHOTOS
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Batch items accept at most 4 photos",
+          path: ["entries", index, "photoPaths"],
+        });
+      }
       if (keys.has(entry.idempotencyKey)) {
         context.addIssue({
           code: "custom",
@@ -96,7 +109,7 @@ export const pipelineReplayEntrySchema = z
     idempotencyKey: z.string().min(1).max(128),
     source: z.enum(["single", "batch"]),
     autopilotEnabled: z.boolean(),
-    photoCount: z.number().int().min(1).max(4),
+    photoCount: z.number().int().min(1).max(MAX_SINGLE_ITEM_PHOTOS),
     costBasis: z.number().finite().nonnegative().nullable(),
   })
   .strict();
@@ -111,6 +124,16 @@ export const pipelineReplayBatchInputSchema = z
   .superRefine((input, context) => {
     const keys = new Set<string>();
     for (const [index, entry] of input.entries.entries()) {
+      if (
+        entry.source === "batch" &&
+        entry.photoCount > MAX_BATCH_ITEM_PHOTOS
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "Batch items accept at most 4 photos",
+          path: ["entries", index, "photoCount"],
+        });
+      }
       if (keys.has(entry.idempotencyKey)) {
         context.addIssue({
           code: "custom",
