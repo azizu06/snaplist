@@ -72,6 +72,15 @@
     "maximumBillableAttemptsPerLogicalRun": 1,
     "maximumTranscriptUnicodeScalars": 1000,
     "maximumTranscriptUtf8Bytes": 4096,
+    "languageOutput": "canonical-bcp47-or-null",
+    "maximumLanguageTagUtf8Bytes": 255,
+    "invalidLanguageOutputBehavior": "null",
+    "languageNormalizationMatrix": [
+      { "input": "missing", "normalizedLanguage": null, "transcriptOutcome": "transcribed" },
+      { "input": "invalid", "normalizedLanguage": null, "transcriptOutcome": "transcribed" },
+      { "input": "oversized", "normalizedLanguage": null, "transcriptOutcome": "transcribed" },
+      { "input": "EN-us", "normalizedLanguage": "en-US", "transcriptOutcome": "transcribed" }
+    ],
     "providerConstructedByCaller": false,
     "providerModelFrozenByContract": false
   },
@@ -103,6 +112,11 @@
     "transcriptDeletedWithVoiceContext": true,
     "transcriptDeletedWithItem": true,
     "transcriptDeletedWithAccount": true,
+    "languageTagRequiresTranscript": true,
+    "languageTagFollowsGuestClaim": true,
+    "languageTagDeletedWithVoiceContext": true,
+    "languageTagDeletedWithItem": true,
+    "languageTagDeletedWithAccount": true,
     "externalProviderRetentionRequiresActivationDisclosure": true
   },
   "telemetry": {
