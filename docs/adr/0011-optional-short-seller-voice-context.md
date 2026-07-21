@@ -1,6 +1,7 @@
 # ADR-0011 — Optional short seller voice context
 
-- **Status:** Accepted (2026-07-21)
+- **Status:** Accepted decision record (2026-07-21); publication requires issue #350 authority to
+  land on the default branch first
 - **Decider:** Aziz
 - **Owned by:** issue #351
 - **Parent:** issue #349
@@ -81,9 +82,11 @@ logical request and produces the photos-only path; it never invalidates otherwis
 Voice travels in the same `POST /v1/items/runs` multipart mutation and under the same
 `Idempotency-Key` as the photos. There is no separate audio upload, signed URL, reservation, or run.
 The optional file field is `voiceContext`; it may occur at most once. The optional
-`voiceContextLocale` field is a BCP-47 hint and is ignored when missing, invalid, or unaccompanied by
-an accepted voice file. Clients do not supply duration, byte length, digest, codec, or voice version;
-the server derives them from the accepted bytes under V1.
+`voiceContextLocale` field is a BCP-47 hint. For an accepted voice file, the server canonicalizes a
+valid hint through SnapList's IANA-backed locale normalizer and uses that value; a missing or invalid
+hint becomes `null`. The field is ignored when no voice file is accepted. Clients do not supply
+duration, byte length, digest, codec, or voice version; the server derives them from the accepted
+bytes under V1.
 
 The submission receipt adds a required-nullable `voiceContext` field. `null` means no voice bytes
 were durably accepted, including invalid/oversized input. An accepted receipt is exactly
@@ -146,14 +149,15 @@ The next mobile request-fingerprint version includes:
 
 - the existing ordered photo bytes/digests and other request-affecting fields;
 - `voice: null` when the intake has no voice asset; or
-- `voice: { version, contentSha256, byteLength, durationMs, mediaType }` for the exact accepted voice
-  asset.
+- `voice: { version, contentSha256, byteLength, durationMs, mediaType, localeHint }` for the exact
+  accepted voice asset, where `localeHint` is the canonical accepted BCP-47 value or `null`.
 
 The transcript is output and is never included in the request fingerprint. An exact replay of the
 same idempotency key and request fingerprint returns the original durable result. Reusing that key
-after adding, replacing, or deleting voice is a conflict, not a replay. Before any server acceptance,
-the local draft may change while retaining its unsent logical key; after an ambiguous submission,
-the intake must preserve the original bytes and key until canonical server truth resolves.
+after adding, replacing, or deleting voice, or after changing the effective canonical locale hint,
+is a conflict, not a replay. Before any server acceptance, the local draft may change while retaining
+its unsent logical key; after an ambiguous submission, the intake must preserve the original bytes,
+locale hint, and key until canonical server truth resolves.
 
 ### 6. Every non-transcribed outcome continues photos-only
 
@@ -243,10 +247,13 @@ Future implementation is finite and separately issue-owned:
 This issue ships no UI, microphone permission string, Swift implementation, API change, migration,
 pipeline change, credential, hosted resource, provider activation, or production data mutation.
 
-Issue #350 owns the exact PRD, AGENTS, and `CONTEXT.md` lean-MVP composition and has already recorded
-the ubiquitous product term **voice context**. This branch does not duplicate those files. Internal
-contract identifiers such as `voice_context_v1`, `sellerContext`, and `seller_voice` remain in this
-ADR/contract rather than being promoted to product glossary terms.
+Issue #350 owns the exact PRD, AGENTS, and `CONTEXT.md` lean-MVP composition, including the ubiquitous
+product term **voice context**. That authority is not present in this branch's default-branch base,
+so issue #350 must merge first; this ADR/contract must not merge or become effective before it. This
+branch does not duplicate those files. After #350 lands, any composition must preserve its authority
+rather than recreating it here. Internal contract identifiers such as `voice_context_v1`,
+`sellerContext`, and `seller_voice` remain in this ADR/contract rather than being promoted to product
+glossary terms.
 
 ## Alternatives considered
 

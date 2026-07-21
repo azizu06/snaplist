@@ -16,6 +16,13 @@ const contractSchema = z
     version: z.literal(1),
     status: z.literal("accepted"),
     ownerIssue: z.literal(351),
+    publication: z
+      .object({
+        requiresIssue: z.literal(350),
+        requiredAuthorityState: z.literal("merged-into-default-branch"),
+        mergeBeforeThis: z.literal(true),
+      })
+      .strict(),
     capture: z
       .object({
         optional: z.literal(true),
@@ -70,9 +77,11 @@ const contractSchema = z
           z.literal("byteLength"),
           z.literal("durationMs"),
           z.literal("mediaType"),
+          z.literal("localeHint"),
         ]),
         transcriptAffectsRequestFingerprint: z.literal(false),
         changedVoiceWithAcceptedIdempotencyKey: z.literal("conflict"),
+        changedLocaleWithAcceptedIdempotencyKey: z.literal("conflict"),
       })
       .strict(),
     transcription: z
@@ -187,6 +196,20 @@ describe("voice-context V1 authority", () => {
       voiceAffectsAiItemCreditIdentity: false,
       voiceAffectsRequestFingerprint: true,
       transcriptAffectsRequestFingerprint: false,
+      requestVoiceShape: [
+        "version",
+        "contentSha256",
+        "byteLength",
+        "durationMs",
+        "mediaType",
+        "localeHint",
+      ],
+      changedLocaleWithAcceptedIdempotencyKey: "conflict",
+    });
+    expect(contract.publication).toEqual({
+      requiresIssue: 350,
+      requiredAuthorityState: "merged-into-default-branch",
+      mergeBeforeThis: true,
     });
     expect(contract.upload).toEqual({
       transport: "multipart/form-data",

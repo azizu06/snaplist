@@ -3,6 +3,11 @@
   "version": 1,
   "status": "accepted",
   "ownerIssue": 351,
+  "publication": {
+    "requiresIssue": 350,
+    "requiredAuthorityState": "merged-into-default-branch",
+    "mergeBeforeThis": true
+  },
   "capture": {
     "optional": true,
     "maximumAssets": 1,
@@ -51,10 +56,12 @@
       "contentSha256",
       "byteLength",
       "durationMs",
-      "mediaType"
+      "mediaType",
+      "localeHint"
     ],
     "transcriptAffectsRequestFingerprint": false,
-    "changedVoiceWithAcceptedIdempotencyKey": "conflict"
+    "changedVoiceWithAcceptedIdempotencyKey": "conflict",
+    "changedLocaleWithAcceptedIdempotencyKey": "conflict"
   },
   "transcription": {
     "role": "sellerContext",
