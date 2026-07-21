@@ -160,7 +160,7 @@ struct AppShellView: View {
             openActivity: { router.navigate(to: .activity) },
             openAccount: { router.navigate(to: .account) },
             openCapture: { router.select(.capture) },
-            openRoute: { router.navigate(to: .home($0)) }
+            openRoute: { router.navigate(to: $0) }
         )
     }
 

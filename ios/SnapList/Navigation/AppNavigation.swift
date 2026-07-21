@@ -191,6 +191,10 @@ final class AppRouter {
         setPath(current, for: selectedTab)
     }
 
+    func navigate(to route: HomeRoute) {
+        navigate(to: AppRoute.home(route))
+    }
+
     @discardableResult
     func open(_ url: URL) -> Bool {
         guard let deepLink = RunDeepLink(url: url) else { return false }
