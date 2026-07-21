@@ -59,10 +59,19 @@ final class HomeUITests: XCTestCase {
         )
         pricing.tap()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["pricing.item-summary"]
-                .waitForExistence(timeout: 3)
-        )
+        let loadedOverview = app.buttons["pricing.back"]
+        if !loadedOverview.waitForExistence(timeout: 3) {
+            XCTFail(
+                """
+                Pricing route did not reach the loaded overview.
+                homeActionExists=\(pricing.exists)
+                loadingExists=\(app.descendants(matching: .any)["pricing.loading"].exists)
+                loadFailedExists=\(app.descendants(matching: .any)["pricing.load-failed"].exists)
+                accessibilityHierarchy:
+                \(app.debugDescription)
+                """
+            )
+        }
     }
 
     func testRunDetailUsesSystemBackAndReturnsToExactHomeOpener() {
