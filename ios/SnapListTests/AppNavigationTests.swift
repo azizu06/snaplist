@@ -1,3 +1,5 @@
+import SwiftUI
+import UIKit
 import XCTest
 @testable import SnapList
 
@@ -43,6 +45,64 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(
             router.pathBinding(for: .home).wrappedValue,
             [.home(.pricing(itemID))]
+        )
+    }
+
+    @MainActor
+    func testMountedAppShellKeepsTheTypedPricingRouteOnTheHomePath() {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first else {
+            XCTFail("A simulator window scene is required to exercise AppShell navigation.")
+            return
+        }
+
+        let itemID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000106"
+        )!
+        let route = AppRoute.home(.pricing(itemID))
+        let router = AppRouter(initialTab: .home, initialRoute: route)
+        let configuration = LaunchConfiguration.preview
+        let dependencies = AppDependencies.make(configuration: configuration)
+        let root = AppShellView(
+            router: router,
+            onboardingModel: OnboardingFlowModel(
+                cameraAuthorization: FixtureCameraAuthorizationClient(status: .authorized),
+                progressStore: InMemoryOnboardingProgressStore(),
+                stagedLibraryPhotos: InMemoryStagedLibraryPhotoStore(),
+                guestAllowance: DeferredGuestAllowanceCapability()
+            ),
+            captureFlow: CaptureFlowModel(
+                camera: dependencies.captureCamera,
+                evaluator: dependencies.framingEvaluator,
+                store: dependencies.captureDraftStore
+            ),
+            homeStore: HomeStore(repository: HomeFixtureRepository(model: HomeFixtures.active)),
+            runStore: RunDetailStore(
+                service: UnavailableRunService(),
+                bearerToken: { "fixture-bearer" }
+            ),
+            pricingRepository: PricingFixtureRepository(model: PricingFeatureFixtures.limited),
+            configuration: configuration
+        )
+        .environment(\.appDependencies, dependencies)
+
+        let controller = UIHostingController(rootView: root)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = controller
+        defer { window.isHidden = true }
+
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        controller.view.layoutIfNeeded()
+
+        XCTAssertEqual(
+            router.pathBinding(for: .home).wrappedValue,
+            [route]
         )
     }
 
