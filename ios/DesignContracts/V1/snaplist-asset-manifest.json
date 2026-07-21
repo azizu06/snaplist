@@ -1,5 +1,7 @@
 {
-  "version": "approved-families-v1",
+  "version": "retired-approved-families-v1",
+  "status": "historical_assets_only_awaiting_redirected_design",
+  "authorizes_implementation": false,
   "scout": [
     {
       "file": "assets/pose-01-coaching-photo.png",
@@ -35,7 +37,7 @@
     "Preserve original alpha, colors, silhouette, and intrinsic ratio.",
     "Never redraw, regenerate, recolor, crop, rotate, mask, or add a rectangular background.",
     "Place free-standing beside separate copy, never inside a generic card or status row.",
-    "Do not place Scout in the dock, routine Seller Home, ordinary success, or routine photo review."
+    "Do not place Scout in primary navigation, routine Trophy Wall rows, ordinary success, or routine photo review."
   ],
   "temporary_product_photography": {
     "status": "review-only",
@@ -51,18 +53,14 @@
   "icon_intent": {
     "stroke_range": [1.7, 1.9],
     "sf_symbol_candidates": [
-      "house",
-      "list.bullet",
       "camera",
-      "envelope",
-      "chart.line.uptrend.xyaxis",
-      "bell",
+      "square.grid.2x2",
       "gearshape",
       "chevron.right",
       "bolt",
       "arrow.triangle.2.circlepath"
     ],
-    "rule": "Use a native SF Symbol when it preserves the approved meaning and weight; keep the central Capture glyph custom-consistent if the native symbol cannot match."
+    "rule": "Historical candidates only. The redirected package must approve Scan and Trophy Wall icons before implementation."
   },
   "reference_contract": {
     "purpose": "structural evidence only",

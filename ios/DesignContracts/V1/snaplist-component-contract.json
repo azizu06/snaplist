@@ -1,18 +1,23 @@
 {
-  "version": "approved-families-v1",
+  "version": "lean-scan-trophy-wall-authority-v2",
+  "authority": {
+    "epic": 349,
+    "documentation_issue": 350,
+    "swiftui_implementation_authorized": false,
+    "redirected_high_fidelity_design_required": true
+  },
   "components": {
     "floating_dock": {
-      "anatomy": ["Home", "Listings", "central Capture tile", "Inbox", "Insights"],
+      "anatomy": ["Scan", "Trophy Wall"],
       "metrics": {"left_right_inset": 14, "bottom": 12, "height": 66, "radius": 26, "icon": 24, "label": 12},
       "material_token": "shadows_and_materials.floating_dock",
-      "capture_tile": {"width": 52, "height": 44, "radius": 15, "fill": "#3665F3", "glyph": 25},
       "states": ["selected", "quiet"],
-      "rules": ["No Runs tab", "No You tab", "Hide while keyboard is visible", "Home uses aria-current/page equivalent"]
+      "rules": ["Exactly two primary destinations", "No separate Runs destination", "No activity destination", "Hide while keyboard is visible", "Selected destination uses aria-current/page equivalent"]
     },
     "top_header": {
-      "anatomy": ["SnapList wordmark", "Activity bell", "Account avatar"],
-      "metrics": {"status_bar_height": 54, "bell_target": [44, 44], "avatar_target": [44, 44], "badge": [18, 18], "dot": [8, 8]},
-      "routes": {"bell": "Activity", "avatar": "Account/Settings"}
+      "anatomy": ["SnapList wordmark", "Profile avatar"],
+      "metrics": {"status_bar_height": 54, "avatar_target": [44, 44]},
+      "routes": {"avatar": "Settings"}
     },
     "button": {
       "primary": {"height": 54, "radius": 27, "fill": "#3665F3", "font": {"size": 16, "weight": 700}, "active_scale": 0.99},
@@ -85,12 +90,13 @@
       "forbidden": ["recolor", "crop", "rotate", "mask", "rectangular background", "routine list row", "dock"],
       "sizes": {"onboarding_hero": 184, "denied": 152, "handoff": 140, "app_icon_mark": 104, "helper": 82, "price_limited": 72}
     },
-    "home_in_progress": {
+    "trophy_wall_in_progress": {
       "fill": "#F7F9FC",
       "border": "#E3E8F2",
       "radius": 16,
-      "required": ["item thumbnail", "truthful current stage", "You can leave", "route to run detail"],
-      "forbidden": ["fabricated percentage", "fabricated ETA"]
+      "required": ["item thumbnail", "plain-language current state", "local/server identity merge without duplication"],
+      "allowed_states": ["pending upload", "accepted", "analyzing", "ready to review", "needs retry", "published to eBay", "export pack prepared/shared"],
+      "forbidden": ["queue terminology", "worker terminology", "lease terminology", "provider terminology", "fabricated percentage", "fabricated ETA"]
     }
   }
 }

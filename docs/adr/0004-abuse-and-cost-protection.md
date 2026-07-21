@@ -2,6 +2,11 @@
 
 Status: accepted · Issue #58
 
+> **Lean-MVP scope amendment (2026-07-21):** ADR-0008/#349 removes buyer messaging and
+> bulk/haul capture from launch scope. The controls below remain historical implementation and
+> defense-in-depth for any still-reachable legacy route; they do not authorize those product flows
+> or make the legacy daily cap the native AI-item allowance promise.
+
 ## Context
 
 The metered AI endpoints (vision + pricing + listing generation, buyer-reply drafting) cost real

@@ -1,48 +1,12 @@
 {
-  "version": "approved-families-v1",
-  "reference_board": "https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=SnapList+Master+Review+Board+-+Approved+%2B+Final+Round.dc.html&present=1",
-  "reference_contract": "https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=SnapList+Implementation+Fidelity+Contract+-+Approved+Families+v1.dc.html&present=1",
-  "comparison_policy": {
-    "canonical_scale": "1 iOS point per reference CSS pixel at the declared device frame",
-    "reduced_motion": true,
-    "scroll_position": "top unless the state itself represents a scrolled destination",
-    "allowed_variance": ["system-font antialiasing", "native permission-alert chrome", "dynamic system status-bar glyph rendering"],
-    "zero_intentional_drift": ["major geometry", "visible copy", "navigation", "state semantics", "status labels", "approved assets", "item framing", "safe-area placement"],
-    "review_method": "Capture an implementation screenshot at the canonical viewport, place beside the Claude reference, and inspect overlay/diff before acceptance."
-  },
-  "approved": [
-    {"id":"ONB-00","family":"onboarding","viewport":[393,852],"fixture":"first launch","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-01","family":"onboarding","viewport":[393,852],"fixture":"outcome promise","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-05","family":"onboarding","viewport":[393,852],"fixture":"marketplace explanation open","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-06","family":"onboarding","viewport":[393,852],"fixture":"one-free-item state","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-07","family":"onboarding","viewport":[393,852],"fixture":"photo primer","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"native-camera-permission","family":"onboarding","viewport":[393,852],"fixture":"camera prompt","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-08","family":"onboarding","viewport":[393,852],"fixture":"camera denied","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"settings-handoff","family":"onboarding","viewport":[393,852],"fixture":"Settings handoff","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-09-camera","family":"onboarding","viewport":[393,852],"fixture":"camera authorized","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"ONB-09-library","family":"onboarding","viewport":[393,852],"fixture":"library photos staged","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"returning-sign-in","family":"onboarding","viewport":[393,852],"fixture":"sign-in sheet open","reference":"master board section 1 / accountless-onboarding-reference.html"},
-    {"id":"CAP-01","family":"capture","viewport":[393,852],"fixture":"launcher over populated Home","reference":"master board section 2 / capture-guided-camera-reference.html"},
-    {"id":"CAP-02a","family":"capture","viewport":[393,852],"fixture":"initial coaching","reference":"master board section 2 / capture-guided-camera-reference.html"},
-    {"id":"CAP-02b1","family":"capture","viewport":[393,852],"fixture":"Move closer","reference":"master board section 2 / capture-guided-camera-reference.html"},
-    {"id":"CAP-02b2","family":"capture","viewport":[393,852],"fixture":"accepted full watch framing","reference":"master board section 2 / capture-guided-camera-reference.html"},
-    {"id":"CAP-02c","family":"capture","viewport":[393,852],"fixture":"one accepted photo","reference":"master board section 2 / capture-guided-camera-reference.html"},
-    {"id":"CAP-03-handoff","family":"capture","viewport":[393,852],"fixture":"photos ready to review","reference":"master board section 2 / capture-guided-camera-reference.html"},
-    {"id":"S1","family":"pricing","viewport":[402,874],"fixture":"Strong: $58, $49–$66, 12 sold/60D","reference":"master board section 4 / price-screen-live-reference.html"},
-    {"id":"S1b","family":"pricing","viewport":[402,874],"fixture":"12 sold, median $57, range $46–$66","reference":"master board section 4 / price-screen-live-reference.html"},
-    {"id":"S2","family":"pricing","viewport":[402,874],"fixture":"Jan 8 Excellent $60 selected comp","reference":"master board section 4 / price-screen-live-reference.html"},
-    {"id":"S3","family":"pricing","viewport":[402,874],"fixture":"Limited: $24, $15–$40, 3 sold/90D","reference":"master board section 4 / price-screen-live-reference.html"},
-    {"id":"HOME-01","family":"seller_home","viewport":[393,852],"fixture":"active seller with 3 attention tasks","reference":"master board section 5 / seller-home-live-reference.html"},
-    {"id":"HOME-02","family":"seller_home","viewport":[393,852],"fixture":"new-seller empty state","reference":"master board section 5 / seller-home-live-reference.html"},
-    {"id":"HOME-03","family":"seller_home","viewport":[393,852],"fixture":"six attention tasks","reference":"master board section 5 / seller-home-live-reference.html"},
-    {"id":"HOME-04","family":"seller_home","viewport":[393,852],"fixture":"focused search and filters","reference":"master board section 5 / seller-home-live-reference.html"}
-  ],
-  "candidates": [
-    {"id":"CAP-03a","family":"photo_review","status":"not_implementation_frozen","fixture":"one-photo fast path","reference":"master board section 3"},
-    {"id":"CAP-03b","family":"photo_review","status":"not_implementation_frozen","fixture":"complete four-photo set","reference":"master board section 3"},
-    {"id":"CAP-03c","family":"photo_review","status":"not_implementation_frozen","fixture":"photo actions open","reference":"master board section 3"},
-    {"id":"CAP-03d","family":"photo_review","status":"not_implementation_frozen","fixture":"reorder mode","reference":"master board section 3"},
-    {"id":"CAP-03e","family":"photo_review","status":"not_implementation_frozen","fixture":"remove then undo","reference":"master board section 3"},
-    {"id":"CAP-04","family":"photo_review","status":"not_implementation_frozen","fixture":"guidance sheet","reference":"master board section 3"}
-  ]
+  "version": "lean-authority-boundary-v2",
+  "status": "retired_references_do_not_authorize_regression_acceptance",
+  "supersededByIssue": 349,
+  "approvedCurrentReferences": [],
+  "implementationAcceptanceAuthorized": false,
+  "nextGate": "redirected versioned high-fidelity design package",
+  "retainedEvidence": {
+    "originalReferenceBoard": "https://claude.ai/design/p/897124b5-5da4-447e-9dab-26706c006653?via=share&file=SnapList+Master+Review+Board+-+Approved+%2B+Final+Round.dc.html&present=1",
+    "use": "historical comparison only"
+  }
 }

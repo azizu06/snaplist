@@ -1,226 +1,139 @@
 # SnapList — Domain Context & Glossary
 
-The shared vocabulary for this repo. Use these exact terms in code, issues, tests, and PRDs. Full
-requirements live in `PRD.md`; this file is the language layer the engineering skills read first.
+This is the shared vocabulary for the lean MVP. `PRD.md` owns requirements; ADR-0008 owns the
+durable entitlement, marketplace-authority, and supersession decisions.
 
-## What the product does (one paragraph)
-A seller photographs a used item; SnapList **identifies** it, **prices** it with a range and a
-**confidence** score, cites the evidence-backed tiers, and clearly labels the terminal uncited
-fallback when necessary. It **generates** platform-specific listing copy and **drafts**
-buyer replies. The confidence gate can mark high-confidence items **ready to publish**; the seller
-still confirms every consequential eBay action through an **adapter**. Other launch platforms
-receive honest **assisted marketplace handoffs**.
+## What the product does
 
-## Glossary (ubiquitous language)
+A seller uses **Scan** to submit one to five photos and optional short **voice context**. SnapList
+asynchronously identifies the **Item**, finds trustworthy **sold comps** when available, produces a
+user-editable **price recommendation** and **Listing**, and returns truthful progress and outcomes to
+the **Trophy Wall**. The first usable listing precedes signup/paywall. eBay is the only direct-publish
+destination; Facebook Marketplace, Mercari, and Depop receive honest **export packs**.
 
-- **Item** — a single physical thing the seller wants to sell. The root entity. Has photos, extracted
-  **attributes**, a **condition**, and (once priced) a **price recommendation**.
-- **Attributes** — the structured, Zod-validated facts extracted from photos: brand, model, category,
-  key specs, and any decoded **barcode**/**ISBN**. Prefer "attributes" over "metadata" or "details".
-- **Condition** — the assessed wear state of a used item (e.g. new/like-new/good/fair). A first-class
-  attribute because it drives pricing. Not "quality".
-- **Barcode / ISBN / UPC** — *ISBN* (books/media) resolves to a structured catalog lookup; without
-  sold grounding its pricing trust remains estimate-level. *UPC*
-  (general goods) is decoded only as an **identification aid** that sharpens the search, never a price
-  source. "Barcode" is the umbrella term.
-- **PricingProvider** — the interface every pricing strategy implements. Returns a **price
-  recommendation**. Never bypass it with an inline price lookup.
-- **Tier** — one PricingProvider strategy in the routing pipeline: *ISBN lookup* → *eBay sold comps*
-  → *web-search agent* → *depreciation estimate* → *LLM fallback*. "Which tier fired" is a logged,
-  confidence-bearing fact.
-- **eBay-sold provider** — the `ebay-sold` evidence tier (ADR-0001): retrieves real **sold comps**
-  through replaceable read-only strategies. The default-off Caffein Apify adapter is the leading
-  automatic candidate; eBay's PUBLIC sold/completed pages (`LH_Sold=1&LH_Complete=1`) remain the
-  immediate fallback. Both feed the same provider-neutral matcher and are distinct from the
-  transactional eBay **adapter** (posting/messaging). Never used to post. Availability is
-  best-effort; blocked or too-thin anchor sets decline to the next tier.
-- **Sold-comps egress** — the outbound fetch path for the **eBay-sold scraper**. Direct HTTPS fetch
-  is the default. An operator may configure one validated `EBAY_SOLD_PROXY_TEMPLATE` for hosted
-  environments; malformed templates fail before egress, and credentials/raw upstream errors are
-  redacted from reports and diagnostics. See `docs/sold-comps-egress.md`.
-- **Pricing (research) agent** — the bounded tool-calling **agent** that searches the web for
-  used/resale comps and synthesizes a cited range. One of two agents in the system.
-- **Comp** — a comparable price point found for an item. A **sold comp** is a completed sale (eBay
-  public sold pages, the `ebay-sold` tier) — the strongest used signal; an **asking comp** is an
-  active listing (open-web, the web-search tier) and is down-weighted. **Comp agreement** (tight vs
-  scattered) is a confidence signal.
-- **Price recommendation** — always `{ suggested, range, confidence, sources[] }`, always
-  user-editable. Never a bare number. Evidence-backed tiers require citations; the clearly labeled
-  terminal `llm-only` estimate may have an empty `sources[]`.
-- **Pricing-evidence snapshot** — the immutable, tenant-scoped record committed with one successful
-  **pipeline run**. It contains that run's validated **price recommendation** and only the **sold
-  comps** that survived retrieval, matching, freshness, and robust-core selection, all stamped with
-  one server `evidenceAsOf` time. Native reads consume one whole snapshot; they never rebuild comp
-  facts from citations, combine runs, or turn an **asking comp** into a disclosed sale.
-- **Cost basis (COGS)** — what the seller **paid** for the item (cost of goods sold), captured
-  optionally at upload or review. Blank means *unknown* (stored `NULL`, never a fake $0); a recorded
-  **$0** is a real value (a free find). Persisted as `items.cost_basis`; feeds **net profit**.
-- **Net profit (margin)** — the estimated amount a seller pockets on a sale:
-  `price − estimated platform fees − cost basis`. Resellers think in margin, not list price, so it's
-  shown only when cost basis is known. When cost is missing, show revenue, estimated fees, and
-  estimated net proceeds—never profit and never a fake $0. Pure, unit-tested math in
-  `src/lib/pricing/fees.ts`.
-- **Platform fees** — the per-platform selling-fee **estimate** (`rate × price + fixed`) behind
-  net-profit math: eBay ≈13.25% + $0.30, Facebook Marketplace 5%, Mercari ≈12.9% + $0.50. Always an
-  *estimate* (labeled "est."), not an invoice — real fees vary by category, store level, and promos.
-- **Confidence (composite)** — a signal-based score from {tier fired, comp agreement, identification
-  completeness}. Never raw LLM self-report. Drives the **publish-eligibility gate**. The tier-trust ordering
-  encodes "sold beats asking": a tight **sold**-comp cluster ranks above the asking-based web tiers
-  and below only a sold-backed exact ISBN result (issue #60); a catalog-only ISBN result stays at
-  estimate-level trust, and a scattered sold set degrades to the wide-comp tier so a noisy sale
-  spread cannot ride the sold label past the gate.
-- **Publish eligibility** (persisted under the legacy `autopilot_*` names) — the confidence-gated
-  readiness preference: high-confidence items are marked **ready to publish**; lower-confidence
-  items stay in review. Toggleable off. Eligibility never calls the eBay **adapter** or publishes in
-  the background; only the seller's explicit **Publish to eBay** action creates a marketplace post.
-  A seller-triggered **review correction** always returns to `draft`, regardless of score.
-- **Bulk / haul capture** — an advanced-volume growth path (issue #100) at `/batch`: photograph
-  several items in one session (1–4 photos each), then submit the whole **batch**. Each item runs
-  through the *same* single-item pipeline spine (`POST /api/batch/item`) with its own **AI-item
-  credit**, evidence, review, and bounded concurrency. Additive to the primary one-item native path,
-  never the default posture or a shared-credit shortcut.
-- **Triage list** — the live results surface of a bulk **batch**: one row per captured **item**, each
-  showing a **triage status** (processing → needs-review / ready-to-publish / active, plus failed /
-  credit-limit). Triage statuses are a *reading* of the item's persisted **listing** status — no new
-  persisted vocabulary — and the list polls `GET /api/batch/status` so rows track DB truth (e.g. a
-  `queued` listing becoming `published` after the seller acts elsewhere). Every row links to the
-  item's normal review page.
-- **Listing** — generated, platform-specific sale copy for an item (title, item specifics,
-  description, tags). One **Item** can have multiple listings (one per platform).
-- **Review correction** — the bounded, pre-publish replacement of load-bearing identity facts
-  (brand, model, category, condition, valid ISBN/UPC, and relevant specifications), followed by an
-  explicit re-price and regeneration through the shared router, confidence, and listing seams. It
-  preserves a seller's saved price override and never auto-publishes. Distinct from **Sharpen**,
-  which only adds pricing detail and does not regenerate listing copy.
-- **Review revision** — the item-owned concurrency token coordinating review edits, regeneration,
-  export-pack generation, dashboard edits, applied reprices, and publish acquisition. Any seller-price
-  change advances it; stale writers fail rather than mixing identity, price, copy, or marketplace state.
-- **Export pack** — platform-appropriate listing text/photos for a platform with no approved write API
-  (Facebook Marketplace, Mercari, Depop). It feeds an **assisted marketplace handoff** and is distinct
-  from a real **post**. Generated copy is tied to the review content revision, while
-  every fresh or cached read carries the current **effective price** and verifies the full review
-  revision. Content edits regenerate copy; price-only edits reuse copy without serving a stale price.
-- **Assisted marketplace handoff** — prepare Facebook Marketplace, Mercari, or Depop text/photos,
-  invoke the native share sheet or an honest deep link when available, and show a short checklist.
-  The seller completes the destination form; SnapList never claims it filled or published it.
-- **Effective price** — the one amount every outbound consumer uses: a valid, positive,
-  cent-normalized seller `price_override`, otherwise the latest suggested price from the prediction
-  log. Invalid legacy overrides are ignored rather than published; the underlying recommendation log
-  remains unchanged when the seller chooses a different price.
-- **Post / publish** — actually putting a listing live on eBay via the **adapter**, always after an
-  explicit seller confirmation.
-- **eBay authority** — SnapList owns unpublished drafts. After publish, eBay is authoritative for
-  listing and order truth. External changes sync into SnapList; seller-confirmed local changes go
-  through an **adapter** and persist from the confirmed provider result. Divergence creates a visible
-  **sync conflict**, never silent last-write-wins.
-- **Sync conflict** — an explicit state where local seller intent and current eBay truth differ or
-  provider acknowledgement is ambiguous. SnapList shows both sides and a safe next action rather
-  than choosing a winner silently.
-- **Adapter** — an isolating interface around an eBay capability such as publish/listing mutation,
-  fulfillment, or messaging. Launch flows must run against **mock adapters** with no live eBay.
-  Sandbox→production is a credential/configuration flip.
-- **Marketplace messaging adapter** — the provider-neutral seam for fetching unresolved pre-sale
-  questions, resolving their provider conversation, replying to the exact question, and sending a
-  later seller-authored follow-up. Both delivery paths can carry supported hosted photos with the
-  required text. Distinct from both the transactional publish adapter and the public
-  **eBay-sold scraper**.
-- **Message attachment** — a tenant-scoped photo on an imported buyer question or an approved
-  seller reply/follow-up. Outbound originals stay in private storage; provider-hosted references
-  share the message's delivery truth and never downgrade a failed text-plus-photo attempt to
-  text-only success. See `docs/ebay-messaging-sandbox.md` for the provider contract and limits.
-- **External question identity** — the identity bundle kept on an imported eBay question: the exact
-  Trading `Question.MessageID` used as `ParentMessageID`, plus separate Commerce conversation,
-  listing, and buyer identities. These values are not interchangeable.
-- **eBay account generation** — the tenant-bound version of a connected or operator-fallback seller
-  identity. Sync, messages, token refresh, and provider dispatch are pinned to it so disconnect,
-  reconnect, replacement, or erasure cannot let stale work cross account boundaries.
-- **Delivery truth** — the external state of a seller-approved reply/follow-up: `sending`, `delivered`,
-  `rejected`, `failed`, or `ambiguous`. `sent_at` and an external delivery ID exist only after an
-  acknowledgement; ambiguous delivery remains visibly retryable with an explicit duplicate-risk
-  confirmation.
-- **Inbox sync** — the shared foreground/cron service that reads overlapping eBay windows, stores
-  unresolved conversation matches for later reconciliation, deduplicates external identity,
-  routes each question once per **message policy version**, and retires questions eBay reports as answered or no
-  longer available. Normal ingestion targets the next five-minute boundary or sooner.
-- **Safe buyer auto-reply** — the legacy name for a default-off implemented capability. It is not
-  authorized in the native launch contract: a deterministic **message policy** may recommend or
-  draft an exact restatement of a current authoritative listing fact, but every external send still
-  requires explicit seller confirmation. Negotiation, commitments, post-sale support, untrusted
-  buyer instructions/premises, raw vision guesses, and missing/stale/conflicting facts remain
-  seller-gated.
-- **Message policy decision** — the versioned, once-per-question audit outcome: **draft for
-  approval** or **escalate**, with structured reasons, grounding references, safety signals, and
-  canonical delivery truth. Existing `auto-send` records are legacy state, not launch authorization.
-  Model confidence never authorizes a send.
-- **Buyer-Q&A agent** — the **agent** that drafts replies to buyer questions, grounded in an item's
-  attributes/listing. It runs for simulated demo questions and tenant-scoped eBay Sandbox imports;
-  it never authorizes a send. The deterministic **message policy** selects draft or escalation, and
-  every authenticated delivery requires explicit seller approval.
-- **Inbox** — the seller's live view of simulated or imported buyer **messages**, fed
-  DB→Supabase Realtime after **inbox sync**. The seller is the only SnapList user; buyers stay on eBay.
-- **Reference corpus:** a retained, evaluation-only set of example listings embedded in
-  **pgvector**. Optional retrieval may provide listing style and structure hints only after the
-  paired evaluation gate passes. It is default-off, non-blocking, and never pricing, confidence,
-  factual, or seller-data authority.
-- **Freshness** — sold prices drift, so pricing is **live-fetched** at query time; a TTL
-  cache-on-miss + recency/age-decay layer (#59) cuts footprint without becoming the authority.
-  Reference-corpus prices do not participate in pricing or confidence.
-- **Prediction log** — the per-run record (attributes, price, range, confidence, tier, model) written
-  for every pipeline execution. Its price is the pipeline's recommendation, not a seller override or
-  necessarily the outbound **effective price**. The **eval harness** depends on that distinction.
-- **Pipeline run** — the tenant-owned durable execution record for one complete listing-preparation
-  attempt. It links the seller's **Item** and eventual **Listing**, records status/stage, attempts,
-  idempotency, lease fencing, cumulative stage checkpoints, safe failure details, and lifecycle
-  timestamps, and is the product-visible truth when queue delivery is retried. Distinct from a
-  **prediction log**, which records model/eval output.
-- **Usable draft** — the durable settlement point for one complete AI item run: one coherent item,
-  price recommendation (including an honestly labeled fallback), and editable listing draft are
-  atomically available to the seller. Provider retries, queue attempts, and partial checkpoints do
-  not qualify.
-- **AI-item credit** — one logical entitlement reservation for one complete AI item run. It is
-  reserved before provider-backed processing, settles exactly once at **usable draft**, and is
-  restored after failure/cancellation before that point. A seller-confirmed manual retry of the same
-  pipeline run and immutable photo set may reclaim the same allowance slot without creating another
-  reservation, but only while that restored slot remains available. Each reclaim either settles on
-  one usable draft or restores again, and every accounting fact moves forward. Internal
-  retries/recovery and the one included same-item/same-photo-set guided correction reuse it; a new
-  item, changed photo set, or full re-analysis needs a new credit.
-- **SnapList Pro allowance period** — for a monthly Apple product, the verified StoreKit transaction
-  span `[purchaseDate, expiresDate)`. For an annual product, a server-derived monthly subperiod inside
-  that signed span, anchored to verified `purchaseDate`, capped at verified `expiresDate`, and keyed
-  by `(originalTransactionId, transactionId, subperiodIndex)`. It is never selected by a client clock.
-  Verified active state advances once; verified grace preserves the current remainder without
-  advancing; late, duplicate, out-of-order, or ambiguous state cannot advance credits. RevenueCat
-  manages the native StoreKit lifecycle, while its client state stays advisory and the server/#168
-  ledger remains the only quota authority.
-- **Guest allowance** — one App Attest-backed device entitlement containing one **AI-item credit** and
-  exactly one guided identity correction for the same item/photo set. Manual edits that preserve the
-  immutable photo-set fingerprint are unlimited; adding, replacing, or removing a photo requires a
-  new run.
-  The usable result remains encrypted/recoverable for 24 hours, then is claimed by an account or
-  deleted with its server-side guest artifacts.
-- **Pipeline queue envelope** — the strict versioned PGMQ message `{ run_id, schema_version }`. It is
-  only a wake-up signal: never a photo/signed URL, tenant identity, secret, seller copy, or
-  authorization claim. The worker derives tenant scope from the stored **pipeline run**.
-- **Eval harness** — the offline quality measurement over a fixed **gold set**: ID accuracy,
-  pricing-within-band, **confidence calibration**, listing quality (validated LLM-judge). The
-  judge is **cross-family** (`--real-judge` runs the OPPOSITE provider from the generator, #61) to
-  strip same-family self-bias; it falls back to the offline heuristic — and says so — when the
-  opposite provider's key is absent.
-- **Gold set** — the fixed, labeled set of items used by the eval harness; doubles as the demo set.
-  Truth is **independent of the pipeline**; price bands are (re)built from live eBay sold comps by
-  `pnpm eval:build-gold` (#61), emitted for a human spot-check rather than auto-overwriting.
-- **Hero domain** — the item categories SnapList excels at, i.e. reseller inventory (books/media,
-  electronics, video games and consoles, board games, LEGO, sneakers, branded clothing/streetwear,
-  branded gear) — exactly where eBay public sold comps are dense. Generic items still flow through
-  but honestly show low confidence.
+## Lean MVP language
+
+- **Seller** — the SnapList user. The only human actor in the native product.
+- **Scan** — one of exactly two primary destinations. It owns recoverable intake for one physical
+  item: one to five ordered photos and zero or one voice note capped at fifteen seconds. It clears
+  only after durable server acceptance.
+- **Trophy Wall** — the other primary destination. A tenant-owned chronological projection that
+  merges local pending intake with canonical server truth without duplication. Its public states are
+  **pending upload**, **accepted**, **analyzing**, **ready to review**, **needs retry**, **published to
+  eBay**, and **export pack prepared/shared**. It is not an analytics, messaging, inventory, order, or
+  fulfillment dashboard.
+- **Settings** — the full account/product-control destination opened from the profile avatar. It is
+  not a third primary destination.
+- **Voice context** — optional seller-supplied context from at most one fifteen-second voice note.
+  Raw audio is bounded temporary input; a transcript may enrich condition notes or listing copy but
+  is not external verification and cannot override image, catalog, sold-evidence, or marketplace
+  truth. Missing/failed voice processing falls back to photos only.
+- **Item** — one physical thing the seller wants to sell. The root entity with photos, extracted
+  **attributes**, a **condition**, and eventually a **price recommendation**.
+- **Attributes** — Zod-validated facts extracted from photos: brand, model, category, key specs, and
+  any passively decoded ISBN/UPC. Prefer “attributes” over “metadata” or “details.”
+- **Condition** — the assessed wear state of an item. Prefer “condition” over “quality.”
+- **ISBN / UPC** — passive identification aids. ISBN may resolve structured catalog identity; UPC
+  may sharpen search. Neither creates a barcode-only Scan mode, and UPC is never a price source.
+- **Listing** — coherent, editable sale copy for one item: title, item specifics, description,
+  condition, photos, and effective price. The lean MVP produces an eBay draft plus supported export
+  packs.
+- **Usable draft** — the AI-item settlement point: one coherent item, price recommendation (including
+  an honestly labeled fallback), and editable listing are durably available. Provider output,
+  partial checkpoints, or queue acknowledgement alone do not qualify.
+
+## Pricing and evidence
+
+- **PricingProvider** — the interface every pricing strategy implements. Never bypass it with an
+  inline price lookup.
+- **Tier** — one pricing strategy in order: structured ISBN lookup → **eBay sold comps** → cited web
+  search → depreciation → clearly labeled LLM fallback. Which tier fired is logged.
+- **eBay-sold adapter** — read-only sold-price research, distinct from the transactional eBay
+  **adapter**. Caffein Apify is the intended primary automatic adapter behind an operator-controlled
+  activation gate; the public-page provider is the immediate fallback. Both feed the same canonical
+  matcher and fail soft when blocked or too thin.
+- **Comp** — a comparable price point. A **sold comp** is a verified completed sale; an **asking comp**
+  is an active listing and is weaker evidence. Never represent an asking price as a sold amount.
+- **Price recommendation** — `{ suggested, range, confidence, sources[] }`, always editable.
+  Evidence-backed tiers cite sources. The terminal `llm-only` estimate may be uncited and must be
+  labeled honestly.
+- **Pricing-evidence snapshot** — the immutable tenant-scoped recommendation and verified sold comps
+  committed with one successful pipeline run at one server `evidenceAsOf` time. Clients consume the
+  whole snapshot; they do not reconstruct it from generic URLs or combine runs.
+- **No-evidence result** — a complete editable draft with `Starting price estimate` and
+  `No verified sold matches found.` It is a valid fail-soft result, not a stranded pipeline run.
+- **Confidence** — a composite of tier trust, comp agreement, and identification completeness.
+  Never raw model self-report and never authorization for a marketplace action.
+- **Effective price** — a valid positive cent-normalized seller `price_override`; otherwise the
+  latest recommendation. It governs eBay publish and every fresh/cached export pack.
+- **Prediction log** — per-run evaluation history containing attributes, price, range, confidence,
+  tier, and model. It is not the seller’s chosen price or a delivery authority.
+
+## Durable value, tenancy, and credits
+
+- **Pipeline run** — the tenant-owned durable execution record for one listing-preparation attempt.
+  It owns status/stage/attempt/idempotency/recovery truth. Seller UI maps it to plain language and
+  never exposes queue, worker, lease, or provider terminology.
+- **Pipeline queue envelope** — internal `{ run_id, schema_version }` wake-up data. It contains no
+  photo URL, tenant claim, secret, seller copy, or authorization. It is never seller-facing.
+- **AI-item credit** — one logical entitlement reservation for one complete run. Reserve before
+  provider work, settle once at usable draft, and restore once on failure/cancel before that point.
+  Internal retries, recovery, queue redelivery, and the included guided correction reuse it.
+- **Guest allowance** — one App Attest-backed device entitlement with one AI-item credit and one
+  guided correction for the same immutable photo set. The usable result is encrypted/recoverable for
+  24 hours and then claimed or deleted.
+- **Review correction** — bounded pre-publish replacement of identity facts followed by shared
+  pricing/confidence/listing regeneration and one atomic RLS-scoped persistence step. It preserves a
+  seller price override and never publishes.
+- **Review revision** — the item-owned concurrency token covering review edits, regeneration, export
+  packs, and publish acquisition. Stale writers fail closed.
+- **Tenant isolation** — every domain row is owned by a Clerk `user_id`; Postgres RLS and private
+  Storage policies enforce isolation. Queue authority never substitutes for tenant authority.
+
+## Marketplace delivery
+
+- **Adapter** — an isolating interface around an eBay capability. The transactional eBay adapter is
+  the only direct marketplace mutation seam and must remain testable against mocks.
+- **Publish** — putting a listing live on eBay after account claim/connection, current review
+  acquisition, and explicit seller confirmation. Durable replay protection prevents duplicates.
+- **eBay authority** — SnapList owns unpublished drafts. After publish, only confirmed provider
+  results become local truth; conflicts are explicit rather than silent last-write-wins.
+- **Export pack** — platform-appropriate text/photos for Facebook Marketplace, Mercari, or Depop.
+  It is delivered through a native share sheet or honest deep link plus a completion checklist. It
+  never directly fills or publishes a destination form.
+- **Prepared / Shared** — export-pack delivery states. Neither means `Published`, `Listed`, or `Sold`.
+- **Explicit seller confirmation** — the mandatory authorization for every external marketplace
+  mutation. Confidence, eligibility, automation, or a retry can never substitute for it.
+
+## Retired launch language
+
+The following terms may occur in historical code, migrations, benchmarks, or closed issue records.
+They are outside the lean MVP and must not be used to create new launch states, navigation, or
+acceptance criteria. ADR-0008 records the superseded issue families.
+
+- **Inbox / buyer messaging / buyer-Q&A delivery** — not a primary destination or lean-MVP flow.
+- **Insights / generic analytics / profit dashboard / streaks** — not a primary destination or
+  lean-MVP motivation system.
+- **Post-sale operations** — order, fulfillment, shipping, returns, cancellations, disputes,
+  repricing, relisting, and sold-elsewhere workflows are deferred.
+- **Bulk / haul capture and triage list** — historical advanced-volume behavior, not launch posture.
+- **Barcode-only capture** — rejected. Passive ISBN/UPC recognition may remain internal only.
+- **Garment measurements** — historical experiment/implementation, excluded from MVP composition.
+- **Autonomous marketplace action** — prohibited. No publish, reprice, end, relist, fulfill, or
+  message action may occur without explicit seller confirmation; only direct eBay publish is in the
+  lean MVP.
 
 ## Terms to avoid
-- "metadata" → use **attributes**. "quality" (of an item) → use **condition**. "the model's
-  confidence" when meaning self-report → say so explicitly; default **confidence** means the composite.
-- "chat" / "conversation platform" → SnapList is a seller **control surface**, not a chat app.
 
-## Actors
-- **Seller** — the SnapList user. The only human in the app.
-- **Buyer** — a person on eBay asking questions. Never a SnapList user.
-- **Builder** — Aziz, operating the project as a portfolio/showcase (eval, architecture, narrative).
+- “Home,” “Listings,” “Inbox,” or “Insights” as primary native destinations → use **Scan** and
+  **Trophy Wall**.
+- “Queued,” “worker,” “lease,” or provider names in seller-facing progress → use the Trophy Wall
+  public states.
+- “Published” for Facebook Marketplace, Mercari, or Depop → use **export pack prepared/shared**.
+- “The model’s confidence” when referring to the composite → use **confidence**.
+- “Buyer” as a SnapList actor → only the **seller** uses SnapList in this MVP.
+
+## Builder
+
+- **Builder** — Aziz, operating and shipping SnapList as a real product while preserving its
+  evidence-driven engineering narrative.

@@ -1,8 +1,10 @@
 {
   "meta": {
     "project": "SnapList iOS",
-    "version": "approved-families-v1",
-    "date": "2026-07-16",
+    "version": "retired-approved-families-v1",
+    "date": "2026-07-21",
+    "status": "historical_tokens_only_awaiting_redirected_design",
+    "authorizes_implementation": false,
     "system": "White Seller Utility",
     "units": "CSS px in Claude reference; map 1:1 to iOS points at the canonical device size unless native system chrome requires otherwise",
     "board_styles_are_app_tokens": false
@@ -105,11 +107,11 @@
     "safe_area_bottom_approx": 34
   },
   "dock": {
-    "destinations": ["Home", "Listings", "Capture", "Inbox", "Insights"],
+    "destinations": ["Scan", "Trophy Wall"],
     "height": 66,
     "radius": 26,
-    "capture_tile": {"width": 52, "height": 44, "radius": 15, "glyph_size": 25},
     "label_size": 12,
-    "hidden_when_keyboard_visible": true
+    "hidden_when_keyboard_visible": true,
+    "geometry_status": "historical_only_pending_redirected_high_fidelity_design"
   }
 }
