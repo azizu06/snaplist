@@ -66,6 +66,15 @@ describe("internal pipeline maintenance composition", () => {
             }
           : { data: { kind: "empty" }, error: null };
       }
+      if (name === "authorize_pipeline_storage_cleanup") {
+        return {
+          data: {
+            kind: "authorized",
+            photoPaths: ["user/pipeline-staging/photo.jpg"],
+          },
+          error: null,
+        };
+      }
       if (name === "pipeline_operations_health") {
         return {
           data: {
@@ -100,6 +109,7 @@ describe("internal pipeline maintenance composition", () => {
       "expire_guest_draft_recoveries",
       "prepare_pipeline_retention",
       "claim_pipeline_storage_cleanup",
+      "authorize_pipeline_storage_cleanup",
       "complete_pipeline_storage_cleanup",
       "claim_pipeline_storage_cleanup",
       "record_pipeline_cleanup_outcome",

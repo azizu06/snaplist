@@ -23,6 +23,32 @@ struct SessionEnvelope: Codable, Equatable {
     let meta: ResponseMeta
 }
 
+struct MobileItemSubmissionEnvelope: Codable, Equatable {
+    struct PhotoIdentity: Codable, Equatable {
+        let kind: String
+        let fingerprint: String
+    }
+
+    struct PhotoReceipt: Codable, Equatable {
+        let ordinal: Int
+        let contentSha256: String
+        let byteLength: Int
+        let mediaType: String
+    }
+
+    struct DataPayload: Codable, Equatable {
+        let itemId: UUID
+        let runId: UUID
+        let status: String
+        let stage: String
+        let photoIdentity: PhotoIdentity
+        let photos: [PhotoReceipt]
+    }
+
+    let data: DataPayload
+    let meta: ResponseMeta
+}
+
 struct RevenueCatConfigurationEnvelope: Codable, Equatable {
     struct DataPayload: Codable, Equatable {
         let configured: Bool
@@ -91,14 +117,12 @@ struct AiItemEntitlementEnvelope: Codable, Equatable {
 
 enum ContractOnlyOperation: String, CaseIterable, Codable {
     case verifyGuestAttestation
-    case createItemRun
     case createEbayOauthSession
     case completeEbayOauthCallback
 
     var ownerIssue: Int {
         switch self {
         case .verifyGuestAttestation: 174
-        case .createItemRun: 159
         case .createEbayOauthSession, .completeEbayOauthCallback: 17
         }
     }

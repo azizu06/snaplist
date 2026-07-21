@@ -1,0 +1,44 @@
+import { verifyToken } from "@clerk/nextjs/server";
+import { createConfiguredMobileItemSubmissionOperations } from "@/lib/mobile-item-submission/configured";
+import { createMobileItemSubmissionHandler } from "@/lib/mobile-item-submission/http";
+
+function configuredSubmissionOperations() {
+  const supabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY?.trim()
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const secretKey = process.env.SUPABASE_SECRET_KEY?.trim()
+    || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!supabaseURL || !publishableKey || !secretKey) {
+    throw new Error("The mobile item submission adapter is not configured.");
+  }
+  return createConfiguredMobileItemSubmissionOperations({
+    supabaseURL,
+    publishableKey,
+    secretKey,
+  });
+}
+
+const handler = createMobileItemSubmissionHandler({
+  itemSubmission: {
+    async resolvePrincipal(bearerToken) {
+      const secretKey = process.env.CLERK_SECRET_KEY?.trim();
+      const authorizedParties = process.env.CLERK_AUTHORIZED_PARTIES?.split(",")
+        .map((party) => party.trim())
+        .filter(Boolean);
+      if (!secretKey || !authorizedParties?.length) {
+        throw new Error("The native Clerk verification boundary is not configured.");
+      }
+      const verified = await verifyToken(bearerToken, { secretKey, authorizedParties });
+      const userId = verified.sub?.trim();
+      if (!userId) throw new Error("The verified Clerk token has no subject.");
+      return { kind: "clerk", userId, bearerToken };
+    },
+    submit(input) {
+      return configuredSubmissionOperations().submit(input);
+    },
+  },
+});
+
+export function handleMobileItemSubmissionRequest(request: Request): Promise<Response> {
+  return handler(request);
+}

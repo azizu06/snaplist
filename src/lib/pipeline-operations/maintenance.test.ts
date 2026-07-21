@@ -33,6 +33,13 @@ describe("pipeline maintenance", () => {
           },
         })
         .mockResolvedValueOnce({ kind: "empty" }),
+      authorizeStorageCleanup: vi.fn().mockResolvedValue({
+        kind: "authorized",
+        photoPaths: [
+          "guest_fixture/items/front.enc",
+          "user_account/guest-claims/recovery/lease/1",
+        ],
+      }),
       completeStorageCleanup: vi.fn().mockResolvedValue(true),
       failStorageCleanup: vi.fn(),
       recordCleanupOutcome: vi.fn().mockResolvedValue(true),
@@ -96,6 +103,10 @@ describe("pipeline maintenance", () => {
           },
         })
         .mockResolvedValueOnce({ kind: "empty" }),
+      authorizeStorageCleanup: vi.fn().mockResolvedValue({
+        kind: "authorized",
+        photoPaths: ["user/pipeline-staging/a/photo.jpg"],
+      }),
       completeStorageCleanup: vi.fn(),
       failStorageCleanup: vi.fn().mockResolvedValue(true),
       recordCleanupOutcome: vi.fn().mockResolvedValue(true),

@@ -1,6 +1,6 @@
 begin;
 
-select plan(44);
+select plan(47);
 
 select extensions.has_column(
   'public', 'pipeline_runs', 'retention_cleaned_at',
@@ -23,6 +23,10 @@ select extensions.has_function(
   'leased Storage cleanup claim RPC exists'
 );
 select extensions.has_function(
+  'public', 'authorize_pipeline_storage_cleanup', array['uuid', 'uuid'],
+  'Storage cleanup requires final path authorization'
+);
+select extensions.has_function(
   'public', 'complete_pipeline_storage_cleanup', array['uuid', 'uuid'],
   'Storage cleanup completion RPC exists'
 );
@@ -42,6 +46,10 @@ select extensions.function_privs_are(
 select extensions.function_privs_are(
   'public', 'claim_pipeline_storage_cleanup', array['integer'], 'service_role',
   array['EXECUTE'], 'service role receives fixed cleanup claim authority'
+);
+select extensions.function_privs_are(
+  'public', 'authorize_pipeline_storage_cleanup', array['uuid', 'uuid'], 'service_role',
+  array['EXECUTE'], 'service role receives fixed cleanup authorization authority'
 );
 select extensions.function_privs_are(
   'public', 'pipeline_operations_health', array[]::text[], 'service_role',
@@ -399,6 +407,11 @@ create temporary table health_before on commit drop as
 select public.pipeline_operations_health() as value;
 create temporary table cleanup_claim on commit drop as
 select public.claim_pipeline_storage_cleanup(300) as value;
+create temporary table cleanup_authorization on commit drop as
+select public.authorize_pipeline_storage_cleanup(
+  (select (value #>> '{job,jobId}')::uuid from cleanup_claim),
+  (select (value #>> '{job,leaseToken}')::uuid from cleanup_claim)
+) as value;
 reset role;
 
 select extensions.is(
@@ -419,6 +432,11 @@ select extensions.is(
 select extensions.ok(
   (select jsonb_array_length(value #> '{job,photoPaths}') > 0 from cleanup_claim),
   'cleanup returns only exact persisted paths'
+);
+select extensions.is(
+  (select value->>'kind' from cleanup_authorization),
+  'authorized',
+  'cleanup revalidates exact paths immediately before deletion'
 );
 
 set local role service_role;

@@ -40,20 +40,25 @@ export async function runPipelineMaintenance(dependencies: {
     );
     if (claim.kind === "empty") break;
     claimedStorageJobs += 1;
+    const authorization = await dependencies.store.authorizeStorageCleanup(
+      claim.job.jobId,
+      claim.job.leaseToken,
+    );
+    if (authorization.kind === "stale") continue;
     try {
-      await dependencies.photos.remove(claim.job.photoPaths);
+      await dependencies.photos.remove(authorization.photoPaths);
       await dependencies.store.completeStorageCleanup(
         claim.job.jobId,
         claim.job.leaseToken,
       );
-      deletedObjects += claim.job.photoPaths.length;
+      deletedObjects += authorization.photoPaths.length;
     } catch {
       await dependencies.store.failStorageCleanup(
         claim.job.jobId,
         claim.job.leaseToken,
         "Photo cleanup failed and will be retried.",
       );
-      failedObjects += claim.job.photoPaths.length;
+      failedObjects += authorization.photoPaths.length;
     }
   }
 
