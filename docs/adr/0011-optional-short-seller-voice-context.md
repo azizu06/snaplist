@@ -115,8 +115,12 @@ transcription models have different SDK types and call contracts.
 The stable domain seam is:
 
 ```ts
+type CanonicalLanguageTag = string & {
+  readonly __brand: "CanonicalLanguageTag";
+};
+
 type SellerContextTranscriptionResult =
-  | { kind: "transcribed"; text: string; language: string | null }
+  | { kind: "transcribed"; text: string; language: CanonicalLanguageTag | null }
   | { kind: "empty" | "unsupported" | "timed-out" | "failed" };
 
 interface SellerContextTranscriber {
@@ -173,12 +177,16 @@ pipeline terminally fail.
 
 A successful transcript is normalized to Unicode plain text, trimmed, stripped of control
 characters, and bounded to both 1,000 Unicode scalar values and 4 KiB UTF-8. Empty output is
-photos-only. Provider errors normalize to the bounded outcome enum. Raw provider messages, response
-bodies, audio, transcript fragments, and provider request ids are never persisted as telemetry.
-Per-run telemetry may retain only adapter/model configuration ids, outcome, elapsed milliseconds,
-billed audio seconds, and measured/estimated cost; it follows item/account deletion. Deidentified
-aggregate cost/latency measurements may persist without seller, item, run, audio, transcript, or
-provider request identity.
+photos-only. A provider-reported language is untrusted output: the adapter passes it through the same
+IANA-backed BCP-47 canonicalizer as the request hint and accepts it only when the canonical result is
+at most 255 UTF-8 bytes. Missing, invalid, or oversized language output becomes `null` without
+discarding an otherwise-valid transcript. Only that canonical tag or `null` may cross the domain
+seam or persist with the item. Provider errors normalize to the bounded outcome enum. Raw provider
+messages, response bodies, audio, transcript fragments, and provider request ids are never persisted
+as telemetry. Per-run telemetry may retain only adapter/model configuration ids, outcome, elapsed
+milliseconds, billed audio seconds, and measured/estimated cost; it follows item/account deletion.
+Deidentified aggregate cost/latency measurements may persist without seller, item, run, audio,
+transcript, or provider request identity.
 
 ### 7. A transcript is seller context, not verified truth
 
@@ -208,10 +216,12 @@ in every case no later than 24 hours after durable acceptance. Cleanup must be d
 a failed delete cannot be reported as deleted. Raw audio is never copied into the item, listing,
 prediction log, evaluation corpus, analytics, or marketplace payload.
 
-The bounded transcript, provenance, and optional language tag may persist with the item. Guest claim
-transfers it with the same item; guest expiry deletes it. Deleting the voice context, item, or account
-deletes the retained transcript under the existing deletion authority. No provider-specific request
-id or raw response becomes seller content.
+The bounded transcript, provenance, and canonical optional BCP-47 language tag may persist with the
+item. Guest claim transfers them with the same item; guest expiry deletes them. Deleting the voice
+context, item, or account deletes the retained transcript and language tag under the existing
+deletion authority. The language tag has no independent claim or retention lifecycle: it requires
+the associated transcript and cannot outlive or detach from it. No provider-specific request id or
+raw response becomes seller content.
 
 A hosted provider may independently retain request content under its then-current API data policy.
 That external policy cannot be described as SnapList deletion. Provider activation is blocked until

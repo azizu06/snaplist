@@ -94,6 +94,39 @@ const contractSchema = z
         maximumBillableAttemptsPerLogicalRun: z.literal(1),
         maximumTranscriptUnicodeScalars: z.literal(1_000),
         maximumTranscriptUtf8Bytes: z.literal(4_096),
+        languageOutput: z.literal("canonical-bcp47-or-null"),
+        maximumLanguageTagUtf8Bytes: z.literal(255),
+        invalidLanguageOutputBehavior: z.literal("null"),
+        languageNormalizationMatrix: z.tuple([
+          z
+            .object({
+              input: z.literal("missing"),
+              normalizedLanguage: z.null(),
+              transcriptOutcome: z.literal("transcribed"),
+            })
+            .strict(),
+          z
+            .object({
+              input: z.literal("invalid"),
+              normalizedLanguage: z.null(),
+              transcriptOutcome: z.literal("transcribed"),
+            })
+            .strict(),
+          z
+            .object({
+              input: z.literal("oversized"),
+              normalizedLanguage: z.null(),
+              transcriptOutcome: z.literal("transcribed"),
+            })
+            .strict(),
+          z
+            .object({
+              input: z.literal("valid-canonical"),
+              normalizedLanguage: z.literal("en-US"),
+              transcriptOutcome: z.literal("transcribed"),
+            })
+            .strict(),
+        ]),
         providerConstructedByCaller: z.literal(false),
         providerModelFrozenByContract: z.literal(false),
       })
@@ -129,6 +162,11 @@ const contractSchema = z
         transcriptDeletedWithVoiceContext: z.literal(true),
         transcriptDeletedWithItem: z.literal(true),
         transcriptDeletedWithAccount: z.literal(true),
+        languageTagRequiresTranscript: z.literal(true),
+        languageTagFollowsGuestClaim: z.literal(true),
+        languageTagDeletedWithVoiceContext: z.literal(true),
+        languageTagDeletedWithItem: z.literal(true),
+        languageTagDeletedWithAccount: z.literal(true),
         externalProviderRetentionRequiresActivationDisclosure: z.literal(true),
       })
       .strict(),
@@ -280,7 +318,32 @@ describe("voice-context V1 authority", () => {
       maximumBillableAttemptsPerLogicalRun: 1,
       maximumTranscriptUnicodeScalars: 1_000,
       maximumTranscriptUtf8Bytes: 4_096,
+      languageOutput: "canonical-bcp47-or-null",
+      maximumLanguageTagUtf8Bytes: 255,
+      invalidLanguageOutputBehavior: "null",
     });
+    expect(contract.transcription.languageNormalizationMatrix).toEqual([
+      {
+        input: "missing",
+        normalizedLanguage: null,
+        transcriptOutcome: "transcribed",
+      },
+      {
+        input: "invalid",
+        normalizedLanguage: null,
+        transcriptOutcome: "transcribed",
+      },
+      {
+        input: "oversized",
+        normalizedLanguage: null,
+        transcriptOutcome: "transcribed",
+      },
+      {
+        input: "valid-canonical",
+        normalizedLanguage: "en-US",
+        transcriptOutcome: "transcribed",
+      },
+    ]);
     expect(contract.authority).toEqual({
       provenance: "seller_voice",
       verification: "unverified",
@@ -311,7 +374,24 @@ describe("voice-context V1 authority", () => {
       transcriptDeletedWithVoiceContext: true,
       transcriptDeletedWithItem: true,
       transcriptDeletedWithAccount: true,
+      languageTagRequiresTranscript: true,
+      languageTagFollowsGuestClaim: true,
+      languageTagDeletedWithVoiceContext: true,
+      languageTagDeletedWithItem: true,
+      languageTagDeletedWithAccount: true,
     });
+    expect(contract.retention.languageTagFollowsGuestClaim).toBe(
+      contract.retention.transcriptFollowsGuestClaim,
+    );
+    expect(contract.retention.languageTagDeletedWithVoiceContext).toBe(
+      contract.retention.transcriptDeletedWithVoiceContext,
+    );
+    expect(contract.retention.languageTagDeletedWithItem).toBe(
+      contract.retention.transcriptDeletedWithItem,
+    );
+    expect(contract.retention.languageTagDeletedWithAccount).toBe(
+      contract.retention.transcriptDeletedWithAccount,
+    );
     expect(contract.telemetry).toEqual({
       rawProviderMessagesPersisted: false,
       providerRequestIdPersisted: false,
