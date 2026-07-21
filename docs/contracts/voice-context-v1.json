@@ -1,0 +1,143 @@
+{
+  "contract": "snaplist.voice-context",
+  "version": 1,
+  "status": "accepted",
+  "ownerIssue": 351,
+  "capture": {
+    "optional": true,
+    "maximumAssets": 1,
+    "primitive": "AVAudioRecorder",
+    "container": "wav",
+    "mediaType": "audio/wav",
+    "codec": "pcm-s16le",
+    "channels": 1,
+    "sampleRateHz": 16000,
+    "bitsPerSample": 16,
+    "maximumDurationMs": 15000,
+    "maximumBytes": 524288,
+    "fileProtection": "complete",
+    "excludedFromBackup": true,
+    "localRecoveryMaximumHours": 24
+  },
+  "upload": {
+    "transport": "multipart/form-data",
+    "mutation": "POST /v1/items/runs",
+    "idempotencyHeader": "Idempotency-Key",
+    "fileField": "voiceContext",
+    "localeHintField": "voiceContextLocale",
+    "maximumFileParts": 1,
+    "separateUploadEndpoint": false,
+    "clientSuppliesDerivedMetadata": false,
+    "invalidVoiceBehavior": "continue-photos-with-null-receipt",
+    "receiptField": "voiceContext",
+    "receiptRequiredNullable": true,
+    "receiptAcceptedShape": [
+      "version",
+      "contentSha256",
+      "byteLength",
+      "durationMs",
+      "mediaType"
+    ],
+    "queueCarriesAudio": false
+  },
+  "identity": {
+    "photoIdentityKind": "content_sha256_set_v1",
+    "voiceAffectsPhotoIdentity": false,
+    "voiceAffectsAiItemCreditIdentity": false,
+    "voiceAffectsRequestFingerprint": true,
+    "requestFingerprintVersion": "snaplist-mobile-item-submission-v2",
+    "requestVoiceShape": [
+      "version",
+      "contentSha256",
+      "byteLength",
+      "durationMs",
+      "mediaType"
+    ],
+    "transcriptAffectsRequestFingerprint": false,
+    "changedVoiceWithAcceptedIdempotencyKey": "conflict"
+  },
+  "transcription": {
+    "role": "sellerContext",
+    "resolverKind": "transcription-model",
+    "generationRole": false,
+    "disabledByDefault": true,
+    "attemptDeadlineMs": 20000,
+    "maximumBillableAttemptsPerLogicalRun": 1,
+    "maximumTranscriptUnicodeScalars": 1000,
+    "maximumTranscriptUtf8Bytes": 4096,
+    "providerConstructedByCaller": false,
+    "providerModelFrozenByContract": false
+  },
+  "authority": {
+    "provenance": "seller_voice",
+    "verification": "unverified",
+    "mayEnrich": [
+      "seller-stated-condition-note",
+      "editable-title-copy",
+      "editable-description-copy",
+      "review-prompt"
+    ],
+    "mayNotOverride": [
+      "photo-or-catalog-identity",
+      "pricing-evidence",
+      "composite-confidence",
+      "marketplace-truth",
+      "seller-confirmation"
+    ],
+    "treatedAsInstructions": false
+  },
+  "retention": {
+    "rawAudioPurpose": "temporary-transcription-input",
+    "rawAudioDeletedAfterTerminalTranscriptionOutcome": true,
+    "rawAudioMaximumServerHours": 24,
+    "rawAudioCopiedToDurableItem": false,
+    "transcriptOwnedBy": "seller",
+    "transcriptFollowsGuestClaim": true,
+    "transcriptDeletedWithVoiceContext": true,
+    "transcriptDeletedWithItem": true,
+    "transcriptDeletedWithAccount": true,
+    "externalProviderRetentionRequiresActivationDisclosure": true
+  },
+  "telemetry": {
+    "rawProviderMessagesPersisted": false,
+    "providerRequestIdPersisted": false,
+    "perRunFields": [
+      "adapterConfigId",
+      "modelConfigId",
+      "outcome",
+      "elapsedMs",
+      "billedAudioSeconds",
+      "cost"
+    ],
+    "perRunTelemetryFollowsItemAccountDeletion": true,
+    "deidentifiedAggregateMayPersist": true
+  },
+  "outcomeMatrix": [
+    { "outcome": "missing", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "skipped", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "deleted", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "permission-denied", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "interrupted", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "canceled", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "invalid", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "empty", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "unsupported", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "timed-out", "continuePhotos": true, "sellerContext": null },
+    { "outcome": "failed", "continuePhotos": true, "sellerContext": null },
+    {
+      "outcome": "transcribed",
+      "continuePhotos": true,
+      "sellerContext": { "provenance": "seller_voice", "verification": "unverified" }
+    }
+  ],
+  "excluded": [
+    "ui-composition",
+    "provider-activation",
+    "model-selection",
+    "credentials",
+    "database-migration",
+    "pipeline-implementation",
+    "hosted-resource",
+    "production-mutation"
+  ]
+}
