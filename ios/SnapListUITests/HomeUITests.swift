@@ -59,19 +59,33 @@ final class HomeUITests: XCTestCase {
         )
         pricing.tap()
 
-        let loadedOverview = app.buttons["pricing.back"]
-        if !loadedOverview.waitForExistence(timeout: 3) {
-            XCTFail(
-                """
-                Pricing route did not reach the loaded overview.
-                homeActionExists=\(pricing.exists)
-                loadingExists=\(app.descendants(matching: .any)["pricing.loading"].exists)
-                loadFailedExists=\(app.descendants(matching: .any)["pricing.load-failed"].exists)
-                accessibilityHierarchy:
-                \(app.debugDescription)
-                """
-            )
-        }
+        XCTAssertTrue(
+            !pricing.exists || pricingState(in: app).exists,
+            pricingRouteFailureMessage(app: app, pricing: pricing)
+        )
+    }
+
+    func testPricingAttentionTopEdgeReachesTheProductionPricingRoute() {
+        let app = launch("HOME-03")
+        let scroll = app.scrollViews.firstMatch
+        let pricing = app.buttons[
+            "home.attention.20800000-0000-4000-8000-000000000006"
+        ]
+
+        scrollUntilFullyVisible(
+            scroll,
+            element: pricing,
+            in: app,
+            maximumSwipes: 12
+        )
+        pricing.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)
+        ).tap()
+
+        XCTAssertTrue(
+            pricingState(in: app).waitForExistence(timeout: 3),
+            pricingRouteFailureMessage(app: app, pricing: pricing)
+        )
     }
 
     func testRunDetailUsesSystemBackAndReturnsToExactHomeOpener() {
@@ -381,5 +395,31 @@ final class HomeUITests: XCTestCase {
             && frame.maxX <= viewport.maxX
             && frame.minY >= viewport.minY
             && frame.maxY <= viewport.maxY
+    }
+
+    private func pricingState(in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier == %@ OR identifier == %@ OR identifier == %@",
+                "pricing.loading",
+                "pricing.back",
+                "pricing.load-failed"
+            )
+        ).firstMatch
+    }
+
+    private func pricingRouteFailureMessage(
+        app: XCUIApplication,
+        pricing: XCUIElement
+    ) -> String {
+        """
+        Pricing route did not leave Home or expose a public pricing state.
+        homeActionExists=\(pricing.exists)
+        loadingExists=\(app.descendants(matching: .any)["pricing.loading"].exists)
+        loadedOverviewExists=\(app.buttons["pricing.back"].exists)
+        loadFailedExists=\(app.descendants(matching: .any)["pricing.load-failed"].exists)
+        accessibilityHierarchy:
+        \(app.debugDescription)
+        """
     }
 }
