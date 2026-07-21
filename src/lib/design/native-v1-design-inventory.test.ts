@@ -139,7 +139,7 @@ describe("lean native design authority contract", () => {
     );
   });
 
-  it("keeps the retired V1 text package and shared assets checksum-verifiable", () => {
+  it("keeps the repository-normalized retired V1 archive integrity-verifiable", () => {
     const archiveRoot = resolve("ios/DesignContracts/Retired/V1-2026-07-16");
     const manifest = JSON.parse(
       readFileSync(resolve(archiveRoot, "ARCHIVE-MANIFEST.json"), "utf8"),

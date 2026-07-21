@@ -1,8 +1,9 @@
 {
   "source_commit": "b01d9b4d59b884392434d65675943e276fd2a5e8",
   "status": "repository_archive_integrity",
+  "derivation": "Content copied from source_commit; repository patching normalized a missing terminal newline in CLAUDE-DESIGN-CONTRACT-EXTRACT.txt. These hashes describe the repository copy, not the external ZIP or byte-exact source commit.",
   "files": [
-    {"path": "ARCHIVE-NOTICE.md", "sha256": "d69900c82ce8fb6d360eb012053292e2f9b670212c30f3ba00b6a5660be8ea34"},
+    {"path": "ARCHIVE-NOTICE.md", "sha256": "3e1f9c08132d3db7ef7b788c697f2334ef8366d04a1fc38b3fdead21d5fc4197"},
     {"path": "CAMERA-MASCOT-SYSTEM.md", "sha256": "b1aa3d6b024e76a9e5575cee58b8215e588840faf584480f2bc794cce871f6fa"},
     {"path": "CLAUDE-DESIGN-CONTRACT-EXTRACT.txt", "sha256": "cb1ee6f8dfc170f94031909988ebb0d5033699bf6ebf2829c6f456aea046c189"},
     {"path": "GLOBAL-CONTRACT-POINTERS.md", "sha256": "f3ede96514cf90aa41938cd494caf0b1e6e4c6209b11102c71d773e83b3e6f57"},
