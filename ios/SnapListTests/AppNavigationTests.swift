@@ -24,6 +24,29 @@ final class AppNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testHomePricingAttentionDispatchesTheExactTypedRoute() throws {
+        let attentionID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000006"
+        )!
+        let itemID = UUID(
+            uuidString: "20800000-0000-4000-8000-000000000106"
+        )!
+        let task = try XCTUnwrap(
+            HomeFixtures.attention.attention.first { $0.id == attentionID }
+        )
+        let router = AppRouter()
+
+        XCTAssertEqual(task.route, .pricing(itemID))
+
+        router.navigate(to: task.route)
+
+        XCTAssertEqual(
+            router.pathBinding(for: .home).wrappedValue,
+            [.home(.pricing(itemID))]
+        )
+    }
+
+    @MainActor
     func testCaptureIsASheetAndDoesNotReplaceTheSelectedTab() {
         let router = AppRouter(initialTab: .inbox)
 
