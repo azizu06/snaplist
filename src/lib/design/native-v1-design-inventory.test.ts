@@ -162,14 +162,14 @@ describe("lean native design authority contract", () => {
         path: "docs/contracts/mobile-api-v1.openapi.json",
         status: "current_runtime_contract_with_lean_mvp_gaps",
         legacy_home_projection_is_navigation_authority: false,
-        photo_maximum: { current: 4, target: 5, owner_issue: 352 },
+        photo_maximum: { current: 5, target: 5, owner_issue: 352 },
         voice_context_owner_issue: 351,
       },
       {
         path: "ios/DesignContracts/V1/mobile-api-v1.openapi.json",
         status: "mirrored_runtime_contract_with_lean_mvp_gaps",
         legacy_home_projection_is_navigation_authority: false,
-        photo_maximum: { current: 4, target: 5, owner_issue: 352 },
+        photo_maximum: { current: 5, target: 5, owner_issue: 352 },
         voice_context_owner_issue: 351,
       },
     ]);
