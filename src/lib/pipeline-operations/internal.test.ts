@@ -58,6 +58,7 @@ describe("internal pipeline maintenance composition", () => {
                   jobId: "11111111-1111-4111-8111-111111111111",
                   leaseToken: "22222222-2222-4222-8222-222222222222",
                   photoPaths: ["user/pipeline-staging/photo.jpg"],
+                  fenceGeneration: null,
                   attemptCount: 1,
                   maxAttempts: 5,
                 },
@@ -65,6 +66,15 @@ describe("internal pipeline maintenance composition", () => {
               error: null,
             }
           : { data: { kind: "empty" }, error: null };
+      }
+      if (name === "authorize_pipeline_storage_cleanup") {
+        return {
+          data: {
+            kind: "authorized",
+            photoPaths: ["user/pipeline-staging/photo.jpg"],
+          },
+          error: null,
+        };
       }
       if (name === "pipeline_operations_health") {
         return {
@@ -100,6 +110,7 @@ describe("internal pipeline maintenance composition", () => {
       "expire_guest_draft_recoveries",
       "prepare_pipeline_retention",
       "claim_pipeline_storage_cleanup",
+      "authorize_pipeline_storage_cleanup",
       "complete_pipeline_storage_cleanup",
       "claim_pipeline_storage_cleanup",
       "record_pipeline_cleanup_outcome",

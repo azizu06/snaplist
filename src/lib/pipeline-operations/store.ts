@@ -15,6 +15,7 @@ const cleanupJobSchema = z.object({
   jobId: z.string().uuid(),
   leaseToken: z.string().uuid(),
   photoPaths: z.array(z.string().min(1).max(1_024)).min(1).max(800),
+  fenceGeneration: z.number().int().positive().nullable(),
   attemptCount: z.number().int().positive(),
   maxAttempts: z.number().int().positive(),
 }).strict();
@@ -22,6 +23,14 @@ const cleanupJobSchema = z.object({
 const cleanupClaimSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("claimed"), job: cleanupJobSchema }).strict(),
   z.object({ kind: z.literal("empty") }).strict(),
+]);
+
+const cleanupAuthorizationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("authorized"),
+    photoPaths: z.array(z.string().min(1).max(1_024)).min(1).max(800),
+  }).strict(),
+  z.object({ kind: z.literal("stale") }).strict(),
 ]);
 
 const cleanupOutcomeSchema = preparationSchema.extend({
@@ -50,6 +59,9 @@ const healthSchema = z.object({
 
 export type PipelineRetentionPreparation = z.infer<typeof preparationSchema>;
 export type PipelineStorageCleanupClaim = z.infer<typeof cleanupClaimSchema>;
+export type PipelineStorageCleanupAuthorization = z.infer<
+  typeof cleanupAuthorizationSchema
+>;
 export type PipelineCleanupOutcome = z.infer<typeof cleanupOutcomeSchema>;
 export type GuestRecoveryExpiry = z.infer<typeof guestRecoveryExpirySchema>;
 export type PipelineOperationsHealth = z.infer<typeof healthSchema>;
@@ -58,6 +70,7 @@ type PipelineOperationsRpcName =
   | "expire_guest_draft_recoveries"
   | "prepare_pipeline_retention"
   | "claim_pipeline_storage_cleanup"
+  | "authorize_pipeline_storage_cleanup"
   | "complete_pipeline_storage_cleanup"
   | "fail_pipeline_storage_cleanup"
   | "record_pipeline_cleanup_outcome"
@@ -80,6 +93,10 @@ export interface PipelineOperationsStore {
   expireGuestRecoveries(batchSize: number): Promise<GuestRecoveryExpiry>;
   prepareRetention(batchSize: number): Promise<PipelineRetentionPreparation>;
   claimStorageCleanup(leaseSeconds: number): Promise<PipelineStorageCleanupClaim>;
+  authorizeStorageCleanup(
+    jobId: string,
+    leaseToken: string,
+  ): Promise<PipelineStorageCleanupAuthorization>;
   completeStorageCleanup(jobId: string, leaseToken: string): Promise<boolean>;
   failStorageCleanup(
     jobId: string,
@@ -128,6 +145,18 @@ export function createSupabasePipelineOperationsStore(
         p_lease_seconds: leaseSeconds,
       });
       return cleanupClaimSchema.parse(rpcData("cleanup claim", result));
+    },
+
+    async authorizeStorageCleanup(rawJobId, rawLeaseToken) {
+      const jobId = z.string().uuid().parse(rawJobId);
+      const leaseToken = z.string().uuid().parse(rawLeaseToken);
+      const result = await client.rpc("authorize_pipeline_storage_cleanup", {
+        p_job_id: jobId,
+        p_lease_token: leaseToken,
+      });
+      return cleanupAuthorizationSchema.parse(
+        rpcData("cleanup authorization", result),
+      );
     },
 
     async completeStorageCleanup(rawJobId, rawLeaseToken) {

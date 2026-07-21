@@ -28,9 +28,17 @@ describe("pipeline operations fixed RPC store", () => {
             jobId: "11111111-1111-4111-8111-111111111111",
             leaseToken: "22222222-2222-4222-8222-222222222222",
             photoPaths: ["user/photos/example.jpg"],
+            fenceGeneration: null,
             attemptCount: 1,
             maxAttempts: 5,
           },
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          kind: "authorized",
+          photoPaths: ["user/photos/example.jpg"],
         },
         error: null,
       })
@@ -64,6 +72,13 @@ describe("pipeline operations fixed RPC store", () => {
     const claim = await store.claimStorageCleanup(300);
     expect(claim).toMatchObject({ kind: "claimed" });
     if (claim.kind !== "claimed") throw new Error("expected a claimed job");
+    await expect(store.authorizeStorageCleanup(
+      claim.job.jobId,
+      claim.job.leaseToken,
+    )).resolves.toEqual({
+      kind: "authorized",
+      photoPaths: ["user/photos/example.jpg"],
+    });
     await expect(store.completeStorageCleanup(
       claim.job.jobId,
       claim.job.leaseToken,
@@ -93,6 +108,7 @@ describe("pipeline operations fixed RPC store", () => {
       "expire_guest_draft_recoveries",
       "prepare_pipeline_retention",
       "claim_pipeline_storage_cleanup",
+      "authorize_pipeline_storage_cleanup",
       "complete_pipeline_storage_cleanup",
       "record_pipeline_cleanup_outcome",
       "pipeline_operations_health",

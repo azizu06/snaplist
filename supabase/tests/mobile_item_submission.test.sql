@@ -1,6 +1,6 @@
 begin;
 
-select plan(23);
+select plan(24);
 
 select has_table(
   'private', 'mobile_item_submissions',
@@ -25,6 +25,10 @@ select has_column(
 select has_column(
   'private', 'mobile_item_submissions', 'cost_basis',
   'the pre-upload binding retains the cost-sensitive input'
+);
+select has_column(
+  'private', 'mobile_item_submissions', 'cleanup_generation',
+  'replay truth versions cleanup authority'
 );
 
 select ok(

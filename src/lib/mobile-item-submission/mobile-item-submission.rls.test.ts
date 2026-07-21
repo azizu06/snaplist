@@ -10,6 +10,8 @@ import { cleanupClerkTestUsers, mintUserJwt } from "@/lib/supabase/test-users";
 import { createMobileItemSubmissionHandler } from "./http";
 import { createMobileItemSubmissionOperations } from "./service";
 import { createSupabaseMobileItemSubmissionStaging } from "./store";
+import { runPipelineMaintenance } from "@/lib/pipeline-operations/maintenance";
+import { createSupabasePipelineOperationsStore } from "@/lib/pipeline-operations/store";
 
 vi.mock("server-only", () => ({}));
 
@@ -25,9 +27,11 @@ let lease: ExclusiveTestResourceLease;
 let ownerId = "";
 let foreignId = "";
 let recoveryId = "";
+let abandonedId = "";
 let ownerToken = "";
 let foreignToken = "";
 let recoveryToken = "";
+let abandonedToken = "";
 let itemId = "";
 let runId = "";
 let queueMessageId = "";
@@ -59,6 +63,58 @@ function request(token: string, key: string, body: FormData): Request {
   });
 }
 
+async function connectDatabase(applicationName: string): Promise<Client> {
+  const client = new Client({
+    application_name: applicationName,
+    connectionString: DATABASE_URL,
+    connectionTimeoutMillis: 2_000,
+  });
+  await client.connect();
+  await client.query("set statement_timeout = '10s'");
+  return client;
+}
+
+async function assumeServiceRole(client: Client): Promise<void> {
+  await client.query("select set_config('request.jwt.claims', $1, true)", [
+    JSON.stringify({ role: "service_role" }),
+  ]);
+  await client.query("set local role service_role");
+}
+
+async function waitForCleanupFence(
+  observer: Client,
+  replayPid: number,
+): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = await observer.query<{
+      blockers: number[];
+      waiting_on_advisory: boolean;
+    }>(
+      `select
+         pg_blocking_pids(activity.pid) as blockers,
+         exists (
+           select 1
+           from pg_locks lock
+           where lock.pid = activity.pid
+             and lock.locktype = 'advisory'
+             and not lock.granted
+         ) as waiting_on_advisory
+       from pg_stat_activity activity
+       where activity.pid <> pg_backend_pid()
+         and activity.query ilike '%authorize_pipeline_storage_cleanup%'
+       order by activity.query_start desc`,
+    );
+    if (result.rows.some((row) => (
+      row.waiting_on_advisory && row.blockers.includes(replayPid)
+    ))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("Claimed cleanup never blocked at the mobile submission fence");
+}
+
 beforeAll(async () => {
   if (
     !PUBLISHABLE_KEY?.startsWith("sb_publishable_") ||
@@ -84,10 +140,12 @@ beforeAll(async () => {
   ownerId = `user_test_mobile_submit_owner_${Date.now()}`;
   foreignId = `user_test_mobile_submit_foreign_${Date.now()}`;
   recoveryId = `user_test_mobile_submit_recovery_${Date.now()}`;
-  [ownerToken, foreignToken, recoveryToken] = await Promise.all([
+  abandonedId = `user_test_mobile_submit_abandoned_${Date.now()}`;
+  [ownerToken, foreignToken, recoveryToken, abandonedToken] = await Promise.all([
     mintUserJwt(ownerId),
     mintUserJwt(foreignId),
     mintUserJwt(recoveryId),
+    mintUserJwt(abandonedId),
   ]);
   reachable = true;
 });
@@ -102,7 +160,7 @@ afterAll(async () => {
      from storage.objects object
      where object.bucket_id = 'photos'
        and split_part(object.name, '/', 1) = any($1::text[])`,
-    [[ownerId, foreignId, recoveryId]],
+    [[ownerId, foreignId, recoveryId, abandonedId]],
   );
   const messageIds = new Set([
     ...residue.rows.flatMap((row) => row.queue_message_id ? [row.queue_message_id] : []),
@@ -118,23 +176,23 @@ afterAll(async () => {
     ),
   );
   if (paths.size > 0) await admin.storage.from("photos").remove([...paths]);
-  await cleanupClerkTestUsers(admin, [ownerId, foreignId, recoveryId]);
+  await cleanupClerkTestUsers(admin, [ownerId, foreignId, recoveryId, abandonedId]);
   await database.query(
     `delete from private.pipeline_staging_cleanup_intents
      where user_id = any($1::text[])`,
-    [[ownerId, foreignId, recoveryId]],
+    [[ownerId, foreignId, recoveryId, abandonedId]],
   );
   await database.query(
     `delete from private.mobile_item_submissions
      where user_id = any($1::text[])`,
-    [[ownerId, foreignId, recoveryId]],
+    [[ownerId, foreignId, recoveryId, abandonedId]],
   );
   await database.end();
   await lease.release();
 });
 
 describe("authenticated mobile item submission against local Supabase", () => {
-  it("binds a failed pre-commit attempt, rejects changed cost, and resumes exact bytes", async () => {
+  it("fences a claimed stale cleanup job when the exact submission resumes", async () => {
     if (!reachable) return;
     const staging = createSupabaseMobileItemSubmissionStaging(admin);
     const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
@@ -217,6 +275,114 @@ describe("authenticated mobile item submission against local Supabase", () => {
     });
     expect((await failingHandler(request(recoveryToken, key, multipart("13.00")))).status).toBe(409);
 
+    const uploading = await database.query<{
+      batch_id: string;
+      cleanup_id: string;
+      cost_basis: string;
+      photo_receipts: Array<{ storage_path: string }>;
+      request_fingerprint: string;
+    }>(
+      `update private.pipeline_staging_cleanup_intents intent
+       set created_at = statement_timestamp() - interval '25 hours',
+           cleanup_after = statement_timestamp() - interval '1 hour'
+       from private.mobile_item_submissions submission
+       where submission.user_id = $1
+         and submission.idempotency_key = $2::uuid
+         and intent.cleanup_id = submission.cleanup_id
+       returning submission.batch_id,
+         submission.cleanup_id,
+         submission.cost_basis::text,
+         submission.photo_receipts,
+         submission.request_fingerprint`,
+      [recoveryId, key],
+    );
+    const bound = uploading.rows[0]!;
+    const cleanupStore = createSupabasePipelineOperationsStore({
+      async rpc(functionName, args) {
+        const { data, error } = await admin.rpc(functionName, args);
+        return { data, error: error ? { message: error.message } : null };
+      },
+    });
+    let releaseClaimedCleanup: () => void = () => {};
+    let reportClaimedCleanup: () => void = () => {};
+    const claimedCleanup = new Promise<void>((resolve) => {
+      reportClaimedCleanup = resolve;
+    });
+    const holdClaimedCleanup = new Promise<void>((resolve) => {
+      releaseClaimedCleanup = resolve;
+    });
+    const removedPaths: string[][] = [];
+    const cleanup = runPipelineMaintenance({
+      store: {
+        ...cleanupStore,
+        async claimStorageCleanup(leaseSeconds) {
+          const claim = await cleanupStore.claimStorageCleanup(leaseSeconds);
+          if (claim.kind === "claimed") {
+            expect(claim.job.fenceGeneration).toBe(1);
+            expect(claim.job.photoPaths).toEqual(
+              bound.photo_receipts.map((receipt) => receipt.storage_path),
+            );
+            reportClaimedCleanup();
+            await holdClaimedCleanup;
+          }
+          return claim;
+        },
+      },
+      photos: {
+        async remove(paths) {
+          removedPaths.push(paths);
+          const { error } = await admin.storage.from("photos").remove(paths);
+          if (error) throw error;
+        },
+      },
+    });
+    await claimedCleanup;
+
+    const replay = await connectDatabase("issue-346-exact-replay");
+    try {
+      await replay.query("begin");
+      await assumeServiceRole(replay);
+      const replayPid = (
+        await replay.query<{ pid: number }>("select pg_backend_pid() as pid")
+      ).rows[0]!.pid;
+      const resumed = await replay.query<{ began: boolean }>(
+        `select public.begin_mobile_item_submission(
+           $1,
+           $2::uuid,
+           $3,
+           $4::uuid,
+           $5::uuid,
+           $6::numeric,
+           $7::jsonb
+         ) as began`,
+        [
+          recoveryId,
+          key,
+          bound.request_fingerprint,
+          bound.batch_id,
+          bound.cleanup_id,
+          bound.cost_basis,
+          JSON.stringify(bound.photo_receipts),
+        ],
+      );
+      expect(resumed.rows[0]?.began).toBe(false);
+
+      releaseClaimedCleanup();
+      await waitForCleanupFence(database, replayPid);
+      await replay.query("commit");
+    } finally {
+      releaseClaimedCleanup();
+      await replay.query("rollback").catch(() => undefined);
+      await replay.end();
+    }
+
+    await expect(cleanup).resolves.toMatchObject({
+      claimedStorageJobs: 1,
+      deletedObjects: 0,
+      failedObjects: 0,
+    });
+    expect(removedPaths).toEqual([]);
+
     const { createConfiguredMobileItemSubmissionOperations } = await import("./configured");
     const recoverySubmitter = createConfiguredMobileItemSubmissionOperations({
       supabaseURL: SUPABASE_URL,
@@ -237,6 +403,93 @@ describe("authenticated mobile item submission against local Supabase", () => {
     await expect(recovered.json()).resolves.toMatchObject({
       data: { runId: expect.stringMatching(/^[0-9a-f-]{36}$/) },
     });
+    for (const { storage_path: path } of bound.photo_receipts) {
+      const preserved = await admin.storage.from("photos").download(path);
+      expect(preserved.error).toBeNull();
+    }
+  });
+
+  it("deletes an expired mobile upload when no exact replay resumes it", async () => {
+    if (!reachable) return;
+    const staging = createSupabaseMobileItemSubmissionStaging(admin);
+    const tenant = createClient(SUPABASE_URL, PUBLISHABLE_KEY!, {
+      accessToken: async () => abandonedToken,
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const bucket = tenant.storage.from("photos");
+    const submitter = createMobileItemSubmissionOperations({
+      async resolvePrincipal(token) {
+        return { kind: "clerk", userId: abandonedId, bearerToken: token };
+      },
+      limits: { dailyLimit: 0, perMinuteLimit: 20 },
+      staging,
+      storageFor: () => ({
+        async upload(path, bytes, mediaType) {
+          const { error } = await bucket.upload(path, bytes, {
+            contentType: mediaType,
+            upsert: false,
+          });
+          if (error) throw error;
+        },
+        async download(path) {
+          const { data, error } = await bucket.download(path);
+          if (error) throw error;
+          return {
+            bytes: new Uint8Array(await data.arrayBuffer()),
+            mediaType: data.type,
+          };
+        },
+      }),
+    });
+    const handler = createMobileItemSubmissionHandler({
+      requestId: () => crypto.randomUUID(),
+      itemSubmission: submitter,
+    });
+    const key = crypto.randomUUID();
+
+    expect((await handler(request(abandonedToken, key, multipart()))).status).toBe(503);
+    const expired = await database.query<{
+      photo_receipts: Array<{ storage_path: string }>;
+    }>(
+      `update private.pipeline_staging_cleanup_intents intent
+       set created_at = statement_timestamp() - interval '25 hours',
+           cleanup_after = statement_timestamp() - interval '1 hour'
+       from private.mobile_item_submissions submission
+       where submission.user_id = $1
+         and submission.idempotency_key = $2::uuid
+         and intent.cleanup_id = submission.cleanup_id
+       returning submission.photo_receipts`,
+      [abandonedId, key],
+    );
+    const paths = expired.rows[0]!.photo_receipts.map(
+      (receipt) => receipt.storage_path,
+    );
+    const cleanupStore = createSupabasePipelineOperationsStore({
+      async rpc(functionName, args) {
+        const { data, error } = await admin.rpc(functionName, args);
+        return { data, error: error ? { message: error.message } : null };
+      },
+    });
+    const cleanup = await runPipelineMaintenance({
+      store: cleanupStore,
+      photos: {
+        async remove(photoPaths) {
+          const { error } = await admin.storage.from("photos").remove(photoPaths);
+          if (error) throw error;
+        },
+      },
+    });
+
+    expect(cleanup).toMatchObject({
+      claimedStorageJobs: 1,
+      deletedObjects: 2,
+      failedObjects: 0,
+    });
+    for (const path of paths) {
+      const removed = await admin.storage.from("photos").download(path);
+      expect(removed.data).toBeNull();
+      expect(removed.error).not.toBeNull();
+    }
   });
 
   it("recovers an ambiguous response with one atomic reservation and queue message", async () => {

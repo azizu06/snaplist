@@ -28,11 +28,19 @@ describe("pipeline maintenance", () => {
               "guest_fixture/items/front.enc",
               "user_account/guest-claims/recovery/lease/1",
             ],
+            fenceGeneration: null,
             attemptCount: 1,
             maxAttempts: 5,
           },
         })
         .mockResolvedValueOnce({ kind: "empty" }),
+      authorizeStorageCleanup: vi.fn().mockResolvedValue({
+        kind: "authorized",
+        photoPaths: [
+          "guest_fixture/items/front.enc",
+          "user_account/guest-claims/recovery/lease/1",
+        ],
+      }),
       completeStorageCleanup: vi.fn().mockResolvedValue(true),
       failStorageCleanup: vi.fn(),
       recordCleanupOutcome: vi.fn().mockResolvedValue(true),
@@ -91,11 +99,16 @@ describe("pipeline maintenance", () => {
             jobId: "11111111-1111-4111-8111-111111111111",
             leaseToken: "22222222-2222-4222-8222-222222222222",
             photoPaths: ["user/pipeline-staging/a/photo.jpg"],
+            fenceGeneration: null,
             attemptCount: 5,
             maxAttempts: 5,
           },
         })
         .mockResolvedValueOnce({ kind: "empty" }),
+      authorizeStorageCleanup: vi.fn().mockResolvedValue({
+        kind: "authorized",
+        photoPaths: ["user/pipeline-staging/a/photo.jpg"],
+      }),
       completeStorageCleanup: vi.fn(),
       failStorageCleanup: vi.fn().mockResolvedValue(true),
       recordCleanupOutcome: vi.fn().mockResolvedValue(true),

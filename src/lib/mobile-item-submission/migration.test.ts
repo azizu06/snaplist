@@ -6,6 +6,12 @@ const migration = readFileSync(
   resolve("supabase/migrations/20260720210000_mobile_item_submission.sql"),
   "utf8",
 );
+const cleanupFenceMigration = readFileSync(
+  resolve(
+    "supabase/migrations/20260720230000_mobile_submission_cleanup_replay_fence.sql",
+  ),
+  "utf8",
+);
 
 describe("mobile item submission migration", () => {
   it("binds one ordered request fingerprint to one atomic #159/#333 run receipt", () => {
@@ -46,6 +52,36 @@ describe("mobile item submission migration", () => {
   it("renews exact pending cleanup protection before replay can upload", () => {
     expect(migration).toMatch(
       /if v_submission\.state = 'uploading' then[\s\S]*record_pipeline_staging_cleanup_intent[\s\S]*update private\.pipeline_staging_cleanup_intents[\s\S]*cleanup_after[\s\S]*interval '24 hours'[\s\S]*return false/i,
+    );
+  });
+
+  it("supersedes stale cleanup generations and authorizes deletion under the replay fence", () => {
+    expect(cleanupFenceMigration).toMatch(
+      /add column cleanup_generation bigint not null default 1/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /add column fence_generation bigint/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /delete_authorized_at is not null[\s\S]*retry the exact submission/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /cleanup_generation = submission\.cleanup_generation \+ 1[\s\S]*delete from private\.pipeline_storage_cleanup_jobs/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /create or replace function public\.authorize_pipeline_storage_cleanup/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /authorize_pipeline_storage_cleanup[\s\S]*pg_advisory_xact_lock[\s\S]*mobile-item-submission/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /cleanup_generation is distinct from v_job\.fence_generation/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /v_receipt_paths is distinct from v_job\.photo_paths/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /public\.items[\s\S]*item\.photos && v_job\.photo_paths/i,
     );
   });
 });

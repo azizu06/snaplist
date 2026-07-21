@@ -7,6 +7,10 @@ const migration = fs.readFileSync(path.join(
   root,
   "supabase/migrations/20260717050000_pipeline_operations.sql",
 ), "utf8");
+const cleanupFenceMigration = fs.readFileSync(path.join(
+  root,
+  "supabase/migrations/20260720230000_mobile_submission_cleanup_replay_fence.sql",
+), "utf8");
 const schedule = fs.readFileSync(path.join(
   root,
   "supabase/templates/pipeline-operations-cron.sql",
@@ -42,5 +46,14 @@ describe("pipeline operations database contract", () => {
     expect(schedule).not.toMatch(/[a-f0-9]{64}/i);
     expect(migration).not.toMatch(/cron\.schedule/i);
     expect(migration).not.toMatch(/net\.http_post/i);
+  });
+
+  it("requires a final typed cleanup authorization before Storage deletion", () => {
+    expect(cleanupFenceMigration).toMatch(
+      /create or replace function public\.authorize_pipeline_storage_cleanup/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /grant execute on function public\.authorize_pipeline_storage_cleanup\(uuid, uuid\)[\s\S]*to service_role/i,
+    );
   });
 });
