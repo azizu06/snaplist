@@ -25,7 +25,7 @@ function assertRunDerivedPhotos(context: PipelineWorkerContext): void {
     context.item.user_id !== context.run.user_id ||
     context.item.id !== context.run.item_id ||
     context.item.photos.length === 0 ||
-    context.item.photos.length > 4 ||
+    context.item.photos.length > 5 ||
     context.item.photos.some((path) => !ownedPath(path))
   ) {
     throw new PipelineWorkerFailure({

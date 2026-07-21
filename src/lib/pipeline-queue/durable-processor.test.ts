@@ -176,6 +176,35 @@ describe("durable vision pipeline processor", () => {
     expect(result.confidence.autopilotEligible).toBe(true);
   });
 
+  it("passes five run-derived tenant photo paths to identification in presentation order", async () => {
+    const pipeline = stages();
+    const processor = createDurableVisionPipelineProcessor(pipeline);
+    const ctx = workerContext({});
+    ctx.item.photos = Array.from(
+      { length: 5 },
+      (_, ordinal) => `user_a/pipeline-staging/batch/0/${ordinal}-photo.jpg`,
+    );
+
+    await processor.process({ context: ctx, onCheckpoint: persistTestCheckpoint });
+
+    expect(pipeline.identify).toHaveBeenCalledWith({ photos: ctx.item.photos });
+  });
+
+  it("rejects more than five run-derived photo paths", async () => {
+    const pipeline = stages();
+    const processor = createDurableVisionPipelineProcessor(pipeline);
+    const ctx = workerContext({});
+    ctx.item.photos = Array.from(
+      { length: 6 },
+      (_, ordinal) => `user_a/pipeline-staging/batch/0/${ordinal}-photo.jpg`,
+    );
+
+    await expect(
+      processor.process({ context: ctx, onCheckpoint: persistTestCheckpoint }),
+    ).rejects.toMatchObject({ code: "invalid_run_photos", retryable: false });
+    expect(pipeline.identify).not.toHaveBeenCalled();
+  });
+
   it("rejects a stored photo path that is not owned by the run tenant", async () => {
     const pipeline = stages();
     const processor = createDurableVisionPipelineProcessor(pipeline);
