@@ -1,7 +1,5 @@
 {
-  "version": "retired-approved-families-v1",
-  "status": "historical_copy_only_awaiting_redirected_design",
-  "authorizes_implementation": false,
+  "version": "approved-families-v1",
   "policy": {
     "no_account_before_value": true,
     "free_allowance": "Exactly one complete AI item on the device plus one guided identity correction for the same item/photo set.",
@@ -51,13 +49,6 @@
     "direct publish to Facebook Marketplace",
     "direct publish to Depop",
     "Runs tab",
-    "You tab",
-    "Home tab",
-    "Listings tab",
-    "Inbox tab",
-    "Insights tab",
-    "queue",
-    "worker",
-    "lease"
+    "You tab"
   ]
 }

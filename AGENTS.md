@@ -5,10 +5,10 @@ to work in the repo. `PROJECT_BRIEF.md` is origin/narrative context only and is 
 where they disagree.
 
 ## What this is
-A production-real AI-engineering showcase: photo of a used item → priced, ready-to-post listing →
-buyer-Q&A. The **AI pipeline is the product** for the average consumer reseller; eBay is the only
-direct launch marketplace and lives behind adapters. Advanced volume workflows are a growth path,
-not the default product posture.
+A production-real native **Scan-to-Trophy-Wall** product: one to five photos plus optional short
+voice context → an editable, priced listing. The **AI pipeline is the product** for the average
+consumer reseller. eBay is the only direct-publish launch destination and lives behind adapters;
+Facebook Marketplace, Mercari, and Depop receive honest export packs.
 
 ## Non-negotiable decisions (don't relitigate without the user)
 - **Multi-tenant from day one:** Clerk auth (Supabase third-party JWTs; issue #41), text `user_id`
@@ -22,6 +22,10 @@ not the default product posture.
   result remains encrypted and recoverable for 24 hours. Account creation/eBay connection become
   blocking only when the guest chooses **Publish to eBay**, after which the same result is claimed
   and reopened. Pre-value onboarding has no seller questionnaire. See ADR-0008.
+- **Lean native information architecture:** exactly two primary destinations, **Scan** and
+  **Trophy Wall**. Settings opens from the profile avatar. Scan accepts one to five ordered photos
+  and at most one optional voice note capped at fifteen seconds. Processing is asynchronous, but
+  seller-facing states use plain language and never expose queue, worker, lease, or provider terms.
 - **AI-item credits settle on durable value.** The first usable listing and first seller-confirmed
   eBay publish are free. SnapList Pro gates complete AI item run #2 and uses a configurable monthly
   allowance whose public count waits for TestFlight median/p95 cost data. For monthly Apple billing,
@@ -40,7 +44,8 @@ not the default product posture.
   Embeddings are excluded from the switch (pgvector `vector(1536)` dimension lock).
 - **Pricing is a routing pipeline behind a `PricingProvider` interface** (ISBN lookup → **eBay
   sold comps** → web-search agent → depreciation → LLM fallback; see `docs/adr/0001`). Caffein Apify
-  is the default-off leading automatic sold-comp candidate, followed by the public-page provider;
+  is the intended primary automatic sold-comp adapter behind an operator-controlled activation gate,
+  followed by the public-page provider;
   both must use the provider-neutral matcher. Every result is
   `{ suggested, range, confidence, sources[] }` and is user-editable. Never collapse this to a single
   source. The eBay-sold scraper is **read-only price research** — distinct from the transactional eBay
@@ -61,30 +66,18 @@ not the default product posture.
 - **Barcode tier split:** ISBN → true structured lookup; UPC → identification/query aid into the
   search agent, not a price source.
 - **Env-configurable everything.** Sandbox→production is a credential / `EBAY_BASE_URL` flip.
-- **eBay marketplace mutations and messaging only ever go through adapter interfaces.** The one
-  non-transactional exception is read-only public sold-page research through `ebay-sold`; it cannot
-  post or message. SnapList owns unpublished drafts; after publish, eBay is authoritative for listing
-  and order truth. External changes sync in, seller-confirmed changes go through the adapter, and
-  only confirmed provider results become local truth. Conflicts are explicit, never silent
-  last-write-wins. Keep every path testable offline against mock adapters, and leave production
-  activation owner-controlled under #17 and ADR-0008.
-- **Launch has no autonomous marketplace actions.** Publish, reprice, end, relist, add tracking/mark
-  shipped, and send-message actions all require explicit seller confirmation. Buyer-Q&A may draft and
-  ground a reply but cannot authorize delivery. Persist intent, outcome, grounding, provider result,
-  and canonical delivery truth so retries never create a second external action.
-- **Post-sale writes are allowlisted.** Standard Fulfillment may read orders/payment/fulfillment and
-  ship-by data; `createShippingFulfillment` may add tracking/mark shipped after explicit confirmation.
-  Inventory `withdrawOffer` may end a SnapList-managed listing sold elsewhere; a Trading end call is
-  allowed only for a verified owned/mapped non-Inventory listing. Fulfillment `FULFILLED` means
-  shipped, not carrier-delivered. Cancellations, refunds, returns/cases, disputes, and label purchase
-  remain status/deep-link surfaces at launch.
-- **Unsupported launch marketplaces use honest assisted handoffs.** Mercari, Facebook Marketplace,
-  and Depop may receive platform-appropriate text/photos, the native share sheet or an honest deep
-  link, and a completion checklist. Never claim SnapList filled or published the destination form.
-  A sold-elsewhere record defaults **Also end on eBay** on but still requires one explicit confirm.
-- **Profit requires cost basis.** Cost is optional on the draft and may be requested again at sale.
-  Without it, show revenue, estimated fees, and estimated net proceeds—never profit. Adding cost later
-  may update profit retroactively.
+- **eBay marketplace mutations only ever go through adapter interfaces.** The one non-transactional
+  exception is read-only public sold-page research through `ebay-sold`; it cannot post or message.
+  SnapList owns unpublished drafts; after publish, confirmed eBay results are authoritative.
+  Conflicts are explicit, never silent last-write-wins. Keep the seam testable offline against mock
+  adapters and leave production activation owner-controlled under #17 and ADR-0008.
+- **Launch has no autonomous marketplace actions.** Direct eBay publish requires explicit seller
+  confirmation and durable replay protection. Reprice, end, relist, fulfillment, post-sale, and
+  message actions are outside the lean MVP, not launch surfaces to extend.
+- **Unsupported launch marketplaces use honest export packs.** Facebook Marketplace, Mercari, and
+  Depop may receive platform-appropriate text/photos, the native share sheet or an honest deep link,
+  and a completion checklist. `Prepared` or `Shared` never means SnapList filled, listed, sold, or
+  published the destination form.
 - **Log every pipeline run's predictions** (attributes, price, range, confidence, tier, model) from
   day one — the eval harness depends on it.
 - **Listing-example retrieval is optional and evaluation-gated.** The validated item core is the
@@ -100,6 +93,10 @@ not the default product posture.
   schema_version }`. Queue claim/ack authority is a narrow internal capability, never a generic
   service-role domain client. Worker domain access must derive ownership from the stored run through
   RLS or audited run-scoped RPCs. See ADR-0007.
+- **Retired launch directions stay retired.** Inbox/buyer messaging, generic analytics, post-sale
+  operations, barcode-only capture, garment measurements, bulk/haul launch posture, and autonomous
+  marketplace actions are outside the lean MVP. Historical implementations and migrations may
+  remain until separately retired; they are not authority for new issues or UI. See ADR-0008.
 
 ## How we build
 - **Matt workflow gates are explicit, not implied by setup.** Apply `to-tickets`
@@ -185,9 +182,9 @@ by documentation work.
   global design workflow. Do not substitute a retired generator or begin SwiftUI implementation
   before the high-fidelity direction and owning issue are approved.
 - **Mutation seams:** views mutate through **server actions**; API routes serve external/programmatic
-  callers (and client fetch flows like the inbox that need JSON/streaming). When an operation has both
+  callers and client fetch flows that need JSON/streaming. When an operation has both
   entry points, ALL domain behavior (persistence, notifications) lives in the shared `src/lib` service
-  (e.g. `publishListingToEbayAndNotify`) so the two can never diverge.
+  so the two can never diverge.
 - Keep `PRD.md` updated when a decision changes; keep this file's "non-negotiables" in sync.
 
 ## Item domain

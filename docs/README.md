@@ -11,8 +11,9 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 - [0004 — Abuse and cost protection](./adr/0004-abuse-and-cost-protection.md)
 - [0005 — Billing: direct Stripe entitlement mirror](./adr/0005-billing-direct-stripe-entitlement-mirror.md)
 - [0007 — Durable listing pipeline on Supabase Queues](./adr/0007-durable-pipeline-supabase-queues.md)
-- [0008 — Native launch entitlement, credits, and eBay authority](./adr/0008-native-launch-entitlement-credits-and-ebay-authority.md)
+- [0008 — Lean native launch, entitlement, credits, and marketplace authority](./adr/0008-native-launch-entitlement-credits-and-ebay-authority.md)
 - [0009 — Provider-neutral mobile API and worker runtime](./adr/0009-provider-neutral-mobile-api-and-worker-runtime.md)
+- [0010 — Evaluation-gated listing-example retrieval](./adr/0010-evaluation-gated-listing-example-retrieval.md)
 
 ## Engineering workflow — [`agents/`](./agents)
 
@@ -40,6 +41,8 @@ Index of the `docs/` folder. Top-level project docs (`PRD.md`, `CONTEXT.md`,
 
 ## Operations & planning
 
+- [Lean native design authority handoff](./design/native-v1-implementation-handoff.md) — records the
+  superseded V1 package and the #349 redirection boundary; it does not authorize SwiftUI work.
 - [Billing plan](./billing-plan.md)
 - [Security — OWASP audit (2026-06)](./security/owasp-audit-2026-06.md)
 - [Product positioning](./strategy/positioning.md)

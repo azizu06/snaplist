@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -90,21 +90,22 @@ const catalog = JSON.parse(
 const inventory = JSON.parse(
   readFileSync(resolve("docs/design/native-v1-design-inventory.json"), "utf8"),
 ) as {
-  states: Array<{ id: string; status: string }>;
+  redirect: { swiftui_implementation_authorized_by_this_file: boolean };
+  retired_state_ids_with_production_provenance: string[];
+  implementation_states: unknown[];
 };
 const assetManifests = [
   "ios/DesignContracts/V1/snaplist-asset-manifest.json",
   "ios/DesignContracts/Resolved/V1PlusRunRev/resolved/snaplist-asset-manifest.json",
-].map(
-  (path) =>
-    JSON.parse(readFileSync(resolve(path), "utf8")) as {
-      scout: Array<{
-        file: string;
-        allowed?: Array<{ state: string }>;
-      }>;
-    },
-);
-
+].map((manifestPath) => ({
+  manifestPath,
+  manifest: JSON.parse(readFileSync(resolve(manifestPath), "utf8")) as {
+    scout: Array<{
+      file: string;
+      allowed?: Array<{ state: string }>;
+    }>;
+  },
+}));
 describe("Scout guidance catalog contract", () => {
   it("validates the checked-in provider-neutral V1 catalog", () => {
     expect(scoutGuidanceCatalogSchema.parse(catalog)).toEqual(catalog);
@@ -244,22 +245,42 @@ describe("Scout guidance catalog contract", () => {
     }
   });
 
-  it("references only implementation-frozen states and approved Scout placements", () => {
-    const frozenStateIds = new Set(
-      inventory.states
-        .filter((state) => state.status === "implementation_frozen")
-        .map((state) => state.id),
+  it("retains legacy Scout provenance without granting new design authorization", () => {
+    const retiredStateIds = new Set(
+      inventory.retired_state_ids_with_production_provenance,
     );
+    expect(inventory.redirect.swiftui_implementation_authorized_by_this_file).toBe(
+      false,
+    );
+    expect(inventory.implementation_states).toEqual([]);
     const allowedPlacements = new Map<string, Set<string>>();
-    for (const manifest of assetManifests) {
+    for (const { manifestPath, manifest } of assetManifests) {
       for (const asset of manifest.scout) {
         const assetName = asset.file.split("/").at(-1) ?? asset.file;
         const states = allowedPlacements.get(assetName) ?? new Set<string>();
         for (const placement of asset.allowed ?? []) states.add(placement.state);
         allowedPlacements.set(assetName, states);
+
+        const manifestDirectory = resolve(manifestPath, "..");
+        const manifestAssetPath = resolve(manifestDirectory, asset.file);
+        const sharedV1AssetPath = resolve(
+          "ios/DesignContracts/V1/assets",
+          assetName,
+        );
+        const resolvedPackageAssetPath = resolve(
+          manifestDirectory,
+          "..",
+          "assets",
+          assetName,
+        );
+        expect(
+          existsSync(manifestAssetPath) ||
+            existsSync(sharedV1AssetPath) ||
+            existsSync(resolvedPackageAssetPath),
+          `${asset.file} must exist in its manifest package or the retained V1 asset directory`,
+        ).toBe(true);
       }
     }
-
     for (const [state, definition] of Object.entries(catalog.states) as Array<
       [
         string,
@@ -271,8 +292,8 @@ describe("Scout guidance catalog contract", () => {
     >) {
       for (const approvedStateId of definition.approvedStateIds) {
         expect(
-          frozenStateIds.has(approvedStateId),
-          `${state} must not reference candidate, withheld, or planned state ${approvedStateId}`,
+          retiredStateIds.has(approvedStateId),
+          `${state} must retain explicit provenance for retired state ${approvedStateId}`,
         ).toBe(true);
         if (!definition.guide.scoutAsset) continue;
         const placementState = approvedStateId.startsWith("ONB-09-")
@@ -282,9 +303,14 @@ describe("Scout guidance catalog contract", () => {
             : approvedStateId;
         expect(
           allowedPlacements.get(definition.guide.scoutAsset)?.has(placementState),
-          `${definition.guide.scoutAsset} is not approved for ${approvedStateId}`,
+          `${definition.guide.scoutAsset} must retain approved placement provenance for ${approvedStateId}`,
         ).toBe(true);
       }
+      expect(definition.guide).toMatchObject({
+        optional: true,
+        persistent: false,
+        blocksPrimaryAction: false,
+      });
     }
   });
 

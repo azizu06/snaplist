@@ -1,302 +1,132 @@
 {
-  "schema_version": 1,
-  "updated_at": "2026-07-16",
-  "purpose": "Provider-neutral, machine-auditable native screen inventory and implementation authorization boundary for SnapList iOS.",
+  "schema_version": 2,
+  "updated_at": "2026-07-21",
+  "purpose": "Machine-auditable supersession boundary between the retired native V1 package and the lean Scan-to-Trophy-Wall MVP.",
   "authoritative_product_contracts": [
     "PRD.md",
     "docs/adr/0008-native-launch-entitlement-credits-and-ebay-authority.md",
     "docs/adr/0009-provider-neutral-mobile-api-and-worker-runtime.md"
   ],
-  "provider_neutral_design_sources": [
-    "/Users/aziz.u/agent-context/snaplist-claude-design-handoff.md",
-    "/Users/aziz.u/Developer/snaplist-claude-design-bundle-v6/snaplist-claude-design-packet/FULL-DESIGN-SCOPE.md"
-  ],
-  "frozen_package": {
-    "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
-    "sha256": "13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415",
-    "read_first": "README-FIRST.md",
-    "approved_state_count": 25,
-    "status": "authoritative_for_listed_implementation_frozen_states"
+  "redirect": {
+    "epic": "https://github.com/azizu06/snaplist/issues/349",
+    "authority_issue": "https://github.com/azizu06/snaplist/issues/350",
+    "photo_contract_issue": "https://github.com/azizu06/snaplist/issues/352",
+    "voice_contract_issue": "https://github.com/azizu06/snaplist/issues/351",
+    "final_high_fidelity_design": "owned_by_redirected_design_task",
+    "swiftui_implementation_authorized_by_this_file": false
   },
-  "active_design_review": {
-    "task_id": "019f6900-23bc-7a23-a861-1cfa65753dc8",
-    "status": "design_only_active",
-    "live_project_mutation_authorized": false
-  },
-  "approved_deltas": [
-    {
-      "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",
-      "version": "run-rev-delta-v1.1",
-      "sha256": "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
-      "exact_base": "snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
-      "internal_checksums_verified": true,
-      "approved_frame_ids": [
-        "RUN-01",
-        "RUN-02",
-        "RUN-03",
-        "RUN-04",
-        "RUN-05",
-        "RUN-06",
-        "RUN-07",
-        "RUN-08",
-        "REV-01",
-        "REV-02a",
-        "REV-02b",
-        "REV-02c",
-        "REV-02d",
-        "REV-02d-retry",
-        "REV-02e",
-        "REV-07",
-        "REV-08"
-      ],
-      "candidate_unchanged": ["CAP-03a", "CAP-03b", "CAP-03c", "CAP-03d", "CAP-03e", "CAP-04"],
-      "withheld_unchanged": ["CAP-05"]
-    }
-  ],
-  "known_contract_conflicts": [],
-  "status_definitions": {
-    "implementation_frozen": "Visually approved and authorized for implementation only by its owning issue and declared dependencies.",
-    "implementation_frozen_parent": "Approved parent contract whose renderable variants are individually listed as implementation-frozen.",
-    "candidate_not_implementation_frozen": "Design candidate only; it must not be implemented or treated as approved.",
-    "withheld_interaction_repair": "Explicitly withheld while interaction repair is active.",
-    "approved_awaiting_machine_readable_delta": "Visually approved, but implementation remains blocked until a separate machine-readable delta package arrives.",
-    "optional_post_value_not_frozen": "Optional product state that may appear only after first value and has no frozen implementation design.",
-    "planned_not_implementation_frozen": "Required or planned inventory state with no implementation authorization from V1.",
-    "inventory_container_not_implementation_state": "Inventory grouping label only, not a renderable or authorized state."
-  },
-  "implementation_epic": {
-    "epic": "https://github.com/azizu06/snaplist/issues/204",
-    "foundation": "https://github.com/azizu06/snaplist/issues/205",
-    "accountless_onboarding": "https://github.com/azizu06/snaplist/issues/206",
-    "capture": "https://github.com/azizu06/snaplist/issues/207",
-    "seller_home": "https://github.com/azizu06/snaplist/issues/208",
-    "pricing_evidence": "https://github.com/azizu06/snaplist/issues/209",
-    "durable_runs_recovery": "https://github.com/azizu06/snaplist/issues/211",
-    "identity_guided_correction": "https://github.com/azizu06/snaplist/issues/212"
-  },
-  "implementation_dependencies": {
-    "211": {"lane":"Blocked","phase":"Phase 2","blocked_by":[205,161]},
-    "212": {"lane":"Blocked","phase":"Phase 1","blocked_by":[205,174,211]}
-  },
-  "visual_contract": {
-    "direction": "White Seller Utility",
-    "legacy_directions_superseded": true,
-    "action_blue": "#3665F3",
-    "pricing_source_blue": "#0031E9",
-    "pricing_source_blue_disposition": "visual_diff_only_use_action_blue_in_implementation",
-    "scout_assets": {
-      "approved_transparent_assets_only": true,
-      "redraw": false,
-      "vectorize": false,
-      "recolor": false,
-      "crop": false,
-      "persistent_placement": false
+  "lean_product_contract": {
+    "primary_destinations": ["Scan", "Trophy Wall"],
+    "settings_entry": "profile_avatar",
+    "scan": {
+      "ordered_photo_count": {"minimum": 1, "maximum": 5},
+      "optional_voice_context": true,
+      "voice_duration_seconds_maximum": 15,
+      "clears_after": "durable_server_acceptance",
+      "processing": "asynchronous"
     },
-    "temporary_product_photography": {
-      "status": "review_only",
-      "may_ship": false,
-      "cleared_replacement_required": true,
-      "mobbin_pixels_may_ship": false
-    }
-  },
-  "product_contract": {
+    "seller_facing_progress": {
+      "states": [
+        "pending_upload",
+        "accepted",
+        "analyzing",
+        "ready_to_review",
+        "needs_retry",
+        "published_to_ebay",
+        "export_pack_prepared_or_shared"
+      ],
+      "forbidden_terms": ["queue", "worker", "lease", "provider"],
+      "fabricated_percentage_or_eta": false
+    },
     "first_value": {
-      "seller_goal_questions_before_usable_draft": false,
-      "experience_questions_before_usable_draft": false,
-      "category_questions_before_usable_draft": false,
-      "marketplace_questions_before_usable_draft": false,
-      "optional_personalization_after_usable_draft_only": true,
+      "usable_listing_before_signup_or_paywall": true,
       "complete_guest_ai_item_runs": 1,
       "guided_identity_corrections": 1,
-      "guided_correction_scope": "same_item_same_immutable_photo_set",
-      "manual_edits": "unlimited_when_photo_set_fingerprint_is_unchanged",
-      "changed_photo_set_requires_new_run": true,
-      "guest_recovery_hours": 24
-    },
-    "snaplist_pro": {
-      "first_usable_listing_free": true,
-      "first_seller_confirmed_ebay_publish_free": true,
-      "hard_gate_at_complete_ai_item_run": 2,
-      "allowance_window": "configurable_monthly",
-      "public_count": null,
-      "public_count_gate": "TestFlight median and p95 usable-item cost evidence",
-      "storekit_localized_price_and_state": true,
-      "changes_ai_quality": false
-    },
-    "navigation": {
-      "primary": ["Home", "Listings", "Capture", "Inbox", "Insights"],
-      "capture_is_central_action": true,
-      "account_entry": "profile",
-      "activity_entry": "notification_bell",
-      "runs_entry": "contextual_from_home",
-      "runs_is_primary_destination": false
+      "guest_recovery_hours": 24,
+      "hard_paid_gate_at_complete_ai_item_run": 2
     },
     "marketplace_authority": {
-      "direct_launch_marketplace": "eBay",
-      "assisted_launch_marketplaces": ["Mercari", "Facebook Marketplace", "Depop"],
-      "assisted_handoff_claims_form_completion": false,
-      "unpublished_draft_authority": "SnapList",
-      "published_listing_and_order_authority": "eBay",
-      "silent_last_write_wins": false,
-      "seller_confirmation_required_for": [
-        "publish",
-        "reprice",
-        "end",
-        "relist",
-        "add_tracking_or_mark_shipped",
-        "send_message"
-      ]
+      "direct_publish_destination": "eBay",
+      "assisted_export_pack_destinations": ["Facebook Marketplace", "Mercari", "Depop"],
+      "explicit_seller_confirmation_required": true,
+      "prepared_or_shared_means_published": false
     },
-    "post_sale": {
-      "fulfilled_label": "shipped",
-      "fulfilled_is_carrier_delivered": false,
-      "delivered_requires_separately_approved_authoritative_source": true,
-      "seller_confirmation_required_for_tracking_write": true,
-      "returns_refunds_disputes_and_labels": "status_and_ebay_handoff_at_launch"
-    },
-    "economics": {
-      "cost_basis_optional": true,
-      "without_cost_show": ["revenue", "estimated_fees", "estimated_net_proceeds"],
-      "without_cost_show_profit": false,
-      "later_cost_may_update_profit": true
-    },
-    "volume": {
-      "primary_launch_posture": "one_item",
-      "advanced_volume_workflows": "growth_path",
-      "launch_navigation_entry": false
-    }
+    "preserved_authority": [
+      "RLS tenant isolation",
+      "App Attest guest capability",
+      "durable pipeline and recovery",
+      "AI-item credit accounting",
+      "effective-price precedence",
+      "coherent correction and revision guards",
+      "eBay adapter authority"
+    ]
   },
-  "states": [
-    {"id":"ONB-00","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-01","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-02","family":"accountless_onboarding","status":"optional_post_value_not_frozen","implementation_issue":null},
-    {"id":"ONB-03","family":"accountless_onboarding","status":"optional_post_value_not_frozen","implementation_issue":null},
-    {"id":"ONB-04","family":"accountless_onboarding","status":"optional_post_value_not_frozen","implementation_issue":null},
-    {"id":"ONB-05","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-06","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-07","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"native-camera-permission","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-08","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"settings-handoff","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-09","family":"accountless_onboarding","status":"inventory_container_not_implementation_state","implementation_issue":null},
-    {"id":"ONB-09-camera","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-09-library","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"returning-sign-in","family":"accountless_onboarding","status":"implementation_frozen","implementation_issue":206},
-    {"id":"ONB-10","family":"accountless_onboarding","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ONB-11","family":"accountless_onboarding","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ONB-12","family":"accountless_onboarding","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ONB-13","family":"accountless_onboarding","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ONB-14","family":"accountless_onboarding","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"HOME-01","family":"seller_home","status":"implementation_frozen","implementation_issue":208},
-    {"id":"HOME-02","family":"seller_home","status":"implementation_frozen","implementation_issue":208},
-    {"id":"HOME-03","family":"seller_home","status":"implementation_frozen","implementation_issue":208},
-    {"id":"HOME-04","family":"seller_home","status":"implementation_frozen","implementation_issue":208},
-
-    {"id":"CAP-01","family":"capture","status":"implementation_frozen","implementation_issue":207},
-    {"id":"CAP-02","family":"capture","status":"inventory_container_not_implementation_state","implementation_issue":null},
-    {"id":"CAP-02a","family":"capture","status":"implementation_frozen","implementation_issue":207},
-    {"id":"CAP-02b1","family":"capture","status":"implementation_frozen","implementation_issue":207},
-    {"id":"CAP-02b2","family":"capture","status":"implementation_frozen","implementation_issue":207},
-    {"id":"CAP-02c","family":"capture","status":"implementation_frozen","implementation_issue":207},
-    {"id":"CAP-03-handoff","family":"capture","status":"implementation_frozen","implementation_issue":207},
-    {"id":"CAP-03","family":"photo_review","status":"inventory_container_not_implementation_state","implementation_issue":null},
-    {"id":"CAP-03a","family":"photo_review","status":"candidate_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-03b","family":"photo_review","status":"candidate_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-03c","family":"photo_review","status":"candidate_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-03d","family":"photo_review","status":"candidate_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-03e","family":"photo_review","status":"candidate_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-04","family":"photo_review","status":"candidate_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-05","family":"barcode_isbn","status":"withheld_interaction_repair","implementation_issue":null},
-    {"id":"CAP-06","family":"advanced_volume_capture","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-07","family":"advanced_volume_capture","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-08","family":"assisted_measurement","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"CAP-09","family":"assisted_measurement","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"RUN-01","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-02","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-03","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-04","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-05","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-06","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-07","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-    {"id":"RUN-08","family":"durable_runs","status":"implementation_frozen","implementation_issue":211},
-
-    {"id":"S1","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
-    {"id":"S1b","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
-    {"id":"S2","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
-    {"id":"S3","family":"pricing_evidence","status":"implementation_frozen","implementation_issue":209},
-    {"id":"REV-01","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-02","family":"review","status":"implementation_frozen_parent","implementation_issue":212},
-    {"id":"REV-02a","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-02b","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-02c","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-02d","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-02d-retry","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-02e","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-03","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"REV-04","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"REV-05","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"REV-06","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"REV-07","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-08","family":"review","status":"implementation_frozen","implementation_issue":212},
-    {"id":"REV-09","family":"review","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"PUB-01","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-02","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-03","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-04","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-05","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-06","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-07","family":"ebay_publish","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-08","family":"assisted_marketplaces","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-09","family":"sold_elsewhere","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"PUB-10","family":"sold_elsewhere","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"LST-01","family":"listings","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-02","family":"listings","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-03","family":"listings","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-04","family":"listings","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-05","family":"post_sale","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-06","family":"post_sale","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-07","family":"listings","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"LST-08","family":"listings","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"INB-01","family":"inbox","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INB-02","family":"inbox","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INB-03","family":"inbox","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INB-04","family":"inbox","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INB-05","family":"inbox","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INB-06","family":"inbox","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"INS-01","family":"insights","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INS-02","family":"insights","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INS-03","family":"insights","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INS-04","family":"insights","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INS-05","family":"insights","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"INS-06","family":"insights","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"ACC-01","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-02","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-03","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-04","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-05","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-06","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-07","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-08","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-09","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-10","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-11","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"ACC-12","family":"account","status":"planned_not_implementation_frozen","implementation_issue":null},
-
-    {"id":"SYS-01","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-02","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-03","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-04","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-05","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-06","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-07","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-08","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null},
-    {"id":"SYS-09","family":"system","status":"planned_not_implementation_frozen","implementation_issue":null}
+  "retired_v1_package": {
+    "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-package-v1-2026-07-16.zip",
+    "sha256": "13ea5cfc237a98d188452b66abde94fb24b44e2e539ee63f42eb232120672415",
+    "status": "superseded_by_issue_349",
+    "historical_evidence_retained": true,
+    "authorizes_new_implementation": false,
+    "repository_archive": "ios/DesignContracts/Retired/V1-2026-07-16",
+    "binary_assets": "ios/DesignContracts/V1/assets"
+  },
+  "retired_run_rev_delta": {
+    "path": "/Users/aziz.u/Documents/Codex/2026-07-15/snaplist-ios-design-review/outputs/snaplist-implementation-fidelity-delta-run-rev-v1.1-2026-07-16.zip",
+    "sha256": "93bb1571b2926c4c79744a8fe28905f972a7fda506a81765376b704dbb964884",
+    "status": "superseded_by_issue_349",
+    "historical_evidence_retained": true,
+    "authorizes_new_implementation": false
+  },
+  "superseded_state_families": [
+    {"family": "five_tab_navigation", "records": [204, 205, 206, 207, 208, 209, 211, 212]},
+    {"family": "inbox_and_buyer_messaging", "records": [140, 141, 145, 146, 150]},
+    {"family": "generic_analytics_and_insights", "records": [118, 220, 274, 289]},
+    {"family": "post_sale_operations", "records": [169, 172, 176, 177]},
+    {"family": "bulk_haul_capture", "records": [100, 111]},
+    {"family": "barcode_only_capture", "state_ids": ["CAP-05"]},
+    {"family": "garment_measurements", "records": [104, 116, 124], "state_ids": ["CAP-08", "CAP-09"]},
+    {"family": "autonomous_marketplace_actions", "status": "prohibited"}
+  ],
+  "retired_state_ids_with_production_provenance": [
+    "CAP-02a",
+    "CAP-02b1",
+    "CAP-02b2",
+    "CAP-02c",
+    "HOME-02",
+    "ONB-01",
+    "ONB-07",
+    "ONB-08",
+    "ONB-09-camera",
+    "ONB-09-library",
+    "REV-02d-retry",
+    "REV-08",
+    "RUN-02",
+    "RUN-04",
+    "RUN-05",
+    "RUN-06",
+    "S3"
+  ],
+  "retained_runtime_contracts": [
+    {
+      "path": "docs/contracts/mobile-api-v1.openapi.json",
+      "status": "current_runtime_contract_with_lean_mvp_gaps",
+      "legacy_home_projection_is_navigation_authority": false,
+      "photo_maximum": {"current": 4, "target": 5, "owner_issue": 352},
+      "voice_context_owner_issue": 351
+    },
+    {
+      "path": "ios/DesignContracts/V1/mobile-api-v1.openapi.json",
+      "status": "mirrored_runtime_contract_with_lean_mvp_gaps",
+      "legacy_home_projection_is_navigation_authority": false,
+      "photo_maximum": {"current": 4, "target": 5, "owner_issue": 352},
+      "voice_context_owner_issue": 351
+    }
+  ],
+  "implementation_states": [],
+  "stop_rules": [
+    "Do not implement a retired V1 frame or infer adjacent states from it.",
+    "Do not begin SwiftUI composition until the redirected versioned design package and owning issue are approved.",
+    "Do not treat historical code, migrations, screenshots, or closed issues as lean-MVP product authority.",
+    "Preserve the server-authoritative security, tenancy, credit, durable-run, pricing, and marketplace boundaries."
   ]
 }

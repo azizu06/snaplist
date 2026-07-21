@@ -1,34 +1,14 @@
 {
-  "version": "approved-families-v1",
-  "routes": [
-    {"from":"ONB-00","trigger":"automatic settle","precondition":"launch animation completes","to":"ONB-01","mutation":"none","persistence":"first-run state retained","escape":null,"kind":"in-place crossfade"},
-    {"from":"ONB-01","trigger":"Start with one item","precondition":"none","to":"ONB-06","mutation":"none","persistence":"no account created","escape":"Back","kind":"native push/in-place prototype"},
-    {"from":"ONB-01","trigger":"Sign in","precondition":"returning user chooses it","to":"returning-sign-in","mutation":"none","persistence":"underlying onboarding state retained","escape":"Close","kind":"sheet"},
-    {"from":"ONB-06","trigger":"Where can I list?","precondition":"none","to":"ONB-05","mutation":"none","persistence":"ONB-06 retained","escape":"Close","kind":"sheet"},
-    {"from":"ONB-06","trigger":"Continue","precondition":"none","to":"ONB-07","mutation":"none","persistence":"allowance explanation acknowledged","escape":"Back","kind":"native push/in-place prototype"},
-    {"from":"ONB-07","trigger":"Use camera","precondition":"camera authorization not determined","to":"native-camera-permission","mutation":"request system authorization","persistence":"system permission is authoritative","escape":"Don't Allow","kind":"native permission alert"},
-    {"from":"native-camera-permission","trigger":"Allow","precondition":"system grants access","to":"ONB-09-camera","mutation":"cameraAccess=authorized","persistence":"system permission","escape":"Back","kind":"system result to app state"},
-    {"from":"native-camera-permission","trigger":"Don't Allow","precondition":"system denies access","to":"ONB-08","mutation":"cameraAccess=denied","persistence":"system permission","escape":"library fallback","kind":"system result to app state"},
-    {"from":"ONB-08","trigger":"Open Settings","precondition":"cameraAccess=denied","to":"settings-handoff","mutation":"none","persistence":"authorization remains denied until OS reports a real change","escape":"Return to SnapList","kind":"external Settings handoff"},
-    {"from":"settings-handoff","trigger":"Return to SnapList","precondition":"no verified authorization change","to":"ONB-08","mutation":"none","persistence":"denied state retained","escape":"library fallback","kind":"external return"},
-    {"from":"ONB-07 or ONB-08","trigger":"Choose from library","precondition":"photo library selection succeeds","to":"ONB-09-library","mutation":"stagedPhotos populated","persistence":"staged photos retained","escape":"Back","kind":"native photo picker result"},
-    {"from":"ONB-09-camera or ONB-09-library","trigger":"Continue to capture","precondition":"camera authorized or library photos staged","to":"CAP-01","mutation":"carry entry mode and staged photos","persistence":"yes","escape":"Back","kind":"artifact/native navigation bridge"},
-    {"from":"HOME any","trigger":"central Capture","precondition":"none","to":"CAP-01","mutation":"preserve Home state","persistence":"yes","escape":"Close sheet","kind":"bottom sheet"},
-    {"from":"CAP-01","trigger":"Take one item","precondition":"camera available","to":"CAP-02a","mutation":"start capture session only; no AI run","persistence":"capture session","escape":"Close/back","kind":"full-screen camera"},
-    {"from":"CAP-02a","trigger":"Reposition item","precondition":"item not yet optimally framed","to":"CAP-02b1","mutation":"guidance state only","persistence":"same session","escape":"Back/close","kind":"in-place state"},
-    {"from":"CAP-02b1","trigger":"item moves into accepted bounds","precondition":"complete item visible","to":"CAP-02b2","mutation":"framingStatus=accepted","persistence":"same session","escape":"reposition","kind":"in-place state"},
-    {"from":"CAP-02b2","trigger":"Shutter","precondition":"accepted framing","to":"CAP-02c","mutation":"append accepted photo","persistence":"staged locally","escape":"retake/review","kind":"capture result"},
-    {"from":"CAP-02c","trigger":"Continue","precondition":"at least one accepted photo","to":"CAP-03-handoff","mutation":"preserve photos and cover thumbnail","persistence":"yes","escape":"Back","kind":"native push"},
-    {"from":"HOME-01","trigger":"attention action","precondition":"corresponding task exists","to":"order, conversation, or publish issue","mutation":"none until user confirms downstream action","persistence":"Home task retained","escape":"Back","kind":"native push"},
-    {"from":"HOME-01","trigger":"in-progress run surface","precondition":"durable run exists","to":"RUN-02 future family","mutation":"none","persistence":"same run/idempotency key","escape":"Back to Home","kind":"native push"},
-    {"from":"HOME any","trigger":"bell","precondition":"none","to":"Activity","mutation":"none","persistence":"Home state retained","escape":"Back","kind":"native push"},
-    {"from":"HOME any","trigger":"avatar","precondition":"none","to":"Account/Settings","mutation":"none","persistence":"Home state retained","escape":"Back","kind":"native push"},
-    {"from":"HOME-04","trigger":"search query or filter chip","precondition":"none","to":"HOME-04 filtered state","mutation":"query/filter only","persistence":"screen session","escape":"clear query/filter","kind":"in-place state"},
-    {"from":"S1","trigger":"View all 12 sold comps","precondition":"strong fixture loaded","to":"S1b","mutation":"none","persistence":"price state retained","escape":"Back","kind":"native push"},
-    {"from":"S1 or S1b","trigger":"select sold comp or scrub chart","precondition":"selected comp exists in current range","to":"S2","mutation":"selectedComparableId","persistence":"pricing screen session","escape":"Back/clear selection","kind":"in-place or detail state"},
-    {"from":"S1","trigger":"30D/60D/90D/All","precondition":"sold data loaded","to":"S1 recomputed range","mutation":"timeRange and derived evidence","persistence":"screen session","escape":"choose another range","kind":"in-place state"},
-    {"from":"S1 or S3","trigger":"Add cost","precondition":"none","to":"add-cost-sheet","mutation":"none until save","persistence":"pricing state retained","escape":"Close","kind":"sheet"},
-    {"from":"S1 or S3","trigger":"Set my own price","precondition":"none","to":"manual-price-sheet","mutation":"none until save","persistence":"pricing state retained","escape":"Close","kind":"sheet"},
-    {"from":"S1","trigger":"Use $58 and continue","precondition":"price valid","to":"next draft step","mutation":"sellerPrice=58","persistence":"draft","escape":"Back in draft flow","kind":"native push"}
-  ]
+  "version": "lean-authority-boundary-v2",
+  "status": "awaiting_redirected_high_fidelity_design",
+  "swiftuiImplementationAuthorized": false,
+  "productRoutes": [
+    {"from": "Scan", "trigger": "durable server acceptance", "to": "Scan", "effect": "clear accepted intake and allow another item while processing continues"},
+    {"from": "Scan", "trigger": "accepted item", "to": "Trophy Wall", "effect": "merge local pending identity with canonical server identity without duplication"},
+    {"from": "Trophy Wall", "trigger": "open ready item", "to": "Listing review", "effect": "open canonical coherent result"},
+    {"from": "app header", "trigger": "profile avatar", "to": "Settings", "effect": "none"}
+  ],
+  "primaryDestinations": ["Scan", "Trophy Wall"],
+  "forbiddenDestinations": ["Home", "Listings", "Inbox", "Insights", "Activity", "Runs"],
+  "note": "These routes record product authority only. Final presentation and SwiftUI routing await the redirected design package and owning issue."
 }
