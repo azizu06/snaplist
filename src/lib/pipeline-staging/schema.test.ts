@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  pipelineReplayBatchInputSchema,
   pipelineStageBatchInputSchema,
   pipelineStageBatchResultSchema,
 } from "./schema";
@@ -18,16 +19,21 @@ describe("pipeline staging contract", () => {
           idempotencyKey: "capture-1",
           source: "single",
           autopilotEnabled: false,
-          photoPaths: [PHOTO, "user_123/staging/batch/item/back.jpg"],
+          photoPaths: Array.from(
+            { length: 5 },
+            (_, ordinal) => `user_123/staging/batch/item/photo-${ordinal}.jpg`,
+          ),
           costBasis: 12.5,
         },
       ],
     });
 
-    expect(parsed.entries[0].photoPaths).toEqual([
-      PHOTO,
-      "user_123/staging/batch/item/back.jpg",
-    ]);
+    expect(parsed.entries[0].photoPaths).toEqual(
+      Array.from(
+        { length: 5 },
+        (_, ordinal) => `user_123/staging/batch/item/photo-${ordinal}.jpg`,
+      ),
+    );
     expect(Object.keys(parsed.entries[0]).sort()).toEqual([
       "autopilotEnabled",
       "costBasis",
@@ -84,5 +90,25 @@ describe("pipeline staging contract", () => {
         },
       ]),
     ).toHaveLength(1);
+  });
+
+  it("replays five-photo single-item input without widening batch intake", () => {
+    const replay = {
+      batchId: "11111111-1111-4111-8111-111111111111",
+      userId: "user_123",
+      entries: [{
+        idempotencyKey: "capture-1",
+        source: "single" as const,
+        autopilotEnabled: false,
+        photoCount: 5,
+        costBasis: null,
+      }],
+    };
+
+    expect(pipelineReplayBatchInputSchema.parse(replay)).toEqual(replay);
+    expect(() => pipelineReplayBatchInputSchema.parse({
+      ...replay,
+      entries: [{ ...replay.entries[0], source: "batch" }],
+    })).toThrow();
   });
 });

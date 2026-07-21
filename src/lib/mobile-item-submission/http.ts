@@ -74,7 +74,7 @@ export function createMobileItemSubmissionHandler(
         requestId,
         400,
         "invalid_request",
-        "Submit 1–4 valid JPEG, PNG, or WebP photos and an optional cost basis.",
+        "Submit 1–5 valid JPEG, PNG, or WebP photos and an optional cost basis.",
       );
     }
 

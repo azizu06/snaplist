@@ -39,13 +39,20 @@ describe("mobile item submission OpenAPI", () => {
         photo: {
           type: "array",
           minItems: 1,
-          maxItems: 4,
+          maxItems: 5,
           items: { type: "string", format: "binary" },
         },
       },
     });
     expect(contract.components.schemas.MobileItemSubmissionReceipt).toMatchObject({
       required: expect.arrayContaining(["runId", "photoIdentity", "photos"]),
+      properties: { photos: { minItems: 1, maxItems: 5 } },
+    });
+    expect(contract.components.schemas.MobileItemSubmissionPhoto).toMatchObject({
+      properties: { ordinal: { minimum: 0, maximum: 4 } },
+    });
+    expect(contract.components.schemas.GuestClaimAccountRecovery).toMatchObject({
+      properties: { storageManifest: { minItems: 1, maxItems: 5 } },
     });
   });
 
@@ -63,6 +70,8 @@ describe("mobile item submission OpenAPI", () => {
     expect(nativeModels).toContain("struct MobileItemSubmissionEnvelope");
     expect(fixture.data.runId).toMatch(/^[0-9a-f-]{36}$/);
     expect(fixture.data.photoIdentity.kind).toBe("content_sha256_set_v1");
-    expect(fixture.data.photos).toHaveLength(1);
+    expect(fixture.data.photos.map((photo: { ordinal: number }) => photo.ordinal)).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
   });
 });

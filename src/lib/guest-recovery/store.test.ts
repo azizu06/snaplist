@@ -25,6 +25,41 @@ const encryption = {
 };
 
 describe("guest claim fixed-RPC store", () => {
+  it("completes a five-object claim through the fixed lease capability", async () => {
+    const verifiedObjects = Array.from({ length: 5 }, (_, ordinal) => ({
+      destinationPath: `user_account/items/photo-${ordinal}.enc`,
+      sha256: ordinal.toString(16).repeat(64),
+      byteLength: 128 + ordinal,
+      encryption: {
+        ...encryption,
+        nonce: Buffer.alloc(12, ordinal + 10).toString("base64"),
+        tag: Buffer.alloc(16, ordinal + 20).toString("base64"),
+      },
+    }));
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        outcome: "expired",
+        itemId: "22222222-2222-4222-8222-222222222222",
+        runId: "33333333-3333-4333-8333-333333333333",
+        draftId: "44444444-4444-4444-8444-444444444444",
+        purgeLocalRecovery: true,
+      },
+      error: null,
+    });
+    const store = createSupabaseGuestClaimStore({ rpc });
+
+    await store.completeClaim({
+      ...identity,
+      claimLeaseToken: "55555555-5555-4555-8555-555555555555",
+      verifiedObjects,
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_guest_draft_claim",
+      expect.objectContaining({ p_verified_objects: verifiedObjects }),
+    );
+  });
+
   it("begins from a verified handoff and never accepts a deadline or ownership payload", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: {

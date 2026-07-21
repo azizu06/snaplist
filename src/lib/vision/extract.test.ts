@@ -14,7 +14,7 @@ import {
  *  - output validates against the real Zod attribute schema and is returned;
  *  - an invalid-then-valid sequence triggers a RETRY and then succeeds;
  *  - retries are exhausted → a clear throw (never a half-validated object);
- *  - 0 or >4 images throw (1..4 enforced);
+ *  - 0 or >5 images throw (1..5 enforced);
  *  - ALL images are passed to a SINGLE call;
  *  - thin/low-evidence (or model-signalled uncertain) input is FLAGGED
  *    (`confident: false`) rather than fabricated into a confident id.
@@ -54,29 +54,27 @@ describe("vision/extract — image-count enforcement", () => {
     ).rejects.toThrow(/at least one|1.*image|require/i);
   });
 
-  it("throws on more than 4 images", async () => {
-    const { generate } = scriptedGenerate([STRONG]);
-    await expect(
-      extractItemAttributes({
-        images: ["a", "b", "c", "d", "e"],
-        generate,
-      }),
-    ).rejects.toThrow(/up to 4|at most 4|more than 4|4 image/i);
-  });
-
-  it("accepts the boundary counts 1 and 4", async () => {
+  it("accepts the boundary counts 1 and 5 and rejects 6", async () => {
     const one = scriptedGenerate([STRONG]);
     await expect(
       extractItemAttributes({ images: ["only"], generate: one.generate }),
     ).resolves.toBeTruthy();
 
-    const four = scriptedGenerate([STRONG]);
+    const five = scriptedGenerate([STRONG]);
     await expect(
       extractItemAttributes({
-        images: ["a", "b", "c", "d"],
-        generate: four.generate,
+        images: ["a", "b", "c", "d", "e"],
+        generate: five.generate,
       }),
     ).resolves.toBeTruthy();
+
+    const six = scriptedGenerate([STRONG]);
+    await expect(
+      extractItemAttributes({
+        images: ["a", "b", "c", "d", "e", "f"],
+        generate: six.generate,
+      }),
+    ).rejects.toThrow(/up to 5|at most 5|more than 5|5 image/i);
   });
 });
 

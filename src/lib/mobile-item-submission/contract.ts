@@ -3,6 +3,7 @@ import { z } from "zod";
 import { parseCostBasis } from "@/lib/pipeline/autopilot";
 
 export const MAX_MOBILE_ITEM_PHOTO_BYTES = 50 * 1024 * 1024;
+export const MAX_MOBILE_ITEM_PHOTOS = 5;
 
 export const mobileSubmissionMediaTypeSchema = z.enum([
   "image/jpeg",
@@ -52,7 +53,7 @@ export const mobileItemSubmissionReceiptSchema = z
       .array(
         z
           .object({
-            ordinal: z.number().int().min(0).max(3),
+            ordinal: z.number().int().min(0).max(MAX_MOBILE_ITEM_PHOTOS - 1),
             contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
             byteLength: z.number().int().positive().max(MAX_MOBILE_ITEM_PHOTO_BYTES),
             mediaType: mobileSubmissionMediaTypeSchema,
@@ -60,7 +61,7 @@ export const mobileItemSubmissionReceiptSchema = z
           .strict(),
       )
       .min(1)
-      .max(4),
+      .max(MAX_MOBILE_ITEM_PHOTOS),
   })
   .strict();
 
@@ -207,8 +208,8 @@ export async function prepareMobileItemSubmission(
   }
 
   const photoValues = formData.getAll("photo");
-  if (photoValues.length < 1 || photoValues.length > 4) {
-    throw new Error("Submit between 1 and 4 photos.");
+  if (photoValues.length < 1 || photoValues.length > MAX_MOBILE_ITEM_PHOTOS) {
+    throw new Error(`Submit between 1 and ${MAX_MOBILE_ITEM_PHOTOS} photos.`);
   }
   if (formData.getAll("costBasis").length > 1) {
     throw new Error("Submit cost basis at most once.");

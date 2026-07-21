@@ -5,6 +5,7 @@ import {
   guestClaimVerifiedObjectSchema,
   guestRecoveryOutcomeSchema,
   GuestClaimIdempotencyConflictError,
+  MAX_GUEST_RECOVERY_PHOTOS,
   type GuestClaimStore,
 } from "./service";
 
@@ -66,9 +67,11 @@ export function createSupabaseGuestClaimStore(
         p_recovery_id: z.string().uuid().parse(input.recoveryId),
         p_recovery_token_hash: z.string().regex(/^[0-9a-f]{64}$/).parse(input.recoveryTokenHash),
         p_target_user_id: z.string().min(1).max(255).parse(input.targetUserId),
-        p_verified_objects: z.array(guestClaimVerifiedObjectSchema).min(1).max(4).parse(
-          input.verifiedObjects,
-        ),
+        p_verified_objects: z
+          .array(guestClaimVerifiedObjectSchema)
+          .min(1)
+          .max(MAX_GUEST_RECOVERY_PHOTOS)
+          .parse(input.verifiedObjects),
       });
       return guestClaimTerminalOutcomeSchema.parse(
         rpcData("claim completion", result),

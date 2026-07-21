@@ -47,7 +47,7 @@ final class MobileAPIContractTests: XCTestCase {
         )
         XCTAssertEqual(envelope.data.status, "queued")
         XCTAssertEqual(envelope.data.photoIdentity.kind, "content_sha256_set_v1")
-        XCTAssertEqual(envelope.data.photos.count, 1)
+        XCTAssertEqual(envelope.data.photos.map(\.ordinal), [0, 1, 2, 3, 4])
     }
 
     func testServerEntitlementParsesPostgresDatesWithAndWithoutFractions() {

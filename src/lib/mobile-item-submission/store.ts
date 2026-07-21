@@ -3,6 +3,7 @@ import {
   MobileItemSubmissionConflictError,
   MobileItemSubmissionDeniedError,
   MAX_MOBILE_ITEM_PHOTO_BYTES,
+  MAX_MOBILE_ITEM_PHOTOS,
   mobileItemSubmissionReceiptSchema,
 } from "./contract";
 import type {
@@ -31,7 +32,7 @@ export interface MobileItemSubmissionRpcClient {
 
 const storedPhotoReceiptSchema = z
   .object({
-    ordinal: z.number().int().min(0).max(3),
+    ordinal: z.number().int().min(0).max(MAX_MOBILE_ITEM_PHOTOS - 1),
     storage_path: z.string().min(1).max(1_024),
     content_sha256: z.string().regex(/^[0-9a-f]{64}$/),
     byte_length: z.number().int().positive().max(MAX_MOBILE_ITEM_PHOTO_BYTES),
@@ -46,7 +47,7 @@ const submissionRowSchema = z
     queue_message_id: z.union([z.number(), z.string(), z.bigint()]),
     photo_identity_kind: z.literal("content_sha256_set_v1"),
     photo_identity_fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
-    photo_receipts: z.array(storedPhotoReceiptSchema).min(1).max(4),
+    photo_receipts: z.array(storedPhotoReceiptSchema).min(1).max(MAX_MOBILE_ITEM_PHOTOS),
     is_replay: z.boolean(),
   })
   .strict();

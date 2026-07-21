@@ -9,7 +9,7 @@ import { resolveLanguageModel, resolveModelId } from "../llm";
 /**
  * Real single-shot multimodal vision extraction (issue #6).
  *
- * Given 1–4 images, ONE multimodal model call extracts structured attributes +
+ * Given 1–5 images, ONE multimodal model call extracts structured attributes +
  * condition + barcode/ISBN/UPC, Zod-validated against `extractedAttributesSchema`
  * (the attribute contract). Invalid output is retried; persistent invalid output
  * throws. Mirrors `rag/embedding.ts`: the SDK is imported LAZILY and the provider
@@ -24,9 +24,9 @@ import { resolveLanguageModel, resolveModelId } from "../llm";
  * invalid-then-valid sequences to exercise the retry path.
  */
 
-/** Min/max images the single call accepts (PRD: 1 required, up to ~4). */
+/** Min/max images the single call accepts (mobile submission: 1 required, up to 5). */
 export const MIN_IMAGES = 1;
-export const MAX_IMAGES = 4;
+export const MAX_IMAGES = 5;
 
 /**
  * Current strong multimodal model (confirmed against OpenAI docs at build time —
@@ -71,7 +71,7 @@ export type VisionGenerate = (args: {
 }) => Promise<VisionGenerateResult>;
 
 export interface ExtractItemAttributesInput {
-  /** 1–4 image inputs (URLs and/or inline bytes). Enforced; 0 or >4 throws. */
+  /** 1–5 image inputs (URLs and/or inline bytes). Enforced; 0 or >5 throws. */
   images: VisionImageInput[];
   /** Injected model call. Defaults to the real lazy `generateObject` wrapper. */
   generate?: VisionGenerate;
@@ -177,7 +177,7 @@ function resolveModel(model?: string): string {
 }
 
 /**
- * Run the single multimodal extraction. Enforces the 1..4 image bound, calls
+ * Run the single multimodal extraction. Enforces the 1..5 image bound, calls
  * `generate` once per attempt, validates each candidate against the attribute
  * schema, retries on mismatch up to `maxRetries`, and throws a clear error after
  * exhaustion. Returns the validated attributes + a flagged identification.

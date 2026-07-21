@@ -1,6 +1,8 @@
 import { Buffer } from "node:buffer";
 import { z } from "zod";
 
+export const MAX_GUEST_RECOVERY_PHOTOS = 5;
+
 interface Base64Bounds {
   exactBytes?: number;
   minBytes?: number;
@@ -110,7 +112,10 @@ export type GuestClaimVerifiedObject = z.infer<
 export const guestClaimAccountRecoverySchema = z
   .object({
     encryptedArtifact: encryptedGuestRecoveryArtifactSchema,
-    storageManifest: z.array(guestClaimVerifiedObjectSchema).min(1).max(4),
+    storageManifest: z
+      .array(guestClaimVerifiedObjectSchema)
+      .min(1)
+      .max(MAX_GUEST_RECOVERY_PHOTOS),
   })
   .strict()
   .superRefine((recovery, context) => {
@@ -167,7 +172,10 @@ const guestClaimCopyPlanSchema = z
     itemId: z.string().uuid(),
     runId: z.string().uuid(),
     draftId: z.string().uuid(),
-    objects: z.array(guestClaimObjectSchema).min(1).max(4),
+    objects: z
+      .array(guestClaimObjectSchema)
+      .min(1)
+      .max(MAX_GUEST_RECOVERY_PHOTOS),
   })
   .strict();
 

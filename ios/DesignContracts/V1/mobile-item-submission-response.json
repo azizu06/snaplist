@@ -6,13 +6,37 @@
     "stage": "queued",
     "photoIdentity": {
       "kind": "content_sha256_set_v1",
-      "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "fingerprint": "60655ba2e793a58552ca862e683eadcf0bc111b2c8e5e1a00c1e317836f39e8c"
     },
     "photos": [
       {
         "ordinal": 0,
         "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "byteLength": 4,
+        "mediaType": "image/jpeg"
+      },
+      {
+        "ordinal": 1,
+        "contentSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "byteLength": 5,
+        "mediaType": "image/jpeg"
+      },
+      {
+        "ordinal": 2,
+        "contentSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "byteLength": 6,
+        "mediaType": "image/png"
+      },
+      {
+        "ordinal": 3,
+        "contentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "byteLength": 7,
+        "mediaType": "image/webp"
+      },
+      {
+        "ordinal": 4,
+        "contentSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "byteLength": 8,
         "mediaType": "image/jpeg"
       }
     ]

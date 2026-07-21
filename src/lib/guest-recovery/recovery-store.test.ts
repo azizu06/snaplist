@@ -26,6 +26,21 @@ const storageManifest = [{
 }];
 
 describe("guest encrypted recovery fixed-RPC store", () => {
+  it("accepts five ordered encrypted Storage objects for durable guest recovery", () => {
+    const manifest = Array.from({ length: 5 }, (_, ordinal) => ({
+      ...storageManifest[0],
+      sourcePath: `guest_fixture/item/photo-${ordinal}.enc`,
+      sha256: ordinal.toString(16).repeat(64),
+      encryption: {
+        ...storageManifest[0].encryption,
+        nonce: Buffer.alloc(12, ordinal + 10).toString("base64"),
+        tag: Buffer.alloc(16, ordinal + 20).toString("base64"),
+      },
+    }));
+
+    expect(guestRecoveryStorageManifestSchema.parse(manifest)).toEqual(manifest);
+  });
+
   it("rejects an unlabeled Storage object as recoverable ciphertext", () => {
     expect(guestRecoveryStorageManifestSchema.safeParse([{
       sourcePath: "guest_fixture/item/front.enc",
