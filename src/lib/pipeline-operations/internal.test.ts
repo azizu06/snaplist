@@ -58,7 +58,6 @@ describe("internal pipeline maintenance composition", () => {
                   jobId: "11111111-1111-4111-8111-111111111111",
                   leaseToken: "22222222-2222-4222-8222-222222222222",
                   photoPaths: ["user/pipeline-staging/photo.jpg"],
-                  fenceGeneration: null,
                   attemptCount: 1,
                   maxAttempts: 5,
                 },

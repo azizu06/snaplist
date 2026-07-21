@@ -15,7 +15,6 @@ const cleanupJobSchema = z.object({
   jobId: z.string().uuid(),
   leaseToken: z.string().uuid(),
   photoPaths: z.array(z.string().min(1).max(1_024)).min(1).max(800),
-  fenceGeneration: z.number().int().positive().nullable(),
   attemptCount: z.number().int().positive(),
   maxAttempts: z.number().int().positive(),
 }).strict();

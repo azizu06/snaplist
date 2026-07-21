@@ -69,6 +69,12 @@ describe("mobile item submission migration", () => {
       /cleanup_generation = submission\.cleanup_generation \+ 1[\s\S]*delete from private\.pipeline_storage_cleanup_jobs/i,
     );
     expect(cleanupFenceMigration).toMatch(
+      /create or replace function public\.prepare_pipeline_retention[\s\S]*pg_advisory_xact_lock[\s\S]*mobile-item-submission[\s\S]*select submission\.\* into v_submission[\s\S]*for update[\s\S]*select intent\.\* into v_current_intent[\s\S]*for update[\s\S]*select job\.\* into v_cleanup_job[\s\S]*for update/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
+      /v_current_intent\.cleanup_after > statement_timestamp\(\)[\s\S]*continue/i,
+    );
+    expect(cleanupFenceMigration).toMatch(
       /create or replace function public\.authorize_pipeline_storage_cleanup/i,
     );
     expect(cleanupFenceMigration).toMatch(
