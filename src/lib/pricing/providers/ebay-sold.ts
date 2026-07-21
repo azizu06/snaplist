@@ -261,11 +261,10 @@ export function assertSafeEbayUrl(rawUrl: string): URL {
  */
 export function canonicalEbayItemUrl(
   value: unknown,
-  baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
 ): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
-    const url = assertSafeEbayUrl(new URL(value.trim(), baseUrl).toString());
+    const url = assertSafeEbayUrl(value.trim());
     if (!url.pathname.toLowerCase().startsWith("/itm/")) return null;
     url.search = "";
     url.hash = "";
@@ -277,12 +276,11 @@ export function canonicalEbayItemUrl(
 
 export function normalizeEbaySoldCompUrls(
   comps: readonly EbaySoldComp[],
-  baseUrl: string = EBAY_SOLD_BASE_URL_DEFAULT,
 ): EbaySoldComp[] {
   const seen = new Set<string>();
   const normalized: EbaySoldComp[] = [];
   for (const comp of comps) {
-    const url = canonicalEbayItemUrl(comp.url, baseUrl);
+    const url = canonicalEbayItemUrl(comp.url);
     if (!url || seen.has(url)) continue;
     seen.add(url);
     normalized.push({ ...comp, url });
@@ -1140,7 +1138,7 @@ export function createEbaySoldPricingProvider(
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
-      const normalizedComps = normalizeEbaySoldCompUrls(comps, baseUrl);
+      const normalizedComps = normalizeEbaySoldCompUrls(comps);
       const evidence = selectSoldCompEvidence(normalizedComps, signal);
       const relevant = evidence.anchors.map((entry) => entry.comp);
       const evidenceWeights = new Map(

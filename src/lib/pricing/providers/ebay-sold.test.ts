@@ -994,6 +994,16 @@ describe("ebay-sold wired into the PriceRouter above the web tiers", () => {
           title: "Sony WH-1000XM4 Wireless Headphones",
           price: 190,
         },
+        {
+          url: "/itm/poisoned-c",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 175,
+        },
+        {
+          url: "itm/poisoned-d",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 185,
+        },
       ],
       set: async () => undefined,
     };
@@ -1089,6 +1099,16 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
           url: "https://www.ebay.com/help/poisoned-b",
           title: "Sony WH-1000XM4 Wireless Headphones",
           price: 190,
+        },
+        {
+          url: "/itm/poisoned-c",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 175,
+        },
+        {
+          url: "itm/poisoned-d",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 185,
         },
       ],
       set: async () => undefined,

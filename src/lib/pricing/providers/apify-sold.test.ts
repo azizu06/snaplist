@@ -302,6 +302,16 @@ describe("createApifySoldPricingProvider", () => {
           title: "Sony WH-1000XM4 Wireless Headphones",
           price: 190,
         },
+        {
+          url: "/itm/poisoned-c",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 175,
+        },
+        {
+          url: "itm/poisoned-d",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 185,
+        },
       ],
       set: async () => undefined,
     };
