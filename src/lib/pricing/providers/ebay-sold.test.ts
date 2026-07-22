@@ -1681,6 +1681,79 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     ).toEqual(["10", "20"]);
   });
 
+  it("coordinates separate default-direct runtimes through an available shared claim", async () => {
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", "");
+    let releaseFetch!: () => void;
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    let firstFetchStarted!: () => void;
+    const firstFetch = new Promise<void>((resolve) => {
+      firstFetchStarted = resolve;
+    });
+    let reportSecondPath!: (path: "claim" | "fetch") => void;
+    const secondPath = new Promise<"claim" | "fetch">((resolve) => {
+      reportSecondPath = resolve;
+    });
+    let fetchCount = 0;
+    const fetchImpl = vi.fn(async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) firstFetchStarted();
+      if (fetchCount === 2) reportSecondPath("fetch");
+      await fetchGate;
+      return new Response(FIXTURE_HTML);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimOwner: string | null = null;
+    const claimResults: boolean[] = [];
+    const claim = vi.fn(
+      async (key: string, signal?: AbortSignal, ownerToken?: string) => {
+        void key;
+        void signal;
+        const claimed = claimOwner === null;
+        if (claimed) claimOwner = ownerToken ?? "1";
+        claimResults.push(claimed);
+        if (claimResults.length === 2) reportSecondPath("claim");
+        return claimed;
+      },
+    );
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        values.set(key, value);
+      },
+      claim,
+      async getClaimOwner(key, signal) {
+        void key;
+        void signal;
+        return claimOwner;
+      },
+    });
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        enabled: true,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await firstFetch;
+    const second = providerForRuntime().price(BRANDED_SIGNAL);
+    const observedSecondPath = await secondPath;
+    releaseFetch();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(observedSecondPath).toBe("claim");
+    expect(claimResults).toEqual([true, false]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(firstResult).not.toBeNull();
+    expect(secondResult).toEqual(firstResult);
+  });
+
   it("keeps a configured proxy behind the shared cost fence", async () => {
     vi.stubEnv(
       "EBAY_SOLD_PROXY_TEMPLATE",

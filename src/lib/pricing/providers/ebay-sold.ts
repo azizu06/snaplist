@@ -1268,7 +1268,9 @@ function createEbaySoldPricingProviderInternal(
       : null;
   const requiresSharedFence =
     !operatorSmokeOneRequest &&
-    (configuredEgress.mode !== "direct" || fetchFallback !== undefined);
+    (cache?.scope === "shared" ||
+      configuredEgress.mode !== "direct" ||
+      fetchFallback !== undefined);
   const maximumRequestCount = allowExpansion ? 2 : 1;
   const handoffWaitMs =
     effectiveFetchTimeoutMs * maximumRequestCount +
@@ -1499,12 +1501,13 @@ function createEbaySoldPricingProviderInternal(
       // age-decay below re-runs on
       // every read, so a comp that goes stale while cached is still dropped.
       // The cache is an OPTIMIZATION, never pricing authority. The free no-proxy
-      // default direct path may coordinate within one process. Configured proxy
-      // and injected/instrumented normal fetchers require the existing atomic
-      // shared claim so separate runtimes cannot multiply a potentially billable
-      // bounded pass; an unavailable fence declines before egress. The separately
-      // named operator smoke factory retains its one-request authority. Neither
-      // path propagates cache failure into the listing pipeline.
+      // default direct path may coordinate within one process when that is the
+      // selected cache scope, and retains the atomic claim when a shared cache is
+      // available. Configured proxy and injected/instrumented normal fetchers
+      // require the shared claim so separate runtimes cannot multiply a potentially
+      // billable bounded pass; an unavailable fence declines before egress. The
+      // separately named operator smoke factory retains its one-request authority.
+      // Neither path propagates cache failure into the listing pipeline.
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {

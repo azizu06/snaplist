@@ -64,7 +64,8 @@ matcher. Terminal and sparse outcomes are cached alongside successful combined
 results. With no proxy configured, the real default direct eBay fetch is free and
 may coordinate through the process-local cache and in-flight map when Upstash is
 absent. Cache hits and same-runtime retry/redelivery reuse that winner; this mode
-claims no cross-runtime guarantee.
+claims no cross-runtime guarantee. When Upstash is configured, the same direct
+path retains the shared atomic claim and its cross-runtime winner guarantee.
 
 A configured proxy or an injected, instrumented, or wrapped normal fetch path may
 carry direct cost and therefore still requires the existing atomic shared-cache
