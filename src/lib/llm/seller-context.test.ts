@@ -171,6 +171,41 @@ describe("resolveSellerContextTranscriber", () => {
     }
   });
 
+  it("fails open on caller cancellation without misreporting the deadline", async () => {
+    const preAborted = new AbortController();
+    preAborted.abort();
+    const shouldNotRun = vi.fn(async () => ({ text: "must not run" }));
+    const transcriber = resolveSellerContextTranscriber({
+      model: { transcribe: shouldNotRun },
+    });
+
+    await expect(
+      transcriber.transcribe({ ...verifiedVoice, signal: preAborted.signal }),
+    ).resolves.toEqual({ kind: "failed" });
+    expect(shouldNotRun).not.toHaveBeenCalled();
+
+    const caller = new AbortController();
+    let adapterSignal: AbortSignal | undefined;
+    const inFlight = resolveSellerContextTranscriber({
+      model: {
+        async transcribe(input) {
+          adapterSignal = input.signal;
+          return new Promise<never>((_resolve, reject) => {
+            input.signal.addEventListener(
+              "abort",
+              () => reject(new Error("provider abort req_sensitive")),
+              { once: true },
+            );
+          });
+        },
+      },
+    }).transcribe({ ...verifiedVoice, signal: caller.signal });
+
+    caller.abort();
+    await expect(inFlight).resolves.toEqual({ kind: "failed" });
+    expect(adapterSignal?.aborted).toBe(true);
+  });
+
   it("keeps valid text when provider language is missing, invalid, or oversized", async () => {
     const oversizedLanguage = `x-${Array.from(
       { length: 32 },

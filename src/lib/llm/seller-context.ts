@@ -10,6 +10,7 @@ const MAXIMUM_LANGUAGE_TAG_UTF8_BYTES = 255;
 const TRANSCRIPTION_DEADLINE_MS = 20_000;
 const utf8Encoder = new TextEncoder();
 const timedOut = Symbol("seller-context-transcription-timed-out");
+const callerCancelled = Symbol("seller-context-transcription-caller-cancelled");
 
 export const SELLER_CONTEXT_TRANSCRIPTION_ROLE = "sellerContext" as const;
 
@@ -130,10 +131,17 @@ export function resolveSellerContextTranscriber(
   return {
     async transcribe(input) {
       if (!isVerifiedVoiceInput(input)) return { kind: "unsupported" };
+      if (input.signal.aborted) return { kind: "failed" };
       const deadlineController = new AbortController();
-      const abortFromCaller = () => deadlineController.abort(input.signal.reason);
-      if (input.signal.aborted) abortFromCaller();
-      else input.signal.addEventListener("abort", abortFromCaller, { once: true });
+      let cancelFromCaller: (() => void) | undefined;
+      const callerCancellation = new Promise<typeof callerCancelled>((resolve) => {
+        cancelFromCaller = () => resolve(callerCancelled);
+      });
+      const abortFromCaller = () => {
+        cancelFromCaller?.();
+        deadlineController.abort(input.signal.reason);
+      };
+      input.signal.addEventListener("abort", abortFromCaller, { once: true });
       let deadline: ReturnType<typeof setTimeout> | undefined;
       try {
         const timeout = new Promise<typeof timedOut>((resolve) => {
@@ -145,8 +153,10 @@ export function resolveSellerContextTranscriber(
         const output = await Promise.race([
           model.transcribe({ ...input, signal: deadlineController.signal }),
           timeout,
+          callerCancellation,
         ]);
         if (output === timedOut) return { kind: "timed-out" };
+        if (output === callerCancelled) return { kind: "failed" };
         if ("kind" in output) return { kind: "unsupported" };
         const text = normalizeTranscript(output.text);
         if (!text) return { kind: "empty" };
@@ -156,7 +166,6 @@ export function resolveSellerContextTranscriber(
           language: normalizeLanguage(output.language),
         };
       } catch {
-        if (deadlineController.signal.aborted) return { kind: "timed-out" };
         return { kind: "failed" };
       } finally {
         if (deadline) clearTimeout(deadline);
