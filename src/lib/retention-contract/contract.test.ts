@@ -13,6 +13,15 @@ const contract = parseReleaseRetentionContract(
   ),
 );
 
+const completeDisposition = {
+  treatment: "delete",
+  owner: "seller-local-client",
+  deletionTriggers: ["local-recovery-window-expires"],
+  maximumRetention: "24 hours from local intake capture",
+  executor: "native-intake-cleanup-capability",
+  completionProof: "protected local file is absent",
+};
+
 describe("lean-MVP release retention contract", () => {
   it("rejects a release datum without one complete disposition", () => {
     const datumWithoutDisposition = {
@@ -31,6 +40,56 @@ describe("lean-MVP release retention contract", () => {
 
     expect(() =>
       parseReleaseRetentionContract(datumWithoutDisposition),
+    ).toThrow();
+  });
+
+  it("rejects a release datum with more than one disposition", () => {
+    const datumWithTwoDispositions = {
+      contract: "snaplist.lean-mvp-retention",
+      version: 1,
+      status: "release-blocked",
+      ownerIssue: 383,
+      data: [
+        {
+          id: "local-photos",
+          releaseDatum: true,
+          dispositions: [completeDisposition, completeDisposition],
+        },
+      ],
+      blockers: [],
+    };
+
+    expect(() =>
+      parseReleaseRetentionContract(datumWithTwoDispositions),
+    ).toThrow();
+  });
+
+  it("rejects a release datum with an incomplete disposition", () => {
+    const datumWithIncompleteDisposition = {
+      contract: "snaplist.lean-mvp-retention",
+      version: 1,
+      status: "release-blocked",
+      ownerIssue: 383,
+      data: [
+        {
+          id: "local-photos",
+          releaseDatum: true,
+          dispositions: [
+            {
+              treatment: "delete",
+              owner: "seller-local-client",
+              deletionTriggers: ["local-recovery-window-expires"],
+              maximumRetention: "24 hours from local intake capture",
+              executor: "native-intake-cleanup-capability",
+            },
+          ],
+        },
+      ],
+      blockers: [],
+    };
+
+    expect(() =>
+      parseReleaseRetentionContract(datumWithIncompleteDisposition),
     ).toThrow();
   });
 
@@ -124,9 +183,14 @@ describe("lean-MVP release retention contract", () => {
       "utf8",
     );
 
+    expect(prd).toMatch(
+      /`docs\/contracts\/lean-mvp-retention-v1\.json` is the singular row-level authority[\s\S]*owner, deletion triggers, maximum retention, executor, and completion proof/,
+    );
+    expect(adr).toMatch(
+      /`docs\/contracts\/lean-mvp-retention-v1\.json` is the only normative row-level retention authority/,
+    );
     expect(prd).toContain(contractPath);
     expect(adr).toContain(contractPath);
-    expect(adr).toContain("the only normative row-level retention authority");
   });
 
   it("routes lean-MVP and voice retention authority to ADR-0012", () => {
@@ -139,7 +203,11 @@ describe("lean-MVP release retention contract", () => {
       "utf8",
     );
 
-    expect(leanMvpAdr).toContain("ADR-0012");
-    expect(voiceAdr).toContain("ADR-0012");
+    expect(leanMvpAdr).toMatch(
+      /ADR-0012 and `docs\/contracts\/lean-mvp-retention-v1\.json` are the singular\s+row-level authority for those deletion and retention dispositions/,
+    );
+    expect(voiceAdr).toMatch(
+      /ADR-0012 and `docs\/contracts\/lean-mvp-retention-v1\.json` own the singular release matrix and\s+completion-proof vocabulary/,
+    );
   });
 });
