@@ -1262,6 +1262,10 @@ function createEbaySoldPricingProviderInternal(
   const staleDays = options.staleDays ?? resolveStaleDays();
   const halfLifeDays = options.halfLifeDays ?? resolveHalfLifeDays();
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
+  const normalizeBoundedCandidates = (
+    comps: readonly EbaySoldComp[],
+  ): EbaySoldComp[] =>
+    normalizeEbaySoldCompUrls(comps).slice(0, EBAY_SOLD_MAX_RESULTS);
 
   const identifiable = (signal: ItemSignal): boolean =>
     buildSoldSearchUrl(signal, baseUrl) !== null;
@@ -1418,7 +1422,7 @@ function createEbaySoldPricingProviderInternal(
       "pricing.ebay_sold.fetch_blocked",
       coordinationDeadline,
     );
-    let combined = normalizeEbaySoldCompUrls(initial.comps);
+    let combined = normalizeBoundedCandidates(initial.comps);
 
     if (initial.failed) {
       if (fetchFallback) {
@@ -1429,7 +1433,7 @@ function createEbaySoldPricingProviderInternal(
           "pricing.ebay_sold.fallback_blocked",
           coordinationDeadline,
         );
-        if (!fallback.failed) combined = normalizeEbaySoldCompUrls(fallback.comps);
+        if (!fallback.failed) combined = normalizeBoundedCandidates(fallback.comps);
       }
     } else {
       const evidence = selectSoldCompEvidence(combined, signal);
@@ -1449,7 +1453,7 @@ function createEbaySoldPricingProviderInternal(
             coordinationDeadline,
           );
           if (!expanded.failed) {
-            combined = normalizeEbaySoldCompUrls([...expanded.comps, ...combined]);
+            combined = normalizeBoundedCandidates([...expanded.comps, ...combined]);
           }
         }
       }
@@ -1614,7 +1618,7 @@ function createEbaySoldPricingProviderInternal(
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
-      const normalizedComps = normalizeEbaySoldCompUrls(comps);
+      const normalizedComps = normalizeBoundedCandidates(comps);
       const evidence = selectSoldCompEvidence(normalizedComps, signal);
       const relevant = evidence.anchors.map((entry) => entry.comp);
       // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,

@@ -872,28 +872,46 @@ describe("synthesizeSoldResult — robust core rescues a tight cluster from one 
 });
 
 describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
-  it("requests ten candidates, expands once to twenty, and caches the deterministic best five", async () => {
-    const initial = srp([
-      soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
-      soldCard("https://www.ebay.com/itm/initial-b", 180, 7),
-    ]);
-    const expanded = srp([
-      soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
-      soldCard("https://www.ebay.com/itm/best-newest", 175, 1),
-      soldCard("https://www.ebay.com/itm/best-second", 176, 2),
-      soldCard("https://www.ebay.com/itm/best-third", 177, 3),
-      soldCard("https://www.ebay.com/itm/best-fourth", 178, 4),
-      soldCard("https://www.ebay.com/itm/best-fifth", 179, 5),
-      soldCard("https://www.ebay.com/itm/lower-ranked", 180, 9),
-    ]);
+  it("caps disjoint initial and expanded responses at twenty cached candidates", async () => {
+    const initial = srp(
+      Array.from({ length: 10 }, (_, index) => {
+        const card = soldCard(
+          `https://www.ebay.com/itm/initial-${index}`,
+          150 + index,
+          index + 1,
+        );
+        return index < 2
+          ? card
+          : card.replace(
+              "Sony WH-1000XM4 Headphones",
+              "Bose QuietComfort Headphones",
+            );
+      }),
+    );
+    const expanded = srp(
+      Array.from({ length: 20 }, (_, index) =>
+        soldCard(
+          `https://www.ebay.com/itm/expanded-${index}`,
+          170 + index,
+          10 + index,
+        ),
+      ),
+    );
     const urls: string[] = [];
     const fetchPage = vi.fn(async (url: string) => {
       urls.push(url);
       return new URL(url).searchParams.get("_ipg") === "10" ? initial : expanded;
     });
+    let cachedCandidates: EbaySoldComp[] = [];
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => (cachedCandidates.length > 0 ? cachedCandidates : null),
+      set: async (_key, value) => {
+        cachedCandidates = value;
+      },
+    };
     const provider = createEbaySoldPricingProvider({
       fetchPage,
-      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      cache,
       now: () => NOW,
     });
 
@@ -904,12 +922,19 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       "10",
       "20",
     ]);
+    expect(cachedCandidates).toHaveLength(20);
+    expect(cachedCandidates.map(({ url }) => url)).toEqual(
+      Array.from(
+        { length: 20 },
+        (_, index) => `https://www.ebay.com/itm/expanded-${index}`,
+      ),
+    );
     expect(first?.evidence?.map(({ sourceUrl }) => sourceUrl)).toEqual([
-      "https://www.ebay.com/itm/best-newest",
-      "https://www.ebay.com/itm/best-second",
-      "https://www.ebay.com/itm/best-third",
-      "https://www.ebay.com/itm/best-fourth",
-      "https://www.ebay.com/itm/best-fifth",
+      "https://www.ebay.com/itm/expanded-0",
+      "https://www.ebay.com/itm/expanded-1",
+      "https://www.ebay.com/itm/expanded-2",
+      "https://www.ebay.com/itm/expanded-3",
+      "https://www.ebay.com/itm/expanded-4",
     ]);
     expect(first?.sources.map(({ url }) => url)).toEqual(
       first?.evidence?.map(({ sourceUrl }) => sourceUrl),
