@@ -1420,7 +1420,6 @@ function createEbaySoldPricingProviderInternal(
         emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
           reason: "handoff-read-failed",
         });
-        return null;
       }
       if (Date.now() >= deadline) break;
       delayMs =
