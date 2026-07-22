@@ -703,7 +703,9 @@ describe("createApifySoldPricingProvider", () => {
       const winnerResult = providerForRequest().price(SIGNAL);
       await vi.advanceTimersByTimeAsync(2_501);
       const winner = await winnerResult;
-      const retry = await providerForRequest().price(SIGNAL);
+      const retryResult = providerForRequest().price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      const retry = await retryResult;
 
       expect(winner).toBeNull();
       expect(retry).toEqual(winner);
@@ -1098,7 +1100,9 @@ describe("createApifySoldPricingProvider", () => {
 
       expect(settled).toBe(true);
       await expect(first).resolves.toBeNull();
-      await expect(provider.price(SIGNAL)).resolves.toBeNull();
+      const retry = provider.price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      await expect(retry).resolves.toBeNull();
       expect(runActor).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
