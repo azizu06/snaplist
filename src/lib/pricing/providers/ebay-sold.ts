@@ -262,7 +262,9 @@ async function observeCommittedMutation<T>(
     return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
   }
   let delayMs = EBAY_SOLD_AMBIGUOUS_MUTATION_POLL_MS;
+  let retriedTransientFinalObservation = false;
   while (!cancellationSignal.aborted) {
+    let observationFailed = false;
     try {
       const observed = await settleBeforeCoordinationDeadline(
         observe,
@@ -272,6 +274,7 @@ async function observeCommittedMutation<T>(
       if (observed === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) return observed;
       if (observed != null && accepts(observed)) return observed;
     } catch {
+      observationFailed = true;
       // An observation failure does not override a mutation response that may
       // still settle successfully within the same deadline. A later bounded
       // observation may still prove the exact committed mutation.
@@ -289,6 +292,14 @@ async function observeCommittedMutation<T>(
       reserveFinalExactObservation &&
       remainingMs <= EBAY_SOLD_FINAL_OBSERVATION_RESERVE_MS
     ) {
+      if (
+        observationFailed &&
+        !retriedTransientFinalObservation &&
+        remainingMs > 0
+      ) {
+        retriedTransientFinalObservation = true;
+        continue;
+      }
       await delayBeforeCoordinationDeadline(
         Number.MAX_SAFE_INTEGER,
         deadline,
