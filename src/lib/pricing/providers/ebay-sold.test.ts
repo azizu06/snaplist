@@ -1529,7 +1529,95 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(fetchPage).toHaveBeenCalledOnce();
   });
 
+  it("reconciles an exact winner store that commits before its response rejects", async () => {
+    let claimed = false;
+    let stored: EbaySoldComp[] | null = null;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return stored;
+      },
+      async set(_key, value) {
+        stored = value;
+        throw new Error("winner store response rejected after commit");
+      },
+      async claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimed ? "owner" : null;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const firstResult = await providerForRuntime().price(BRANDED_SIGNAL);
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(stored).toHaveLength(7);
+    expect(firstResult?.sources).toHaveLength(5);
+    expect(retryResult).toEqual(firstResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      observed: Array.from({ length: 5 }, (_, index) => ({
+        url: `https://www.ebay.com/itm/different-${index}`,
+        title: "Sony WH-1000XM4 Wireless Headphones",
+        price: 900 + index,
+      })),
+    },
+    {
+      observed: { rows: "malformed" } as unknown as EbaySoldComp[],
+    },
+  ])(
+    "does not authorize a rejected winner store from different or malformed cache data",
+    async ({ observed }) => {
+      vi.useFakeTimers();
+      let storeAttempted = false;
+      let claimOwner: string | null = null;
+      const cache: TtlCache<EbaySoldComp[]> = {
+        scope: "shared",
+        async get() {
+          return storeAttempted ? observed : null;
+        },
+        async set() {
+          storeAttempted = true;
+          throw new Error("winner store response rejected without the retrieved result");
+        },
+        async claim(_key, _signal, ownerToken) {
+          claimOwner = ownerToken ?? "owner";
+          return true;
+        },
+        async getClaimOwner() {
+          return claimOwner;
+        },
+      };
+      const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+      const result = createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      }).price(BRANDED_SIGNAL);
+
+      await vi.advanceTimersByTimeAsync(502);
+
+      await expect(result).resolves.toBeNull();
+      expect(fetchPage).toHaveBeenCalledOnce();
+    },
+  );
+
   it("fails soft without divergent evidence when the winner store rejects", async () => {
+    vi.useFakeTimers();
     const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
       async get() {
         return null;
@@ -1542,11 +1630,15 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
     const provider = createRawEbaySoldPricingProvider({
       fetchPage,
+      fetchTimeoutMs: 1,
       cache,
       emitDiagnostic: () => undefined,
     });
 
-    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+
+    await expect(result).resolves.toBeNull();
     expect(fetchPage).toHaveBeenCalledOnce();
   });
 
@@ -2204,6 +2296,7 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
   });
 
   it("declines without throwing when a shared cache outage prevents winner storage", async () => {
+    vi.useFakeTimers();
     // The claimed retrieval may finish after a transient read failure, but its
     // evidence cannot be returned unless the shared store makes it observable
     // to other runtimes. Decline so the router can continue fail-soft.
@@ -2216,10 +2309,16 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
         throw new Error("upstash unreachable");
       },
     };
-    const provider = createEbaySoldPricingProvider({ fetchPage, cache: throwingCache });
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache: throwingCache,
+    });
 
-    const result = await provider.price(BRANDED_SIGNAL);
-    expect(result).toBeNull();
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+
+    await expect(result).resolves.toBeNull();
     expect(fetchPage.urls).toHaveLength(1);
   });
 });

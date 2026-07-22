@@ -88,6 +88,30 @@ export interface EbaySoldComp {
   soldAt?: number;
 }
 
+function sameEbaySoldComps(
+  observed: readonly EbaySoldComp[],
+  expected: readonly EbaySoldComp[],
+): boolean {
+  return (
+    Array.isArray(observed) &&
+    observed.length === expected.length &&
+    observed.every((comp, index) => {
+      const expectedComp = expected[index];
+      return (
+        comp != null &&
+        typeof comp === "object" &&
+        !Array.isArray(comp) &&
+        expectedComp != null &&
+        comp.url === expectedComp.url &&
+        comp.title === expectedComp.title &&
+        comp.price === expectedComp.price &&
+        comp.condition === expectedComp.condition &&
+        comp.soldAt === expectedComp.soldAt
+      );
+    })
+  );
+}
+
 export interface EbaySoldPricingProviderOptions {
   /** Explicit kill-switch state; defaults to `EBAY_SOLD_ENABLED` env config. */
   enabled?: boolean;
@@ -1603,8 +1627,9 @@ function createEbaySoldPricingProviderInternal(
                 const storeResult = await settleMutationWithObservation(
                   (signal) => cache.set(key, retrieved, signal),
                   (signal) => cache.get(key, signal),
-                  () => true,
+                  (observed) => sameEbaySoldComps(observed, retrieved),
                   coordinationDeadline,
+                  true,
                 );
                 if (
                   storeResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
