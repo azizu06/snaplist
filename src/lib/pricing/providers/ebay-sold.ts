@@ -252,6 +252,7 @@ async function observeCommittedMutation<T>(
   accepts: (value: T) => boolean,
   deadline: number,
   cancellationSignal: AbortSignal,
+  reserveFinalExactObservation: boolean,
 ): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
   // Let an immediate authoritative mutation response win without spending a
   // reconciliation read. A stalled response crosses this event-loop boundary.
@@ -270,18 +271,24 @@ async function observeCommittedMutation<T>(
       if (observed != null && accepts(observed)) return observed;
     } catch {
       // An observation failure does not override a mutation response that may
-      // still settle successfully within the same deadline. Stop issuing reads
-      // on an unavailable cache and let that response or the deadline decide.
-      await delayBeforeCoordinationDeadline(
-        Number.MAX_SAFE_INTEGER,
-        deadline,
-        cancellationSignal,
-      );
-      return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+      // still settle successfully within the same deadline. A later bounded
+      // observation may still prove the exact committed mutation.
+      if (!reserveFinalExactObservation) {
+        await delayBeforeCoordinationDeadline(
+          Number.MAX_SAFE_INTEGER,
+          deadline,
+          cancellationSignal,
+        );
+        return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+      }
     }
+    const remainingMs = deadline - Date.now();
+    if (reserveFinalExactObservation && remainingMs <= 1) break;
     if (
       !(await delayBeforeCoordinationDeadline(
-        delayMs,
+        reserveFinalExactObservation
+          ? Math.min(delayMs, remainingMs - 1)
+          : delayMs,
         deadline,
         cancellationSignal,
       ))
@@ -303,6 +310,7 @@ async function settleMutationWithObservation<MutationResult, Observed>(
   accepts: (value: Observed) => boolean,
   deadline: number,
   observeAfterMutationRejection = false,
+  reserveFinalExactObservation = false,
 ): Promise<
   | ReconciledMutation<MutationResult, Observed>
   | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
@@ -335,6 +343,7 @@ async function settleMutationWithObservation<MutationResult, Observed>(
       accepts,
       deadline,
       cancellation.signal,
+      reserveFinalExactObservation,
     ).then(
       (value): Outcome =>
         value === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
@@ -1629,6 +1638,7 @@ function createEbaySoldPricingProviderInternal(
                   (signal) => cache.get(key, signal),
                   (observed) => sameEbaySoldComps(observed, retrieved),
                   coordinationDeadline,
+                  true,
                   true,
                 );
                 if (
