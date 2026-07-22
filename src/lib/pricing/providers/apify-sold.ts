@@ -465,6 +465,10 @@ export function createApifySoldPricingProvider(
     cache?.scope === "shared" && typeof cache.claim === "function"
       ? cache.claim.bind(cache)
       : null;
+  const getClaimOwner =
+    cache?.scope === "shared" && typeof cache.getClaimOwner === "function"
+      ? cache.getClaimOwner.bind(cache)
+      : null;
   const now = options.now;
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
@@ -574,6 +578,88 @@ export function createApifySoldPricingProvider(
       reason: "handoff-timeout",
     });
     return null;
+  }
+
+  async function claimOrObserveExactOwner(
+    key: string,
+    ownerToken: string,
+    pricingDeadline: number,
+  ): Promise<boolean | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED> {
+    if (!claimCostFence) return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+    if (!getClaimOwner) {
+      return settleBeforeApifyPricingDeadline(
+        (abortSignal) => claimCostFence(key, abortSignal, ownerToken),
+        pricingDeadline,
+      );
+    }
+
+    const cancellation = new AbortController();
+    try {
+      const claimResponse = settleBeforeApifyPricingDeadline(
+        (abortSignal) => claimCostFence(key, abortSignal, ownerToken),
+        pricingDeadline,
+        cancellation.signal,
+      );
+      const ownerObservation = (async (): Promise<
+        true | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
+      > => {
+        if (
+          !(await delayBeforeApifyPricingDeadline(
+            0,
+            pricingDeadline,
+            cancellation.signal,
+          ))
+        ) {
+          return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+        }
+
+        let delayMs = APIFY_SOLD_WINNER_STORE_POLL_MS;
+        while (!cancellation.signal.aborted) {
+          try {
+            const observedOwner = await settleBeforeApifyPricingDeadline(
+              (abortSignal) => getClaimOwner(key, abortSignal),
+              pricingDeadline,
+              cancellation.signal,
+            );
+            if (observedOwner === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+              return observedOwner;
+            }
+            if (observedOwner === ownerToken) return true;
+          } catch {
+            // A later bounded observation may still prove this exact owner.
+          }
+
+          const remainingMs = pricingDeadline - Date.now();
+          if (remainingMs <= 0) break;
+          const finalReadAllowanceMs =
+            APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS +
+            APIFY_SOLD_DEADLINE_MARGIN_MS;
+          if (remainingMs <= finalReadAllowanceMs) {
+            await delayBeforeApifyPricingDeadline(
+              Number.MAX_SAFE_INTEGER,
+              pricingDeadline,
+              cancellation.signal,
+            );
+            break;
+          }
+          if (
+            !(await delayBeforeApifyPricingDeadline(
+              Math.min(delayMs, remainingMs - finalReadAllowanceMs),
+              pricingDeadline,
+              cancellation.signal,
+            ))
+          ) {
+            break;
+          }
+          delayMs = Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
+        }
+        return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+      })();
+
+      return await Promise.race([claimResponse, ownerObservation]);
+    } finally {
+      cancellation.abort();
+    }
   }
 
   async function writeCache(
@@ -805,9 +891,11 @@ export function createApifySoldPricingProvider(
     }
     const pending = (async () => {
       let claimed: boolean;
+      const claimOwnerToken = globalThis.crypto.randomUUID();
       try {
-        const claimResult = await settleBeforeApifyPricingDeadline(
-          (abortSignal) => claimCostFence(key, abortSignal),
+        const claimResult = await claimOrObserveExactOwner(
+          key,
+          claimOwnerToken,
           pricingDeadline,
         );
         if (claimResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
