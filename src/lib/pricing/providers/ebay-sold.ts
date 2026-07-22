@@ -149,6 +149,38 @@ interface EbaySoldRuntimeState {
 const EBAY_SOLD_HANDOFF_POLL_MAX_MS = 3_200;
 /** Bounded time for the winner to store and the loser to observe its result. */
 export const EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS = 500;
+const EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED = Symbol(
+  "ebay-sold-coordination-deadline-exceeded",
+);
+
+async function settleBeforeCoordinationDeadline<T>(
+  startOperation: (signal: AbortSignal) => Promise<T>,
+  deadline: number,
+): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs < 0) return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      startOperation(controller.signal),
+      new Promise<typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED>((resolve) => {
+        timer = setTimeout(
+          () => {
+            // Win the race with the fail-soft sentinel before abort listeners
+            // reject the underlying cache request.
+            resolve(EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED);
+            controller.abort();
+          },
+          remainingMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Request-scoped providers share one cache object at the composition root. */
 const EBAY_SOLD_RUNTIME_STATE_BY_CACHE = new WeakMap<
@@ -1104,7 +1136,12 @@ function createEbaySoldPricingProviderInternal(
   async function fetchWithinEffectiveTimeout(
     fetchPage: FetchPage,
     url: string,
+    coordinationDeadline: number,
   ): Promise<string> {
+    const remainingMs = coordinationDeadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new DOMException("aborted", "AbortError");
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -1112,7 +1149,7 @@ function createEbaySoldPricingProviderInternal(
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new DOMException("aborted", "AbortError")),
-            effectiveFetchTimeoutMs,
+            Math.min(effectiveFetchTimeoutMs, remainingMs),
           );
         }),
       ]);
@@ -1139,20 +1176,32 @@ function createEbaySoldPricingProviderInternal(
     });
   }
 
-  async function waitForClaimWinner(key: string): Promise<EbaySoldComp[] | null> {
+  async function waitForClaimWinner(
+    key: string,
+    deadline: number,
+  ): Promise<EbaySoldComp[] | null> {
     if (!cache) return null;
-    const deadline = Date.now() + handoffWaitMs;
     let delayMs = 0;
     while (true) {
       if (delayMs > 0) {
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) break;
+        // Do not let exponential backoff consume the entire handoff window.
+        // Waking halfway through the remaining budget leaves a bounded cache
+        // observation that can see evidence stored during the final interval.
         await new Promise<void>((resolve) =>
-          setTimeout(resolve, Math.min(delayMs, remainingMs)),
+          setTimeout(
+            resolve,
+            Math.min(delayMs, Math.max(1, Math.floor(remainingMs / 2))),
+          ),
         );
       }
       try {
-        const handedOff = await cache.get(key);
+        const handedOff = await settleBeforeCoordinationDeadline(
+          (signal) => cache.get(key, signal),
+          deadline,
+        );
+        if (handedOff === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) break;
         if (handedOff != null) return handedOff;
       } catch {
         emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
@@ -1183,6 +1232,7 @@ function createEbaySoldPricingProviderInternal(
     fetchPage: FetchPage,
     parseLimit: number,
     blockedEvent: "pricing.ebay_sold.fetch_blocked" | "pricing.ebay_sold.fallback_blocked",
+    coordinationDeadline: number,
   ): Promise<{ comps: EbaySoldComp[]; failed: boolean }> {
     // SSRF guard at the PROVIDER boundary so BOTH the default primary fetcher AND
     // an injected Playwright-style fallback are protected — a non-eBay/internal
@@ -1196,7 +1246,11 @@ function createEbaySoldPricingProviderInternal(
     try {
       return {
         comps: parseSoldComps(
-          await fetchWithinEffectiveTimeout(fetchPage, url),
+          await fetchWithinEffectiveTimeout(
+            fetchPage,
+            url,
+            coordinationDeadline,
+          ),
           baseUrl,
           parseLimit,
         ),
@@ -1222,12 +1276,14 @@ function createEbaySoldPricingProviderInternal(
   async function retrieveBoundedComps(
     signal: ItemSignal,
     initialUrl: string,
+    coordinationDeadline: number,
   ): Promise<EbaySoldComp[]> {
     const initial = await fetchComps(
       initialUrl,
       fetchPrimary,
       Math.min(maxResults, EBAY_SOLD_RESULTS_PER_PAGE),
       "pricing.ebay_sold.fetch_blocked",
+      coordinationDeadline,
     );
     let combined = normalizeEbaySoldCompUrls(initial.comps);
 
@@ -1238,6 +1294,7 @@ function createEbaySoldPricingProviderInternal(
           fetchFallback,
           Math.min(maxResults, EBAY_SOLD_RESULTS_PER_PAGE),
           "pricing.ebay_sold.fallback_blocked",
+          coordinationDeadline,
         );
         if (!fallback.failed) combined = normalizeEbaySoldCompUrls(fallback.comps);
       }
@@ -1256,6 +1313,7 @@ function createEbaySoldPricingProviderInternal(
             fetchFallback
               ? "pricing.ebay_sold.fallback_blocked"
               : "pricing.ebay_sold.fetch_blocked",
+            coordinationDeadline,
           );
           if (!expanded.failed) {
             combined = normalizeEbaySoldCompUrls([...expanded.comps, ...combined]);
@@ -1278,6 +1336,7 @@ function createEbaySoldPricingProviderInternal(
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
       const key = cacheKey(url, signal);
+      const coordinationDeadline = Date.now() + handoffWaitMs;
 
       // Freshness cache (#59): a hit within TTL is reused (no fetch); a miss
       // live-fetches and stores. The live page stays the source of truth. Completed
@@ -1296,7 +1355,17 @@ function createEbaySoldPricingProviderInternal(
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
-          comps = await cache.get(key);
+          const cached = await settleBeforeCoordinationDeadline(
+            (signal) => cache.get(key, signal),
+            coordinationDeadline,
+          );
+          if (cached === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) {
+            emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+              reason: "initial-read-timeout",
+            });
+            return null;
+          }
+          comps = cached;
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
             op: "get",
@@ -1307,7 +1376,14 @@ function createEbaySoldPricingProviderInternal(
       if (comps == null) {
         const existing = inFlight.get(key);
         if (existing) {
-          comps = await existing;
+          const localResult = await settleBeforeCoordinationDeadline(
+            () => existing,
+            coordinationDeadline,
+          );
+          comps =
+            localResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+              ? null
+              : localResult;
         } else {
           const pending = (async () => {
             if (requiresSharedFence && !claimSharedRetrieval) {
@@ -1325,24 +1401,54 @@ function createEbaySoldPricingProviderInternal(
               }
               let claimed: boolean;
               try {
-                claimed = await claimSharedRetrieval(key);
+                const claimResult = await settleBeforeCoordinationDeadline(
+                  (signal) => claimSharedRetrieval(key, signal),
+                  coordinationDeadline,
+                );
+                if (
+                  claimResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+                ) {
+                  emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                    reason: "shared-claim-timeout",
+                  });
+                  return null;
+                }
+                claimed = claimResult;
               } catch {
                 emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
                   reason: "shared-claim-failed",
                 });
                 return null;
               }
-              if (!claimed) return waitForClaimWinner(key);
+              if (!claimed) {
+                return waitForClaimWinner(key, coordinationDeadline);
+              }
             }
-            const retrieved = await retrieveBoundedComps(signal, url);
+            const retrieved = await retrieveBoundedComps(
+              signal,
+              url,
+              coordinationDeadline,
+            );
             if (cache) {
               try {
-                await cache.set(key, retrieved);
+                const storeResult = await settleBeforeCoordinationDeadline(
+                  (signal) => cache.set(key, retrieved, signal),
+                  coordinationDeadline,
+                );
+                if (
+                  storeResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+                ) {
+                  emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                    reason: "winner-store-timeout",
+                  });
+                  return null;
+                }
               } catch (err) {
                 emitDiagnostic("pricing.cache.error", {
                   op: "set",
                   error: err instanceof Error ? err.message : String(err),
                 });
+                return null;
               }
             }
             return retrieved;

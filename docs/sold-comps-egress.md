@@ -70,8 +70,14 @@ next pricing tier without making the external request.
 The effective per-request timeout defaults to 8 seconds and is capped at 15
 seconds even when operator configuration requests more. A loser waits for at
 most that effective timeout multiplied by the maximum two requests, plus a
-bounded 500 ms store/read allowance. Shared-cache reads are immediate and use a
-bounded backoff; expiry is fail-soft and never starts a loser retrieval.
+bounded 500 ms store/read allowance. The initial shared read, atomic claim,
+loser polling reads, and winner store are each bounded by the remaining logical
+deadline; request timeouts also shrink to that remainder. A coordination timeout
+aborts the underlying shared-cache request and declines without starting
+unclaimed egress. Same-process waiters race shared work against their own
+deadline without cancelling the winner. A winner returns evidence only after the
+shared store makes that same result available to losers. Polling uses a bounded
+backoff; expiry is fail-soft and never starts a loser retrieval.
 
 The operator smoke below is intentionally different: its explicit
 `--confirm-one-request` authorization permits exactly the initial 10-candidate
