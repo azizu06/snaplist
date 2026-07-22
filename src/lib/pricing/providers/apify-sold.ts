@@ -607,9 +607,11 @@ export function createApifySoldPricingProvider(
             }
           }
 
+          const remainingMs = pricingDeadline - Date.now();
+          if (remainingMs <= 1) return "unconfirmed";
           if (
             !(await delayBeforeApifyPricingDeadline(
-              pollMs,
+              Math.min(pollMs, remainingMs - 1),
               pricingDeadline,
               cancellation.signal,
             ))
