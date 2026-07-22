@@ -23,7 +23,9 @@ export interface TtlCache<T> {
   /** Store a value under the cache's TTL. */
   set(key: string, value: T, signal?: AbortSignal): Promise<void>;
   /** Atomically claim one cache identity for the full TTL when supported. */
-  claim?(key: string, signal?: AbortSignal): Promise<boolean>;
+  claim?(key: string, signal?: AbortSignal, ownerToken?: string): Promise<boolean>;
+  /** Observe the durable owner token after an ambiguous claim response. */
+  getClaimOwner?(key: string, signal?: AbortSignal): Promise<string | null>;
 }
 
 /** Redis keys all share this prefix (mirrors the abuse limiter's `snaplist:rl`). */
@@ -45,7 +47,7 @@ export function createInMemoryTtlCache<T>(
   scope: "process" | "shared" = "process",
 ): TtlCache<T> {
   const store = new Map<string, { value: T; expires: number }>();
-  const claims = new Map<string, number>();
+  const claims = new Map<string, { expires: number; ownerToken: string }>();
   return {
     scope,
     async get(key) {
@@ -60,11 +62,23 @@ export function createInMemoryTtlCache<T>(
     async set(key, value) {
       store.set(key, { value, expires: now() + ttlMs });
     },
-    async claim(key) {
-      const claimedUntil = claims.get(key);
-      if (claimedUntil != null && now() < claimedUntil) return false;
-      claims.set(key, now() + ttlMs);
+    async claim(key, _signal, ownerToken) {
+      const claim = claims.get(key);
+      if (claim != null && now() < claim.expires) return false;
+      claims.set(key, {
+        expires: now() + ttlMs,
+        ownerToken: ownerToken ?? "1",
+      });
       return true;
+    },
+    async getClaimOwner(key) {
+      const claim = claims.get(key);
+      if (!claim) return null;
+      if (now() >= claim.expires) {
+        claims.delete(key);
+        return null;
+      }
+      return claim.ownerToken;
     },
   };
 }
@@ -133,14 +147,29 @@ export function createUpstashTtlCache<T>(
         signal,
       );
     },
-    async claim(key, signal) {
-      const claimed = await (await client(signal)).set(
-        namespaced(`${key}:paid-claim`),
-        "1",
-        { ex: ttlSec, nx: true },
-        signal,
-      );
+    async claim(key, signal, ownerToken) {
+      const redis = await client(signal);
+      const claimKey = namespaced(`${key}:paid-claim`);
+      const claimed = injected
+        ? await redis.set(
+            claimKey,
+            ownerToken ?? "1",
+            { ex: ttlSec, nx: true },
+            signal,
+          )
+        : await redis.set(claimKey, ownerToken ?? "1", {
+            ex: ttlSec,
+            nx: true,
+          });
       return claimed === "OK" || claimed === true;
+    },
+    async getClaimOwner(key, signal) {
+      const redis = await client(signal);
+      const claimKey = namespaced(`${key}:paid-claim`);
+      const owner = injected
+        ? await redis.get(claimKey, signal)
+        : await redis.get(claimKey);
+      return typeof owner === "string" ? owner : null;
     },
   };
 }

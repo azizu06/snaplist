@@ -47,10 +47,13 @@ describe("createInMemoryTtlCache", () => {
     const cache = createInMemoryTtlCache<string>(100, () => t);
 
     expect(cache.scope).toBe("process");
-    await expect(cache.claim?.("identity")).resolves.toBe(true);
-    await expect(cache.claim?.("identity")).resolves.toBe(false);
+    await expect(cache.claim?.("identity", undefined, "owner-a")).resolves.toBe(true);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBe("owner-a");
+    await expect(cache.claim?.("identity", undefined, "owner-b")).resolves.toBe(false);
     t = 101;
-    await expect(cache.claim?.("identity")).resolves.toBe(true);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBeNull();
+    await expect(cache.claim?.("identity", undefined, "owner-b")).resolves.toBe(true);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBe("owner-b");
   });
 });
 
@@ -93,7 +96,7 @@ describe("createUpstashTtlCache (injected fake client)", () => {
   });
 
   it("uses a shared SET-NX claim so only one worker runtime wins", async () => {
-    const claimed = new Set<string>();
+    const claimed = new Map<string, string>();
     const calls: Array<{ key: string; opts: { ex: number; nx?: true } }> = [];
     const fake = {
       async set(
@@ -103,18 +106,19 @@ describe("createUpstashTtlCache (injected fake client)", () => {
       ) {
         calls.push({ key, opts });
         if (opts.nx && claimed.has(key)) return null;
-        claimed.add(key);
+        claimed.set(key, _value);
         return "OK";
       },
-      async get() {
-        return null;
+      async get(key: string) {
+        return claimed.get(key) ?? null;
       },
     };
     const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
 
     expect(cache.scope).toBe("shared");
-    await expect(cache.claim?.("identity")).resolves.toBe(true);
-    await expect(cache.claim?.("identity")).resolves.toBe(false);
+    await expect(cache.claim?.("identity", undefined, "owner-a")).resolves.toBe(true);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBe("owner-a");
+    await expect(cache.claim?.("identity", undefined, "owner-b")).resolves.toBe(false);
     expect(calls[0]).toMatchObject({
       key: expect.stringContaining("apify-sold:identity:paid-claim"),
       opts: { ex: 60, nx: true },
@@ -174,6 +178,50 @@ describe("createUpstashTtlCache (production client shape)", () => {
           60,
         ],
       ],
+    ]);
+  });
+
+  it("round-trips a claim owner without adding the abort signal to Redis commands", async () => {
+    const commands: unknown[] = [];
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const command = JSON.parse(String(init?.body)) as unknown;
+        commands.push(command);
+        const isGet = JSON.stringify(command).includes('"get"');
+        return new Response(
+          JSON.stringify([{ result: isGet ? "owner-a" : "OK" }]),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const cache = createUpstashTtlCache<string>("sold", 60_000);
+    const controller = new AbortController();
+
+    await expect(
+      cache.claim?.("identity", controller.signal, "owner-a"),
+    ).resolves.toBe(true);
+    await expect(
+      cache.getClaimOwner?.("identity", controller.signal),
+    ).resolves.toBe("owner-a");
+    expect(commands).toEqual([
+      [
+        [
+          "set",
+          "snaplist:cache:sold:identity:paid-claim",
+          "owner-a",
+          "nx",
+          "ex",
+          60,
+        ],
+      ],
+      [["get", "snaplist:cache:sold:identity:paid-claim"]],
     ]);
   });
 });
