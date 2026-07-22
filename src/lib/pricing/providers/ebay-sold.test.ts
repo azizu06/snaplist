@@ -1577,7 +1577,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       async get() {
         if (!storeStarted) return stored;
         const observed = stored;
-        await new Promise<void>((resolve) => setTimeout(resolve, 1));
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
         return observed;
       },
       async set(_key, value) {

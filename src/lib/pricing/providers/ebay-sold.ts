@@ -179,6 +179,8 @@ const EBAY_SOLD_HANDOFF_POLL_MAX_MS = 3_200;
 export const EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS = 500;
 /** Fast bounded polling while a shared mutation response remains ambiguous. */
 const EBAY_SOLD_AMBIGUOUS_MUTATION_POLL_MS = 25;
+/** One 50 ms cache read plus a 1 ms deadline-race margin. */
+const EBAY_SOLD_FINAL_OBSERVATION_RESERVE_MS = 51;
 const EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED = Symbol(
   "ebay-sold-coordination-deadline-exceeded",
 );
@@ -283,11 +285,24 @@ async function observeCommittedMutation<T>(
       }
     }
     const remainingMs = deadline - Date.now();
-    if (reserveFinalExactObservation && remainingMs <= 1) break;
+    if (
+      reserveFinalExactObservation &&
+      remainingMs <= EBAY_SOLD_FINAL_OBSERVATION_RESERVE_MS
+    ) {
+      await delayBeforeCoordinationDeadline(
+        Number.MAX_SAFE_INTEGER,
+        deadline,
+        cancellationSignal,
+      );
+      return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+    }
     if (
       !(await delayBeforeCoordinationDeadline(
         reserveFinalExactObservation
-          ? Math.min(delayMs, remainingMs - 1)
+          ? Math.min(
+              delayMs,
+              remainingMs - EBAY_SOLD_FINAL_OBSERVATION_RESERVE_MS,
+            )
           : delayMs,
         deadline,
         cancellationSignal,
