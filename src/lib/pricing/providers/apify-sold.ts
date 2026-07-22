@@ -534,19 +534,21 @@ export function createApifySoldPricingProvider(
 
     const existing = inFlight.get(key);
     if (existing) return existing;
-    let claimed: boolean;
-    try {
-      claimed = await claimCostFence(key);
-    } catch {
-      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
-        reason: "claim-failed",
-      });
-      return null;
-    }
-    if (!claimed) {
-      return readCache(key);
-    }
-    const pending = fetchAndCache(key, query, signal).finally(() => {
+    const pending = (async () => {
+      let claimed: boolean;
+      try {
+        claimed = await claimCostFence(key);
+      } catch {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "claim-failed",
+        });
+        return null;
+      }
+      if (!claimed) {
+        return readCache(key);
+      }
+      return fetchAndCache(key, query, signal);
+    })().finally(() => {
       inFlight.delete(key);
     });
     inFlight.set(key, pending);

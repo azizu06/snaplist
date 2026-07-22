@@ -272,6 +272,42 @@ describe("createDefaultPricer Apify composition", () => {
     expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 10, 20]);
   });
 
+  it("joins a same-runtime paid winner before considering public fallback", async () => {
+    let releaseActor!: () => void;
+    const actorGate = new Promise<void>((resolve) => {
+      releaseActor = resolve;
+    });
+    let actorStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      actorStarted = resolve;
+    });
+    const runActor = vi.fn<RunApifySoldActor>(async () => {
+      actorStarted();
+      await actorGate;
+      return { status: "SUCCEEDED", items: apifyItems() };
+    });
+    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const price = createDefaultPricer({
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+      },
+      ebaySold: { fetchPage },
+    });
+
+    const first = price(SIGNAL);
+    const concurrent = price(SIGNAL);
+    await started;
+    releaseActor();
+    const [firstResult, concurrentResult] = await Promise.all([first, concurrent]);
+
+    expect(concurrentResult).toEqual(firstResult);
+    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
   it("atomically fences concurrent fresh-runtime redelivery to one bounded paid pass", async () => {
     const values = new Map<string, ApifySoldComp[]>();
     const claims = new Set<string>();
