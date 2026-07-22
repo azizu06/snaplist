@@ -172,6 +172,7 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
   it("replays one session per verified tenant and key while separating another tenant", async () => {
     if (!reachable) return;
     const idempotencyKey = randomUUID();
+    const beforeCreate = Date.now();
 
     const first = await startSession(tenantAToken, idempotencyKey);
     const replay = await startSession(tenantAToken, idempotencyKey);
@@ -185,6 +186,9 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
     expect(otherTenant.status).toBe(201);
     expect(replayBody).toEqual(firstBody);
     expect(otherBody.data.sessionId).not.toBe(firstBody.data.sessionId);
+    const authoritativeExpiry = Date.parse(firstBody.data.expiresAt);
+    expect(authoritativeExpiry).toBeGreaterThanOrEqual(beforeCreate + 9 * 60_000);
+    expect(authoritativeExpiry).toBeLessThanOrEqual(Date.now() + 11 * 60_000);
     expect(JSON.stringify([firstBody, replayBody, otherBody])).not.toMatch(
       /access.token|refresh.token|client.secret/i,
     );
@@ -240,6 +244,43 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
       .select("user_id")
       .in("user_id", [tenantAId, tenantBId]);
     expect(connections).toEqual([]);
+  });
+
+  it("replays the durable terminal outcome instead of a conflicting callback query", async () => {
+    if (!reachable) return;
+    const session = await startSession(tenantAToken, randomUUID());
+    const sessionBody = await session.json();
+    const state = new URL(sessionBody.data.authorizationUrl).searchParams.get(
+      "state",
+    )!;
+    const providerCallsBefore = exchangeCode.mock.calls.length;
+
+    const decline = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&error=access_denied`,
+      ),
+    );
+    const conflictingReplay = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}`,
+      ),
+    );
+
+    expect(decline.status).toBe(303);
+    expect(conflictingReplay.status).toBe(303);
+    expect(decline.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=declined",
+    );
+    expect(conflictingReplay.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=declined",
+    );
+    expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore);
+    const { data: rows, error } = await admin
+      .from("ebay_oauth_sessions")
+      .select("status")
+      .eq("id", sessionBody.data.sessionId);
+    expect(error).toBeNull();
+    expect(rows).toEqual([{ status: "declined" }]);
   });
 
   it("turns a successful callback replay into exactly one encrypted connection", async () => {

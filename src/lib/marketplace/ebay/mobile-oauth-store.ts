@@ -58,7 +58,6 @@ export function createSupabaseMobileEbayOauthSessionStore(
         {
           p_proposed_session_id: sessionInput.proposedSessionId,
           p_idempotency_key: sessionInput.idempotencyKey,
-          p_expires_at: sessionInput.expiresAt,
         },
       );
       rpcFailure("Failed to create eBay OAuth session", error);
@@ -124,11 +123,30 @@ export function createSupabaseMobileEbayOauthSessionStore(
         },
       );
       rpcFailure("Failed to finish eBay OAuth session", error);
-      const kind = record(data, "Failed to finish eBay OAuth session").kind;
+      const result = record(data, "Failed to finish eBay OAuth session");
+      const kind = result.kind;
       if (kind !== "finished" && kind !== "replayed" && kind !== "wrong_tenant") {
         throw new Error("Failed to finish eBay OAuth session: invalid outcome");
       }
-      return { kind };
+      if (kind === "wrong_tenant") return { kind };
+      const outcome = requiredString(
+        result.outcome,
+        "Failed to finish eBay OAuth session",
+        "outcome",
+      );
+      if (![
+        "connected",
+        "declined",
+        "cancelled",
+        "expired",
+        "failed",
+      ].includes(outcome)) {
+        throw new Error("Failed to finish eBay OAuth session: invalid replay outcome");
+      }
+      return {
+        kind,
+        outcome: outcome as "connected" | "declined" | "cancelled" | "expired" | "failed",
+      };
     },
 
     async beginSession(sessionInput) {

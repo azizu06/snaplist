@@ -5,6 +5,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
+import { z } from "zod";
 import type { EbayOauthSession } from "@/lib/mobile-api/contract";
 import {
   encryptSecret,
@@ -26,13 +27,19 @@ export interface StoredMobileEbayOauthSession {
   expiresAt: string;
 }
 
+type MobileEbayOauthOutcome =
+  | "connected"
+  | "declined"
+  | "cancelled"
+  | "expired"
+  | "failed";
+
 export interface MobileEbayOauthSessionStore {
   createOrReplaySession(input: {
     proposedSessionId: string;
     userId: string;
     bearerToken: string;
     idempotencyKey: string;
-    expiresAt: string;
   }): Promise<StoredMobileEbayOauthSession>;
   getSession(sessionId: string): Promise<StoredMobileEbayOauthSession | null>;
   finishSession(input: {
@@ -40,14 +47,17 @@ export interface MobileEbayOauthSessionStore {
     userId: string;
     outcome: "declined" | "cancelled" | "expired" | "failed";
     finishedAt: string;
-  }): Promise<{ kind: "finished" | "replayed" | "wrong_tenant" }>;
+  }): Promise<
+    | { kind: "finished" | "replayed"; outcome: MobileEbayOauthOutcome }
+    | { kind: "wrong_tenant" }
+  >;
   beginSession(input: {
     sessionId: string;
     userId: string;
     startedAt: string;
   }): Promise<
     | { kind: "claimed"; leaseToken: string }
-    | { kind: "replayed"; outcome: "connected" | "declined" | "cancelled" | "expired" | "failed" }
+    | { kind: "replayed"; outcome: MobileEbayOauthOutcome }
     | { kind: "wrong_tenant" }
     | { kind: "expired" }
   >;
@@ -164,8 +174,10 @@ function decodeState(state: string): {
   ) {
     return null;
   }
+  const parsedSessionId = z.string().uuid().safeParse(sessionId);
+  if (!parsedSessionId.success) return null;
   return {
-    sessionId,
+    sessionId: parsedSessionId.data,
     tenantBinding: boundTenant,
     payload: `${version}.${sessionId}.${boundTenant}`,
     signature,
@@ -206,7 +218,6 @@ export function createMobileEbayOauthOperations(input: {
         userId,
         bearerToken,
         idempotencyKey,
-        expiresAt: new Date(now() + 10 * 60_000).toISOString(),
       });
       return {
         sessionId: stored.sessionId,
@@ -225,26 +236,17 @@ export function createMobileEbayOauthOperations(input: {
       if (!decoded) {
         return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
       }
-      const session = await input.store.getSession(decoded.sessionId);
-      if (!session) {
+      if (!equalBase64Url(decoded.signature, signStatePayload(decoded.payload, env))) {
         return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
       }
-      if (!equalBase64Url(decoded.signature, signStatePayload(decoded.payload, env))) {
+      const session = await input.store.getSession(decoded.sessionId);
+      if (!session) {
         return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
       }
       if (!equalBase64Url(decoded.tenantBinding, tenantBinding(session.userId))) {
         return { redirectUrl: mobileReturnUrl(env, "wrong_tenant") };
       }
       const finishedAt = new Date(now()).toISOString();
-      if (Date.parse(session.expiresAt) <= now()) {
-        await input.store.finishSession({
-          sessionId: session.sessionId,
-          userId: session.userId,
-          outcome: "expired",
-          finishedAt,
-        });
-        return { redirectUrl: mobileReturnUrl(env, "expired") };
-      }
       const outcome = error === "access_denied"
         ? "declined"
         : error
@@ -317,7 +319,7 @@ export function createMobileEbayOauthOperations(input: {
       return {
         redirectUrl: mobileReturnUrl(
           env,
-          finish.kind === "wrong_tenant" ? "wrong_tenant" : outcome,
+          finish.kind === "wrong_tenant" ? "wrong_tenant" : finish.outcome,
         ),
       };
     },

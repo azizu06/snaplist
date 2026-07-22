@@ -40,8 +40,7 @@ grant select, delete on table public.ebay_oauth_sessions to service_role;
 
 create function public.create_mobile_ebay_oauth_session(
   p_proposed_session_id uuid,
-  p_idempotency_key uuid,
-  p_expires_at timestamptz
+  p_idempotency_key uuid
 )
 returns jsonb
 language plpgsql
@@ -63,11 +62,6 @@ begin
   if v_api_key not like 'sb_secret_%' then
     raise exception using errcode = '42501', message = 'Server API authorization is required';
   end if;
-  if p_expires_at <= statement_timestamp()
-    or p_expires_at > statement_timestamp() + interval '10 minutes' then
-    raise exception using errcode = '22023', message = 'OAuth session expiry is invalid';
-  end if;
-
   insert into public.ebay_oauth_sessions (
     id,
     user_id,
@@ -77,7 +71,7 @@ begin
     p_proposed_session_id,
     v_user_id,
     p_idempotency_key,
-    p_expires_at
+    statement_timestamp() + interval '10 minutes'
   )
   on conflict (user_id, idempotency_key) do update
   set idempotency_key = excluded.idempotency_key
@@ -93,10 +87,10 @@ end;
 $$;
 
 revoke all on function public.create_mobile_ebay_oauth_session(
-  uuid, uuid, timestamptz
+  uuid, uuid
 ) from public, anon, service_role;
 grant execute on function public.create_mobile_ebay_oauth_session(
-  uuid, uuid, timestamptz
+  uuid, uuid
 ) to authenticated;
 
 create function public.read_mobile_ebay_oauth_session(

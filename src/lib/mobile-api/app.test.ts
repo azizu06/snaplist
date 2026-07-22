@@ -21,6 +21,7 @@ const summary = {
 };
 
 const EBAY_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+const EBAY_OAUTH_SESSION_EXPIRES_AT = "2026-07-22T18:10:00.000Z";
 
 function handler(overrides: Record<string, unknown> = {}) {
   return createMobileApiHandler({
@@ -145,6 +146,66 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|authorizationCode/);
   });
 
+  it("uses the persistence clock for OAuth session expiry when the app clock disagrees", async () => {
+    const dbExpiresAt = "2026-07-22T18:10:00.000Z";
+    const createOrReplaySession = vi.fn(async (input: {
+      proposedSessionId: string;
+      userId: string;
+      bearerToken: string;
+      idempotencyKey: string;
+    }) => {
+      expect(input).not.toHaveProperty("expiresAt");
+      return {
+        sessionId: input.proposedSessionId,
+        userId: input.userId,
+        expiresAt: dbExpiresAt,
+      };
+    });
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        createOrReplaySession,
+        async getSession() {
+          return null;
+        },
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
+        },
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+      }),
+      now: () => Date.parse("2099-01-01T00:00:00.000Z"),
+      randomUUID: () => "38700000-0000-4000-8000-000000000003",
+    });
+
+    const response = await handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    })(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000004",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).data.expiresAt).toBe(dbExpiresAt);
+  });
+
   it("replays the original eBay OAuth session for the same tenant idempotency key", async () => {
     const rows = new Map<
       string,
@@ -154,7 +215,6 @@ describe("mobile API v1 provider-neutral handler", () => {
       proposedSessionId: string;
       userId: string;
       idempotencyKey: string;
-      expiresAt: string;
     }) => {
       const key = `${input.userId}:${input.idempotencyKey}`;
       const existing = rows.get(key);
@@ -162,7 +222,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       const created = {
         sessionId: input.proposedSessionId,
         userId: input.userId,
-        expiresAt: input.expiresAt,
+        expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
       };
       rows.set(key, created);
       return created;
@@ -177,8 +237,8 @@ describe("mobile API v1 provider-neutral handler", () => {
         async getSession() {
           return null;
         },
-        async finishSession() {
-          return { kind: "finished" as const };
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
         },
         async beginSession() {
           return { kind: "wrong_tenant" as const };
@@ -221,19 +281,24 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(createOrReplaySession).toHaveBeenCalledTimes(2);
   });
 
-  it("finishes an eBay decline explicitly without exchanging or exposing provider credentials", async () => {
+  it("replays the durable decline even when a later callback proposes cancellation", async () => {
     const rows = new Map<
       string,
       { sessionId: string; userId: string; expiresAt: string }
     >();
+    let durableOutcome: "declined" | "cancelled" | "expired" | "failed" | null = null;
     const finishSession = vi.fn(async (input: {
       sessionId: string;
       userId: string;
-      outcome: string;
+      outcome: "declined" | "cancelled" | "expired" | "failed";
     }) => {
       const row = rows.get(input.sessionId);
       if (!row || row.userId !== input.userId) return { kind: "wrong_tenant" as const };
-      return { kind: "finished" as const };
+      if (durableOutcome) {
+        return { kind: "replayed" as const, outcome: durableOutcome };
+      }
+      durableOutcome = input.outcome;
+      return { kind: "finished" as const, outcome: durableOutcome };
     });
     const ebayOauth = createMobileEbayOauthOperations({
       store: {
@@ -241,7 +306,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           const row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
           };
           rows.set(row.sessionId, row);
           return row;
@@ -293,9 +358,18 @@ describe("mobile API v1 provider-neutral handler", () => {
         `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}&error=access_denied`,
       ),
     );
+    const conflictingReplay = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}`,
+      ),
+    );
 
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=declined",
+    );
+    expect(conflictingReplay.status).toBe(303);
+    expect(conflictingReplay.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=declined",
     );
     expect(finishSession).toHaveBeenCalledWith({
@@ -314,14 +388,16 @@ describe("mobile API v1 provider-neutral handler", () => {
       string,
       { sessionId: string; userId: string; expiresAt: string }
     >();
-    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    const finishSession = vi.fn(async (input: {
+      outcome: "declined" | "cancelled" | "expired" | "failed";
+    }) => ({ kind: "finished" as const, outcome: input.outcome }));
     const ebayOauth = createMobileEbayOauthOperations({
       store: {
         async createOrReplaySession(input) {
           const row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
           };
           rows.set(row.sessionId, row);
           return row;
@@ -390,7 +466,9 @@ describe("mobile API v1 provider-neutral handler", () => {
       string,
       { sessionId: string; userId: string; expiresAt: string }
     >();
-    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    const finishSession = vi.fn(async (input: {
+      outcome: "declined" | "cancelled" | "expired" | "failed";
+    }) => ({ kind: "finished" as const, outcome: input.outcome }));
     const exchangeCode = vi.fn();
     const ebayOauth = createMobileEbayOauthOperations({
       store: {
@@ -398,7 +476,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           const row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
           };
           rows.set(row.sessionId, row);
           return row;
@@ -469,15 +547,18 @@ describe("mobile API v1 provider-neutral handler", () => {
       string,
       { sessionId: string; userId: string; expiresAt: string }
     >();
-    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
-    let nowMs = Date.parse("2026-07-22T18:00:00.000Z");
+    const finishSession = vi.fn(async (input: {
+      outcome: "declined" | "cancelled" | "expired" | "failed";
+    }) => ({ kind: "finished" as const, outcome: input.outcome }));
+    const beginSession = vi.fn().mockResolvedValue({ kind: "expired" as const });
+    const exchangeCode = vi.fn();
     const ebayOauth = createMobileEbayOauthOperations({
       store: {
         async createOrReplaySession(input) {
           const row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
           };
           rows.set(row.sessionId, row);
           return row;
@@ -486,9 +567,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           return rows.get(sessionId) ?? null;
         },
         finishSession,
-        async beginSession() {
-          return { kind: "wrong_tenant" as const };
-        },
+        beginSession,
         async completeSession() {
           return { kind: "wrong_tenant" as const };
         },
@@ -503,8 +582,9 @@ describe("mobile API v1 provider-neutral handler", () => {
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
       }),
-      now: () => nowMs,
+      now: () => Date.parse("2026-07-22T18:20:00.000Z"),
       randomUUID: () => "38700000-0000-4000-8000-000000000041",
+      exchangeCode,
     });
     const api = handler({
       authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
@@ -522,8 +602,6 @@ describe("mobile API v1 provider-neutral handler", () => {
     const state = new URL(
       (await session.json()).data.authorizationUrl,
     ).searchParams.get("state");
-    nowMs = Date.parse("2026-07-22T18:10:00.001Z");
-
     const response = await api(
       new Request(
         `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}&code=provider-code`,
@@ -534,12 +612,13 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(response.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=expired",
     );
-    expect(finishSession).toHaveBeenCalledWith({
+    expect(beginSession).toHaveBeenCalledWith({
       sessionId: "38700000-0000-4000-8000-000000000041",
       userId: "tenant_a",
-      outcome: "expired",
-      finishedAt: "2026-07-22T18:10:00.001Z",
+      startedAt: "2026-07-22T18:20:00.000Z",
     });
+    expect(finishSession).not.toHaveBeenCalled();
+    expect(exchangeCode).not.toHaveBeenCalled();
   });
 
   it("verifies state authenticity before reporting a valid cross-tenant binding", async () => {
@@ -548,11 +627,15 @@ describe("mobile API v1 provider-neutral handler", () => {
       { sessionId: string; userId: string; expiresAt: string }
     >();
     const byIdempotency = new Map<string, string>();
-    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    const finishSession = vi.fn(async (input: {
+      outcome: "declined" | "cancelled" | "expired" | "failed";
+    }) => ({ kind: "finished" as const, outcome: input.outcome }));
     const generatedIds = [
       "38700000-0000-4000-8000-000000000051",
       "38700000-0000-4000-8000-000000000052",
     ];
+    const getSession = vi.fn(async (sessionId: string) =>
+      rows.get(sessionId) ?? null);
     const ebayOauth = createMobileEbayOauthOperations({
       store: {
         async createOrReplaySession(input) {
@@ -563,7 +646,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           const row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
           };
           rows.set(row.sessionId, row);
           byIdempotency.set(
@@ -572,9 +655,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           );
           return row;
         },
-        async getSession(sessionId) {
-          return rows.get(sessionId) ?? null;
-        },
+        getSession,
         finishSession,
         async beginSession() {
           return { kind: "wrong_tenant" as const };
@@ -636,29 +717,42 @@ describe("mobile API v1 provider-neutral handler", () => {
       .update(mixedPayload)
       .digest("base64url")}`;
 
+    const malformed = await api(
+      new Request(
+        "http://localhost/v1/ebay/oauth/callback?state=v1.not-a-uuid.binding.signature&code=provider-code",
+      ),
+    );
     const forged = await api(
       new Request(
         `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(`${mixedPayload}.forged-signature`)}&code=provider-code`,
       ),
     );
+
+    expect(malformed.status).toBe(303);
+    expect(malformed.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=invalid_state",
+    );
+    expect(forged.status).toBe(303);
+    expect(forged.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=invalid_state",
+    );
+    expect(getSession).not.toHaveBeenCalled();
+
     const response = await api(
       new Request(
         `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(mixedState)}&code=provider-code`,
       ),
     );
 
-    expect(forged.status).toBe(303);
-    expect(forged.headers.get("location")).toBe(
-      "https://snaplist.example/mobile/ebay/oauth?result=invalid_state",
-    );
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=wrong_tenant",
     );
+    expect(getSession).toHaveBeenCalledTimes(1);
     expect(finishSession).not.toHaveBeenCalled();
   });
 
-  it("persists one encrypted tenant connection when the successful callback is replayed", async () => {
+  it("lets the DB callback lease own expiry when the app clock is fast", async () => {
     type Row = {
       sessionId: string;
       userId: string;
@@ -700,7 +794,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           const row: Row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
             status: "pending",
           };
           rows.set(row.sessionId, row);
@@ -709,8 +803,8 @@ describe("mobile API v1 provider-neutral handler", () => {
         async getSession(sessionId) {
           return rows.get(sessionId) ?? null;
         },
-        async finishSession() {
-          return { kind: "finished" as const };
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
         },
         async beginSession(input: { sessionId: string; userId: string }) {
           const row = rows.get(input.sessionId)!;
@@ -737,7 +831,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
       }),
-      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      now: () => Date.parse("2026-07-22T18:20:00.000Z"),
       randomUUID: () => "38700000-0000-4000-8000-000000000061",
       exchangeCode,
       fetchIdentity,
@@ -808,8 +902,8 @@ describe("mobile API v1 provider-neutral handler", () => {
         async getSession() {
           return null;
         },
-        async finishSession() {
-          return { kind: "finished" as const };
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
         },
         async beginSession() {
           return { kind: "wrong_tenant" as const };
@@ -875,7 +969,7 @@ describe("mobile API v1 provider-neutral handler", () => {
           const row = {
             sessionId: input.proposedSessionId,
             userId: input.userId,
-            expiresAt: input.expiresAt,
+            expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
           };
           rows.set(row.sessionId, row);
           return row;
@@ -883,8 +977,8 @@ describe("mobile API v1 provider-neutral handler", () => {
         async getSession(sessionId) {
           return rows.get(sessionId) ?? null;
         },
-        async finishSession() {
-          return { kind: "finished" as const };
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
         },
         async beginSession() {
           return {
