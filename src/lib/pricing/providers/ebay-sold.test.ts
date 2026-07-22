@@ -1342,6 +1342,98 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(values).toHaveLength(1);
   });
 
+  it("reconciles a claim that commits before its response rejects", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimOwner: string | null = null;
+    const getClaimOwner = vi.fn(async () => claimOwner);
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        values.set(key, value);
+      },
+      async claim(_key, _signal, ownerToken) {
+        if (claimOwner !== null) return false;
+        claimOwner = ownerToken ?? null;
+        throw new Error("claim response rejected after commit");
+      },
+      getClaimOwner,
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const ambiguousOwner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const ownerResult = await ambiguousOwner;
+    const waitingRetry = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const retryResult = await waitingRetry;
+
+    expect({
+      ownerTier: ownerResult?.tier ?? null,
+      retryTier: retryResult?.tier ?? null,
+      ownerCommitted: claimOwner !== null,
+      ownerObservations: getClaimOwner.mock.calls.length,
+      fetchCalls: fetchPage.mock.calls.length,
+      cachedValues: values.size,
+    }).toEqual({
+      ownerTier: "ebay-sold",
+      retryTier: "ebay-sold",
+      ownerCommitted: true,
+      ownerObservations: 1,
+      fetchCalls: 1,
+      cachedValues: 1,
+    });
+    expect(retryResult).toEqual(ownerResult);
+  });
+
+  it("fails soft by the handoff deadline when a claim rejects without committing", async () => {
+    vi.useFakeTimers();
+    const getClaimOwner = vi.fn(async () => null);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return null;
+      },
+      async set() {
+        throw new Error("unreached store");
+      },
+      async claim() {
+        throw new Error("claim rejected without commit");
+      },
+      getClaimOwner,
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(getClaimOwner).toHaveBeenCalled();
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
   it("fails soft by the derived handoff deadline when the winner store never settles", async () => {
     vi.useFakeTimers();
     let stores = 0;
