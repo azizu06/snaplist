@@ -132,6 +132,6 @@ describe("runSoldCompsSmoke", () => {
     expect(report.status).toBe("fallback");
     expect(report.selectedTier).toBe("branded-web");
     expect(report.fallbackReason).toBe("no-usable-sold-comps");
-    expect(report.externalRequests).toBe(1);
+    expect(report.externalRequests).toBe(2);
   });
 });

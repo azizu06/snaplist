@@ -132,12 +132,36 @@ export const EBAY_SOLD_BASE_URL_DEFAULT = "https://www.ebay.com";
 export const EBAY_SOLD_USER_AGENT_DEFAULT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 SnapList/1.0 (+pricing research)";
-/** eBay shows up to this many results per page; one fetch is plenty of comps. */
-export const EBAY_SOLD_RESULTS_PER_PAGE = 120;
-/** Parse cap — a pathological page can't blow memory / downstream cost. */
-export const EBAY_SOLD_MAX_RESULTS = 60;
+/** First public sold-page candidate request for one logical pricing pass. */
+export const EBAY_SOLD_RESULTS_PER_PAGE = 10;
+/** One optional public sold-page expansion; no request may ask for more. */
+export const EBAY_SOLD_MAX_RESULTS = 20;
+/** Expand only while canonical matcher evidence remains below this count. */
+export const EBAY_SOLD_EXPANSION_THRESHOLD = 3;
 /** Fewer than this many sold comps = "nothing useful" → decline. */
 export const EBAY_SOLD_MIN_COMPS = 2;
+
+interface EbaySoldRuntimeState {
+  inFlight: Map<string, Promise<EbaySoldComp[]>>;
+}
+
+/** Request-scoped providers share one cache object at the composition root. */
+const EBAY_SOLD_RUNTIME_STATE_BY_CACHE = new WeakMap<
+  TtlCache<EbaySoldComp[]>,
+  EbaySoldRuntimeState
+>();
+
+function runtimeStateFor(
+  cache: TtlCache<EbaySoldComp[]> | undefined,
+): EbaySoldRuntimeState {
+  if (!cache) return { inFlight: new Map() };
+  let state = EBAY_SOLD_RUNTIME_STATE_BY_CACHE.get(cache);
+  if (!state) {
+    state = { inFlight: new Map() };
+    EBAY_SOLD_RUNTIME_STATE_BY_CACHE.set(cache, state);
+  }
+  return state;
+}
 
 /**
  * Per-fetch timeout. A stalled eBay response (connection accepted, body never
@@ -342,6 +366,7 @@ export function buildSoldSearchQuery(signal: ItemSignal): string | null {
 export function buildSoldSearchUrl(
   signal: ItemSignal,
   baseUrl: string = resolveBaseUrl(),
+  resultsPerPage: number = EBAY_SOLD_RESULTS_PER_PAGE,
 ): string | null {
   const q = buildSoldSearchQuery(signal);
   if (!q) return null;
@@ -355,7 +380,7 @@ export function buildSoldSearchUrl(
     url.searchParams.set("_nkw", q);
     url.searchParams.set("LH_Sold", "1");
     url.searchParams.set("LH_Complete", "1");
-    url.searchParams.set("_ipg", String(EBAY_SOLD_RESULTS_PER_PAGE));
+    url.searchParams.set("_ipg", String(resultsPerPage));
     return url.toString();
   } catch {
     return null;
@@ -1036,6 +1061,7 @@ export function createEbaySoldPricingProvider(
   // TTL request cache. Both default OFF in the raw provider (deterministic unit
   // tests); `createDefaultPricer` wires the real clock + shared cache.
   const cache = options.cache;
+  const inFlight = runtimeStateFor(cache).inFlight;
   const now = options.now;
   const staleDays = options.staleDays ?? resolveStaleDays();
   const halfLifeDays = options.halfLifeDays ?? resolveHalfLifeDays();
@@ -1044,13 +1070,36 @@ export function createEbaySoldPricingProvider(
   const identifiable = (signal: ItemSignal): boolean =>
     buildSoldSearchUrl(signal, baseUrl) !== null;
 
+  function cacheKey(url: string, signal: ItemSignal): string {
+    return JSON.stringify({
+      url,
+      retrievalPolicy: "initial-10-expand-20-v1",
+      matcherSignal: {
+        isbn: signal.isbn?.trim() ?? "",
+        upc: signal.upc?.trim() ?? "",
+        brand: signal.brand?.trim() ?? "",
+        model: signal.model?.trim() ?? "",
+        category: signal.category?.trim() ?? "",
+        conditionKnown: signal.conditionKnown === true,
+        condition: signal.condition?.trim() ?? "",
+        resolvedName: signal.resolvedName?.trim() ?? "",
+        specs: signal.specs?.map((spec) => spec.trim()) ?? [],
+      },
+    });
+  }
+
   /**
    * Fetch + parse with graceful degradation. The `catch` wraps ONLY the network
    * fetch (parseSoldComps is total), so a block/rate-limit declines but a real
    * bug still surfaces. The Playwright-style fallback is tried when the primary
    * is blocked or returns too few comps.
    */
-  async function fetchComps(url: string): Promise<EbaySoldComp[]> {
+  async function fetchComps(
+    url: string,
+    fetchPage: FetchPage,
+    parseLimit: number,
+    blockedEvent: "pricing.ebay_sold.fetch_blocked" | "pricing.ebay_sold.fallback_blocked",
+  ): Promise<{ comps: EbaySoldComp[]; failed: boolean }> {
     // SSRF guard at the PROVIDER boundary so BOTH the default primary fetcher AND
     // an injected Playwright-style fallback are protected — a non-eBay/internal
     // EBAY_SOLD_BASE_URL must never reach EITHER seam (#56 review). Declines on a
@@ -1058,37 +1107,76 @@ export function createEbaySoldPricingProvider(
     try {
       assertSafeEbayUrl(url);
     } catch {
-      return [];
+      return { comps: [], failed: true };
     }
-    let comps: EbaySoldComp[] = [];
     try {
-      comps = parseSoldComps(await fetchPrimary(url), baseUrl, maxResults);
+      return {
+        comps: parseSoldComps(await fetchPage(url), baseUrl, parseLimit),
+        failed: false,
+      };
     } catch (err) {
       // A block/rate-limit/timeout — declines, but is NO LONGER SILENT: without
       // this the tier vanished into a generic "declined" and the real reason (eBay
       // 403s direct server fetches) was invisible until someone dug into the logs.
-      emitDiagnostic("pricing.ebay_sold.fetch_blocked", {
+      emitDiagnostic(blockedEvent, {
         reason: soldFetchFailureReason(err),
-        viaProxy: configuredEgress.mode === "proxy",
-        hasFallback: fetchFallback != null,
+        ...(blockedEvent === "pricing.ebay_sold.fetch_blocked"
+          ? {
+              viaProxy: configuredEgress.mode === "proxy",
+              hasFallback: fetchFallback != null,
+            }
+          : {}),
       });
-      comps = [];
+      return { comps: [], failed: true };
     }
-    if (comps.length < EBAY_SOLD_MIN_COMPS && fetchFallback) {
-      try {
-        comps = parseSoldComps(await fetchFallback(url), baseUrl, maxResults);
-      } catch (err) {
-        emitDiagnostic("pricing.ebay_sold.fallback_blocked", {
-          reason: soldFetchFailureReason(err),
-        });
+  }
+
+  async function retrieveBoundedComps(
+    signal: ItemSignal,
+    initialUrl: string,
+  ): Promise<EbaySoldComp[]> {
+    const initial = await fetchComps(
+      initialUrl,
+      fetchPrimary,
+      Math.min(maxResults, EBAY_SOLD_RESULTS_PER_PAGE),
+      "pricing.ebay_sold.fetch_blocked",
+    );
+    let combined = normalizeEbaySoldCompUrls(initial.comps);
+
+    if (initial.failed) {
+      if (fetchFallback) {
+        const fallback = await fetchComps(
+          initialUrl,
+          fetchFallback,
+          Math.min(maxResults, EBAY_SOLD_RESULTS_PER_PAGE),
+          "pricing.ebay_sold.fallback_blocked",
+        );
+        if (!fallback.failed) combined = normalizeEbaySoldCompUrls(fallback.comps);
+      }
+    } else {
+      const evidence = selectSoldCompEvidence(combined, signal);
+      if (evidence.anchors.length < EBAY_SOLD_EXPANSION_THRESHOLD) {
+        const expandedUrl = buildSoldSearchUrl(signal, baseUrl, EBAY_SOLD_MAX_RESULTS);
+        if (expandedUrl) {
+          const expanded = await fetchComps(
+            expandedUrl,
+            fetchFallback ?? fetchPrimary,
+            Math.min(maxResults, EBAY_SOLD_MAX_RESULTS),
+            fetchFallback
+              ? "pricing.ebay_sold.fallback_blocked"
+              : "pricing.ebay_sold.fetch_blocked",
+          );
+          if (!expanded.failed) {
+            combined = normalizeEbaySoldCompUrls([...expanded.comps, ...combined]);
+          }
+        }
       }
     }
-    if (comps.length < EBAY_SOLD_MIN_COMPS) {
-      // Distinguish "blocked/thin" (declining to web search) from "found comps" so
-      // the pricing spine is auditable: which tier actually fired, and why not this one.
-      emitDiagnostic("pricing.ebay_sold.declined_thin", { compsFound: comps.length });
+
+    if (combined.length < EBAY_SOLD_MIN_COMPS) {
+      emitDiagnostic("pricing.ebay_sold.declined_thin", { compsFound: combined.length });
     }
-    return comps;
+    return combined;
   }
 
   return {
@@ -1098,14 +1186,15 @@ export function createEbaySoldPricingProvider(
       if (!enabled) return null; // kill-switch → degrade to web tier
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
+      const key = cacheKey(url, signal);
 
       // Freshness cache (#59): a hit within TTL is reused (no fetch); a miss
-      // live-fetches and stores. The live page stays the source of truth. Only a
-      // scrape that yielded ≥ MIN raw comps is cached — a 0/1-comp result is almost
-      // always a block or placeholder page, and caching it would suppress the retry
-      // that the graceful-degradation design depends on. Relevance/freshness are
+      // live-fetches and stores. The live page stays the source of truth. Completed
+      // terminal and sparse outcomes are cached too: retry/redelivery of the same
+      // logical pricing pass must not start a third public retrieval. Relevance/freshness are
       // applied per-request AFTER the cache, so the cache holds the raw scrape keyed
-      // by the resolved search URL (= product identity); age-decay below re-runs on
+      // by product identity plus the matcher-sensitive signal that controls expansion;
+      // age-decay below re-runs on
       // every read, so a comp that goes stale while cached is still dropped.
       // The cache is an OPTIMIZATION, never the source of truth: a cache (Upstash)
       // outage must DEGRADE — treat a read failure as a miss (live-fetch) and a
@@ -1116,7 +1205,7 @@ export function createEbaySoldPricingProvider(
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
-          comps = await cache.get(url);
+          comps = await cache.get(key);
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
             op: "get",
@@ -1125,16 +1214,28 @@ export function createEbaySoldPricingProvider(
         }
       }
       if (comps == null) {
-        comps = await fetchComps(url);
-        if (cache && comps.length >= EBAY_SOLD_MIN_COMPS) {
-          try {
-            await cache.set(url, comps);
-          } catch (err) {
-            emitDiagnostic("pricing.cache.error", {
-              op: "set",
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+        const existing = inFlight.get(key);
+        if (existing) {
+          comps = await existing;
+        } else {
+          const pending = (async () => {
+            const retrieved = await retrieveBoundedComps(signal, url);
+            if (cache) {
+              try {
+                await cache.set(key, retrieved);
+              } catch (err) {
+                emitDiagnostic("pricing.cache.error", {
+                  op: "set",
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+            return retrieved;
+          })().finally(() => {
+            inFlight.delete(key);
+          });
+          inFlight.set(key, pending);
+          comps = await pending;
         }
       }
 

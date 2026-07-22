@@ -824,6 +824,131 @@ describe("synthesizeSoldResult — robust core rescues a tight cluster from one 
 });
 
 describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
+  it("requests ten candidates, expands once to twenty, and caches the deterministic best five", async () => {
+    const initial = srp([
+      soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
+      soldCard("https://www.ebay.com/itm/initial-b", 180, 7),
+    ]);
+    const expanded = srp([
+      soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
+      soldCard("https://www.ebay.com/itm/best-newest", 175, 1),
+      soldCard("https://www.ebay.com/itm/best-second", 176, 2),
+      soldCard("https://www.ebay.com/itm/best-third", 177, 3),
+      soldCard("https://www.ebay.com/itm/best-fourth", 178, 4),
+      soldCard("https://www.ebay.com/itm/best-fifth", 179, 5),
+      soldCard("https://www.ebay.com/itm/lower-ranked", 180, 9),
+    ]);
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new URL(url).searchParams.get("_ipg") === "10" ? initial : expanded;
+    });
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      now: () => NOW,
+    });
+
+    const first = await provider.price(BRANDED_SIGNAL);
+    const retry = await provider.price(BRANDED_SIGNAL);
+
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
+    expect(first?.evidence?.map(({ sourceUrl }) => sourceUrl)).toEqual([
+      "https://www.ebay.com/itm/best-newest",
+      "https://www.ebay.com/itm/best-second",
+      "https://www.ebay.com/itm/best-third",
+      "https://www.ebay.com/itm/best-fourth",
+      "https://www.ebay.com/itm/best-fifth",
+    ]);
+    expect(first?.sources.map(({ url }) => url)).toEqual(
+      first?.evidence?.map(({ sourceUrl }) => sourceUrl),
+    );
+    expect(retry).toEqual(first);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches a terminal initial failure so retry cannot make another public request", async () => {
+    const fetchPage = blockedFetch();
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+
+    expect(fetchPage.urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+    ]);
+  });
+
+  it("coalesces concurrent redelivery into one bounded public retrieval pass", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      await gate;
+      return new URL(url).searchParams.get("_ipg") === "10"
+        ? srp([
+            soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
+            soldCard("https://www.ebay.com/itm/initial-b", 180, 7),
+          ])
+        : FIXTURE_HTML;
+    });
+    const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+    const providerForRequest = () => createEbaySoldPricingProvider({ fetchPage, cache });
+
+    const first = providerForRequest().price(BRANDED_SIGNAL);
+    const redelivery = providerForRequest().price(BRANDED_SIGNAL);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    release();
+    const [firstResult, redeliveryResult] = await Promise.all([first, redelivery]);
+
+    expect(redeliveryResult).toEqual(firstResult);
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
+  });
+
+  it("does not let a ten-only cache entry suppress expansion for another condition", async () => {
+    const used = srp([
+      soldCard("https://www.ebay.com/itm/used-a", 170, 1),
+      soldCard("https://www.ebay.com/itm/used-b", 180, 2),
+      soldCard("https://www.ebay.com/itm/used-c", 190, 3),
+    ]);
+    const brandNew = used.replaceAll("Pre-Owned", "Brand New");
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new URL(url).searchParams.get("_ipg") === "20" ? brandNew : used;
+    });
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.not.toBeNull();
+    await expect(
+      provider.price({
+        ...BRANDED_SIGNAL,
+        condition: "brand new",
+      }),
+    ).resolves.not.toBeNull();
+
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "10",
+      "20",
+    ]);
+  });
+
   it("declares its tier and only handles identifiable signals", () => {
     const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(FIXTURE_HTML) });
     expect(provider.tier).toBe("ebay-sold");
@@ -846,6 +971,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(result!.sources.every((s) => s.kind === "sold-comp")).toBe(true);
     // It fetched the SOLD/COMPLETED results page for this identity.
     expect(fetchPage.urls).toHaveLength(1);
+    expect(new URL(fetchPage.urls[0]).searchParams.get("_ipg")).toBe("10");
     expect(fetchPage.urls[0]).toContain("LH_Sold=1");
     expect(fetchPage.urls[0]).toContain("Sony");
   });
@@ -867,7 +993,10 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     const provider = createEbaySoldPricingProvider({ fetchPage });
 
     await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
-    expect(fetchPage.urls).toHaveLength(1);
+    expect(fetchPage.urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
   });
 
   it("declines (null) — never throws — when the page fetch is blocked", async () => {
@@ -1161,26 +1290,26 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
     expect(fetchPage.urls).toHaveLength(1); // second served from cache
   });
 
-  it("does NOT cache an empty (blocked) scrape — the next request retries", async () => {
-    const fetchPage = mutableFetch(""); // blocked first
+  it("caches an empty expanded scrape so retry cannot start a third request", async () => {
+    const fetchPage = mutableFetch("");
     const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
     const provider = createEbaySoldPricingProvider({ fetchPage, cache });
 
-    expect(await provider.price(BRANDED_SIGNAL)).toBeNull(); // declined, nothing cached
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     fetchPage.set(FIXTURE_HTML);
-    expect(await provider.price(BRANDED_SIGNAL)).not.toBeNull(); // retried, got comps
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     expect(fetchPage.urls).toHaveLength(2);
   });
 
-  it("does NOT cache a thin (<MIN raw comps) scrape — likely a block, retried next time", async () => {
+  it("caches a thin expanded scrape so retry cannot start a third request", async () => {
     const thin = srp([soldCard("https://www.ebay.com/itm/1", 178, 5)]); // 1 raw comp < MIN
     const fetchPage = mutableFetch(thin);
     const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
     const provider = createEbaySoldPricingProvider({ fetchPage, cache });
 
-    expect(await provider.price(BRANDED_SIGNAL)).toBeNull(); // <MIN → declines, not cached
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     fetchPage.set(FIXTURE_HTML);
-    expect(await provider.price(BRANDED_SIGNAL)).not.toBeNull(); // retried, found comps
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     expect(fetchPage.urls).toHaveLength(2);
   });
 

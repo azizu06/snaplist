@@ -82,8 +82,9 @@ function smokeFallbackProvider(signal: ItemSignal): PricingProvider {
 /**
  * Exercise the real sold-comps provider and the real PriceRouter seam without
  * ever invoking paid web-search/LLM fallbacks. Dry-run is the default and makes
- * zero requests. Live mode performs at most one caller-controlled sold-page
- * request; if it declines, a deterministic sentinel proves graceful routing.
+ * zero requests. Live mode performs the bounded ten-candidate request and at
+ * most one twenty-candidate expansion; if the provider declines, a deterministic
+ * sentinel proves graceful routing.
  */
 export async function runSoldCompsSmoke(
   options: RunSoldCompsSmokeOptions,
