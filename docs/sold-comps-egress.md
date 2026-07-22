@@ -61,11 +61,16 @@ and [eBay condition ID meanings](https://developer.ebay.com/api-docs/sell/static
 The normal public-page provider requests 10 candidates first and makes one
 20-candidate expansion only when fewer than three anchors survive the canonical
 matcher. Terminal and sparse outcomes are cached alongside successful combined
-results. Every normal construction path, including injected, instrumented, or
-wrapped fetchers, requires the existing atomic shared-cache claim to select one
-winner across worker runtimes. Losers read the winner's result through a bounded
-handoff. A missing, process-local, or unavailable shared fence declines to the
-next pricing tier without making the external request.
+results. With no proxy configured, the real default direct eBay fetch is free and
+may coordinate through the process-local cache and in-flight map when Upstash is
+absent. Cache hits and same-runtime retry/redelivery reuse that winner; this mode
+claims no cross-runtime guarantee.
+
+A configured proxy or an injected, instrumented, or wrapped normal fetch path may
+carry direct cost and therefore still requires the existing atomic shared-cache
+claim to select one winner across worker runtimes. Losers read the winner's result
+through a bounded handoff. A missing, process-local, or unavailable shared fence
+declines to the next pricing tier without making that potentially billable request.
 
 The effective per-request timeout defaults to 8 seconds and is capped at 15
 seconds even when operator configuration requests more. A loser waits for at

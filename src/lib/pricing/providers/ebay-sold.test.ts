@@ -1646,13 +1646,47 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(fetchPage).toHaveBeenCalledOnce();
   });
 
-  it("declines before real egress when only a process-local fence is available", async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(FIXTURE_HTML, {
+  it("uses the free default direct fetch with process-local coordination", async () => {
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", "");
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const html =
+        new URL(String(input)).searchParams.get("_ipg") === "10"
+          ? ""
+          : FIXTURE_HTML;
+      return new Response(html, {
         status: 200,
         headers: { "content-type": "text/html" },
-      }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const provider = createRawEbaySoldPricingProvider({
+      enabled: true,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = await provider.price(BRANDED_SIGNAL);
+    const retry = await provider.price(BRANDED_SIGNAL);
+
+    expect(result).not.toBeNull();
+    expect(result?.evidence).toHaveLength(5);
+    expect(result?.sources.map(({ url }) => url)).toEqual(
+      result?.evidence?.map(({ sourceUrl }) => sourceUrl),
     );
+    expect(retry).toEqual(result);
+    expect(
+      fetchImpl.mock.calls.map(([input]) =>
+        new URL(String(input)).searchParams.get("_ipg"),
+      ),
+    ).toEqual(["10", "20"]);
+  });
+
+  it("keeps a configured proxy behind the shared cost fence", async () => {
+    vi.stubEnv(
+      "EBAY_SOLD_PROXY_TEMPLATE",
+      "https://proxy.example/fetch?key=secret&url={url}",
+    );
+    const fetchImpl = vi.fn(async () => new Response(FIXTURE_HTML));
     vi.stubGlobal("fetch", fetchImpl);
     const provider = createRawEbaySoldPricingProvider({
       enabled: true,
