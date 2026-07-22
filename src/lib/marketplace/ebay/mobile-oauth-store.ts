@@ -125,10 +125,15 @@ export function createSupabaseMobileEbayOauthSessionStore(
       rpcFailure("Failed to finish eBay OAuth session", error);
       const result = record(data, "Failed to finish eBay OAuth session");
       const kind = result.kind;
-      if (kind !== "finished" && kind !== "replayed" && kind !== "wrong_tenant") {
+      if (
+        kind !== "finished"
+        && kind !== "replayed"
+        && kind !== "in_progress"
+        && kind !== "wrong_tenant"
+      ) {
         throw new Error("Failed to finish eBay OAuth session: invalid outcome");
       }
-      if (kind === "wrong_tenant") return { kind };
+      if (kind === "wrong_tenant" || kind === "in_progress") return { kind };
       const outcome = requiredString(
         result.outcome,
         "Failed to finish eBay OAuth session",
@@ -190,7 +195,11 @@ export function createSupabaseMobileEbayOauthSessionStore(
           outcome: outcome as "connected" | "declined" | "cancelled" | "expired" | "failed",
         };
       }
-      if (result.kind === "wrong_tenant" || result.kind === "expired") {
+      if (
+        result.kind === "wrong_tenant"
+        || result.kind === "expired"
+        || result.kind === "in_progress"
+      ) {
         return { kind: result.kind };
       }
       throw new Error("Failed to begin eBay OAuth callback: invalid outcome");

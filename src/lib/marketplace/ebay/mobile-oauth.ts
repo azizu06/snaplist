@@ -49,6 +49,7 @@ export interface MobileEbayOauthSessionStore {
     finishedAt: string;
   }): Promise<
     | { kind: "finished" | "replayed"; outcome: MobileEbayOauthOutcome }
+    | { kind: "in_progress" }
     | { kind: "wrong_tenant" }
   >;
   beginSession(input: {
@@ -58,6 +59,7 @@ export interface MobileEbayOauthSessionStore {
   }): Promise<
     | { kind: "claimed"; leaseToken: string }
     | { kind: "replayed"; outcome: MobileEbayOauthOutcome }
+    | { kind: "in_progress" }
     | { kind: "wrong_tenant" }
     | { kind: "expired" }
   >;
@@ -124,6 +126,16 @@ function assertSandboxOnly(env: Env): void {
   ) {
     throw new Error("Mobile eBay OAuth is restricted to Sandbox.");
   }
+}
+
+function mobileProviderEnv(env: Env): Env {
+  const mobileRuName = env.EBAY_MOBILE_RU_NAME?.trim();
+  if (!mobileRuName) {
+    throw new Error(
+      "EBAY_MOBILE_RU_NAME is not configured for the Sandbox mobile callback.",
+    );
+  }
+  return { ...env, EBAY_RU_NAME: mobileRuName };
 }
 
 function tenantBinding(userId: string): string {
@@ -211,7 +223,7 @@ export function createMobileEbayOauthOperations(input: {
 
   return {
     async createSession({ userId, bearerToken, idempotencyKey }) {
-      const env = readEnv();
+      const env = mobileProviderEnv(readEnv());
       assertSandboxOnly(env);
       const stored = await input.store.createOrReplaySession({
         proposedSessionId: nextUUID(),
@@ -226,11 +238,13 @@ export function createMobileEbayOauthOperations(input: {
       };
     },
     async completeCallback({ state, code, error }) {
-      const env = readEnv();
+      const configuredEnv = readEnv();
+      let env: Env;
       try {
+        env = mobileProviderEnv(configuredEnv);
         assertSandboxOnly(env);
       } catch {
-        return { redirectUrl: mobileReturnUrl(env, "failed") };
+        return { redirectUrl: mobileReturnUrl(configuredEnv, "failed") };
       }
       const decoded = decodeState(state);
       if (!decoded) {
@@ -269,6 +283,9 @@ export function createMobileEbayOauthOperations(input: {
         }
         if (begin.kind === "expired") {
           return { redirectUrl: mobileReturnUrl(env, "expired") };
+        }
+        if (begin.kind === "in_progress") {
+          return { redirectUrl: mobileReturnUrl(env, "in_progress") };
         }
         if (begin.kind === "replayed") {
           return { redirectUrl: mobileReturnUrl(env, begin.outcome) };
@@ -319,7 +336,11 @@ export function createMobileEbayOauthOperations(input: {
       return {
         redirectUrl: mobileReturnUrl(
           env,
-          finish.kind === "wrong_tenant" ? "wrong_tenant" : finish.outcome,
+          finish.kind === "wrong_tenant"
+            ? "wrong_tenant"
+            : finish.kind === "in_progress"
+              ? "in_progress"
+              : finish.outcome,
         ),
       };
     },

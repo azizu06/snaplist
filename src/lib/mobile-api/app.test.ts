@@ -183,6 +183,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
       }),
       now: () => Date.parse("2099-01-01T00:00:00.000Z"),
@@ -253,6 +254,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
       }),
       now: () => Date.parse("2026-07-22T18:00:00.000Z"),
@@ -328,6 +330,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -419,6 +422,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -498,6 +502,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -578,6 +583,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -670,6 +676,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -752,7 +759,7 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(finishSession).not.toHaveBeenCalled();
   });
 
-  it("lets the DB callback lease own expiry when the app clock is fast", async () => {
+  it("keeps an active duplicate nonterminal and replays one encrypted connection", async () => {
     type Row = {
       sessionId: string;
       userId: string;
@@ -764,12 +771,19 @@ describe("mobile API v1 provider-neutral handler", () => {
       string,
       { refreshTokenEnc: string; accessTokenEnc: string }
     >();
-    const exchangeCode = vi.fn().mockResolvedValue({
+    const grant = {
       accessToken: "access-secret-387",
       refreshToken: "refresh-secret-387",
       accessTokenExpiresAt: Date.parse("2026-07-22T20:00:00.000Z"),
       scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+    };
+    let releaseExchange!: (value: typeof grant) => void;
+    const activeExchange = new Promise<typeof grant>((resolve) => {
+      releaseExchange = resolve;
     });
+    const exchangeCode = vi.fn()
+      .mockImplementationOnce(() => activeExchange)
+      .mockRejectedValue(new Error("duplicate provider exchange"));
     const fetchIdentity = vi.fn().mockResolvedValue({
       userId: "ebay-sandbox-user-387",
       username: "sandbox_seller_387",
@@ -804,6 +818,10 @@ describe("mobile API v1 provider-neutral handler", () => {
           return rows.get(sessionId) ?? null;
         },
         async finishSession(input) {
+          const row = rows.get(input.sessionId)!;
+          if (row.status === "completing") {
+            return { kind: "in_progress" as const };
+          }
           return { kind: "finished" as const, outcome: input.outcome };
         },
         async beginSession(input: { sessionId: string; userId: string }) {
@@ -811,6 +829,9 @@ describe("mobile API v1 provider-neutral handler", () => {
           if (row.userId !== input.userId) return { kind: "wrong_tenant" as const };
           if (row.status === "connected") {
             return { kind: "replayed" as const, outcome: "connected" as const };
+          }
+          if (row.status === "completing") {
+            return { kind: "in_progress" as const };
           }
           row.status = "completing";
           return {
@@ -826,7 +847,8 @@ describe("mobile API v1 provider-neutral handler", () => {
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
         EBAY_CLIENT_SECRET: "sandbox-client-secret",
-        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_RU_NAME: "legacy-web-callback-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -851,9 +873,12 @@ describe("mobile API v1 provider-neutral handler", () => {
         },
       }),
     );
-    const state = new URL(
-      (await session.json()).data.authorizationUrl,
-    ).searchParams.get("state");
+    const sessionBody = await session.json();
+    const authorizationUrl = new URL(sessionBody.data.authorizationUrl);
+    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
+      "mobile-sandbox-callback-ru-name",
+    );
+    const state = authorizationUrl.searchParams.get("state");
     const callback = () =>
       api(
         new Request(
@@ -861,10 +886,21 @@ describe("mobile API v1 provider-neutral handler", () => {
         ),
       );
 
-    const first = await callback();
+    const winner = callback();
+    await vi.waitFor(() => expect(exchangeCode).toHaveBeenCalledTimes(1));
+    const activeDuplicate = await callback();
+    const activeCancellation = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}`,
+      ),
+    );
+    releaseExchange(grant);
+    const first = await winner;
     const replay = await callback();
 
     expect(first.status).toBe(303);
+    expect(activeDuplicate.status).toBe(303);
+    expect(activeCancellation.status).toBe(303);
     expect(replay.status).toBe(303);
     expect(first.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=connected",
@@ -872,11 +908,18 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(replay.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=connected",
     );
+    expect(activeDuplicate.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=in_progress",
+    );
+    expect(activeCancellation.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=in_progress",
+    );
     expect(exchangeCode).toHaveBeenCalledTimes(1);
     expect(exchangeCode).toHaveBeenCalledWith(
       "sandbox-provider-code",
       expect.objectContaining({
         EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "mobile-sandbox-callback-ru-name",
       }),
     );
     expect(fetchIdentity).toHaveBeenCalledTimes(1);
@@ -919,6 +962,7 @@ describe("mobile API v1 provider-neutral handler", () => {
         EBAY_BASE_URL: "https://api.ebay.com",
         EBAY_CLIENT_ID: "production-client-id",
         EBAY_RU_NAME: "production-ru-name",
+        EBAY_MOBILE_RU_NAME: "production-mobile-ru-name",
         EBAY_TOKEN_ENCRYPTION_KEY,
         EBAY_MOBILE_OAUTH_RETURN_URL:
           "https://snaplist.example/mobile/ebay/oauth",
@@ -947,6 +991,63 @@ describe("mobile API v1 provider-neutral handler", () => {
     );
   });
 
+  it("fails closed before persistence without a mobile Sandbox redirect registration", async () => {
+    const createOrReplaySession = vi.fn().mockResolvedValue({
+      sessionId: "38700000-0000-4000-8000-000000000076",
+      userId: "tenant_a",
+      expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
+    });
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        createOrReplaySession,
+        async getSession() {
+          return null;
+        },
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
+        },
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "legacy-web-callback-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      randomUUID: () => "38700000-0000-4000-8000-000000000076",
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+
+    const response = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000077",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(createOrReplaySession).not.toHaveBeenCalled();
+    expect(JSON.stringify(await response.json())).not.toContain(
+      "legacy-web-callback-ru-name",
+    );
+  });
+
   it("refuses a callback if the OAuth capability is no longer configured for Sandbox", async () => {
     const rows = new Map<
       string,
@@ -959,6 +1060,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       EBAY_CLIENT_ID: "sandbox-client-id",
       EBAY_CLIENT_SECRET: "sandbox-client-secret",
       EBAY_RU_NAME: "sandbox-ru-name",
+      EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
       EBAY_TOKEN_ENCRYPTION_KEY,
       EBAY_MOBILE_OAUTH_RETURN_URL:
         "https://snaplist.example/mobile/ebay/oauth",

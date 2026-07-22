@@ -162,7 +162,7 @@ begin
     return jsonb_build_object('kind', 'replayed', 'outcome', v_session.status);
   end if;
   if v_session.status = 'completing' then
-    return jsonb_build_object('kind', 'replayed', 'outcome', 'failed');
+    return jsonb_build_object('kind', 'in_progress');
   end if;
 
   v_outcome := case
@@ -217,15 +217,17 @@ begin
   if v_session.status in ('connected', 'declined', 'cancelled', 'expired', 'failed') then
     return jsonb_build_object('kind', 'replayed', 'outcome', v_session.status);
   end if;
-  if v_session.status = 'completing' then
-    return jsonb_build_object('kind', 'replayed', 'outcome', 'failed');
-  end if;
   if v_session.expires_at <= statement_timestamp() then
     update public.ebay_oauth_sessions session
     set status = 'expired',
         finished_at = statement_timestamp()
     where session.id = p_session_id;
     return jsonb_build_object('kind', 'expired');
+  end if;
+  if v_session.status = 'completing'
+    and v_session.completion_started_at
+      > statement_timestamp() - interval '2 minutes' then
+    return jsonb_build_object('kind', 'in_progress');
   end if;
 
   v_lease_token := gen_random_uuid();

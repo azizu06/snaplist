@@ -101,6 +101,7 @@ beforeAll(async () => {
       EBAY_CLIENT_ID: "sandbox-client-id",
       EBAY_CLIENT_SECRET: "sandbox-client-secret",
       EBAY_RU_NAME: "sandbox-ru-name",
+      EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
       EBAY_TOKEN_ENCRYPTION_KEY: OAUTH_ENCRYPTION_KEY,
       EBAY_MOBILE_OAUTH_RETURN_URL:
         "https://snaplist.example/mobile/ebay/oauth",
@@ -283,29 +284,59 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
     expect(rows).toEqual([{ status: "declined" }]);
   });
 
-  it("turns a successful callback replay into exactly one encrypted connection", async () => {
+  it("keeps an active duplicate nonterminal before one encrypted connection wins", async () => {
     if (!reachable) return;
     const session = await startSession(tenantAToken, randomUUID());
     const state = new URL(
       (await session.json()).data.authorizationUrl,
     ).searchParams.get("state")!;
     const providerCallsBefore = exchangeCode.mock.calls.length;
+    const heldGrant = {
+      accessToken: "mobile-ebay-access-token-387",
+      refreshToken: "mobile-ebay-refresh-token-387",
+      accessTokenExpiresAt: Date.now() + 2 * 60 * 60_000,
+      scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+    };
+    let releaseExchange!: (value: typeof heldGrant) => void;
+    const activeExchange = new Promise<typeof heldGrant>((resolve) => {
+      releaseExchange = resolve;
+    });
+    exchangeCode.mockImplementationOnce(() => activeExchange);
     const callback = () => api(
       new Request(
         `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&code=sandbox-provider-code`,
       ),
     );
 
-    const first = await callback();
+    const winner = callback();
+    await vi.waitFor(() => {
+      expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
+    });
+    const activeDuplicate = await callback();
+    const activeCancellation = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}`,
+      ),
+    );
+    releaseExchange(heldGrant);
+    const first = await winner;
     const replay = await callback();
 
     expect(first.status).toBe(303);
+    expect(activeDuplicate.status).toBe(303);
+    expect(activeCancellation.status).toBe(303);
     expect(replay.status).toBe(303);
     expect(first.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=connected",
     );
     expect(replay.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=connected",
+    );
+    expect(activeDuplicate.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=in_progress",
+    );
+    expect(activeCancellation.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=in_progress",
     );
     expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
     const { data: rows, error } = await admin
@@ -319,5 +350,51 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
     expect(JSON.stringify([rows, first.headers, replay.headers])).not.toMatch(
       /mobile-ebay-(?:access|refresh)-token-387|sandbox-provider-code/,
     );
+  });
+
+  it("reclaims one abandoned callback lease after the bounded DB interval", async () => {
+    if (!reachable) return;
+    const session = await startSession(tenantBToken, randomUUID());
+    const sessionBody = await session.json();
+    const state = new URL(sessionBody.data.authorizationUrl).searchParams.get(
+      "state",
+    )!;
+    const database = new Client({
+      connectionString: DATABASE_URL,
+      connectionTimeoutMillis: 2_000,
+    });
+    try {
+      await database.connect();
+      const abandoned = await database.query(
+        `update public.ebay_oauth_sessions
+         set status = 'completing',
+             completion_lease_token = $1,
+             completion_started_at = statement_timestamp() - interval '3 minutes'
+         where id = $2 and user_id = $3 and status = 'pending'`,
+        [randomUUID(), sessionBody.data.sessionId, tenantBId],
+      );
+      expect(abandoned.rowCount).toBe(1);
+    } finally {
+      await database.end().catch(() => undefined);
+    }
+    const providerCallsBefore = exchangeCode.mock.calls.length;
+
+    const recovered = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&code=recovered-sandbox-code`,
+      ),
+    );
+
+    expect(recovered.status).toBe(303);
+    expect(recovered.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=connected",
+    );
+    expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
+    const { data: rows, error } = await admin
+      .from("ebay_oauth_sessions")
+      .select("status")
+      .eq("id", sessionBody.data.sessionId);
+    expect(error).toBeNull();
+    expect(rows).toEqual([{ status: "connected" }]);
   });
 });
