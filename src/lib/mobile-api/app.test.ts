@@ -1058,7 +1058,7 @@ describe("mobile API v1 provider-neutral handler", () => {
     ])).not.toMatch(/sandbox-provider-code|refresh-secret-387|access-secret-387/);
   });
 
-  it("returns canonical truth when a later callback supersedes the completing lease", async () => {
+  it("returns retryable HTTP truth when the canonical reread fails after a later callback supersedes the lease", async () => {
     type Row = {
       sessionId: string;
       userId: string;
@@ -1080,6 +1080,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       { refreshTokenEnc: string; accessTokenEnc: string }
     >();
     let currentTime = Date.parse("2026-07-22T18:00:00.000Z");
+    let failNextCanonicalRead = false;
     const grant = {
       accessToken: "access-secret-413",
       refreshToken: "refresh-secret-413",
@@ -1151,7 +1152,14 @@ describe("mobile API v1 provider-neutral handler", () => {
           return row;
         },
         async getSession(sessionId) {
-          return sessionId === row.sessionId ? row : null;
+          if (sessionId !== row.sessionId) {
+            return null;
+          }
+          if (failNextCanonicalRead) {
+            failNextCanonicalRead = false;
+            throw new Error("transient canonical reread failure");
+          }
+          return row;
         },
         async finishSession(input) {
           if (row.userId !== input.userId) {
@@ -1213,13 +1221,19 @@ describe("mobile API v1 provider-neutral handler", () => {
     currentTime += 2 * 60 * 1_000 + 1;
     const callbackB = callback();
     await vi.waitFor(() => expect(exchangeCode).toHaveBeenCalledTimes(2));
+    failNextCanonicalRead = true;
     releaseFirstExchange(grant);
     const supersededA = await callbackA;
 
-    expect(supersededA.status).toBe(303);
-    expect(supersededA.headers.get("location")).toBe(
-      "https://snaplist.example/mobile/ebay/oauth?result=in_progress",
-    );
+    expect(supersededA.status).toBe(503);
+    expect(supersededA.headers.get("location")).toBeNull();
+    await expect(supersededA.json()).resolves.toEqual({
+      error: {
+        code: "internal_error",
+        message: "eBay connection is temporarily unavailable.",
+        requestId: "req_test",
+      },
+    });
     expect(row).toMatchObject({
       status: "completing",
       leaseToken: "41300000-0000-4000-8000-000000000003",
@@ -1263,6 +1277,16 @@ describe("mobile API v1 provider-neutral handler", () => {
         status: "completing" as const,
       },
       expected: "wrong_tenant",
+    },
+    {
+      name: "in-progress",
+      canonical: {
+        sessionId: "41300000-0000-4000-8000-000000000011",
+        userId: "tenant_a",
+        expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
+        status: "completing" as const,
+      },
+      expected: "in_progress",
     },
     ...(["connected", "declined", "cancelled", "expired", "failed"] as const)
       .map((status) => ({
