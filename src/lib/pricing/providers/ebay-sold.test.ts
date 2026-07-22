@@ -1061,6 +1061,77 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     ]);
   });
 
+  it("continues cross-runtime handoff after a transient loser read failure", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimOwner: string | null = null;
+    const claimResults: boolean[] = [];
+    let runtimeCount = 0;
+    let transientHandoffFailures = 0;
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => {
+      const runtime = runtimeCount;
+      runtimeCount += 1;
+      let reads = 0;
+      return {
+        scope: "shared",
+        async get(key) {
+          reads += 1;
+          if (runtime === 1 && reads === 2) {
+            transientHandoffFailures += 1;
+            throw new Error("transient loser handoff read failure");
+          }
+          return values.get(key) ?? null;
+        },
+        async set(key, value) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          values.set(key, value);
+        },
+        async claim(_key, _signal, ownerToken) {
+          const claimed = claimOwner === null;
+          if (claimed) claimOwner = ownerToken ?? "owner";
+          claimResults.push(claimed);
+          return claimed;
+        },
+        async getClaimOwner() {
+          return claimOwner;
+        },
+      };
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const winner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(0);
+    const loser = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(claimResults).toEqual([true, false]);
+    expect(transientHandoffFailures).toBe(1);
+    expect(fetchPage).toHaveBeenCalledOnce();
+    expect(values.size).toBe(1);
+    expect(winnerResult).not.toBeNull();
+    expect(winnerResult?.sources).toHaveLength(5);
+    expect(retryResult).toEqual(winnerResult);
+    expect({
+      winner: winnerResult?.tier ?? null,
+      loser: loserResult?.tier ?? null,
+      retry: retryResult?.tier ?? null,
+    }).toEqual({
+      winner: "ebay-sold",
+      loser: "ebay-sold",
+      retry: "ebay-sold",
+    });
+    expect(loserResult).toEqual(winnerResult);
+  });
+
   it("observes a winner stored during the loser final backoff interval", async () => {
     vi.useFakeTimers();
     const startedAt = Date.now();
