@@ -339,24 +339,51 @@ create function public.fail_mobile_ebay_oauth_session(
   p_lease_token uuid,
   p_failed_at timestamptz
 )
-returns void
+returns jsonb
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_session public.ebay_oauth_sessions%rowtype;
 begin
   if p_failed_at is null then
     raise exception using errcode = '22023', message = 'OAuth failure time is required';
+  end if;
+  select session.*
+  into v_session
+  from public.ebay_oauth_sessions session
+  where session.id = p_session_id
+  for update;
+  if not found then
+    return jsonb_build_object('kind', 'replayed', 'outcome', 'failed');
+  end if;
+  if v_session.user_id is distinct from p_expected_user_id then
+    return jsonb_build_object('kind', 'wrong_tenant');
+  end if;
+  if v_session.status in ('connected', 'declined', 'cancelled', 'expired', 'failed') then
+    return jsonb_build_object('kind', 'replayed', 'outcome', v_session.status);
+  end if;
+  if v_session.expires_at <= statement_timestamp() then
+    update public.ebay_oauth_sessions session
+    set status = 'expired',
+        completion_lease_token = null,
+        completion_started_at = null,
+        finished_at = statement_timestamp()
+    where session.id = p_session_id;
+    return jsonb_build_object('kind', 'replayed', 'outcome', 'expired');
+  end if;
+  if v_session.status <> 'completing'
+    or v_session.completion_lease_token is distinct from p_lease_token then
+    raise exception using errcode = '40001', message = 'OAuth callback lease expired';
   end if;
   update public.ebay_oauth_sessions session
   set status = 'failed',
       completion_lease_token = null,
       completion_started_at = null,
       finished_at = statement_timestamp()
-  where session.id = p_session_id
-    and session.user_id = p_expected_user_id
-    and session.status = 'completing'
-    and session.completion_lease_token = p_lease_token;
+  where session.id = p_session_id;
+  return jsonb_build_object('kind', 'finished', 'outcome', 'failed');
 end;
 $$;
 

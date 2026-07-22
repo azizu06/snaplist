@@ -507,6 +507,81 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
     );
   });
 
+  it("keeps DB expiry durable when a held provider exchange rejects late", async () => {
+    if (!reachable) return;
+    const session = await startSession(tenantBToken, randomUUID());
+    const sessionBody = await session.json();
+    const state = new URL(
+      sessionBody.data.authorizationUrl,
+    ).searchParams.get("state")!;
+    const providerCallsBefore = exchangeCode.mock.calls.length;
+    let rejectExchange!: (error: Error) => void;
+    const activeExchange = new Promise<never>((_resolve, reject) => {
+      rejectExchange = reject;
+    });
+    exchangeCode.mockImplementationOnce(() => activeExchange);
+    const callback = () => api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&code=late-rejected-provider-code`,
+      ),
+    );
+
+    const winner = callback();
+    await vi.waitFor(() => {
+      expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
+    });
+    const database = new Client({
+      connectionString: DATABASE_URL,
+      connectionTimeoutMillis: 2_000,
+    });
+    try {
+      await database.connect();
+      const expired = await database.query(
+        `update public.ebay_oauth_sessions
+         set expires_at = statement_timestamp() - interval '1 second'
+         where id = $1 and user_id = $2 and status = 'completing'`,
+        [sessionBody.data.sessionId, tenantBId],
+      );
+      expect(expired.rowCount).toBe(1);
+    } finally {
+      await database.end().catch(() => undefined);
+    }
+    rejectExchange(new Error("late provider rejection"));
+    const lateFailure = await winner;
+    const replay = await callback();
+
+    for (const response of [lateFailure, replay]) {
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        "https://snaplist.example/mobile/ebay/oauth?result=expired",
+      );
+    }
+    expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
+    const [{ data: connections, error: connectionError }, { data: rows, error }] =
+      await Promise.all([
+        admin.from("ebay_connections").select("user_id").eq("user_id", tenantBId),
+        admin
+          .from("ebay_oauth_sessions")
+          .select(
+            "status, completion_lease_token, completion_started_at, finished_at",
+          )
+          .eq("id", sessionBody.data.sessionId),
+      ]);
+    expect(connectionError).toBeNull();
+    expect(connections).toEqual([]);
+    expect(error).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows?.[0]).toMatchObject({
+      status: "expired",
+      completion_lease_token: null,
+      completion_started_at: null,
+    });
+    expect(rows?.[0].finished_at).not.toBeNull();
+    expect(JSON.stringify([lateFailure.headers, replay.headers])).not.toMatch(
+      /late-rejected-provider-code/,
+    );
+  });
+
   it("reclaims one abandoned callback lease after the bounded DB interval", async () => {
     if (!reachable) return;
     const session = await startSession(tenantBToken, randomUUID());

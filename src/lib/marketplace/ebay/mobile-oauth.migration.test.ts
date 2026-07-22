@@ -62,6 +62,32 @@ describe("mobile eBay OAuth migration authority", () => {
     );
   });
 
+  it("replays terminal or expired truth before a late provider failure", () => {
+    const fail = functionSql("fail_mobile_ebay_oauth_session");
+    const lock = fail.indexOf("for update");
+    const terminal = fail.indexOf(
+      "if v_session.status in ('connected', 'declined', 'cancelled', 'expired', 'failed')",
+    );
+    const expiry = fail.indexOf(
+      "if v_session.expires_at <= statement_timestamp()",
+    );
+    const failed = fail.indexOf("set status = 'failed'");
+
+    expect(lock).toBeGreaterThan(0);
+    expect(terminal).toBeGreaterThan(lock);
+    expect(expiry).toBeGreaterThan(terminal);
+    expect(expiry).toBeLessThan(failed);
+    expect(fail.slice(terminal, expiry)).toMatch(
+      /'kind', 'replayed', 'outcome', v_session\.status/i,
+    );
+    expect(fail.slice(expiry, failed)).toMatch(
+      /status = 'expired',[\s\S]*completion_lease_token = null,[\s\S]*completion_started_at = null,[\s\S]*'kind', 'replayed', 'outcome', 'expired'/i,
+    );
+    expect(fail.slice(failed)).toMatch(
+      /'kind', 'finished', 'outcome', 'failed'/i,
+    );
+  });
+
   it("keeps the six RPCs hardened and narrowly granted", () => {
     expect(
       migration.match(/language plpgsql\s+security definer\s+set search_path = ''/gi),

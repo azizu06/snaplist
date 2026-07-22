@@ -83,7 +83,10 @@ export interface MobileEbayOauthSessionStore {
     userId: string;
     leaseToken: string;
     failedAt: string;
-  }): Promise<void>;
+  }): Promise<
+    | { kind: "finished" | "replayed"; outcome: MobileEbayOauthOutcome }
+    | { kind: "wrong_tenant" }
+  >;
 }
 
 export interface CreateMobileEbayOauthSessionInput {
@@ -371,13 +374,24 @@ export function createMobileEbayOauthOperations(input: {
             ),
           };
         } catch {
-          await input.store.failSession({
-            sessionId: session.sessionId,
-            userId: session.userId,
-            leaseToken: begin.leaseToken,
-            failedAt: new Date(now()).toISOString(),
-          }).catch(() => undefined);
-          return { redirectUrl: mobileReturnUrl(env, "failed") };
+          try {
+            const failure = await input.store.failSession({
+              sessionId: session.sessionId,
+              userId: session.userId,
+              leaseToken: begin.leaseToken,
+              failedAt: new Date(now()).toISOString(),
+            });
+            return {
+              redirectUrl: mobileReturnUrl(
+                env,
+                failure.kind === "wrong_tenant"
+                  ? "wrong_tenant"
+                  : failure.outcome,
+              ),
+            };
+          } catch {
+            return { redirectUrl: mobileReturnUrl(env, "failed") };
+          }
         }
       }
       const finish = await input.store.finishSession({
