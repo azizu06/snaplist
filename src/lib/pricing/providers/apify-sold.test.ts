@@ -716,6 +716,58 @@ describe("createApifySoldPricingProvider", () => {
     }
   });
 
+  it("observes an exact owner committed during the final backoff interval", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      let claimOwner: string | null = null;
+      let stored: ApifySoldComp[] | null = null;
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => stored,
+        set: async (_key, value) => {
+          stored = value;
+        },
+        claim: (_key, _signal, ownerToken) => {
+          setTimeout(() => {
+            claimOwner = ownerToken ?? "legacy-owner";
+          }, 2_400);
+          return new Promise<boolean>(() => undefined);
+        },
+        getClaimOwner: async () => claimOwner,
+      };
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      const startedAt = Date.now();
+      let settledAt: number | null = null;
+      const result = provider.price(SIGNAL).then((value) => {
+        settledAt = Date.now();
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settledAt).not.toBeNull();
+      expect(settledAt! - startedAt).toBeLessThanOrEqual(2_500);
+      expect(runActor).toHaveBeenCalledTimes(1);
+      await expect(result).resolves.not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails soft by the pricing deadline when the winner-result store never settles", async () => {
     vi.useFakeTimers();
     try {

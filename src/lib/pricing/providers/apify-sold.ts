@@ -631,9 +631,20 @@ export function createApifySoldPricingProvider(
 
           const remainingMs = pricingDeadline - Date.now();
           if (remainingMs <= 0) break;
+          const finalReadAllowanceMs =
+            APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS +
+            APIFY_SOLD_DEADLINE_MARGIN_MS;
+          if (remainingMs <= finalReadAllowanceMs) {
+            await delayBeforeApifyPricingDeadline(
+              Number.MAX_SAFE_INTEGER,
+              pricingDeadline,
+              cancellation.signal,
+            );
+            break;
+          }
           if (
             !(await delayBeforeApifyPricingDeadline(
-              Math.min(delayMs, remainingMs),
+              Math.min(delayMs, remainingMs - finalReadAllowanceMs),
               pricingDeadline,
               cancellation.signal,
             ))
