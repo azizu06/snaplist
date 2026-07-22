@@ -68,8 +68,9 @@ call live eBay.
      for the legacy Settings callback. Register a separate Sandbox RuName whose
      auth-accepted URL is `https://<host>/v1/ebay/oauth/callback` and set it as
      `EBAY_MOBILE_RU_NAME`; the mobile route fails closed if this is absent. Also
-     set the HTTPS app universal link as `EBAY_MOBILE_OAUTH_RETURN_URL` and one
-     stable `EBAY_TOKEN_ENCRYPTION_KEY`. In Settings, choose **Connect
+     set the HTTPS app universal link as `EBAY_MOBILE_OAUTH_RETURN_URL`; it
+     must contain neither credentials nor a fragment. Set one stable
+     `EBAY_TOKEN_ENCRYPTION_KEY`. In Settings, choose **Connect
      eBay** and authorize the Sandbox seller. The flow requests inventory,
      identity/account-read, the traditional base, and `commerce.message` scopes;
      the encrypted per-user grant is used for publish, reprice, and messaging.

@@ -117,17 +117,29 @@ export interface MobileEbayOauthOperations {
   }): Promise<{ redirectUrl: string }>;
 }
 
-function mobileReturnUrl(env: Env, result: string): string {
+function validatedMobileReturnUrl(env: Env): URL {
   const configured = env.EBAY_MOBILE_OAUTH_RETURN_URL;
   if (!configured) {
     throw new Error("EBAY_MOBILE_OAUTH_RETURN_URL is not configured.");
   }
-  const url = new URL(configured);
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw new Error(
+      "EBAY_MOBILE_OAUTH_RETURN_URL must be an HTTPS universal link without credentials or a fragment.",
+    );
+  }
   if (url.protocol !== "https:" || url.username || url.password || url.hash) {
     throw new Error(
       "EBAY_MOBILE_OAUTH_RETURN_URL must be an HTTPS universal link without credentials or a fragment.",
     );
   }
+  return url;
+}
+
+function mobileReturnUrl(env: Env, result: string): string {
+  const url = validatedMobileReturnUrl(env);
   url.searchParams.set("result", result);
   return url.toString();
 }
@@ -277,7 +289,9 @@ export function createMobileEbayOauthOperations(input: {
 
   return {
     async createSession({ userId, bearerToken, idempotencyKey }) {
-      const env = mobileProviderEnv(readEnv());
+      const configuredEnv = readEnv();
+      validatedMobileReturnUrl(configuredEnv);
+      const env = mobileProviderEnv(configuredEnv);
       assertSandboxOnly(env);
       const stored = await input.store.createOrReplaySession({
         proposedSessionId: nextUUID(),
@@ -293,6 +307,7 @@ export function createMobileEbayOauthOperations(input: {
     },
     async completeCallback({ state, code, error }) {
       const configuredEnv = readEnv();
+      validatedMobileReturnUrl(configuredEnv);
       let env: Env;
       try {
         env = mobileProviderEnv(configuredEnv);

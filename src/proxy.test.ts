@@ -62,6 +62,25 @@ describe("auth proxy", () => {
     expect(doesProxyMatch("/dashboard")).toBe(true);
   });
 
+  it("lets only the exact eBay OAuth callback bypass cookie authentication", async () => {
+    expect(doesProxyMatch("/v1/ebay/oauth/callback")).toBe(false);
+    expect(doesProxyMatch("/v1/ebay/oauth/sessions")).toBe(true);
+    expect(doesProxyMatch("/v1/ebay/oauth/callback/")).toBe(true);
+    expect(doesProxyMatch("/v1/ebay/oauth/callback/extra")).toBe(true);
+
+    const protectedResponse = await proxy(
+      new NextRequest("https://snaplist.test/v1/ebay/oauth/sessions"),
+      {} as NextFetchEvent,
+    );
+    if (!protectedResponse) {
+      throw new Error("Expected the proxy to return a response");
+    }
+    expect(protectedResponse.status).toBe(307);
+    expect(protectedResponse.headers.get("location")).toBe(
+      "https://snaplist.test/login?next=%2Fv1%2Febay%2Foauth%2Fsessions",
+    );
+  });
+
   it("lets the exact native item pricing route own bearer authentication without changing web login", async () => {
     const itemId = "22222222-2222-4222-8222-222222222222";
 
