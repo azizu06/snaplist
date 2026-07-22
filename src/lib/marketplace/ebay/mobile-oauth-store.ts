@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   createMobileEbayOauthOperations,
   type MobileEbayOauthSessionStore,
+  type MobileEbayOauthSessionStatus,
 } from "./mobile-oauth";
 
 type JsonRecord = Record<string, unknown>;
@@ -24,6 +25,24 @@ function requiredString(
     throw new Error(`${context}: invalid ${field}`);
   }
   return value;
+}
+
+function requiredSessionStatus(
+  value: unknown,
+  context: string,
+): MobileEbayOauthSessionStatus {
+  if (![
+    "pending",
+    "completing",
+    "connected",
+    "declined",
+    "cancelled",
+    "expired",
+    "failed",
+  ].includes(value as string)) {
+    throw new Error(`${context}: invalid status`);
+  }
+  return value as MobileEbayOauthSessionStatus;
 }
 
 function rpcFailure(context: string, error: { message: string } | null): void {
@@ -108,6 +127,10 @@ export function createSupabaseMobileEbayOauthSessionStore(
           result.expires_at,
           "Failed to read eBay OAuth session",
           "expires_at",
+        ),
+        status: requiredSessionStatus(
+          result.status,
+          "Failed to read eBay OAuth session",
         ),
       };
     },
