@@ -1,131 +1,4 @@
-create table public.ebay_oauth_sessions (
-  id uuid primary key,
-  user_id text not null,
-  idempotency_key uuid not null,
-  status text not null default 'pending'
-    check (status in (
-      'pending',
-      'completing',
-      'connected',
-      'declined',
-      'cancelled',
-      'expired',
-      'failed'
-    )),
-  expires_at timestamptz not null,
-  completion_lease_token uuid,
-  completion_started_at timestamptz,
-  finished_at timestamptz,
-  created_at timestamptz not null default statement_timestamp(),
-  unique (user_id, idempotency_key),
-  check (
-    (status = 'completing') =
-      (completion_lease_token is not null and completion_started_at is not null)
-  ),
-  check (
-    (status in ('connected', 'declined', 'cancelled', 'expired', 'failed')) =
-      (finished_at is not null)
-  )
-);
-
-comment on table public.ebay_oauth_sessions is
-  'Short-lived, tenant-bound, one-time mobile eBay OAuth state. Provider grants are never stored here.';
-
-create index ebay_oauth_sessions_expiry_idx
-  on public.ebay_oauth_sessions (expires_at);
-
-alter table public.ebay_oauth_sessions enable row level security;
-revoke all on table public.ebay_oauth_sessions from public, anon, authenticated;
-grant select, delete on table public.ebay_oauth_sessions to service_role;
-
-create function public.create_mobile_ebay_oauth_session(
-  p_proposed_session_id uuid,
-  p_idempotency_key uuid
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_user_id text := public.clerk_user_id();
-  v_api_key text := coalesce(
-    (nullif(current_setting('request.headers', true), '')::jsonb)->>'apikey',
-    ''
-  );
-  v_session public.ebay_oauth_sessions%rowtype;
-begin
-  if coalesce(auth.jwt()->>'role', '') <> 'authenticated'
-    or nullif(btrim(v_user_id), '') is null then
-    raise exception using errcode = '42501', message = 'Seller authorization is required';
-  end if;
-  if v_api_key not like 'sb_secret_%' then
-    raise exception using errcode = '42501', message = 'Server API authorization is required';
-  end if;
-  insert into public.ebay_oauth_sessions (
-    id,
-    user_id,
-    idempotency_key,
-    expires_at
-  ) values (
-    p_proposed_session_id,
-    v_user_id,
-    p_idempotency_key,
-    statement_timestamp() + interval '10 minutes'
-  )
-  on conflict (user_id, idempotency_key) do update
-  set idempotency_key = excluded.idempotency_key
-  returning * into v_session;
-
-  return jsonb_build_object(
-    'session_id', v_session.id,
-    'user_id', v_session.user_id,
-    'expires_at', v_session.expires_at,
-    'kind', case when v_session.id = p_proposed_session_id then 'created' else 'replayed' end
-  );
-end;
-$$;
-
-revoke all on function public.create_mobile_ebay_oauth_session(
-  uuid, uuid
-) from public, anon, service_role;
-grant execute on function public.create_mobile_ebay_oauth_session(
-  uuid, uuid
-) to authenticated;
-
-create function public.read_mobile_ebay_oauth_session(
-  p_session_id uuid
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_session public.ebay_oauth_sessions%rowtype;
-begin
-  select session.*
-  into v_session
-  from public.ebay_oauth_sessions session
-  where session.id = p_session_id;
-  if not found then
-    return null;
-  end if;
-  return jsonb_build_object(
-    'session_id', v_session.id,
-    'user_id', v_session.user_id,
-    'expires_at', v_session.expires_at,
-    'status', v_session.status
-  );
-end;
-$$;
-
-revoke all on function public.read_mobile_ebay_oauth_session(uuid)
-  from public, anon, authenticated;
-grant execute on function public.read_mobile_ebay_oauth_session(uuid)
-  to service_role;
-
-create function public.finish_mobile_ebay_oauth_session(
+create or replace function public.finish_mobile_ebay_oauth_session(
   p_session_id uuid,
   p_expected_user_id text,
   p_outcome text,
@@ -192,7 +65,7 @@ grant execute on function public.finish_mobile_ebay_oauth_session(
   uuid, text, text, timestamptz
 ) to service_role;
 
-create function public.begin_mobile_ebay_oauth_session(
+create or replace function public.begin_mobile_ebay_oauth_session(
   p_session_id uuid,
   p_expected_user_id text,
   p_started_at timestamptz
@@ -255,7 +128,7 @@ grant execute on function public.begin_mobile_ebay_oauth_session(
   uuid, text, timestamptz
 ) to service_role;
 
-create function public.complete_mobile_ebay_oauth_session(
+create or replace function public.complete_mobile_ebay_oauth_session(
   p_session_id uuid,
   p_expected_user_id text,
   p_lease_token uuid,
@@ -332,6 +205,10 @@ revoke all on function public.complete_mobile_ebay_oauth_session(
 grant execute on function public.complete_mobile_ebay_oauth_session(
   uuid, text, uuid, text, text, text, text, timestamptz, text[], timestamptz
 ) to service_role;
+
+drop function public.fail_mobile_ebay_oauth_session(
+  uuid, text, uuid, timestamptz
+);
 
 create function public.fail_mobile_ebay_oauth_session(
   p_session_id uuid,

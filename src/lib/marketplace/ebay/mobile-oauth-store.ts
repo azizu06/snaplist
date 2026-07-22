@@ -222,15 +222,43 @@ export function createSupabaseMobileEbayOauthSessionStore(
         },
       );
       rpcFailure("Failed to complete eBay OAuth callback", error);
-      const kind = record(data, "Failed to complete eBay OAuth callback").kind;
+      const result = record(data, "Failed to complete eBay OAuth callback");
+      const kind = result.kind;
       if (kind !== "connected" && kind !== "replayed" && kind !== "wrong_tenant") {
         throw new Error("Failed to complete eBay OAuth callback: invalid outcome");
+      }
+      if (kind === "replayed") {
+        const outcome = requiredString(
+          result.outcome,
+          "Failed to complete eBay OAuth callback",
+          "outcome",
+        );
+        if (![
+          "connected",
+          "declined",
+          "cancelled",
+          "expired",
+          "failed",
+        ].includes(outcome)) {
+          throw new Error(
+            "Failed to complete eBay OAuth callback: invalid replay outcome",
+          );
+        }
+        return {
+          kind,
+          outcome: outcome as
+            | "connected"
+            | "declined"
+            | "cancelled"
+            | "expired"
+            | "failed",
+        };
       }
       return { kind };
     },
 
     async failSession(sessionInput) {
-      const { error } = await serviceClient.rpc(
+      const { data, error } = await serviceClient.rpc(
         "fail_mobile_ebay_oauth_session",
         {
           p_session_id: sessionInput.sessionId,
@@ -240,6 +268,41 @@ export function createSupabaseMobileEbayOauthSessionStore(
         },
       );
       rpcFailure("Failed to fail eBay OAuth callback", error);
+      const result = record(data, "Failed to fail eBay OAuth callback");
+      const kind = result.kind;
+      if (
+        kind !== "finished"
+        && kind !== "replayed"
+        && kind !== "wrong_tenant"
+      ) {
+        throw new Error("Failed to fail eBay OAuth callback: invalid outcome");
+      }
+      if (kind === "wrong_tenant") return { kind };
+      const outcome = requiredString(
+        result.outcome,
+        "Failed to fail eBay OAuth callback",
+        "outcome",
+      );
+      if (![
+        "connected",
+        "declined",
+        "cancelled",
+        "expired",
+        "failed",
+      ].includes(outcome)) {
+        throw new Error(
+          "Failed to fail eBay OAuth callback: invalid replay outcome",
+        );
+      }
+      return {
+        kind,
+        outcome: outcome as
+          | "connected"
+          | "declined"
+          | "cancelled"
+          | "expired"
+          | "failed",
+      };
     },
   };
 
