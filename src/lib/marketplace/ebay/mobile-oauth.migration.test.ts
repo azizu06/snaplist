@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -12,12 +12,31 @@ const grantCorrection = readFileSync(
   ),
   "utf8",
 );
+const forwardRpcMigrationPath = resolve(
+  "supabase/migrations/20260722150000_forward_mobile_ebay_oauth_expiry_rpcs.sql",
+);
+const forwardRpcMigration = existsSync(forwardRpcMigrationPath)
+  ? readFileSync(forwardRpcMigrationPath, "utf8")
+  : "";
 
 function functionSql(name: string): string {
   const start = migration.indexOf(`create function public.${name}(`);
   if (start < 0) throw new Error(`Missing ${name}`);
   const next = migration.indexOf("\ncreate function public.", start + 1);
   return migration.slice(start, next < 0 ? undefined : next);
+}
+
+function functionDefinition(source: string, name: string): string {
+  const startMatch = new RegExp(
+    `create(?: or replace)? function public\\.${name}\\(`,
+    "i",
+  ).exec(source);
+  if (!startMatch) throw new Error(`Missing ${name}`);
+  const end = source.indexOf("\n$$;", startMatch.index);
+  if (end < 0) throw new Error(`Missing ${name} terminator`);
+  return source
+    .slice(startMatch.index, end + 4)
+    .replace(/^create or replace function/i, "create function");
 }
 
 describe("mobile eBay OAuth migration authority", () => {
@@ -116,5 +135,43 @@ describe("mobile eBay OAuth migration authority", () => {
     expect(migration).toMatch(
       /revoke all on table public\.ebay_oauth_sessions from public, anon, authenticated/i,
     );
+  });
+
+  it("forwards every corrected RPC into databases that recorded the parent migration", () => {
+    expect(forwardRpcMigration).not.toBe("");
+    expect(
+      forwardRpcMigration.match(
+        /create or replace function public\.(?:finish|begin|complete)_mobile_ebay_oauth_session\(/gi,
+      ),
+    ).toHaveLength(3);
+    expect(forwardRpcMigration).toMatch(
+      /drop function public\.fail_mobile_ebay_oauth_session\(\s*uuid, text, uuid, timestamptz\s*\);[\s\S]*create function public\.fail_mobile_ebay_oauth_session\(/i,
+    );
+    expect(
+      forwardRpcMigration.match(
+        /language plpgsql\s+security definer\s+set search_path = ''/gi,
+      ),
+    ).toHaveLength(4);
+    expect(
+      forwardRpcMigration.match(
+        /grant execute on function public\.(?:finish|begin|complete|fail)_mobile_ebay_oauth_session\([\s\S]*?to service_role;/gi,
+      ),
+    ).toHaveLength(4);
+    expect(forwardRpcMigration).toMatch(
+      /create or replace function public\.complete_mobile_ebay_oauth_session\([\s\S]*if v_session\.expires_at <= statement_timestamp\(\)[\s\S]*perform private\.save_ebay_connection_for_tenant\(/i,
+    );
+    expect(forwardRpcMigration).toMatch(
+      /create function public\.fail_mobile_ebay_oauth_session\([\s\S]*returns jsonb[\s\S]*for update;[\s\S]*if v_session\.status in \('connected', 'declined', 'cancelled', 'expired', 'failed'\)[\s\S]*if v_session\.expires_at <= statement_timestamp\(\)[\s\S]*set status = 'failed'/i,
+    );
+    for (const name of [
+      "finish_mobile_ebay_oauth_session",
+      "begin_mobile_ebay_oauth_session",
+      "complete_mobile_ebay_oauth_session",
+      "fail_mobile_ebay_oauth_session",
+    ]) {
+      expect(functionDefinition(forwardRpcMigration, name)).toBe(
+        functionDefinition(migration, name),
+      );
+    }
   });
 });
