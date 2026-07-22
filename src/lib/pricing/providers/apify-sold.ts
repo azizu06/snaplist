@@ -37,6 +37,34 @@ export const APIFY_SOLD_WAIT_SECS_DEFAULT = 60;
 export const APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT = 0.11;
 export const APIFY_SOLD_CIRCUIT_FAILURE_THRESHOLD_DEFAULT = 3;
 export const APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT = 60_000;
+const APIFY_SOLD_COORDINATION_ALLOWANCE_MS = 500;
+const APIFY_SOLD_PRICING_DEADLINE_EXCEEDED = Symbol(
+  "apify-sold-pricing-deadline-exceeded",
+);
+
+async function settleBeforeApifyPricingDeadline<T>(
+  startOperation: (signal: AbortSignal) => Promise<T>,
+  deadline: number,
+): Promise<T | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      startOperation(controller.signal),
+      new Promise<typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(APIFY_SOLD_PRICING_DEADLINE_EXCEEDED);
+          controller.abort();
+        }, remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export interface ApifySoldComp extends EbaySoldComp {
   isBestOfferAccepted?: boolean;
@@ -355,6 +383,9 @@ export function createApifySoldPricingProvider(
       APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT,
     ),
   );
+  const pricingWindowMs =
+    Math.max(timeoutSecs, waitSecs) * 1_000 * 2 +
+    APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
   const staleDays = positiveNumber(
     options.staleDays ?? process.env.EBAY_SOLD_STALE_DAYS,
     SOLD_STALE_DAYS_DEFAULT,
@@ -432,23 +463,52 @@ export function createApifySoldPricingProvider(
     });
   }
 
-  async function readCache(key: string): Promise<ApifySoldComp[] | null> {
+  async function readCache(
+    key: string,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
     if (!cache) return null;
     try {
-      return await cache.get(key);
+      const cacheRead = await settleBeforeApifyPricingDeadline(
+        (abortSignal) => cache.get(key, abortSignal),
+        pricingDeadline,
+      );
+      if (cacheRead === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cache_error", {
+          op: "get",
+          reason: "timeout",
+        });
+        return null;
+      }
+      return cacheRead;
     } catch {
       emitDiagnostic("pricing.apify_sold.cache_error", { op: "get", reason: "unavailable" });
       return null;
     }
   }
 
-  async function writeCache(key: string, comps: ApifySoldComp[]): Promise<void> {
-    if (!cache) return;
+  async function writeCache(
+    key: string,
+    comps: ApifySoldComp[],
+    pricingDeadline: number,
+  ): Promise<"settled" | "timed-out"> {
+    if (!cache) return "settled";
     try {
-      await cache.set(key, comps);
+      const storeResult = await settleBeforeApifyPricingDeadline(
+        (abortSignal) => cache.set(key, comps, abortSignal),
+        pricingDeadline,
+      );
+      if (storeResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cache_error", {
+          op: "set",
+          reason: "timeout",
+        });
+        return "timed-out";
+      }
     } catch {
       emitDiagnostic("pricing.apify_sold.cache_error", { op: "set", reason: "unavailable" });
     }
+    return "settled";
   }
 
   function recordFailure(reason: string): void {
@@ -462,9 +522,19 @@ export function createApifySoldPricingProvider(
   async function runBatch(
     query: string,
     maxItems: number,
+    pricingDeadline: number,
   ): Promise<ApifySoldComp[] | null> {
+    if (Date.now() >= pricingDeadline) return null;
     try {
-      const result = await runActor(requestFor(query, maxItems));
+      const actorResult = await settleBeforeApifyPricingDeadline(
+        () => runActor(requestFor(query, maxItems)),
+        pricingDeadline,
+      );
+      if (actorResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        recordFailure("request-timeout");
+        return null;
+      }
+      const result = actorResult;
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;
@@ -483,28 +553,40 @@ export function createApifySoldPricingProvider(
     key: string,
     query: string,
     signal: ItemSignal,
-  ): Promise<ApifySoldComp[]> {
-    const initial = await runBatch(query, APIFY_SOLD_INITIAL_RESULTS);
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
+    const initial = await runBatch(
+      query,
+      APIFY_SOLD_INITIAL_RESULTS,
+      pricingDeadline,
+    );
     if (initial == null) {
-      await writeCache(key, []);
-      return [];
+      return (await writeCache(key, [], pricingDeadline)) === "timed-out"
+        ? null
+        : [];
     }
 
     let combined = normalizeEbaySoldCompUrls(initial);
     const initialEvidence = selectSoldCompEvidence(combined, signal);
     if (initialEvidence.anchors.length < APIFY_SOLD_EXPANSION_THRESHOLD) {
-      const expanded = await runBatch(query, APIFY_SOLD_MAX_RESULTS_DEFAULT);
+      const expanded = await runBatch(
+        query,
+        APIFY_SOLD_MAX_RESULTS_DEFAULT,
+        pricingDeadline,
+      );
       if (expanded != null) {
         combined = normalizeEbaySoldCompUrls([...expanded, ...combined]);
       }
     }
-    await writeCache(key, combined);
-    return combined;
+    return (await writeCache(key, combined, pricingDeadline)) === "timed-out"
+      ? null
+      : combined;
   }
 
   async function loadComps(
     query: string,
     signal: ItemSignal,
+    pricingDeadline: number,
   ): Promise<ApifySoldComp[] | null> {
     if (!cache || !claimCostFence) {
       emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
@@ -515,7 +597,17 @@ export function createApifySoldPricingProvider(
     const key = cacheKey(query, signal);
     let cached: ApifySoldComp[] | null;
     try {
-      cached = await cache.get(key);
+      const cacheRead = await settleBeforeApifyPricingDeadline(
+        (abortSignal) => cache.get(key, abortSignal),
+        pricingDeadline,
+      );
+      if (cacheRead === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "cache-read-timeout",
+        });
+        return null;
+      }
+      cached = cacheRead;
     } catch {
       emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
         reason: "cache-read-failed",
@@ -533,11 +625,33 @@ export function createApifySoldPricingProvider(
     }
 
     const existing = inFlight.get(key);
-    if (existing) return existing;
+    if (existing) {
+      const joined = await settleBeforeApifyPricingDeadline(
+        () => existing,
+        pricingDeadline,
+      );
+      if (joined === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "in-flight-timeout",
+        });
+        return null;
+      }
+      return joined;
+    }
     const pending = (async () => {
       let claimed: boolean;
       try {
-        claimed = await claimCostFence(key);
+        const claimResult = await settleBeforeApifyPricingDeadline(
+          (abortSignal) => claimCostFence(key, abortSignal),
+          pricingDeadline,
+        );
+        if (claimResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+          emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+            reason: "claim-timeout",
+          });
+          return null;
+        }
+        claimed = claimResult;
       } catch {
         emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
           reason: "claim-failed",
@@ -545,9 +659,9 @@ export function createApifySoldPricingProvider(
         return null;
       }
       if (!claimed) {
-        return readCache(key);
+        return readCache(key, pricingDeadline);
       }
-      return fetchAndCache(key, query, signal);
+      return fetchAndCache(key, query, signal, pricingDeadline);
     })().finally(() => {
       inFlight.delete(key);
     });
@@ -564,7 +678,8 @@ export function createApifySoldPricingProvider(
       if (!active) return null;
       const query = queryFor(signal);
       if (!query) return null;
-      const comps = await loadComps(query, signal);
+      const pricingDeadline = Date.now() + pricingWindowMs;
+      const comps = await loadComps(query, signal, pricingDeadline);
       if (comps == null) return null;
 
       const normalizedComps = normalizeEbaySoldCompUrls(comps);
