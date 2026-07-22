@@ -1186,8 +1186,14 @@ function createEbaySoldPricingProviderInternal(
       if (delayMs > 0) {
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) break;
+        // Do not let exponential backoff consume the entire handoff window.
+        // Waking halfway through the remaining budget leaves a bounded cache
+        // observation that can see evidence stored during the final interval.
         await new Promise<void>((resolve) =>
-          setTimeout(resolve, Math.min(delayMs, remainingMs)),
+          setTimeout(
+            resolve,
+            Math.min(delayMs, Math.max(1, Math.floor(remainingMs / 2))),
+          ),
         );
       }
       try {
