@@ -642,6 +642,18 @@ describe("mobile API v1 provider-neutral handler", () => {
     ];
     const getSession = vi.fn(async (sessionId: string) =>
       rows.get(sessionId) ?? null);
+    const beginSession = vi.fn(async () => ({
+      kind: "wrong_tenant" as const,
+    }));
+    const completeSession = vi.fn(async () => ({
+      kind: "wrong_tenant" as const,
+    }));
+    const failSession = vi.fn(async () => ({
+      kind: "finished" as const,
+      outcome: "failed" as const,
+    }));
+    const exchangeCode = vi.fn();
+    const fetchIdentity = vi.fn();
     const ebayOauth = createMobileEbayOauthOperations({
       store: {
         async createOrReplaySession(input) {
@@ -663,15 +675,9 @@ describe("mobile API v1 provider-neutral handler", () => {
         },
         getSession,
         finishSession,
-        async beginSession() {
-          return { kind: "wrong_tenant" as const };
-        },
-        async completeSession() {
-          return { kind: "wrong_tenant" as const };
-        },
-        async failSession() {
-          return { kind: "finished" as const, outcome: "failed" as const };
-        },
+        beginSession,
+        completeSession,
+        failSession,
       },
       env: () => ({
         EBAY_CLIENT_ID: "sandbox-client-id",
@@ -683,6 +689,8 @@ describe("mobile API v1 provider-neutral handler", () => {
       }),
       now: () => Date.parse("2026-07-22T18:00:00.000Z"),
       randomUUID: () => generatedIds.shift()!,
+      exchangeCode,
+      fetchIdentity,
     });
     const api = handler({
       authenticate: vi.fn(async (token: string) => ({
@@ -810,6 +818,18 @@ describe("mobile API v1 provider-neutral handler", () => {
         `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(`${mixedPayload}.forged-signature`)}&code=provider-code`,
       ),
     );
+    const normalizedWhitespaceResponses = await Promise.all([
+      ["percent-encoded space", `${encodeURIComponent(tenantAState)}%20`],
+      ["raw plus", `${encodeURIComponent(tenantAState)}+`],
+      ["percent-encoded tab", `${encodeURIComponent(tenantAState)}%09`],
+    ].map(async ([name, stateQuery]) => ({
+      name,
+      response: await api(
+        new Request(
+          `http://localhost/v1/ebay/oauth/callback?state=${stateQuery}&code=provider-code`,
+        ),
+      ),
+    })));
 
     expect(malformed.status).toBe(303);
     expect(malformed.headers.get("location")).toBe(
@@ -825,7 +845,19 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(forged.headers.get("location")).toBe(
       "https://snaplist.example/mobile/ebay/oauth?result=invalid_state",
     );
+    for (const { name, response: invalidResponse } of normalizedWhitespaceResponses) {
+      expect(invalidResponse.status, name).toBe(303);
+      expect(invalidResponse.headers.get("location"), name).toBe(
+        "https://snaplist.example/mobile/ebay/oauth?result=invalid_state",
+      );
+    }
     expect(getSession).not.toHaveBeenCalled();
+    expect(beginSession).not.toHaveBeenCalled();
+    expect(finishSession).not.toHaveBeenCalled();
+    expect(exchangeCode).not.toHaveBeenCalled();
+    expect(fetchIdentity).not.toHaveBeenCalled();
+    expect(completeSession).not.toHaveBeenCalled();
+    expect(failSession).not.toHaveBeenCalled();
 
     const response = await api(
       new Request(
@@ -838,6 +870,7 @@ describe("mobile API v1 provider-neutral handler", () => {
       "https://snaplist.example/mobile/ebay/oauth?result=wrong_tenant",
     );
     expect(getSession).toHaveBeenCalledTimes(1);
+    expect(beginSession).not.toHaveBeenCalled();
     expect(finishSession).not.toHaveBeenCalled();
   });
 
