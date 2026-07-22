@@ -549,10 +549,6 @@ export function createApifySoldPricingProvider(
     pricingDeadline: number,
   ): Promise<"stored" | "unconfirmed"> {
     if (!cache) return "stored";
-    const reconciliationDeadline = Math.min(
-      pricingDeadline,
-      Date.now() + APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
-    );
     const cancellation = new AbortController();
     let storeFailureLogged = false;
     try {
@@ -576,10 +572,12 @@ export function createApifySoldPricingProvider(
       );
 
       const observationOutcome = (async (): Promise<"stored" | "unconfirmed"> => {
+        let pollMs = APIFY_SOLD_WINNER_STORE_POLL_MS;
+        let observationFailureLogged = false;
         if (
           !(await delayBeforeApifyPricingDeadline(
             0,
-            reconciliationDeadline,
+            pricingDeadline,
             cancellation.signal,
           ))
         ) {
@@ -590,7 +588,7 @@ export function createApifySoldPricingProvider(
           try {
             const observed = await settleBeforeApifyPricingDeadline(
               (abortSignal) => cache.get(key, abortSignal),
-              reconciliationDeadline,
+              pricingDeadline,
               cancellation.signal,
             );
             if (observed === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
@@ -600,27 +598,25 @@ export function createApifySoldPricingProvider(
               return "stored";
             }
           } catch {
-            emitDiagnostic("pricing.apify_sold.cache_error", {
-              op: "get",
-              reason: "unavailable",
-            });
-            await delayBeforeApifyPricingDeadline(
-              Number.MAX_SAFE_INTEGER,
-              reconciliationDeadline,
-              cancellation.signal,
-            );
-            return "unconfirmed";
+            if (!observationFailureLogged) {
+              observationFailureLogged = true;
+              emitDiagnostic("pricing.apify_sold.cache_error", {
+                op: "get",
+                reason: "unavailable",
+              });
+            }
           }
 
           if (
             !(await delayBeforeApifyPricingDeadline(
-              APIFY_SOLD_WINNER_STORE_POLL_MS,
-              reconciliationDeadline,
+              pollMs,
+              pricingDeadline,
               cancellation.signal,
             ))
           ) {
             return "unconfirmed";
           }
+          pollMs = Math.min(pollMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
         }
         return "unconfirmed";
       })();
