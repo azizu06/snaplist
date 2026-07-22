@@ -400,31 +400,27 @@ export function createMobileEbayOauthOperations(input: {
               ),
             };
           } catch {
-            try {
-              const canonical = await input.store.getSession(session.sessionId);
-              if (!canonical) {
-                return {
-                  redirectUrl: mobileReturnUrl(env, "invalid_state"),
-                };
-              }
-              if (canonical.userId !== session.userId) {
-                return {
-                  redirectUrl: mobileReturnUrl(env, "wrong_tenant"),
-                };
-              }
+            const canonical = await input.store.getSession(session.sessionId);
+            if (!canonical) {
               return {
-                redirectUrl: mobileReturnUrl(
-                  env,
-                  canonical.status === "completing"
-                    ? "in_progress"
-                    : canonical.status === "pending"
-                      ? "failed"
-                      : canonical.status,
-                ),
+                redirectUrl: mobileReturnUrl(env, "invalid_state"),
               };
-            } catch {
-              return { redirectUrl: mobileReturnUrl(env, "failed") };
             }
+            if (canonical.userId !== session.userId) {
+              return {
+                redirectUrl: mobileReturnUrl(env, "wrong_tenant"),
+              };
+            }
+            return {
+              redirectUrl: mobileReturnUrl(
+                env,
+                canonical.status === "completing"
+                  ? "in_progress"
+                  : canonical.status === "pending"
+                    ? "failed"
+                    : canonical.status,
+              ),
+            };
           }
         }
       }
