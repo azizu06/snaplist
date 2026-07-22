@@ -274,6 +274,7 @@ async function settleMutationWithObservation<MutationResult, Observed>(
   observe: (signal: AbortSignal) => Promise<Observed | null>,
   accepts: (value: Observed) => boolean,
   deadline: number,
+  observeAfterMutationRejection = false,
 ): Promise<
   | ReconciledMutation<MutationResult, Observed>
   | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
@@ -283,7 +284,7 @@ async function settleMutationWithObservation<MutationResult, Observed>(
     | ReconciledMutation<MutationResult, Observed>
     | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
   try {
-    const mutationOutcome: Promise<Outcome> = settleBeforeCoordinationDeadline(
+    const mutationResponse: Promise<Outcome> = settleBeforeCoordinationDeadline(
       mutate,
       deadline,
       cancellation.signal,
@@ -293,6 +294,14 @@ async function settleMutationWithObservation<MutationResult, Observed>(
           ? EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
           : { kind: "mutation", value: value as MutationResult },
     );
+    const mutationOutcome = observeAfterMutationRejection
+      ? mutationResponse.catch(
+          // A rejected claim response is ambiguous: its owner token may already
+          // be durable. Keep the bounded observation in the race instead of
+          // letting this rejection win and cancel it.
+          () => new Promise<never>(() => undefined),
+        )
+      : mutationResponse;
     const observationOutcome: Promise<Outcome> = observeCommittedMutation(
       observe,
       accepts,
@@ -1542,6 +1551,7 @@ function createEbaySoldPricingProviderInternal(
                   (signal) => getSharedClaimOwner!(key, signal),
                   (owner) => owner === claimOwnerToken,
                   coordinationDeadline,
+                  true,
                 );
                 if (
                   claimResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
