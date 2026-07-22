@@ -102,6 +102,7 @@ describe("lean-MVP release retention contract", () => {
       "hosted-transcription-provider-copy",
       "seller-voice-transcript",
       "items",
+      "user-settings",
       "ebay-drafts",
       "export-packs",
       "pipeline-runs",

@@ -90,6 +90,18 @@
       }]
     },
     {
+      "id": "user-settings",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["account-erasure"],
+        "maximumRetention": "for the account lifetime, then no later than account-erasure completion",
+        "executor": "snaplist-account-erasure-capability",
+        "completionProof": "the tenant user_settings row is absent"
+      }]
+    },
+    {
       "id": "ebay-drafts",
       "releaseDatum": true,
       "dispositions": [{

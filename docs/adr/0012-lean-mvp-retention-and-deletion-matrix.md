@@ -21,8 +21,8 @@ be inferred from current code or historical policy.
 `docs/contracts/lean-mvp-retention-v1.json` is the only normative row-level retention authority. It
 covers local photos and voice, private Storage photos and raw voice, a possible hosted transcription
 copy, retained transcripts, items, eBay drafts, export packs, pipeline runs, pricing evidence,
-per-run telemetry, guest recovery, AI-item credits, eBay connections and publish receipts, Clerk
-identity, and Apple/RevenueCat references.
+per-run telemetry, tenant user settings, guest recovery, AI-item credits, eBay connections and
+publish receipts, Clerk identity, and Apple/RevenueCat references.
 
 Every release datum has exactly one disposition. A complete disposition names:
 
