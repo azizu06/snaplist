@@ -3,7 +3,7 @@
 - **Status:** Accepted; lean-MVP scope amended by issues #349/#350
 - **Date:** 2026-07-15; amended 2026-07-21
 - **Decision owners:** #166 (original native contract), #349 (Scan-to-Trophy-Wall redirection)
-- **Preserved dependencies:** ADR-0004, ADR-0007, ADR-0009
+- **Preserved dependencies:** ADR-0004, ADR-0007, ADR-0009, ADR-0012
 
 ## Context
 
@@ -53,7 +53,8 @@ reopens the same result; it never regenerates the listing as a side effect.
 
 The usable guest result remains encrypted and recoverable for 24 hours. Successful claim transfers
 ownership atomically. Expiry or deletion removes guest artifacts under the existing retention and
-cleanup contracts.
+cleanup contracts. ADR-0012 and `docs/contracts/lean-mvp-retention-v1.json` are the singular
+row-level authority for those deletion and retention dispositions.
 
 Adding, replacing, or removing a photo changes the photo set and requires a new run. Reordering is a
 request-affecting change and participates in request identity. Issue #352 owns the one-to-five mobile

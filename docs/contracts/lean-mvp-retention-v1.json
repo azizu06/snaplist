@@ -1,0 +1,262 @@
+{
+  "contract": "snaplist.lean-mvp-retention",
+  "version": 1,
+  "status": "release-blocked",
+  "ownerIssue": 383,
+  "data": [
+    {
+      "id": "local-intake-photos",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-local-client",
+        "deletionTriggers": ["seller-discards-intake", "matching-durable-acceptance-allows-local-cleanup", "local-recovery-window-expires"],
+        "maximumRetention": "24 hours from local intake capture",
+        "executor": "native-intake-cleanup-capability",
+        "completionProof": "protected photo files and their local intake references are absent"
+      }]
+    },
+    {
+      "id": "local-intake-voice",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-local-client",
+        "deletionTriggers": ["seller-deletes-or-replaces-voice", "seller-discards-intake", "matching-durable-acceptance-allows-local-cleanup", "local-recovery-window-expires"],
+        "maximumRetention": "24 hours from local intake capture",
+        "executor": "native-intake-cleanup-capability",
+        "completionProof": "protected voice file and its local intake reference are absent"
+      }]
+    },
+    {
+      "id": "private-storage-photos",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["uncommitted-staging-window-expires", "failed-or-canceled-item-becomes-unreferenced", "guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "24 hours for uncommitted staging and unclaimed guest recovery; otherwise while referenced by the retained item until item deletion or account erasure",
+        "executor": "snaplist-private-storage-cleanup-capability",
+        "completionProof": "durable cleanup job records success and every selected private object path is absent"
+      }]
+    },
+    {
+      "id": "private-storage-raw-voice",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["first-durable-terminal-transcription-outcome", "guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "24 hours after durable server acceptance",
+        "executor": "snaplist-private-storage-cleanup-capability",
+        "completionProof": "durable cleanup job records success and the raw voice object is absent"
+      }]
+    },
+    {
+      "id": "hosted-transcription-provider-copy",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "blocked",
+        "owner": "hosted-transcription-provider",
+        "deletionTriggers": ["provider-policy-or-approved-zero-retention-control"],
+        "maximumRetention": "unresolved until the selected provider current policy and approved controls are verified",
+        "executor": "unassigned-until-hosted-transcription-activation-review",
+        "completionProof": "provider policy citation and activation evidence for the selected retention control",
+        "blockerId": "hosted-transcription-retention"
+      }]
+    },
+    {
+      "id": "seller-voice-transcript",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["seller-deletes-voice-context", "guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "while attached to the retained item; never beyond the earliest applicable deletion trigger",
+        "executor": "snaplist-tenant-data-deletion-capability",
+        "completionProof": "transcript, seller_voice provenance, and language tag are absent from tenant data"
+      }]
+    },
+    {
+      "id": "items",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "while the seller retains the item; unclaimed guest item no longer than 24 hours",
+        "executor": "snaplist-tenant-data-deletion-capability",
+        "completionProof": "item row and item-owned mutable data are absent for that tenant"
+      }]
+    },
+    {
+      "id": "user-settings",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["account-erasure"],
+        "maximumRetention": "for the account lifetime, then no later than account-erasure completion",
+        "executor": "snaplist-account-erasure-capability",
+        "completionProof": "the tenant user_settings row is absent"
+      }]
+    },
+    {
+      "id": "ebay-drafts",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "while the associated unpublished item is retained; unclaimed guest draft no longer than 24 hours",
+        "executor": "snaplist-tenant-data-deletion-capability",
+        "completionProof": "SnapList-owned unpublished draft is absent for the associated item and tenant"
+      }]
+    },
+    {
+      "id": "export-packs",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["review-revision-invalidates-pack", "guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "until invalidated or while the associated item is retained; unclaimed guest pack no longer than 24 hours",
+        "executor": "snaplist-tenant-data-deletion-capability",
+        "completionProof": "prepared/shared pack payload and cached pack references are absent"
+      }]
+    },
+    {
+      "id": "pipeline-runs",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["terminal-operational-retention-expires", "guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "operational checkpoint and capture metadata 30 days after terminal outcome; remaining tenant run identity no later than item deletion or account erasure",
+        "executor": "snaplist-pipeline-retention-and-tenant-deletion-capabilities",
+        "completionProof": "retention checkpoint proves operational pruning and tenant deletion proves the selected run rows are absent"
+      }]
+    },
+    {
+      "id": "pricing-evidence",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "while the associated item and immutable pricing-evidence snapshot are retained; unclaimed guest evidence no longer than 24 hours",
+        "executor": "snaplist-tenant-data-deletion-capability",
+        "completionProof": "prediction logs, verified sold matches, source citations, and snapshot references are absent for the item"
+      }]
+    },
+    {
+      "id": "per-run-telemetry",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["guest-recovery-expires", "item-deletion", "account-erasure"],
+        "maximumRetention": "while linked to the retained item or run; unclaimed guest telemetry no longer than 24 hours",
+        "executor": "snaplist-tenant-data-deletion-capability",
+        "completionProof": "seller-, item-, and run-linked telemetry rows are absent; any surviving aggregate has no such identifiers"
+      }]
+    },
+    {
+      "id": "guest-recovery",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "guest-device-entitlement",
+        "deletionTriggers": ["successful-claim-transfers-ownership", "guest-recovery-expires", "guest-deletion"],
+        "maximumRetention": "24 hours after durable guest result acceptance unless atomically claimed sooner",
+        "executor": "guest-claim-or-expiry-capability-owned-by-issue-175",
+        "completionProof": "stable claimed outcome names the tenant owner or stable expired outcome proves guest artifacts were deleted"
+      }]
+    },
+    {
+      "id": "ai-item-credits",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["account-erasure-after-active-reservation-reconciliation"],
+        "maximumRetention": "for the account lifetime, then only until reservation settlement or restoration is durably reconciled for erasure",
+        "executor": "snaplist-account-erasure-capability",
+        "completionProof": "tenant credit reservations, ledger entries, and allowance periods are absent after reconciliation"
+      }]
+    },
+    {
+      "id": "ebay-connections",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "delete",
+        "owner": "seller-snaplist-tenant",
+        "deletionTriggers": ["seller-disconnects-ebay", "verified-ebay-account-deletion-notification", "account-erasure"],
+        "maximumRetention": "until the earliest disconnect, verified provider deletion notice, or account erasure completion",
+        "executor": "snaplist-ebay-connection-deletion-capability-owned-by-issue-17",
+        "completionProof": "generation-fenced connection row and encrypted refresh/access tokens are absent"
+      }]
+    },
+    {
+      "id": "ebay-publish-receipts",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "blocked",
+        "owner": "seller-snaplist-tenant-and-ebay-provider",
+        "deletionTriggers": ["item-deletion", "account-erasure", "verified-ebay-account-deletion-notification"],
+        "maximumRetention": "unresolved until legal record obligations and eBay deletion requirements are verified",
+        "executor": "unassigned-until-ebay-legal-provider-review",
+        "completionProof": "approved legal/provider rule identifies the SnapList receipt fields to delete or retain and distinguishes eBay-owned records",
+        "blockerId": "ebay-publish-receipt-obligations"
+      }]
+    },
+    {
+      "id": "clerk-identity",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "blocked",
+        "owner": "clerk-identity-provider",
+        "deletionTriggers": ["account-erasure"],
+        "maximumRetention": "unresolved until current Clerk deletion and retention behavior is verified",
+        "executor": "unassigned-until-clerk-account-deletion-review",
+        "completionProof": "provider deletion receipt or verified absence plus current policy evidence",
+        "blockerId": "clerk-identity-retention"
+      }]
+    },
+    {
+      "id": "apple-revenuecat-references",
+      "releaseDatum": true,
+      "dispositions": [{
+        "treatment": "blocked",
+        "owner": "snaplist-ledger-with-apple-and-revenuecat-provider-references",
+        "deletionTriggers": ["account-erasure-after-entitlement-reconciliation"],
+        "maximumRetention": "unresolved until Apple transaction, RevenueCat customer-reference, refund, tax, and legal record obligations are verified",
+        "executor": "unassigned-until-billing-legal-provider-review",
+        "completionProof": "approved rule identifies deletable SnapList mappings, any required retained reference, its duration, and provider-side evidence",
+        "blockerId": "apple-revenuecat-reference-obligations"
+      }]
+    }
+  ],
+  "blockers": [
+    {
+      "id": "hosted-transcription-retention",
+      "affectedData": ["hosted-transcription-provider-copy"],
+      "requiredEvidence": "current provider retention policy and approved zero-retention control evidence before activation"
+    },
+    {
+      "id": "ebay-publish-receipt-obligations",
+      "affectedData": ["ebay-publish-receipts"],
+      "requiredEvidence": "approved legal and eBay rule for SnapList publish receipts, external records, retention duration, and deletion proof"
+    },
+    {
+      "id": "clerk-identity-retention",
+      "affectedData": ["clerk-identity"],
+      "requiredEvidence": "current Clerk account deletion behavior, retention policy, and deletion proof"
+    },
+    {
+      "id": "apple-revenuecat-reference-obligations",
+      "affectedData": ["apple-revenuecat-references"],
+      "requiredEvidence": "approved Apple, RevenueCat, refund, tax, and legal rule with duration and provider-side proof"
+    }
+  ]
+}

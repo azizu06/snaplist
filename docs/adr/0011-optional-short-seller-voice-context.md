@@ -6,7 +6,7 @@
 - **Owned by:** issue #351
 - **Parent:** issue #349
 - **Coordinates with:** issue #350 (lean-MVP product authority) and issue #352 (photo-count contract)
-- **Related authority:** ADR-0002, ADR-0007, ADR-0008, and ADR-0009
+- **Related authority:** ADR-0002, ADR-0007, ADR-0008, ADR-0009, and ADR-0012
 
 ## Context
 
@@ -215,6 +215,10 @@ terminal transcription outcome (`transcribed`, `empty`, `unsupported`, `timed-ou
 in every case no later than 24 hours after durable acceptance. Cleanup must be durable and retryable;
 a failed delete cannot be reported as deleted. Raw audio is never copied into the item, listing,
 prediction log, evaluation corpus, analytics, or marketplace payload.
+
+ADR-0012 and `docs/contracts/lean-mvp-retention-v1.json` own the singular release matrix and
+completion-proof vocabulary; this voice ADR remains the behavior authority for the raw-audio and
+transcript boundaries that those rows encode.
 
 The bounded transcript, provenance, and canonical optional BCP-47 language tag may persist with the
 item. Guest claim transfers them with the same item; guest expiry deletes them. Deleting the voice
