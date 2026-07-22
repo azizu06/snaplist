@@ -19,7 +19,10 @@ import {
   buildEbaySoldProxyRequestUrl,
   resolveEbaySoldEgressConfig,
 } from "../ebay-sold-egress";
-import { selectSoldCompEvidence } from "../sold-comp-matcher";
+import {
+  selectSoldCompEvidence,
+  selectVerifiedSoldMatches,
+} from "../sold-comp-matcher";
 
 /**
  * Tier "ebay-sold" — a scraper over eBay's PUBLIC sold-listings pages (issue #56).
@@ -1141,18 +1144,21 @@ export function createEbaySoldPricingProvider(
       const normalizedComps = normalizeEbaySoldCompUrls(comps);
       const evidence = selectSoldCompEvidence(normalizedComps, signal);
       const relevant = evidence.anchors.map((entry) => entry.comp);
-      const evidenceWeights = new Map(
-        evidence.anchors.map((entry) => [entry.comp, entry.score]),
-      );
-
       // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
       // then recency-weight the suggested price toward more recent sales.
       const tNow = now?.();
       const fresh =
         tNow != null ? selectFreshComps(relevant, tNow, staleDays) : relevant;
-      if (fresh.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
+      const freshSet = new Set(fresh);
+      const retained = selectVerifiedSoldMatches(
+        evidence.anchors.filter(({ comp }) => freshSet.has(comp)),
+      );
+      if (retained.length < EBAY_SOLD_MIN_COMPS) return null; // too thin → decline
+      const evidenceWeights = new Map(
+        retained.map((entry) => [entry.comp, entry.score]),
+      );
       return synthesizeSoldResult(
-        fresh,
+        retained.map(({ comp }) => comp),
         {
           ...(tNow != null ? { now: tNow, halfLifeDays } : {}),
           evidenceWeight: (comp) => evidenceWeights.get(comp) ?? 1,

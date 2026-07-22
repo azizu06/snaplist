@@ -317,9 +317,9 @@ describe("pricing-evidence read projection", () => {
     expect(projection.chartBounds).toBeNull();
   });
 
-  it("fails closed when a persisted page exceeds the 60-row contract bound", () => {
+  it("fails closed when a persisted page contains a sixth verified sold match", () => {
     const oversized = row();
-    oversized.evidence = Array.from({ length: 61 }, (_, index) => ({
+    oversized.evidence = Array.from({ length: 6 }, (_, index) => ({
       ...oversized.evidence[0]!,
       id: `sale-${index}`,
     }));

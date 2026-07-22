@@ -157,7 +157,7 @@ export const priceResultSchema = z
      * tier resolved. Optional preserves non-sold and legacy provider results;
      * it is never reconstructed later from citation text.
      */
-    evidence: z.array(pricingEvidenceRecordSchema).max(60).optional(),
+    evidence: z.array(pricingEvidenceRecordSchema).max(5).optional(),
     /** Which tier produced this — a logged, confidence-bearing fact. */
     tier: pricingTierSchema,
     /**

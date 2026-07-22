@@ -5,6 +5,7 @@ import {
   priceResultSchema,
 } from "@/lib/pricing/types";
 import {
+  PRICING_EVIDENCE_MAX_ROWS,
   acceptedPricingEvidenceRecordSchema,
   persistedPriceResultSchema,
 } from "./snapshot";
@@ -35,7 +36,7 @@ export const pricingEvidenceSnapshotRowSchema = z
       })
       .strict(),
     price_result: persistedPriceResultSchema,
-    evidence: z.array(evidenceAsOfSchema).max(60),
+    evidence: z.array(evidenceAsOfSchema).max(PRICING_EVIDENCE_MAX_ROWS),
     evidence_as_of: isoDateTime,
     pipeline_runs: z
       .object({
@@ -73,7 +74,7 @@ export const pricingEvidenceProjectionSchema = z
     evidenceAgeDays: z.number().nonnegative(),
     isStale: z.boolean(),
     defaultWindow: z.enum(["60D", "90D"]),
-    comparables: z.array(evidenceAsOfSchema).max(60),
+    comparables: z.array(evidenceAsOfSchema).max(PRICING_EVIDENCE_MAX_ROWS),
     estimatedFees: z.number().nonnegative(),
     estimatedPayout: z.number().nonnegative(),
     chartBounds: z

@@ -16,6 +16,8 @@ Issue #200 adds a second retrieval strategy inside the same provider-neutral
 on any failure, thin matcher output, or open circuit, the public-page provider
 below remains the immediate fallback. Both strategies feed the same
 anchor/corroboration/reject matcher, freshness layer, and minimum-two-anchor gate.
+The recommendation and exposed evidence retain the same deterministically ranked,
+deduplicated set of at most five verified matches.
 
 The adapter is disabled unless both `APIFY_SOLD_ENABLED=true` and `APIFY_TOKEN`
 are present. The token is passed to the official Apify client only; it never
@@ -24,19 +26,24 @@ normalization keeps only canonical eBay URL, title, positive USD sold price,
 condition, sale date, and Best Offer disclosure. Seller fields, images, raw
 payload fields, malformed URLs/prices, non-USD rows, and duplicates are dropped.
 
-The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.18.3` and caps a
-run at 25 rows, $0.11, 55 seconds of Actor runtime, 60 seconds of client wait,
-two official-client post-run read retries, and no automatic Actor restart. The
-paid Actor-start request itself is never retried. These safety
-environment values can tighten but not raise the in-code ceilings. SnapList does
-not launch a second paid run after failure: it falls through. Successful empty
-results are cached because repeating a paid no-result run is not useful; cache
-misses for the same identity are coalesced across request-scoped providers sharing
-one cache object in the same runtime, and age decay/staleness are reapplied on every
-cache read. Actor failures also accumulate across those provider instances so the
-bounded circuit cannot reset on every request. Cross-runtime distributed
-coalescing and breaker state must be validated with the chosen shared-cache
-deployment before production activation.
+The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.18.3`. One logical
+pricing pass requests exactly 10 candidates first and makes one 20-candidate
+expansion only when fewer than three anchors survive the canonical matcher. A
+terminal initial failure falls through without expansion. Each request is capped
+at $0.11, 55 seconds of Actor runtime, 60 seconds of client wait, two
+official-client post-run read retries, and no automatic Actor restart. The paid
+Actor-start request itself is never retried. The remaining safety environment
+values can tighten but not raise the in-code ceilings.
+
+Terminal initial failures, completed empty results, and combined successful
+results are cached so retry or queue redelivery cannot add a third paid request
+when the shared cache is healthy. Cache misses for the same identity are
+coalesced across request-scoped providers sharing one cache object in the same
+runtime, and age decay/staleness are reapplied on every cache read. Actor failures
+also accumulate across those provider instances so the bounded circuit cannot
+reset on every request. Cross-runtime distributed coalescing and breaker state
+must be validated with the chosen shared-cache deployment before production
+activation.
 
 Production activation is not part of Issue #200. Leave the flag off until the
 owner approves a separate budget and validates current Actor schema/build/pricing

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -9,8 +9,24 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const boundedMatchesMigrationPath = join(
+  process.cwd(),
+  "supabase/migrations/20260721210000_bounded_verified_sold_matches.sql",
+);
+const boundedMatchesMigration = existsSync(boundedMatchesMigrationPath)
+  ? readFileSync(boundedMatchesMigrationPath, "utf8")
+  : "";
 
 describe("pricing-evidence snapshot migration", () => {
+  it("hard-bounds new persisted verified sold matches at five", () => {
+    expect(boundedMatchesMigration).toMatch(
+      /create or replace function private\.pricing_evidence_rows_coarse\(p_evidence jsonb\)[\s\S]*jsonb_array_length\(p_evidence\) > 5/i,
+    );
+    expect(boundedMatchesMigration).toMatch(
+      /revoke all on function private\.pricing_evidence_rows_coarse\(jsonb\)[\s\S]*from public, anon, authenticated, service_role/i,
+    );
+  });
+
   it("creates one run-bound tenant row with immutable authenticated access", () => {
     expect(migration).toMatch(/create table public\.pricing_evidence_snapshots/i);
     expect(migration).toMatch(/run_id uuid primary key/i);

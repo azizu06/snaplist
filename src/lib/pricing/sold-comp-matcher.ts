@@ -32,6 +32,12 @@ export type SoldCompMatchReason =
   | "accepted-price-unknown";
 
 export interface SoldCompCandidate {
+  /** Stable provider-neutral identity when the retrieval adapter exposes one. */
+  id?: string;
+  /** Canonical sold-listing URL; preferred as the stable ranking tie-break. */
+  url?: string;
+  /** Persisted/read-side alias for a canonical sold-listing URL. */
+  sourceUrl?: string;
   title?: string;
   price: number;
   condition?: string | null;
@@ -53,6 +59,59 @@ export interface SoldCompEvidence<T extends SoldCompCandidate = SoldCompCandidat
   anchors: SoldCompMatch<T>[];
   corroboration: SoldCompMatch<T>[];
   rejected: SoldCompMatch<T>[];
+}
+
+export const MAX_VERIFIED_SOLD_MATCHES = 5;
+
+function stableSoldCompKey(comp: SoldCompCandidate): string {
+  return (
+    comp.url ??
+    comp.sourceUrl ??
+    comp.id ??
+    [
+      normalizeComparableText(comp.title ?? ""),
+      comp.price,
+      normalizeComparableText(comp.condition ?? ""),
+      comp.soldAt ?? "",
+    ].join("|")
+  );
+}
+
+function compareVerifiedMatches<T extends SoldCompCandidate>(
+  left: SoldCompMatch<T>,
+  right: SoldCompMatch<T>,
+): number {
+  const leftKey = stableSoldCompKey(left.comp);
+  const rightKey = stableSoldCompKey(right.comp);
+  return (
+    right.score - left.score ||
+    (right.comp.soldAt ?? Number.NEGATIVE_INFINITY) -
+      (left.comp.soldAt ?? Number.NEGATIVE_INFINITY) ||
+    (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0)
+  );
+}
+
+/**
+ * Deduplicate and retain the strongest verified sold matches from one canonical
+ * matcher result. Ranking is match quality first, then recency, then a stable
+ * provider-neutral identity so retrieval order can never affect the projection.
+ */
+export function selectVerifiedSoldMatches<T extends SoldCompCandidate>(
+  matches: readonly SoldCompMatch<T>[],
+  limit = MAX_VERIFIED_SOLD_MATCHES,
+): SoldCompMatch<T>[] {
+  const bestByIdentity = new Map<string, SoldCompMatch<T>>();
+  for (const match of matches) {
+    if (match.classification !== "anchor") continue;
+    const key = stableSoldCompKey(match.comp);
+    const previous = bestByIdentity.get(key);
+    if (!previous || compareVerifiedMatches(match, previous) < 0) {
+      bestByIdentity.set(key, match);
+    }
+  }
+  return [...bestByIdentity.values()]
+    .sort(compareVerifiedMatches)
+    .slice(0, Math.max(0, Math.min(MAX_VERIFIED_SOLD_MATCHES, limit)));
 }
 
 const CONDITION_RANK: Partial<Record<SoldCompCondition, number>> = {

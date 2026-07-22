@@ -141,5 +141,8 @@ export function createDefaultPricer(
     createDepreciationPricingProvider(options.depreciation),
     createLlmOnlyPricingProvider(options.llmOnly),
   ]);
-  return (signal) => router.price(signal);
+  return async (signal) => {
+    const result = await router.price(signal);
+    return { ...result, evidence: result.evidence ?? [] };
+  };
 }

@@ -1,6 +1,6 @@
 begin;
 
-select plan(27);
+select plan(30);
 
 select ok(
   has_table_privilege('authenticated', 'public.pricing_evidence_snapshots', 'select'),
@@ -83,6 +83,44 @@ select ok(
       and conname = 'pricing_evidence_snapshots_listing_fkey'
   ),
   'snapshot is bound to its same-run listing'
+);
+select ok(
+  private.pricing_evidence_rows_coarse(
+    jsonb_build_array(
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb
+    )
+  ),
+  'five verified sold matches satisfy the database evidence bound'
+);
+select ok(
+  not private.pricing_evidence_rows_coarse(
+    jsonb_build_array(
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb,
+      '{}'::jsonb
+    )
+  ),
+  'a sixth verified sold match violates the database evidence bound'
+);
+select ok(
+  exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.pricing_evidence_snapshots'::regclass
+      and conname = 'pricing_evidence_snapshots_evidence_check'
+      and position(
+        'pricing_evidence_rows_coarse(evidence)'
+        in pg_get_constraintdef(oid)
+      ) > 0
+  ),
+  'the tenant-protected snapshot table enforces the bounded evidence validator'
 );
 
 select ok(

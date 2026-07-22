@@ -6,7 +6,7 @@ import {
 } from "@/lib/pricing/types";
 
 export const PRICING_EVIDENCE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
-export const PRICING_EVIDENCE_MAX_ROWS = 60;
+export const PRICING_EVIDENCE_MAX_ROWS = 5;
 
 export const persistedPriceResultSchema = priceResultSchema.refine(
   (result) => result.evidence === undefined,

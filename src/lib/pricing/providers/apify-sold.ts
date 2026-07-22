@@ -5,7 +5,10 @@ import {
   SOLD_HALFLIFE_DAYS_DEFAULT,
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
-import { selectSoldCompEvidence } from "../sold-comp-matcher";
+import {
+  selectSoldCompEvidence,
+  selectVerifiedSoldMatches,
+} from "../sold-comp-matcher";
 import type { ItemSignal, PriceResult, PricingProvider } from "../types";
 import { logEvent, type LogFields } from "../../observability";
 import {
@@ -20,7 +23,9 @@ import {
 /** The exact Caffein Dev Actor and build evaluated by issues #188/#198. */
 export const APIFY_SOLD_ACTOR_ID = "oTtB3VgfuE9GtxQt2";
 export const APIFY_SOLD_ACTOR_BUILD_DEFAULT = "1.18.3";
-export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 25;
+export const APIFY_SOLD_INITIAL_RESULTS = 10;
+export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 20;
+export const APIFY_SOLD_EXPANSION_THRESHOLD = 3;
 export const APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT = 90;
 export const APIFY_SOLD_REQUEST_RETRIES_DEFAULT = 2;
 export const APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT = 55;
@@ -122,7 +127,6 @@ export interface ApifySoldPricingProviderOptions {
   runActor?: RunApifySoldActor;
   actorId?: string;
   actorBuild?: string;
-  maxResults?: number;
   daysToScrape?: number;
   maxTotalChargeUsd?: number;
   timeoutSecs?: number;
@@ -316,13 +320,6 @@ export function createApifySoldPricingProvider(
     options.actorBuild?.trim() ||
     process.env.APIFY_SOLD_ACTOR_BUILD?.trim() ||
     APIFY_SOLD_ACTOR_BUILD_DEFAULT;
-  const maxResults = Math.min(
-    APIFY_SOLD_MAX_RESULTS_DEFAULT,
-    positiveInteger(
-      options.maxResults ?? process.env.APIFY_SOLD_MAX_RESULTS,
-      APIFY_SOLD_MAX_RESULTS_DEFAULT,
-    ),
-  );
   const daysToScrape = Math.min(
     180,
     positiveInteger(
@@ -387,13 +384,13 @@ export function createApifySoldPricingProvider(
 
   const queryFor = (signal: ItemSignal): string | null => buildSoldSearchQuery(signal);
 
-  function requestFor(query: string): ApifySoldRunRequest {
+  function requestFor(query: string, maxItems: number): ApifySoldRunRequest {
     return {
       actorId,
       build: actorBuild,
       input: {
         keywords: [query],
-        count: maxResults,
+        count: maxItems,
         daysToScrape,
         ebaySite: "ebay.com",
         sortOrder: "endedRecently",
@@ -401,7 +398,7 @@ export function createApifySoldPricingProvider(
         itemCondition: "any",
         includeCompletedListings: true,
       },
-      maxItems: maxResults,
+      maxItems,
       maxTotalChargeUsd,
       timeoutSecs,
       waitSecs,
@@ -411,7 +408,13 @@ export function createApifySoldPricingProvider(
   }
 
   function cacheKey(query: string): string {
-    return JSON.stringify({ actorId, actorBuild, query, maxResults, daysToScrape });
+    return JSON.stringify({
+      actorId,
+      actorBuild,
+      query,
+      retrievalPolicy: "initial-10-expand-20-v1",
+      daysToScrape,
+    });
   }
 
   async function readCache(key: string): Promise<ApifySoldComp[] | null> {
@@ -441,17 +444,19 @@ export function createApifySoldPricingProvider(
     }
   }
 
-  async function fetchAndCache(key: string, query: string): Promise<ApifySoldComp[] | null> {
+  async function runBatch(
+    query: string,
+    maxItems: number,
+  ): Promise<ApifySoldComp[] | null> {
     try {
-      const result = await runActor(requestFor(query));
+      const result = await runActor(requestFor(query, maxItems));
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;
       }
-      const comps = normalizeApifySoldItems(result.items, maxResults);
+      const comps = normalizeApifySoldItems(result.items, maxItems);
       circuit.consecutiveFailures = 0;
       circuit.openUntil = 0;
-      await writeCache(key, comps);
       return comps;
     } catch {
       recordFailure("request-failed");
@@ -459,7 +464,33 @@ export function createApifySoldPricingProvider(
     }
   }
 
-  async function loadComps(query: string): Promise<ApifySoldComp[] | null> {
+  async function fetchAndCache(
+    key: string,
+    query: string,
+    signal: ItemSignal,
+  ): Promise<ApifySoldComp[]> {
+    const initial = await runBatch(query, APIFY_SOLD_INITIAL_RESULTS);
+    if (initial == null) {
+      await writeCache(key, []);
+      return [];
+    }
+
+    let combined = normalizeEbaySoldCompUrls(initial);
+    const initialEvidence = selectSoldCompEvidence(combined, signal);
+    if (initialEvidence.anchors.length < APIFY_SOLD_EXPANSION_THRESHOLD) {
+      const expanded = await runBatch(query, APIFY_SOLD_MAX_RESULTS_DEFAULT);
+      if (expanded != null) {
+        combined = normalizeEbaySoldCompUrls([...expanded, ...combined]);
+      }
+    }
+    await writeCache(key, combined);
+    return combined;
+  }
+
+  async function loadComps(
+    query: string,
+    signal: ItemSignal,
+  ): Promise<ApifySoldComp[] | null> {
     const key = cacheKey(query);
     const cached = await readCache(key);
     if (cached != null) return cached;
@@ -474,7 +505,7 @@ export function createApifySoldPricingProvider(
 
     const existing = inFlight.get(key);
     if (existing) return existing;
-    const pending = fetchAndCache(key, query).finally(() => {
+    const pending = fetchAndCache(key, query, signal).finally(() => {
       inFlight.delete(key);
     });
     inFlight.set(key, pending);
@@ -490,18 +521,22 @@ export function createApifySoldPricingProvider(
       if (!active) return null;
       const query = queryFor(signal);
       if (!query) return null;
-      const comps = await loadComps(query);
+      const comps = await loadComps(query, signal);
       if (comps == null) return null;
 
       const normalizedComps = normalizeEbaySoldCompUrls(comps);
       const evidence = selectSoldCompEvidence(normalizedComps, signal);
-      const weights = new Map(evidence.anchors.map(({ comp, score }) => [comp, score]));
       const clock = now?.();
       const anchors = evidence.anchors.map(({ comp }) => comp);
       const fresh = clock == null ? anchors : selectFreshComps(anchors, clock, staleDays);
-      if (fresh.length < EBAY_SOLD_MIN_COMPS) return null;
+      const freshSet = new Set(fresh);
+      const retained = selectVerifiedSoldMatches(
+        evidence.anchors.filter(({ comp }) => freshSet.has(comp)),
+      );
+      if (retained.length < EBAY_SOLD_MIN_COMPS) return null;
+      const weights = new Map(retained.map(({ comp, score }) => [comp, score]));
 
-      return synthesizeSoldResult(fresh, {
+      return synthesizeSoldResult(retained.map(({ comp }) => comp), {
         ...(clock != null ? { now: clock, halfLifeDays } : {}),
         evidenceWeight: (comp) => weights.get(comp as ApifySoldComp) ?? 1,
       });

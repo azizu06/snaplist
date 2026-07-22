@@ -33,6 +33,7 @@ import {
   APIFY_SOLD_ACTOR_ID,
   APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT,
   APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT,
+  APIFY_SOLD_INITIAL_RESULTS,
   APIFY_SOLD_MAX_RESULTS_DEFAULT,
   APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT,
   APIFY_SOLD_REQUEST_RETRIES_DEFAULT,
@@ -229,6 +230,7 @@ describe("createApifySoldPricingProvider", () => {
         items: [
           rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "175" }),
           rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "185" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
         ],
       };
     };
@@ -248,7 +250,7 @@ describe("createApifySoldPricingProvider", () => {
     expect(requests[0]).toMatchObject({
       actorId: APIFY_SOLD_ACTOR_ID,
       build: APIFY_SOLD_ACTOR_BUILD_DEFAULT,
-      maxItems: APIFY_SOLD_MAX_RESULTS_DEFAULT,
+      maxItems: APIFY_SOLD_INITIAL_RESULTS,
       requestRetries: APIFY_SOLD_REQUEST_RETRIES_DEFAULT,
       restartOnError: false,
       timeoutSecs: APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT,
@@ -257,7 +259,7 @@ describe("createApifySoldPricingProvider", () => {
     });
     expect(requests[0].input).toMatchObject({
       keywords: ["Sony WH-1000XM4"],
-      count: APIFY_SOLD_MAX_RESULTS_DEFAULT,
+      count: APIFY_SOLD_INITIAL_RESULTS,
       daysToScrape: APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT,
       includeCompletedListings: true,
       itemCondition: "any",
@@ -370,11 +372,12 @@ describe("createApifySoldPricingProvider", () => {
     });
     await expect(emptyProvider.price(SIGNAL)).resolves.toBeNull();
     await expect(emptyProvider.price(SIGNAL)).resolves.toBeNull();
-    expect(emptyRun).toHaveBeenCalledTimes(1);
+    expect(emptyRun).toHaveBeenCalledTimes(2);
 
     const usableRun = successfulRun([
       rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
       rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+      rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
     ]);
     const usableProvider = createApifySoldPricingProvider({
       enabled: true,
@@ -387,7 +390,7 @@ describe("createApifySoldPricingProvider", () => {
     expect(usableRun).toHaveBeenCalledTimes(1);
   });
 
-  it("coalesces concurrent cache misses for the same identity into one Actor run", async () => {
+  it("coalesces concurrent cache misses into one bounded two-request pricing pass", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -414,10 +417,10 @@ describe("createApifySoldPricingProvider", () => {
     release();
     await Promise.all([first, second]);
 
-    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
-  it("coalesces concurrent misses across provider instances that share the production cache", async () => {
+  it("coalesces concurrent misses across provider instances into one bounded pricing pass", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -451,7 +454,7 @@ describe("createApifySoldPricingProvider", () => {
     release();
     await Promise.all([first, second]);
 
-    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
   it("reapplies staleness on cached rows instead of treating the cache as authority", async () => {
@@ -472,7 +475,7 @@ describe("createApifySoldPricingProvider", () => {
     await expect(provider.price(SIGNAL)).resolves.not.toBeNull();
     now = Date.parse("2026-08-01T12:00:00.000Z");
     await expect(provider.price(SIGNAL)).resolves.toBeNull();
-    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
   it("bounds failures, opens a circuit, and falls through without leaking raw error text", async () => {
@@ -533,7 +536,7 @@ describe("createApifySoldPricingProvider", () => {
 
     now += 5_001;
     await expect(providerForRequest().price(SIGNAL)).resolves.toBeNull();
-    expect(runActor).toHaveBeenCalledTimes(3);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
   it("treats cache failures as misses/no-ops and still returns a usable result", async () => {
