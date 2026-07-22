@@ -1,0 +1,325 @@
+import {
+  createHash,
+  createHmac,
+  hkdfSync,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
+import type { EbayOauthSession } from "@/lib/mobile-api/contract";
+import {
+  encryptSecret,
+  parseEncryptionKey,
+} from "@/lib/crypto/secretbox";
+import { buildAuthorizeUrl, ebayApiBaseUrl } from "./oauth";
+import {
+  exchangeAuthorizationCode,
+  fetchEbayIdentity,
+  type EbayIdentity,
+  type EbayTokenGrant,
+} from "./oauth";
+
+type Env = Record<string, string | undefined>;
+
+export interface StoredMobileEbayOauthSession {
+  sessionId: string;
+  userId: string;
+  expiresAt: string;
+}
+
+export interface MobileEbayOauthSessionStore {
+  createOrReplaySession(input: {
+    proposedSessionId: string;
+    userId: string;
+    bearerToken: string;
+    idempotencyKey: string;
+    expiresAt: string;
+  }): Promise<StoredMobileEbayOauthSession>;
+  getSession(sessionId: string): Promise<StoredMobileEbayOauthSession | null>;
+  finishSession(input: {
+    sessionId: string;
+    userId: string;
+    outcome: "declined" | "cancelled" | "expired" | "failed";
+    finishedAt: string;
+  }): Promise<{ kind: "finished" | "replayed" | "wrong_tenant" }>;
+  beginSession(input: {
+    sessionId: string;
+    userId: string;
+    startedAt: string;
+  }): Promise<
+    | { kind: "claimed"; leaseToken: string }
+    | { kind: "replayed"; outcome: "connected" | "declined" | "cancelled" | "expired" | "failed" }
+    | { kind: "wrong_tenant" }
+    | { kind: "expired" }
+  >;
+  completeSession(input: {
+    sessionId: string;
+    userId: string;
+    leaseToken: string;
+    ebayUserId: string;
+    ebayUsername: string;
+    refreshTokenEnc: string;
+    accessTokenEnc: string;
+    accessTokenExpiresAt: string;
+    scopes: string[];
+    completedAt: string;
+  }): Promise<{ kind: "connected" | "replayed" | "wrong_tenant" }>;
+  failSession(input: {
+    sessionId: string;
+    userId: string;
+    leaseToken: string;
+    failedAt: string;
+  }): Promise<void>;
+}
+
+export interface CreateMobileEbayOauthSessionInput {
+  userId: string;
+  bearerToken: string;
+  idempotencyKey: string;
+}
+
+export interface MobileEbayOauthOperations {
+  createSession(
+    input: CreateMobileEbayOauthSessionInput,
+  ): Promise<EbayOauthSession>;
+  completeCallback(input: {
+    state: string;
+    code: string | null;
+    error: string | null;
+    errorDescription: string | null;
+  }): Promise<{ redirectUrl: string }>;
+}
+
+function mobileReturnUrl(env: Env, result: string): string {
+  const configured = env.EBAY_MOBILE_OAUTH_RETURN_URL;
+  if (!configured) {
+    throw new Error("EBAY_MOBILE_OAUTH_RETURN_URL is not configured.");
+  }
+  const url = new URL(configured);
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+    throw new Error(
+      "EBAY_MOBILE_OAUTH_RETURN_URL must be an HTTPS universal link without credentials or a fragment.",
+    );
+  }
+  url.searchParams.set("result", result);
+  return url.toString();
+}
+
+function assertSandboxOnly(env: Env): void {
+  const url = new URL(ebayApiBaseUrl(env));
+  if (
+    url.origin !== "https://api.sandbox.ebay.com" ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("Mobile eBay OAuth is restricted to Sandbox.");
+  }
+}
+
+function tenantBinding(userId: string): string {
+  return createHash("sha256")
+    .update("snaplist:ebay-mobile-oauth-tenant:v1\0")
+    .update(userId)
+    .digest()
+    .subarray(0, 16)
+    .toString("base64url");
+}
+
+function stateSigningKey(env: Env): Buffer {
+  return Buffer.from(
+    hkdfSync(
+      "sha256",
+      parseEncryptionKey(env.EBAY_TOKEN_ENCRYPTION_KEY),
+      Buffer.alloc(0),
+      Buffer.from("snaplist:ebay-mobile-oauth-state:v1"),
+      32,
+    ),
+  );
+}
+
+function signStatePayload(payload: string, env: Env): string {
+  return createHmac("sha256", stateSigningKey(env))
+    .update(payload)
+    .digest("base64url");
+}
+
+function encodeState(session: StoredMobileEbayOauthSession, env: Env): string {
+  const payload = `v1.${session.sessionId}.${tenantBinding(session.userId)}`;
+  return `${payload}.${signStatePayload(payload, env)}`;
+}
+
+function decodeState(state: string): {
+  sessionId: string;
+  tenantBinding: string;
+  payload: string;
+  signature: string;
+} | null {
+  const [version, sessionId, boundTenant, signature, ...rest] = state.split(".");
+  if (
+    version !== "v1" ||
+    !sessionId ||
+    !boundTenant ||
+    !signature ||
+    rest.length > 0
+  ) {
+    return null;
+  }
+  return {
+    sessionId,
+    tenantBinding: boundTenant,
+    payload: `${version}.${sessionId}.${boundTenant}`,
+    signature,
+  };
+}
+
+function equalBase64Url(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, "base64url");
+  const rightBytes = Buffer.from(right, "base64url");
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
+
+export function createMobileEbayOauthOperations(input: {
+  store: MobileEbayOauthSessionStore;
+  env?: () => Env;
+  now?: () => number;
+  randomUUID?: () => string;
+  exchangeCode?: (code: string, env: Env) => Promise<EbayTokenGrant>;
+  fetchIdentity?: (
+    accessToken: string,
+    env: Env,
+  ) => Promise<EbayIdentity | null>;
+}): MobileEbayOauthOperations {
+  const readEnv = input.env ?? (() => process.env);
+  const now = input.now ?? Date.now;
+  const nextUUID = input.randomUUID ?? randomUUID;
+  const exchangeCode = input.exchangeCode ?? ((code, env) =>
+    exchangeAuthorizationCode(code, env));
+  const resolveIdentity = input.fetchIdentity ?? ((accessToken, env) =>
+    fetchEbayIdentity(accessToken, env));
+
+  return {
+    async createSession({ userId, bearerToken, idempotencyKey }) {
+      const env = readEnv();
+      assertSandboxOnly(env);
+      const stored = await input.store.createOrReplaySession({
+        proposedSessionId: nextUUID(),
+        userId,
+        bearerToken,
+        idempotencyKey,
+        expiresAt: new Date(now() + 10 * 60_000).toISOString(),
+      });
+      return {
+        sessionId: stored.sessionId,
+        authorizationUrl: buildAuthorizeUrl(env, encodeState(stored, env)),
+        expiresAt: stored.expiresAt,
+      };
+    },
+    async completeCallback({ state, code, error }) {
+      const env = readEnv();
+      try {
+        assertSandboxOnly(env);
+      } catch {
+        return { redirectUrl: mobileReturnUrl(env, "failed") };
+      }
+      const decoded = decodeState(state);
+      if (!decoded) {
+        return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
+      }
+      const session = await input.store.getSession(decoded.sessionId);
+      if (!session) {
+        return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
+      }
+      if (!equalBase64Url(decoded.signature, signStatePayload(decoded.payload, env))) {
+        return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
+      }
+      if (!equalBase64Url(decoded.tenantBinding, tenantBinding(session.userId))) {
+        return { redirectUrl: mobileReturnUrl(env, "wrong_tenant") };
+      }
+      const finishedAt = new Date(now()).toISOString();
+      if (Date.parse(session.expiresAt) <= now()) {
+        await input.store.finishSession({
+          sessionId: session.sessionId,
+          userId: session.userId,
+          outcome: "expired",
+          finishedAt,
+        });
+        return { redirectUrl: mobileReturnUrl(env, "expired") };
+      }
+      const outcome = error === "access_denied"
+        ? "declined"
+        : error
+          ? "failed"
+          : !code
+          ? "cancelled"
+          : null;
+      if (!outcome) {
+        if (!code || error) {
+          return { redirectUrl: mobileReturnUrl(env, "failed") };
+        }
+        const startedAt = new Date(now()).toISOString();
+        const begin = await input.store.beginSession({
+          sessionId: session.sessionId,
+          userId: session.userId,
+          startedAt,
+        });
+        if (begin.kind === "wrong_tenant") {
+          return { redirectUrl: mobileReturnUrl(env, "wrong_tenant") };
+        }
+        if (begin.kind === "expired") {
+          return { redirectUrl: mobileReturnUrl(env, "expired") };
+        }
+        if (begin.kind === "replayed") {
+          return { redirectUrl: mobileReturnUrl(env, begin.outcome) };
+        }
+        try {
+          const grant = await exchangeCode(code, env);
+          const identity = await resolveIdentity(grant.accessToken, env);
+          if (!identity) {
+            throw new Error("eBay Sandbox identity could not be verified.");
+          }
+          const key = parseEncryptionKey(env.EBAY_TOKEN_ENCRYPTION_KEY);
+          const complete = await input.store.completeSession({
+            sessionId: session.sessionId,
+            userId: session.userId,
+            leaseToken: begin.leaseToken,
+            ebayUserId: identity.userId,
+            ebayUsername: identity.username,
+            refreshTokenEnc: encryptSecret(grant.refreshToken, key),
+            accessTokenEnc: encryptSecret(grant.accessToken, key),
+            accessTokenExpiresAt: new Date(
+              grant.accessTokenExpiresAt,
+            ).toISOString(),
+            scopes: grant.scopes,
+            completedAt: new Date(now()).toISOString(),
+          });
+          return {
+            redirectUrl: mobileReturnUrl(
+              env,
+              complete.kind === "wrong_tenant" ? "wrong_tenant" : "connected",
+            ),
+          };
+        } catch {
+          await input.store.failSession({
+            sessionId: session.sessionId,
+            userId: session.userId,
+            leaseToken: begin.leaseToken,
+            failedAt: new Date(now()).toISOString(),
+          }).catch(() => undefined);
+          return { redirectUrl: mobileReturnUrl(env, "failed") };
+        }
+      }
+      const finish = await input.store.finishSession({
+        sessionId: session.sessionId,
+        userId: session.userId,
+        outcome,
+        finishedAt,
+      });
+      return {
+        redirectUrl: mobileReturnUrl(
+          env,
+          finish.kind === "wrong_tenant" ? "wrong_tenant" : outcome,
+        ),
+      };
+    },
+  };
+}

@@ -1,3 +1,4 @@
+import { createHmac, hkdfSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createSupabaseNativeSubscriptionBridge } from "@/lib/billing/revenuecat-store";
 import {
@@ -7,6 +8,7 @@ import {
 import { buildPipelinePersistencePayload } from "@/lib/pipeline/persist";
 import type { PipelineResult } from "@/lib/pipeline/types";
 import { buildPricingEvidenceProjection } from "@/lib/pricing-evidence";
+import { createMobileEbayOauthOperations } from "@/lib/marketplace/ebay/mobile-oauth";
 import { MobileRunConflictError, MobileRunNotFoundError } from "./runs";
 import { createMobileApiHandler } from "./app";
 
@@ -17,6 +19,8 @@ const summary = {
   failed: 0,
   skipped: 0,
 };
+
+const EBAY_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 function handler(overrides: Record<string, unknown> = {}) {
   return createMobileApiHandler({
@@ -97,6 +101,837 @@ describe("mobile API v1 provider-neutral handler", () => {
       data: { userId: "user_native" },
       meta: { requestId: "req_test" },
     });
+  });
+
+  it("creates one tenant-bound eBay Sandbox OAuth session through the authenticated mobile seam", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      sessionId: "38700000-0000-4000-8000-000000000001",
+      authorizationUrl:
+        "https://auth.sandbox.ebay.com/oauth2/authorize?state=opaque-state",
+      expiresAt: "2026-07-22T18:10:00.000Z",
+    });
+    const authenticate = vi.fn().mockResolvedValue({ userId: "tenant_a" });
+
+    const response = await handler({
+      authenticate,
+      ebayOauth: { createSession },
+    })(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000002",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(authenticate).toHaveBeenCalledWith("tenant-a-jwt");
+    expect(createSession).toHaveBeenCalledWith({
+      userId: "tenant_a",
+      bearerToken: "tenant-a-jwt",
+      idempotencyKey: "38700000-0000-4000-8000-000000000002",
+    });
+    const body = await response.json();
+    expect(body).toEqual({
+      data: {
+        sessionId: "38700000-0000-4000-8000-000000000001",
+        authorizationUrl:
+          "https://auth.sandbox.ebay.com/oauth2/authorize?state=opaque-state",
+        expiresAt: "2026-07-22T18:10:00.000Z",
+      },
+      meta: { requestId: "req_test" },
+    });
+    expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|authorizationCode/);
+  });
+
+  it("replays the original eBay OAuth session for the same tenant idempotency key", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const createOrReplaySession = vi.fn(async (input: {
+      proposedSessionId: string;
+      userId: string;
+      idempotencyKey: string;
+      expiresAt: string;
+    }) => {
+      const key = `${input.userId}:${input.idempotencyKey}`;
+      const existing = rows.get(key);
+      if (existing) return existing;
+      const created = {
+        sessionId: input.proposedSessionId,
+        userId: input.userId,
+        expiresAt: input.expiresAt,
+      };
+      rows.set(key, created);
+      return created;
+    });
+    const generatedIds = [
+      "38700000-0000-4000-8000-000000000011",
+      "38700000-0000-4000-8000-000000000012",
+    ];
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        createOrReplaySession,
+        async getSession() {
+          return null;
+        },
+        async finishSession() {
+          return { kind: "finished" as const };
+        },
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => generatedIds.shift()!,
+    });
+    const create = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const request = () =>
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000013",
+        },
+      });
+
+    const first = await create(request());
+    const replay = await create(request());
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(await first.json());
+    expect(rows).toHaveLength(1);
+    expect(createOrReplaySession).toHaveBeenCalledTimes(2);
+  });
+
+  it("finishes an eBay decline explicitly without exchanging or exposing provider credentials", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const finishSession = vi.fn(async (input: {
+      sessionId: string;
+      userId: string;
+      outcome: string;
+    }) => {
+      const row = rows.get(input.sessionId);
+      if (!row || row.userId !== input.userId) return { kind: "wrong_tenant" as const };
+      return { kind: "finished" as const };
+    });
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+          };
+          rows.set(row.sessionId, row);
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        finishSession,
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => "38700000-0000-4000-8000-000000000021",
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const sessionResponse = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000022",
+        },
+      }),
+    );
+    const sessionBody = await sessionResponse.json();
+    const state = new URL(sessionBody.data.authorizationUrl).searchParams.get(
+      "state",
+    );
+
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}&error=access_denied`,
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=declined",
+    );
+    expect(finishSession).toHaveBeenCalledWith({
+      sessionId: "38700000-0000-4000-8000-000000000021",
+      userId: "tenant_a",
+      outcome: "declined",
+      finishedAt: "2026-07-22T18:00:00.000Z",
+    });
+    expect(JSON.stringify(response.headers)).not.toMatch(
+      /accessToken|refreshToken|authorizationCode|access_denied/,
+    );
+  });
+
+  it("finishes a cancelled eBay callback explicitly before any token exchange", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+          };
+          rows.set(row.sessionId, row);
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        finishSession,
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => "38700000-0000-4000-8000-000000000031",
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const session = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000032",
+        },
+      }),
+    );
+    const state = new URL(
+      (await session.json()).data.authorizationUrl,
+    ).searchParams.get("state");
+
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}`,
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=cancelled",
+    );
+    expect(finishSession).toHaveBeenCalledWith({
+      sessionId: "38700000-0000-4000-8000-000000000031",
+      userId: "tenant_a",
+      outcome: "cancelled",
+      finishedAt: "2026-07-22T18:00:00.000Z",
+    });
+  });
+
+  it("consumes a valid state once when eBay returns a non-decline provider failure", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    const exchangeCode = vi.fn();
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+          };
+          rows.set(row.sessionId, row);
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        finishSession,
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => "38700000-0000-4000-8000-000000000033",
+      exchangeCode,
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const session = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000034",
+        },
+      }),
+    );
+    const state = new URL(
+      (await session.json()).data.authorizationUrl,
+    ).searchParams.get("state")!;
+
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&error=temporarily_unavailable`,
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=failed",
+    );
+    expect(finishSession).toHaveBeenCalledWith({
+      sessionId: "38700000-0000-4000-8000-000000000033",
+      userId: "tenant_a",
+      outcome: "failed",
+      finishedAt: "2026-07-22T18:00:00.000Z",
+    });
+    expect(exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired eBay OAuth session before trusting the authorization code", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    let nowMs = Date.parse("2026-07-22T18:00:00.000Z");
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+          };
+          rows.set(row.sessionId, row);
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        finishSession,
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => nowMs,
+      randomUUID: () => "38700000-0000-4000-8000-000000000041",
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const session = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000042",
+        },
+      }),
+    );
+    const state = new URL(
+      (await session.json()).data.authorizationUrl,
+    ).searchParams.get("state");
+    nowMs = Date.parse("2026-07-22T18:10:00.001Z");
+
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}&code=provider-code`,
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=expired",
+    );
+    expect(finishSession).toHaveBeenCalledWith({
+      sessionId: "38700000-0000-4000-8000-000000000041",
+      userId: "tenant_a",
+      outcome: "expired",
+      finishedAt: "2026-07-22T18:10:00.001Z",
+    });
+  });
+
+  it("verifies state authenticity before reporting a valid cross-tenant binding", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const byIdempotency = new Map<string, string>();
+    const finishSession = vi.fn().mockResolvedValue({ kind: "finished" as const });
+    const generatedIds = [
+      "38700000-0000-4000-8000-000000000051",
+      "38700000-0000-4000-8000-000000000052",
+    ];
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const replayId = byIdempotency.get(
+            `${input.userId}:${input.idempotencyKey}`,
+          );
+          if (replayId) return rows.get(replayId)!;
+          const row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+          };
+          rows.set(row.sessionId, row);
+          byIdempotency.set(
+            `${input.userId}:${input.idempotencyKey}`,
+            row.sessionId,
+          );
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        finishSession,
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => generatedIds.shift()!,
+    });
+    const api = handler({
+      authenticate: vi.fn(async (token: string) => ({
+        userId: token === "tenant-a-jwt" ? "tenant_a" : "tenant_b",
+      })),
+      ebayOauth,
+    });
+    const start = async (token: string) => {
+      const response = await api(
+        new Request("http://localhost/v1/ebay/oauth/sessions", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "idempotency-key": "38700000-0000-4000-8000-000000000053",
+          },
+        }),
+      );
+      return new URL(
+        (await response.json()).data.authorizationUrl,
+      ).searchParams.get("state")!;
+    };
+    const tenantAState = await start("tenant-a-jwt");
+    const tenantBState = await start("tenant-b-jwt");
+    const tenantAParts = tenantAState.split(".");
+    const tenantBParts = tenantBState.split(".");
+    const mixedPayload = [
+      tenantAParts[0],
+      tenantAParts[1],
+      tenantBParts[2],
+    ].join(".");
+    const stateKey = Buffer.from(hkdfSync(
+      "sha256",
+      Buffer.from(EBAY_TOKEN_ENCRYPTION_KEY, "base64"),
+      Buffer.alloc(0),
+      Buffer.from("snaplist:ebay-mobile-oauth-state:v1"),
+      32,
+    ));
+    const mixedState = `${mixedPayload}.${createHmac("sha256", stateKey)
+      .update(mixedPayload)
+      .digest("base64url")}`;
+
+    const forged = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(`${mixedPayload}.forged-signature`)}&code=provider-code`,
+      ),
+    );
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(mixedState)}&code=provider-code`,
+      ),
+    );
+
+    expect(forged.status).toBe(303);
+    expect(forged.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=invalid_state",
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=wrong_tenant",
+    );
+    expect(finishSession).not.toHaveBeenCalled();
+  });
+
+  it("persists one encrypted tenant connection when the successful callback is replayed", async () => {
+    type Row = {
+      sessionId: string;
+      userId: string;
+      expiresAt: string;
+      status: "pending" | "completing" | "connected";
+    };
+    const rows = new Map<string, Row>();
+    const connections = new Map<
+      string,
+      { refreshTokenEnc: string; accessTokenEnc: string }
+    >();
+    const exchangeCode = vi.fn().mockResolvedValue({
+      accessToken: "access-secret-387",
+      refreshToken: "refresh-secret-387",
+      accessTokenExpiresAt: Date.parse("2026-07-22T20:00:00.000Z"),
+      scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+    });
+    const fetchIdentity = vi.fn().mockResolvedValue({
+      userId: "ebay-sandbox-user-387",
+      username: "sandbox_seller_387",
+    });
+    const completeSession = vi.fn(async (input: {
+      sessionId: string;
+      userId: string;
+      refreshTokenEnc: string;
+      accessTokenEnc: string;
+    }) => {
+      const row = rows.get(input.sessionId)!;
+      row.status = "connected";
+      connections.set(input.userId, {
+        refreshTokenEnc: input.refreshTokenEnc,
+        accessTokenEnc: input.accessTokenEnc,
+      });
+      return { kind: "connected" as const };
+    });
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const row: Row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+            status: "pending",
+          };
+          rows.set(row.sessionId, row);
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        async finishSession() {
+          return { kind: "finished" as const };
+        },
+        async beginSession(input: { sessionId: string; userId: string }) {
+          const row = rows.get(input.sessionId)!;
+          if (row.userId !== input.userId) return { kind: "wrong_tenant" as const };
+          if (row.status === "connected") {
+            return { kind: "replayed" as const, outcome: "connected" as const };
+          }
+          row.status = "completing";
+          return {
+            kind: "claimed" as const,
+            leaseToken: "38700000-0000-4000-8000-000000000063",
+          };
+        },
+        completeSession,
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_CLIENT_SECRET: "sandbox-client-secret",
+        EBAY_RU_NAME: "sandbox-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => "38700000-0000-4000-8000-000000000061",
+      exchangeCode,
+      fetchIdentity,
+    });
+    const reportError = vi.fn();
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+      reportError,
+    });
+    const session = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000062",
+        },
+      }),
+    );
+    const state = new URL(
+      (await session.json()).data.authorizationUrl,
+    ).searchParams.get("state");
+    const callback = () =>
+      api(
+        new Request(
+          `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}&code=sandbox-provider-code`,
+        ),
+      );
+
+    const first = await callback();
+    const replay = await callback();
+
+    expect(first.status).toBe(303);
+    expect(replay.status).toBe(303);
+    expect(first.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=connected",
+    );
+    expect(replay.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=connected",
+    );
+    expect(exchangeCode).toHaveBeenCalledTimes(1);
+    expect(exchangeCode).toHaveBeenCalledWith(
+      "sandbox-provider-code",
+      expect.objectContaining({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+      }),
+    );
+    expect(fetchIdentity).toHaveBeenCalledTimes(1);
+    expect(completeSession).toHaveBeenCalledTimes(1);
+    expect(connections).toHaveLength(1);
+    const stored = connections.get("tenant_a")!;
+    expect(stored.refreshTokenEnc).toMatch(/^v1\./);
+    expect(stored.accessTokenEnc).toMatch(/^v1\./);
+    expect(JSON.stringify(stored)).not.toContain("refresh-secret-387");
+    expect(JSON.stringify(stored)).not.toContain("access-secret-387");
+    expect(JSON.stringify([
+      first.headers.get("location"),
+      replay.headers.get("location"),
+      reportError.mock.calls,
+    ])).not.toMatch(/sandbox-provider-code|refresh-secret-387|access-secret-387/);
+  });
+
+  it("refuses to create the mobile OAuth session when eBay is configured for production", async () => {
+    const createOrReplaySession = vi.fn();
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        createOrReplaySession,
+        async getSession() {
+          return null;
+        },
+        async finishSession() {
+          return { kind: "finished" as const };
+        },
+        async beginSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async completeSession() {
+          return { kind: "wrong_tenant" as const };
+        },
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => ({
+        EBAY_BASE_URL: "https://api.ebay.com",
+        EBAY_CLIENT_ID: "production-client-id",
+        EBAY_RU_NAME: "production-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      randomUUID: () => "38700000-0000-4000-8000-000000000071",
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+
+    const response = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000072",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(createOrReplaySession).not.toHaveBeenCalled();
+    expect(JSON.stringify(await response.json())).not.toMatch(
+      /api\.ebay\.com|production-client-id|production-ru-name/,
+    );
+  });
+
+  it("refuses a callback if the OAuth capability is no longer configured for Sandbox", async () => {
+    const rows = new Map<
+      string,
+      { sessionId: string; userId: string; expiresAt: string }
+    >();
+    const exchangeCode = vi.fn();
+    const completeSession = vi.fn();
+    const env = {
+      EBAY_BASE_URL: "https://api.sandbox.ebay.com",
+      EBAY_CLIENT_ID: "sandbox-client-id",
+      EBAY_CLIENT_SECRET: "sandbox-client-secret",
+      EBAY_RU_NAME: "sandbox-ru-name",
+      EBAY_TOKEN_ENCRYPTION_KEY,
+      EBAY_MOBILE_OAUTH_RETURN_URL:
+        "https://snaplist.example/mobile/ebay/oauth",
+    };
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession(input) {
+          const row = {
+            sessionId: input.proposedSessionId,
+            userId: input.userId,
+            expiresAt: input.expiresAt,
+          };
+          rows.set(row.sessionId, row);
+          return row;
+        },
+        async getSession(sessionId) {
+          return rows.get(sessionId) ?? null;
+        },
+        async finishSession() {
+          return { kind: "finished" as const };
+        },
+        async beginSession() {
+          return {
+            kind: "claimed" as const,
+            leaseToken: "38700000-0000-4000-8000-000000000073",
+          };
+        },
+        completeSession,
+        async failSession() {
+          return undefined;
+        },
+      },
+      env: () => env,
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => "38700000-0000-4000-8000-000000000074",
+      exchangeCode,
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const session = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "38700000-0000-4000-8000-000000000075",
+        },
+      }),
+    );
+    const state = new URL(
+      (await session.json()).data.authorizationUrl,
+    ).searchParams.get("state");
+    env.EBAY_BASE_URL = "https://api.ebay.com";
+
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state!)}&code=provider-code`,
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://snaplist.example/mobile/ebay/oauth?result=failed",
+    );
+    expect(exchangeCode).not.toHaveBeenCalled();
+    expect(completeSession).not.toHaveBeenCalled();
   });
 
   it("returns the tenant-scoped Home projection for the verified native seller", async () => {

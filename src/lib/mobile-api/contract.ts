@@ -55,6 +55,20 @@ export const sessionEnvelopeSchema = z
   })
   .strict();
 
+export const ebayOauthSessionSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    authorizationUrl: z.string().url(),
+    expiresAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
+export type EbayOauthSession = z.infer<typeof ebayOauthSessionSchema>;
+
+export const ebayOauthSessionEnvelopeSchema = z
+  .object({ data: ebayOauthSessionSchema, meta: apiMetaSchema })
+  .strict();
+
 export const homeProjectionEnvelopeSchema = z
   .object({ data: homeProjectionSchema, meta: apiMetaSchema })
   .strict();

@@ -22,11 +22,13 @@ import {
   mobileRunEnvelopeSchema,
   pricingEvidenceEnvelopeSchema,
   aiItemEntitlementEnvelopeSchema,
+  ebayOauthSessionEnvelopeSchema,
   guestClaimEnvelopeSchema,
   revenueCatConfigurationEnvelopeSchema,
   sessionEnvelopeSchema,
   workerSummaryEnvelopeSchema,
   type ApiErrorCode,
+  type EbayOauthSession,
 } from "./contract";
 
 export interface MobileApiPrincipal {
@@ -41,6 +43,20 @@ export interface MobileApiDependencies {
    * the concrete verifier; request bodies never supply a user id.
    */
   authenticate(token: string): Promise<MobileApiPrincipal>;
+  /** #387 owns the tenant-bound, one-time mobile eBay Sandbox OAuth seam. */
+  ebayOauth?: {
+    createSession(input: {
+      userId: string;
+      bearerToken: string;
+      idempotencyKey: string;
+    }): Promise<EbayOauthSession>;
+    completeCallback?(input: {
+      state: string;
+      code: string | null;
+      error: string | null;
+      errorDescription: string | null;
+    }): Promise<{ redirectUrl: string }>;
+  };
   /** #174 verifies the opaque App Attest/auth handoff; #175 consumes only this result. */
   verifyGuestClaimHandoff?: (token: string) => Promise<VerifiedGuestHandoff>;
   /** Authoritative #175 claim service. The target always comes from authenticate(). */
@@ -155,6 +171,130 @@ export function createMobileApiHandler(
           401,
           "unauthorized",
           "Authentication is required.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/ebay/oauth/sessions`) {
+      if (request.method !== "POST") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const token = bearerToken(request);
+      if (!token) {
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      const idempotencyKey = z
+        .string()
+        .uuid()
+        .safeParse(request.headers.get("idempotency-key")?.trim());
+      if (!idempotencyKey.success) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid Idempotency-Key is required.",
+        );
+      }
+
+      let principal: MobileApiPrincipal;
+      try {
+        principal = await dependencies.authenticate(token);
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.authenticate", error);
+        return errorResponse(
+          requestId,
+          401,
+          "unauthorized",
+          "Authentication is required.",
+        );
+      }
+      if (!dependencies.ebayOauth) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay connection is temporarily unavailable.",
+        );
+      }
+      try {
+        const session = await dependencies.ebayOauth.createSession({
+          userId: principal.userId,
+          bearerToken: token,
+          idempotencyKey: idempotencyKey.data,
+        });
+        return json(
+          ebayOauthSessionEnvelopeSchema.parse({
+            data: session,
+            meta: { requestId },
+          }),
+          201,
+        );
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.ebay-oauth-session", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay connection is temporarily unavailable.",
+        );
+      }
+    }
+
+    if (pathname === `/${MOBILE_API_VERSION}/ebay/oauth/callback`) {
+      if (request.method !== "GET") {
+        return errorResponse(
+          requestId,
+          405,
+          "method_not_allowed",
+          "This method is not allowed.",
+        );
+      }
+      const callbackUrl = new URL(request.url);
+      const state = callbackUrl.searchParams.get("state")?.trim();
+      if (!state) {
+        return errorResponse(
+          requestId,
+          400,
+          "invalid_request",
+          "A valid eBay OAuth state is required.",
+        );
+      }
+      if (!dependencies.ebayOauth?.completeCallback) {
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay connection is temporarily unavailable.",
+        );
+      }
+      try {
+        const result = await dependencies.ebayOauth.completeCallback({
+          state,
+          code: callbackUrl.searchParams.get("code"),
+          error: callbackUrl.searchParams.get("error"),
+          errorDescription: callbackUrl.searchParams.get("error_description"),
+        });
+        return new Response(null, {
+          status: 303,
+          headers: { location: result.redirectUrl },
+        });
+      } catch (error) {
+        dependencies.reportError?.("mobile-api.ebay-oauth-callback", error);
+        return errorResponse(
+          requestId,
+          503,
+          "internal_error",
+          "eBay connection is temporarily unavailable.",
         );
       }
     }

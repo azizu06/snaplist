@@ -70,6 +70,7 @@ const OWNED_TABLES = [
   "listings",
   "embeddings",
   "user_settings",
+  "ebay_oauth_sessions",
   "ebay_connections",
   "items",
 ] as const;

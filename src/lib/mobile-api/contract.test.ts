@@ -216,7 +216,7 @@ describe("SwiftUI mobile HTTP contract", () => {
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);
-    for (const issue of [17, 174]) {
+    for (const issue of [174]) {
       expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
     }
   });
@@ -326,12 +326,15 @@ describe("SwiftUI mobile HTTP contract", () => {
     }
   });
 
-  it("keeps both per-user eBay OAuth operations owned by issue 17", () => {
+  it("marks both #387 per-user eBay OAuth operations implemented", () => {
     expect(contract.paths["/v1/ebay/oauth/sessions"].post).toMatchObject({
-      "x-owner-issue": 17,
+      "x-owner-issue": 387,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
     });
     expect(contract.paths["/v1/ebay/oauth/callback"].get).toMatchObject({
-      "x-owner-issue": 17,
+      "x-owner-issue": 387,
+      "x-implementation-status": "implemented",
     });
   });
 
