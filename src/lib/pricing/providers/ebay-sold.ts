@@ -149,6 +149,8 @@ interface EbaySoldRuntimeState {
 const EBAY_SOLD_HANDOFF_POLL_MAX_MS = 3_200;
 /** Bounded time for the winner to store and the loser to observe its result. */
 export const EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS = 500;
+/** Fast bounded polling while a shared mutation response remains ambiguous. */
+const EBAY_SOLD_AMBIGUOUS_MUTATION_POLL_MS = 25;
 const EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED = Symbol(
   "ebay-sold-coordination-deadline-exceeded",
 );
@@ -156,12 +158,14 @@ const EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED = Symbol(
 async function settleBeforeCoordinationDeadline<T>(
   startOperation: (signal: AbortSignal) => Promise<T>,
   deadline: number,
+  cancellationSignal?: AbortSignal,
 ): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
   const remainingMs = deadline - Date.now();
   if (remainingMs < 0) return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
 
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
   try {
     return await Promise.race([
       startOperation(controller.signal),
@@ -176,9 +180,134 @@ async function settleBeforeCoordinationDeadline<T>(
           remainingMs,
         );
       }),
+      new Promise<typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED>((resolve) => {
+        cancel = () => {
+          resolve(EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED);
+          controller.abort();
+        };
+        if (cancellationSignal?.aborted) cancel();
+        else cancellationSignal?.addEventListener("abort", cancel, { once: true });
+      }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (cancel) cancellationSignal?.removeEventListener("abort", cancel);
+  }
+}
+
+async function delayBeforeCoordinationDeadline(
+  delayMs: number,
+  deadline: number,
+  cancellationSignal: AbortSignal,
+): Promise<boolean> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0 || cancellationSignal.aborted) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
+  try {
+    return await new Promise<boolean>((resolve) => {
+      timer = setTimeout(
+        () => resolve(true),
+        Math.min(delayMs, remainingMs),
+      );
+      cancel = () => resolve(false);
+      cancellationSignal.addEventListener("abort", cancel, { once: true });
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (cancel) cancellationSignal.removeEventListener("abort", cancel);
+  }
+}
+
+async function observeCommittedMutation<T>(
+  observe: (signal: AbortSignal) => Promise<T | null>,
+  accepts: (value: T) => boolean,
+  deadline: number,
+  cancellationSignal: AbortSignal,
+): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
+  // Let an immediate authoritative mutation response win without spending a
+  // reconciliation read. A stalled response crosses this event-loop boundary.
+  if (!(await delayBeforeCoordinationDeadline(0, deadline, cancellationSignal))) {
+    return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+  }
+  let delayMs = EBAY_SOLD_AMBIGUOUS_MUTATION_POLL_MS;
+  while (!cancellationSignal.aborted) {
+    try {
+      const observed = await settleBeforeCoordinationDeadline(
+        observe,
+        deadline,
+        cancellationSignal,
+      );
+      if (observed === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) return observed;
+      if (observed != null && accepts(observed)) return observed;
+    } catch {
+      // An observation failure does not override a mutation response that may
+      // still settle successfully within the same deadline. Stop issuing reads
+      // on an unavailable cache and let that response or the deadline decide.
+      await delayBeforeCoordinationDeadline(
+        Number.MAX_SAFE_INTEGER,
+        deadline,
+        cancellationSignal,
+      );
+      return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+    }
+    if (
+      !(await delayBeforeCoordinationDeadline(
+        delayMs,
+        deadline,
+        cancellationSignal,
+      ))
+    ) {
+      break;
+    }
+    delayMs = Math.min(delayMs * 2, EBAY_SOLD_HANDOFF_POLL_MAX_MS);
+  }
+  return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+}
+
+type ReconciledMutation<MutationResult, Observed> =
+  | { kind: "mutation"; value: MutationResult }
+  | { kind: "observed"; value: Observed };
+
+async function settleMutationWithObservation<MutationResult, Observed>(
+  mutate: (signal: AbortSignal) => Promise<MutationResult>,
+  observe: (signal: AbortSignal) => Promise<Observed | null>,
+  accepts: (value: Observed) => boolean,
+  deadline: number,
+): Promise<
+  | ReconciledMutation<MutationResult, Observed>
+  | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+> {
+  const cancellation = new AbortController();
+  type Outcome =
+    | ReconciledMutation<MutationResult, Observed>
+    | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+  try {
+    const mutationOutcome: Promise<Outcome> = settleBeforeCoordinationDeadline(
+      mutate,
+      deadline,
+      cancellation.signal,
+    ).then(
+      (value): Outcome =>
+        value === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          ? EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          : { kind: "mutation", value: value as MutationResult },
+    );
+    const observationOutcome: Promise<Outcome> = observeCommittedMutation(
+      observe,
+      accepts,
+      deadline,
+      cancellation.signal,
+    ).then(
+      (value): Outcome =>
+        value === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          ? EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          : { kind: "observed", value: value as Observed },
+    );
+    const outcome = await Promise.race([mutationOutcome, observationOutcome]);
+    return outcome;
+  } finally {
+    cancellation.abort();
   }
 }
 
@@ -1120,6 +1249,10 @@ function createEbaySoldPricingProviderInternal(
     cache?.scope === "shared" && typeof cache.claim === "function"
       ? cache.claim.bind(cache)
       : null;
+  const getSharedClaimOwner =
+    cache?.scope === "shared" && typeof cache.getClaimOwner === "function"
+      ? cache.getClaimOwner.bind(cache)
+      : null;
   const requiresSharedFence = !operatorSmokeOneRequest;
   const maximumRequestCount = allowExpansion ? 2 : 1;
   const handoffWaitMs =
@@ -1386,23 +1519,24 @@ function createEbaySoldPricingProviderInternal(
               : localResult;
         } else {
           const pending = (async () => {
-            if (requiresSharedFence && !claimSharedRetrieval) {
+            if (
+              requiresSharedFence &&
+              (!claimSharedRetrieval || !getSharedClaimOwner)
+            ) {
               emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
                 reason: "shared-cache-required",
               });
               return null;
             }
-            if (cache?.scope === "shared") {
-              if (!claimSharedRetrieval) {
-                emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
-                  reason: "shared-claim-missing",
-                });
-                return null;
-              }
+            if (requiresSharedFence && cache?.scope === "shared") {
               let claimed: boolean;
+              const claimOwnerToken = globalThis.crypto.randomUUID();
               try {
-                const claimResult = await settleBeforeCoordinationDeadline(
-                  (signal) => claimSharedRetrieval(key, signal),
+                const claimResult = await settleMutationWithObservation(
+                  (signal) =>
+                    claimSharedRetrieval!(key, signal, claimOwnerToken),
+                  (signal) => getSharedClaimOwner!(key, signal),
+                  (owner) => owner === claimOwnerToken,
                   coordinationDeadline,
                 );
                 if (
@@ -1412,8 +1546,19 @@ function createEbaySoldPricingProviderInternal(
                     reason: "shared-claim-timeout",
                   });
                   return null;
+                } else if (
+                  typeof claimResult === "object" &&
+                  claimResult.kind === "observed"
+                ) {
+                  claimed = true;
+                } else if (
+                  typeof claimResult === "object" &&
+                  claimResult.kind === "mutation"
+                ) {
+                  claimed = claimResult.value;
+                } else {
+                  claimed = claimResult;
                 }
-                claimed = claimResult;
               } catch {
                 emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
                   reason: "shared-claim-failed",
@@ -1431,8 +1576,10 @@ function createEbaySoldPricingProviderInternal(
             );
             if (cache) {
               try {
-                const storeResult = await settleBeforeCoordinationDeadline(
+                const storeResult = await settleMutationWithObservation(
                   (signal) => cache.set(key, retrieved, signal),
+                  (signal) => cache.get(key, signal),
+                  () => true,
                   coordinationDeadline,
                 );
                 if (
@@ -1442,6 +1589,9 @@ function createEbaySoldPricingProviderInternal(
                     reason: "winner-store-timeout",
                   });
                   return null;
+                }
+                if (storeResult.kind === "observed") {
+                  return storeResult.value;
                 }
               } catch (err) {
                 emitDiagnostic("pricing.cache.error", {
