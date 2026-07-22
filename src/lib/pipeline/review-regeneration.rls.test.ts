@@ -182,6 +182,15 @@ function commitFor(
     specs: ["wireless", "noise-cancelling"],
     title: "Sony WH-1000XM4",
   };
+  const evidence = Array.from({ length: 5 }, (_, index) => ({
+    id: `https://www.ebay.com/itm/${index + 1}`,
+    sourceUrl: `https://www.ebay.com/itm/${index + 1}`,
+    price: 163 + index,
+    currency: "USD",
+    condition: "good",
+    kind: "sold-comparable" as const,
+    priceDisclosure: "displayed-sold-price" as const,
+  }));
   return {
     capabilityToken: "A".repeat(43),
     itemId,
@@ -206,17 +215,12 @@ function commitFor(
         suggested: 165,
         range: { min: 145, max: 185 },
         confidence: 0.85,
-        sources: [{ url: "https://www.ebay.com/itm/1", kind: "sold-comp" }],
+        sources: evidence.map((record) => ({
+          url: record.sourceUrl,
+          kind: "sold-comp",
+        })),
         tier: "ebay-sold",
-        evidence: [{
-          id: "https://www.ebay.com/itm/1",
-          sourceUrl: "https://www.ebay.com/itm/1",
-          price: 165,
-          currency: "USD",
-          condition: "good",
-          kind: "sold-comparable",
-          priceDisclosure: "displayed-sold-price",
-        }],
+        evidence,
       },
       confidence: { score: 0.85, band: "high", autopilotEligible: false },
       model: "vision-model",
@@ -454,9 +458,11 @@ describe("review identity regeneration transaction + RLS", () => {
     commit.result.identification!.label = `\u00a0${title}\u00a0`;
     commit.result.attributes.condition = "\u00a0good\u00a0";
     commit.result.price.sources = [source];
-    commit.result.price.evidence = (commit.result.price.evidence ?? []).map(
-      (record) => ({ ...record, id: source.url, sourceUrl: source.url }),
-    );
+    commit.result.price.evidence = [{
+      ...commit.result.price.evidence![0]!,
+      id: source.url,
+      sourceUrl: source.url,
+    }];
     const snapshot = buildPricingEvidenceSnapshotInput(commit.result);
 
     expect(
@@ -528,6 +534,28 @@ describe("review identity regeneration transaction + RLS", () => {
     };
     delete missingConfidence.prediction.confidence;
     delete missingConfidence.pricing_snapshot.price_result.confidence;
+    const sixEvidence = structuredClone(rpcCommit) as unknown as {
+      prediction: { sources: Array<Record<string, unknown>> };
+      pricing_snapshot: {
+        price_result: { sources: Array<Record<string, unknown>> };
+        evidence: Array<Record<string, unknown>>;
+      };
+    };
+    const sixthSource = {
+      url: "https://www.ebay.com/itm/6",
+      kind: "sold-comp",
+    };
+    sixEvidence.prediction.sources.push(sixthSource);
+    sixEvidence.pricing_snapshot.price_result.sources.push(sixthSource);
+    sixEvidence.pricing_snapshot.evidence.push({
+      id: sixthSource.url,
+      sourceUrl: sixthSource.url,
+      price: 168,
+      currency: "USD",
+      condition: "good",
+      kind: "sold-comparable",
+      priceDisclosure: "displayed-sold-price",
+    });
     const ownerItemIds = [owner.itemId, sibling.itemId];
     const ownerBefore = await correctionState(userA, ownerItemIds);
     const foreignBefore = await correctionState(userB, [foreign.itemId]);
@@ -610,6 +638,12 @@ describe("review identity regeneration transaction + RLS", () => {
         name: "snapshot and prediction both omit confidence",
         capabilityToken: token,
         commit: missingConfidence,
+        message: /invalid guided correction completion/i,
+      },
+      {
+        name: "current write contains a sixth verified sold match",
+        capabilityToken: token,
+        commit: sixEvidence,
         message: /invalid guided correction completion/i,
       },
     ];

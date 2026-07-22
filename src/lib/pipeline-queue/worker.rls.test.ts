@@ -51,6 +51,21 @@ const RESULT: PipelineResult = {
         kind: "sold-comp",
       },
       {
+        url: "https://www.ebay.com/itm/worker-sold-3",
+        title: "Sony WH-1000XM4 sold third",
+        kind: "sold-comp",
+      },
+      {
+        url: "https://www.ebay.com/itm/worker-sold-4",
+        title: "Sony WH-1000XM4 sold fourth",
+        kind: "sold-comp",
+      },
+      {
+        url: "https://www.ebay.com/itm/worker-sold-5",
+        title: "Sony WH-1000XM4 sold fifth",
+        kind: "sold-comp",
+      },
+      {
         url: "https://www.ebay.com/itm/worker-asking-1",
         title: "Sony WH-1000XM4 best offer accepted",
         kind: "asking-comp",
@@ -78,13 +93,31 @@ const RESULT: PipelineResult = {
         priceDisclosure: "displayed-sold-price",
       },
       {
-        id: "worker-asking-1",
-        sourceUrl: "https://www.ebay.com/itm/worker-asking-1",
-        title: "Sony WH-1000XM4 best offer accepted",
-        price: 199,
+        id: "worker-sold-3",
+        sourceUrl: "https://www.ebay.com/itm/worker-sold-3",
+        title: "Sony WH-1000XM4 sold third",
+        price: 148,
         currency: "USD",
         kind: "sold-comparable",
-        priceDisclosure: "asking-price-not-accepted-amount",
+        priceDisclosure: "displayed-sold-price",
+      },
+      {
+        id: "worker-sold-4",
+        sourceUrl: "https://www.ebay.com/itm/worker-sold-4",
+        title: "Sony WH-1000XM4 sold fourth",
+        price: 150,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
+      },
+      {
+        id: "worker-sold-5",
+        sourceUrl: "https://www.ebay.com/itm/worker-sold-5",
+        title: "Sony WH-1000XM4 sold fifth",
+        price: 151,
+        currency: "USD",
+        kind: "sold-comparable",
+        priceDisclosure: "displayed-sold-price",
       },
     ],
     tier: "ebay-sold",
@@ -389,7 +422,32 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     };
     delete missingConfidencePersistence.prediction.confidence;
     delete missingConfidencePersistence.pricing_snapshot.price_result.confidence;
-    const rejectedConfidencePayloads = [
+    const sixEvidencePersistence = structuredClone(
+      buildPipelinePersistencePayload(RESULT, true),
+    ) as unknown as {
+      prediction: { sources: Array<Record<string, unknown>> };
+      pricing_snapshot: {
+        price_result: { sources: Array<Record<string, unknown>> };
+        evidence: Array<Record<string, unknown>>;
+      };
+    };
+    const sixthSource = {
+      url: "https://www.ebay.com/itm/worker-sold-6",
+      title: "Sony WH-1000XM4 sold sixth",
+      kind: "sold-comp",
+    };
+    sixEvidencePersistence.prediction.sources.push(sixthSource);
+    sixEvidencePersistence.pricing_snapshot.price_result.sources.push(sixthSource);
+    sixEvidencePersistence.pricing_snapshot.evidence.push({
+      id: "worker-sold-6",
+      sourceUrl: sixthSource.url,
+      title: sixthSource.title,
+      price: 152,
+      currency: "USD",
+      kind: "sold-comparable",
+      priceDisclosure: "displayed-sold-price",
+    });
+    const rejectedPersistencePayloads = [
       {
         persistence: incoherentPersistence,
         message: /pipeline persistence is incoherent/i,
@@ -398,8 +456,12 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         persistence: missingConfidencePersistence,
         message: /invalid pricing evidence snapshot/i,
       },
+      {
+        persistence: sixEvidencePersistence,
+        message: /invalid pricing evidence snapshot/i,
+      },
     ];
-    for (const rejected of rejectedConfidencePayloads) {
+    for (const rejected of rejectedPersistencePayloads) {
       const completion = await admin.rpc("complete_pipeline_run", {
         p_run_id: runA,
         p_lease_token: resumed.context.run.lease_token,
@@ -408,10 +470,10 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       expect(completion.error?.message).toMatch(rejected.message);
     }
     const [
-      runAfterRejectedConfidence,
-      listingsAfterRejectedConfidence,
-      logsAfterRejectedConfidence,
-      snapshotsAfterRejectedConfidence,
+      runAfterRejectedPersistence,
+      listingsAfterRejectedPersistence,
+      logsAfterRejectedPersistence,
+      snapshotsAfterRejectedPersistence,
     ] =
       await Promise.all([
         userA.client
@@ -432,13 +494,13 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
           .select("run_id")
           .eq("run_id", runA),
       ]);
-    expect(runAfterRejectedConfidence.data).toEqual({
+    expect(runAfterRejectedPersistence.data).toEqual({
       status: "running",
       stage: "generating",
     });
-    expect(listingsAfterRejectedConfidence.data).toEqual([]);
-    expect(logsAfterRejectedConfidence.data).toEqual([]);
-    expect(snapshotsAfterRejectedConfidence.data).toEqual([]);
+    expect(listingsAfterRejectedPersistence.data).toEqual([]);
+    expect(logsAfterRejectedPersistence.data).toEqual([]);
+    expect(snapshotsAfterRejectedPersistence.data).toEqual([]);
 
     await store.complete({
       runId: runA,
@@ -503,6 +565,21 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
         priceDisclosure: "displayed-sold-price",
         evidenceAsOf: snapshots![0]!.evidence_as_of,
       }),
+      expect.objectContaining({
+        id: "worker-sold-3",
+        priceDisclosure: "displayed-sold-price",
+        evidenceAsOf: snapshots![0]!.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-4",
+        priceDisclosure: "displayed-sold-price",
+        evidenceAsOf: snapshots![0]!.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-5",
+        priceDisclosure: "displayed-sold-price",
+        evidenceAsOf: snapshots![0]!.evidence_as_of,
+      }),
     ]);
     expect(
       (snapshots?.[0]?.price_result as { confidence?: number } | undefined)
@@ -517,11 +594,14 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
     ).resolves.toMatchObject({
       item: { id: itemA },
       priceResult: { confidence: RESULT.confidence.score },
-      evidenceLevel: "limited",
-      defaultWindow: "90D",
+      evidenceLevel: "strong",
+      defaultWindow: "60D",
       comparables: [
         expect.objectContaining({ id: "worker-sold-1" }),
         expect.objectContaining({ id: "worker-sold-2" }),
+        expect.objectContaining({ id: "worker-sold-3" }),
+        expect.objectContaining({ id: "worker-sold-4" }),
+        expect.objectContaining({ id: "worker-sold-5" }),
       ],
     });
     await expect(
@@ -593,8 +673,26 @@ describe("durable pipeline worker live DB/RLS boundary", () => {
       Date.parse(canonicalNewPriced.priced!.evidenceAsOf),
     );
     expect(newSnapshots![0]!.evidence).toEqual([
-      expect.objectContaining({ evidenceAsOf: newSnapshots![0]!.evidence_as_of }),
-      expect.objectContaining({ evidenceAsOf: newSnapshots![0]!.evidence_as_of }),
+      expect.objectContaining({
+        id: "worker-sold-1",
+        evidenceAsOf: newSnapshots![0]!.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-2",
+        evidenceAsOf: newSnapshots![0]!.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-3",
+        evidenceAsOf: newSnapshots![0]!.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-4",
+        evidenceAsOf: newSnapshots![0]!.evidence_as_of,
+      }),
+      expect.objectContaining({
+        id: "worker-sold-5",
+        evidenceAsOf: newSnapshots![0]!.evidence_as_of,
+      }),
     ]);
     expect(Date.parse(canonicalNewPriced.priced!.evidenceAsOf)).toBeGreaterThan(
       Date.parse(canonicalPriced.priced!.evidenceAsOf),
