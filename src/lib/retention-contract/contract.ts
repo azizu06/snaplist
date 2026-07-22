@@ -39,6 +39,17 @@ const releaseRetentionContractSchema = z
   })
   .strict()
   .superRefine((contract, context) => {
+    const mobileOauthDispositionCount = contract.data.filter(
+      ({ id }) => id === "mobile-ebay-oauth-session-state",
+    ).length;
+    if (mobileOauthDispositionCount !== 1) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "The contract must contain exactly one mobile eBay OAuth session/state disposition.",
+        path: ["data", "mobile-ebay-oauth-session-state"],
+      });
+    }
     const rawVoice = contract.data.find(
       ({ id }) => id === "private-storage-raw-voice",
     );

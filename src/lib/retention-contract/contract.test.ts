@@ -148,6 +148,30 @@ describe("lean-MVP release retention contract", () => {
     ]);
   });
 
+  it("rejects an omitted mobile eBay OAuth session/state disposition", () => {
+    const invalid = structuredClone(contract);
+    invalid.data = invalid.data.filter(
+      ({ id }) => id !== "mobile-ebay-oauth-session-state",
+    );
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /exactly one mobile eBay OAuth session\/state disposition/i,
+    );
+  });
+
+  it("rejects duplicate mobile eBay OAuth session/state dispositions", () => {
+    const invalid = structuredClone(contract);
+    const mobileOauth = invalid.data.find(
+      ({ id }) => id === "mobile-ebay-oauth-session-state",
+    );
+    if (!mobileOauth) throw new Error("Mobile eBay OAuth disposition is missing");
+    invalid.data.push(structuredClone(mobileOauth));
+
+    expect(() => parseReleaseRetentionContract(invalid)).toThrow(
+      /exactly one mobile eBay OAuth session\/state disposition/i,
+    );
+  });
+
   it("rejects raw seller voice retained beyond 24 hours", () => {
     const invalid = structuredClone(contract);
     const rawVoice = invalid.data.find(
