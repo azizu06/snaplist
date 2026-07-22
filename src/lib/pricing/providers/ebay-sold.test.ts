@@ -1672,6 +1672,71 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(fetchPage).toHaveBeenCalledOnce();
   });
 
+  it("retries a transient reserved final observation before the caller deadline", async () => {
+    vi.useFakeTimers();
+    let claimed = false;
+    let storeStarted = false;
+    let stored: EbaySoldComp[] | null = null;
+    let winnerObservationReads = 0;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        if (!storeStarted) return stored;
+
+        winnerObservationReads += 1;
+        if (winnerObservationReads < 5) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 6));
+          return stored;
+        }
+        if (winnerObservationReads === 5) {
+          await new Promise<void>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("transient reserved observation failure")),
+              76,
+            ),
+          );
+        }
+        return stored;
+      },
+      async set(_key, value) {
+        storeStarted = true;
+        await new Promise<void>((_, reject) =>
+          setTimeout(() => {
+            stored = value;
+            reject(new Error("winner store response rejected after commit"));
+          }, 471),
+        );
+      },
+      async claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimed ? "owner" : null;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const firstResult = await first;
+    storeStarted = false;
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(stored).toHaveLength(7);
+    expect(retryResult).toEqual(firstResult);
+    expect(firstResult?.sources).toHaveLength(5);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
   it.each([
     {
       observed: Array.from({ length: 5 }, (_, index) => ({
