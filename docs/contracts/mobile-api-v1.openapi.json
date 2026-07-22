@@ -182,7 +182,7 @@
           { "name": "error", "in": "query", "required": false, "schema": { "type": "string" } },
           { "name": "error_description", "in": "query", "required": false, "schema": { "type": "string" } }
         ],
-        "responses": { "303": { "description": "Redirects to an app universal link carrying only an opaque connected, declined, cancelled, expired, wrong-tenant, invalid-state, or failed result" }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "503": { "$ref": "#/components/responses/Unavailable" } }
+        "responses": { "303": { "description": "Redirects to an app universal link carrying exactly one opaque result: connected, declined, cancelled, expired, wrong_tenant, invalid_state, in_progress, or failed. in_progress is a truthful nonterminal result and does not imply connection success or failure." }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/webhooks/revenuecat": {

@@ -120,6 +120,17 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(JSON.stringify(contract)).toContain("Idempotency-Key");
   });
 
+  it("documents the exact eBay OAuth callback vocabulary in both OpenAPI copies", () => {
+    const callback = contract.paths["/v1/ebay/oauth/callback"].get as {
+      responses: { "303": { description: string } };
+    };
+
+    expect(nativeContractSource).toBe(serverContractSource);
+    expect(callback.responses["303"].description).toBe(
+      "Redirects to an app universal link carrying exactly one opaque result: connected, declined, cancelled, expired, wrong_tenant, invalid_state, in_progress, or failed. in_progress is a truthful nonterminal result and does not imply connection success or failure.",
+    );
+  });
+
   it("keeps both OpenAPI copies byte-identical and validates unavailable Home order truth", () => {
     expect(nativeContractSource).toBe(serverContractSource);
     const homeSummary = contract.components.schemas.HomeSummary as {
