@@ -386,65 +386,84 @@ describe("createDefaultPricer Apify composition", () => {
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
-  it("atomically fences concurrent fresh-runtime redelivery to one bounded paid pass", async () => {
-    const values = new Map<string, ApifySoldComp[]>();
-    const claims = new Set<string>();
-    const cacheForRuntime = () =>
-      ({
+  it("waits for a shared Apify winner before public fallback across runtimes", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      const cacheForRuntime = <T>(
+        values: Map<string, T>,
+        claims: Map<string, string>,
+        onLostClaim?: () => void,
+      ): TtlCache<T> => ({
         scope: "shared",
-        get: async (key: string) => values.get(key) ?? null,
-        set: async (key: string, value: ApifySoldComp[]) => {
+        get: async (key) => values.get(key) ?? null,
+        set: async (key, value) => {
           values.set(key, value);
         },
-        claim: async (key: string) => {
-          if (claims.has(key)) return false;
-          claims.add(key);
+        claim: async (key, _signal, ownerToken) => {
+          if (claims.has(key)) {
+            onLostClaim?.();
+            return false;
+          }
+          claims.set(key, ownerToken ?? "owner");
           return true;
         },
-      }) as TtlCache<ApifySoldComp[]> & {
-        claim(key: string): Promise<boolean>;
-      };
-    const initial = [
-      apifyItem("initial-a"),
-      apifyItem("initial-b"),
-      ...Array.from({ length: 8 }, (_, index) =>
-        apifyItem(`initial-reject-${index}`, {
-          title: "Sony WH-1000XM4 replacement case",
-          soldPrice: "20",
-        }),
-      ),
-    ];
-    const expanded = Array.from({ length: 5 }, (_, index) =>
-      apifyItem(`expanded-${index}`, {
-        endedAt: `2026-07-${String(19 - index).padStart(2, "0")}T12:00:00.000Z`,
-      }),
-    );
-    const requests: Parameters<RunApifySoldActor>[0][] = [];
-    const runActor = vi.fn<RunApifySoldActor>(async (request) => {
-      requests.push(request);
-      return {
-        status: "SUCCEEDED",
-        items: request.maxItems === 10 ? initial : expanded,
-      };
-    });
-    const priceForRuntime = () =>
-      createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          cache: cacheForRuntime(),
-        },
-        ebaySold: { fetchPage: async () => PUBLIC_SOLD_HTML },
+        getClaimOwner: async (key) => claims.get(key) ?? null,
       });
+      const apifyValues = new Map<string, ApifySoldComp[]>();
+      const apifyClaims = new Map<string, string>();
+      const publicValues = new Map<string, EbaySoldComp[]>();
+      const publicClaims = new Map<string, string>();
+      let reportLostApifyClaim!: () => void;
+      const lostApifyClaim = new Promise<void>((resolve) => {
+        reportLostApifyClaim = resolve;
+      });
+      const runActor = vi.fn<RunApifySoldActor>(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        return { status: "SUCCEEDED", items: apifyItems() };
+      });
+      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+      const priceForRuntime = () =>
+        createDefaultPricer({
+          apifySold: {
+            enabled: true,
+            token: "secret",
+            runActor,
+            timeoutSecs: 1,
+            waitSecs: 1,
+            cache: cacheForRuntime(
+              apifyValues,
+              apifyClaims,
+              reportLostApifyClaim,
+            ),
+          },
+          ebaySold: {
+            fetchPage,
+            cache: cacheForRuntime(publicValues, publicClaims),
+          },
+        });
 
-    const first = priceForRuntime()(SIGNAL);
-    const concurrentRedelivery = priceForRuntime()(SIGNAL);
-    await Promise.all([first, concurrentRedelivery]);
-    const laterRedelivery = await priceForRuntime()(SIGNAL);
+      const winner = priceForRuntime()(SIGNAL);
+      await vi.advanceTimersByTimeAsync(0);
+      const loser = priceForRuntime()(SIGNAL);
+      await lostApifyClaim;
+      await vi.advanceTimersByTimeAsync(99);
 
-    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 20]);
-    expect(laterRedelivery.evidence).toHaveLength(5);
+      expect(runActor).toHaveBeenCalledTimes(1);
+      expect(fetchPage).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(401);
+      const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+      const retryResult = await priceForRuntime()(SIGNAL);
+
+      expect(runActor).toHaveBeenCalledTimes(1);
+      expect(fetchPage).not.toHaveBeenCalled();
+      expect(winnerResult.evidence).toHaveLength(3);
+      expect(loserResult.evidence).toEqual(winnerResult.evidence);
+      expect(retryResult.evidence).toEqual(winnerResult.evidence);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("declines without a shared cost fence before starting paid retrieval", async () => {

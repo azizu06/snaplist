@@ -545,6 +545,37 @@ export function createApifySoldPricingProvider(
     }
   }
 
+  async function waitForClaimWinner(
+    key: string,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
+    if (!cache) return null;
+    let delayMs = 0;
+    while (true) {
+      if (delayMs > 0) {
+        const remainingMs = pricingDeadline - Date.now();
+        if (remainingMs <= 0) break;
+        await new Promise<void>((resolve) =>
+          setTimeout(
+            resolve,
+            Math.min(delayMs, Math.max(1, Math.floor(remainingMs / 2))),
+          ),
+        );
+      }
+      const handedOff = await readCache(key, pricingDeadline);
+      if (handedOff != null) return handedOff;
+      if (Date.now() >= pricingDeadline) break;
+      delayMs =
+        delayMs === 0
+          ? APIFY_SOLD_WINNER_STORE_POLL_MS
+          : Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
+    }
+    emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+      reason: "handoff-timeout",
+    });
+    return null;
+  }
+
   async function writeCache(
     key: string,
     comps: ApifySoldComp[],
@@ -793,7 +824,7 @@ export function createApifySoldPricingProvider(
         return null;
       }
       if (!claimed) {
-        return readCache(key, pricingDeadline);
+        return waitForClaimWinner(key, pricingDeadline);
       }
       return fetchAndCache(key, query, signal, pricingDeadline);
     })().finally(() => {
