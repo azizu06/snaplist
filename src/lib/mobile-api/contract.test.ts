@@ -120,6 +120,17 @@ describe("SwiftUI mobile HTTP contract", () => {
     expect(JSON.stringify(contract)).toContain("Idempotency-Key");
   });
 
+  it("documents the exact eBay OAuth callback vocabulary in both OpenAPI copies", () => {
+    const callback = contract.paths["/v1/ebay/oauth/callback"].get as {
+      responses: { "303": { description: string } };
+    };
+
+    expect(nativeContractSource).toBe(serverContractSource);
+    expect(callback.responses["303"].description).toBe(
+      "Redirects to an app universal link carrying exactly one opaque result: connected, declined, cancelled, expired, wrong_tenant, invalid_state, in_progress, or failed. in_progress is a truthful nonterminal result and does not imply connection success or failure.",
+    );
+  });
+
   it("keeps both OpenAPI copies byte-identical and validates unavailable Home order truth", () => {
     expect(nativeContractSource).toBe(serverContractSource);
     const homeSummary = contract.components.schemas.HomeSummary as {
@@ -216,7 +227,7 @@ describe("SwiftUI mobile HTTP contract", () => {
 
   it("keeps future implementation ownership explicit in the contract", () => {
     const serialized = JSON.stringify(contract);
-    for (const issue of [17, 174]) {
+    for (const issue of [174]) {
       expect(serialized).toContain(`\"x-owner-issue\":${issue}`);
     }
   });
@@ -326,12 +337,15 @@ describe("SwiftUI mobile HTTP contract", () => {
     }
   });
 
-  it("keeps both per-user eBay OAuth operations owned by issue 17", () => {
+  it("marks both #387 per-user eBay OAuth operations implemented", () => {
     expect(contract.paths["/v1/ebay/oauth/sessions"].post).toMatchObject({
-      "x-owner-issue": 17,
+      "x-owner-issue": 387,
+      "x-implementation-status": "implemented",
+      security: [{ ClerkBearer: [] }],
     });
     expect(contract.paths["/v1/ebay/oauth/callback"].get).toMatchObject({
-      "x-owner-issue": 17,
+      "x-owner-issue": 387,
+      "x-implementation-status": "implemented",
     });
   });
 

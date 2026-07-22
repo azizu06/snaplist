@@ -164,24 +164,25 @@
     "/v1/ebay/oauth/sessions": {
       "post": {
         "operationId": "createEbayOauthSession",
-        "x-owner-issue": 17,
-        "x-implementation-status": "contract-only",
+        "x-owner-issue": 387,
+        "x-implementation-status": "implemented",
         "security": [{ "ClerkBearer": [] }],
         "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
-        "responses": { "201": { "description": "Server-created OAuth state and authorization URL; provider tokens never transit SwiftUI", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayOauthSessionEnvelope" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+        "responses": { "201": { "description": "Server-created tenant-bound one-time OAuth state and Sandbox authorization URL; provider credentials never transit SwiftUI", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EbayOauthSessionEnvelope" } } } }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/ebay/oauth/callback": {
       "get": {
         "operationId": "completeEbayOauthCallback",
-        "x-owner-issue": 17,
-        "x-implementation-status": "contract-only",
+        "x-owner-issue": 387,
+        "x-implementation-status": "implemented",
         "parameters": [
           { "name": "state", "in": "query", "required": true, "schema": { "type": "string" } },
           { "name": "code", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "error", "in": "query", "required": false, "schema": { "type": "string" } }
+          { "name": "error", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "error_description", "in": "query", "required": false, "schema": { "type": "string" } }
         ],
-        "responses": { "303": { "description": "Redirects to an app universal link carrying only an opaque completion result" }, "400": { "$ref": "#/components/responses/InvalidRequest" } }
+        "responses": { "303": { "description": "Redirects to an app universal link carrying exactly one opaque result: connected, declined, cancelled, expired, wrong_tenant, invalid_state, in_progress, or failed. in_progress is a truthful nonterminal result and does not imply connection success or failure." }, "400": { "$ref": "#/components/responses/InvalidRequest" }, "503": { "$ref": "#/components/responses/Unavailable" } }
       }
     },
     "/v1/webhooks/revenuecat": {
@@ -255,7 +256,7 @@
       "GuestClaimEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "oneOf": [{ "$ref": "#/components/schemas/GuestClaimClaimedOutcome" }, { "$ref": "#/components/schemas/GuestClaimExpiredOutcome" }] }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "RevenueCatConfigurationEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["configured", "appUserId"], "properties": { "configured": { "type": "boolean" }, "appUserId": { "type": "string" }, "publicSdkKey": { "type": "string" }, "entitlementId": { "type": "string" }, "monthlyProductId": { "type": "string" }, "offeringId": { "type": "string" }, "transitionState": { "type": "string", "enum": ["not_required", "required", "reconciled"] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "AiItemEntitlementEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["billingSource", "status", "remainingItems", "periodStart", "periodEnd", "gracePeriodEnd", "transitionState", "legacyStripeStatus"], "properties": { "billingSource": { "type": "string", "enum": ["included", "storekit", "none"] }, "status": { "type": "string", "enum": ["included", "active", "grace", "billing_retry", "expired", "revoked", "refunded", "ambiguous", "unconfigured"] }, "remainingItems": { "type": "integer", "minimum": 0 }, "periodStart": { "type": ["string", "null"], "format": "date-time" }, "periodEnd": { "type": ["string", "null"], "format": "date-time" }, "gracePeriodEnd": { "type": ["string", "null"], "format": "date-time" }, "transitionState": { "type": ["string", "null"], "enum": ["not_required", "required", "reconciled", null] }, "legacyStripeStatus": { "type": ["string", "null"] } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
-      "EbayOauthSessionEnvelope": { "type": "object", "required": ["data", "meta"], "properties": { "data": { "type": "object", "required": ["sessionId", "authorizationUrl", "expiresAt"], "properties": { "sessionId": { "type": "string", "format": "uuid" }, "authorizationUrl": { "type": "string", "format": "uri" }, "expiresAt": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
+      "EbayOauthSessionEnvelope": { "type": "object", "additionalProperties": false, "required": ["data", "meta"], "properties": { "data": { "type": "object", "additionalProperties": false, "required": ["sessionId", "authorizationUrl", "expiresAt"], "properties": { "sessionId": { "type": "string", "format": "uuid" }, "authorizationUrl": { "type": "string", "format": "uri" }, "expiresAt": { "type": "string", "format": "date-time" } } }, "meta": { "$ref": "#/components/schemas/ResponseMeta" } } },
       "ResponseMeta": { "type": "object", "required": ["requestId"], "properties": { "requestId": { "type": "string" } } },
       "CreateItemRunMultipart": { "type": "object", "required": ["photo"], "properties": { "photo": { "type": "array", "minItems": 1, "maxItems": 5, "items": { "type": "string", "format": "binary", "description": "JPEG, PNG, or WebP image bytes" } }, "costBasis": { "type": "number", "minimum": 0 } }, "additionalProperties": false },
       "MobileItemSubmissionPhoto": { "type": "object", "additionalProperties": false, "required": ["ordinal", "contentSha256", "byteLength", "mediaType"], "properties": { "ordinal": { "type": "integer", "minimum": 0, "maximum": 4 }, "contentSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "byteLength": { "type": "integer", "minimum": 1, "maximum": 52428800 }, "mediaType": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"] } } },
