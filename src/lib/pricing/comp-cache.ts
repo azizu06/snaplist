@@ -19,11 +19,11 @@ export interface TtlCache<T> {
   /** Whether atomic claims coordinate only this process or every worker runtime. */
   readonly scope?: "process" | "shared";
   /** The cached value, or null on a miss / expiry. */
-  get(key: string): Promise<T | null>;
+  get(key: string, signal?: AbortSignal): Promise<T | null>;
   /** Store a value under the cache's TTL. */
-  set(key: string, value: T): Promise<void>;
+  set(key: string, value: T, signal?: AbortSignal): Promise<void>;
   /** Atomically claim one cache identity for the full TTL when supported. */
-  claim?(key: string): Promise<boolean>;
+  claim?(key: string, signal?: AbortSignal): Promise<boolean>;
 }
 
 /** Redis keys all share this prefix (mirrors the abuse limiter's `snaplist:rl`). */
@@ -75,11 +75,12 @@ export function createInMemoryTtlCache<T>(
 // without a live Redis.
 // ---------------------------------------------------------------------------
 interface RedisLike {
-  get(key: string): Promise<unknown>;
+  get(key: string, signal?: AbortSignal): Promise<unknown>;
   set(
     key: string,
     value: string,
     opts: { ex: number; nx?: true },
+    signal?: AbortSignal,
   ): Promise<unknown>;
 }
 
@@ -90,7 +91,12 @@ export function createUpstashTtlCache<T>(
 ): TtlCache<T> {
   const ttlSec = Math.max(1, Math.round(ttlMs / 1000));
   let pending: Promise<RedisLike> | null = injected ? Promise.resolve(injected) : null;
-  function client(): Promise<RedisLike> {
+  async function client(signal?: AbortSignal): Promise<RedisLike> {
+    if (injected) return injected;
+    if (signal) {
+      const { Redis } = await import("@upstash/redis");
+      return Redis.fromEnv({ signal }) as unknown as RedisLike;
+    }
     if (!pending) {
       pending = (async () => {
         const { Redis } = await import("@upstash/redis");
@@ -102,8 +108,8 @@ export function createUpstashTtlCache<T>(
   const namespaced = (key: string) => `${KEY_PREFIX}:${name}:${key}`;
   return {
     scope: "shared",
-    async get(key) {
-      const raw = await (await client()).get(namespaced(key));
+    async get(key, signal) {
+      const raw = await (await client(signal)).get(namespaced(key), signal);
       if (raw == null) return null;
       // @upstash/redis usually auto-deserializes JSON to the object; tolerate a
       // raw string round-trip too (defensive against client/config differences).
@@ -116,14 +122,20 @@ export function createUpstashTtlCache<T>(
       }
       return raw as T;
     },
-    async set(key, value) {
-      await (await client()).set(namespaced(key), JSON.stringify(value), { ex: ttlSec });
+    async set(key, value, signal) {
+      await (await client(signal)).set(
+        namespaced(key),
+        JSON.stringify(value),
+        { ex: ttlSec },
+        signal,
+      );
     },
-    async claim(key) {
-      const claimed = await (await client()).set(
+    async claim(key, signal) {
+      const claimed = await (await client(signal)).set(
         namespaced(`${key}:paid-claim`),
         "1",
         { ex: ttlSec, nx: true },
+        signal,
       );
       return claimed === "OK" || claimed === true;
     },

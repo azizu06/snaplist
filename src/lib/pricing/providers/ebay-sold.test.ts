@@ -1064,11 +1064,21 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
   it("fails soft by the derived handoff deadline when a loser cache read never settles", async () => {
     vi.useFakeTimers();
     let reads = 0;
+    let loserReadAborted = false;
     const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
-      async get() {
+      async get(_key, signal) {
         reads += 1;
         if (reads === 1) return null;
-        return new Promise<unknown>(() => undefined);
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              loserReadAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
       },
       async set(_key, _value, options) {
         if (options.nx) return null;
@@ -1094,15 +1104,26 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(settled).toBe(true);
     await expect(result).resolves.toBeNull();
     expect(reads).toBe(2);
+    expect(loserReadAborted).toBe(true);
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
   it("fails soft by the derived handoff deadline when the initial cache read never settles", async () => {
     vi.useFakeTimers();
     const set = vi.fn(async () => "OK");
+    let initialReadAborted = false;
     const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
-      async get() {
-        return new Promise<unknown>(() => undefined);
+      async get(_key, signal) {
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              initialReadAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
       },
       set,
     });
@@ -1124,18 +1145,31 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
 
     expect(settled).toBe(true);
     await expect(result).resolves.toBeNull();
+    expect(initialReadAborted).toBe(true);
     expect(set).not.toHaveBeenCalled();
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
   it("fails soft by the derived handoff deadline when the atomic claim never settles", async () => {
     vi.useFakeTimers();
+    let claimAborted = false;
     const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
       async get() {
         return null;
       },
-      async set(_key, _value, options) {
-        if (options.nx) return new Promise<unknown>(() => undefined);
+      async set(_key, _value, options, signal) {
+        if (options.nx) {
+          return new Promise<unknown>((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => {
+                claimAborted = true;
+                reject(new DOMException("aborted", "AbortError"));
+              },
+              { once: true },
+            );
+          });
+        }
         throw new Error("unreached store");
       },
     });
@@ -1157,20 +1191,31 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
 
     expect(settled).toBe(true);
     await expect(result).resolves.toBeNull();
+    expect(claimAborted).toBe(true);
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
   it("fails soft by the derived handoff deadline when the winner store never settles", async () => {
     vi.useFakeTimers();
     let stores = 0;
+    let storeAborted = false;
     const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
       async get() {
         return null;
       },
-      async set(_key, _value, options) {
+      async set(_key, _value, options, signal) {
         if (options.nx) return "OK";
         stores += 1;
-        return new Promise<unknown>(() => undefined);
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              storeAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
       },
     });
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
@@ -1192,6 +1237,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(settled).toBe(true);
     await expect(result).resolves.toBeNull();
     expect(stores).toBe(1);
+    expect(storeAborted).toBe(true);
     expect(fetchPage).toHaveBeenCalledOnce();
   });
 
@@ -1253,6 +1299,58 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(
       fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
     ).toEqual(["10"]);
+  });
+
+  it("does not await a newer in-process retrieval past the caller deadline", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        reads += 1;
+        if (reads === 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 501));
+        }
+        return null;
+      },
+      async set(_key, _value, signal) {
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+      async claim() {
+        return true;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRequest = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+    let firstSettled = false;
+    const first = providerForRequest()
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        firstSettled = true;
+        return value;
+      });
+    await vi.advanceTimersByTimeAsync(100);
+    const second = providerForRequest().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(402);
+    const firstSettledByItsDeadline = firstSettled;
+
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(Promise.all([first, second])).resolves.toEqual([null, null]);
+
+    expect(firstSettledByItsDeadline).toBe(true);
+    expect(fetchPage).toHaveBeenCalledOnce();
   });
 
   it("declines before real egress when only a process-local fence is available", async () => {

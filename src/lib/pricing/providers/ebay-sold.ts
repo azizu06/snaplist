@@ -154,19 +154,25 @@ const EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED = Symbol(
 );
 
 async function settleBeforeCoordinationDeadline<T>(
-  startOperation: () => Promise<T>,
+  startOperation: (signal: AbortSignal) => Promise<T>,
   deadline: number,
 ): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
   const remainingMs = deadline - Date.now();
   if (remainingMs < 0) return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
 
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      startOperation(),
+      startOperation(controller.signal),
       new Promise<typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED>((resolve) => {
         timer = setTimeout(
-          () => resolve(EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED),
+          () => {
+            // Win the race with the fail-soft sentinel before abort listeners
+            // reject the underlying cache request.
+            resolve(EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED);
+            controller.abort();
+          },
           remainingMs,
         );
       }),
@@ -1186,7 +1192,7 @@ function createEbaySoldPricingProviderInternal(
       }
       try {
         const handedOff = await settleBeforeCoordinationDeadline(
-          () => cache.get(key),
+          (signal) => cache.get(key, signal),
           deadline,
         );
         if (handedOff === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) break;
@@ -1344,7 +1350,7 @@ function createEbaySoldPricingProviderInternal(
       if (cache) {
         try {
           const cached = await settleBeforeCoordinationDeadline(
-            () => cache.get(key),
+            (signal) => cache.get(key, signal),
             coordinationDeadline,
           );
           if (cached === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) {
@@ -1364,7 +1370,14 @@ function createEbaySoldPricingProviderInternal(
       if (comps == null) {
         const existing = inFlight.get(key);
         if (existing) {
-          comps = await existing;
+          const localResult = await settleBeforeCoordinationDeadline(
+            () => existing,
+            coordinationDeadline,
+          );
+          comps =
+            localResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+              ? null
+              : localResult;
         } else {
           const pending = (async () => {
             if (requiresSharedFence && !claimSharedRetrieval) {
@@ -1383,7 +1396,7 @@ function createEbaySoldPricingProviderInternal(
               let claimed: boolean;
               try {
                 const claimResult = await settleBeforeCoordinationDeadline(
-                  () => claimSharedRetrieval(key),
+                  (signal) => claimSharedRetrieval(key, signal),
                   coordinationDeadline,
                 );
                 if (
@@ -1413,7 +1426,7 @@ function createEbaySoldPricingProviderInternal(
             if (cache) {
               try {
                 const storeResult = await settleBeforeCoordinationDeadline(
-                  () => cache.set(key, retrieved),
+                  (signal) => cache.set(key, retrieved, signal),
                   coordinationDeadline,
                 );
                 if (
