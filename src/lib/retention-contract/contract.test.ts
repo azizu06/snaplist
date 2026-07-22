@@ -110,10 +110,41 @@ describe("lean-MVP release retention contract", () => {
       "per-run-telemetry",
       "guest-recovery",
       "ai-item-credits",
+      "mobile-ebay-oauth-session-state",
       "ebay-connections",
       "ebay-publish-receipts",
       "clerk-identity",
       "apple-revenuecat-references",
+    ]);
+  });
+
+  it("defines one exact mobile eBay OAuth session/state disposition", () => {
+    const matchingData = contract.data.filter(
+      ({ id }) => id === "mobile-ebay-oauth-session-state",
+    );
+
+    expect(matchingData).toEqual([
+      {
+        id: "mobile-ebay-oauth-session-state",
+        releaseDatum: true,
+        dispositions: [
+          {
+            treatment: "delete",
+            owner: "seller-snaplist-tenant",
+            deletionTriggers: [
+              "oauth-session-terminal",
+              "oauth-session-expires",
+              "account-erasure",
+            ],
+            maximumRetention:
+              "active unexpired rows are ineligible; delete no later than 24 hours after the row first becomes terminal or reaches the database-authoritative expires_at; account erasure removes every owned row immediately regardless of status",
+            executor:
+              "snaplist-mobile-ebay-oauth-retention-capability-and-issue-384-account-erasure-capability",
+            completionProof:
+              "bounded cleanup reports no eligible owned row and durable absence is confirmed; account erasure reports no mobile eBay OAuth session row for the tenant",
+          },
+        ],
+      },
     ]);
   });
 

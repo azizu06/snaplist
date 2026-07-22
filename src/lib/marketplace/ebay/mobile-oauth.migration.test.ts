@@ -18,6 +18,12 @@ const forwardRpcMigrationPath = resolve(
 const forwardRpcMigration = existsSync(forwardRpcMigrationPath)
   ? readFileSync(forwardRpcMigrationPath, "utf8")
   : "";
+const retentionMigrationPath = resolve(
+  "supabase/migrations/20260722160000_mobile_ebay_oauth_retention.sql",
+);
+const retentionMigration = existsSync(retentionMigrationPath)
+  ? readFileSync(retentionMigrationPath, "utf8")
+  : "";
 
 function functionSql(name: string): string {
   const start = migration.indexOf(`create function public.${name}(`);
@@ -173,5 +179,36 @@ describe("mobile eBay OAuth migration authority", () => {
         functionDefinition(migration, name),
       );
     }
+  });
+
+  it("bounds tenant OAuth session retention without deleting active rows", () => {
+    expect(retentionMigration).not.toBe("");
+    expect(retentionMigration).toMatch(
+      /create function public\.cleanup_mobile_ebay_oauth_sessions\(\s*p_user_id text,\s*p_limit integer\s*\)[\s\S]*language plpgsql\s+security definer\s+set search_path = ''/i,
+    );
+    expect(retentionMigration).toMatch(
+      /candidate\.user_id = p_user_id[\s\S]*least\(\s*candidate\.expires_at,\s*coalesce\(candidate\.finished_at, candidate\.expires_at\)\s*\) <= statement_timestamp\(\) - interval '24 hours'[\s\S]*for update of candidate skip locked[\s\S]*limit p_limit/i,
+    );
+    expect(retentionMigration).toMatch(
+      /delete from public\.ebay_oauth_sessions session[\s\S]*using eligible[\s\S]*session\.user_id = p_user_id[\s\S]*returning session\.id/i,
+    );
+    expect(retentionMigration).toMatch(
+      /'deleted_count'[\s\S]*'remaining_eligible_count'[\s\S]*'complete'/i,
+    );
+    expect(retentionMigration).not.toMatch(
+      /access_token|refresh_token|authorization_code|client_secret|credential/i,
+    );
+  });
+
+  it("hands every owned OAuth session row to issue 384 account erasure", () => {
+    expect(retentionMigration).toMatch(
+      /create function public\.delete_mobile_ebay_oauth_sessions_for_account_erasure\(\s*p_user_id text\s*\)[\s\S]*delete from public\.ebay_oauth_sessions session[\s\S]*where session\.user_id = p_user_id[\s\S]*'remaining_count'[\s\S]*'complete'/i,
+    );
+    expect(retentionMigration).toMatch(
+      /revoke all on function public\.cleanup_mobile_ebay_oauth_sessions\(\s*text, integer\s*\)\s+from public, anon, authenticated;[\s\S]*grant execute on function public\.cleanup_mobile_ebay_oauth_sessions\(\s*text, integer\s*\)\s+to service_role;/i,
+    );
+    expect(retentionMigration).toMatch(
+      /revoke all on function public\.delete_mobile_ebay_oauth_sessions_for_account_erasure\(\s*text\s*\)\s+from public, anon, authenticated;[\s\S]*grant execute on function public\.delete_mobile_ebay_oauth_sessions_for_account_erasure\(\s*text\s*\)\s+to service_role;/i,
+    );
   });
 });
