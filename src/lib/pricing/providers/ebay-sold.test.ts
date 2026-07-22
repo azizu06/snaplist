@@ -89,14 +89,23 @@ const sharedTestCacheByCache = new WeakMap<
 function withSharedTestClaim(
   cache: TtlCache<EbaySoldComp[]>,
 ): TtlCache<EbaySoldComp[]> {
-  if (cache.scope === "shared" && cache.claim) return cache;
+  if (cache.scope === "shared" && cache.claim && cache.getClaimOwner) return cache;
   const existing = sharedTestCacheByCache.get(cache);
   if (existing) return existing;
+  let claimOwner: string | null = null;
   const shared: TtlCache<EbaySoldComp[]> = {
     scope: "shared",
     get: cache.get.bind(cache),
     set: cache.set.bind(cache),
-    claim: cache.claim?.bind(cache) ?? (async () => true),
+    async claim(key, signal, ownerToken) {
+      const claimed = cache.claim
+        ? await cache.claim(key, signal, ownerToken)
+        : true;
+      if (claimed) claimOwner = ownerToken ?? "1";
+      return claimed;
+    },
+    getClaimOwner:
+      cache.getClaimOwner?.bind(cache) ?? (async () => claimOwner),
   };
   sharedTestCacheByCache.set(cache, shared);
   return shared;
@@ -1032,6 +1041,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     const startedAt = Date.now();
     const values = new Map<string, EbaySoldComp[]>();
     let claimed = false;
+    let claimOwner: string | null = null;
     const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
       scope: "shared",
       async get(key, signal) {
@@ -1055,10 +1065,14 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
         );
         values.set(key, value);
       },
-      async claim() {
+      async claim(_key, _signal, ownerToken) {
         const won = !claimed;
         claimed = true;
+        if (won) claimOwner = ownerToken ?? null;
         return won;
+      },
+      async getClaimOwner() {
+        return claimOwner;
       },
     });
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
@@ -1461,6 +1475,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
   it("does not await a newer in-process retrieval past the caller deadline", async () => {
     vi.useFakeTimers();
     let reads = 0;
+    let claimOwner: string | null = null;
     const cache: TtlCache<EbaySoldComp[]> = {
       scope: "shared",
       async get() {
@@ -1479,8 +1494,12 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
           );
         });
       },
-      async claim() {
+      async claim(_key, _signal, ownerToken) {
+        claimOwner = ownerToken ?? null;
         return true;
+      },
+      async getClaimOwner() {
+        return claimOwner;
       },
     };
     const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
@@ -1526,6 +1545,30 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
 
     await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("declines before issuing a shared claim that cannot be reconciled", async () => {
+    const claim = vi.fn(async () => true);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return null;
+      },
+      async set() {
+        throw new Error("unreached store");
+      },
+      claim,
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const provider = createRawEbaySoldPricingProvider({
+      fetchPage,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(claim).not.toHaveBeenCalled();
+    expect(fetchPage).not.toHaveBeenCalled();
   });
 
   it("does not infer operator authority from an injected fetch seam", async () => {

@@ -1519,35 +1519,26 @@ function createEbaySoldPricingProviderInternal(
               : localResult;
         } else {
           const pending = (async () => {
-            if (requiresSharedFence && !claimSharedRetrieval) {
+            if (
+              requiresSharedFence &&
+              (!claimSharedRetrieval || !getSharedClaimOwner)
+            ) {
               emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
                 reason: "shared-cache-required",
               });
               return null;
             }
-            if (cache?.scope === "shared") {
-              if (!claimSharedRetrieval) {
-                emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
-                  reason: "shared-claim-missing",
-                });
-                return null;
-              }
+            if (requiresSharedFence && cache?.scope === "shared") {
               let claimed: boolean;
               const claimOwnerToken = globalThis.crypto.randomUUID();
               try {
-                const claimResult = getSharedClaimOwner
-                  ? await settleMutationWithObservation(
-                      (signal) =>
-                        claimSharedRetrieval(key, signal, claimOwnerToken),
-                      (signal) => getSharedClaimOwner(key, signal),
-                      (owner) => owner === claimOwnerToken,
-                      coordinationDeadline,
-                    )
-                  : await settleBeforeCoordinationDeadline(
-                      (signal) =>
-                        claimSharedRetrieval(key, signal, claimOwnerToken),
-                      coordinationDeadline,
-                    );
+                const claimResult = await settleMutationWithObservation(
+                  (signal) =>
+                    claimSharedRetrieval!(key, signal, claimOwnerToken),
+                  (signal) => getSharedClaimOwner!(key, signal),
+                  (owner) => owner === claimOwnerToken,
+                  coordinationDeadline,
+                );
                 if (
                   claimResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
                 ) {
