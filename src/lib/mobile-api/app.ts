@@ -260,7 +260,7 @@ export function createMobileApiHandler(
         );
       }
       const callbackUrl = new URL(request.url);
-      const state = callbackUrl.searchParams.get("state")?.trim();
+      const state = callbackUrl.searchParams.get("state");
       if (!state) {
         return errorResponse(
           requestId,
