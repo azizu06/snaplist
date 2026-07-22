@@ -526,7 +526,15 @@ export function createApifySoldPricingProvider(
   ): Promise<ApifySoldComp[] | null> {
     if (Date.now() >= pricingDeadline) return null;
     try {
-      const result = await runActor(requestFor(query, maxItems));
+      const actorResult = await settleBeforeApifyPricingDeadline(
+        () => runActor(requestFor(query, maxItems)),
+        pricingDeadline,
+      );
+      if (actorResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        recordFailure("request-timeout");
+        return null;
+      }
+      const result = actorResult;
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;
@@ -617,7 +625,19 @@ export function createApifySoldPricingProvider(
     }
 
     const existing = inFlight.get(key);
-    if (existing) return existing;
+    if (existing) {
+      const joined = await settleBeforeApifyPricingDeadline(
+        () => existing,
+        pricingDeadline,
+      );
+      if (joined === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "in-flight-timeout",
+        });
+        return null;
+      }
+      return joined;
+    }
     const pending = (async () => {
       let claimed: boolean;
       try {

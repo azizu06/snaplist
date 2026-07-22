@@ -739,6 +739,91 @@ describe("createApifySoldPricingProvider", () => {
     }
   });
 
+  it("keeps each staggered caller bounded by its own pricing deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let reads = 0;
+      const runActor = successfulRun([]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: vi.fn(async () => {
+          reads += 1;
+          if (reads === 1) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+          }
+          return null;
+        }),
+        set: async () => undefined,
+        claim: vi.fn(() => new Promise<boolean>(() => undefined)),
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let firstSettled = false;
+      let secondSettled = false;
+      const first = provider.price(SIGNAL).then((value) => {
+        firstSettled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const second = provider.price(SIGNAL).then((value) => {
+        secondSettled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(1_501);
+
+      expect(firstSettled).toBe(true);
+      expect(secondSettled).toBe(false);
+      await expect(first).resolves.toBeNull();
+      expect(runActor).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(secondSettled).toBe(true);
+      await expect(second).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft and cleans up the shared flight when the Actor never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const runActor = vi.fn<RunApifySoldActor>(
+        () => new Promise<never>(() => undefined),
+      );
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache: sharedTestCache(),
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let settled = false;
+      const first = provider.price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settled).toBe(true);
+      await expect(first).resolves.toBeNull();
+      await expect(provider.price(SIGNAL)).resolves.toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("declines before paid retrieval when the shared cost fence is unavailable", async () => {
     const runActor = successfulRun([
       rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
