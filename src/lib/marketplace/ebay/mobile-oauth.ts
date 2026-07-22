@@ -34,6 +34,16 @@ type MobileEbayOauthOutcome =
   | "expired"
   | "failed";
 
+export type MobileEbayOauthSessionStatus =
+  | "pending"
+  | "completing"
+  | MobileEbayOauthOutcome;
+
+export interface ReadMobileEbayOauthSession
+  extends StoredMobileEbayOauthSession {
+  status: MobileEbayOauthSessionStatus;
+}
+
 export interface MobileEbayOauthSessionStore {
   createOrReplaySession(input: {
     proposedSessionId: string;
@@ -41,7 +51,7 @@ export interface MobileEbayOauthSessionStore {
     bearerToken: string;
     idempotencyKey: string;
   }): Promise<StoredMobileEbayOauthSession>;
-  getSession(sessionId: string): Promise<StoredMobileEbayOauthSession | null>;
+  getSession(sessionId: string): Promise<ReadMobileEbayOauthSession | null>;
   finishSession(input: {
     sessionId: string;
     userId: string;
@@ -390,7 +400,31 @@ export function createMobileEbayOauthOperations(input: {
               ),
             };
           } catch {
-            return { redirectUrl: mobileReturnUrl(env, "failed") };
+            try {
+              const canonical = await input.store.getSession(session.sessionId);
+              if (!canonical) {
+                return {
+                  redirectUrl: mobileReturnUrl(env, "invalid_state"),
+                };
+              }
+              if (canonical.userId !== session.userId) {
+                return {
+                  redirectUrl: mobileReturnUrl(env, "wrong_tenant"),
+                };
+              }
+              return {
+                redirectUrl: mobileReturnUrl(
+                  env,
+                  canonical.status === "completing"
+                    ? "in_progress"
+                    : canonical.status === "pending"
+                      ? "failed"
+                      : canonical.status,
+                ),
+              };
+            } catch {
+              return { redirectUrl: mobileReturnUrl(env, "failed") };
+            }
           }
         }
       }
