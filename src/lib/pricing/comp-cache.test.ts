@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createInMemoryTtlCache,
   createUpstashTtlCache,
@@ -8,6 +8,11 @@ import {
 } from "./comp-cache";
 
 beforeEach(() => __resetTtlCaches());
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 describe("createInMemoryTtlCache", () => {
   it("returns null on a miss and the stored value on a hit", async () => {
@@ -114,6 +119,62 @@ describe("createUpstashTtlCache (injected fake client)", () => {
       key: expect.stringContaining("apify-sold:identity:paid-claim"),
       opts: { ex: 60, nx: true },
     });
+  });
+});
+
+describe("createUpstashTtlCache (production client shape)", () => {
+  it("keeps the abort signal out of the Redis GET command arguments", async () => {
+    const commands: unknown[] = [];
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        commands.push(JSON.parse(String(init?.body)) as unknown);
+        return new Response(JSON.stringify([{ result: null }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const cache = createUpstashTtlCache<string>("sold", 60_000);
+    const controller = new AbortController();
+
+    await expect(cache.get("identity", controller.signal)).resolves.toBeNull();
+    expect(commands).toEqual([[["get", "snaplist:cache:sold:identity"]]]);
+  });
+
+  it("keeps the abort signal out of the Redis SET command arguments", async () => {
+    const commands: unknown[] = [];
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        commands.push(JSON.parse(String(init?.body)) as unknown);
+        return new Response(JSON.stringify([{ result: "OK" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const cache = createUpstashTtlCache<string>("sold", 60_000);
+    const controller = new AbortController();
+
+    await expect(cache.set("identity", "evidence", controller.signal)).resolves.toBeUndefined();
+    expect(commands).toEqual([
+      [
+        [
+          "set",
+          "snaplist:cache:sold:identity",
+          JSON.stringify("evidence"),
+          "ex",
+          60,
+        ],
+      ],
+    ]);
   });
 });
 

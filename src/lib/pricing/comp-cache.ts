@@ -109,7 +109,10 @@ export function createUpstashTtlCache<T>(
   return {
     scope: "shared",
     async get(key, signal) {
-      const raw = await (await client(signal)).get(namespaced(key), signal);
+      const redis = await client(signal);
+      const raw = injected
+        ? await redis.get(namespaced(key), signal)
+        : await redis.get(namespaced(key));
       if (raw == null) return null;
       // @upstash/redis usually auto-deserializes JSON to the object; tolerate a
       // raw string round-trip too (defensive against client/config differences).
