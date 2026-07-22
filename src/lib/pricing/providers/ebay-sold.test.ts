@@ -100,6 +100,7 @@ function blockedFetch(): FetchPage & { urls: string[] } {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("SSRF hardening", () => {
@@ -915,6 +916,91 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       "10",
       "20",
     ]);
+  });
+
+  it("hands off one bounded winner across distinct runtimes sharing an atomic claim", async () => {
+    let releaseFetch!: () => void;
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    let fetchStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      fetchStarted = resolve;
+    });
+    let winnerStored!: () => void;
+    const stored = new Promise<void>((resolve) => {
+      winnerStored = resolve;
+    });
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimed = false;
+    const claimResults: boolean[] = [];
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => {
+      let reads = 0;
+      return {
+        scope: "shared",
+        async get(key) {
+          reads += 1;
+          if (reads > 1 && claimed && !values.has(key)) await stored;
+          return values.get(key) ?? null;
+        },
+        async set(key, value) {
+          values.set(key, value);
+          winnerStored();
+        },
+        async claim() {
+          const won = !claimed;
+          claimed = true;
+          claimResults.push(won);
+          return won;
+        },
+      };
+    };
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      fetchStarted();
+      await fetchGate;
+      return new URL(url).searchParams.get("_ipg") === "10"
+        ? srp([
+            soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
+            soldCard("https://www.ebay.com/itm/initial-b", 180, 7),
+          ])
+        : FIXTURE_HTML;
+    });
+    const providerForRuntime = () =>
+      createEbaySoldPricingProvider({ fetchPage, cache: cacheForRuntime() });
+
+    const winner = providerForRuntime().price(BRANDED_SIGNAL);
+    await started;
+    const loser = providerForRuntime().price(BRANDED_SIGNAL);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseFetch();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+
+    expect(loserResult).toEqual(winnerResult);
+    expect(claimResults).toEqual([true, false]);
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
+  });
+
+  it("declines before real egress when only a process-local fence is available", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(FIXTURE_HTML, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+    const provider = createEbaySoldPricingProvider({
+      enabled: true,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("does not let a ten-only cache entry suppress expansion for another condition", async () => {

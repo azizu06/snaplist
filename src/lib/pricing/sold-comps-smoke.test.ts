@@ -122,16 +122,22 @@ describe("runSoldCompsSmoke", () => {
   });
 
   it("distinguishes a fetched no-results page from blocked egress", async () => {
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      return "<html><body>No exact matches</body></html>";
+    });
     const report = await runSoldCompsSmoke({
       mode: "live",
       signal: SIGNAL,
       env: {},
-      fetchPage: async () => "<html><body>No exact matches</body></html>",
+      fetchPage,
     });
 
     expect(report.status).toBe("fallback");
     expect(report.selectedTier).toBe("branded-web");
     expect(report.fallbackReason).toBe("no-usable-sold-comps");
-    expect(report.externalRequests).toBe(2);
+    expect(report.externalRequests).toBe(1);
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual(["10"]);
   });
 });

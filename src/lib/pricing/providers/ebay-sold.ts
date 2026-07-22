@@ -96,6 +96,8 @@ export interface EbaySoldPricingProviderOptions {
   baseUrl?: string;
   /** Hard cap on parsed comps per call. */
   maxResults?: number;
+  /** Keep explicitly one-request operator probes from using the optional expansion. */
+  allowExpansion?: boolean;
   /** Outbound User-Agent; defaults to `EBAY_SOLD_USER_AGENT` env or a desktop UA. */
   userAgent?: string;
   /** Per-fetch timeout (ms); defaults to `EBAY_SOLD_TIMEOUT_MS` env or 8000. */
@@ -142,8 +144,11 @@ export const EBAY_SOLD_EXPANSION_THRESHOLD = 3;
 export const EBAY_SOLD_MIN_COMPS = 2;
 
 interface EbaySoldRuntimeState {
-  inFlight: Map<string, Promise<EbaySoldComp[]>>;
+  inFlight: Map<string, Promise<EbaySoldComp[] | null>>;
 }
+
+/** Bounded shared-cache polling while another runtime owns the retrieval claim. */
+const EBAY_SOLD_HANDOFF_DELAYS_MS = [0, 50, 100, 200, 400, 800, 1_600, 3_200, 6_400, 6_400];
 
 /** Request-scoped providers share one cache object at the composition root. */
 const EBAY_SOLD_RUNTIME_STATE_BY_CACHE = new WeakMap<
@@ -1045,6 +1050,7 @@ export function createEbaySoldPricingProvider(
   const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
+  const allowExpansion = options.allowExpansion ?? true;
   const configuredEgress = options.fetchPage
     ? { mode: "injected" as const }
     : resolveEbaySoldEgressConfig();
@@ -1062,6 +1068,11 @@ export function createEbaySoldPricingProvider(
   // tests); `createDefaultPricer` wires the real clock + shared cache.
   const cache = options.cache;
   const inFlight = runtimeStateFor(cache).inFlight;
+  const claimSharedRetrieval =
+    cache?.scope === "shared" && typeof cache.claim === "function"
+      ? cache.claim.bind(cache)
+      : null;
+  const requiresSharedFence = configuredEgress.mode !== "injected";
   const now = options.now;
   const staleDays = options.staleDays ?? resolveStaleDays();
   const halfLifeDays = options.halfLifeDays ?? resolveHalfLifeDays();
@@ -1086,6 +1097,28 @@ export function createEbaySoldPricingProvider(
         specs: signal.specs?.map((spec) => spec.trim()) ?? [],
       },
     });
+  }
+
+  async function waitForClaimWinner(key: string): Promise<EbaySoldComp[] | null> {
+    if (!cache) return null;
+    for (const delayMs of EBAY_SOLD_HANDOFF_DELAYS_MS) {
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+      try {
+        const handedOff = await cache.get(key);
+        if (handedOff != null) return handedOff;
+      } catch {
+        emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+          reason: "handoff-read-failed",
+        });
+        return null;
+      }
+    }
+    emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+      reason: "handoff-timeout",
+    });
+    return null;
   }
 
   /**
@@ -1155,7 +1188,10 @@ export function createEbaySoldPricingProvider(
       }
     } else {
       const evidence = selectSoldCompEvidence(combined, signal);
-      if (evidence.anchors.length < EBAY_SOLD_EXPANSION_THRESHOLD) {
+      if (
+        allowExpansion &&
+        evidence.anchors.length < EBAY_SOLD_EXPANSION_THRESHOLD
+      ) {
         const expandedUrl = buildSoldSearchUrl(signal, baseUrl, EBAY_SOLD_MAX_RESULTS);
         if (expandedUrl) {
           const expanded = await fetchComps(
@@ -1196,12 +1232,11 @@ export function createEbaySoldPricingProvider(
       // by product identity plus the matcher-sensitive signal that controls expansion;
       // age-decay below re-runs on
       // every read, so a comp that goes stale while cached is still dropped.
-      // The cache is an OPTIMIZATION, never the source of truth: a cache (Upstash)
-      // outage must DEGRADE — treat a read failure as a miss (live-fetch) and a
-      // write failure as a no-op — not propagate, which the router would treat as a
-      // hard error and crash the whole listing run. This preserves the provider's
-      // "never hard-fails the pricing call; declines to the web tier" contract,
-      // mirroring the fail-open rate limiter (#58) and the fetchComps catch (#59 review).
+      // The cache is an OPTIMIZATION, never pricing authority. Real direct/proxy
+      // egress additionally requires its existing atomic shared claim so separate
+      // runtimes cannot multiply the bounded pass; an unavailable fence declines
+      // before egress. Injected offline/operator seams remain fail-soft on cache
+      // errors. Neither path propagates cache failure into the listing pipeline.
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
@@ -1219,6 +1254,30 @@ export function createEbaySoldPricingProvider(
           comps = await existing;
         } else {
           const pending = (async () => {
+            if (requiresSharedFence && !claimSharedRetrieval) {
+              emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                reason: "shared-cache-required",
+              });
+              return null;
+            }
+            if (cache?.scope === "shared") {
+              if (!claimSharedRetrieval) {
+                emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                  reason: "shared-claim-missing",
+                });
+                return null;
+              }
+              let claimed: boolean;
+              try {
+                claimed = await claimSharedRetrieval(key);
+              } catch {
+                emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                  reason: "shared-claim-failed",
+                });
+                return null;
+              }
+              if (!claimed) return waitForClaimWinner(key);
+            }
             const retrieved = await retrieveBoundedComps(signal, url);
             if (cache) {
               try {
@@ -1238,6 +1297,7 @@ export function createEbaySoldPricingProvider(
           comps = await pending;
         }
       }
+      if (comps == null) return null;
 
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales

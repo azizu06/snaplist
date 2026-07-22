@@ -56,6 +56,20 @@ Official contract references: [Caffein sold-listings Actor](https://apify.com/ca
 [Actor call caps and restart controls](https://docs.apify.com/api/client/js/reference/interface/ActorCallOptions),
 and [eBay condition ID meanings](https://developer.ebay.com/api-docs/sell/static/metadata/condition-id-values.html).
 
+## Bounded public-page retrieval
+
+The normal public-page provider requests 10 candidates first and makes one
+20-candidate expansion only when fewer than three anchors survive the canonical
+matcher. Terminal and sparse outcomes are cached alongside successful combined
+results. Before real direct or proxy egress, the existing atomic shared-cache
+claim selects one winner across worker runtimes; losers read the winner's result
+through a bounded handoff. A missing, process-local, or unavailable shared fence
+declines to the next pricing tier without making the external request.
+
+The operator smoke below is intentionally different: its explicit
+`--confirm-one-request` authorization permits exactly the initial 10-candidate
+request and suppresses the optional expansion.
+
 ## Optional proxy-template configuration
 
 `EBAY_SOLD_PROXY_TEMPLATE` routes the already SSRF-validated eBay target through
