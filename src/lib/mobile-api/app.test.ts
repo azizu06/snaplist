@@ -1767,6 +1767,7 @@ describe("mobile API v1 provider-neutral handler", () => {
     ["malformed", "not a URL"],
     ["non-HTTPS", "http://snaplist.example/mobile/ebay/oauth"],
     ["credentials", "https://user:pass@snaplist.example/mobile/ebay/oauth"],
+    ["empty fragment", "https://snaplist.example/mobile/ebay/oauth#"],
     ["fragment", "https://snaplist.example/mobile/ebay/oauth#result"],
   ])(
     "fails closed before creating a session when the mobile return URL is %s",

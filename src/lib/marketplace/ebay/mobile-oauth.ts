@@ -130,7 +130,12 @@ function validatedMobileReturnUrl(env: Env): URL {
       "EBAY_MOBILE_OAUTH_RETURN_URL must be an HTTPS universal link without credentials or a fragment.",
     );
   }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || configured.includes("#")
+  ) {
     throw new Error(
       "EBAY_MOBILE_OAUTH_RETURN_URL must be an HTTPS universal link without credentials or a fragment.",
     );

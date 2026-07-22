@@ -27,6 +27,14 @@ const isPublic = createRouteMatcher([
 ]);
 
 export const proxy = clerkMiddleware(async (auth, request) => {
+  // eBay arrives without a Clerk cookie; the route's signed state remains the
+  // tenant and one-time callback authority.
+  if (
+    request.method === "GET"
+    && request.nextUrl.pathname === "/v1/ebay/oauth/callback"
+  ) {
+    return NextResponse.next();
+  }
   if (isPublic(request)) return NextResponse.next();
 
   const { userId } = await auth();
@@ -42,9 +50,9 @@ export const proxy = clerkMiddleware(async (auth, request) => {
 export const config = {
   // Match everything except Next internals and static asset files.
   matcher: [
-    // Native bearer routes and the exact signed-state OAuth callback authenticate
-    // inside their handlers. Keep them outside cookie middleware so missing web
-    // configuration cannot replace their own HTTP contracts with a login redirect.
-    "/((?!_next/static|_next/image|favicon.ico|v1/home(?:/|$)|v1/items/[^/]+/pricing/?$|v1/ebay/oauth/callback$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
+    // Native bearer routes authenticate inside their handlers. Keep them outside
+    // cookie middleware so missing web configuration cannot replace their own
+    // HTTP contracts with a login redirect.
+    "/((?!_next/static|_next/image|favicon.ico|v1/home(?:/|$)|v1/items/[^/]+/pricing/?$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|mov)$).*)",
   ],
 };
