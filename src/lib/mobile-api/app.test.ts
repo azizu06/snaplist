@@ -1248,6 +1248,127 @@ describe("mobile API v1 provider-neutral handler", () => {
     expect(JSON.stringify(stored)).not.toContain("access-secret-413");
   });
 
+  it.each([
+    {
+      name: "missing",
+      canonical: null,
+      expected: "invalid_state",
+    },
+    {
+      name: "wrong-tenant",
+      canonical: {
+        sessionId: "41300000-0000-4000-8000-000000000011",
+        userId: "tenant_b",
+        expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
+        status: "completing" as const,
+      },
+      expected: "wrong_tenant",
+    },
+    ...(["connected", "declined", "cancelled", "expired", "failed"] as const)
+      .map((status) => ({
+        name: status,
+        canonical: {
+          sessionId: "41300000-0000-4000-8000-000000000011",
+          userId: "tenant_a",
+          expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
+          status,
+        },
+        expected: status,
+      })),
+  ])("preserves canonical $name truth after stale lease loss", async ({
+    canonical,
+    expected,
+  }) => {
+    const sessionId = "41300000-0000-4000-8000-000000000011";
+    const initialSession = {
+      sessionId,
+      userId: "tenant_a",
+      expiresAt: EBAY_OAUTH_SESSION_EXPIRES_AT,
+      status: "pending" as const,
+    };
+    const getSession = vi.fn()
+      .mockResolvedValueOnce(initialSession)
+      .mockResolvedValueOnce(canonical);
+    const exchangeCode = vi.fn().mockResolvedValue({
+      accessToken: "access-secret-413-matrix",
+      refreshToken: "refresh-secret-413-matrix",
+      accessTokenExpiresAt: Date.parse("2026-07-22T20:00:00.000Z"),
+      scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+    });
+    const completeSession = vi.fn().mockRejectedValue(
+      new Error("OAuth callback lease expired"),
+    );
+    const failSession = vi.fn().mockRejectedValue(
+      new Error("OAuth callback lease expired"),
+    );
+    const ebayOauth = createMobileEbayOauthOperations({
+      store: {
+        async createOrReplaySession() {
+          return initialSession;
+        },
+        getSession,
+        async finishSession(input) {
+          return { kind: "finished" as const, outcome: input.outcome };
+        },
+        async beginSession() {
+          return {
+            kind: "claimed" as const,
+            leaseToken: "41300000-0000-4000-8000-000000000012",
+          };
+        },
+        completeSession,
+        failSession,
+      },
+      env: () => ({
+        EBAY_CLIENT_ID: "sandbox-client-id",
+        EBAY_CLIENT_SECRET: "sandbox-client-secret",
+        EBAY_RU_NAME: "legacy-web-callback-ru-name",
+        EBAY_MOBILE_RU_NAME: "mobile-sandbox-callback-ru-name",
+        EBAY_TOKEN_ENCRYPTION_KEY,
+        EBAY_MOBILE_OAUTH_RETURN_URL:
+          "https://snaplist.example/mobile/ebay/oauth",
+      }),
+      now: () => Date.parse("2026-07-22T18:00:00.000Z"),
+      randomUUID: () => sessionId,
+      exchangeCode,
+      fetchIdentity: vi.fn().mockResolvedValue({
+        userId: "ebay-sandbox-user-413",
+        username: "sandbox_seller_413",
+      }),
+    });
+    const api = handler({
+      authenticate: vi.fn().mockResolvedValue({ userId: "tenant_a" }),
+      ebayOauth,
+    });
+    const session = await api(
+      new Request("http://localhost/v1/ebay/oauth/sessions", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-jwt",
+          "idempotency-key": "41300000-0000-4000-8000-000000000013",
+        },
+      }),
+    );
+    const state = new URL(
+      (await session.json()).data.authorizationUrl,
+    ).searchParams.get("state")!;
+
+    const response = await api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&code=sandbox-provider-code`,
+      ),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      `https://snaplist.example/mobile/ebay/oauth?result=${expected}`,
+    );
+    expect(getSession).toHaveBeenCalledTimes(2);
+    expect(exchangeCode).toHaveBeenCalledOnce();
+    expect(completeSession).toHaveBeenCalledOnce();
+    expect(failSession).toHaveBeenCalledOnce();
+  });
+
   it("keeps database expiry authoritative when provider completion returns late", async () => {
     type Row = {
       sessionId: string;
