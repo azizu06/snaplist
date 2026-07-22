@@ -43,9 +43,11 @@ import {
  *    web-search tier — it never hard-fails the pricing call.
  *  - Invalid proxy configuration is different: it fails validation before any
  *    request. Runtime fetch diagnostics expose only bounded, credential-safe reasons.
- *  - Cache-on-miss / TTL freshness is opt-in on the raw provider. Every normal
- *    retrieval still requires a shared cache with an atomic claim; the production
- *    composition root wires that cache and the age-decay layer (#59).
+ *  - Cache-on-miss / TTL freshness is opt-in on the raw provider. The free
+ *    no-proxy default direct path may coordinate through the process-local cache;
+ *    configured proxy and injected/wrapped normal fetch paths require a shared
+ *    atomic claim. The production composition root wires the selected cache and
+ *    age-decay layer (#59).
  *
  * Default egress is direct `fetch`; an optional validated proxy template supports
  * hosted environments. HTML is parsed with `cheerio`. A Playwright-style fallback
@@ -103,12 +105,14 @@ export interface EbaySoldPricingProviderOptions {
   fetchTimeoutMs?: number;
   /** Diagnostic sink; tests/operator smoke may silence structured runtime logs. */
   emitDiagnostic?: (event: string, fields: LogFields) => void;
-  // -- Freshness (#59). The clock remains opt-in. Normal retrieval requires the
-  //    shared cache/claim cost fence; `createDefaultPricer` wires both. --
+  // -- Freshness (#59). The clock remains opt-in. `createDefaultPricer` wires the
+  //    process-local or shared cache selected by environment. --
   /**
    * TTL cache of sold-comp scrapes keyed by the resolved search URL (= product
    * identity). A hit within the TTL is reused (no fetch); a claimed miss
-   * live-fetches and stores. Missing/process-local claim → normal provider declines.
+   * live-fetches and stores. Configured proxy and injected/wrapped normal fetch
+   * paths decline when a shared claim is unavailable; the free default direct
+   * path may reuse process-local coordination.
    */
   cache?: TtlCache<EbaySoldComp[]>;
   /**
@@ -1262,7 +1266,11 @@ function createEbaySoldPricingProviderInternal(
     cache?.scope === "shared" && typeof cache.getClaimOwner === "function"
       ? cache.getClaimOwner.bind(cache)
       : null;
-  const requiresSharedFence = !operatorSmokeOneRequest;
+  const requiresSharedFence =
+    !operatorSmokeOneRequest &&
+    (cache?.scope === "shared" ||
+      configuredEgress.mode !== "direct" ||
+      fetchFallback !== undefined);
   const maximumRequestCount = allowExpansion ? 2 : 1;
   const handoffWaitMs =
     effectiveFetchTimeoutMs * maximumRequestCount +
@@ -1492,12 +1500,14 @@ function createEbaySoldPricingProviderInternal(
       // by product identity plus the matcher-sensitive signal that controls expansion;
       // age-decay below re-runs on
       // every read, so a comp that goes stale while cached is still dropped.
-      // The cache is an OPTIMIZATION, never pricing authority. Every normal
-      // provider path, including injected/instrumented fetchers, requires its
-      // existing atomic shared claim so separate runtimes cannot multiply the
-      // bounded pass; an unavailable fence declines before egress. The separately
-      // named operator smoke factory is the only one-request bypass. Neither path
-      // propagates cache failure into the listing pipeline.
+      // The cache is an OPTIMIZATION, never pricing authority. The free no-proxy
+      // default direct path may coordinate within one process when that is the
+      // selected cache scope, and retains the atomic claim when a shared cache is
+      // available. Configured proxy and injected/instrumented normal fetchers
+      // require the shared claim so separate runtimes cannot multiply a potentially
+      // billable bounded pass; an unavailable fence declines before egress. The
+      // separately named operator smoke factory retains its one-request authority.
+      // Neither path propagates cache failure into the listing pipeline.
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {

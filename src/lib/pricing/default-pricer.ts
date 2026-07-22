@@ -59,9 +59,10 @@ export interface CreateDefaultPricerOptions {
 
 /**
  * Activate the #59 freshness layer on the eBay-sold tier for PRODUCTION: the real
- * wall clock (age-decay) + a shared TTL cache of sold-comp scrapes. Both are opt-in
- * at the raw provider so unit tests stay deterministic; this composition root is the
- * one place they're turned on. A caller-supplied `now`/`cache` (tests) is preserved.
+ * wall clock (age-decay) + the configured TTL cache of sold-comp scrapes (Upstash
+ * when configured, process-local otherwise). Both are opt-in at the raw provider so
+ * unit tests stay deterministic; this composition root is the one place they're
+ * turned on. A caller-supplied `now`/`cache` (tests) is preserved.
  */
 function withSoldFreshness(
   opts: EbaySoldPricingProviderOptions = {},

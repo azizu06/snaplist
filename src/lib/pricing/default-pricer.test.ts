@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetTtlCaches,
   createInMemoryTtlCache,
@@ -94,7 +94,7 @@ function sharedPublicSoldCache(): TtlCache<EbaySoldComp[]> {
   return createInMemoryTtlCache<EbaySoldComp[]>(60_000, Date.now, "shared");
 }
 
-/** Composition tests keep the normal public adapter behind its required claim. */
+/** Injected public-adapter tests keep their potentially billable path shared-fenced. */
 function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
   return createRawDefaultPricer({
     ...options,
@@ -108,6 +108,63 @@ function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
 describe("createDefaultPricer Apify composition", () => {
   beforeEach(() => {
     __resetTtlCaches();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the free default direct sold fallback without Upstash", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", "");
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const html = new URL(String(input)).searchParams.has("LH_Sold")
+        ? PUBLIC_SOLD_HTML
+        : "";
+      return new Response(html, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const price = createRawDefaultPricer({
+      apifySold: { enabled: false },
+    });
+
+    const first = await price(SIGNAL);
+    const retry = await price(SIGNAL);
+
+    expect(first.tier).toBe("ebay-sold");
+    expect(retry).toEqual(first);
+    expect(
+      fetchImpl.mock.calls.map(([input]) =>
+        new URL(String(input)).searchParams.get("_ipg"),
+      ),
+    ).toEqual(["10", "20"]);
+  });
+
+  it("keeps an injected public fetch behind shared authority without Upstash", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", "");
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+    const emptySearchClient = { search: vi.fn(async () => []) };
+    const price = createRawDefaultPricer({
+      apifySold: { enabled: false },
+      ebaySold: { fetchPage, emitDiagnostic: () => undefined },
+      webSearch: { searchClient: emptySearchClient },
+      depreciation: { searchClient: emptySearchClient },
+      llmOnly: {
+        estimatePrice: async () => ({ suggested: 100, min: 50, max: 150 }),
+      },
+    });
+
+    const result = await price(SIGNAL);
+
+    expect(result.tier).toBe("llm-only");
+    expect(fetchPage).not.toHaveBeenCalled();
   });
 
   it("expands one thin ten-candidate match to twenty and caches the deterministic best five", async () => {
