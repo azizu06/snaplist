@@ -39,6 +39,8 @@ export const APIFY_SOLD_CIRCUIT_FAILURE_THRESHOLD_DEFAULT = 3;
 export const APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT = 60_000;
 const APIFY_SOLD_COORDINATION_ALLOWANCE_MS = 500;
 const APIFY_SOLD_WINNER_STORE_POLL_MS = 25;
+const APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS = 10;
+const APIFY_SOLD_DEADLINE_MARGIN_MS = 1;
 const APIFY_SOLD_PRICING_DEADLINE_EXCEEDED = Symbol(
   "apify-sold-pricing-deadline-exceeded",
 );
@@ -608,10 +610,17 @@ export function createApifySoldPricingProvider(
           }
 
           const remainingMs = pricingDeadline - Date.now();
-          if (remainingMs <= 1) return "unconfirmed";
+          const finalReadAllowanceMs =
+            APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS + APIFY_SOLD_DEADLINE_MARGIN_MS;
+          if (remainingMs <= finalReadAllowanceMs) {
+            return "unconfirmed";
+          }
           if (
             !(await delayBeforeApifyPricingDeadline(
-              Math.min(pollMs, remainingMs - 1),
+              Math.min(
+                pollMs,
+                remainingMs - finalReadAllowanceMs,
+              ),
               pricingDeadline,
               cancellation.signal,
             ))

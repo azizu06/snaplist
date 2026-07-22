@@ -834,12 +834,16 @@ describe("createApifySoldPricingProvider", () => {
     expect(runActor).toHaveBeenCalledTimes(1);
   });
 
-  it.each([600, 2_400])(
-    "keeps observing an ambiguous winner store that becomes visible after %i ms",
-    async (commitDelayMs) => {
+  it.each([
+    { commitDelayMs: 600, cacheReadDelayMs: 0 },
+    { commitDelayMs: 2_400, cacheReadDelayMs: 10 },
+  ])(
+    "keeps observing an ambiguous winner store visible after $commitDelayMs ms with a $cacheReadDelayMs ms read",
+    async ({ commitDelayMs, cacheReadDelayMs }) => {
       vi.useFakeTimers();
       try {
         let claimed = false;
+        let storeAttempted = false;
         let stored: ApifySoldComp[] | null = null;
         const runActor = successfulRun([
           rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
@@ -848,8 +852,12 @@ describe("createApifySoldPricingProvider", () => {
         ]);
         const cache: TtlCache<ApifySoldComp[]> = {
           scope: "shared",
-          get: async () => stored,
+          get: () =>
+            new Promise<ApifySoldComp[] | null>((resolve) => {
+              setTimeout(() => resolve(stored), storeAttempted ? cacheReadDelayMs : 0);
+            }),
           set: (_key, value) => {
+            storeAttempted = true;
             setTimeout(() => {
               stored = value;
             }, commitDelayMs);
@@ -875,7 +883,9 @@ describe("createApifySoldPricingProvider", () => {
         const winnerResult = providerForRequest().price(SIGNAL);
         await vi.advanceTimersByTimeAsync(2_501);
         const winner = await winnerResult;
-        const retry = await providerForRequest().price(SIGNAL);
+        const retryResult = providerForRequest().price(SIGNAL);
+        await vi.advanceTimersByTimeAsync(cacheReadDelayMs);
+        const retry = await retryResult;
 
         expect(winner).not.toBeNull();
         expect(retry).toEqual(winner);
