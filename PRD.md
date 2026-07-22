@@ -134,6 +134,17 @@ honest prepared/shared export packs; SnapList never claims it filled or publishe
 - Manual edits that preserve the immutable photo set, internal retries, recovery, and queue redelivery
   do not spend another credit. A new item, changed photo set, or full re-analysis does.
 
+### Deletion and retention
+
+- `docs/contracts/lean-mvp-retention-v1.json` is the singular row-level authority for every release
+  datum's owner, deletion triggers, maximum retention, executor, and completion proof. ADR-0012
+  explains the policy and preserves unresolved legal or provider obligations as release blockers.
+- Raw seller voice is temporary private processing input. Delete it after the first durable terminal
+  transcription outcome and never later than 24 hours after durable acceptance. A retained transcript
+  follows the voice context, item, guest-claim/expiry, and account deletion lifecycle instead.
+- Account erasure cannot claim completion while the matrix has an unresolved disposition or while an
+  executor lacks its named completion proof. Provider-owned deletion is not SnapList deletion.
+
 ### Pricing, evidence, and listing generation
 
 - All pricing routes through `PricingProvider`: structured ISBN lookup → eBay sold comps → cited web
