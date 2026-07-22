@@ -3,6 +3,12 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+extension PhotosPickerItem: CaptureLibraryPhotoLoading {
+    func loadPhotoData() async throws -> Data? {
+        try await loadTransferable(type: Data.self)
+    }
+}
+
 struct CaptureLauncherSheet: View {
     @Bindable var flow: CaptureFlowModel
     let takeOneItem: () -> Void
@@ -299,17 +305,7 @@ struct ScanCameraView: View {
                 return
             }
             Task {
-                var selectedData: [Data] = []
-                for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        selectedData.append(data)
-                    }
-                }
-                if selectedData.isEmpty {
-                    flow.cancelLibraryIntake(reservation: intakeID)
-                } else {
-                    _ = await flow.stageLibraryPhotos(selectedData, reservation: intakeID)
-                }
+                _ = await flow.stageLibraryPhotos(items, reservation: intakeID)
                 libraryItems = []
             }
         }

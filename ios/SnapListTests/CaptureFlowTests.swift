@@ -57,6 +57,40 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertFalse(model.canTakePhoto)
     }
 
+    func testLibraryPickerStagesEachPayloadBeforeLoadingTheNextAndKeepsPartialProgress() async {
+        let tracker = LibraryPayloadLifetimeTracker()
+        let store = LifetimeTrackingCaptureStore(tracker: tracker)
+        let model = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        var didReachLaterFailure = false
+        let selections = [
+            TestLibraryPhotoLoader { tracker.makePayload(byte: 0x01) },
+            TestLibraryPhotoLoader { tracker.makePayload(byte: 0x02) },
+            TestLibraryPhotoLoader {
+                didReachLaterFailure = true
+                XCTAssertEqual(store.stagedBytes, [0x01, 0x02])
+                throw TestCaptureError.failed
+            }
+        ]
+
+        let addedCount = await model.stageLibraryPhotos(selections)
+
+        XCTAssertEqual(addedCount, 2)
+        XCTAssertTrue(didReachLaterFailure)
+        XCTAssertEqual(store.stagedBytes, [0x01, 0x02])
+        XCTAssertEqual(model.stagedPhotos.count, 2)
+        XCTAssertEqual(tracker.maximumResidentPayloads, 1)
+        XCTAssertEqual(tracker.residentPayloads, 0)
+        XCTAssertEqual(
+            tracker.events,
+            [.loaded(0x01), .staged(0x01), .released(0x01),
+             .loaded(0x02), .staged(0x02), .released(0x02)]
+        )
+    }
+
     func testFifthSuccessfulAdditionPublishesTheExactLimitAnnouncementOnce() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let model = makeModel(camera: camera)
@@ -1486,6 +1520,120 @@ private actor TestFramingEvaluator: FramingEvaluating {
 
     func evaluate(frame: CaptureFrame) async throws -> FramingObservation {
         observations.isEmpty ? .noSubject : observations.removeFirst()
+    }
+}
+
+private struct TestLibraryPhotoLoader: CaptureLibraryPhotoLoading {
+    let load: @MainActor () async throws -> Data?
+
+    init(load: @escaping @MainActor () async throws -> Data?) {
+        self.load = load
+    }
+
+    func loadPhotoData() async throws -> Data? {
+        try await load()
+    }
+}
+
+private enum LibraryPayloadEvent: Equatable {
+    case loaded(UInt8)
+    case staged(UInt8)
+    case released(UInt8)
+}
+
+private final class LibraryPayloadLifetimeTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var residentCount = 0
+    private var maximumResidentCount = 0
+    private var recordedEvents: [LibraryPayloadEvent] = []
+
+    var residentPayloads: Int {
+        lock.withLock { residentCount }
+    }
+
+    var maximumResidentPayloads: Int {
+        lock.withLock { maximumResidentCount }
+    }
+
+    var events: [LibraryPayloadEvent] {
+        lock.withLock { recordedEvents }
+    }
+
+    func makePayload(byte: UInt8, size: Int = 2 * 1_024 * 1_024) -> Data {
+        let pointer = UnsafeMutableRawPointer.allocate(
+            byteCount: size,
+            alignment: MemoryLayout<UInt8>.alignment
+        )
+        pointer.initializeMemory(as: UInt8.self, repeating: byte, count: size)
+        lock.withLock {
+            residentCount += 1
+            maximumResidentCount = max(maximumResidentCount, residentCount)
+            recordedEvents.append(.loaded(byte))
+        }
+        return Data(
+            bytesNoCopy: pointer,
+            count: size,
+            deallocator: .custom { [self] pointer, _ in
+                pointer.deallocate()
+                lock.withLock {
+                    residentCount -= 1
+                    recordedEvents.append(.released(byte))
+                }
+            }
+        )
+    }
+
+    func recordStage(byte: UInt8) {
+        lock.withLock { recordedEvents.append(.staged(byte)) }
+    }
+}
+
+private final class LifetimeTrackingCaptureStore: CaptureDraftStoring {
+    private let tracker: LibraryPayloadLifetimeTracker
+    private(set) var stagedPhotos: [StagedCapturePhoto] = []
+    private(set) var stagedBytes: [UInt8] = []
+
+    init(tracker: LibraryPayloadLifetimeTracker) {
+        self.tracker = tracker
+    }
+
+    func load() async throws -> StagedCapturePhoto? { stagedPhotos.first }
+    func loadPhotos() async throws -> [StagedCapturePhoto] { stagedPhotos }
+
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto {
+        stagedPhotos = []
+        stagedBytes = []
+        return try await append(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        ).appendedPhoto
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        let byte = try XCTUnwrap(imageData.first)
+        tracker.recordStage(byte: byte)
+        stagedBytes.append(byte)
+        let index = stagedPhotos.count
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/lifetime-photo-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/lifetime-thumb-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos.append(photo)
+        return CaptureDraftAppendResult(appendedPhoto: photo, photos: stagedPhotos)
+    }
+
+    func discard() async throws {
+        stagedPhotos = []
+        stagedBytes = []
     }
 }
 

@@ -280,6 +280,11 @@ protocol FramingEvaluating {
     func evaluate(frame: CaptureFrame) async throws -> FramingObservation
 }
 
+@MainActor
+protocol CaptureLibraryPhotoLoading {
+    func loadPhotoData() async throws -> Data?
+}
+
 protocol CaptureDraftStoring {
     func load() async throws -> StagedCapturePhoto?
     func loadPhotos() async throws -> [StagedCapturePhoto]
@@ -851,6 +856,14 @@ final class CaptureFlowModel {
         return await stageLibraryPhotos(imageData, reservation: intakeID)
     }
 
+    @discardableResult
+    func stageLibraryPhotos<Photo: CaptureLibraryPhotoLoading>(
+        _ photos: [Photo]
+    ) async -> Int {
+        guard let intakeID = reserveLibraryIntake() else { return 0 }
+        return await stageLibraryPhotos(photos, reservation: intakeID)
+    }
+
     func reserveLibraryIntake() -> UUID? {
         guard !isAddingPhotos else { return nil }
         let intakeID = UUID()
@@ -875,6 +888,40 @@ final class CaptureFlowModel {
                 phaseBeforeSelection: phaseBeforeSelection,
                 intakeID: intakeID
             ) else { break }
+            addedCount += 1
+        }
+        return addedCount
+    }
+
+    func stageLibraryPhotos<Photo: CaptureLibraryPhotoLoading>(
+        _ photos: [Photo],
+        reservation intakeID: UUID
+    ) async -> Int {
+        guard activeIntakeID == intakeID, activeCaptureID == nil else { return 0 }
+        defer {
+            if activeIntakeID == intakeID {
+                activeIntakeID = nil
+            }
+        }
+        let phaseBeforeSelection = phase
+        let remainingCapacity = max(0, 5 - stagedPhotos.count)
+        var addedCount = 0
+        for photo in photos.prefix(remainingCapacity) {
+            var imageData: Data?
+            do {
+                imageData = try await photo.loadPhotoData()
+            } catch {
+                break
+            }
+            guard imageData != nil else { break }
+            let didPersist = await persistLibraryPhoto(
+                imageData!,
+                transferReceipt: nil,
+                phaseBeforeSelection: phaseBeforeSelection,
+                intakeID: intakeID
+            )
+            imageData = nil
+            guard didPersist else { break }
             addedCount += 1
         }
         return addedCount
