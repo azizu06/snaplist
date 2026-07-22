@@ -372,6 +372,10 @@ export function createApifySoldPricingProvider(
     APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT,
   );
   const cache = options.cache;
+  const claimCostFence =
+    cache?.scope === "shared" && typeof cache.claim === "function"
+      ? cache.claim.bind(cache)
+      : null;
   const now = options.now;
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
@@ -407,13 +411,24 @@ export function createApifySoldPricingProvider(
     };
   }
 
-  function cacheKey(query: string): string {
+  function cacheKey(query: string, signal: ItemSignal): string {
     return JSON.stringify({
       actorId,
       actorBuild,
       query,
       retrievalPolicy: "initial-10-expand-20-v1",
       daysToScrape,
+      matcherSignal: {
+        isbn: signal.isbn?.trim() ?? "",
+        upc: signal.upc?.trim() ?? "",
+        brand: signal.brand?.trim() ?? "",
+        model: signal.model?.trim() ?? "",
+        category: signal.category?.trim() ?? "",
+        conditionKnown: signal.conditionKnown === true,
+        condition: signal.condition?.trim() ?? "",
+        resolvedName: signal.resolvedName?.trim() ?? "",
+        specs: signal.specs?.map((spec) => spec.trim()) ?? [],
+      },
     });
   }
 
@@ -491,8 +506,22 @@ export function createApifySoldPricingProvider(
     query: string,
     signal: ItemSignal,
   ): Promise<ApifySoldComp[] | null> {
-    const key = cacheKey(query);
-    const cached = await readCache(key);
+    if (!cache || !claimCostFence) {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "shared-cache-required",
+      });
+      return null;
+    }
+    const key = cacheKey(query, signal);
+    let cached: ApifySoldComp[] | null;
+    try {
+      cached = await cache.get(key);
+    } catch {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "cache-read-failed",
+      });
+      return null;
+    }
     if (cached != null) return cached;
 
     const clock = now?.() ?? Date.now();
@@ -505,6 +534,18 @@ export function createApifySoldPricingProvider(
 
     const existing = inFlight.get(key);
     if (existing) return existing;
+    let claimed: boolean;
+    try {
+      claimed = await claimCostFence(key);
+    } catch {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "claim-failed",
+      });
+      return null;
+    }
+    if (!claimed) {
+      return readCache(key);
+    }
     const pending = fetchAndCache(key, query, signal).finally(() => {
       inFlight.delete(key);
     });

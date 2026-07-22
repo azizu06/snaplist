@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetTtlCaches } from "./comp-cache";
+import {
+  __resetTtlCaches,
+  createInMemoryTtlCache,
+  type TtlCache,
+} from "./comp-cache";
 import { createDefaultPricer } from "./default-pricer";
-import type { RunApifySoldActor } from "./providers/apify-sold";
+import type {
+  ApifySoldComp,
+  RunApifySoldActor,
+} from "./providers/apify-sold";
 import type { ItemSignal } from "./types";
 
 const SIGNAL: ItemSignal = {
@@ -75,6 +82,10 @@ function apifyItem(
   };
 }
 
+function sharedApifyCache(): TtlCache<ApifySoldComp[]> {
+  return createInMemoryTtlCache<ApifySoldComp[]>(60_000, Date.now, "shared");
+}
+
 describe("createDefaultPricer Apify composition", () => {
   beforeEach(() => {
     __resetTtlCaches();
@@ -119,7 +130,12 @@ describe("createDefaultPricer Apify composition", () => {
     });
     const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
-      apifySold: { enabled: true, token: "secret", runActor },
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+      },
       ebaySold: { fetchPage },
     });
 
@@ -152,7 +168,12 @@ describe("createDefaultPricer Apify composition", () => {
     });
     const emptySearchClient = { search: vi.fn(async () => []) };
     const price = createDefaultPricer({
-      apifySold: { enabled: true, token: "secret", runActor },
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+      },
       ebaySold: { fetchPage: async () => '<ul class="srp-results"></ul>' },
       webSearch: { searchClient: emptySearchClient },
       depreciation: { searchClient: emptySearchClient },
@@ -195,7 +216,12 @@ describe("createDefaultPricer Apify composition", () => {
     });
     const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
-      apifySold: { enabled: true, token: "secret", runActor },
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+      },
       ebaySold: { fetchPage },
     });
 
@@ -208,7 +234,106 @@ describe("createDefaultPricer Apify composition", () => {
     expect(fetchPage).not.toHaveBeenCalled();
   });
 
-  it("falls through from Actor failure to the public sold provider without blocking listing pricing", async () => {
+  it("does not reuse a ten-only cache entry across matcher-sensitive conditions", async () => {
+    const requests: Parameters<RunApifySoldActor>[0][] = [];
+    const runActor = vi.fn<RunApifySoldActor>(async (request) => {
+      requests.push(request);
+      return {
+        status: "SUCCEEDED",
+        items:
+          request.maxItems === 10
+            ? apifyItems()
+            : [
+                apifyItem("new-a", { condition: "Brand New" }),
+                apifyItem("new-b", { condition: "Brand New" }),
+                apifyItem("new-c", { condition: "Brand New" }),
+              ],
+      };
+    });
+    const emptySearchClient = { search: vi.fn(async () => []) };
+    const price = createDefaultPricer({
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+      },
+      ebaySold: { fetchPage: async () => '<ul class="srp-results"></ul>' },
+      webSearch: { searchClient: emptySearchClient },
+      depreciation: { searchClient: emptySearchClient },
+      llmOnly: {
+        estimatePrice: async () => ({ suggested: 100, min: 50, max: 150 }),
+      },
+    });
+
+    await price(SIGNAL);
+    await price({ ...SIGNAL, condition: "new" });
+
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 10, 20]);
+  });
+
+  it("atomically fences concurrent fresh-runtime redelivery to one bounded paid pass", async () => {
+    const values = new Map<string, ApifySoldComp[]>();
+    const claims = new Set<string>();
+    const cacheForRuntime = () =>
+      ({
+        scope: "shared",
+        get: async (key: string) => values.get(key) ?? null,
+        set: async (key: string, value: ApifySoldComp[]) => {
+          values.set(key, value);
+        },
+        claim: async (key: string) => {
+          if (claims.has(key)) return false;
+          claims.add(key);
+          return true;
+        },
+      }) as TtlCache<ApifySoldComp[]> & {
+        claim(key: string): Promise<boolean>;
+      };
+    const initial = [
+      apifyItem("initial-a"),
+      apifyItem("initial-b"),
+      ...Array.from({ length: 8 }, (_, index) =>
+        apifyItem(`initial-reject-${index}`, {
+          title: "Sony WH-1000XM4 replacement case",
+          soldPrice: "20",
+        }),
+      ),
+    ];
+    const expanded = Array.from({ length: 5 }, (_, index) =>
+      apifyItem(`expanded-${index}`, {
+        endedAt: `2026-07-${String(19 - index).padStart(2, "0")}T12:00:00.000Z`,
+      }),
+    );
+    const requests: Parameters<RunApifySoldActor>[0][] = [];
+    const runActor = vi.fn<RunApifySoldActor>(async (request) => {
+      requests.push(request);
+      return {
+        status: "SUCCEEDED",
+        items: request.maxItems === 10 ? initial : expanded,
+      };
+    });
+    const priceForRuntime = () =>
+      createDefaultPricer({
+        apifySold: {
+          enabled: true,
+          token: "secret",
+          runActor,
+          cache: cacheForRuntime(),
+        },
+        ebaySold: { fetchPage: async () => PUBLIC_SOLD_HTML },
+      });
+
+    const first = priceForRuntime()(SIGNAL);
+    const concurrentRedelivery = priceForRuntime()(SIGNAL);
+    await Promise.all([first, concurrentRedelivery]);
+    const laterRedelivery = await priceForRuntime()(SIGNAL);
+
+    expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 20]);
+    expect(laterRedelivery.evidence).toHaveLength(5);
+  });
+
+  it("declines without a shared cost fence before starting paid retrieval", async () => {
     const runActor = vi.fn<RunApifySoldActor>(async () => {
       throw new Error("actor unavailable");
     });
@@ -224,6 +349,31 @@ describe("createDefaultPricer Apify composition", () => {
     expect(result.tier).toBe("ebay-sold");
     expect(redelivery).toEqual(result);
     expect(result.suggested).toBe(190);
+    expect(runActor).not.toHaveBeenCalled();
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expand or repeat a terminal initial failure behind the shared fence", async () => {
+    const runActor = vi.fn<RunApifySoldActor>(async () => {
+      throw new Error("actor unavailable");
+    });
+    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const price = createDefaultPricer({
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+        emitDiagnostic: () => undefined,
+      },
+      ebaySold: { fetchPage },
+    });
+
+    const result = await price(SIGNAL);
+    const redelivery = await price(SIGNAL);
+
+    expect(result.tier).toBe("ebay-sold");
+    expect(redelivery).toEqual(result);
     expect(runActor).toHaveBeenCalledTimes(1);
     expect(fetchPage).toHaveBeenCalledTimes(1);
   });
@@ -246,7 +396,12 @@ describe("createDefaultPricer Apify composition", () => {
     });
     const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
-      apifySold: { enabled: true, token: "secret", runActor },
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        cache: sharedApifyCache(),
+      },
       ebaySold: { fetchPage },
     });
 

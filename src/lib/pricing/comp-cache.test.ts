@@ -36,6 +36,17 @@ describe("createInMemoryTtlCache", () => {
     t = 120;
     expect(await cache.get("k")).toBe("b");
   });
+
+  it("atomically claims one process-local identity for the TTL", async () => {
+    let t = 0;
+    const cache = createInMemoryTtlCache<string>(100, () => t);
+
+    expect(cache.scope).toBe("process");
+    await expect(cache.claim?.("identity")).resolves.toBe(true);
+    await expect(cache.claim?.("identity")).resolves.toBe(false);
+    t = 101;
+    await expect(cache.claim?.("identity")).resolves.toBe(true);
+  });
 });
 
 describe("createUpstashTtlCache (injected fake client)", () => {
@@ -74,6 +85,35 @@ describe("createUpstashTtlCache (injected fake client)", () => {
     };
     const cache = createUpstashTtlCache<{ a: number }[]>("sold", 1000, fake);
     expect(await cache.get("k")).toEqual([{ a: 9 }]);
+  });
+
+  it("uses a shared SET-NX claim so only one worker runtime wins", async () => {
+    const claimed = new Set<string>();
+    const calls: Array<{ key: string; opts: { ex: number; nx?: true } }> = [];
+    const fake = {
+      async set(
+        key: string,
+        _value: string,
+        opts: { ex: number; nx?: true },
+      ) {
+        calls.push({ key, opts });
+        if (opts.nx && claimed.has(key)) return null;
+        claimed.add(key);
+        return "OK";
+      },
+      async get() {
+        return null;
+      },
+    };
+    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+
+    expect(cache.scope).toBe("shared");
+    await expect(cache.claim?.("identity")).resolves.toBe(true);
+    await expect(cache.claim?.("identity")).resolves.toBe(false);
+    expect(calls[0]).toMatchObject({
+      key: expect.stringContaining("apify-sold:identity:paid-claim"),
+      opts: { ex: 60, nx: true },
+    });
   });
 });
 

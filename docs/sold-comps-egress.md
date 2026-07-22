@@ -37,13 +37,14 @@ values can tighten but not raise the in-code ceilings.
 
 Terminal initial failures, completed empty results, and combined successful
 results are cached so retry or queue redelivery cannot add a third paid request
-when the shared cache is healthy. Cache misses for the same identity are
-coalesced across request-scoped providers sharing one cache object in the same
-runtime, and age decay/staleness are reapplied on every cache read. Actor failures
-also accumulate across those provider instances so the bounded circuit cannot
-reset on every request. Cross-runtime distributed coalescing and breaker state
-must be validated with the chosen shared-cache deployment before production
-activation.
+when the shared cache is healthy. Before any paid request, an atomic shared-cache
+claim fences the matcher-sensitive signal identity across worker runtimes. A
+missing, process-local, or unavailable fence declines to the public sold provider
+without starting the Actor. Cache misses for the same identity are also
+coalesced inside one runtime, and age decay/staleness are reapplied on every cache
+read. Actor failures accumulate across request-scoped providers sharing one cache
+so the bounded circuit cannot reset on every request. The shared-cache deployment
+remains an activation prerequisite.
 
 Production activation is not part of Issue #200. Leave the flag off until the
 owner approves a separate budget and validates current Actor schema/build/pricing

@@ -16,10 +16,14 @@
  */
 
 export interface TtlCache<T> {
+  /** Whether atomic claims coordinate only this process or every worker runtime. */
+  readonly scope?: "process" | "shared";
   /** The cached value, or null on a miss / expiry. */
   get(key: string): Promise<T | null>;
   /** Store a value under the cache's TTL. */
   set(key: string, value: T): Promise<void>;
+  /** Atomically claim one cache identity for the full TTL when supported. */
+  claim?(key: string): Promise<boolean>;
 }
 
 /** Redis keys all share this prefix (mirrors the abuse limiter's `snaplist:rl`). */
@@ -38,9 +42,12 @@ export function upstashConfigured(
 export function createInMemoryTtlCache<T>(
   ttlMs: number,
   now: () => number = Date.now,
+  scope: "process" | "shared" = "process",
 ): TtlCache<T> {
   const store = new Map<string, { value: T; expires: number }>();
+  const claims = new Map<string, number>();
   return {
+    scope,
     async get(key) {
       const entry = store.get(key);
       if (!entry) return null;
@@ -53,6 +60,12 @@ export function createInMemoryTtlCache<T>(
     async set(key, value) {
       store.set(key, { value, expires: now() + ttlMs });
     },
+    async claim(key) {
+      const claimedUntil = claims.get(key);
+      if (claimedUntil != null && now() < claimedUntil) return false;
+      claims.set(key, now() + ttlMs);
+      return true;
+    },
   };
 }
 
@@ -63,7 +76,11 @@ export function createInMemoryTtlCache<T>(
 // ---------------------------------------------------------------------------
 interface RedisLike {
   get(key: string): Promise<unknown>;
-  set(key: string, value: string, opts: { ex: number }): Promise<unknown>;
+  set(
+    key: string,
+    value: string,
+    opts: { ex: number; nx?: true },
+  ): Promise<unknown>;
 }
 
 export function createUpstashTtlCache<T>(
@@ -84,6 +101,7 @@ export function createUpstashTtlCache<T>(
   }
   const namespaced = (key: string) => `${KEY_PREFIX}:${name}:${key}`;
   return {
+    scope: "shared",
     async get(key) {
       const raw = await (await client()).get(namespaced(key));
       if (raw == null) return null;
@@ -100,6 +118,14 @@ export function createUpstashTtlCache<T>(
     },
     async set(key, value) {
       await (await client()).set(namespaced(key), JSON.stringify(value), { ex: ttlSec });
+    },
+    async claim(key) {
+      const claimed = await (await client()).set(
+        namespaced(`${key}:paid-claim`),
+        "1",
+        { ex: ttlSec, nx: true },
+      );
+      return claimed === "OK" || claimed === true;
     },
   };
 }

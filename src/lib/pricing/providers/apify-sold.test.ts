@@ -77,6 +77,13 @@ function successfulRun(items: readonly Record<string, unknown>[]): RunApifySoldA
   return vi.fn(async () => ({ status: "SUCCEEDED", items }));
 }
 
+function sharedTestCache<T>(
+  ttlMs = 60_000,
+  now: () => number = Date.now,
+): TtlCache<T> {
+  return createInMemoryTtlCache<T>(ttlMs, now, "shared");
+}
+
 describe("Apify sold-comp configuration", () => {
   it("is default-off and requires both an explicit opt-in and a token", () => {
     expect(apifySoldConfigured({})).toBe(false);
@@ -238,6 +245,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
+      cache: sharedTestCache(),
       now: () => Date.parse("2026-07-16T12:00:00.000Z"),
     });
 
@@ -270,6 +278,7 @@ describe("createApifySoldPricingProvider", () => {
     const provider = createApifySoldPricingProvider({
       enabled: true,
       token: "secret",
+      cache: sharedTestCache(),
       runActor: successfulRun([
         rawItem({ itemId: "valid", url: "https://www.ebay.com/itm/valid" }),
         rawItem({
@@ -293,6 +302,7 @@ describe("createApifySoldPricingProvider", () => {
   it("rejects hostile cached rows without starting the Actor", async () => {
     const runActor = successfulRun([]);
     const cache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
       get: async () => [
         {
           url: "https://evil.example/itm/poisoned-a",
@@ -316,6 +326,7 @@ describe("createApifySoldPricingProvider", () => {
         },
       ],
       set: async () => undefined,
+      claim: async () => true,
     };
     const provider = createApifySoldPricingProvider({
       enabled: true,
@@ -331,6 +342,7 @@ describe("createApifySoldPricingProvider", () => {
   it("normalizes canonical cached rows without starting the Actor", async () => {
     const runActor = successfulRun([]);
     const cache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
       get: async () => [
         {
           url: "https://www.ebay.com/itm/cache-a?hash=item-a#fragment",
@@ -344,6 +356,7 @@ describe("createApifySoldPricingProvider", () => {
         },
       ],
       set: async () => undefined,
+      claim: async () => true,
     };
     const provider = createApifySoldPricingProvider({
       enabled: true,
@@ -362,7 +375,7 @@ describe("createApifySoldPricingProvider", () => {
   });
 
   it("caches successful empty and usable responses so repeat pricing does not start another paid run", async () => {
-    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const cache = sharedTestCache<ApifySoldComp[]>();
     const emptyRun = successfulRun([]);
     const emptyProvider = createApifySoldPricingProvider({
       enabled: true,
@@ -383,7 +396,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor: usableRun,
-      cache: createInMemoryTtlCache<ApifySoldComp[]>(60_000),
+      cache: sharedTestCache<ApifySoldComp[]>(),
     });
     await usableProvider.price(SIGNAL);
     await usableProvider.price(SIGNAL);
@@ -409,7 +422,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
-      cache: createInMemoryTtlCache<ApifySoldComp[]>(60_000),
+      cache: sharedTestCache<ApifySoldComp[]>(),
     });
 
     const first = provider.price(SIGNAL);
@@ -435,7 +448,7 @@ describe("createApifySoldPricingProvider", () => {
         ],
       };
     });
-    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const cache = sharedTestCache<ApifySoldComp[]>();
     const firstProvider = createApifySoldPricingProvider({
       enabled: true,
       token: "secret",
@@ -467,7 +480,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
-      cache: createInMemoryTtlCache<ApifySoldComp[]>(365 * 86_400_000, () => now),
+      cache: sharedTestCache<ApifySoldComp[]>(365 * 86_400_000, () => now),
       now: () => now,
       staleDays: 10,
     });
@@ -488,6 +501,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
+      cache: sharedTestCache<ApifySoldComp[]>(60_000, () => now),
       now: () => now,
       circuitFailureThreshold: 2,
       circuitCooldownMs: 5_000,
@@ -495,15 +509,21 @@ describe("createApifySoldPricingProvider", () => {
     });
 
     await expect(provider.price(SIGNAL)).resolves.toBeNull();
-    await expect(provider.price(SIGNAL)).resolves.toBeNull();
-    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    await expect(
+      provider.price({ ...SIGNAL, model: "WH-1000XM5" }),
+    ).resolves.toBeNull();
+    await expect(
+      provider.price({ ...SIGNAL, model: "WH-1000XM3" }),
+    ).resolves.toBeNull();
     expect(runActor).toHaveBeenCalledTimes(2);
     expect(diagnostics.some(({ event }) => event === "pricing.apify_sold.circuit_open")).toBe(true);
     expect(JSON.stringify(diagnostics)).not.toContain("private-token");
     expect(JSON.stringify(diagnostics)).not.toContain("api.apify.com/private");
 
     now += 5_001;
-    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    await expect(
+      provider.price({ ...SIGNAL, model: "WH-1000XM2" }),
+    ).resolves.toBeNull();
     expect(runActor).toHaveBeenCalledTimes(3);
   });
 
@@ -512,7 +532,7 @@ describe("createApifySoldPricingProvider", () => {
     const runActor = vi.fn(async () => {
       throw new Error("actor unavailable");
     });
-    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const cache = sharedTestCache<ApifySoldComp[]>();
     const providerForRequest = () =>
       createApifySoldPricingProvider({
         enabled: true,
@@ -539,12 +559,20 @@ describe("createApifySoldPricingProvider", () => {
     expect(runActor).toHaveBeenCalledTimes(2);
   });
 
-  it("treats cache failures as misses/no-ops and still returns a usable result", async () => {
+  it("declines before paid retrieval when the shared cost fence is unavailable", async () => {
+    const runActor = successfulRun([
+      rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+      rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+    ]);
     const brokenCache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
       get: async () => {
         throw new Error("redis unavailable");
       },
       set: async () => {
+        throw new Error("redis unavailable");
+      },
+      claim: async () => {
         throw new Error("redis unavailable");
       },
     };
@@ -552,13 +580,11 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       cache: brokenCache,
-      runActor: successfulRun([
-        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
-        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
-      ]),
+      runActor,
       emitDiagnostic: () => undefined,
     });
 
-    await expect(provider.price(SIGNAL)).resolves.toMatchObject({ tier: "ebay-sold" });
+    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    expect(runActor).not.toHaveBeenCalled();
   });
 });
