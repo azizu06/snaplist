@@ -33,6 +33,56 @@ final class AppNavigationTests: XCTestCase {
         XCTAssertEqual(router.presentedSheet, .capture)
     }
 
+    @MainActor
+    func testReviewBoundaryCarriesTheExactOrderedPhotoSetAndOpenerContext() {
+        let photos = (0..<3).map { index in
+            StagedCapturePhoto(
+                id: UUID(),
+                photoURL: URL(fileURLWithPath: "/tmp/photo-\(index).jpg"),
+                thumbnailURL: URL(fileURLWithPath: "/tmp/thumb-\(index).jpg"),
+                createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
+            )
+        }
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: photos,
+            opener: .reviewButton
+        )
+
+        XCTAssertEqual(
+            router.captureBoundaryRequest,
+            CaptureBoundaryRequest(
+                destination: .photoReview,
+                photos: photos,
+                opener: .reviewButton
+            )
+        )
+        XCTAssertNil(router.presentedFullScreen)
+    }
+
+    @MainActor
+    func testTrophyWallBoundaryPreservesAnEmptyIntakeAndTabOpenerContext() {
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+
+        router.openCaptureBoundary(
+            destination: .trophyWall,
+            photos: [],
+            opener: .trophyWallTab
+        )
+
+        XCTAssertEqual(
+            router.captureBoundaryRequest,
+            CaptureBoundaryRequest(
+                destination: .trophyWall,
+                photos: [],
+                opener: .trophyWallTab
+            )
+        )
+        XCTAssertNil(router.presentedFullScreen)
+    }
+
     func testLaunchArgumentsAcceptApprovedStatesAndRejectCandidateStates() {
         for state in ApprovedVisualStateID.allCases {
             let configuration = LaunchConfiguration.parse(

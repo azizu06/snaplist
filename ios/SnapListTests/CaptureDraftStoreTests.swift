@@ -111,6 +111,60 @@ final class CaptureDraftStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    func testAppendPersistsAndRestoresTheExactOrderedPhotoSet() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = LocalCaptureDraftStore(rootDirectory: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let first = try await store.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let second = try await store.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let third = try await store.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+
+        let restored = try await store.loadPhotos()
+
+        XCTAssertEqual(restored.map(\.id), [first.id, second.id, third.id])
+        XCTAssertEqual(
+            Set(restored.flatMap { [$0.photoURL, $0.thumbnailURL] }).count,
+            6
+        )
+    }
+
+    func testAppendAfterRecoveryExpiryReturnsOnlyTheNewAuthoritativeSet() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let firstDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let expiredDate = firstDate.addingTimeInterval(LocalCaptureDraftStore.recoveryWindow + 1)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let initialStore = LocalCaptureDraftStore(rootDirectory: root, now: { firstDate })
+        let expiredPhoto = try await initialStore.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let resumedStore = LocalCaptureDraftStore(rootDirectory: root, now: { expiredDate })
+
+        let appendResult = try await resumedStore.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        )
+        let currentPhoto = appendResult.appendedPhoto
+        let authoritativePhotos = try await resumedStore.loadPhotos()
+
+        XCTAssertEqual(appendResult.photos, [currentPhoto])
+        XCTAssertEqual(authoritativePhotos, [currentPhoto])
+        XCTAssertFalse(authoritativePhotos.contains(expiredPhoto))
+    }
+
     func testThumbnailWriteFailureRemovesTheNewFullPhotoWithoutLeavingAManifest() async throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory

@@ -3,7 +3,7 @@ import XCTest
 @testable import SnapList
 
 final class VisualContractTests: XCTestCase {
-    func testResolvedManifestContainsAllFortyTwoApprovedStates() throws {
+    func testResolvedManifestAndApprovedScanDeltaCoverEveryTypedVisualState() throws {
         let visualManifest = try loadJSON(
             named: "snaplist-visual-regression-manifest",
             at: .resolvedContracts
@@ -15,9 +15,15 @@ final class VisualContractTests: XCTestCase {
         XCTAssertEqual(approved.count, 42)
         XCTAssertEqual(candidates.count, 6)
         XCTAssertEqual(withheld.compactMap { $0["id"] as? String }, ["CAP-05"])
+        let scanDeltaIDs = Set(["CAM-01", "CAM-02", "CAM-03", "CAM-04", "CAM-V1", "CAM-V2"])
         XCTAssertEqual(
-            Set(approved.compactMap { $0["id"] as? String }),
+            Set(approved.compactMap { $0["id"] as? String }).union(scanDeltaIDs),
             Set(ApprovedVisualStateID.allCases.map(\.rawValue))
+        )
+        XCTAssertTrue(
+            ApprovedVisualStateID.allCases
+                .filter { scanDeltaIDs.contains($0.rawValue) }
+                .allSatisfy { $0.ownerIssue == 424 }
         )
         XCTAssertTrue(candidates.allSatisfy {
             $0["status"] as? String == "not_implementation_frozen"

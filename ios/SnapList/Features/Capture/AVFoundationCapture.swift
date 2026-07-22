@@ -29,6 +29,7 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
     private var rotationObservation: NSKeyValueObservation?
     private var interruptionEndedObserver: NSObjectProtocol?
     private var runtimeErrorObserver: NSObjectProtocol?
+    private var flashMode: CaptureFlashMode = .off
 
     override init() {
         captureDevice = AVCaptureDevice.default(
@@ -64,6 +65,13 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
     }
 
     var isAvailable: Bool { captureDevice != nil }
+    var isFlashAvailable: Bool { captureDevice?.hasFlash == true }
+
+    func setFlashMode(_ mode: CaptureFlashMode) {
+        sessionQueue.async { [weak self] in
+            self?.flashMode = mode
+        }
+    }
 
     func authorizationStatus() -> CaptureCameraAuthorization {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -124,6 +132,12 @@ final class AVFoundationCaptureCamera: NSObject, CaptureCamera, @unchecked Senda
                     format: [AVVideoCodecKey: AVVideoCodecType.jpeg]
                 )
                 settings.photoQualityPrioritization = .balanced
+                let requestedFlashMode: AVCaptureDevice.FlashMode = self.flashMode == .on
+                    ? .on
+                    : .off
+                if self.photoOutput.supportedFlashModes.contains(requestedFlashMode) {
+                    settings.flashMode = requestedFlashMode
+                }
                 let delegate = PhotoCaptureDelegate { [weak self] id, result in
                     self?.sessionQueue.async {
                         self?.photoDelegates[id] = nil

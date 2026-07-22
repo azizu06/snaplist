@@ -103,6 +103,22 @@ enum AppFullScreen: String, Identifiable {
     var id: String { rawValue }
 }
 
+enum CaptureBoundaryDestination: Equatable {
+    case photoReview
+    case trophyWall
+}
+
+enum CaptureBoundaryOpener: Equatable {
+    case reviewButton
+    case trophyWallTab
+}
+
+struct CaptureBoundaryRequest: Equatable {
+    let destination: CaptureBoundaryDestination
+    let photos: [StagedCapturePhoto]
+    let opener: CaptureBoundaryOpener
+}
+
 enum RunDeepLink: Equatable, Sendable {
     case run(UUID)
 
@@ -138,6 +154,7 @@ final class AppRouter {
     var selectedTab: PrimaryTab
     var presentedSheet: AppSheet?
     var presentedFullScreen: AppFullScreen?
+    private(set) var captureBoundaryRequest: CaptureBoundaryRequest?
 
     private var homePath: [AppRoute] = []
     private var listingsPath: [AppRoute] = []
@@ -177,6 +194,24 @@ final class AppRouter {
         var current = path(for: selectedTab)
         current.append(route)
         setPath(current, for: selectedTab)
+    }
+
+    func openCaptureBoundary(
+        destination: CaptureBoundaryDestination,
+        photos: [StagedCapturePhoto],
+        opener: CaptureBoundaryOpener
+    ) {
+        let hasValidPhotoCount = switch destination {
+        case .photoReview: (1...5).contains(photos.count)
+        case .trophyWall: (0...5).contains(photos.count)
+        }
+        guard hasValidPhotoCount else { return }
+        captureBoundaryRequest = CaptureBoundaryRequest(
+            destination: destination,
+            photos: photos,
+            opener: opener
+        )
+        presentedFullScreen = nil
     }
 
     @discardableResult

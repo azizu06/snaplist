@@ -14,6 +14,11 @@ enum CaptureCameraAuthorization: Equatable {
     case restricted
 }
 
+enum CaptureFlashMode: Equatable {
+    case off
+    case on
+}
+
 enum CapturePhase: Equatable {
     case idle
     case requestingPermission
@@ -233,20 +238,29 @@ struct StagedCapturePhoto: Codable, Equatable, Identifiable {
     }
 }
 
+struct CaptureDraftAppendResult: Equatable {
+    let appendedPhoto: StagedCapturePhoto
+    let photos: [StagedCapturePhoto]
+}
+
 protocol CaptureCamera: AnyObject {
     var session: AVCaptureSession { get }
     var captureDevice: AVCaptureDevice? { get }
     var isAvailable: Bool { get }
+    var isFlashAvailable: Bool { get }
 
     func authorizationStatus() -> CaptureCameraAuthorization
     func requestAuthorization() async -> CaptureCameraAuthorization
     func start(frameHandler: @escaping (CaptureFrame) -> Void) async throws
     func stop()
+    func setFlashMode(_ mode: CaptureFlashMode)
     func capturePhoto() async throws -> Data
 }
 
 extension CaptureCamera {
     var captureDevice: AVCaptureDevice? { nil }
+    var isFlashAvailable: Bool { false }
+    func setFlashMode(_ mode: CaptureFlashMode) {}
 }
 
 #if DEBUG
@@ -268,16 +282,40 @@ protocol FramingEvaluating {
 
 protocol CaptureDraftStoring {
     func load() async throws -> StagedCapturePhoto?
+    func loadPhotos() async throws -> [StagedCapturePhoto]
     func stage(
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> StagedCapturePhoto
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult
     func discard() async throws
 }
 
 extension CaptureDraftStoring {
+    func loadPhotos() async throws -> [StagedCapturePhoto] {
+        if let photo = try await load() {
+            [photo]
+        } else {
+            []
+        }
+    }
+
     func stage(imageData: Data) async throws -> StagedCapturePhoto {
         try await stage(imageData: imageData, libraryTransferReceipt: nil)
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        let photo = try await stage(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        return CaptureDraftAppendResult(appendedPhoto: photo, photos: [photo])
     }
 }
 
@@ -287,6 +325,7 @@ enum CaptureDraftStoreError: Error {
     case transferReceiptMismatch
     case invalidManifest
     case partialStageCleanupFailed
+    case photoLimitReached
 }
 
 actor LocalCaptureDraftStore: CaptureDraftStoring {
@@ -297,6 +336,7 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
     private let fileManager: FileManager
     private let rootDirectory: URL
     private let manifestURL: URL
+    private let orderedManifestURL: URL
     private let writeData: @Sendable (Data, URL, Data.WritingOptions) throws -> Void
     private let discardRoot: @Sendable (URL) throws -> Void
     private let now: @Sendable () -> Date
@@ -322,6 +362,7 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         self.fileManager = fileManager
         self.rootDirectory = rootDirectory ?? defaultRoot
         manifestURL = self.rootDirectory.appendingPathComponent("manifest.json")
+        orderedManifestURL = self.rootDirectory.appendingPathComponent("ordered-manifest.json")
         self.writeData = writeData
         self.discardRoot = discardRoot ?? { url in
             try fileManager.removeItem(at: url)
@@ -330,58 +371,110 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
     }
 
     func load() async throws -> StagedCapturePhoto? {
+        try await loadPhotos().first
+    }
+
+    func loadPhotos() async throws -> [StagedCapturePhoto] {
         guard fileManager.fileExists(atPath: rootDirectory.path) else {
-            return nil
+            return []
         }
-        guard fileManager.fileExists(atPath: manifestURL.path) else {
+        let storedPhotos: [StagedCapturePhoto]
+        if fileManager.fileExists(atPath: orderedManifestURL.path) {
+            storedPhotos = try decoder.decode(
+                [StagedCapturePhoto].self,
+                from: Data(contentsOf: orderedManifestURL)
+            )
+        } else if fileManager.fileExists(atPath: manifestURL.path) {
+            storedPhotos = [try decoder.decode(
+                StagedCapturePhoto.self,
+                from: Data(contentsOf: manifestURL)
+            )]
+        } else {
             try removeSupersededImages(keeping: [])
-            return nil
+            return []
         }
-        let staged = try decoder.decode(
-            StagedCapturePhoto.self,
-            from: Data(contentsOf: manifestURL)
-        )
-        let currentPhotoURL = try ownedArtifactURL(
-            storedURL: staged.photoURL,
-            expectedPrefix: "photo",
-            draftID: staged.id
-        )
-        let currentThumbnailURL = try ownedArtifactURL(
-            storedURL: staged.thumbnailURL,
-            expectedPrefix: "thumbnail",
-            draftID: staged.id
-        )
-        try removeSupersededImages(
-            keeping: [currentPhotoURL, currentThumbnailURL]
-        )
-        guard now().timeIntervalSince(staged.createdAt) < Self.recoveryWindow else {
-            purgeOwnedDraft(
-                photoURL: currentPhotoURL,
-                thumbnailURL: currentThumbnailURL
+
+        let restored = try storedPhotos.map { staged in
+            let currentPhotoURL = try ownedArtifactURL(
+                storedURL: staged.photoURL,
+                expectedPrefix: "photo",
+                draftID: staged.id
             )
-            return nil
-        }
-        guard fileManager.fileExists(atPath: currentPhotoURL.path),
-              fileManager.fileExists(atPath: currentThumbnailURL.path) else {
-            purgeOwnedDraft(
-                photoURL: currentPhotoURL,
-                thumbnailURL: currentThumbnailURL
+            let currentThumbnailURL = try ownedArtifactURL(
+                storedURL: staged.thumbnailURL,
+                expectedPrefix: "thumbnail",
+                draftID: staged.id
             )
-            return nil
+            return StagedCapturePhoto(
+                id: staged.id,
+                photoURL: currentPhotoURL,
+                thumbnailURL: currentThumbnailURL,
+                createdAt: staged.createdAt,
+                libraryTransferReceipt: staged.libraryTransferReceipt
+            )
         }
-        return StagedCapturePhoto(
-            id: staged.id,
-            photoURL: currentPhotoURL,
-            thumbnailURL: currentThumbnailURL,
-            createdAt: staged.createdAt,
-            libraryTransferReceipt: staged.libraryTransferReceipt
-        )
+        let currentURLs = Set(restored.flatMap { [$0.photoURL, $0.thumbnailURL] })
+        try removeSupersededImages(keeping: currentURLs)
+        guard restored.allSatisfy({
+            now().timeIntervalSince($0.createdAt) < Self.recoveryWindow
+        }) else {
+            purgeOwnedDraft(photos: restored)
+            return []
+        }
+        guard restored.allSatisfy({
+            fileManager.fileExists(atPath: $0.photoURL.path)
+                && fileManager.fileExists(atPath: $0.thumbnailURL.path)
+        }) else {
+            purgeOwnedDraft(photos: restored)
+            return []
+        }
+        return restored
     }
 
     func stage(
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> StagedCapturePhoto {
+        let staged = try persist(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt,
+            existingPhotos: [],
+            manifestURL: manifestURL,
+            encodeManifest: { try self.encoder.encode($0[0]) }
+        )
+        try? fileManager.removeItem(at: orderedManifestURL)
+        return staged
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        let existingPhotos = try await loadPhotos()
+        guard existingPhotos.count < 5 else {
+            throw CaptureDraftStoreError.photoLimitReached
+        }
+        let staged = try persist(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt,
+            existingPhotos: existingPhotos,
+            manifestURL: orderedManifestURL,
+            encodeManifest: { try self.encoder.encode($0) }
+        )
+        try? fileManager.removeItem(at: manifestURL)
+        return CaptureDraftAppendResult(
+            appendedPhoto: staged,
+            photos: existingPhotos + [staged]
+        )
+    }
+
+    private func persist(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?,
+        existingPhotos: [StagedCapturePhoto],
+        manifestURL: URL,
+        encodeManifest: ([StagedCapturePhoto]) throws -> Data
+    ) throws -> StagedCapturePhoto {
         if let libraryTransferReceipt,
            !libraryTransferReceipt.matchesTransferredPhoto(imageData) {
             throw CaptureDraftStoreError.transferReceiptMismatch
@@ -422,8 +515,10 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
                 createdAt: now(),
                 libraryTransferReceipt: libraryTransferReceipt
             )
-            try writeData(encoder.encode(staged), manifestURL, Self.writingOptions)
-            try? removeSupersededImages(keeping: [nextPhotoURL, nextThumbnailURL])
+            let photos = existingPhotos + [staged]
+            try writeData(try encodeManifest(photos), manifestURL, Self.writingOptions)
+            let currentURLs = Set(photos.flatMap { [$0.photoURL, $0.thumbnailURL] })
+            try? removeSupersededImages(keeping: currentURLs)
             return staged
         } catch {
             let stagingError = error
@@ -443,9 +538,10 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
         try discardRoot(rootDirectory)
     }
 
-    private func purgeOwnedDraft(photoURL: URL, thumbnailURL: URL) {
+    private func purgeOwnedDraft(photos: [StagedCapturePhoto]) {
         // Callers validate both reconstructed artifact URLs before any deletion begins.
-        for url in Set([photoURL, thumbnailURL, manifestURL]) {
+        let artifactURLs = photos.flatMap { [$0.photoURL, $0.thumbnailURL] }
+        for url in Set(artifactURLs + [manifestURL, orderedManifestURL]) {
             try? fileManager.removeItem(at: url)
         }
     }
@@ -570,11 +666,14 @@ final class CaptureFlowModel {
     private var stabilizer: FramingGuidanceStabilizer
     private var evaluationInFlight = false
     private var activeCaptureID: UUID?
+    private var activeIntakeID: UUID?
     private var resumeAfterBackground = false
+    private var pendingPhotoLimitAnnouncement: String?
 
     private(set) var phase: CapturePhase = .idle
     private(set) var guidance: FramingGuidance = .coaching
-    private(set) var stagedPhoto: StagedCapturePhoto?
+    private(set) var stagedPhotos: [StagedCapturePhoto] = []
+    private(set) var flashMode: CaptureFlashMode = .off
     private(set) var hasCompletedRestoration = false
 
     init(
@@ -593,20 +692,29 @@ final class CaptureFlowModel {
 
     var previewSession: AVCaptureSession { camera.session }
     var captureDevice: AVCaptureDevice? { camera.captureDevice }
+    var isFlashAvailable: Bool { camera.isFlashAvailable }
+    var stagedPhoto: StagedCapturePhoto? { stagedPhotos.first }
     var isCapturingPhoto: Bool { activeCaptureID != nil }
+    var isAddingPhotos: Bool { activeIntakeID != nil }
+    var canOpenBoundary: Bool { !isAddingPhotos && (0...5).contains(stagedPhotos.count) }
     var canTakePhoto: Bool {
         phase == .camera
-            && stagedPhoto == nil
-            && guidance == .accepted
-            && !isCapturingPhoto
+            && stagedPhotos.count < 5
+            && !isAddingPhotos
     }
     var handoffTitle: String { "Photos ready to review" }
+
+    func toggleFlash() {
+        guard isFlashAvailable else { return }
+        flashMode = flashMode == .off ? .on : .off
+        camera.setFlashMode(flashMode)
+    }
 
     func restore() async -> CaptureRestoration {
         defer { hasCompletedRestoration = true }
         do {
-            stagedPhoto = try await store.load()
-            if stagedPhoto != nil {
+            stagedPhotos = try await store.loadPhotos()
+            if !stagedPhotos.isEmpty {
                 phase = .captured
                 return .stagedPhoto
             }
@@ -629,8 +737,17 @@ final class CaptureFlowModel {
             authorization = await camera.requestAuthorization()
         }
 
-        guard authorization == .authorized else {
+        switch authorization {
+        case .authorized:
+            break
+        case .denied:
             phase = .denied
+            return
+        case .restricted:
+            phase = .unavailable
+            return
+        case .notDetermined:
+            phase = .unavailable
             return
         }
 
@@ -662,30 +779,42 @@ final class CaptureFlowModel {
         }
     }
 
-    func takePhoto() async {
-        guard canTakePhoto else { return }
+    func reservePhotoCapture() -> UUID? {
+        guard canTakePhoto else { return nil }
         let captureID = UUID()
         activeCaptureID = captureID
+        activeIntakeID = captureID
+        return captureID
+    }
+
+    func takePhoto() async {
+        guard let captureID = reservePhotoCapture() else { return }
+        await takePhoto(reservation: captureID)
+    }
+
+    func takePhoto(reservation captureID: UUID) async {
+        guard activeCaptureID == captureID, activeIntakeID == captureID else { return }
         defer {
             if activeCaptureID == captureID {
                 activeCaptureID = nil
             }
+            if activeIntakeID == captureID {
+                activeIntakeID = nil
+            }
         }
         do {
             let imageData = try await camera.capturePhoto()
-            guard activeCaptureID == captureID else { return }
-            let photo = try await store.stage(imageData: imageData)
-            guard activeCaptureID == captureID else { return }
-            stagedPhoto = photo
-            camera.stop()
-            resumeAfterBackground = false
-            phase = .captured
+            guard activeIntakeID == captureID else { return }
+            let result = try await store.append(
+                imageData: imageData,
+                libraryTransferReceipt: nil
+            )
+            guard activeIntakeID == captureID else { return }
+            stagedPhotos = result.photos
+            queuePhotoLimitAnnouncementIfNeeded()
         } catch {
-            guard activeCaptureID == captureID else { return }
-            activeCaptureID = nil
-            camera.stop()
-            resumeAfterBackground = false
-            phase = .failed
+            guard activeIntakeID == captureID else { return }
+            // Capture and persistence failures are retryable on the still-live camera.
         }
     }
 
@@ -694,34 +823,77 @@ final class CaptureFlowModel {
         _ imageData: Data,
         transferReceipt: LibraryPhotoTransferReceipt? = nil
     ) async -> Bool {
-        guard stagedPhoto == nil else { return false }
+        guard !isAddingPhotos, stagedPhotos.count < 5 else { return false }
         if let transferReceipt,
            !transferReceipt.matchesTransferredPhoto(imageData) {
             phase = .failed
             return false
         }
-        do {
-            stagedPhoto = try await store.stage(
-                imageData: imageData,
-                libraryTransferReceipt: transferReceipt
-            )
-            camera.stop()
-            resumeAfterBackground = false
-            phase = .captured
-            return true
-        } catch {
-            activeCaptureID = nil
-            camera.stop()
-            resumeAfterBackground = false
-            phase = .failed
-            return false
+        let intakeID = UUID()
+        activeIntakeID = intakeID
+        defer {
+            if activeIntakeID == intakeID {
+                activeIntakeID = nil
+            }
         }
+        let phaseBeforeSelection = phase
+        return await persistLibraryPhoto(
+            imageData,
+            transferReceipt: transferReceipt,
+            phaseBeforeSelection: phaseBeforeSelection,
+            intakeID: intakeID
+        )
+    }
+
+    @discardableResult
+    func stageLibraryPhotos(_ imageData: [Data]) async -> Int {
+        guard let intakeID = reserveLibraryIntake() else { return 0 }
+        return await stageLibraryPhotos(imageData, reservation: intakeID)
+    }
+
+    func reserveLibraryIntake() -> UUID? {
+        guard !isAddingPhotos else { return nil }
+        let intakeID = UUID()
+        activeIntakeID = intakeID
+        return intakeID
+    }
+
+    func stageLibraryPhotos(_ imageData: [Data], reservation intakeID: UUID) async -> Int {
+        guard activeIntakeID == intakeID, activeCaptureID == nil else { return 0 }
+        defer {
+            if activeIntakeID == intakeID {
+                activeIntakeID = nil
+            }
+        }
+        let phaseBeforeSelection = phase
+        let remainingCapacity = max(0, 5 - stagedPhotos.count)
+        var addedCount = 0
+        for photoData in imageData.prefix(remainingCapacity) {
+            guard await persistLibraryPhoto(
+                photoData,
+                transferReceipt: nil,
+                phaseBeforeSelection: phaseBeforeSelection,
+                intakeID: intakeID
+            ) else { break }
+            addedCount += 1
+        }
+        return addedCount
+    }
+
+    func cancelLibraryIntake(reservation intakeID: UUID) {
+        guard activeIntakeID == intakeID, activeCaptureID == nil else { return }
+        activeIntakeID = nil
+    }
+
+    func consumePhotoLimitAnnouncement() -> String? {
+        defer { pendingPhotoLimitAnnouncement = nil }
+        return pendingPhotoLimitAnnouncement
     }
 
     func rollBackLibraryTransferAfterSourceConsumptionFailure() async -> Bool {
         do {
             try await store.discard()
-            stagedPhoto = nil
+            stagedPhotos = []
             camera.stop()
             resumeAfterBackground = false
             phase = .failed
@@ -733,20 +905,21 @@ final class CaptureFlowModel {
     }
 
     func continueToReviewHandoff() {
-        guard stagedPhoto != nil else { return }
+        guard !stagedPhotos.isEmpty else { return }
         phase = .reviewHandoff
     }
 
     func reopenCameraFromReviewHandoff() async {
-        guard phase == .reviewHandoff, stagedPhoto != nil else { return }
+        guard phase == .reviewHandoff, !stagedPhotos.isEmpty else { return }
         await startCamera()
     }
 
     func cancelCamera() {
+        activeIntakeID = nil
         activeCaptureID = nil
         camera.stop()
         resumeAfterBackground = false
-        phase = stagedPhoto == nil ? .idle : .captured
+        phase = stagedPhotos.isEmpty ? .idle : .captured
     }
 
     func handleScenePhase(_ scenePhase: ScenePhase) {
@@ -763,5 +936,41 @@ final class CaptureFlowModel {
         }
         guard resumeAfterBackground, phase == .camera else { return }
         await startCamera()
+    }
+
+    private func queuePhotoLimitAnnouncementIfNeeded() {
+        guard stagedPhotos.count == 5,
+              pendingPhotoLimitAnnouncement == nil else { return }
+        pendingPhotoLimitAnnouncement = "Five photo limit reached. Review your photos."
+    }
+
+    private func persistLibraryPhoto(
+        _ imageData: Data,
+        transferReceipt: LibraryPhotoTransferReceipt?,
+        phaseBeforeSelection: CapturePhase,
+        intakeID: UUID
+    ) async -> Bool {
+        guard activeIntakeID == intakeID, stagedPhotos.count < 5 else { return false }
+        do {
+            let result = try await store.append(
+                imageData: imageData,
+                libraryTransferReceipt: transferReceipt
+            )
+            guard activeIntakeID == intakeID else { return false }
+            stagedPhotos = result.photos
+            queuePhotoLimitAnnouncementIfNeeded()
+            if ![.camera, .denied, .unavailable].contains(phaseBeforeSelection) {
+                camera.stop()
+                resumeAfterBackground = false
+                phase = .captured
+            }
+            return true
+        } catch {
+            if ![.camera, .denied, .unavailable].contains(phaseBeforeSelection) {
+                phase = .failed
+            }
+            // Live and recovery surfaces keep their prior truthful state for retry.
+            return false
+        }
     }
 }
