@@ -13,6 +13,8 @@ import {
 } from "../pipeline/types";
 import { priceToConfidence } from "../confidence/from-price";
 import { createDefaultPricer } from "../pricing/default-pricer";
+import { createInMemoryTtlCache } from "../pricing/comp-cache";
+import type { EbaySoldComp } from "../pricing/providers/ebay-sold";
 import {
   createVisionPipeline,
   type CreateVisionPipelineOptions,
@@ -613,6 +615,11 @@ describe("#11 — createDefaultPricer fallthrough (offline fakes)", () => {
           calls.push("ebay-sold");
           return "";
         },
+        cache: createInMemoryTtlCache<EbaySoldComp[]>(
+          60_000,
+          Date.now,
+          "shared",
+        ),
       },
       webSearch: { searchClient: emptyWebSearch },
       depreciation: {

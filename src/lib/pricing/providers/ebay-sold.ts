@@ -43,8 +43,9 @@ import {
  *    web-search tier — it never hard-fails the pricing call.
  *  - Invalid proxy configuration is different: it fails validation before any
  *    request. Runtime fetch diagnostics expose only bounded, credential-safe reasons.
- *  - Cache-on-miss / TTL freshness is opt-in on the raw provider; the production
- *    composition root wires the shared cache and age-decay layer (#59).
+ *  - Cache-on-miss / TTL freshness is opt-in on the raw provider. Every normal
+ *    retrieval still requires a shared cache with an atomic claim; the production
+ *    composition root wires that cache and the age-decay layer (#59).
  *
  * Default egress is direct `fetch`; an optional validated proxy template supports
  * hosted environments. HTML is parsed with `cheerio`. A Playwright-style fallback
@@ -96,21 +97,18 @@ export interface EbaySoldPricingProviderOptions {
   baseUrl?: string;
   /** Hard cap on parsed comps per call. */
   maxResults?: number;
-  /** Keep explicitly one-request operator probes from using the optional expansion. */
-  allowExpansion?: boolean;
   /** Outbound User-Agent; defaults to `EBAY_SOLD_USER_AGENT` env or a desktop UA. */
   userAgent?: string;
-  /** Per-fetch timeout (ms); defaults to `EBAY_SOLD_TIMEOUT_MS` env or 8000. */
+  /** Per-fetch timeout (ms), clamped to 15s; defaults to env or 8000. */
   fetchTimeoutMs?: number;
   /** Diagnostic sink; tests/operator smoke may silence structured runtime logs. */
   emitDiagnostic?: (event: string, fields: LogFields) => void;
-  // -- Freshness (#59). All OPT-IN: the raw provider stays clock-free and
-  //    cache-free (so unit tests are deterministic); `createDefaultPricer` wires
-  //    the real clock + shared cache for production. --
+  // -- Freshness (#59). The clock remains opt-in. Normal retrieval requires the
+  //    shared cache/claim cost fence; `createDefaultPricer` wires both. --
   /**
    * TTL cache of sold-comp scrapes keyed by the resolved search URL (= product
-   * identity). A hit within the TTL is reused (no fetch); a miss live-fetches and
-   * stores. Omitted → always live-fetch (the live page is the source of truth).
+   * identity). A hit within the TTL is reused (no fetch); a claimed miss
+   * live-fetches and stores. Missing/process-local claim → normal provider declines.
    */
   cache?: TtlCache<EbaySoldComp[]>;
   /**
@@ -147,8 +145,10 @@ interface EbaySoldRuntimeState {
   inFlight: Map<string, Promise<EbaySoldComp[] | null>>;
 }
 
-/** Bounded shared-cache polling while another runtime owns the retrieval claim. */
-const EBAY_SOLD_HANDOFF_DELAYS_MS = [0, 50, 100, 200, 400, 800, 1_600, 3_200, 6_400, 6_400];
+/** Maximum delay between shared-cache reads while another runtime owns the claim. */
+const EBAY_SOLD_HANDOFF_POLL_MAX_MS = 3_200;
+/** Bounded time for the winner to store and the loser to observe its result. */
+export const EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS = 500;
 
 /** Request-scoped providers share one cache object at the composition root. */
 const EBAY_SOLD_RUNTIME_STATE_BY_CACHE = new WeakMap<
@@ -175,6 +175,8 @@ function runtimeStateFor(
  * runs (#56 review). Overridable via `EBAY_SOLD_TIMEOUT_MS`.
  */
 export const EBAY_SOLD_FETCH_TIMEOUT_MS = 8000;
+/** Operator config cannot extend a public sold-page request without bound. */
+export const EBAY_SOLD_FETCH_TIMEOUT_MAX_MS = 15_000;
 
 /** The only host family this provider will ever fetch. */
 export const EBAY_ALLOWED_HOST = "ebay.com";
@@ -187,9 +189,14 @@ function resolveUserAgent(env: NodeJS.ProcessEnv = process.env): string {
   return env.EBAY_SOLD_USER_AGENT?.trim() || EBAY_SOLD_USER_AGENT_DEFAULT;
 }
 
+function boundedTimeoutMs(value: number): number {
+  return Number.isFinite(value) && value > 0
+    ? Math.min(value, EBAY_SOLD_FETCH_TIMEOUT_MAX_MS)
+    : EBAY_SOLD_FETCH_TIMEOUT_MS;
+}
+
 function resolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const v = Number(env.EBAY_SOLD_TIMEOUT_MS);
-  return Number.isFinite(v) && v > 0 ? v : EBAY_SOLD_FETCH_TIMEOUT_MS;
+  return boundedTimeoutMs(Number(env.EBAY_SOLD_TIMEOUT_MS));
 }
 
 /** Freshness TTL/cutoff/half-life — env-tunable (#59); each falls back to its default. */
@@ -994,7 +1001,7 @@ export function createDefaultFetchPage(
   } = {},
 ): FetchPage {
   const userAgent = opts.userAgent ?? resolveUserAgent();
-  const timeoutMs = opts.timeoutMs ?? resolveTimeoutMs();
+  const timeoutMs = boundedTimeoutMs(opts.timeoutMs ?? resolveTimeoutMs());
   const doFetch = opts.fetchImpl ?? fetch;
   const egress = resolveEbaySoldEgressConfig(
     opts.proxyTemplate === undefined
@@ -1044,13 +1051,20 @@ export function createDefaultFetchPage(
  * router falls through to the web-search / estimate tiers. Invalid operator
  * proxy configuration instead throws during provider creation, before egress.
  */
-export function createEbaySoldPricingProvider(
+type EbaySoldRetrievalAuthority = "normal" | "operator-smoke-one-request";
+
+function createEbaySoldPricingProviderInternal(
   options: EbaySoldPricingProviderOptions = {},
+  authority: EbaySoldRetrievalAuthority,
 ): PricingProvider {
   const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
-  const allowExpansion = options.allowExpansion ?? true;
+  const operatorSmokeOneRequest = authority === "operator-smoke-one-request";
+  const allowExpansion = !operatorSmokeOneRequest;
+  const effectiveFetchTimeoutMs = boundedTimeoutMs(
+    options.fetchTimeoutMs ?? resolveTimeoutMs(),
+  );
   const configuredEgress = options.fetchPage
     ? { mode: "injected" as const }
     : resolveEbaySoldEgressConfig();
@@ -1058,21 +1072,27 @@ export function createEbaySoldPricingProvider(
     options.fetchPage ??
     createDefaultFetchPage({
       userAgent: options.userAgent,
-      timeoutMs: options.fetchTimeoutMs,
+      timeoutMs: effectiveFetchTimeoutMs,
       proxyTemplate:
         configuredEgress.mode === "proxy" ? configuredEgress.template : "",
     });
-  const fetchFallback = options.fetchPageFallback;
-  // Freshness (#59) — opt-in. `now` activates age-decay; `cache` activates the
-  // TTL request cache. Both default OFF in the raw provider (deterministic unit
-  // tests); `createDefaultPricer` wires the real clock + shared cache.
+  const fetchFallback = operatorSmokeOneRequest
+    ? undefined
+    : options.fetchPageFallback;
+  // Freshness (#59): `now` activates age-decay. The raw provider accepts an
+  // injected shared cache for deterministic tests; `createDefaultPricer` wires
+  // the real clock + cache in normal composition.
   const cache = options.cache;
   const inFlight = runtimeStateFor(cache).inFlight;
   const claimSharedRetrieval =
     cache?.scope === "shared" && typeof cache.claim === "function"
       ? cache.claim.bind(cache)
       : null;
-  const requiresSharedFence = configuredEgress.mode !== "injected";
+  const requiresSharedFence = !operatorSmokeOneRequest;
+  const maximumRequestCount = allowExpansion ? 2 : 1;
+  const handoffWaitMs =
+    effectiveFetchTimeoutMs * maximumRequestCount +
+    EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS;
   const now = options.now;
   const staleDays = options.staleDays ?? resolveStaleDays();
   const halfLifeDays = options.halfLifeDays ?? resolveHalfLifeDays();
@@ -1080,6 +1100,26 @@ export function createEbaySoldPricingProvider(
 
   const identifiable = (signal: ItemSignal): boolean =>
     buildSoldSearchUrl(signal, baseUrl) !== null;
+
+  async function fetchWithinEffectiveTimeout(
+    fetchPage: FetchPage,
+    url: string,
+  ): Promise<string> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        fetchPage(url),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new DOMException("aborted", "AbortError")),
+            effectiveFetchTimeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 
   function cacheKey(url: string, signal: ItemSignal): string {
     return JSON.stringify({
@@ -1101,9 +1141,15 @@ export function createEbaySoldPricingProvider(
 
   async function waitForClaimWinner(key: string): Promise<EbaySoldComp[] | null> {
     if (!cache) return null;
-    for (const delayMs of EBAY_SOLD_HANDOFF_DELAYS_MS) {
+    const deadline = Date.now() + handoffWaitMs;
+    let delayMs = 0;
+    while (true) {
       if (delayMs > 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) break;
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.min(delayMs, remainingMs)),
+        );
       }
       try {
         const handedOff = await cache.get(key);
@@ -1114,6 +1160,11 @@ export function createEbaySoldPricingProvider(
         });
         return null;
       }
+      if (Date.now() >= deadline) break;
+      delayMs =
+        delayMs === 0
+          ? 50
+          : Math.min(delayMs * 2, EBAY_SOLD_HANDOFF_POLL_MAX_MS);
     }
     emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
       reason: "handoff-timeout",
@@ -1144,7 +1195,11 @@ export function createEbaySoldPricingProvider(
     }
     try {
       return {
-        comps: parseSoldComps(await fetchPage(url), baseUrl, parseLimit),
+        comps: parseSoldComps(
+          await fetchWithinEffectiveTimeout(fetchPage, url),
+          baseUrl,
+          parseLimit,
+        ),
         failed: false,
       };
     } catch (err) {
@@ -1232,11 +1287,12 @@ export function createEbaySoldPricingProvider(
       // by product identity plus the matcher-sensitive signal that controls expansion;
       // age-decay below re-runs on
       // every read, so a comp that goes stale while cached is still dropped.
-      // The cache is an OPTIMIZATION, never pricing authority. Real direct/proxy
-      // egress additionally requires its existing atomic shared claim so separate
-      // runtimes cannot multiply the bounded pass; an unavailable fence declines
-      // before egress. Injected offline/operator seams remain fail-soft on cache
-      // errors. Neither path propagates cache failure into the listing pipeline.
+      // The cache is an OPTIMIZATION, never pricing authority. Every normal
+      // provider path, including injected/instrumented fetchers, requires its
+      // existing atomic shared claim so separate runtimes cannot multiply the
+      // bounded pass; an unavailable fence declines before egress. The separately
+      // named operator smoke factory is the only one-request bypass. Neither path
+      // propagates cache failure into the listing pipeline.
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
@@ -1327,4 +1383,24 @@ export function createEbaySoldPricingProvider(
       );
     },
   };
+}
+
+export function createEbaySoldPricingProvider(
+  options: EbaySoldPricingProviderOptions = {},
+): PricingProvider {
+  return createEbaySoldPricingProviderInternal(options, "normal");
+}
+
+/**
+ * Narrow operator-authorized smoke mode. This is deliberately a separate,
+ * explicit factory so normal provider construction cannot accidentally bypass
+ * the shared cost fence. It always suppresses the optional expansion.
+ */
+export function createOneRequestEbaySoldPricingProviderForOperatorSmoke(
+  options: EbaySoldPricingProviderOptions = {},
+): PricingProvider {
+  return createEbaySoldPricingProviderInternal(
+    options,
+    "operator-smoke-one-request",
+  );
 }

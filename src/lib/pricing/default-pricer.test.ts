@@ -4,12 +4,15 @@ import {
   createInMemoryTtlCache,
   type TtlCache,
 } from "./comp-cache";
-import { createDefaultPricer } from "./default-pricer";
+import {
+  createDefaultPricer as createRawDefaultPricer,
+  type CreateDefaultPricerOptions,
+} from "./default-pricer";
 import type {
   ApifySoldComp,
   RunApifySoldActor,
 } from "./providers/apify-sold";
-import type { FetchPage } from "./providers/ebay-sold";
+import type { EbaySoldComp, FetchPage } from "./providers/ebay-sold";
 import type { ItemSignal } from "./types";
 
 const SIGNAL: ItemSignal = {
@@ -85,6 +88,21 @@ function apifyItem(
 
 function sharedApifyCache(): TtlCache<ApifySoldComp[]> {
   return createInMemoryTtlCache<ApifySoldComp[]>(60_000, Date.now, "shared");
+}
+
+function sharedPublicSoldCache(): TtlCache<EbaySoldComp[]> {
+  return createInMemoryTtlCache<EbaySoldComp[]>(60_000, Date.now, "shared");
+}
+
+/** Composition tests keep the normal public adapter behind its required claim. */
+function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
+  return createRawDefaultPricer({
+    ...options,
+    ebaySold: {
+      ...options.ebaySold,
+      cache: options.ebaySold?.cache ?? sharedPublicSoldCache(),
+    },
+  });
 }
 
 describe("createDefaultPricer Apify composition", () => {

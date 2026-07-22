@@ -7,7 +7,7 @@ import {
   buildSoldSearchUrl,
   coreComps,
   createDefaultFetchPage,
-  createEbaySoldPricingProvider,
+  createEbaySoldPricingProvider as createRawEbaySoldPricingProvider,
   ebaySoldConfigured,
   filterRelevantComps,
   isAllowedEbayHost,
@@ -17,6 +17,7 @@ import {
   parseSoldDate,
   synthesizeSoldResult,
   type EbaySoldComp,
+  type EbaySoldPricingProviderOptions,
   type FetchPage,
 } from "./ebay-sold";
 import { createInMemoryTtlCache, type TtlCache } from "../comp-cache";
@@ -76,6 +77,38 @@ const BRANDED_SIGNAL: ItemSignal = {
   conditionKnown: true,
 };
 
+const sharedTestCacheByCache = new WeakMap<
+  TtlCache<EbaySoldComp[]>,
+  TtlCache<EbaySoldComp[]>
+>();
+
+function withSharedTestClaim(
+  cache: TtlCache<EbaySoldComp[]>,
+): TtlCache<EbaySoldComp[]> {
+  if (cache.scope === "shared" && cache.claim) return cache;
+  const existing = sharedTestCacheByCache.get(cache);
+  if (existing) return existing;
+  const shared: TtlCache<EbaySoldComp[]> = {
+    scope: "shared",
+    get: cache.get.bind(cache),
+    set: cache.set.bind(cache),
+    claim: cache.claim?.bind(cache) ?? (async () => true),
+  };
+  sharedTestCacheByCache.set(cache, shared);
+  return shared;
+}
+
+/** Normal offline provider construction still exercises the required shared claim. */
+function createEbaySoldPricingProvider(
+  options: EbaySoldPricingProviderOptions = {},
+): PricingProvider {
+  const cache = options.cache ?? createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+  return createRawEbaySoldPricingProvider({
+    ...options,
+    cache: withSharedTestClaim(cache),
+  });
+}
+
 /** A FetchPage fake that records the URLs it was asked to fetch. */
 function fakeFetch(html: string): FetchPage & { urls: string[] } {
   const urls: string[] = [];
@@ -99,6 +132,7 @@ function blockedFetch(): FetchPage & { urls: string[] } {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -886,6 +920,24 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     ]);
   });
 
+  it("bounds an injected normal fetch and declines without starting expansion", async () => {
+    vi.useFakeTimers();
+    const fetchPage = vi.fn<FetchPage>(
+      async () => new Promise<string>(() => undefined),
+    );
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 100,
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(result).resolves.toBeNull();
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
   it("coalesces concurrent redelivery into one bounded public retrieval pass", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -918,48 +970,31 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     ]);
   });
 
-  it("hands off one bounded winner across distinct runtimes sharing an atomic claim", async () => {
-    let releaseFetch!: () => void;
-    const fetchGate = new Promise<void>((resolve) => {
-      releaseFetch = resolve;
-    });
-    let fetchStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      fetchStarted = resolve;
-    });
-    let winnerStored!: () => void;
-    const stored = new Promise<void>((resolve) => {
-      winnerStored = resolve;
-    });
+  it("hands off a near-deadline winner across immediate-miss Redis-like runtimes", async () => {
+    vi.useFakeTimers();
     const values = new Map<string, EbaySoldComp[]>();
     let claimed = false;
     const claimResults: boolean[] = [];
-    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => {
-      let reads = 0;
-      return {
-        scope: "shared",
-        async get(key) {
-          reads += 1;
-          if (reads > 1 && claimed && !values.has(key)) await stored;
-          return values.get(key) ?? null;
-        },
-        async set(key, value) {
-          values.set(key, value);
-          winnerStored();
-        },
-        async claim() {
-          const won = !claimed;
-          claimed = true;
-          claimResults.push(won);
-          return won;
-        },
-      };
-    };
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 400));
+        values.set(key, value);
+      },
+      async claim() {
+        const won = !claimed;
+        claimed = true;
+        claimResults.push(won);
+        return won;
+      },
+    });
     const urls: string[] = [];
     const fetchPage = vi.fn(async (url: string) => {
       urls.push(url);
-      fetchStarted();
-      await fetchGate;
+      await new Promise<void>((resolve) => setTimeout(resolve, 975));
       return new URL(url).searchParams.get("_ipg") === "10"
         ? srp([
             soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
@@ -968,13 +1003,16 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
         : FIXTURE_HTML;
     });
     const providerForRuntime = () =>
-      createEbaySoldPricingProvider({ fetchPage, cache: cacheForRuntime() });
+      createEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1_000,
+        cache: cacheForRuntime(),
+      });
 
     const winner = providerForRuntime().price(BRANDED_SIGNAL);
-    await started;
+    await vi.advanceTimersByTimeAsync(0);
     const loser = providerForRuntime().price(BRANDED_SIGNAL);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    releaseFetch();
+    await vi.advanceTimersByTimeAsync(2_500);
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
 
     expect(loserResult).toEqual(winnerResult);
@@ -985,6 +1023,40 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     ]);
   });
 
+  it("clamps configured timeouts and fails soft after the derived handoff budget", async () => {
+    vi.useFakeTimers();
+    const reads: number[] = [];
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        reads.push(Date.now());
+        return null;
+      },
+      async set() {
+        throw new Error("loser must not store");
+      },
+      async claim() {
+        return false;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 60_000,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(30_499);
+    expect(fetchPage).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(result).resolves.toBeNull();
+    expect(fetchPage).not.toHaveBeenCalled();
+    expect(reads.at(-1)! - reads[0]!).toBe(30_500);
+  });
+
   it("declines before real egress when only a process-local fence is available", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(FIXTURE_HTML, {
@@ -993,7 +1065,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchImpl);
-    const provider = createEbaySoldPricingProvider({
+    const provider = createRawEbaySoldPricingProvider({
       enabled: true,
       cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
       emitDiagnostic: () => undefined,
@@ -1001,6 +1073,18 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
 
     await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not infer operator authority from an injected fetch seam", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const provider = createRawEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
   });
 
   it("does not let a ten-only cache entry suppress expansion for another condition", async () => {

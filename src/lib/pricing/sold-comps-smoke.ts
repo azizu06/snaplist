@@ -3,7 +3,7 @@ import {
   EBAY_SOLD_BASE_URL_DEFAULT,
   buildSoldSearchUrl,
   createDefaultFetchPage,
-  createEbaySoldPricingProvider,
+  createOneRequestEbaySoldPricingProviderForOperatorSmoke,
   ebaySoldConfigured,
   type FetchPage,
 } from "./providers/ebay-sold";
@@ -130,11 +130,10 @@ export async function runSoldCompsSmoke(
     }
   };
 
-  const provider = createEbaySoldPricingProvider({
+  const provider = createOneRequestEbaySoldPricingProviderForOperatorSmoke({
     enabled,
     baseUrl,
     fetchPage: observedFetch,
-    allowExpansion: false,
     emitDiagnostic: () => undefined,
   });
   const soldProvider: PricingProvider = {

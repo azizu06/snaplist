@@ -61,14 +61,24 @@ and [eBay condition ID meanings](https://developer.ebay.com/api-docs/sell/static
 The normal public-page provider requests 10 candidates first and makes one
 20-candidate expansion only when fewer than three anchors survive the canonical
 matcher. Terminal and sparse outcomes are cached alongside successful combined
-results. Before real direct or proxy egress, the existing atomic shared-cache
-claim selects one winner across worker runtimes; losers read the winner's result
-through a bounded handoff. A missing, process-local, or unavailable shared fence
-declines to the next pricing tier without making the external request.
+results. Every normal construction path, including injected, instrumented, or
+wrapped fetchers, requires the existing atomic shared-cache claim to select one
+winner across worker runtimes. Losers read the winner's result through a bounded
+handoff. A missing, process-local, or unavailable shared fence declines to the
+next pricing tier without making the external request.
+
+The effective per-request timeout defaults to 8 seconds and is capped at 15
+seconds even when operator configuration requests more. A loser waits for at
+most that effective timeout multiplied by the maximum two requests, plus a
+bounded 500 ms store/read allowance. Shared-cache reads are immediate and use a
+bounded backoff; expiry is fail-soft and never starts a loser retrieval.
 
 The operator smoke below is intentionally different: its explicit
 `--confirm-one-request` authorization permits exactly the initial 10-candidate
-request and suppresses the optional expansion.
+request and suppresses the optional expansion and fallback request. The smoke
+module alone imports the separately named operator-only provider factory; normal
+factory construction cannot select this bypass through fetcher injection or an
+options flag.
 
 ## Optional proxy-template configuration
 
