@@ -4,11 +4,15 @@ import {
   createInMemoryTtlCache,
   type TtlCache,
 } from "./comp-cache";
-import { createDefaultPricer } from "./default-pricer";
+import {
+  createDefaultPricer as createRawDefaultPricer,
+  type CreateDefaultPricerOptions,
+} from "./default-pricer";
 import type {
   ApifySoldComp,
   RunApifySoldActor,
 } from "./providers/apify-sold";
+import type { EbaySoldComp, FetchPage } from "./providers/ebay-sold";
 import type { ItemSignal } from "./types";
 
 const SIGNAL: ItemSignal = {
@@ -86,6 +90,21 @@ function sharedApifyCache(): TtlCache<ApifySoldComp[]> {
   return createInMemoryTtlCache<ApifySoldComp[]>(60_000, Date.now, "shared");
 }
 
+function sharedPublicSoldCache(): TtlCache<EbaySoldComp[]> {
+  return createInMemoryTtlCache<EbaySoldComp[]>(60_000, Date.now, "shared");
+}
+
+/** Composition tests keep the normal public adapter behind its required claim. */
+function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
+  return createRawDefaultPricer({
+    ...options,
+    ebaySold: {
+      ...options.ebaySold,
+      cache: options.ebaySold?.cache ?? sharedPublicSoldCache(),
+    },
+  });
+}
+
 describe("createDefaultPricer Apify composition", () => {
   beforeEach(() => {
     __resetTtlCaches();
@@ -128,7 +147,7 @@ describe("createDefaultPricer Apify composition", () => {
         items: request.maxItems === 10 ? initial : expanded,
       };
     });
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: {
         enabled: true,
@@ -194,7 +213,7 @@ describe("createDefaultPricer Apify composition", () => {
       status: "SUCCEEDED",
       items: apifyItems(),
     }));
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: { enabled: false, token: "secret", runActor },
       ebaySold: { fetchPage },
@@ -205,7 +224,9 @@ describe("createDefaultPricer Apify composition", () => {
     expect(result.tier).toBe("ebay-sold");
     expect(result.suggested).toBe(190);
     expect(runActor).not.toHaveBeenCalled();
-    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(
+      fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
+    ).toEqual(["10", "20"]);
   });
 
   it("uses Apify first when explicitly enabled and does not call the public provider on success", async () => {
@@ -214,7 +235,7 @@ describe("createDefaultPricer Apify composition", () => {
       requests.push(request);
       return { status: "SUCCEEDED", items: apifyItems() };
     });
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: {
         enabled: true,
@@ -286,7 +307,7 @@ describe("createDefaultPricer Apify composition", () => {
       await actorGate;
       return { status: "SUCCEEDED", items: apifyItems() };
     });
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: {
         enabled: true,
@@ -373,7 +394,7 @@ describe("createDefaultPricer Apify composition", () => {
     const runActor = vi.fn<RunApifySoldActor>(async () => {
       throw new Error("actor unavailable");
     });
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: { enabled: true, token: "secret", runActor, emitDiagnostic: () => undefined },
       ebaySold: { fetchPage },
@@ -386,14 +407,16 @@ describe("createDefaultPricer Apify composition", () => {
     expect(redelivery).toEqual(result);
     expect(result.suggested).toBe(190);
     expect(runActor).not.toHaveBeenCalled();
-    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(
+      fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
+    ).toEqual(["10", "20"]);
   });
 
   it("does not expand or repeat a terminal initial failure behind the shared fence", async () => {
     const runActor = vi.fn<RunApifySoldActor>(async () => {
       throw new Error("actor unavailable");
     });
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: {
         enabled: true,
@@ -411,7 +434,9 @@ describe("createDefaultPricer Apify composition", () => {
     expect(result.tier).toBe("ebay-sold");
     expect(redelivery).toEqual(result);
     expect(runActor).toHaveBeenCalledTimes(1);
-    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(
+      fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
+    ).toEqual(["10", "20"]);
   });
 
   it("falls through when Actor retrieval has fewer than two matcher-approved anchors", async () => {
@@ -430,7 +455,7 @@ describe("createDefaultPricer Apify composition", () => {
         ],
       };
     });
-    const fetchPage = vi.fn(async () => PUBLIC_SOLD_HTML);
+    const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
     const price = createDefaultPricer({
       apifySold: {
         enabled: true,
@@ -447,6 +472,8 @@ describe("createDefaultPricer Apify composition", () => {
     expect(result.suggested).toBe(190);
     expect(requests.map(({ maxItems }) => maxItems)).toEqual([10, 20]);
     expect(runActor).toHaveBeenCalledTimes(2);
-    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(
+      fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
+    ).toEqual(["10", "20"]);
   });
 });

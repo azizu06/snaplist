@@ -19,11 +19,13 @@ export interface TtlCache<T> {
   /** Whether atomic claims coordinate only this process or every worker runtime. */
   readonly scope?: "process" | "shared";
   /** The cached value, or null on a miss / expiry. */
-  get(key: string): Promise<T | null>;
+  get(key: string, signal?: AbortSignal): Promise<T | null>;
   /** Store a value under the cache's TTL. */
-  set(key: string, value: T): Promise<void>;
+  set(key: string, value: T, signal?: AbortSignal): Promise<void>;
   /** Atomically claim one cache identity for the full TTL when supported. */
-  claim?(key: string): Promise<boolean>;
+  claim?(key: string, signal?: AbortSignal, ownerToken?: string): Promise<boolean>;
+  /** Observe the durable owner token after an ambiguous claim response. */
+  getClaimOwner?(key: string, signal?: AbortSignal): Promise<string | null>;
 }
 
 /** Redis keys all share this prefix (mirrors the abuse limiter's `snaplist:rl`). */
@@ -45,7 +47,7 @@ export function createInMemoryTtlCache<T>(
   scope: "process" | "shared" = "process",
 ): TtlCache<T> {
   const store = new Map<string, { value: T; expires: number }>();
-  const claims = new Map<string, number>();
+  const claims = new Map<string, { expires: number; ownerToken: string }>();
   return {
     scope,
     async get(key) {
@@ -60,11 +62,23 @@ export function createInMemoryTtlCache<T>(
     async set(key, value) {
       store.set(key, { value, expires: now() + ttlMs });
     },
-    async claim(key) {
-      const claimedUntil = claims.get(key);
-      if (claimedUntil != null && now() < claimedUntil) return false;
-      claims.set(key, now() + ttlMs);
+    async claim(key, _signal, ownerToken) {
+      const claim = claims.get(key);
+      if (claim != null && now() < claim.expires) return false;
+      claims.set(key, {
+        expires: now() + ttlMs,
+        ownerToken: ownerToken ?? "1",
+      });
       return true;
+    },
+    async getClaimOwner(key) {
+      const claim = claims.get(key);
+      if (!claim) return null;
+      if (now() >= claim.expires) {
+        claims.delete(key);
+        return null;
+      }
+      return claim.ownerToken;
     },
   };
 }
@@ -75,11 +89,12 @@ export function createInMemoryTtlCache<T>(
 // without a live Redis.
 // ---------------------------------------------------------------------------
 interface RedisLike {
-  get(key: string): Promise<unknown>;
+  get(key: string, signal?: AbortSignal): Promise<unknown>;
   set(
     key: string,
     value: string,
     opts: { ex: number; nx?: true },
+    signal?: AbortSignal,
   ): Promise<unknown>;
 }
 
@@ -90,7 +105,12 @@ export function createUpstashTtlCache<T>(
 ): TtlCache<T> {
   const ttlSec = Math.max(1, Math.round(ttlMs / 1000));
   let pending: Promise<RedisLike> | null = injected ? Promise.resolve(injected) : null;
-  function client(): Promise<RedisLike> {
+  async function client(signal?: AbortSignal): Promise<RedisLike> {
+    if (injected) return injected;
+    if (signal) {
+      const { Redis } = await import("@upstash/redis");
+      return Redis.fromEnv({ signal }) as unknown as RedisLike;
+    }
     if (!pending) {
       pending = (async () => {
         const { Redis } = await import("@upstash/redis");
@@ -102,8 +122,11 @@ export function createUpstashTtlCache<T>(
   const namespaced = (key: string) => `${KEY_PREFIX}:${name}:${key}`;
   return {
     scope: "shared",
-    async get(key) {
-      const raw = await (await client()).get(namespaced(key));
+    async get(key, signal) {
+      const redis = await client(signal);
+      const raw = injected
+        ? await redis.get(namespaced(key), signal)
+        : await redis.get(namespaced(key));
       if (raw == null) return null;
       // @upstash/redis usually auto-deserializes JSON to the object; tolerate a
       // raw string round-trip too (defensive against client/config differences).
@@ -116,16 +139,37 @@ export function createUpstashTtlCache<T>(
       }
       return raw as T;
     },
-    async set(key, value) {
-      await (await client()).set(namespaced(key), JSON.stringify(value), { ex: ttlSec });
-    },
-    async claim(key) {
-      const claimed = await (await client()).set(
-        namespaced(`${key}:paid-claim`),
-        "1",
-        { ex: ttlSec, nx: true },
+    async set(key, value, signal) {
+      await (await client(signal)).set(
+        namespaced(key),
+        JSON.stringify(value),
+        { ex: ttlSec },
+        signal,
       );
+    },
+    async claim(key, signal, ownerToken) {
+      const redis = await client(signal);
+      const claimKey = namespaced(`${key}:paid-claim`);
+      const claimed = injected
+        ? await redis.set(
+            claimKey,
+            ownerToken ?? "1",
+            { ex: ttlSec, nx: true },
+            signal,
+          )
+        : await redis.set(claimKey, ownerToken ?? "1", {
+            ex: ttlSec,
+            nx: true,
+          });
       return claimed === "OK" || claimed === true;
+    },
+    async getClaimOwner(key, signal) {
+      const redis = await client(signal);
+      const claimKey = namespaced(`${key}:paid-claim`);
+      const owner = injected
+        ? await redis.get(claimKey, signal)
+        : await redis.get(claimKey);
+      return typeof owner === "string" ? owner : null;
     },
   };
 }

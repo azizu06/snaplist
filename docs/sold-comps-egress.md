@@ -56,6 +56,36 @@ Official contract references: [Caffein sold-listings Actor](https://apify.com/ca
 [Actor call caps and restart controls](https://docs.apify.com/api/client/js/reference/interface/ActorCallOptions),
 and [eBay condition ID meanings](https://developer.ebay.com/api-docs/sell/static/metadata/condition-id-values.html).
 
+## Bounded public-page retrieval
+
+The normal public-page provider requests 10 candidates first and makes one
+20-candidate expansion only when fewer than three anchors survive the canonical
+matcher. Terminal and sparse outcomes are cached alongside successful combined
+results. Every normal construction path, including injected, instrumented, or
+wrapped fetchers, requires the existing atomic shared-cache claim to select one
+winner across worker runtimes. Losers read the winner's result through a bounded
+handoff. A missing, process-local, or unavailable shared fence declines to the
+next pricing tier without making the external request.
+
+The effective per-request timeout defaults to 8 seconds and is capped at 15
+seconds even when operator configuration requests more. A loser waits for at
+most that effective timeout multiplied by the maximum two requests, plus a
+bounded 500 ms store/read allowance. The initial shared read, atomic claim,
+loser polling reads, and winner store are each bounded by the remaining logical
+deadline; request timeouts also shrink to that remainder. A coordination timeout
+aborts the underlying shared-cache request and declines without starting
+unclaimed egress. Same-process waiters race shared work against their own
+deadline without cancelling the winner. A winner returns evidence only after the
+shared store makes that same result available to losers. Polling uses a bounded
+backoff; expiry is fail-soft and never starts a loser retrieval.
+
+The operator smoke below is intentionally different: its explicit
+`--confirm-one-request` authorization permits exactly the initial 10-candidate
+request and suppresses the optional expansion and fallback request. The smoke
+module alone imports the separately named operator-only provider factory; normal
+factory construction cannot select this bypass through fetcher injection or an
+options flag.
+
 ## Optional proxy-template configuration
 
 `EBAY_SOLD_PROXY_TEMPLATE` routes the already SSRF-validated eBay target through

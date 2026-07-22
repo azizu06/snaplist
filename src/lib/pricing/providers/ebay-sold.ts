@@ -43,8 +43,9 @@ import {
  *    web-search tier — it never hard-fails the pricing call.
  *  - Invalid proxy configuration is different: it fails validation before any
  *    request. Runtime fetch diagnostics expose only bounded, credential-safe reasons.
- *  - Cache-on-miss / TTL freshness is opt-in on the raw provider; the production
- *    composition root wires the shared cache and age-decay layer (#59).
+ *  - Cache-on-miss / TTL freshness is opt-in on the raw provider. Every normal
+ *    retrieval still requires a shared cache with an atomic claim; the production
+ *    composition root wires that cache and the age-decay layer (#59).
  *
  * Default egress is direct `fetch`; an optional validated proxy template supports
  * hosted environments. HTML is parsed with `cheerio`. A Playwright-style fallback
@@ -98,17 +99,16 @@ export interface EbaySoldPricingProviderOptions {
   maxResults?: number;
   /** Outbound User-Agent; defaults to `EBAY_SOLD_USER_AGENT` env or a desktop UA. */
   userAgent?: string;
-  /** Per-fetch timeout (ms); defaults to `EBAY_SOLD_TIMEOUT_MS` env or 8000. */
+  /** Per-fetch timeout (ms), clamped to 15s; defaults to env or 8000. */
   fetchTimeoutMs?: number;
   /** Diagnostic sink; tests/operator smoke may silence structured runtime logs. */
   emitDiagnostic?: (event: string, fields: LogFields) => void;
-  // -- Freshness (#59). All OPT-IN: the raw provider stays clock-free and
-  //    cache-free (so unit tests are deterministic); `createDefaultPricer` wires
-  //    the real clock + shared cache for production. --
+  // -- Freshness (#59). The clock remains opt-in. Normal retrieval requires the
+  //    shared cache/claim cost fence; `createDefaultPricer` wires both. --
   /**
    * TTL cache of sold-comp scrapes keyed by the resolved search URL (= product
-   * identity). A hit within the TTL is reused (no fetch); a miss live-fetches and
-   * stores. Omitted → always live-fetch (the live page is the source of truth).
+   * identity). A hit within the TTL is reused (no fetch); a claimed miss
+   * live-fetches and stores. Missing/process-local claim → normal provider declines.
    */
   cache?: TtlCache<EbaySoldComp[]>;
   /**
@@ -132,12 +132,202 @@ export const EBAY_SOLD_BASE_URL_DEFAULT = "https://www.ebay.com";
 export const EBAY_SOLD_USER_AGENT_DEFAULT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 SnapList/1.0 (+pricing research)";
-/** eBay shows up to this many results per page; one fetch is plenty of comps. */
-export const EBAY_SOLD_RESULTS_PER_PAGE = 120;
-/** Parse cap — a pathological page can't blow memory / downstream cost. */
-export const EBAY_SOLD_MAX_RESULTS = 60;
+/** First public sold-page candidate request for one logical pricing pass. */
+export const EBAY_SOLD_RESULTS_PER_PAGE = 10;
+/** One optional public sold-page expansion; no request may ask for more. */
+export const EBAY_SOLD_MAX_RESULTS = 20;
+/** Expand only while canonical matcher evidence remains below this count. */
+export const EBAY_SOLD_EXPANSION_THRESHOLD = 3;
 /** Fewer than this many sold comps = "nothing useful" → decline. */
 export const EBAY_SOLD_MIN_COMPS = 2;
+
+interface EbaySoldRuntimeState {
+  inFlight: Map<string, Promise<EbaySoldComp[] | null>>;
+}
+
+/** Maximum delay between shared-cache reads while another runtime owns the claim. */
+const EBAY_SOLD_HANDOFF_POLL_MAX_MS = 3_200;
+/** Bounded time for the winner to store and the loser to observe its result. */
+export const EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS = 500;
+/** Fast bounded polling while a shared mutation response remains ambiguous. */
+const EBAY_SOLD_AMBIGUOUS_MUTATION_POLL_MS = 25;
+const EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED = Symbol(
+  "ebay-sold-coordination-deadline-exceeded",
+);
+
+async function settleBeforeCoordinationDeadline<T>(
+  startOperation: (signal: AbortSignal) => Promise<T>,
+  deadline: number,
+  cancellationSignal?: AbortSignal,
+): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs < 0) return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      startOperation(controller.signal),
+      new Promise<typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED>((resolve) => {
+        timer = setTimeout(
+          () => {
+            // Win the race with the fail-soft sentinel before abort listeners
+            // reject the underlying cache request.
+            resolve(EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED);
+            controller.abort();
+          },
+          remainingMs,
+        );
+      }),
+      new Promise<typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED>((resolve) => {
+        cancel = () => {
+          resolve(EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED);
+          controller.abort();
+        };
+        if (cancellationSignal?.aborted) cancel();
+        else cancellationSignal?.addEventListener("abort", cancel, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (cancel) cancellationSignal?.removeEventListener("abort", cancel);
+  }
+}
+
+async function delayBeforeCoordinationDeadline(
+  delayMs: number,
+  deadline: number,
+  cancellationSignal: AbortSignal,
+): Promise<boolean> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0 || cancellationSignal.aborted) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
+  try {
+    return await new Promise<boolean>((resolve) => {
+      timer = setTimeout(
+        () => resolve(true),
+        Math.min(delayMs, remainingMs),
+      );
+      cancel = () => resolve(false);
+      cancellationSignal.addEventListener("abort", cancel, { once: true });
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (cancel) cancellationSignal.removeEventListener("abort", cancel);
+  }
+}
+
+async function observeCommittedMutation<T>(
+  observe: (signal: AbortSignal) => Promise<T | null>,
+  accepts: (value: T) => boolean,
+  deadline: number,
+  cancellationSignal: AbortSignal,
+): Promise<T | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED> {
+  // Let an immediate authoritative mutation response win without spending a
+  // reconciliation read. A stalled response crosses this event-loop boundary.
+  if (!(await delayBeforeCoordinationDeadline(0, deadline, cancellationSignal))) {
+    return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+  }
+  let delayMs = EBAY_SOLD_AMBIGUOUS_MUTATION_POLL_MS;
+  while (!cancellationSignal.aborted) {
+    try {
+      const observed = await settleBeforeCoordinationDeadline(
+        observe,
+        deadline,
+        cancellationSignal,
+      );
+      if (observed === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) return observed;
+      if (observed != null && accepts(observed)) return observed;
+    } catch {
+      // An observation failure does not override a mutation response that may
+      // still settle successfully within the same deadline. Stop issuing reads
+      // on an unavailable cache and let that response or the deadline decide.
+      await delayBeforeCoordinationDeadline(
+        Number.MAX_SAFE_INTEGER,
+        deadline,
+        cancellationSignal,
+      );
+      return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+    }
+    if (
+      !(await delayBeforeCoordinationDeadline(
+        delayMs,
+        deadline,
+        cancellationSignal,
+      ))
+    ) {
+      break;
+    }
+    delayMs = Math.min(delayMs * 2, EBAY_SOLD_HANDOFF_POLL_MAX_MS);
+  }
+  return EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+}
+
+type ReconciledMutation<MutationResult, Observed> =
+  | { kind: "mutation"; value: MutationResult }
+  | { kind: "observed"; value: Observed };
+
+async function settleMutationWithObservation<MutationResult, Observed>(
+  mutate: (signal: AbortSignal) => Promise<MutationResult>,
+  observe: (signal: AbortSignal) => Promise<Observed | null>,
+  accepts: (value: Observed) => boolean,
+  deadline: number,
+): Promise<
+  | ReconciledMutation<MutationResult, Observed>
+  | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+> {
+  const cancellation = new AbortController();
+  type Outcome =
+    | ReconciledMutation<MutationResult, Observed>
+    | typeof EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED;
+  try {
+    const mutationOutcome: Promise<Outcome> = settleBeforeCoordinationDeadline(
+      mutate,
+      deadline,
+      cancellation.signal,
+    ).then(
+      (value): Outcome =>
+        value === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          ? EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          : { kind: "mutation", value: value as MutationResult },
+    );
+    const observationOutcome: Promise<Outcome> = observeCommittedMutation(
+      observe,
+      accepts,
+      deadline,
+      cancellation.signal,
+    ).then(
+      (value): Outcome =>
+        value === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          ? EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+          : { kind: "observed", value: value as Observed },
+    );
+    const outcome = await Promise.race([mutationOutcome, observationOutcome]);
+    return outcome;
+  } finally {
+    cancellation.abort();
+  }
+}
+
+/** Request-scoped providers share one cache object at the composition root. */
+const EBAY_SOLD_RUNTIME_STATE_BY_CACHE = new WeakMap<
+  TtlCache<EbaySoldComp[]>,
+  EbaySoldRuntimeState
+>();
+
+function runtimeStateFor(
+  cache: TtlCache<EbaySoldComp[]> | undefined,
+): EbaySoldRuntimeState {
+  if (!cache) return { inFlight: new Map() };
+  let state = EBAY_SOLD_RUNTIME_STATE_BY_CACHE.get(cache);
+  if (!state) {
+    state = { inFlight: new Map() };
+    EBAY_SOLD_RUNTIME_STATE_BY_CACHE.set(cache, state);
+  }
+  return state;
+}
 
 /**
  * Per-fetch timeout. A stalled eBay response (connection accepted, body never
@@ -146,6 +336,8 @@ export const EBAY_SOLD_MIN_COMPS = 2;
  * runs (#56 review). Overridable via `EBAY_SOLD_TIMEOUT_MS`.
  */
 export const EBAY_SOLD_FETCH_TIMEOUT_MS = 8000;
+/** Operator config cannot extend a public sold-page request without bound. */
+export const EBAY_SOLD_FETCH_TIMEOUT_MAX_MS = 15_000;
 
 /** The only host family this provider will ever fetch. */
 export const EBAY_ALLOWED_HOST = "ebay.com";
@@ -158,9 +350,14 @@ function resolveUserAgent(env: NodeJS.ProcessEnv = process.env): string {
   return env.EBAY_SOLD_USER_AGENT?.trim() || EBAY_SOLD_USER_AGENT_DEFAULT;
 }
 
+function boundedTimeoutMs(value: number): number {
+  return Number.isFinite(value) && value > 0
+    ? Math.min(value, EBAY_SOLD_FETCH_TIMEOUT_MAX_MS)
+    : EBAY_SOLD_FETCH_TIMEOUT_MS;
+}
+
 function resolveTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const v = Number(env.EBAY_SOLD_TIMEOUT_MS);
-  return Number.isFinite(v) && v > 0 ? v : EBAY_SOLD_FETCH_TIMEOUT_MS;
+  return boundedTimeoutMs(Number(env.EBAY_SOLD_TIMEOUT_MS));
 }
 
 /** Freshness TTL/cutoff/half-life — env-tunable (#59); each falls back to its default. */
@@ -342,6 +539,7 @@ export function buildSoldSearchQuery(signal: ItemSignal): string | null {
 export function buildSoldSearchUrl(
   signal: ItemSignal,
   baseUrl: string = resolveBaseUrl(),
+  resultsPerPage: number = EBAY_SOLD_RESULTS_PER_PAGE,
 ): string | null {
   const q = buildSoldSearchQuery(signal);
   if (!q) return null;
@@ -355,7 +553,7 @@ export function buildSoldSearchUrl(
     url.searchParams.set("_nkw", q);
     url.searchParams.set("LH_Sold", "1");
     url.searchParams.set("LH_Complete", "1");
-    url.searchParams.set("_ipg", String(EBAY_SOLD_RESULTS_PER_PAGE));
+    url.searchParams.set("_ipg", String(resultsPerPage));
     return url.toString();
   } catch {
     return null;
@@ -964,7 +1162,7 @@ export function createDefaultFetchPage(
   } = {},
 ): FetchPage {
   const userAgent = opts.userAgent ?? resolveUserAgent();
-  const timeoutMs = opts.timeoutMs ?? resolveTimeoutMs();
+  const timeoutMs = boundedTimeoutMs(opts.timeoutMs ?? resolveTimeoutMs());
   const doFetch = opts.fetchImpl ?? fetch;
   const egress = resolveEbaySoldEgressConfig(
     opts.proxyTemplate === undefined
@@ -1014,12 +1212,20 @@ export function createDefaultFetchPage(
  * router falls through to the web-search / estimate tiers. Invalid operator
  * proxy configuration instead throws during provider creation, before egress.
  */
-export function createEbaySoldPricingProvider(
+type EbaySoldRetrievalAuthority = "normal" | "operator-smoke-one-request";
+
+function createEbaySoldPricingProviderInternal(
   options: EbaySoldPricingProviderOptions = {},
+  authority: EbaySoldRetrievalAuthority,
 ): PricingProvider {
   const enabled = options.enabled ?? ebaySoldConfigured();
   const baseUrl = options.baseUrl ?? resolveBaseUrl();
   const maxResults = options.maxResults ?? EBAY_SOLD_MAX_RESULTS;
+  const operatorSmokeOneRequest = authority === "operator-smoke-one-request";
+  const allowExpansion = !operatorSmokeOneRequest;
+  const effectiveFetchTimeoutMs = boundedTimeoutMs(
+    options.fetchTimeoutMs ?? resolveTimeoutMs(),
+  );
   const configuredEgress = options.fetchPage
     ? { mode: "injected" as const }
     : resolveEbaySoldEgressConfig();
@@ -1027,22 +1233,130 @@ export function createEbaySoldPricingProvider(
     options.fetchPage ??
     createDefaultFetchPage({
       userAgent: options.userAgent,
-      timeoutMs: options.fetchTimeoutMs,
+      timeoutMs: effectiveFetchTimeoutMs,
       proxyTemplate:
         configuredEgress.mode === "proxy" ? configuredEgress.template : "",
     });
-  const fetchFallback = options.fetchPageFallback;
-  // Freshness (#59) — opt-in. `now` activates age-decay; `cache` activates the
-  // TTL request cache. Both default OFF in the raw provider (deterministic unit
-  // tests); `createDefaultPricer` wires the real clock + shared cache.
+  const fetchFallback = operatorSmokeOneRequest
+    ? undefined
+    : options.fetchPageFallback;
+  // Freshness (#59): `now` activates age-decay. The raw provider accepts an
+  // injected shared cache for deterministic tests; `createDefaultPricer` wires
+  // the real clock + cache in normal composition.
   const cache = options.cache;
+  const inFlight = runtimeStateFor(cache).inFlight;
+  const claimSharedRetrieval =
+    cache?.scope === "shared" && typeof cache.claim === "function"
+      ? cache.claim.bind(cache)
+      : null;
+  const getSharedClaimOwner =
+    cache?.scope === "shared" && typeof cache.getClaimOwner === "function"
+      ? cache.getClaimOwner.bind(cache)
+      : null;
+  const requiresSharedFence = !operatorSmokeOneRequest;
+  const maximumRequestCount = allowExpansion ? 2 : 1;
+  const handoffWaitMs =
+    effectiveFetchTimeoutMs * maximumRequestCount +
+    EBAY_SOLD_HANDOFF_STORE_READ_ALLOWANCE_MS;
   const now = options.now;
   const staleDays = options.staleDays ?? resolveStaleDays();
   const halfLifeDays = options.halfLifeDays ?? resolveHalfLifeDays();
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
+  const normalizeBoundedCandidates = (
+    comps: readonly EbaySoldComp[],
+  ): EbaySoldComp[] =>
+    normalizeEbaySoldCompUrls(comps).slice(0, EBAY_SOLD_MAX_RESULTS);
 
   const identifiable = (signal: ItemSignal): boolean =>
     buildSoldSearchUrl(signal, baseUrl) !== null;
+
+  async function fetchWithinEffectiveTimeout(
+    fetchPage: FetchPage,
+    url: string,
+    coordinationDeadline: number,
+  ): Promise<string> {
+    const remainingMs = coordinationDeadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new DOMException("aborted", "AbortError");
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        fetchPage(url),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new DOMException("aborted", "AbortError")),
+            Math.min(effectiveFetchTimeoutMs, remainingMs),
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function cacheKey(url: string, signal: ItemSignal): string {
+    return JSON.stringify({
+      url,
+      retrievalPolicy: "initial-10-expand-20-v1",
+      matcherSignal: {
+        isbn: signal.isbn?.trim() ?? "",
+        upc: signal.upc?.trim() ?? "",
+        brand: signal.brand?.trim() ?? "",
+        model: signal.model?.trim() ?? "",
+        category: signal.category?.trim() ?? "",
+        conditionKnown: signal.conditionKnown === true,
+        condition: signal.condition?.trim() ?? "",
+        resolvedName: signal.resolvedName?.trim() ?? "",
+        specs: signal.specs?.map((spec) => spec.trim()) ?? [],
+      },
+    });
+  }
+
+  async function waitForClaimWinner(
+    key: string,
+    deadline: number,
+  ): Promise<EbaySoldComp[] | null> {
+    if (!cache) return null;
+    let delayMs = 0;
+    while (true) {
+      if (delayMs > 0) {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) break;
+        // Do not let exponential backoff consume the entire handoff window.
+        // Waking halfway through the remaining budget leaves a bounded cache
+        // observation that can see evidence stored during the final interval.
+        await new Promise<void>((resolve) =>
+          setTimeout(
+            resolve,
+            Math.min(delayMs, Math.max(1, Math.floor(remainingMs / 2))),
+          ),
+        );
+      }
+      try {
+        const handedOff = await settleBeforeCoordinationDeadline(
+          (signal) => cache.get(key, signal),
+          deadline,
+        );
+        if (handedOff === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) break;
+        if (handedOff != null) return handedOff;
+      } catch {
+        emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+          reason: "handoff-read-failed",
+        });
+        return null;
+      }
+      if (Date.now() >= deadline) break;
+      delayMs =
+        delayMs === 0
+          ? 50
+          : Math.min(delayMs * 2, EBAY_SOLD_HANDOFF_POLL_MAX_MS);
+    }
+    emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+      reason: "handoff-timeout",
+    });
+    return null;
+  }
 
   /**
    * Fetch + parse with graceful degradation. The `catch` wraps ONLY the network
@@ -1050,7 +1364,13 @@ export function createEbaySoldPricingProvider(
    * bug still surfaces. The Playwright-style fallback is tried when the primary
    * is blocked or returns too few comps.
    */
-  async function fetchComps(url: string): Promise<EbaySoldComp[]> {
+  async function fetchComps(
+    url: string,
+    fetchPage: FetchPage,
+    parseLimit: number,
+    blockedEvent: "pricing.ebay_sold.fetch_blocked" | "pricing.ebay_sold.fallback_blocked",
+    coordinationDeadline: number,
+  ): Promise<{ comps: EbaySoldComp[]; failed: boolean }> {
     // SSRF guard at the PROVIDER boundary so BOTH the default primary fetcher AND
     // an injected Playwright-style fallback are protected — a non-eBay/internal
     // EBAY_SOLD_BASE_URL must never reach EITHER seam (#56 review). Declines on a
@@ -1058,37 +1378,91 @@ export function createEbaySoldPricingProvider(
     try {
       assertSafeEbayUrl(url);
     } catch {
-      return [];
+      return { comps: [], failed: true };
     }
-    let comps: EbaySoldComp[] = [];
     try {
-      comps = parseSoldComps(await fetchPrimary(url), baseUrl, maxResults);
+      return {
+        comps: parseSoldComps(
+          await fetchWithinEffectiveTimeout(
+            fetchPage,
+            url,
+            coordinationDeadline,
+          ),
+          baseUrl,
+          parseLimit,
+        ),
+        failed: false,
+      };
     } catch (err) {
       // A block/rate-limit/timeout — declines, but is NO LONGER SILENT: without
       // this the tier vanished into a generic "declined" and the real reason (eBay
       // 403s direct server fetches) was invisible until someone dug into the logs.
-      emitDiagnostic("pricing.ebay_sold.fetch_blocked", {
+      emitDiagnostic(blockedEvent, {
         reason: soldFetchFailureReason(err),
-        viaProxy: configuredEgress.mode === "proxy",
-        hasFallback: fetchFallback != null,
+        ...(blockedEvent === "pricing.ebay_sold.fetch_blocked"
+          ? {
+              viaProxy: configuredEgress.mode === "proxy",
+              hasFallback: fetchFallback != null,
+            }
+          : {}),
       });
-      comps = [];
+      return { comps: [], failed: true };
     }
-    if (comps.length < EBAY_SOLD_MIN_COMPS && fetchFallback) {
-      try {
-        comps = parseSoldComps(await fetchFallback(url), baseUrl, maxResults);
-      } catch (err) {
-        emitDiagnostic("pricing.ebay_sold.fallback_blocked", {
-          reason: soldFetchFailureReason(err),
-        });
+  }
+
+  async function retrieveBoundedComps(
+    signal: ItemSignal,
+    initialUrl: string,
+    coordinationDeadline: number,
+  ): Promise<EbaySoldComp[]> {
+    const initial = await fetchComps(
+      initialUrl,
+      fetchPrimary,
+      Math.min(maxResults, EBAY_SOLD_RESULTS_PER_PAGE),
+      "pricing.ebay_sold.fetch_blocked",
+      coordinationDeadline,
+    );
+    let combined = normalizeBoundedCandidates(initial.comps);
+
+    if (initial.failed) {
+      if (fetchFallback) {
+        const fallback = await fetchComps(
+          initialUrl,
+          fetchFallback,
+          Math.min(maxResults, EBAY_SOLD_RESULTS_PER_PAGE),
+          "pricing.ebay_sold.fallback_blocked",
+          coordinationDeadline,
+        );
+        if (!fallback.failed) combined = normalizeBoundedCandidates(fallback.comps);
+      }
+    } else {
+      const evidence = selectSoldCompEvidence(combined, signal);
+      if (
+        allowExpansion &&
+        evidence.anchors.length < EBAY_SOLD_EXPANSION_THRESHOLD
+      ) {
+        const expandedUrl = buildSoldSearchUrl(signal, baseUrl, EBAY_SOLD_MAX_RESULTS);
+        if (expandedUrl) {
+          const expanded = await fetchComps(
+            expandedUrl,
+            fetchFallback ?? fetchPrimary,
+            Math.min(maxResults, EBAY_SOLD_MAX_RESULTS),
+            fetchFallback
+              ? "pricing.ebay_sold.fallback_blocked"
+              : "pricing.ebay_sold.fetch_blocked",
+            coordinationDeadline,
+          );
+          if (!expanded.failed) {
+            combined = normalizeBoundedCandidates([...expanded.comps, ...combined]);
+          }
+        }
       }
     }
-    if (comps.length < EBAY_SOLD_MIN_COMPS) {
-      // Distinguish "blocked/thin" (declining to web search) from "found comps" so
-      // the pricing spine is auditable: which tier actually fired, and why not this one.
-      emitDiagnostic("pricing.ebay_sold.declined_thin", { compsFound: comps.length });
+
+    if (combined.length < EBAY_SOLD_MIN_COMPS) {
+      emitDiagnostic("pricing.ebay_sold.declined_thin", { compsFound: combined.length });
     }
-    return comps;
+    return combined;
   }
 
   return {
@@ -1098,25 +1472,37 @@ export function createEbaySoldPricingProvider(
       if (!enabled) return null; // kill-switch → degrade to web tier
       const url = buildSoldSearchUrl(signal, baseUrl);
       if (!url) return null;
+      const key = cacheKey(url, signal);
+      const coordinationDeadline = Date.now() + handoffWaitMs;
 
       // Freshness cache (#59): a hit within TTL is reused (no fetch); a miss
-      // live-fetches and stores. The live page stays the source of truth. Only a
-      // scrape that yielded ≥ MIN raw comps is cached — a 0/1-comp result is almost
-      // always a block or placeholder page, and caching it would suppress the retry
-      // that the graceful-degradation design depends on. Relevance/freshness are
+      // live-fetches and stores. The live page stays the source of truth. Completed
+      // terminal and sparse outcomes are cached too: retry/redelivery of the same
+      // logical pricing pass must not start a third public retrieval. Relevance/freshness are
       // applied per-request AFTER the cache, so the cache holds the raw scrape keyed
-      // by the resolved search URL (= product identity); age-decay below re-runs on
+      // by product identity plus the matcher-sensitive signal that controls expansion;
+      // age-decay below re-runs on
       // every read, so a comp that goes stale while cached is still dropped.
-      // The cache is an OPTIMIZATION, never the source of truth: a cache (Upstash)
-      // outage must DEGRADE — treat a read failure as a miss (live-fetch) and a
-      // write failure as a no-op — not propagate, which the router would treat as a
-      // hard error and crash the whole listing run. This preserves the provider's
-      // "never hard-fails the pricing call; declines to the web tier" contract,
-      // mirroring the fail-open rate limiter (#58) and the fetchComps catch (#59 review).
+      // The cache is an OPTIMIZATION, never pricing authority. Every normal
+      // provider path, including injected/instrumented fetchers, requires its
+      // existing atomic shared claim so separate runtimes cannot multiply the
+      // bounded pass; an unavailable fence declines before egress. The separately
+      // named operator smoke factory is the only one-request bypass. Neither path
+      // propagates cache failure into the listing pipeline.
       let comps: EbaySoldComp[] | null = null;
       if (cache) {
         try {
-          comps = await cache.get(url);
+          const cached = await settleBeforeCoordinationDeadline(
+            (signal) => cache.get(key, signal),
+            coordinationDeadline,
+          );
+          if (cached === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED) {
+            emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+              reason: "initial-read-timeout",
+            });
+            return null;
+          }
+          comps = cached;
         } catch (err) {
           emitDiagnostic("pricing.cache.error", {
             op: "get",
@@ -1125,23 +1511,114 @@ export function createEbaySoldPricingProvider(
         }
       }
       if (comps == null) {
-        comps = await fetchComps(url);
-        if (cache && comps.length >= EBAY_SOLD_MIN_COMPS) {
-          try {
-            await cache.set(url, comps);
-          } catch (err) {
-            emitDiagnostic("pricing.cache.error", {
-              op: "set",
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
+        const existing = inFlight.get(key);
+        if (existing) {
+          const localResult = await settleBeforeCoordinationDeadline(
+            () => existing,
+            coordinationDeadline,
+          );
+          comps =
+            localResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+              ? null
+              : localResult;
+        } else {
+          const pending = (async () => {
+            if (
+              requiresSharedFence &&
+              (!claimSharedRetrieval || !getSharedClaimOwner)
+            ) {
+              emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                reason: "shared-cache-required",
+              });
+              return null;
+            }
+            if (requiresSharedFence && cache?.scope === "shared") {
+              let claimed: boolean;
+              const claimOwnerToken = globalThis.crypto.randomUUID();
+              try {
+                const claimResult = await settleMutationWithObservation(
+                  (signal) =>
+                    claimSharedRetrieval!(key, signal, claimOwnerToken),
+                  (signal) => getSharedClaimOwner!(key, signal),
+                  (owner) => owner === claimOwnerToken,
+                  coordinationDeadline,
+                );
+                if (
+                  claimResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+                ) {
+                  emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                    reason: "shared-claim-timeout",
+                  });
+                  return null;
+                } else if (
+                  typeof claimResult === "object" &&
+                  claimResult.kind === "observed"
+                ) {
+                  claimed = true;
+                } else if (
+                  typeof claimResult === "object" &&
+                  claimResult.kind === "mutation"
+                ) {
+                  claimed = claimResult.value;
+                } else {
+                  claimed = claimResult;
+                }
+              } catch {
+                emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                  reason: "shared-claim-failed",
+                });
+                return null;
+              }
+              if (!claimed) {
+                return waitForClaimWinner(key, coordinationDeadline);
+              }
+            }
+            const retrieved = await retrieveBoundedComps(
+              signal,
+              url,
+              coordinationDeadline,
+            );
+            if (cache) {
+              try {
+                const storeResult = await settleMutationWithObservation(
+                  (signal) => cache.set(key, retrieved, signal),
+                  (signal) => cache.get(key, signal),
+                  () => true,
+                  coordinationDeadline,
+                );
+                if (
+                  storeResult === EBAY_SOLD_COORDINATION_DEADLINE_EXCEEDED
+                ) {
+                  emitDiagnostic("pricing.ebay_sold.cost_fence_unavailable", {
+                    reason: "winner-store-timeout",
+                  });
+                  return null;
+                }
+                if (storeResult.kind === "observed") {
+                  return storeResult.value;
+                }
+              } catch (err) {
+                emitDiagnostic("pricing.cache.error", {
+                  op: "set",
+                  error: err instanceof Error ? err.message : String(err),
+                });
+                return null;
+              }
+            }
+            return retrieved;
+          })().finally(() => {
+            inFlight.delete(key);
+          });
+          inFlight.set(key, pending);
+          comps = await pending;
         }
       }
+      if (comps == null) return null;
 
       // Relevance gate (#56 review): drop accessories/parts/wrong-model/broken
       // listings eBay returns for the query, so two clustered accessory sales
       // can't price the main item near an accessory price.
-      const normalizedComps = normalizeEbaySoldCompUrls(comps);
+      const normalizedComps = normalizeBoundedCandidates(comps);
       const evidence = selectSoldCompEvidence(normalizedComps, signal);
       const relevant = evidence.anchors.map((entry) => entry.comp);
       // Age-decay (#59), opt-in via `now`: drop comps with a known stale sale date,
@@ -1166,4 +1643,24 @@ export function createEbaySoldPricingProvider(
       );
     },
   };
+}
+
+export function createEbaySoldPricingProvider(
+  options: EbaySoldPricingProviderOptions = {},
+): PricingProvider {
+  return createEbaySoldPricingProviderInternal(options, "normal");
+}
+
+/**
+ * Narrow operator-authorized smoke mode. This is deliberately a separate,
+ * explicit factory so normal provider construction cannot accidentally bypass
+ * the shared cost fence. It always suppresses the optional expansion.
+ */
+export function createOneRequestEbaySoldPricingProviderForOperatorSmoke(
+  options: EbaySoldPricingProviderOptions = {},
+): PricingProvider {
+  return createEbaySoldPricingProviderInternal(
+    options,
+    "operator-smoke-one-request",
+  );
 }
