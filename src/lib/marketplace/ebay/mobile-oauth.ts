@@ -74,7 +74,10 @@ export interface MobileEbayOauthSessionStore {
     accessTokenExpiresAt: string;
     scopes: string[];
     completedAt: string;
-  }): Promise<{ kind: "connected" | "replayed" | "wrong_tenant" }>;
+  }): Promise<
+    | { kind: "connected" | "wrong_tenant" }
+    | { kind: "replayed"; outcome: MobileEbayOauthOutcome }
+  >;
   failSession(input: {
     sessionId: string;
     userId: string;
@@ -166,8 +169,27 @@ function signStatePayload(payload: string, env: Env): string {
 }
 
 function encodeState(session: StoredMobileEbayOauthSession, env: Env): string {
-  const payload = `v1.${session.sessionId}.${tenantBinding(session.userId)}`;
+  const sessionId = z.string().uuid().parse(session.sessionId);
+  const encodedSessionId = Buffer.from(sessionId, "utf8").toString("base64url");
+  const payload = `v1.${encodedSessionId}.${tenantBinding(session.userId)}`;
   return `${payload}.${signStatePayload(payload, env)}`;
+}
+
+const canonicalBase64UrlPattern = /^[A-Za-z0-9_-]+$/;
+
+function decodeCanonicalBase64Url(
+  value: string,
+  expectedByteLength: number,
+): Buffer | null {
+  if (!canonicalBase64UrlPattern.test(value)) return null;
+  const decoded = Buffer.from(value, "base64url");
+  if (
+    decoded.length !== expectedByteLength
+    || decoded.toString("base64url") !== value
+  ) {
+    return null;
+  }
+  return decoded;
 }
 
 function decodeState(state: string): {
@@ -186,8 +208,19 @@ function decodeState(state: string): {
   ) {
     return null;
   }
-  const parsedSessionId = z.string().uuid().safeParse(sessionId);
-  if (!parsedSessionId.success) return null;
+  const sessionIdBytes = decodeCanonicalBase64Url(sessionId, 36);
+  const tenantBytes = decodeCanonicalBase64Url(boundTenant, 16);
+  const signatureBytes = decodeCanonicalBase64Url(signature, 32);
+  if (!sessionIdBytes || !tenantBytes || !signatureBytes) return null;
+  const parsedSessionId = z.string().uuid().safeParse(
+    sessionIdBytes.toString("utf8"),
+  );
+  if (
+    !parsedSessionId.success
+    || parsedSessionId.data !== parsedSessionId.data.toLowerCase()
+  ) {
+    return null;
+  }
   return {
     sessionId: parsedSessionId.data,
     tenantBinding: boundTenant,
@@ -196,10 +229,18 @@ function decodeState(state: string): {
   };
 }
 
-function equalBase64Url(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left, "base64url");
-  const rightBytes = Buffer.from(right, "base64url");
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+function equalCanonicalBase64Url(
+  left: string,
+  right: string,
+  expectedByteLength: number,
+): boolean {
+  const leftBytes = decodeCanonicalBase64Url(left, expectedByteLength);
+  const rightBytes = decodeCanonicalBase64Url(right, expectedByteLength);
+  return Boolean(
+    leftBytes
+    && rightBytes
+    && timingSafeEqual(leftBytes, rightBytes),
+  );
 }
 
 export function createMobileEbayOauthOperations(input: {
@@ -250,14 +291,22 @@ export function createMobileEbayOauthOperations(input: {
       if (!decoded) {
         return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
       }
-      if (!equalBase64Url(decoded.signature, signStatePayload(decoded.payload, env))) {
+      if (!equalCanonicalBase64Url(
+        decoded.signature,
+        signStatePayload(decoded.payload, env),
+        32,
+      )) {
         return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
       }
       const session = await input.store.getSession(decoded.sessionId);
       if (!session) {
         return { redirectUrl: mobileReturnUrl(env, "invalid_state") };
       }
-      if (!equalBase64Url(decoded.tenantBinding, tenantBinding(session.userId))) {
+      if (!equalCanonicalBase64Url(
+        decoded.tenantBinding,
+        tenantBinding(session.userId),
+        16,
+      )) {
         return { redirectUrl: mobileReturnUrl(env, "wrong_tenant") };
       }
       const finishedAt = new Date(now()).toISOString();
@@ -314,7 +363,11 @@ export function createMobileEbayOauthOperations(input: {
           return {
             redirectUrl: mobileReturnUrl(
               env,
-              complete.kind === "wrong_tenant" ? "wrong_tenant" : "connected",
+              complete.kind === "wrong_tenant"
+                ? "wrong_tenant"
+                : complete.kind === "replayed"
+                  ? complete.outcome
+                  : "connected",
             ),
           };
         } catch {

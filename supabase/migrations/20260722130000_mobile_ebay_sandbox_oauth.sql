@@ -161,14 +161,20 @@ begin
   if v_session.status in ('connected', 'declined', 'cancelled', 'expired', 'failed') then
     return jsonb_build_object('kind', 'replayed', 'outcome', v_session.status);
   end if;
+  if v_session.expires_at <= statement_timestamp() then
+    update public.ebay_oauth_sessions session
+    set status = 'expired',
+        completion_lease_token = null,
+        completion_started_at = null,
+        finished_at = statement_timestamp()
+    where session.id = p_session_id;
+    return jsonb_build_object('kind', 'finished', 'outcome', 'expired');
+  end if;
   if v_session.status = 'completing' then
     return jsonb_build_object('kind', 'in_progress');
   end if;
 
-  v_outcome := case
-    when v_session.expires_at <= statement_timestamp() then 'expired'
-    else p_outcome
-  end;
+  v_outcome := p_outcome;
   update public.ebay_oauth_sessions session
   set status = v_outcome,
       completion_lease_token = null,
@@ -220,6 +226,8 @@ begin
   if v_session.expires_at <= statement_timestamp() then
     update public.ebay_oauth_sessions session
     set status = 'expired',
+        completion_lease_token = null,
+        completion_started_at = null,
         finished_at = statement_timestamp()
     where session.id = p_session_id;
     return jsonb_build_object('kind', 'expired');
@@ -276,13 +284,22 @@ begin
   where session.id = p_session_id
   for update;
   if not found then
-    return jsonb_build_object('kind', 'replayed');
+    return jsonb_build_object('kind', 'replayed', 'outcome', 'failed');
   end if;
   if v_session.user_id is distinct from p_expected_user_id then
     return jsonb_build_object('kind', 'wrong_tenant');
   end if;
-  if v_session.status = 'connected' then
-    return jsonb_build_object('kind', 'replayed');
+  if v_session.status in ('connected', 'declined', 'cancelled', 'expired', 'failed') then
+    return jsonb_build_object('kind', 'replayed', 'outcome', v_session.status);
+  end if;
+  if v_session.expires_at <= statement_timestamp() then
+    update public.ebay_oauth_sessions session
+    set status = 'expired',
+        completion_lease_token = null,
+        completion_started_at = null,
+        finished_at = statement_timestamp()
+    where session.id = p_session_id;
+    return jsonb_build_object('kind', 'replayed', 'outcome', 'expired');
   end if;
   if v_session.status <> 'completing'
     or v_session.completion_lease_token is distinct from p_lease_token then

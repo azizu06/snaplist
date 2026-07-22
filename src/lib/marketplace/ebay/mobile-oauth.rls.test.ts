@@ -352,6 +352,161 @@ describe("mobile eBay Sandbox OAuth (DB-gated)", () => {
     );
   });
 
+  it("expires completing callbacks before in-progress truth or stale reclaim", async () => {
+    if (!reachable) return;
+    const [codeSession, cancellationSession] = await Promise.all([
+      startSession(tenantAToken, randomUUID()),
+      startSession(tenantBToken, randomUUID()),
+    ]);
+    const codeBody = await codeSession.json();
+    const cancellationBody = await cancellationSession.json();
+    const codeState = new URL(codeBody.data.authorizationUrl).searchParams.get(
+      "state",
+    )!;
+    const cancellationState = new URL(
+      cancellationBody.data.authorizationUrl,
+    ).searchParams.get("state")!;
+    const database = new Client({
+      connectionString: DATABASE_URL,
+      connectionTimeoutMillis: 2_000,
+    });
+    try {
+      await database.connect();
+      const seeded = await database.query(
+        `update public.ebay_oauth_sessions
+         set status = 'completing',
+             completion_lease_token = gen_random_uuid(),
+             completion_started_at = statement_timestamp() - interval '3 minutes',
+             expires_at = statement_timestamp() - interval '1 second'
+         where id = any($1::uuid[]) and status = 'pending'`,
+        [[codeBody.data.sessionId, cancellationBody.data.sessionId]],
+      );
+      expect(seeded.rowCount).toBe(2);
+    } finally {
+      await database.end().catch(() => undefined);
+    }
+    const providerCallsBefore = exchangeCode.mock.calls.length;
+
+    const [expiredCode, expiredCancellation] = await Promise.all([
+      api(
+        new Request(
+          `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(codeState)}&code=expired-provider-code`,
+        ),
+      ),
+      api(
+        new Request(
+          `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(cancellationState)}`,
+        ),
+      ),
+    ]);
+
+    for (const response of [expiredCode, expiredCancellation]) {
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        "https://snaplist.example/mobile/ebay/oauth?result=expired",
+      );
+    }
+    expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore);
+    const { data: rows, error } = await admin
+      .from("ebay_oauth_sessions")
+      .select(
+        "id, status, completion_lease_token, completion_started_at, finished_at",
+      )
+      .in("id", [codeBody.data.sessionId, cancellationBody.data.sessionId])
+      .order("id");
+    expect(error).toBeNull();
+    expect(rows).toHaveLength(2);
+    for (const row of rows ?? []) {
+      expect(row).toMatchObject({
+        status: "expired",
+        completion_lease_token: null,
+        completion_started_at: null,
+      });
+      expect(row.finished_at).not.toBeNull();
+    }
+  });
+
+  it("keeps a late provider completion from saving a connection after DB expiry", async () => {
+    if (!reachable) return;
+    const session = await startSession(tenantBToken, randomUUID());
+    const sessionBody = await session.json();
+    const state = new URL(
+      sessionBody.data.authorizationUrl,
+    ).searchParams.get("state")!;
+    const providerCallsBefore = exchangeCode.mock.calls.length;
+    const heldGrant = {
+      accessToken: "late-mobile-ebay-access-token-401",
+      refreshToken: "late-mobile-ebay-refresh-token-401",
+      accessTokenExpiresAt: Date.now() + 2 * 60 * 60_000,
+      scopes: ["https://api.ebay.com/oauth/api_scope/sell.inventory"],
+    };
+    let releaseExchange!: (value: typeof heldGrant) => void;
+    const activeExchange = new Promise<typeof heldGrant>((resolve) => {
+      releaseExchange = resolve;
+    });
+    exchangeCode.mockImplementationOnce(() => activeExchange);
+    const callback = () => api(
+      new Request(
+        `http://localhost/v1/ebay/oauth/callback?state=${encodeURIComponent(state)}&code=late-sandbox-provider-code`,
+      ),
+    );
+
+    const winner = callback();
+    await vi.waitFor(() => {
+      expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
+    });
+    const database = new Client({
+      connectionString: DATABASE_URL,
+      connectionTimeoutMillis: 2_000,
+    });
+    try {
+      await database.connect();
+      const expired = await database.query(
+        `update public.ebay_oauth_sessions
+         set expires_at = statement_timestamp() - interval '1 second'
+         where id = $1 and user_id = $2 and status = 'completing'`,
+        [sessionBody.data.sessionId, tenantBId],
+      );
+      expect(expired.rowCount).toBe(1);
+    } finally {
+      await database.end().catch(() => undefined);
+    }
+    releaseExchange(heldGrant);
+    const lateWinner = await winner;
+    const replay = await callback();
+
+    for (const response of [lateWinner, replay]) {
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        "https://snaplist.example/mobile/ebay/oauth?result=expired",
+      );
+    }
+    expect(exchangeCode).toHaveBeenCalledTimes(providerCallsBefore + 1);
+    const [{ data: connections, error: connectionError }, { data: rows, error }] =
+      await Promise.all([
+        admin.from("ebay_connections").select("user_id").eq("user_id", tenantBId),
+        admin
+          .from("ebay_oauth_sessions")
+          .select(
+            "status, completion_lease_token, completion_started_at, finished_at",
+          )
+          .eq("id", sessionBody.data.sessionId),
+      ]);
+    expect(connectionError).toBeNull();
+    expect(connections).toEqual([]);
+    expect(error).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows?.[0]).toMatchObject({
+      status: "expired",
+      completion_lease_token: null,
+      completion_started_at: null,
+    });
+    expect(rows?.[0].finished_at).not.toBeNull();
+    expect(JSON.stringify([lateWinner.headers, replay.headers])).not.toMatch(
+      /late-mobile-ebay-(?:access|refresh)-token-401|late-sandbox-provider-code/,
+    );
+  });
+
   it("reclaims one abandoned callback lease after the bounded DB interval", async () => {
     if (!reachable) return;
     const session = await startSession(tenantBToken, randomUUID());
