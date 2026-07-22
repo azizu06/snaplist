@@ -594,15 +594,20 @@ describe("createApifySoldPricingProvider", () => {
     }
   });
 
-  it("fails soft by the pricing deadline when the shared-cache claim never settles", async () => {
+  it("fails soft by the pricing deadline when the shared claim neither commits nor settles", async () => {
     vi.useFakeTimers();
     try {
       const runActor = successfulRun([]);
+      const claim = vi.fn(
+        () => new Promise<boolean>(() => undefined),
+      );
+      const getClaimOwner = vi.fn(async () => null);
       const cache: TtlCache<ApifySoldComp[]> = {
         scope: "shared",
         get: async () => null,
         set: async () => undefined,
-        claim: vi.fn(() => new Promise<boolean>(() => undefined)),
+        claim,
+        getClaimOwner,
       };
       const provider = createApifySoldPricingProvider({
         enabled: true,
@@ -623,7 +628,89 @@ describe("createApifySoldPricingProvider", () => {
 
       expect(settled).toBe(true);
       await expect(result).resolves.toBeNull();
+      expect(claim).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(AbortSignal),
+        expect.any(String),
+      );
+      expect(getClaimOwner).toHaveBeenCalled();
       expect(runActor).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconciles an exact committed claim owner before bounded retrieval", async () => {
+    vi.useFakeTimers();
+    try {
+      let claimOwner: string | null = null;
+      let stored: ApifySoldComp[] | null = null;
+      const suppliedOwnerTokens: Array<string | undefined> = [];
+      const getClaimOwner = vi.fn(async () => claimOwner);
+      const cacheForRuntime = (): TtlCache<ApifySoldComp[]> => ({
+        scope: "shared",
+        get: async () => stored,
+        set: async (_key, value) => {
+          stored = value;
+        },
+        claim: (_key, _signal, ownerToken) => {
+          suppliedOwnerTokens.push(ownerToken);
+          if (claimOwner != null) return Promise.resolve(false);
+          claimOwner = ownerToken ?? "legacy-owner";
+          return new Promise<boolean>(() => undefined);
+        },
+        getClaimOwner,
+      });
+      const runActor = vi.fn<RunApifySoldActor>(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        return {
+          status: "SUCCEEDED",
+          items: [
+            rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+            rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+            rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+          ],
+        };
+      });
+      const providerForRuntime = () =>
+        createApifySoldPricingProvider({
+          enabled: true,
+          token: "secret",
+          cache: cacheForRuntime(),
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          emitDiagnostic: () => undefined,
+        });
+
+      let ownerSettled = false;
+      let separateRuntimeSettled = false;
+      const owner = providerForRuntime().price(SIGNAL).then((result) => {
+        ownerSettled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const separateRuntime = providerForRuntime().price(SIGNAL).then((result) => {
+        separateRuntimeSettled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(499);
+
+      expect(ownerSettled).toBe(true);
+      expect(separateRuntimeSettled).toBe(true);
+      const [ownerResult, separateRuntimeResult] = await Promise.all([
+        owner,
+        separateRuntime,
+      ]);
+      const retryResult = await providerForRuntime().price(SIGNAL);
+
+      expect(getClaimOwner).toHaveBeenCalled();
+      expect(suppliedOwnerTokens[0]).toEqual(expect.any(String));
+      expect(claimOwner).toBe(suppliedOwnerTokens[0]);
+      expect(runActor).toHaveBeenCalledTimes(1);
+      expect(ownerResult).not.toBeNull();
+      expect(separateRuntimeResult).toEqual(ownerResult);
+      expect(retryResult).toEqual(ownerResult);
     } finally {
       vi.useRealTimers();
     }
