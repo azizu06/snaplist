@@ -1027,6 +1027,61 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     ]);
   });
 
+  it("observes a winner stored during the loser final backoff interval", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimed = false;
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key, signal) {
+        const readStartedAt = Date.now() - startedAt;
+        if (readStartedAt >= 503) return null;
+        return new Promise<EbaySoldComp[] | null>((resolve, reject) => {
+          const timer = setTimeout(() => resolve(values.get(key) ?? null), 1);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      },
+      async set(key, value) {
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.max(0, startedAt + 500 - Date.now())),
+        );
+        values.set(key, value);
+      },
+      async claim() {
+        const won = !claimed;
+        claimed = true;
+        return won;
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const winner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(1);
+    const loser = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    await vi.advanceTimersToNextTimerAsync();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+
+    expect(winnerResult).not.toBeNull();
+    expect(loserResult).toEqual(winnerResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
   it("clamps configured timeouts and fails soft after the derived handoff budget", async () => {
     vi.useFakeTimers();
     const reads: number[] = [];
