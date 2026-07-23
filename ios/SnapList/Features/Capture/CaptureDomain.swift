@@ -298,7 +298,36 @@ final class PhotoReviewStore {
     func confirmPickerResult(
         _ result: PhotoReviewConfirmedPickerResult
     ) -> StagedCapturePhoto.ID? {
-        nil
+        guard let request = activePickerRequest else {
+            return nil
+        }
+
+        switch (request, result) {
+        case (.add, .additions(let additions)):
+            guard let appliedPhotoID = additions.last?.id else {
+                return nil
+            }
+            photos.append(contentsOf: additions)
+            activePickerRequest = nil
+            return appliedPhotoID
+
+        case (.replace(let photoID), .replacement(let replacement)):
+            guard let index = photos.firstIndex(where: { $0.id == photoID }) else {
+                return nil
+            }
+            photos[index] = replacement
+            if selectedPhotoID == photoID {
+                selectedPhotoID = replacement.id
+            }
+            if actionsPhotoID == photoID {
+                actionsPhotoID = replacement.id
+            }
+            activePickerRequest = nil
+            return replacement.id
+
+        default:
+            return nil
+        }
     }
 
     @discardableResult
