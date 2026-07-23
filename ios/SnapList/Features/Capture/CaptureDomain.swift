@@ -271,11 +271,22 @@ final class PhotoReviewStore {
         return true
     }
 
-    func beginPickerRequest(_ request: PhotoReviewPickerRequest) {}
+    func beginPickerRequest(_ request: PhotoReviewPickerRequest) {
+        activePickerRequest = request
+    }
 
     @discardableResult
     func cancelPickerRequest() -> PhotoReviewPickerOpener? {
-        nil
+        guard let request = activePickerRequest else {
+            return nil
+        }
+        activePickerRequest = nil
+        switch request {
+        case .add:
+            return .addButton
+        case .replace(let photoID):
+            return .replaceButton(photoID: photoID)
+        }
     }
 
     @discardableResult
