@@ -337,16 +337,15 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(model.canTakePhoto)
 
         let firstCapture = Task { await model.takePhoto() }
-        await Task.yield()
+        XCTAssertTrue(await camera.waitUntilCaptureIsPending())
         let secondCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        await secondCapture.value
 
         XCTAssertEqual(camera.captureCount, 1)
         XCTAssertFalse(model.canTakePhoto)
         XCTAssertTrue(model.isCapturingPhoto)
         camera.completePendingCaptures()
         await firstCapture.value
-        await secondCapture.value
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
@@ -435,7 +434,7 @@ final class CaptureFlowTests: XCTestCase {
         await model.startCamera()
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         let pendingCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        XCTAssertTrue(await camera.waitUntilCaptureIsPending())
         XCTAssertTrue(model.isCapturingPhoto)
 
         model.cancelCamera()
@@ -1459,7 +1458,9 @@ private final class TestCaptureCamera: CaptureCamera {
     var frameHandler: ((CaptureFrame) -> Void)?
     private let suspendsCapture: Bool
     private var captureError: Error?
+    private let pendingCaptureLock = NSLock()
     private var pendingCaptures: [CheckedContinuation<Data, Error>] = []
+    private var pendingCaptureWaiters: [CheckedContinuation<Bool, Never>] = []
 
     init(
         isAvailable: Bool,
@@ -1501,17 +1502,35 @@ private final class TestCaptureCamera: CaptureCamera {
         }
         guard suspendsCapture else { return Self.photoData }
         return try await withCheckedThrowingContinuation { continuation in
+            pendingCaptureLock.lock()
             pendingCaptures.append(continuation)
+            let waiters = pendingCaptureWaiters
+            pendingCaptureWaiters.removeAll()
+            pendingCaptureLock.unlock()
+            for waiter in waiters {
+                waiter.resume(returning: true)
+            }
         }
     }
 
     func waitUntilCaptureIsPending() async -> Bool {
-        false
+        await withCheckedContinuation { continuation in
+            pendingCaptureLock.lock()
+            guard pendingCaptures.isEmpty else {
+                pendingCaptureLock.unlock()
+                continuation.resume(returning: true)
+                return
+            }
+            pendingCaptureWaiters.append(continuation)
+            pendingCaptureLock.unlock()
+        }
     }
 
     func completePendingCaptures() {
+        pendingCaptureLock.lock()
         let captures = pendingCaptures
         pendingCaptures.removeAll()
+        pendingCaptureLock.unlock()
         for capture in captures {
             capture.resume(returning: Self.photoData)
         }
