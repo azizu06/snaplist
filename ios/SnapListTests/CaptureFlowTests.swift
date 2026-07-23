@@ -235,6 +235,23 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(model.canOpenBoundary)
     }
 
+    func testPendingCaptureReadinessTimesOutWithoutRegisteredContinuation() async {
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            suspendsCapture: true
+        )
+
+        let isCapturePending = await camera.waitUntilCaptureIsPending(
+            timeoutNanoseconds: 1_000_000
+        )
+
+        XCTAssertFalse(
+            isCapturePending,
+            "Readiness must fail within its bound when no capture continuation registers."
+        )
+    }
+
     func testCommittedAppendUsesAtomicAuthoritativeSetWithoutASecondReload() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let store = TestCaptureStore(loadPhotosError: TestCaptureError.failed)
@@ -1517,7 +1534,9 @@ private final class TestCaptureCamera: CaptureCamera {
         }
     }
 
-    func waitUntilCaptureIsPending() async -> Bool {
+    func waitUntilCaptureIsPending(
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async -> Bool {
         await withCheckedContinuation { continuation in
             pendingCaptureLock.lock()
             guard pendingCaptures.isEmpty else {
@@ -1525,8 +1544,11 @@ private final class TestCaptureCamera: CaptureCamera {
                 continuation.resume(returning: true)
                 return
             }
-            pendingCaptureWaiters.append(continuation)
             pendingCaptureLock.unlock()
+            Task<Void, Never> {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                continuation.resume(returning: true)
+            }
         }
     }
 
