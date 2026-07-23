@@ -1481,7 +1481,7 @@ private final class TestCaptureCamera: CaptureCamera {
     private var captureError: Error?
     private let pendingCaptureLock = NSLock()
     private var pendingCaptures: [CheckedContinuation<Data, Error>] = []
-    private var pendingCaptureWaiters: [CheckedContinuation<Bool, Never>] = []
+    private var pendingCaptureWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
     init(
         isAvailable: Bool,
@@ -1525,7 +1525,7 @@ private final class TestCaptureCamera: CaptureCamera {
         return try await withCheckedThrowingContinuation { continuation in
             pendingCaptureLock.lock()
             pendingCaptures.append(continuation)
-            let waiters = pendingCaptureWaiters
+            let waiters = Array(pendingCaptureWaiters.values)
             pendingCaptureWaiters.removeAll()
             pendingCaptureLock.unlock()
             for waiter in waiters {
@@ -1537,17 +1537,22 @@ private final class TestCaptureCamera: CaptureCamera {
     func waitUntilCaptureIsPending(
         timeoutNanoseconds: UInt64 = 5_000_000_000
     ) async -> Bool {
-        await withCheckedContinuation { continuation in
+        let waiterID = UUID()
+        return await withCheckedContinuation { continuation in
             pendingCaptureLock.lock()
             guard pendingCaptures.isEmpty else {
                 pendingCaptureLock.unlock()
                 continuation.resume(returning: true)
                 return
             }
+            pendingCaptureWaiters[waiterID] = continuation
             pendingCaptureLock.unlock()
             Task<Void, Never> {
                 try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-                continuation.resume(returning: true)
+                self.pendingCaptureLock.lock()
+                let waiter = self.pendingCaptureWaiters.removeValue(forKey: waiterID)
+                self.pendingCaptureLock.unlock()
+                waiter?.resume(returning: false)
             }
         }
     }
