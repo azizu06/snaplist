@@ -171,6 +171,51 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(denied.buttons["scan.flash"].exists)
     }
 
+    func testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
+        let screen = app.otherElements["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The approved Photo Review fixture must render the public screen."
+        )
+
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "3 of 5")
+        XCTAssertEqual(
+            app.staticTexts.matching(identifier: "photo-review.visible-ordinal").count,
+            0
+        )
+
+        let firstPhoto = app.buttons["photo-review.thumbnail.1"]
+        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
+        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
+        for thumbnail in [firstPhoto, secondPhoto, thirdPhoto] {
+            XCTAssertTrue(thumbnail.exists)
+        }
+
+        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+        XCTAssertTrue(secondPhoto.label.contains("Photo 2 of 3"))
+        XCTAssertFalse(secondPhoto.label.contains("Cover"))
+        XCTAssertFalse(secondPhoto.isSelected)
+        XCTAssertTrue(thirdPhoto.label.contains("Photo 3 of 3"))
+
+        let cover = app.staticTexts["photo-review.cover"]
+        XCTAssertEqual(app.staticTexts.matching(identifier: "photo-review.cover").count, 1)
+        XCTAssertGreaterThanOrEqual(cover.frame.minY, firstPhoto.frame.maxY)
+
+        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+
+        secondPhoto.tap()
+
+        XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertTrue(secondPhoto.isSelected)
+        XCTAssertFalse(firstPhoto.isSelected)
+    }
+
     func testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion() {
         let app = launch(extraArguments: [
             "--visual-state=CAM-03",
