@@ -173,7 +173,7 @@ final class SnapListUITests: XCTestCase {
 
     func testPhotoReviewThumbnailsHideVisibleOrdinalsWhileAccessibilityRetainsOrderSelectionCoverAndProgressiveActions() {
         let app = launch(extraArguments: ["--photo-review-state=REV-02"])
-        let screen = app.otherElements["photo-review.screen"]
+        let screen = app.scrollViews["photo-review.screen"]
 
         XCTAssertTrue(
             screen.waitForExistence(timeout: 3),

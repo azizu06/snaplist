@@ -52,20 +52,18 @@ struct PhotoReviewView: View {
     }
 
     var body: some View {
-        ZStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    topBar
-                    hero
-                    thumbnailStrip
+        ScrollView {
+            VStack(spacing: 20) {
+                topBar
+                hero
+                thumbnailStrip
 
-                    if store.actionsPhotoID != nil {
-                        actionRow
-                    }
+                if store.actionsPhotoID != nil {
+                    actionRow
                 }
-                .padding(.horizontal, SnapListMetrics.screenGutter)
-                .padding(.vertical, 16)
             }
+            .padding(.horizontal, SnapListMetrics.screenGutter)
+            .padding(.vertical, 16)
         }
         .background(SnapListColorToken.groupingFill.color)
         .accessibilityElement(children: .contain)
