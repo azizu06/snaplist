@@ -224,7 +224,9 @@ final class AppRouter {
         presentedFullScreen = nil
     }
 
-    func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {}
+    func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {
+        photoReviewScanReturn = request
+    }
 
     @discardableResult
     func open(_ url: URL) -> Bool {

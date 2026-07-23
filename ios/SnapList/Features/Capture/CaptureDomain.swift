@@ -251,7 +251,15 @@ final class PhotoReviewStore {
 
     @discardableResult
     func movePhoto(id: StagedCapturePhoto.ID, to destinationIndex: Int) -> Bool {
-        false
+        guard let sourceIndex = photos.firstIndex(where: { $0.id == id }),
+              photos.indices.contains(destinationIndex) else {
+            return false
+        }
+
+        let photo = photos.remove(at: sourceIndex)
+        photos.insert(photo, at: destinationIndex)
+        selectedPhotoID = photo.id
+        return true
     }
 
     @discardableResult
@@ -259,12 +267,29 @@ final class PhotoReviewStore {
         id: StagedCapturePhoto.ID,
         with replacement: StagedCapturePhoto
     ) -> Bool {
-        false
+        guard let index = photos.firstIndex(where: { $0.id == id }),
+              !photos.contains(where: { $0.id == replacement.id && $0.id != id }) else {
+            return false
+        }
+
+        photos[index] = replacement
+        if selectedPhotoID == id {
+            selectedPhotoID = replacement.id
+        }
+        return true
     }
 
     @discardableResult
     func deletePhoto(id: StagedCapturePhoto.ID) -> Bool {
-        false
+        guard let index = photos.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        photos.remove(at: index)
+        if selectedPhotoID == id {
+            selectedPhotoID = photos.first?.id
+        }
+        return true
     }
 }
 
