@@ -28,6 +28,30 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, returned)
     }
 
+    func testDeletingFinalPhotoReturnsToZeroPhotoScanWithoutPhotoReviewShell() {
+        let onlyPhoto = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000005")
+        let store = PhotoReviewStore(photos: [onlyPhoto])
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: store.photos,
+            opener: .reviewButton
+        )
+
+        XCTAssertTrue(store.deletePhoto(id: onlyPhoto.id))
+
+        let returned = PhotoReviewScanReturn(
+            photos: store.photos,
+            focus: .reviewButton
+        )
+        router.returnFromPhotoReview(returned)
+
+        XCTAssertEqual(router.photoReviewScanReturn, returned)
+        XCTAssertTrue(returned.photos.isEmpty)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+    }
+
     func testManualShutterStaysAvailableAfterFirstCaptureWithoutAVisionVerdict() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let store = TestCaptureStore()
