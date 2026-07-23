@@ -337,7 +337,9 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(model.canTakePhoto)
 
         let firstCapture = Task { await model.takePhoto() }
-        XCTAssertTrue(await camera.waitUntilCaptureIsPending())
+        let isFirstCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(isFirstCapturePending)
+        guard isFirstCapturePending else { return }
         let secondCapture = Task { await model.takePhoto() }
         await secondCapture.value
 
@@ -434,7 +436,9 @@ final class CaptureFlowTests: XCTestCase {
         await model.startCamera()
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         let pendingCapture = Task { await model.takePhoto() }
-        XCTAssertTrue(await camera.waitUntilCaptureIsPending())
+        let isCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(isCapturePending)
+        guard isCapturePending else { return }
         XCTAssertTrue(model.isCapturingPhoto)
 
         model.cancelCamera()
