@@ -450,6 +450,20 @@ struct ScanShutterAccessibility {
     }
 }
 
+enum ScanReviewAccessibilityPriority: String, CaseIterable {
+    case live
+    case recovery
+
+    var value: Double {
+        switch self {
+        case .live:
+            40
+        case .recovery:
+            0
+        }
+    }
+}
+
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let isShutterEnabled: Bool
@@ -608,7 +622,7 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
                     : "Review \(thumbnailURLs.count) photos"
             )
             .accessibilityIdentifier("scan.review")
-            .accessibilitySortPriority(40)
+            .accessibilitySortPriority(ScanReviewAccessibilityPriority.live.value)
     }
 }
 
@@ -680,6 +694,9 @@ private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
                                     : "Review \(thumbnailURLs.count) photos"
                             )
                             .accessibilityIdentifier("scan.review")
+                            .accessibilitySortPriority(
+                                ScanReviewAccessibilityPriority.recovery.value
+                            )
                     }
                     .padding(.bottom, 10)
                     .transition(
