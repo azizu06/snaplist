@@ -203,15 +203,24 @@ final class CaptureFlowTests: XCTestCase {
 
         await model.startCamera()
         for _ in 0..<4 {
-            camera.completePendingCaptures()
             let capture = Task { await model.takePhoto() }
-            await Task.yield()
+            let isCapturePending = await camera.waitUntilCaptureIsPending()
+            XCTAssertTrue(
+                isCapturePending,
+                "Capture completion requires a registered pending continuation."
+            )
+            guard isCapturePending else { return }
             camera.completePendingCaptures()
             await capture.value
         }
 
         let fifthCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        let isFifthCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(
+            isFifthCapturePending,
+            "Fifth-photo completion requires a registered pending continuation."
+        )
+        guard isFifthCapturePending else { return }
 
         XCTAssertTrue(model.isAddingPhotos)
         XCTAssertFalse(model.canOpenBoundary)
@@ -224,6 +233,23 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(model.stagedPhotos.count, 5)
         XCTAssertEqual(store.stageCount, 5)
         XCTAssertTrue(model.canOpenBoundary)
+    }
+
+    func testPendingCaptureReadinessTimesOutWithoutRegisteredContinuation() async {
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            suspendsCapture: true
+        )
+
+        let isCapturePending = await camera.waitUntilCaptureIsPending(
+            timeoutNanoseconds: 1_000_000
+        )
+
+        XCTAssertFalse(
+            isCapturePending,
+            "Readiness must fail within its bound when no capture continuation registers."
+        )
     }
 
     func testCommittedAppendUsesAtomicAuthoritativeSetWithoutASecondReload() async {
@@ -328,16 +354,17 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(model.canTakePhoto)
 
         let firstCapture = Task { await model.takePhoto() }
-        await Task.yield()
+        let isFirstCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(isFirstCapturePending)
+        guard isFirstCapturePending else { return }
         let secondCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        await secondCapture.value
 
         XCTAssertEqual(camera.captureCount, 1)
         XCTAssertFalse(model.canTakePhoto)
         XCTAssertTrue(model.isCapturingPhoto)
         camera.completePendingCaptures()
         await firstCapture.value
-        await secondCapture.value
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
@@ -426,7 +453,9 @@ final class CaptureFlowTests: XCTestCase {
         await model.startCamera()
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         let pendingCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        let isCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(isCapturePending)
+        guard isCapturePending else { return }
         XCTAssertTrue(model.isCapturingPhoto)
 
         model.cancelCamera()
@@ -1450,7 +1479,9 @@ private final class TestCaptureCamera: CaptureCamera {
     var frameHandler: ((CaptureFrame) -> Void)?
     private let suspendsCapture: Bool
     private var captureError: Error?
+    private let pendingCaptureLock = NSLock()
     private var pendingCaptures: [CheckedContinuation<Data, Error>] = []
+    private var pendingCaptureWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
     init(
         isAvailable: Bool,
@@ -1492,13 +1523,45 @@ private final class TestCaptureCamera: CaptureCamera {
         }
         guard suspendsCapture else { return Self.photoData }
         return try await withCheckedThrowingContinuation { continuation in
+            pendingCaptureLock.lock()
             pendingCaptures.append(continuation)
+            let waiters = Array(pendingCaptureWaiters.values)
+            pendingCaptureWaiters.removeAll()
+            pendingCaptureLock.unlock()
+            for waiter in waiters {
+                waiter.resume(returning: true)
+            }
+        }
+    }
+
+    func waitUntilCaptureIsPending(
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async -> Bool {
+        let waiterID = UUID()
+        return await withCheckedContinuation { continuation in
+            pendingCaptureLock.lock()
+            guard pendingCaptures.isEmpty else {
+                pendingCaptureLock.unlock()
+                continuation.resume(returning: true)
+                return
+            }
+            pendingCaptureWaiters[waiterID] = continuation
+            pendingCaptureLock.unlock()
+            Task<Void, Never> {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self.pendingCaptureLock.lock()
+                let waiter = self.pendingCaptureWaiters.removeValue(forKey: waiterID)
+                self.pendingCaptureLock.unlock()
+                waiter?.resume(returning: false)
+            }
         }
     }
 
     func completePendingCaptures() {
+        pendingCaptureLock.lock()
         let captures = pendingCaptures
         pendingCaptures.removeAll()
+        pendingCaptureLock.unlock()
         for capture in captures {
             capture.resume(returning: Self.photoData)
         }
