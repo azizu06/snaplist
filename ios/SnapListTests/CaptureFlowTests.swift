@@ -52,6 +52,69 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
+    func testPhotoReviewPickerCancellationPreservesExactStateAndRestoresTheTypedOpener() {
+        let fingerprints = [
+            "picker-photo-a-digest",
+            "picker-photo-b-digest",
+            "picker-photo-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000011",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000012",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000013",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+        let store = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(store.selectPhotoForActions(id: photos[1].id))
+
+        let expectedPhotos = store.photos
+        let expectedIDs = expectedPhotos.map(\.id)
+        let expectedPhotoURLs = expectedPhotos.map(\.photoURL)
+        let expectedThumbnailURLs = expectedPhotos.map(\.thumbnailURL)
+        let expectedCreatedAt = expectedPhotos.map(\.createdAt)
+        let expectedReceipts = expectedPhotos.map(\.libraryTransferReceipt)
+        let expectedSelectedID = store.selectedPhotoID
+        let expectedActionsID = store.actionsPhotoID
+
+        func assertExactValueState() {
+            XCTAssertEqual(store.photos, expectedPhotos)
+            XCTAssertEqual(store.photos.map(\.id), expectedIDs)
+            XCTAssertEqual(store.photos.map(\.photoURL), expectedPhotoURLs)
+            XCTAssertEqual(store.photos.map(\.thumbnailURL), expectedThumbnailURLs)
+            XCTAssertEqual(store.photos.map(\.createdAt), expectedCreatedAt)
+            XCTAssertEqual(store.photos.map(\.libraryTransferReceipt), expectedReceipts)
+            XCTAssertEqual(store.selectedPhotoID, expectedSelectedID)
+            XCTAssertEqual(store.actionsPhotoID, expectedActionsID)
+        }
+
+        store.beginPickerRequest(.add)
+        XCTAssertEqual(store.activePickerRequest, PhotoReviewPickerRequest.add)
+        XCTAssertEqual(store.cancelPickerRequest(), PhotoReviewPickerOpener.addButton)
+        XCTAssertNil(store.activePickerRequest)
+        assertExactValueState()
+
+        let replaceRequest = PhotoReviewPickerRequest.replace(photoID: photos[1].id)
+        store.beginPickerRequest(replaceRequest)
+        XCTAssertEqual(store.activePickerRequest, replaceRequest)
+        XCTAssertEqual(
+            store.cancelPickerRequest(),
+            PhotoReviewPickerOpener.replaceButton(photoID: photos[1].id)
+        )
+        XCTAssertNil(store.activePickerRequest)
+        assertExactValueState()
+    }
+
     func testManualShutterStaysAvailableAfterFirstCaptureWithoutAVisionVerdict() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let store = TestCaptureStore()
@@ -95,6 +158,24 @@ final class CaptureFlowTests: XCTestCase {
             photoURL: URL(fileURLWithPath: "/tmp/photo-\(photoID).jpg"),
             thumbnailURL: URL(fileURLWithPath: "/tmp/thumbnail-\(photoID).jpg"),
             createdAt: Date(timeIntervalSinceReferenceDate: 455)
+        )
+    }
+
+    private func makePickerPhoto(
+        id: String,
+        ordinal: Int,
+        fingerprints: [String]
+    ) -> StagedCapturePhoto {
+        let photoID = UUID(uuidString: id)!
+        return StagedCapturePhoto(
+            id: photoID,
+            photoURL: URL(fileURLWithPath: "/tmp/picker-photo-\(ordinal).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/picker-thumbnail-\(ordinal).jpg"),
+            createdAt: Date(timeIntervalSinceReferenceDate: 455 + Double(ordinal)),
+            libraryTransferReceipt: LibraryPhotoTransferReceipt(
+                sourcePhotoFingerprints: fingerprints,
+                sourceIndex: ordinal
+            )
         )
     }
 

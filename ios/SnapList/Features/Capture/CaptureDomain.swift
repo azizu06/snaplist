@@ -238,12 +238,23 @@ struct StagedCapturePhoto: Codable, Equatable, Identifiable {
     }
 }
 
+enum PhotoReviewPickerRequest: Equatable {
+    case add
+    case replace(photoID: StagedCapturePhoto.ID)
+}
+
+enum PhotoReviewPickerOpener: Equatable {
+    case addButton
+    case replaceButton(photoID: StagedCapturePhoto.ID)
+}
+
 @MainActor
 @Observable
 final class PhotoReviewStore {
     private(set) var photos: [StagedCapturePhoto]
     private(set) var selectedPhotoID: StagedCapturePhoto.ID?
     private(set) var actionsPhotoID: StagedCapturePhoto.ID?
+    private(set) var activePickerRequest: PhotoReviewPickerRequest?
 
     init(photos: [StagedCapturePhoto]) {
         self.photos = photos
@@ -258,6 +269,13 @@ final class PhotoReviewStore {
         selectedPhotoID = id
         actionsPhotoID = id
         return true
+    }
+
+    func beginPickerRequest(_ request: PhotoReviewPickerRequest) {}
+
+    @discardableResult
+    func cancelPickerRequest() -> PhotoReviewPickerOpener? {
+        nil
     }
 
     @discardableResult
