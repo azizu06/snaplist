@@ -10,12 +10,22 @@ on:
     paths:
       - "ios/**"
       - ".github/workflows/ios.yml"
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-hex repository commit to test
+        required: true
+        type: string
+      test_selector:
+        description: Xcode selector such as Target/TestClass/testMethod
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.workflow }}-${{ github.ref }}
+  group: ios-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,8 +33,57 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
+      - name: Validate focused test inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SNAPLIST_COMMIT_SHA: ${{ inputs.commit_sha }}
+          SNAPLIST_IOS_ONLY_TESTING: ${{ inputs.test_selector }}
+        run: |
+          if [[ ! "$SNAPLIST_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "commit_sha must be exactly 40 hexadecimal characters." >&2
+            exit 64
+          fi
+
+          if [[ ! "$SNAPLIST_IOS_ONLY_TESTING" =~ ^[[:alnum:]_][[:alnum:]_.-]*(/[[:alnum:]_][[:alnum:]_.-]*){0,2}$ ]]; then
+            echo "test_selector must be a non-empty Xcode test selector." >&2
+            exit 64
+          fi
+
       - uses: actions/checkout@v4
+        if: github.event_name != 'workflow_dispatch'
+
+      - name: Check out trusted workflow tooling
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: workflow-tooling
+
+      - name: Check out exact test target
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+          path: test-target
+
       - name: Show Apple toolchain
         run: xcodebuild -version
+
+      - name: Validate reusable iOS test script
+        if: github.event_name != 'workflow_dispatch'
+        run: zsh ios/Scripts/test-contract.test.sh
+
+      - name: Validate trusted reusable iOS test script
+        if: github.event_name == 'workflow_dispatch'
+        run: zsh workflow-tooling/ios/Scripts/test-contract.test.sh
+
       - name: Build app and run unit and UI smoke tests
+        if: github.event_name != 'workflow_dispatch'
         run: ios/Scripts/test.sh
+
+      - name: Build app and run one focused test
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SNAPLIST_IOS_ONLY_TESTING: ${{ inputs.test_selector }}
+          SNAPLIST_IOS_REPOSITORY_ROOT: ${{ github.workspace }}/test-target
+        run: workflow-tooling/ios/Scripts/test.sh
