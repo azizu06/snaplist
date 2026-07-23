@@ -203,15 +203,24 @@ final class CaptureFlowTests: XCTestCase {
 
         await model.startCamera()
         for _ in 0..<4 {
-            camera.completePendingCaptures()
             let capture = Task { await model.takePhoto() }
-            await Task.yield()
+            let isCapturePending = await camera.waitUntilCaptureIsPending()
+            XCTAssertTrue(
+                isCapturePending,
+                "Capture completion requires a registered pending continuation."
+            )
+            guard isCapturePending else { return }
             camera.completePendingCaptures()
             await capture.value
         }
 
         let fifthCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        let isFifthCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(
+            isFifthCapturePending,
+            "Fifth-photo completion requires a registered pending continuation."
+        )
+        guard isFifthCapturePending else { return }
 
         XCTAssertTrue(model.isAddingPhotos)
         XCTAssertFalse(model.canOpenBoundary)
@@ -1494,6 +1503,10 @@ private final class TestCaptureCamera: CaptureCamera {
         return try await withCheckedThrowingContinuation { continuation in
             pendingCaptures.append(continuation)
         }
+    }
+
+    func waitUntilCaptureIsPending() async -> Bool {
+        false
     }
 
     func completePendingCaptures() {
