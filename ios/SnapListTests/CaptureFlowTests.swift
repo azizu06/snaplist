@@ -111,6 +111,43 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertNil(model.consumePhotoLimitAnnouncement())
     }
 
+    func testShutterAccessibleNameOnlyAnnouncesTheLimitAtFiveDurablePhotos() {
+        let states = [
+            (
+                name: "below-cap idle",
+                accessibility: ScanShutterAccessibility(
+                    isEnabled: true,
+                    durablePhotoCount: 0
+                ),
+                expectedLabel: "Take photo"
+            ),
+            (
+                name: "below-cap pending intake",
+                accessibility: ScanShutterAccessibility(
+                    isEnabled: false,
+                    durablePhotoCount: 2
+                ),
+                expectedLabel: "Take photo"
+            ),
+            (
+                name: "at cap",
+                accessibility: ScanShutterAccessibility(
+                    isEnabled: false,
+                    durablePhotoCount: 5
+                ),
+                expectedLabel: "Take photo, unavailable at five photo limit"
+            )
+        ]
+
+        for state in states {
+            XCTAssertEqual(
+                state.accessibility.label,
+                state.expectedLabel,
+                state.name
+            )
+        }
+    }
+
     func testFlashControlOnlyTogglesWhenTheCaptureDeviceSupportsIt() async {
         let supportedCamera = TestCaptureCamera(
             isAvailable: true,
