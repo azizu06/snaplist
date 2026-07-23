@@ -456,10 +456,8 @@ enum ScanReviewAccessibilityPriority: String, CaseIterable {
 
     var value: Double {
         switch self {
-        case .live:
+        case .live, .recovery:
             40
-        case .recovery:
-            0
         }
     }
 }
