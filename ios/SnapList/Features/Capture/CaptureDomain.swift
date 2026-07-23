@@ -243,6 +243,11 @@ enum PhotoReviewPickerRequest: Equatable {
     case replace(photoID: StagedCapturePhoto.ID)
 }
 
+enum PhotoReviewConfirmedPickerResult: Equatable {
+    case additions([StagedCapturePhoto])
+    case replacement(StagedCapturePhoto)
+}
+
 enum PhotoReviewPickerOpener: Equatable {
     case addButton
     case replaceButton(photoID: StagedCapturePhoto.ID)
@@ -287,6 +292,13 @@ final class PhotoReviewStore {
         case .replace(let photoID):
             return .replaceButton(photoID: photoID)
         }
+    }
+
+    @discardableResult
+    func confirmPickerResult(
+        _ result: PhotoReviewConfirmedPickerResult
+    ) -> StagedCapturePhoto.ID? {
+        nil
     }
 
     @discardableResult

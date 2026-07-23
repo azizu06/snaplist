@@ -115,6 +115,124 @@ final class CaptureFlowTests: XCTestCase {
         assertExactValueState()
     }
 
+    func testPhotoReviewConfirmedPickerResultsPreserveExactValuesOrderAndRequestConsumption() {
+        let fingerprints = [
+            "picker-photo-a-digest",
+            "picker-photo-b-digest",
+            "picker-photo-c-digest",
+            "picker-photo-d-digest",
+            "picker-photo-e-digest",
+            "picker-photo-f-digest"
+        ]
+        let originalPhotos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000021",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000022",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000023",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+        let additions = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000024",
+                ordinal: 3,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000025",
+                ordinal: 4,
+                fingerprints: fingerprints
+            )
+        ]
+        let replacement = makePickerPhoto(
+            id: "45500000-0000-4000-8000-000000000026",
+            ordinal: 5,
+            fingerprints: fingerprints
+        )
+
+        let addStore = PhotoReviewStore(photos: originalPhotos)
+        XCTAssertTrue(addStore.selectPhotoForActions(id: originalPhotos[1].id))
+        addStore.beginPickerRequest(.add)
+
+        XCTAssertEqual(
+            addStore.confirmPickerResult(.additions(additions)),
+            additions[1].id
+        )
+        XCTAssertEqual(addStore.photos, originalPhotos + additions)
+        XCTAssertEqual(Array(addStore.photos.prefix(3)), originalPhotos)
+        XCTAssertEqual(addStore.selectedPhotoID, originalPhotos[1].id)
+        XCTAssertEqual(addStore.actionsPhotoID, originalPhotos[1].id)
+        XCTAssertNil(addStore.activePickerRequest)
+
+        let addStateAfterConfirmation = addStore.photos
+        XCTAssertNil(addStore.confirmPickerResult(.additions(additions)))
+        XCTAssertEqual(addStore.photos, addStateAfterConfirmation)
+        XCTAssertEqual(addStore.selectedPhotoID, originalPhotos[1].id)
+        XCTAssertEqual(addStore.actionsPhotoID, originalPhotos[1].id)
+        XCTAssertNil(addStore.activePickerRequest)
+
+        let referencedReplaceStore = PhotoReviewStore(photos: originalPhotos)
+        XCTAssertTrue(
+            referencedReplaceStore.selectPhotoForActions(id: originalPhotos[1].id)
+        )
+        let replaceRequest = PhotoReviewPickerRequest.replace(
+            photoID: originalPhotos[1].id
+        )
+        referencedReplaceStore.beginPickerRequest(replaceRequest)
+
+        XCTAssertEqual(
+            referencedReplaceStore.confirmPickerResult(.replacement(replacement)),
+            replacement.id
+        )
+        XCTAssertEqual(
+            referencedReplaceStore.photos,
+            [originalPhotos[0], replacement, originalPhotos[2]]
+        )
+        XCTAssertEqual(referencedReplaceStore.photos[0], originalPhotos[0])
+        XCTAssertEqual(referencedReplaceStore.photos[2], originalPhotos[2])
+        XCTAssertEqual(referencedReplaceStore.selectedPhotoID, replacement.id)
+        XCTAssertEqual(referencedReplaceStore.actionsPhotoID, replacement.id)
+        XCTAssertNil(referencedReplaceStore.activePickerRequest)
+
+        let replaceStateAfterConfirmation = referencedReplaceStore.photos
+        XCTAssertNil(
+            referencedReplaceStore.confirmPickerResult(.replacement(replacement))
+        )
+        XCTAssertEqual(referencedReplaceStore.photos, replaceStateAfterConfirmation)
+        XCTAssertEqual(referencedReplaceStore.selectedPhotoID, replacement.id)
+        XCTAssertEqual(referencedReplaceStore.actionsPhotoID, replacement.id)
+        XCTAssertNil(referencedReplaceStore.activePickerRequest)
+
+        let unrelatedReplaceStore = PhotoReviewStore(photos: originalPhotos)
+        XCTAssertTrue(
+            unrelatedReplaceStore.selectPhotoForActions(id: originalPhotos[0].id)
+        )
+        unrelatedReplaceStore.beginPickerRequest(replaceRequest)
+
+        XCTAssertEqual(
+            unrelatedReplaceStore.confirmPickerResult(.replacement(replacement)),
+            replacement.id
+        )
+        XCTAssertEqual(
+            unrelatedReplaceStore.photos,
+            [originalPhotos[0], replacement, originalPhotos[2]]
+        )
+        XCTAssertEqual(unrelatedReplaceStore.photos[0], originalPhotos[0])
+        XCTAssertEqual(unrelatedReplaceStore.photos[2], originalPhotos[2])
+        XCTAssertEqual(unrelatedReplaceStore.selectedPhotoID, originalPhotos[0].id)
+        XCTAssertEqual(unrelatedReplaceStore.actionsPhotoID, originalPhotos[0].id)
+        XCTAssertNil(unrelatedReplaceStore.activePickerRequest)
+    }
+
     func testManualShutterStaysAvailableAfterFirstCaptureWithoutAVisionVerdict() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let store = TestCaptureStore()
