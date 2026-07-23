@@ -119,6 +119,15 @@ struct CaptureBoundaryRequest: Equatable {
     let opener: CaptureBoundaryOpener
 }
 
+enum PhotoReviewScanFocus: Equatable {
+    case reviewButton
+}
+
+struct PhotoReviewScanReturn: Equatable {
+    let photos: [StagedCapturePhoto]
+    let focus: PhotoReviewScanFocus
+}
+
 enum RunDeepLink: Equatable, Sendable {
     case run(UUID)
 
@@ -155,6 +164,7 @@ final class AppRouter {
     var presentedSheet: AppSheet?
     var presentedFullScreen: AppFullScreen?
     private(set) var captureBoundaryRequest: CaptureBoundaryRequest?
+    private(set) var photoReviewScanReturn: PhotoReviewScanReturn?
 
     private var homePath: [AppRoute] = []
     private var listingsPath: [AppRoute] = []
@@ -213,6 +223,8 @@ final class AppRouter {
         )
         presentedFullScreen = nil
     }
+
+    func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {}
 
     @discardableResult
     func open(_ url: URL) -> Bool {

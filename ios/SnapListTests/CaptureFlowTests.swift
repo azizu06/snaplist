@@ -5,6 +5,29 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    func testPhotoReviewEditsPreserveIdentityOrderAndReturnTheExactScanPayload() {
+        let originalCover = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000001")
+        let second = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000002")
+        let third = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000003")
+        let replacement = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000004")
+        let store = PhotoReviewStore(photos: [originalCover, second, third])
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+
+        XCTAssertTrue(store.movePhoto(id: third.id, to: 0))
+        XCTAssertTrue(store.replacePhoto(id: second.id, with: replacement))
+        XCTAssertTrue(store.deletePhoto(id: originalCover.id))
+
+        let returned = PhotoReviewScanReturn(
+            photos: store.photos,
+            focus: .reviewButton
+        )
+        router.returnFromPhotoReview(returned)
+
+        XCTAssertEqual(store.photos.map(\.id), [third.id, replacement.id])
+        XCTAssertEqual(store.selectedPhotoID, third.id)
+        XCTAssertEqual(router.photoReviewScanReturn, returned)
+    }
+
     func testManualShutterStaysAvailableAfterFirstCaptureWithoutAVisionVerdict() async {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let store = TestCaptureStore()
@@ -39,6 +62,16 @@ final class CaptureFlowTests: XCTestCase {
 
         XCTAssertEqual(camera.captureCount, 5)
         XCTAssertEqual(model.stagedPhotos.count, 5)
+    }
+
+    private func makeStagedPhoto(id: String) -> StagedCapturePhoto {
+        let photoID = UUID(uuidString: id)!
+        return StagedCapturePhoto(
+            id: photoID,
+            photoURL: URL(fileURLWithPath: "/tmp/photo-\(photoID).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/thumbnail-\(photoID).jpg"),
+            createdAt: Date(timeIntervalSinceReferenceDate: 455)
+        )
     }
 
     func testLibrarySelectionAppendsInOrderOnlyThroughRemainingCapacity() async {

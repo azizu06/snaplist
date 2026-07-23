@@ -238,6 +238,36 @@ struct StagedCapturePhoto: Codable, Equatable, Identifiable {
     }
 }
 
+@MainActor
+@Observable
+final class PhotoReviewStore {
+    private(set) var photos: [StagedCapturePhoto]
+    private(set) var selectedPhotoID: StagedCapturePhoto.ID?
+
+    init(photos: [StagedCapturePhoto]) {
+        self.photos = photos
+        selectedPhotoID = photos.first?.id
+    }
+
+    @discardableResult
+    func movePhoto(id: StagedCapturePhoto.ID, to destinationIndex: Int) -> Bool {
+        false
+    }
+
+    @discardableResult
+    func replacePhoto(
+        id: StagedCapturePhoto.ID,
+        with replacement: StagedCapturePhoto
+    ) -> Bool {
+        false
+    }
+
+    @discardableResult
+    func deletePhoto(id: StagedCapturePhoto.ID) -> Bool {
+        false
+    }
+}
+
 struct CaptureDraftAppendResult: Equatable {
     let appendedPhoto: StagedCapturePhoto
     let photos: [StagedCapturePhoto]
