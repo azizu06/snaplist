@@ -137,9 +137,9 @@ struct PhotoReviewView: View {
                             lineWidth: 3
                         )
                 }
+                .accessibilityHidden(true)
             }
             .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
             .accessibilityLabel(
                 thumbnailAccessibilityLabel(index: index, isSelected: isSelected)
             )
