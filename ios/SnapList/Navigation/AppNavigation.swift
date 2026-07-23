@@ -226,6 +226,8 @@ final class AppRouter {
 
     func returnFromPhotoReview(_ request: PhotoReviewScanReturn) {
         photoReviewScanReturn = request
+        captureBoundaryRequest = nil
+        presentedFullScreen = .guidedCamera
     }
 
     @discardableResult
