@@ -317,18 +317,38 @@ describe("pricing-evidence read projection", () => {
     expect(projection.chartBounds).toBeNull();
   });
 
-  it("fails closed when a persisted page exceeds the 60-row contract bound", () => {
-    const oversized = row();
-    oversized.evidence = Array.from({ length: 61 }, (_, index) => ({
-      ...oversized.evidence[0]!,
+  it("projects the first five canonical matches from a legacy six-match snapshot", () => {
+    const legacy = row();
+    legacy.evidence = Array.from({ length: 6 }, (_, index) => ({
+      ...legacy.evidence[0]!,
       id: `sale-${index}`,
+      sourceUrl: `https://www.ebay.com/itm/sale-${index}`,
+      title: `Sony headphones sale-${index}`,
+    }));
+    legacy.price_result.sources = legacy.evidence.map((evidence) => ({
+      url: evidence.sourceUrl,
+      title: evidence.title,
+      kind: "sold-comp",
     }));
 
-    expect(() =>
-      buildPricingEvidenceProjection(oversized, {
-        userId: oversized.user_id,
-        itemId: oversized.item_id,
-      }),
-    ).toThrow(/malformed/i);
+    const projection = buildPricingEvidenceProjection(legacy, {
+      userId: legacy.user_id,
+      itemId: legacy.item_id,
+    });
+
+    expect(projection.comparables.map(({ id }) => id)).toEqual([
+      "sale-0",
+      "sale-1",
+      "sale-2",
+      "sale-3",
+      "sale-4",
+    ]);
+    expect(projection.priceResult.evidence?.map(({ id }) => id)).toEqual([
+      "sale-0",
+      "sale-1",
+      "sale-2",
+      "sale-3",
+      "sale-4",
+    ]);
   });
 });

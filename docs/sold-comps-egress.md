@@ -16,6 +16,8 @@ Issue #200 adds a second retrieval strategy inside the same provider-neutral
 on any failure, thin matcher output, or open circuit, the public-page provider
 below remains the immediate fallback. Both strategies feed the same
 anchor/corroboration/reject matcher, freshness layer, and minimum-two-anchor gate.
+The recommendation and exposed evidence retain the same deterministically ranked,
+deduplicated set of at most five verified matches.
 
 The adapter is disabled unless both `APIFY_SOLD_ENABLED=true` and `APIFY_TOKEN`
 are present. The token is passed to the official Apify client only; it never
@@ -24,19 +26,25 @@ normalization keeps only canonical eBay URL, title, positive USD sold price,
 condition, sale date, and Best Offer disclosure. Seller fields, images, raw
 payload fields, malformed URLs/prices, non-USD rows, and duplicates are dropped.
 
-The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.18.3` and caps a
-run at 25 rows, $0.11, 55 seconds of Actor runtime, 60 seconds of client wait,
-two official-client post-run read retries, and no automatic Actor restart. The
-paid Actor-start request itself is never retried. These safety
-environment values can tighten but not raise the in-code ceilings. SnapList does
-not launch a second paid run after failure: it falls through. Successful empty
-results are cached because repeating a paid no-result run is not useful; cache
-misses for the same identity are coalesced across request-scoped providers sharing
-one cache object in the same runtime, and age decay/staleness are reapplied on every
-cache read. Actor failures also accumulate across those provider instances so the
-bounded circuit cannot reset on every request. Cross-runtime distributed
-coalescing and breaker state must be validated with the chosen shared-cache
-deployment before production activation.
+The tested default pins Actor `oTtB3VgfuE9GtxQt2` to build `1.18.3`. One logical
+pricing pass requests exactly 10 candidates first and makes one 20-candidate
+expansion only when fewer than three anchors survive the canonical matcher. A
+terminal initial failure falls through without expansion. Each request is capped
+at $0.11, 55 seconds of Actor runtime, 60 seconds of client wait, two
+official-client post-run read retries, and no automatic Actor restart. The paid
+Actor-start request itself is never retried. The remaining safety environment
+values can tighten but not raise the in-code ceilings.
+
+Terminal initial failures, completed empty results, and combined successful
+results are cached so retry or queue redelivery cannot add a third paid request
+when the shared cache is healthy. Before any paid request, an atomic shared-cache
+claim fences the matcher-sensitive signal identity across worker runtimes. A
+missing, process-local, or unavailable fence declines to the public sold provider
+without starting the Actor. Cache misses for the same identity are also
+coalesced inside one runtime, and age decay/staleness are reapplied on every cache
+read. Actor failures accumulate across request-scoped providers sharing one cache
+so the bounded circuit cannot reset on every request. The shared-cache deployment
+remains an activation prerequisite.
 
 Production activation is not part of Issue #200. Leave the flag off until the
 owner approves a separate budget and validates current Actor schema/build/pricing
@@ -47,6 +55,42 @@ Official contract references: [Caffein sold-listings Actor](https://apify.com/ca
 [Apify client retry/timeout options](https://docs.apify.com/api/client/js/reference/interface/ApifyClientOptions),
 [Actor call caps and restart controls](https://docs.apify.com/api/client/js/reference/interface/ActorCallOptions),
 and [eBay condition ID meanings](https://developer.ebay.com/api-docs/sell/static/metadata/condition-id-values.html).
+
+## Bounded public-page retrieval
+
+The normal public-page provider requests 10 candidates first and makes one
+20-candidate expansion only when fewer than three anchors survive the canonical
+matcher. Terminal and sparse outcomes are cached alongside successful combined
+results. With no proxy configured, the real default direct eBay fetch is free and
+may coordinate through the process-local cache and in-flight map when Upstash is
+absent. Cache hits and same-runtime retry/redelivery reuse that winner; this mode
+claims no cross-runtime guarantee. When Upstash is configured, the same direct
+path retains the shared atomic claim and its cross-runtime winner guarantee.
+
+A configured proxy or an injected, instrumented, or wrapped normal fetch path may
+carry direct cost and therefore still requires the existing atomic shared-cache
+claim to select one winner across worker runtimes. Losers read the winner's result
+through a bounded handoff. A missing, process-local, or unavailable shared fence
+declines to the next pricing tier without making that potentially billable request.
+
+The effective per-request timeout defaults to 8 seconds and is capped at 15
+seconds even when operator configuration requests more. A loser waits for at
+most that effective timeout multiplied by the maximum two requests, plus a
+bounded 500 ms store/read allowance. The initial shared read, atomic claim,
+loser polling reads, and winner store are each bounded by the remaining logical
+deadline; request timeouts also shrink to that remainder. A coordination timeout
+aborts the underlying shared-cache request and declines without starting
+unclaimed egress. Same-process waiters race shared work against their own
+deadline without cancelling the winner. A winner returns evidence only after the
+shared store makes that same result available to losers. Polling uses a bounded
+backoff; expiry is fail-soft and never starts a loser retrieval.
+
+The operator smoke below is intentionally different: its explicit
+`--confirm-one-request` authorization permits exactly the initial 10-candidate
+request and suppresses the optional expansion and fallback request. The smoke
+module alone imports the separately named operator-only provider factory; normal
+factory construction cannot select this bypass through fetcher injection or an
+options flag.
 
 ## Optional proxy-template configuration
 

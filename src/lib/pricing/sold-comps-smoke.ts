@@ -3,7 +3,7 @@ import {
   EBAY_SOLD_BASE_URL_DEFAULT,
   buildSoldSearchUrl,
   createDefaultFetchPage,
-  createEbaySoldPricingProvider,
+  createOneRequestEbaySoldPricingProviderForOperatorSmoke,
   ebaySoldConfigured,
   type FetchPage,
 } from "./providers/ebay-sold";
@@ -82,8 +82,9 @@ function smokeFallbackProvider(signal: ItemSignal): PricingProvider {
 /**
  * Exercise the real sold-comps provider and the real PriceRouter seam without
  * ever invoking paid web-search/LLM fallbacks. Dry-run is the default and makes
- * zero requests. Live mode performs at most one caller-controlled sold-page
- * request; if it declines, a deterministic sentinel proves graceful routing.
+ * zero requests. Live mode performs exactly one caller-authorized ten-candidate
+ * sold-page request; if it declines, a deterministic sentinel proves graceful
+ * routing without silently widening the operator's egress confirmation.
  */
 export async function runSoldCompsSmoke(
   options: RunSoldCompsSmokeOptions,
@@ -129,7 +130,7 @@ export async function runSoldCompsSmoke(
     }
   };
 
-  const provider = createEbaySoldPricingProvider({
+  const provider = createOneRequestEbaySoldPricingProviderForOperatorSmoke({
     enabled,
     baseUrl,
     fetchPage: observedFetch,

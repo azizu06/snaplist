@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -9,8 +9,68 @@ const migration = readFileSync(
   ),
   "utf8",
 );
+const boundedMatchesMigrationPath = join(
+  process.cwd(),
+  "supabase/migrations/20260721210000_bounded_verified_sold_matches.sql",
+);
+const boundedMatchesMigration = existsSync(boundedMatchesMigrationPath)
+  ? readFileSync(boundedMatchesMigrationPath, "utf8")
+  : "";
+const legacyRestoreMigrationPath = join(
+  process.cwd(),
+  "supabase/migrations/20260722035415_preserve_legacy_pricing_evidence_restore.sql",
+);
+const legacyRestoreMigration = existsSync(legacyRestoreMigrationPath)
+  ? readFileSync(legacyRestoreMigrationPath, "utf8")
+  : "";
+const guidedAuthorityOrderMigrationPath = join(
+  process.cwd(),
+  "supabase/migrations/20260722040255_preserve_guided_correction_authority_order.sql",
+);
+const guidedAuthorityOrderMigration = existsSync(guidedAuthorityOrderMigrationPath)
+  ? readFileSync(guidedAuthorityOrderMigrationPath, "utf8")
+  : "";
 
 describe("pricing-evidence snapshot migration", () => {
+  it("versions current write bounds without redefining historical V1 validity", () => {
+    expect(boundedMatchesMigration).toMatch(
+      /create or replace function private\.pricing_evidence_rows_coarse\(p_evidence jsonb\)[\s\S]*jsonb_array_length\(p_evidence\) > 5/i,
+    );
+    expect(legacyRestoreMigration).toMatch(
+      /create or replace function private\.pricing_evidence_rows_coarse\(p_evidence jsonb\)[\s\S]*jsonb_array_length\(p_evidence\) > 60/i,
+    );
+    expect(legacyRestoreMigration).toMatch(
+      /create or replace function private\.pricing_evidence_rows_current_write\([\s\S]*jsonb_array_length\(p_evidence\) > 5/i,
+    );
+    expect(legacyRestoreMigration).toMatch(
+      /create function public\.complete_pipeline_run\([\s\S]*pricing_evidence_rows_current_write/i,
+    );
+    expect(legacyRestoreMigration).toMatch(
+      /create function public\.complete_guided_review_correction\([\s\S]*pricing_evidence_rows_current_write/i,
+    );
+  });
+
+  it("preserves guided-correction authority precedence before bounded validation", () => {
+    const unavailableCheck = guidedAuthorityOrderMigration.indexOf(
+      "Guided correction capability is unavailable",
+    );
+    const bindingCheck = guidedAuthorityOrderMigration.indexOf(
+      "Guided correction capability binding mismatch",
+    );
+    const boundedValidation = guidedAuthorityOrderMigration.indexOf(
+      "pricing_evidence_rows_current_write",
+    );
+    const privateDelegate = guidedAuthorityOrderMigration.indexOf(
+      "complete_guided_review_correction_legacy_evidence_v1",
+    );
+
+    expect(unavailableCheck).toBeGreaterThan(-1);
+    expect(bindingCheck).toBeGreaterThan(unavailableCheck);
+    expect(boundedValidation).toBeGreaterThan(bindingCheck);
+    expect(privateDelegate).toBeGreaterThan(boundedValidation);
+    expect(guidedAuthorityOrderMigration).not.toMatch(/for update/i);
+  });
+
   it("creates one run-bound tenant row with immutable authenticated access", () => {
     expect(migration).toMatch(/create table public\.pricing_evidence_snapshots/i);
     expect(migration).toMatch(/run_id uuid primary key/i);

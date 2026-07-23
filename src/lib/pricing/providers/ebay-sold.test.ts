@@ -7,7 +7,7 @@ import {
   buildSoldSearchUrl,
   coreComps,
   createDefaultFetchPage,
-  createEbaySoldPricingProvider,
+  createEbaySoldPricingProvider as createRawEbaySoldPricingProvider,
   ebaySoldConfigured,
   filterRelevantComps,
   isAllowedEbayHost,
@@ -17,9 +17,14 @@ import {
   parseSoldDate,
   synthesizeSoldResult,
   type EbaySoldComp,
+  type EbaySoldPricingProviderOptions,
   type FetchPage,
 } from "./ebay-sold";
-import { createInMemoryTtlCache, type TtlCache } from "../comp-cache";
+import {
+  createInMemoryTtlCache,
+  createUpstashTtlCache,
+  type TtlCache,
+} from "../comp-cache";
 import { PriceRouter } from "../router";
 import { priceResultSchema, type ItemSignal, type PricingProvider } from "../types";
 import { TIGHT_AGREEMENT_MIN } from "./web-search";
@@ -76,6 +81,47 @@ const BRANDED_SIGNAL: ItemSignal = {
   conditionKnown: true,
 };
 
+const sharedTestCacheByCache = new WeakMap<
+  TtlCache<EbaySoldComp[]>,
+  TtlCache<EbaySoldComp[]>
+>();
+
+function withSharedTestClaim(
+  cache: TtlCache<EbaySoldComp[]>,
+): TtlCache<EbaySoldComp[]> {
+  if (cache.scope === "shared" && cache.claim && cache.getClaimOwner) return cache;
+  const existing = sharedTestCacheByCache.get(cache);
+  if (existing) return existing;
+  let claimOwner: string | null = null;
+  const shared: TtlCache<EbaySoldComp[]> = {
+    scope: "shared",
+    get: cache.get.bind(cache),
+    set: cache.set.bind(cache),
+    async claim(key, signal, ownerToken) {
+      const claimed = cache.claim
+        ? await cache.claim(key, signal, ownerToken)
+        : true;
+      if (claimed) claimOwner = ownerToken ?? "1";
+      return claimed;
+    },
+    getClaimOwner:
+      cache.getClaimOwner?.bind(cache) ?? (async () => claimOwner),
+  };
+  sharedTestCacheByCache.set(cache, shared);
+  return shared;
+}
+
+/** Normal offline provider construction still exercises the required shared claim. */
+function createEbaySoldPricingProvider(
+  options: EbaySoldPricingProviderOptions = {},
+): PricingProvider {
+  const cache = options.cache ?? createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+  return createRawEbaySoldPricingProvider({
+    ...options,
+    cache: withSharedTestClaim(cache),
+  });
+}
+
 /** A FetchPage fake that records the URLs it was asked to fetch. */
 function fakeFetch(html: string): FetchPage & { urls: string[] } {
   const urls: string[] = [];
@@ -99,7 +145,9 @@ function blockedFetch(): FetchPage & { urls: string[] } {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("SSRF hardening", () => {
@@ -824,6 +872,1342 @@ describe("synthesizeSoldResult — robust core rescues a tight cluster from one 
 });
 
 describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
+  it("caps disjoint initial and expanded responses at twenty cached candidates", async () => {
+    const initial = srp(
+      Array.from({ length: 10 }, (_, index) => {
+        const card = soldCard(
+          `https://www.ebay.com/itm/initial-${index}`,
+          150 + index,
+          index + 1,
+        );
+        return index < 2
+          ? card
+          : card.replace(
+              "Sony WH-1000XM4 Headphones",
+              "Bose QuietComfort Headphones",
+            );
+      }),
+    );
+    const expanded = srp(
+      Array.from({ length: 20 }, (_, index) =>
+        soldCard(
+          `https://www.ebay.com/itm/expanded-${index}`,
+          170 + index,
+          10 + index,
+        ),
+      ),
+    );
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new URL(url).searchParams.get("_ipg") === "10" ? initial : expanded;
+    });
+    let cachedCandidates: EbaySoldComp[] = [];
+    const cache: TtlCache<EbaySoldComp[]> = {
+      get: async () => (cachedCandidates.length > 0 ? cachedCandidates : null),
+      set: async (_key, value) => {
+        cachedCandidates = value;
+      },
+    };
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      cache,
+      now: () => NOW,
+    });
+
+    const first = await provider.price(BRANDED_SIGNAL);
+    const retry = await provider.price(BRANDED_SIGNAL);
+
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
+    expect(cachedCandidates).toHaveLength(20);
+    expect(cachedCandidates.map(({ url }) => url)).toEqual(
+      Array.from(
+        { length: 20 },
+        (_, index) => `https://www.ebay.com/itm/expanded-${index}`,
+      ),
+    );
+    expect(first?.evidence?.map(({ sourceUrl }) => sourceUrl)).toEqual([
+      "https://www.ebay.com/itm/expanded-0",
+      "https://www.ebay.com/itm/expanded-1",
+      "https://www.ebay.com/itm/expanded-2",
+      "https://www.ebay.com/itm/expanded-3",
+      "https://www.ebay.com/itm/expanded-4",
+    ]);
+    expect(first?.sources.map(({ url }) => url)).toEqual(
+      first?.evidence?.map(({ sourceUrl }) => sourceUrl),
+    );
+    expect(retry).toEqual(first);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches a terminal initial failure so retry cannot make another public request", async () => {
+    const fetchPage = blockedFetch();
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+
+    expect(fetchPage.urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+    ]);
+  });
+
+  it("bounds an injected normal fetch and declines without starting expansion", async () => {
+    vi.useFakeTimers();
+    const fetchPage = vi.fn<FetchPage>(
+      async () => new Promise<string>(() => undefined),
+    );
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 100,
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(100);
+
+    await expect(result).resolves.toBeNull();
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("coalesces concurrent redelivery into one bounded public retrieval pass", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      await gate;
+      return new URL(url).searchParams.get("_ipg") === "10"
+        ? srp([
+            soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
+            soldCard("https://www.ebay.com/itm/initial-b", 180, 7),
+          ])
+        : FIXTURE_HTML;
+    });
+    const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
+    const providerForRequest = () => createEbaySoldPricingProvider({ fetchPage, cache });
+
+    const first = providerForRequest().price(BRANDED_SIGNAL);
+    const redelivery = providerForRequest().price(BRANDED_SIGNAL);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    release();
+    const [firstResult, redeliveryResult] = await Promise.all([first, redelivery]);
+
+    expect(redeliveryResult).toEqual(firstResult);
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
+  });
+
+  it("hands off a near-deadline winner across immediate-miss Redis-like runtimes", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimed = false;
+    const claimResults: boolean[] = [];
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 400));
+        values.set(key, value);
+      },
+      async claim() {
+        const won = !claimed;
+        claimed = true;
+        claimResults.push(won);
+        return won;
+      },
+    });
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      await new Promise<void>((resolve) => setTimeout(resolve, 975));
+      return new URL(url).searchParams.get("_ipg") === "10"
+        ? srp([
+            soldCard("https://www.ebay.com/itm/initial-a", 170, 8),
+            soldCard("https://www.ebay.com/itm/initial-b", 180, 7),
+          ])
+        : FIXTURE_HTML;
+    });
+    const providerForRuntime = () =>
+      createEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1_000,
+        cache: cacheForRuntime(),
+      });
+
+    const winner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(0);
+    const loser = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(2_500);
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+
+    expect(loserResult).toEqual(winnerResult);
+    expect(claimResults).toEqual([true, false]);
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
+  });
+
+  it("continues cross-runtime handoff after a transient loser read failure", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimOwner: string | null = null;
+    const claimResults: boolean[] = [];
+    let runtimeCount = 0;
+    let transientHandoffFailures = 0;
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => {
+      const runtime = runtimeCount;
+      runtimeCount += 1;
+      let reads = 0;
+      return {
+        scope: "shared",
+        async get(key) {
+          reads += 1;
+          if (runtime === 1 && reads === 2) {
+            transientHandoffFailures += 1;
+            throw new Error("transient loser handoff read failure");
+          }
+          return values.get(key) ?? null;
+        },
+        async set(key, value) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 100));
+          values.set(key, value);
+        },
+        async claim(_key, _signal, ownerToken) {
+          const claimed = claimOwner === null;
+          if (claimed) claimOwner = ownerToken ?? "owner";
+          claimResults.push(claimed);
+          return claimed;
+        },
+        async getClaimOwner() {
+          return claimOwner;
+        },
+      };
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const winner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(0);
+    const loser = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(claimResults).toEqual([true, false]);
+    expect(transientHandoffFailures).toBe(1);
+    expect(fetchPage).toHaveBeenCalledOnce();
+    expect(values.size).toBe(1);
+    expect(winnerResult).not.toBeNull();
+    expect(winnerResult?.sources).toHaveLength(5);
+    expect(retryResult).toEqual(winnerResult);
+    expect({
+      winner: winnerResult?.tier ?? null,
+      loser: loserResult?.tier ?? null,
+      retry: retryResult?.tier ?? null,
+    }).toEqual({
+      winner: "ebay-sold",
+      loser: "ebay-sold",
+      retry: "ebay-sold",
+    });
+    expect(loserResult).toEqual(winnerResult);
+  });
+
+  it("observes a winner stored during the loser final backoff interval", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimed = false;
+    let claimOwner: string | null = null;
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key, signal) {
+        const readStartedAt = Date.now() - startedAt;
+        if (readStartedAt >= 503) return null;
+        return new Promise<EbaySoldComp[] | null>((resolve, reject) => {
+          const timer = setTimeout(() => resolve(values.get(key) ?? null), 1);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      },
+      async set(key, value) {
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.max(0, startedAt + 500 - Date.now())),
+        );
+        values.set(key, value);
+      },
+      async claim(_key, _signal, ownerToken) {
+        const won = !claimed;
+        claimed = true;
+        if (won) claimOwner = ownerToken ?? null;
+        return won;
+      },
+      async getClaimOwner() {
+        return claimOwner;
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const winner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(1);
+    const loser = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    await vi.advanceTimersToNextTimerAsync();
+    const [winnerResult, loserResult] = await Promise.all([winner, loser]);
+
+    expect(winnerResult).not.toBeNull();
+    expect(loserResult).toEqual(winnerResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("clamps configured timeouts and fails soft after the derived handoff budget", async () => {
+    vi.useFakeTimers();
+    const reads: number[] = [];
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        reads.push(Date.now());
+        return null;
+      },
+      async set() {
+        throw new Error("loser must not store");
+      },
+      async claim() {
+        return false;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 60_000,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(30_499);
+    expect(fetchPage).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(result).resolves.toBeNull();
+    expect(fetchPage).not.toHaveBeenCalled();
+    expect(reads.at(-1)! - reads[0]!).toBe(30_500);
+  });
+
+  it("fails soft by the derived handoff deadline when a loser cache read never settles", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    let loserReadAborted = false;
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get(_key, signal) {
+        reads += 1;
+        if (reads === 1) return null;
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              loserReadAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      },
+      async set(_key, _value, options) {
+        if (options.nx) return null;
+        throw new Error("loser must not store");
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(reads).toBe(2);
+    expect(loserReadAborted).toBe(true);
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("fails soft by the derived handoff deadline when the initial cache read never settles", async () => {
+    vi.useFakeTimers();
+    const set = vi.fn(async () => "OK");
+    let initialReadAborted = false;
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get(_key, signal) {
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              initialReadAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      },
+      set,
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(initialReadAborted).toBe(true);
+    expect(set).not.toHaveBeenCalled();
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("fails soft by the derived handoff deadline when the atomic claim never settles", async () => {
+    vi.useFakeTimers();
+    let claimAborted = false;
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get() {
+        return null;
+      },
+      async set(_key, _value, options, signal) {
+        if (options.nx) {
+          return new Promise<unknown>((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => {
+                claimAborted = true;
+                reject(new DOMException("aborted", "AbortError"));
+              },
+              { once: true },
+            );
+          });
+        }
+        throw new Error("unreached store");
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(claimAborted).toBe(true);
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a claim that commits before its response stalls", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimed = false;
+    let claimOwner: string | null = null;
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        values.set(key, value);
+      },
+      async claim(_key, signal, ownerToken) {
+        if (claimed) return false;
+        claimed = true;
+        claimOwner = ownerToken ?? null;
+        return new Promise<boolean>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+      async getClaimOwner() {
+        return claimOwner;
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const ambiguousOwner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(0);
+    const waitingRetry = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const [ownerResult, retryResult] = await Promise.all([
+      ambiguousOwner,
+      waitingRetry,
+    ]);
+
+    expect(ownerResult?.tier).toBe("ebay-sold");
+    expect(retryResult).toEqual(ownerResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+    expect(values).toHaveLength(1);
+  });
+
+  it("reconciles a claim that commits before its response rejects", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimOwner: string | null = null;
+    const getClaimOwner = vi.fn(async () => claimOwner);
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        values.set(key, value);
+      },
+      async claim(_key, _signal, ownerToken) {
+        if (claimOwner !== null) return false;
+        claimOwner = ownerToken ?? null;
+        throw new Error("claim response rejected after commit");
+      },
+      getClaimOwner,
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const ambiguousOwner = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const ownerResult = await ambiguousOwner;
+    const waitingRetry = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const retryResult = await waitingRetry;
+
+    expect({
+      ownerTier: ownerResult?.tier ?? null,
+      retryTier: retryResult?.tier ?? null,
+      ownerCommitted: claimOwner !== null,
+      ownerObservations: getClaimOwner.mock.calls.length,
+      fetchCalls: fetchPage.mock.calls.length,
+      cachedValues: values.size,
+    }).toEqual({
+      ownerTier: "ebay-sold",
+      retryTier: "ebay-sold",
+      ownerCommitted: true,
+      ownerObservations: 1,
+      fetchCalls: 1,
+      cachedValues: 1,
+    });
+    expect(retryResult).toEqual(ownerResult);
+  });
+
+  it("fails soft by the handoff deadline when a claim rejects without committing", async () => {
+    vi.useFakeTimers();
+    const getClaimOwner = vi.fn(async () => null);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return null;
+      },
+      async set() {
+        throw new Error("unreached store");
+      },
+      async claim() {
+        throw new Error("claim rejected without commit");
+      },
+      getClaimOwner,
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(getClaimOwner).toHaveBeenCalled();
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("fails soft by the derived handoff deadline when the winner store never settles", async () => {
+    vi.useFakeTimers();
+    let stores = 0;
+    let storeAborted = false;
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get() {
+        return null;
+      },
+      async set(_key, _value, options, signal) {
+        if (options.nx) return "OK";
+        stores += 1;
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              storeAborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(stores).toBe(1);
+    expect(storeAborted).toBe(true);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles a winner store that commits before its response stalls", async () => {
+    vi.useFakeTimers();
+    const values = new Map<string, string>();
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value, options, signal) {
+        values.set(key, value);
+        if (options.nx) return "OK";
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const firstResult = await first;
+    const secondResult = await providerForRuntime().price(BRANDED_SIGNAL);
+    const cachedValues = [...values.keys()].filter(
+      (key) => !key.endsWith(":paid-claim"),
+    ).length;
+
+    expect({
+      firstTier: firstResult?.tier ?? null,
+      secondTier: secondResult?.tier ?? null,
+      cachedValues,
+    }).toEqual({
+      firstTier: "ebay-sold",
+      secondTier: "ebay-sold",
+      cachedValues: 1,
+    });
+    expect(secondResult).toEqual(firstResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles an exact winner store that commits before its response rejects", async () => {
+    let claimed = false;
+    let stored: EbaySoldComp[] | null = null;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return stored;
+      },
+      async set(_key, value) {
+        stored = value;
+        throw new Error("winner store response rejected after commit");
+      },
+      async claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimed ? "owner" : null;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const firstResult = await providerForRuntime().price(BRANDED_SIGNAL);
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(stored).toHaveLength(7);
+    expect(firstResult?.sources).toHaveLength(5);
+    expect(retryResult).toEqual(firstResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("reserves a final exact observation when the winner store commits near the deadline and rejects", async () => {
+    vi.useFakeTimers();
+    let claimed = false;
+    let storeStarted = false;
+    let stored: EbaySoldComp[] | null = null;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        if (!storeStarted) return stored;
+        const observed = stored;
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        return observed;
+      },
+      async set(_key, value) {
+        storeStarted = true;
+        await new Promise<void>((_, reject) =>
+          setTimeout(() => {
+            stored = value;
+            reject(new Error("winner store response rejected after commit"));
+          }, 400),
+        );
+      },
+      async claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimed ? "owner" : null;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.runAllTimersAsync();
+    const firstResult = await first;
+    storeStarted = false;
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(stored).toHaveLength(7);
+    expect(firstResult?.sources).toHaveLength(5);
+    expect(retryResult).toEqual(firstResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("continues exact winner observation after transient cache read failures", async () => {
+    vi.useFakeTimers();
+    let claimed = false;
+    let storeStarted = false;
+    let observationFailuresRemaining = 2;
+    let stored: EbaySoldComp[] | null = null;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        if (storeStarted && observationFailuresRemaining > 0) {
+          observationFailuresRemaining -= 1;
+          throw new Error("transient observation read failure");
+        }
+        return stored;
+      },
+      async set(_key, value) {
+        storeStarted = true;
+        await new Promise<void>((_, reject) =>
+          setTimeout(() => {
+            stored = value;
+            reject(new Error("winner store response rejected after commit"));
+          }, 100),
+        );
+      },
+      async claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimed ? "owner" : null;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.runAllTimersAsync();
+    const firstResult = await first;
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(observationFailuresRemaining).toBe(0);
+    expect(firstResult?.sources).toHaveLength(5);
+    expect(retryResult).toEqual(firstResult);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("retries a transient reserved final observation before the caller deadline", async () => {
+    vi.useFakeTimers();
+    let claimed = false;
+    let storeStarted = false;
+    let stored: EbaySoldComp[] | null = null;
+    let winnerObservationReads = 0;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        if (!storeStarted) return stored;
+
+        winnerObservationReads += 1;
+        if (winnerObservationReads < 5) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 6));
+          return stored;
+        }
+        if (winnerObservationReads === 5) {
+          await new Promise<void>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("transient reserved observation failure")),
+              76,
+            ),
+          );
+        }
+        return stored;
+      },
+      async set(_key, value) {
+        storeStarted = true;
+        await new Promise<void>((_, reject) =>
+          setTimeout(() => {
+            stored = value;
+            reject(new Error("winner store response rejected after commit"));
+          }, 471),
+        );
+      },
+      async claim() {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimed ? "owner" : null;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+    const firstResult = await first;
+    storeStarted = false;
+    const retryResult = await providerForRuntime().price(BRANDED_SIGNAL);
+
+    expect(stored).toHaveLength(7);
+    expect(retryResult).toEqual(firstResult);
+    expect(firstResult?.sources).toHaveLength(5);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      observed: Array.from({ length: 5 }, (_, index) => ({
+        url: `https://www.ebay.com/itm/different-${index}`,
+        title: "Sony WH-1000XM4 Wireless Headphones",
+        price: 900 + index,
+      })),
+    },
+    {
+      observed: { rows: "malformed" } as unknown as EbaySoldComp[],
+    },
+  ])(
+    "does not authorize a rejected winner store from different or malformed cache data",
+    async ({ observed }) => {
+      vi.useFakeTimers();
+      let storeAttempted = false;
+      let claimOwner: string | null = null;
+      const cache: TtlCache<EbaySoldComp[]> = {
+        scope: "shared",
+        async get() {
+          return storeAttempted ? observed : null;
+        },
+        async set() {
+          storeAttempted = true;
+          throw new Error("winner store response rejected without the retrieved result");
+        },
+        async claim(_key, _signal, ownerToken) {
+          claimOwner = ownerToken ?? "owner";
+          return true;
+        },
+        async getClaimOwner() {
+          return claimOwner;
+        },
+      };
+      const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+      const result = createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      }).price(BRANDED_SIGNAL);
+
+      await vi.advanceTimersByTimeAsync(502);
+
+      await expect(result).resolves.toBeNull();
+      expect(fetchPage).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not authorize a rejected winner store from reordered cache data", async () => {
+    vi.useFakeTimers();
+    let observed: EbaySoldComp[] | null = null;
+    let claimOwner: string | null = null;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return observed;
+      },
+      async set(_key, value) {
+        observed = [...value].reverse();
+        throw new Error("winner store response rejected after a reordered commit");
+      },
+      async claim(_key, _signal, ownerToken) {
+        claimOwner = ownerToken ?? "owner";
+        return true;
+      },
+      async getClaimOwner() {
+        return claimOwner;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    }).price(BRANDED_SIGNAL);
+
+    await vi.runAllTimersAsync();
+
+    await expect(result).resolves.toBeNull();
+    expect(observed).toHaveLength(7);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("fails soft without divergent evidence when the winner store rejects", async () => {
+    vi.useFakeTimers();
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get() {
+        return null;
+      },
+      async set(_key, _value, options) {
+        if (options.nx) return "OK";
+        throw new Error("shared store unavailable");
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const provider = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+
+    await expect(result).resolves.toBeNull();
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("uses the remaining logical deadline after a slow initial cache read", async () => {
+    vi.useFakeTimers();
+    const cache = createUpstashTtlCache<EbaySoldComp[]>("sold-test", 60_000, {
+      async get() {
+        await new Promise<void>((resolve) => setTimeout(resolve, 501));
+        return null;
+      },
+      async set() {
+        return "OK";
+      },
+    });
+    const fetchPage = vi.fn<FetchPage>(async (url) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      return new URL(url).searchParams.get("_ipg") === "10"
+        ? "<html><body>No exact matches</body></html>"
+        : FIXTURE_HTML;
+    });
+    let settled = false;
+    const result = createRawEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache,
+      emitDiagnostic: () => undefined,
+    })
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await vi.advanceTimersByTimeAsync(502);
+
+    expect(settled).toBe(true);
+    await expect(result).resolves.toBeNull();
+    expect(
+      fetchPage.mock.calls.map(([url]) => new URL(url).searchParams.get("_ipg")),
+    ).toEqual(["10"]);
+  });
+
+  it("does not await a newer in-process retrieval past the caller deadline", async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    let claimOwner: string | null = null;
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        reads += 1;
+        if (reads === 1) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 501));
+        }
+        return null;
+      },
+      async set(_key, _value, signal) {
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+      async claim(_key, _signal, ownerToken) {
+        claimOwner = ownerToken ?? null;
+        return true;
+      },
+      async getClaimOwner() {
+        return claimOwner;
+      },
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const providerForRequest = () =>
+      createRawEbaySoldPricingProvider({
+        fetchPage,
+        fetchTimeoutMs: 1,
+        cache,
+        emitDiagnostic: () => undefined,
+      });
+    let firstSettled = false;
+    const first = providerForRequest()
+      .price(BRANDED_SIGNAL)
+      .then((value) => {
+        firstSettled = true;
+        return value;
+      });
+    await vi.advanceTimersByTimeAsync(100);
+    const second = providerForRequest().price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(402);
+    const firstSettledByItsDeadline = firstSettled;
+
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(Promise.all([first, second])).resolves.toEqual([null, null]);
+
+    expect(firstSettledByItsDeadline).toBe(true);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("uses the free default direct fetch with process-local coordination", async () => {
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", "");
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const html =
+        new URL(String(input)).searchParams.get("_ipg") === "10"
+          ? ""
+          : FIXTURE_HTML;
+      return new Response(html, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const provider = createRawEbaySoldPricingProvider({
+      enabled: true,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      emitDiagnostic: () => undefined,
+    });
+
+    const result = await provider.price(BRANDED_SIGNAL);
+    const retry = await provider.price(BRANDED_SIGNAL);
+
+    expect(result).not.toBeNull();
+    expect(result?.evidence).toHaveLength(5);
+    expect(result?.sources.map(({ url }) => url)).toEqual(
+      result?.evidence?.map(({ sourceUrl }) => sourceUrl),
+    );
+    expect(retry).toEqual(result);
+    expect(
+      fetchImpl.mock.calls.map(([input]) =>
+        new URL(String(input)).searchParams.get("_ipg"),
+      ),
+    ).toEqual(["10", "20"]);
+  });
+
+  it("coordinates separate default-direct runtimes through an available shared claim", async () => {
+    vi.stubEnv("EBAY_SOLD_PROXY_TEMPLATE", "");
+    let releaseFetch!: () => void;
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    let firstFetchStarted!: () => void;
+    const firstFetch = new Promise<void>((resolve) => {
+      firstFetchStarted = resolve;
+    });
+    let reportSecondPath!: (path: "claim" | "fetch") => void;
+    const secondPath = new Promise<"claim" | "fetch">((resolve) => {
+      reportSecondPath = resolve;
+    });
+    let fetchCount = 0;
+    const fetchImpl = vi.fn(async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) firstFetchStarted();
+      if (fetchCount === 2) reportSecondPath("fetch");
+      await fetchGate;
+      return new Response(FIXTURE_HTML);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const values = new Map<string, EbaySoldComp[]>();
+    let claimOwner: string | null = null;
+    const claimResults: boolean[] = [];
+    const claim = vi.fn(
+      async (key: string, signal?: AbortSignal, ownerToken?: string) => {
+        void key;
+        void signal;
+        const claimed = claimOwner === null;
+        if (claimed) claimOwner = ownerToken ?? "1";
+        claimResults.push(claimed);
+        if (claimResults.length === 2) reportSecondPath("claim");
+        return claimed;
+      },
+    );
+    const cacheForRuntime = (): TtlCache<EbaySoldComp[]> => ({
+      scope: "shared",
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async set(key, value) {
+        values.set(key, value);
+      },
+      claim,
+      async getClaimOwner(key, signal) {
+        void key;
+        void signal;
+        return claimOwner;
+      },
+    });
+    const providerForRuntime = () =>
+      createRawEbaySoldPricingProvider({
+        enabled: true,
+        cache: cacheForRuntime(),
+        emitDiagnostic: () => undefined,
+      });
+
+    const first = providerForRuntime().price(BRANDED_SIGNAL);
+    await firstFetch;
+    const second = providerForRuntime().price(BRANDED_SIGNAL);
+    const observedSecondPath = await secondPath;
+    releaseFetch();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(observedSecondPath).toBe("claim");
+    expect(claimResults).toEqual([true, false]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(firstResult).not.toBeNull();
+    expect(secondResult).toEqual(firstResult);
+  });
+
+  it("keeps a configured proxy behind the shared cost fence", async () => {
+    vi.stubEnv(
+      "EBAY_SOLD_PROXY_TEMPLATE",
+      "https://proxy.example/fetch?key=secret&url={url}",
+    );
+    const fetchImpl = vi.fn(async () => new Response(FIXTURE_HTML));
+    vi.stubGlobal("fetch", fetchImpl);
+    const provider = createRawEbaySoldPricingProvider({
+      enabled: true,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("declines before issuing a shared claim that cannot be reconciled", async () => {
+    const claim = vi.fn(async () => true);
+    const cache: TtlCache<EbaySoldComp[]> = {
+      scope: "shared",
+      async get() {
+        return null;
+      },
+      async set() {
+        throw new Error("unreached store");
+      },
+      claim,
+    };
+    const fetchPage = vi.fn<FetchPage>(async () => FIXTURE_HTML);
+    const provider = createRawEbaySoldPricingProvider({
+      fetchPage,
+      cache,
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(claim).not.toHaveBeenCalled();
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("does not infer operator authority from an injected fetch seam", async () => {
+    const fetchPage = fakeFetch(FIXTURE_HTML);
+    const provider = createRawEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+      emitDiagnostic: () => undefined,
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
+    expect(fetchPage.urls).toHaveLength(0);
+  });
+
+  it("does not let a ten-only cache entry suppress expansion for another condition", async () => {
+    const used = srp([
+      soldCard("https://www.ebay.com/itm/used-a", 170, 1),
+      soldCard("https://www.ebay.com/itm/used-b", 180, 2),
+      soldCard("https://www.ebay.com/itm/used-c", 190, 3),
+    ]);
+    const brandNew = used.replaceAll("Pre-Owned", "Brand New");
+    const urls: string[] = [];
+    const fetchPage = vi.fn(async (url: string) => {
+      urls.push(url);
+      return new URL(url).searchParams.get("_ipg") === "20" ? brandNew : used;
+    });
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      cache: createInMemoryTtlCache<EbaySoldComp[]>(60_000),
+    });
+
+    await expect(provider.price(BRANDED_SIGNAL)).resolves.not.toBeNull();
+    await expect(
+      provider.price({
+        ...BRANDED_SIGNAL,
+        condition: "brand new",
+      }),
+    ).resolves.not.toBeNull();
+
+    expect(urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "10",
+      "20",
+    ]);
+  });
+
   it("declares its tier and only handles identifiable signals", () => {
     const provider = createEbaySoldPricingProvider({ fetchPage: fakeFetch(FIXTURE_HTML) });
     expect(provider.tier).toBe("ebay-sold");
@@ -846,6 +2230,7 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     expect(result!.sources.every((s) => s.kind === "sold-comp")).toBe(true);
     // It fetched the SOLD/COMPLETED results page for this identity.
     expect(fetchPage.urls).toHaveLength(1);
+    expect(new URL(fetchPage.urls[0]).searchParams.get("_ipg")).toBe("10");
     expect(fetchPage.urls[0]).toContain("LH_Sold=1");
     expect(fetchPage.urls[0]).toContain("Sony");
   });
@@ -867,7 +2252,10 @@ describe("createEbaySoldPricingProvider (offline via injected fetch)", () => {
     const provider = createEbaySoldPricingProvider({ fetchPage });
 
     await expect(provider.price(BRANDED_SIGNAL)).resolves.toBeNull();
-    expect(fetchPage.urls).toHaveLength(1);
+    expect(fetchPage.urls.map((url) => new URL(url).searchParams.get("_ipg"))).toEqual([
+      "10",
+      "20",
+    ]);
   });
 
   it("declines (null) — never throws — when the page fetch is blocked", async () => {
@@ -1161,33 +2549,34 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
     expect(fetchPage.urls).toHaveLength(1); // second served from cache
   });
 
-  it("does NOT cache an empty (blocked) scrape — the next request retries", async () => {
-    const fetchPage = mutableFetch(""); // blocked first
+  it("caches an empty expanded scrape so retry cannot start a third request", async () => {
+    const fetchPage = mutableFetch("");
     const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
     const provider = createEbaySoldPricingProvider({ fetchPage, cache });
 
-    expect(await provider.price(BRANDED_SIGNAL)).toBeNull(); // declined, nothing cached
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     fetchPage.set(FIXTURE_HTML);
-    expect(await provider.price(BRANDED_SIGNAL)).not.toBeNull(); // retried, got comps
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     expect(fetchPage.urls).toHaveLength(2);
   });
 
-  it("does NOT cache a thin (<MIN raw comps) scrape — likely a block, retried next time", async () => {
+  it("caches a thin expanded scrape so retry cannot start a third request", async () => {
     const thin = srp([soldCard("https://www.ebay.com/itm/1", 178, 5)]); // 1 raw comp < MIN
     const fetchPage = mutableFetch(thin);
     const cache = createInMemoryTtlCache<EbaySoldComp[]>(60_000);
     const provider = createEbaySoldPricingProvider({ fetchPage, cache });
 
-    expect(await provider.price(BRANDED_SIGNAL)).toBeNull(); // <MIN → declines, not cached
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     fetchPage.set(FIXTURE_HTML);
-    expect(await provider.price(BRANDED_SIGNAL)).not.toBeNull(); // retried, found comps
+    expect(await provider.price(BRANDED_SIGNAL)).toBeNull();
     expect(fetchPage.urls).toHaveLength(2);
   });
 
-  it("degrades gracefully when the cache throws — an outage must not hard-fail the call", async () => {
-    // A cache (Upstash) outage must DEGRADE to a live fetch, never propagate: the
-    // router treats a thrown provider error as hard, which would crash the whole
-    // listing run instead of declining to the web tier (#59 review).
+  it("declines without throwing when a shared cache outage prevents winner storage", async () => {
+    vi.useFakeTimers();
+    // The claimed retrieval may finish after a transient read failure, but its
+    // evidence cannot be returned unless the shared store makes it observable
+    // to other runtimes. Decline so the router can continue fail-soft.
     const fetchPage = fakeFetch(FIXTURE_HTML);
     const throwingCache: TtlCache<EbaySoldComp[]> = {
       async get() {
@@ -1197,11 +2586,16 @@ describe("createEbaySoldPricingProvider — TTL request cache (#59)", () => {
         throw new Error("upstash unreachable");
       },
     };
-    const provider = createEbaySoldPricingProvider({ fetchPage, cache: throwingCache });
+    const provider = createEbaySoldPricingProvider({
+      fetchPage,
+      fetchTimeoutMs: 1,
+      cache: throwingCache,
+    });
 
-    const result = await provider.price(BRANDED_SIGNAL);
-    expect(result).not.toBeNull(); // read threw → treated as miss → live-fetched
-    expect(result!.tier).toBe("ebay-sold"); // write threw → swallowed, result still returned
+    const result = provider.price(BRANDED_SIGNAL);
+    await vi.advanceTimersByTimeAsync(502);
+
+    await expect(result).resolves.toBeNull();
     expect(fetchPage.urls).toHaveLength(1);
   });
 });

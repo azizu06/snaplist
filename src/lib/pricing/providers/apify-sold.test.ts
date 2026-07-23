@@ -33,6 +33,7 @@ import {
   APIFY_SOLD_ACTOR_ID,
   APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT,
   APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT,
+  APIFY_SOLD_INITIAL_RESULTS,
   APIFY_SOLD_MAX_RESULTS_DEFAULT,
   APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT,
   APIFY_SOLD_REQUEST_RETRIES_DEFAULT,
@@ -74,6 +75,13 @@ function rawItem(overrides: Record<string, unknown> = {}): Record<string, unknow
 
 function successfulRun(items: readonly Record<string, unknown>[]): RunApifySoldActor {
   return vi.fn(async () => ({ status: "SUCCEEDED", items }));
+}
+
+function sharedTestCache<T>(
+  ttlMs = 60_000,
+  now: () => number = Date.now,
+): TtlCache<T> {
+  return createInMemoryTtlCache<T>(ttlMs, now, "shared");
 }
 
 describe("Apify sold-comp configuration", () => {
@@ -229,6 +237,7 @@ describe("createApifySoldPricingProvider", () => {
         items: [
           rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "175" }),
           rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "185" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
         ],
       };
     };
@@ -236,6 +245,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
+      cache: sharedTestCache(),
       now: () => Date.parse("2026-07-16T12:00:00.000Z"),
     });
 
@@ -248,7 +258,7 @@ describe("createApifySoldPricingProvider", () => {
     expect(requests[0]).toMatchObject({
       actorId: APIFY_SOLD_ACTOR_ID,
       build: APIFY_SOLD_ACTOR_BUILD_DEFAULT,
-      maxItems: APIFY_SOLD_MAX_RESULTS_DEFAULT,
+      maxItems: APIFY_SOLD_INITIAL_RESULTS,
       requestRetries: APIFY_SOLD_REQUEST_RETRIES_DEFAULT,
       restartOnError: false,
       timeoutSecs: APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT,
@@ -257,7 +267,7 @@ describe("createApifySoldPricingProvider", () => {
     });
     expect(requests[0].input).toMatchObject({
       keywords: ["Sony WH-1000XM4"],
-      count: APIFY_SOLD_MAX_RESULTS_DEFAULT,
+      count: APIFY_SOLD_INITIAL_RESULTS,
       daysToScrape: APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT,
       includeCompletedListings: true,
       itemCondition: "any",
@@ -268,6 +278,7 @@ describe("createApifySoldPricingProvider", () => {
     const provider = createApifySoldPricingProvider({
       enabled: true,
       token: "secret",
+      cache: sharedTestCache(),
       runActor: successfulRun([
         rawItem({ itemId: "valid", url: "https://www.ebay.com/itm/valid" }),
         rawItem({
@@ -291,6 +302,7 @@ describe("createApifySoldPricingProvider", () => {
   it("rejects hostile cached rows without starting the Actor", async () => {
     const runActor = successfulRun([]);
     const cache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
       get: async () => [
         {
           url: "https://evil.example/itm/poisoned-a",
@@ -314,6 +326,7 @@ describe("createApifySoldPricingProvider", () => {
         },
       ],
       set: async () => undefined,
+      claim: async () => true,
     };
     const provider = createApifySoldPricingProvider({
       enabled: true,
@@ -329,6 +342,7 @@ describe("createApifySoldPricingProvider", () => {
   it("normalizes canonical cached rows without starting the Actor", async () => {
     const runActor = successfulRun([]);
     const cache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
       get: async () => [
         {
           url: "https://www.ebay.com/itm/cache-a?hash=item-a#fragment",
@@ -342,6 +356,7 @@ describe("createApifySoldPricingProvider", () => {
         },
       ],
       set: async () => undefined,
+      claim: async () => true,
     };
     const provider = createApifySoldPricingProvider({
       enabled: true,
@@ -360,7 +375,7 @@ describe("createApifySoldPricingProvider", () => {
   });
 
   it("caches successful empty and usable responses so repeat pricing does not start another paid run", async () => {
-    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const cache = sharedTestCache<ApifySoldComp[]>();
     const emptyRun = successfulRun([]);
     const emptyProvider = createApifySoldPricingProvider({
       enabled: true,
@@ -370,24 +385,25 @@ describe("createApifySoldPricingProvider", () => {
     });
     await expect(emptyProvider.price(SIGNAL)).resolves.toBeNull();
     await expect(emptyProvider.price(SIGNAL)).resolves.toBeNull();
-    expect(emptyRun).toHaveBeenCalledTimes(1);
+    expect(emptyRun).toHaveBeenCalledTimes(2);
 
     const usableRun = successfulRun([
       rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
       rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+      rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
     ]);
     const usableProvider = createApifySoldPricingProvider({
       enabled: true,
       token: "secret",
       runActor: usableRun,
-      cache: createInMemoryTtlCache<ApifySoldComp[]>(60_000),
+      cache: sharedTestCache<ApifySoldComp[]>(),
     });
     await usableProvider.price(SIGNAL);
     await usableProvider.price(SIGNAL);
     expect(usableRun).toHaveBeenCalledTimes(1);
   });
 
-  it("coalesces concurrent cache misses for the same identity into one Actor run", async () => {
+  it("coalesces concurrent cache misses into one bounded two-request pricing pass", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -406,7 +422,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
-      cache: createInMemoryTtlCache<ApifySoldComp[]>(60_000),
+      cache: sharedTestCache<ApifySoldComp[]>(),
     });
 
     const first = provider.price(SIGNAL);
@@ -414,10 +430,10 @@ describe("createApifySoldPricingProvider", () => {
     release();
     await Promise.all([first, second]);
 
-    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
-  it("coalesces concurrent misses across provider instances that share the production cache", async () => {
+  it("coalesces concurrent misses across provider instances into one bounded pricing pass", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -432,7 +448,7 @@ describe("createApifySoldPricingProvider", () => {
         ],
       };
     });
-    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const cache = sharedTestCache<ApifySoldComp[]>();
     const firstProvider = createApifySoldPricingProvider({
       enabled: true,
       token: "secret",
@@ -451,7 +467,7 @@ describe("createApifySoldPricingProvider", () => {
     release();
     await Promise.all([first, second]);
 
-    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
   it("reapplies staleness on cached rows instead of treating the cache as authority", async () => {
@@ -464,7 +480,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
-      cache: createInMemoryTtlCache<ApifySoldComp[]>(365 * 86_400_000, () => now),
+      cache: sharedTestCache<ApifySoldComp[]>(365 * 86_400_000, () => now),
       now: () => now,
       staleDays: 10,
     });
@@ -472,7 +488,7 @@ describe("createApifySoldPricingProvider", () => {
     await expect(provider.price(SIGNAL)).resolves.not.toBeNull();
     now = Date.parse("2026-08-01T12:00:00.000Z");
     await expect(provider.price(SIGNAL)).resolves.toBeNull();
-    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
   it("bounds failures, opens a circuit, and falls through without leaking raw error text", async () => {
@@ -485,6 +501,7 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       runActor,
+      cache: sharedTestCache<ApifySoldComp[]>(60_000, () => now),
       now: () => now,
       circuitFailureThreshold: 2,
       circuitCooldownMs: 5_000,
@@ -492,15 +509,21 @@ describe("createApifySoldPricingProvider", () => {
     });
 
     await expect(provider.price(SIGNAL)).resolves.toBeNull();
-    await expect(provider.price(SIGNAL)).resolves.toBeNull();
-    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    await expect(
+      provider.price({ ...SIGNAL, model: "WH-1000XM5" }),
+    ).resolves.toBeNull();
+    await expect(
+      provider.price({ ...SIGNAL, model: "WH-1000XM3" }),
+    ).resolves.toBeNull();
     expect(runActor).toHaveBeenCalledTimes(2);
     expect(diagnostics.some(({ event }) => event === "pricing.apify_sold.circuit_open")).toBe(true);
     expect(JSON.stringify(diagnostics)).not.toContain("private-token");
     expect(JSON.stringify(diagnostics)).not.toContain("api.apify.com/private");
 
     now += 5_001;
-    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    await expect(
+      provider.price({ ...SIGNAL, model: "WH-1000XM2" }),
+    ).resolves.toBeNull();
     expect(runActor).toHaveBeenCalledTimes(3);
   });
 
@@ -509,7 +532,7 @@ describe("createApifySoldPricingProvider", () => {
     const runActor = vi.fn(async () => {
       throw new Error("actor unavailable");
     });
-    const cache = createInMemoryTtlCache<ApifySoldComp[]>(60_000);
+    const cache = sharedTestCache<ApifySoldComp[]>();
     const providerForRequest = () =>
       createApifySoldPricingProvider({
         enabled: true,
@@ -533,15 +556,712 @@ describe("createApifySoldPricingProvider", () => {
 
     now += 5_001;
     await expect(providerForRequest().price(SIGNAL)).resolves.toBeNull();
-    expect(runActor).toHaveBeenCalledTimes(3);
+    expect(runActor).toHaveBeenCalledTimes(2);
   });
 
-  it("treats cache failures as misses/no-ops and still returns a usable result", async () => {
+  it("fails soft by the pricing deadline when the initial shared-cache read never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const runActor = successfulRun([]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: vi.fn(() => new Promise<ApifySoldComp[] | null>(() => undefined)),
+        set: async () => undefined,
+        claim: async () => true,
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let settled = false;
+      const result = provider.price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toBeNull();
+      expect(runActor).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft by the pricing deadline when the shared claim neither commits nor settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const runActor = successfulRun([]);
+      const claim = vi.fn(
+        () => new Promise<boolean>(() => undefined),
+      );
+      const getClaimOwner = vi.fn(async () => null);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => null,
+        set: async () => undefined,
+        claim,
+        getClaimOwner,
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let settled = false;
+      const result = provider.price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toBeNull();
+      expect(claim).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(AbortSignal),
+        expect.any(String),
+      );
+      expect(getClaimOwner).toHaveBeenCalled();
+      expect(runActor).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconciles an exact committed claim owner before bounded retrieval", async () => {
+    vi.useFakeTimers();
+    try {
+      let claimOwner: string | null = null;
+      let stored: ApifySoldComp[] | null = null;
+      const suppliedOwnerTokens: Array<string | undefined> = [];
+      const getClaimOwner = vi.fn(async () => claimOwner);
+      const cacheForRuntime = (): TtlCache<ApifySoldComp[]> => ({
+        scope: "shared",
+        get: async () => stored,
+        set: async (_key, value) => {
+          stored = value;
+        },
+        claim: (_key, _signal, ownerToken) => {
+          suppliedOwnerTokens.push(ownerToken);
+          if (claimOwner != null) return Promise.resolve(false);
+          claimOwner = ownerToken ?? "legacy-owner";
+          return new Promise<boolean>(() => undefined);
+        },
+        getClaimOwner,
+      });
+      const runActor = vi.fn<RunApifySoldActor>(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        return {
+          status: "SUCCEEDED",
+          items: [
+            rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+            rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+            rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+          ],
+        };
+      });
+      const providerForRuntime = () =>
+        createApifySoldPricingProvider({
+          enabled: true,
+          token: "secret",
+          cache: cacheForRuntime(),
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          emitDiagnostic: () => undefined,
+        });
+
+      let ownerSettled = false;
+      let separateRuntimeSettled = false;
+      const owner = providerForRuntime().price(SIGNAL).then((result) => {
+        ownerSettled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const separateRuntime = providerForRuntime().price(SIGNAL).then((result) => {
+        separateRuntimeSettled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(499);
+
+      expect(ownerSettled).toBe(true);
+      expect(separateRuntimeSettled).toBe(true);
+      const [ownerResult, separateRuntimeResult] = await Promise.all([
+        owner,
+        separateRuntime,
+      ]);
+      const retryResult = await providerForRuntime().price(SIGNAL);
+
+      expect(getClaimOwner).toHaveBeenCalled();
+      expect(suppliedOwnerTokens[0]).toEqual(expect.any(String));
+      expect(claimOwner).toBe(suppliedOwnerTokens[0]);
+      expect(runActor).toHaveBeenCalledTimes(1);
+      expect(ownerResult).not.toBeNull();
+      expect(separateRuntimeResult).toEqual(ownerResult);
+      expect(retryResult).toEqual(ownerResult);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("observes an exact owner committed during the final backoff interval", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      let claimOwner: string | null = null;
+      let stored: ApifySoldComp[] | null = null;
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => stored,
+        set: async (_key, value) => {
+          stored = value;
+        },
+        claim: (_key, _signal, ownerToken) => {
+          setTimeout(() => {
+            claimOwner = ownerToken ?? "legacy-owner";
+          }, 2_400);
+          return new Promise<boolean>(() => undefined);
+        },
+        getClaimOwner: async () => claimOwner,
+      };
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      const startedAt = Date.now();
+      let settledAt: number | null = null;
+      const result = provider.price(SIGNAL).then((value) => {
+        settledAt = Date.now();
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settledAt).not.toBeNull();
+      expect(settledAt! - startedAt).toBeLessThanOrEqual(2_500);
+      expect(runActor).toHaveBeenCalledTimes(1);
+      await expect(result).resolves.not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft by the pricing deadline when the winner-result store never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => null,
+        set: vi.fn(() => new Promise<void>(() => undefined)),
+        claim: async () => true,
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let settled = false;
+      const result = provider.price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft when a rejected winner store leaves no shared result for retry", async () => {
+    vi.useFakeTimers();
+    try {
+      let claimed = false;
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => null,
+        set: async () => {
+          throw new Error("winner store rejected without committing");
+        },
+        claim: async () => {
+          if (claimed) return false;
+          claimed = true;
+          return true;
+        },
+      };
+      const providerForRequest = () =>
+        createApifySoldPricingProvider({
+          enabled: true,
+          token: "secret",
+          cache,
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          emitDiagnostic: () => undefined,
+        });
+
+      const winnerResult = providerForRequest().price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      const winner = await winnerResult;
+      const retryResult = providerForRequest().price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      const retry = await retryResult;
+
+      expect(winner).toBeNull();
+      expect(retry).toEqual(winner);
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns a commit-then-reject winner only after the exact shared result is observable", async () => {
+    let claimed = false;
+    let stored: ApifySoldComp[] | null = null;
+    const runActor = successfulRun([
+      rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+      rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+      rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+    ]);
+    const cache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
+      get: async () => stored,
+      set: async (_key, value) => {
+        stored = value;
+        throw new Error("winner store response rejected after commit");
+      },
+      claim: async () => {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+    };
+    const providerForRequest = () =>
+      createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        emitDiagnostic: () => undefined,
+      });
+
+    const winner = await providerForRequest().price(SIGNAL);
+    const retry = await providerForRequest().price(SIGNAL);
+
+    expect(winner).not.toBeNull();
+    expect(retry).toEqual(winner);
+    expect(runActor).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a different shared result after the winner store is rejected", async () => {
+    vi.useFakeTimers();
+    try {
+      let storeAttempted = false;
+      const differentResult: ApifySoldComp[] = [
+        {
+          url: "https://www.ebay.com/itm/different",
+          title: "Sony WH-1000XM4 Wireless Headphones",
+          price: 999,
+        },
+      ];
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => (storeAttempted ? differentResult : null),
+        set: async () => {
+          storeAttempted = true;
+          throw new Error("winner store rejected after the cache exposed a different value");
+        },
+        claim: async () => true,
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+
+      const result = provider.price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      await expect(result).resolves.toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns an ambiguously settled winner only after the exact shared result is observable", async () => {
+    let claimed = false;
+    let stored: ApifySoldComp[] | null = null;
+    const runActor = successfulRun([
+      rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+      rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+      rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+    ]);
+    const cache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
+      get: async () => stored,
+      set: (_key, value) => {
+        stored = value;
+        return new Promise<void>(() => undefined);
+      },
+      claim: async () => {
+        if (claimed) return false;
+        claimed = true;
+        return true;
+      },
+    };
+    const providerForRequest = () =>
+      createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        emitDiagnostic: () => undefined,
+      });
+
+    const winner = await providerForRequest().price(SIGNAL);
+    const retry = await providerForRequest().price(SIGNAL);
+
+    expect(winner).not.toBeNull();
+    expect(retry).toEqual(winner);
+    expect(runActor).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { commitDelayMs: 600, cacheReadDelayMs: 0 },
+    { commitDelayMs: 2_400, cacheReadDelayMs: 10 },
+  ])(
+    "keeps observing an ambiguous winner store visible after $commitDelayMs ms with a $cacheReadDelayMs ms read",
+    async ({ commitDelayMs, cacheReadDelayMs }) => {
+      vi.useFakeTimers();
+      try {
+        let claimed = false;
+        let storeAttempted = false;
+        let stored: ApifySoldComp[] | null = null;
+        const runActor = successfulRun([
+          rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+          rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+          rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+        ]);
+        const cache: TtlCache<ApifySoldComp[]> = {
+          scope: "shared",
+          get: () =>
+            new Promise<ApifySoldComp[] | null>((resolve) => {
+              setTimeout(() => resolve(stored), storeAttempted ? cacheReadDelayMs : 0);
+            }),
+          set: (_key, value) => {
+            storeAttempted = true;
+            setTimeout(() => {
+              stored = value;
+            }, commitDelayMs);
+            return new Promise<void>(() => undefined);
+          },
+          claim: async () => {
+            if (claimed) return false;
+            claimed = true;
+            return true;
+          },
+        };
+        const providerForRequest = () =>
+          createApifySoldPricingProvider({
+            enabled: true,
+            token: "secret",
+            cache,
+            runActor,
+            timeoutSecs: 1,
+            waitSecs: 1,
+            emitDiagnostic: () => undefined,
+          });
+
+        const winnerResult = providerForRequest().price(SIGNAL);
+        await vi.advanceTimersByTimeAsync(2_501);
+        const winner = await winnerResult;
+        const retryResult = providerForRequest().price(SIGNAL);
+        await vi.advanceTimersByTimeAsync(cacheReadDelayMs);
+        const retry = await retryResult;
+
+        expect(winner).not.toBeNull();
+        expect(retry).toEqual(winner);
+        expect(runActor).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("recovers when exact winner observation follows one transient cache read failure", async () => {
+    vi.useFakeTimers();
+    try {
+      let claimed = false;
+      let reads = 0;
+      let stored: ApifySoldComp[] | null = null;
+      const runActor = successfulRun([
+        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+        rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+      ]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => {
+          reads += 1;
+          if (reads === 1) return null;
+          if (reads === 2) throw new Error("transient cache read failure");
+          return stored;
+        },
+        set: (_key, value) => {
+          stored = value;
+          return new Promise<void>(() => undefined);
+        },
+        claim: async () => {
+          if (claimed) return false;
+          claimed = true;
+          return true;
+        },
+      };
+      const providerForRequest = () =>
+        createApifySoldPricingProvider({
+          enabled: true,
+          token: "secret",
+          cache,
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          emitDiagnostic: () => undefined,
+        });
+
+      const winnerResult = providerForRequest().price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const winner = await winnerResult;
+      const retry = await providerForRequest().price(SIGNAL);
+
+      expect(winner).not.toBeNull();
+      expect(retry).toEqual(winner);
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft by the pricing deadline when the losing claimant cache read never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      let reads = 0;
+      const runActor = successfulRun([]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: vi.fn(() => {
+          reads += 1;
+          return reads === 1
+            ? Promise.resolve(null)
+            : new Promise<ApifySoldComp[] | null>(() => undefined);
+        }),
+        set: async () => undefined,
+        claim: async () => false,
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let settled = false;
+      const result = provider.price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toBeNull();
+      expect(runActor).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not start the optional paid expansion after the pricing deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const runActor = vi.fn<RunApifySoldActor>(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 2_501));
+        return {
+          status: "SUCCEEDED",
+          items: [rawItem()],
+        };
+      });
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache: sharedTestCache(),
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      const result = provider.price(SIGNAL);
+
+      await vi.advanceTimersByTimeAsync(5_002);
+
+      await expect(result).resolves.toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps each staggered caller bounded by its own pricing deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let reads = 0;
+      const runActor = successfulRun([]);
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: vi.fn(async () => {
+          reads += 1;
+          if (reads === 1) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+          }
+          return null;
+        }),
+        set: async () => undefined,
+        claim: vi.fn(() => new Promise<boolean>(() => undefined)),
+      };
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let firstSettled = false;
+      let secondSettled = false;
+      const first = provider.price(SIGNAL).then((value) => {
+        firstSettled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const second = provider.price(SIGNAL).then((value) => {
+        secondSettled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(1_501);
+
+      expect(firstSettled).toBe(true);
+      expect(secondSettled).toBe(false);
+      await expect(first).resolves.toBeNull();
+      expect(runActor).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(secondSettled).toBe(true);
+      await expect(second).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft and cleans up the shared flight when the Actor never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const runActor = vi.fn<RunApifySoldActor>(
+        () => new Promise<never>(() => undefined),
+      );
+      const provider = createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache: sharedTestCache(),
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+      let settled = false;
+      const first = provider.price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(2_501);
+
+      expect(settled).toBe(true);
+      await expect(first).resolves.toBeNull();
+      const retry = provider.price(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      await expect(retry).resolves.toBeNull();
+      expect(runActor).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("declines before paid retrieval when the shared cost fence is unavailable", async () => {
+    const runActor = successfulRun([
+      rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+      rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+    ]);
     const brokenCache: TtlCache<ApifySoldComp[]> = {
+      scope: "shared",
       get: async () => {
         throw new Error("redis unavailable");
       },
       set: async () => {
+        throw new Error("redis unavailable");
+      },
+      claim: async () => {
         throw new Error("redis unavailable");
       },
     };
@@ -549,13 +1269,11 @@ describe("createApifySoldPricingProvider", () => {
       enabled: true,
       token: "secret",
       cache: brokenCache,
-      runActor: successfulRun([
-        rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
-        rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
-      ]),
+      runActor,
       emitDiagnostic: () => undefined,
     });
 
-    await expect(provider.price(SIGNAL)).resolves.toMatchObject({ tier: "ebay-sold" });
+    await expect(provider.price(SIGNAL)).resolves.toBeNull();
+    expect(runActor).not.toHaveBeenCalled();
   });
 });

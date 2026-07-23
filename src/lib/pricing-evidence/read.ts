@@ -5,6 +5,7 @@ import {
   priceResultSchema,
 } from "@/lib/pricing/types";
 import {
+  PRICING_EVIDENCE_MAX_ROWS,
   acceptedPricingEvidenceRecordSchema,
   persistedPriceResultSchema,
 } from "./snapshot";
@@ -17,6 +18,7 @@ const evidenceAsOfSchema = acceptedPricingEvidenceRecordSchema.extend({
 
 export const PRICING_EVIDENCE_STALE_AFTER_DAYS = 3;
 export const PRICING_EVIDENCE_STRONG_MINIMUM = 4;
+const PRICING_EVIDENCE_LEGACY_MAX_ROWS = 60;
 
 export const pricingEvidenceSnapshotRowSchema = z
   .object({
@@ -35,7 +37,7 @@ export const pricingEvidenceSnapshotRowSchema = z
       })
       .strict(),
     price_result: persistedPriceResultSchema,
-    evidence: z.array(evidenceAsOfSchema).max(60),
+    evidence: z.array(evidenceAsOfSchema).max(PRICING_EVIDENCE_LEGACY_MAX_ROWS),
     evidence_as_of: isoDateTime,
     pipeline_runs: z
       .object({
@@ -73,7 +75,7 @@ export const pricingEvidenceProjectionSchema = z
     evidenceAgeDays: z.number().nonnegative(),
     isStale: z.boolean(),
     defaultWindow: z.enum(["60D", "90D"]),
-    comparables: z.array(evidenceAsOfSchema).max(60),
+    comparables: z.array(evidenceAsOfSchema).max(PRICING_EVIDENCE_MAX_ROWS),
     estimatedFees: z.number().nonnegative(),
     estimatedPayout: z.number().nonnegative(),
     chartBounds: z
@@ -140,11 +142,11 @@ export function buildPricingEvidenceProjection(
   }
 
   const sourceUrls = new Set(row.price_result.sources.map((source) => source.url));
-  const comparables = row.evidence.filter(
+  const acceptedEvidence = row.evidence.filter(
     (record) => record.priceDisclosure === "displayed-sold-price",
   );
   if (
-    comparables.some(
+    acceptedEvidence.some(
       (record) =>
         Date.parse(record.evidenceAsOf) !== evidenceAsOfMs ||
         !sourceUrls.has(record.sourceUrl),
@@ -154,6 +156,7 @@ export function buildPricingEvidenceProjection(
       "Pricing evidence row timestamp or citation is incoherent.",
     );
   }
+  const comparables = acceptedEvidence.slice(0, PRICING_EVIDENCE_MAX_ROWS);
 
   const now = input.now ?? Date.now();
   if (!Number.isFinite(now) || now < evidenceAsOfMs) {

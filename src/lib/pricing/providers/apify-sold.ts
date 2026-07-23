@@ -5,7 +5,10 @@ import {
   SOLD_HALFLIFE_DAYS_DEFAULT,
   SOLD_STALE_DAYS_DEFAULT,
 } from "../freshness";
-import { selectSoldCompEvidence } from "../sold-comp-matcher";
+import {
+  selectSoldCompEvidence,
+  selectVerifiedSoldMatches,
+} from "../sold-comp-matcher";
 import type { ItemSignal, PriceResult, PricingProvider } from "../types";
 import { logEvent, type LogFields } from "../../observability";
 import {
@@ -20,7 +23,9 @@ import {
 /** The exact Caffein Dev Actor and build evaluated by issues #188/#198. */
 export const APIFY_SOLD_ACTOR_ID = "oTtB3VgfuE9GtxQt2";
 export const APIFY_SOLD_ACTOR_BUILD_DEFAULT = "1.18.3";
-export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 25;
+export const APIFY_SOLD_INITIAL_RESULTS = 10;
+export const APIFY_SOLD_MAX_RESULTS_DEFAULT = 20;
+export const APIFY_SOLD_EXPANSION_THRESHOLD = 3;
 export const APIFY_SOLD_DAYS_TO_SCRAPE_DEFAULT = 90;
 export const APIFY_SOLD_REQUEST_RETRIES_DEFAULT = 2;
 export const APIFY_SOLD_ACTOR_TIMEOUT_SECS_DEFAULT = 55;
@@ -32,10 +37,96 @@ export const APIFY_SOLD_WAIT_SECS_DEFAULT = 60;
 export const APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT = 0.11;
 export const APIFY_SOLD_CIRCUIT_FAILURE_THRESHOLD_DEFAULT = 3;
 export const APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT = 60_000;
+const APIFY_SOLD_COORDINATION_ALLOWANCE_MS = 500;
+const APIFY_SOLD_WINNER_STORE_POLL_MS = 25;
+const APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS = 10;
+const APIFY_SOLD_DEADLINE_MARGIN_MS = 1;
+const APIFY_SOLD_PRICING_DEADLINE_EXCEEDED = Symbol(
+  "apify-sold-pricing-deadline-exceeded",
+);
+
+async function settleBeforeApifyPricingDeadline<T>(
+  startOperation: (signal: AbortSignal) => Promise<T>,
+  deadline: number,
+  cancellationSignal?: AbortSignal,
+): Promise<T | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      startOperation(controller.signal),
+      new Promise<typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(APIFY_SOLD_PRICING_DEADLINE_EXCEEDED);
+          controller.abort();
+        }, remainingMs);
+      }),
+      new Promise<typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED>((resolve) => {
+        cancel = () => {
+          resolve(APIFY_SOLD_PRICING_DEADLINE_EXCEEDED);
+          controller.abort();
+        };
+        if (cancellationSignal?.aborted) cancel();
+        else cancellationSignal?.addEventListener("abort", cancel, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (cancel) cancellationSignal?.removeEventListener("abort", cancel);
+  }
+}
+
+async function delayBeforeApifyPricingDeadline(
+  delayMs: number,
+  deadline: number,
+  cancellationSignal: AbortSignal,
+): Promise<boolean> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0 || cancellationSignal.aborted) return false;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: (() => void) | undefined;
+  try {
+    return await new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), Math.min(delayMs, remainingMs));
+      cancel = () => resolve(false);
+      cancellationSignal.addEventListener("abort", cancel, { once: true });
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (cancel) cancellationSignal.removeEventListener("abort", cancel);
+  }
+}
 
 export interface ApifySoldComp extends EbaySoldComp {
   isBestOfferAccepted?: boolean;
   priceDisclosure?: "displayed-sold-price" | "asking-price-not-accepted-amount";
+}
+
+function sameApifySoldComps(
+  observed: readonly ApifySoldComp[],
+  expected: readonly ApifySoldComp[],
+): boolean {
+  return (
+    observed.length === expected.length &&
+    observed.every((comp, index) => {
+      const expectedComp = expected[index];
+      return (
+        expectedComp != null &&
+        comp.url === expectedComp.url &&
+        comp.title === expectedComp.title &&
+        comp.price === expectedComp.price &&
+        comp.condition === expectedComp.condition &&
+        comp.soldAt === expectedComp.soldAt &&
+        comp.isBestOfferAccepted === expectedComp.isBestOfferAccepted &&
+        comp.priceDisclosure === expectedComp.priceDisclosure
+      );
+    })
+  );
 }
 
 interface ApifyCircuitState {
@@ -122,7 +213,6 @@ export interface ApifySoldPricingProviderOptions {
   runActor?: RunApifySoldActor;
   actorId?: string;
   actorBuild?: string;
-  maxResults?: number;
   daysToScrape?: number;
   maxTotalChargeUsd?: number;
   timeoutSecs?: number;
@@ -316,13 +406,6 @@ export function createApifySoldPricingProvider(
     options.actorBuild?.trim() ||
     process.env.APIFY_SOLD_ACTOR_BUILD?.trim() ||
     APIFY_SOLD_ACTOR_BUILD_DEFAULT;
-  const maxResults = Math.min(
-    APIFY_SOLD_MAX_RESULTS_DEFAULT,
-    positiveInteger(
-      options.maxResults ?? process.env.APIFY_SOLD_MAX_RESULTS,
-      APIFY_SOLD_MAX_RESULTS_DEFAULT,
-    ),
-  );
   const daysToScrape = Math.min(
     180,
     positiveInteger(
@@ -358,6 +441,9 @@ export function createApifySoldPricingProvider(
       APIFY_SOLD_MAX_TOTAL_CHARGE_USD_DEFAULT,
     ),
   );
+  const pricingWindowMs =
+    Math.max(timeoutSecs, waitSecs) * 1_000 * 2 +
+    APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
   const staleDays = positiveNumber(
     options.staleDays ?? process.env.EBAY_SOLD_STALE_DAYS,
     SOLD_STALE_DAYS_DEFAULT,
@@ -375,6 +461,14 @@ export function createApifySoldPricingProvider(
     APIFY_SOLD_CIRCUIT_COOLDOWN_MS_DEFAULT,
   );
   const cache = options.cache;
+  const claimCostFence =
+    cache?.scope === "shared" && typeof cache.claim === "function"
+      ? cache.claim.bind(cache)
+      : null;
+  const getClaimOwner =
+    cache?.scope === "shared" && typeof cache.getClaimOwner === "function"
+      ? cache.getClaimOwner.bind(cache)
+      : null;
   const now = options.now;
   const emitDiagnostic = options.emitDiagnostic ?? logEvent;
   const runActor = options.runActor ?? createDefaultApifySoldActorRunner(token);
@@ -387,13 +481,13 @@ export function createApifySoldPricingProvider(
 
   const queryFor = (signal: ItemSignal): string | null => buildSoldSearchQuery(signal);
 
-  function requestFor(query: string): ApifySoldRunRequest {
+  function requestFor(query: string, maxItems: number): ApifySoldRunRequest {
     return {
       actorId,
       build: actorBuild,
       input: {
         keywords: [query],
-        count: maxResults,
+        count: maxItems,
         daysToScrape,
         ebaySite: "ebay.com",
         sortOrder: "endedRecently",
@@ -401,7 +495,7 @@ export function createApifySoldPricingProvider(
         itemCondition: "any",
         includeCompletedListings: true,
       },
-      maxItems: maxResults,
+      maxItems,
       maxTotalChargeUsd,
       timeoutSecs,
       waitSecs,
@@ -410,26 +504,261 @@ export function createApifySoldPricingProvider(
     };
   }
 
-  function cacheKey(query: string): string {
-    return JSON.stringify({ actorId, actorBuild, query, maxResults, daysToScrape });
+  function cacheKey(query: string, signal: ItemSignal): string {
+    return JSON.stringify({
+      actorId,
+      actorBuild,
+      query,
+      retrievalPolicy: "initial-10-expand-20-v1",
+      daysToScrape,
+      matcherSignal: {
+        isbn: signal.isbn?.trim() ?? "",
+        upc: signal.upc?.trim() ?? "",
+        brand: signal.brand?.trim() ?? "",
+        model: signal.model?.trim() ?? "",
+        category: signal.category?.trim() ?? "",
+        conditionKnown: signal.conditionKnown === true,
+        condition: signal.condition?.trim() ?? "",
+        resolvedName: signal.resolvedName?.trim() ?? "",
+        specs: signal.specs?.map((spec) => spec.trim()) ?? [],
+      },
+    });
   }
 
-  async function readCache(key: string): Promise<ApifySoldComp[] | null> {
+  async function readCache(
+    key: string,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
     if (!cache) return null;
     try {
-      return await cache.get(key);
+      const cacheRead = await settleBeforeApifyPricingDeadline(
+        (abortSignal) => cache.get(key, abortSignal),
+        pricingDeadline,
+      );
+      if (cacheRead === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cache_error", {
+          op: "get",
+          reason: "timeout",
+        });
+        return null;
+      }
+      return cacheRead;
     } catch {
       emitDiagnostic("pricing.apify_sold.cache_error", { op: "get", reason: "unavailable" });
       return null;
     }
   }
 
-  async function writeCache(key: string, comps: ApifySoldComp[]): Promise<void> {
-    if (!cache) return;
+  async function waitForClaimWinner(
+    key: string,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
+    if (!cache) return null;
+    let delayMs = 0;
+    while (true) {
+      if (delayMs > 0) {
+        const remainingMs = pricingDeadline - Date.now();
+        if (remainingMs <= 0) break;
+        await new Promise<void>((resolve) =>
+          setTimeout(
+            resolve,
+            Math.min(delayMs, Math.max(1, Math.floor(remainingMs / 2))),
+          ),
+        );
+      }
+      const handedOff = await readCache(key, pricingDeadline);
+      if (handedOff != null) return handedOff;
+      if (Date.now() >= pricingDeadline) break;
+      delayMs =
+        delayMs === 0
+          ? APIFY_SOLD_WINNER_STORE_POLL_MS
+          : Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
+    }
+    emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+      reason: "handoff-timeout",
+    });
+    return null;
+  }
+
+  async function claimOrObserveExactOwner(
+    key: string,
+    ownerToken: string,
+    pricingDeadline: number,
+  ): Promise<boolean | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED> {
+    if (!claimCostFence) return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+    if (!getClaimOwner) {
+      return settleBeforeApifyPricingDeadline(
+        (abortSignal) => claimCostFence(key, abortSignal, ownerToken),
+        pricingDeadline,
+      );
+    }
+
+    const cancellation = new AbortController();
     try {
-      await cache.set(key, comps);
-    } catch {
-      emitDiagnostic("pricing.apify_sold.cache_error", { op: "set", reason: "unavailable" });
+      const claimResponse = settleBeforeApifyPricingDeadline(
+        (abortSignal) => claimCostFence(key, abortSignal, ownerToken),
+        pricingDeadline,
+        cancellation.signal,
+      );
+      const ownerObservation = (async (): Promise<
+        true | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
+      > => {
+        if (
+          !(await delayBeforeApifyPricingDeadline(
+            0,
+            pricingDeadline,
+            cancellation.signal,
+          ))
+        ) {
+          return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+        }
+
+        let delayMs = APIFY_SOLD_WINNER_STORE_POLL_MS;
+        while (!cancellation.signal.aborted) {
+          try {
+            const observedOwner = await settleBeforeApifyPricingDeadline(
+              (abortSignal) => getClaimOwner(key, abortSignal),
+              pricingDeadline,
+              cancellation.signal,
+            );
+            if (observedOwner === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+              return observedOwner;
+            }
+            if (observedOwner === ownerToken) return true;
+          } catch {
+            // A later bounded observation may still prove this exact owner.
+          }
+
+          const remainingMs = pricingDeadline - Date.now();
+          if (remainingMs <= 0) break;
+          const finalReadAllowanceMs =
+            APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS +
+            APIFY_SOLD_DEADLINE_MARGIN_MS;
+          if (remainingMs <= finalReadAllowanceMs) {
+            await delayBeforeApifyPricingDeadline(
+              Number.MAX_SAFE_INTEGER,
+              pricingDeadline,
+              cancellation.signal,
+            );
+            break;
+          }
+          if (
+            !(await delayBeforeApifyPricingDeadline(
+              Math.min(delayMs, remainingMs - finalReadAllowanceMs),
+              pricingDeadline,
+              cancellation.signal,
+            ))
+          ) {
+            break;
+          }
+          delayMs = Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
+        }
+        return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+      })();
+
+      return await Promise.race([claimResponse, ownerObservation]);
+    } finally {
+      cancellation.abort();
+    }
+  }
+
+  async function writeCache(
+    key: string,
+    comps: ApifySoldComp[],
+    pricingDeadline: number,
+  ): Promise<"stored" | "unconfirmed"> {
+    if (!cache) return "stored";
+    const cancellation = new AbortController();
+    let storeFailureLogged = false;
+    try {
+      const storeOutcome = settleBeforeApifyPricingDeadline(
+        (abortSignal) => cache.set(key, comps, abortSignal),
+        pricingDeadline,
+        cancellation.signal,
+      ).then(
+        (result): "stored" | "unconfirmed" =>
+          result === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
+            ? "unconfirmed"
+            : "stored",
+        () => {
+          storeFailureLogged = true;
+          emitDiagnostic("pricing.apify_sold.cache_error", {
+            op: "set",
+            reason: "unavailable",
+          });
+          return new Promise<never>(() => undefined);
+        },
+      );
+
+      const observationOutcome = (async (): Promise<"stored" | "unconfirmed"> => {
+        let pollMs = APIFY_SOLD_WINNER_STORE_POLL_MS;
+        let observationFailureLogged = false;
+        if (
+          !(await delayBeforeApifyPricingDeadline(
+            0,
+            pricingDeadline,
+            cancellation.signal,
+          ))
+        ) {
+          return "unconfirmed";
+        }
+
+        while (!cancellation.signal.aborted) {
+          try {
+            const observed = await settleBeforeApifyPricingDeadline(
+              (abortSignal) => cache.get(key, abortSignal),
+              pricingDeadline,
+              cancellation.signal,
+            );
+            if (observed === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+              return "unconfirmed";
+            }
+            if (observed != null && sameApifySoldComps(observed, comps)) {
+              return "stored";
+            }
+          } catch {
+            if (!observationFailureLogged) {
+              observationFailureLogged = true;
+              emitDiagnostic("pricing.apify_sold.cache_error", {
+                op: "get",
+                reason: "unavailable",
+              });
+            }
+          }
+
+          const remainingMs = pricingDeadline - Date.now();
+          const finalReadAllowanceMs =
+            APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS + APIFY_SOLD_DEADLINE_MARGIN_MS;
+          if (remainingMs <= finalReadAllowanceMs) {
+            return "unconfirmed";
+          }
+          if (
+            !(await delayBeforeApifyPricingDeadline(
+              Math.min(
+                pollMs,
+                remainingMs - finalReadAllowanceMs,
+              ),
+              pricingDeadline,
+              cancellation.signal,
+            ))
+          ) {
+            return "unconfirmed";
+          }
+          pollMs = Math.min(pollMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
+        }
+        return "unconfirmed";
+      })();
+
+      const outcome = await Promise.race([storeOutcome, observationOutcome]);
+      if (outcome === "unconfirmed" && !storeFailureLogged) {
+        emitDiagnostic("pricing.apify_sold.cache_error", {
+          op: "set",
+          reason: "timeout",
+        });
+      }
+      return outcome;
+    } finally {
+      cancellation.abort();
     }
   }
 
@@ -441,17 +770,29 @@ export function createApifySoldPricingProvider(
     }
   }
 
-  async function fetchAndCache(key: string, query: string): Promise<ApifySoldComp[] | null> {
+  async function runBatch(
+    query: string,
+    maxItems: number,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
+    if (Date.now() >= pricingDeadline) return null;
     try {
-      const result = await runActor(requestFor(query));
+      const actorResult = await settleBeforeApifyPricingDeadline(
+        () => runActor(requestFor(query, maxItems)),
+        pricingDeadline,
+      );
+      if (actorResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        recordFailure("request-timeout");
+        return null;
+      }
+      const result = actorResult;
       if (result.status !== "SUCCEEDED") {
         recordFailure(boundedStatus(result.status));
         return null;
       }
-      const comps = normalizeApifySoldItems(result.items, maxResults);
+      const comps = normalizeApifySoldItems(result.items, maxItems);
       circuit.consecutiveFailures = 0;
       circuit.openUntil = 0;
-      await writeCache(key, comps);
       return comps;
     } catch {
       recordFailure("request-failed");
@@ -459,9 +800,71 @@ export function createApifySoldPricingProvider(
     }
   }
 
-  async function loadComps(query: string): Promise<ApifySoldComp[] | null> {
-    const key = cacheKey(query);
-    const cached = await readCache(key);
+  async function fetchAndCache(
+    key: string,
+    query: string,
+    signal: ItemSignal,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
+    const initial = await runBatch(
+      query,
+      APIFY_SOLD_INITIAL_RESULTS,
+      pricingDeadline,
+    );
+    if (initial == null) {
+      return (await writeCache(key, [], pricingDeadline)) === "unconfirmed"
+        ? null
+        : [];
+    }
+
+    let combined = normalizeEbaySoldCompUrls(initial);
+    const initialEvidence = selectSoldCompEvidence(combined, signal);
+    if (initialEvidence.anchors.length < APIFY_SOLD_EXPANSION_THRESHOLD) {
+      const expanded = await runBatch(
+        query,
+        APIFY_SOLD_MAX_RESULTS_DEFAULT,
+        pricingDeadline,
+      );
+      if (expanded != null) {
+        combined = normalizeEbaySoldCompUrls([...expanded, ...combined]);
+      }
+    }
+    return (await writeCache(key, combined, pricingDeadline)) === "unconfirmed"
+      ? null
+      : combined;
+  }
+
+  async function loadComps(
+    query: string,
+    signal: ItemSignal,
+    pricingDeadline: number,
+  ): Promise<ApifySoldComp[] | null> {
+    if (!cache || !claimCostFence) {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "shared-cache-required",
+      });
+      return null;
+    }
+    const key = cacheKey(query, signal);
+    let cached: ApifySoldComp[] | null;
+    try {
+      const cacheRead = await settleBeforeApifyPricingDeadline(
+        (abortSignal) => cache.get(key, abortSignal),
+        pricingDeadline,
+      );
+      if (cacheRead === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "cache-read-timeout",
+        });
+        return null;
+      }
+      cached = cacheRead;
+    } catch {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "cache-read-failed",
+      });
+      return null;
+    }
     if (cached != null) return cached;
 
     const clock = now?.() ?? Date.now();
@@ -473,8 +876,46 @@ export function createApifySoldPricingProvider(
     }
 
     const existing = inFlight.get(key);
-    if (existing) return existing;
-    const pending = fetchAndCache(key, query).finally(() => {
+    if (existing) {
+      const joined = await settleBeforeApifyPricingDeadline(
+        () => existing,
+        pricingDeadline,
+      );
+      if (joined === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "in-flight-timeout",
+        });
+        return null;
+      }
+      return joined;
+    }
+    const pending = (async () => {
+      let claimed: boolean;
+      const claimOwnerToken = globalThis.crypto.randomUUID();
+      try {
+        const claimResult = await claimOrObserveExactOwner(
+          key,
+          claimOwnerToken,
+          pricingDeadline,
+        );
+        if (claimResult === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
+          emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+            reason: "claim-timeout",
+          });
+          return null;
+        }
+        claimed = claimResult;
+      } catch {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "claim-failed",
+        });
+        return null;
+      }
+      if (!claimed) {
+        return waitForClaimWinner(key, pricingDeadline);
+      }
+      return fetchAndCache(key, query, signal, pricingDeadline);
+    })().finally(() => {
       inFlight.delete(key);
     });
     inFlight.set(key, pending);
@@ -490,18 +931,23 @@ export function createApifySoldPricingProvider(
       if (!active) return null;
       const query = queryFor(signal);
       if (!query) return null;
-      const comps = await loadComps(query);
+      const pricingDeadline = Date.now() + pricingWindowMs;
+      const comps = await loadComps(query, signal, pricingDeadline);
       if (comps == null) return null;
 
       const normalizedComps = normalizeEbaySoldCompUrls(comps);
       const evidence = selectSoldCompEvidence(normalizedComps, signal);
-      const weights = new Map(evidence.anchors.map(({ comp, score }) => [comp, score]));
       const clock = now?.();
       const anchors = evidence.anchors.map(({ comp }) => comp);
       const fresh = clock == null ? anchors : selectFreshComps(anchors, clock, staleDays);
-      if (fresh.length < EBAY_SOLD_MIN_COMPS) return null;
+      const freshSet = new Set(fresh);
+      const retained = selectVerifiedSoldMatches(
+        evidence.anchors.filter(({ comp }) => freshSet.has(comp)),
+      );
+      if (retained.length < EBAY_SOLD_MIN_COMPS) return null;
+      const weights = new Map(retained.map(({ comp, score }) => [comp, score]));
 
-      return synthesizeSoldResult(fresh, {
+      return synthesizeSoldResult(retained.map(({ comp }) => comp), {
         ...(clock != null ? { now: clock, halfLifeDays } : {}),
         evidenceWeight: (comp) => weights.get(comp as ApifySoldComp) ?? 1,
       });
