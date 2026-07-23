@@ -27,6 +27,11 @@ struct AppShellView: View {
 #if DEBUG
                 if visualState.ownerIssue == 207 {
                     CaptureVisualStateView(state: visualState)
+                } else if visualState.ownerIssue == 424 {
+                    ScanCameraVisualStateView(
+                        state: visualState,
+                        forceReducedMotion: configuration.forceReducedMotion
+                    )
                 } else if visualState.ownerIssue == 208 || visualState == .runDetail {
                     shell
                 } else {
@@ -127,8 +132,12 @@ struct AppShellView: View {
         .fullScreenCover(item: $router.presentedFullScreen) { destination in
             switch destination {
             case .guidedCamera:
-                GuidedCameraView(flow: captureFlow) {
-                    router.presentedFullScreen = nil
+                ScanCameraView(flow: captureFlow) { destination, photos, opener in
+                    router.openCaptureBoundary(
+                        destination: destination,
+                        photos: photos,
+                        opener: opener
+                    )
                 }
             }
         }
@@ -200,12 +209,10 @@ struct AppShellView: View {
     }
 
     private func presentPendingCaptureIfNeeded() {
-        guard let pendingCapturePresentation else { return }
+        guard pendingCapturePresentation != nil else { return }
         self.pendingCapturePresentation = nil
         router.presentedFullScreen = .guidedCamera
-        if pendingCapturePresentation == .camera {
-            Task { await captureFlow.startCamera() }
-        }
+        Task { await captureFlow.startCamera() }
     }
 }
 

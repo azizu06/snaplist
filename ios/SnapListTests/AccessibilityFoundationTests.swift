@@ -26,4 +26,14 @@ final class AccessibilityFoundationTests: XCTestCase {
         XCTAssertTrue(configuration.forceReducedMotion)
         XCTAssertTrue(configuration.usesZeroNetworkFixtures)
     }
+
+    func testLiveAndRecoveryReviewControlsShareApprovedAccessibilityPriority() {
+        for context in ScanReviewAccessibilityPriority.allCases {
+            XCTAssertEqual(
+                context.value,
+                40,
+                "\(context.rawValue) Review priority"
+            )
+        }
+    }
 }

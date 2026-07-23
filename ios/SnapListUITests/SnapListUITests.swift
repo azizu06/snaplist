@@ -39,8 +39,16 @@ final class SnapListUITests: XCTestCase {
             app.buttons["capture.choose-library"]
         ] {
             XCTAssertTrue(control.exists)
-            XCTAssertGreaterThanOrEqual(control.frame.width, 44)
-            XCTAssertGreaterThanOrEqual(control.frame.height, 44)
+            XCTAssertGreaterThanOrEqual(
+                control.frame.width,
+                44,
+                "\(control.identifier) width"
+            )
+            XCTAssertGreaterThanOrEqual(
+                control.frame.height,
+                44,
+                "\(control.identifier) height"
+            )
         }
 
         app.buttons["capture.close"].tap()
@@ -55,9 +63,9 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.buttons["capture.take-one-item"].waitForExistence(timeout: 2))
         app.buttons["capture.take-one-item"].tap()
 
-        XCTAssertTrue(app.staticTexts["Camera isn’t available"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
         addScreenshot(named: "CAPTURE-CAMERA-UNAVAILABLE.png")
-        let library = app.buttons["camera.library-recovery"]
+        let library = app.buttons["scan.choose-library"]
         XCTAssertTrue(library.exists)
         XCTAssertGreaterThanOrEqual(library.frame.width, 44)
         XCTAssertGreaterThanOrEqual(library.frame.height, 44)
@@ -65,7 +73,7 @@ final class SnapListUITests: XCTestCase {
         library.tap()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 3))
         app.buttons["Cancel"].tap()
-        XCTAssertTrue(app.staticTexts["Camera isn’t available"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 2))
     }
 
     func testRestoredDraftResumesBeforeTheFreshLauncherCanOverwriteIt() {
@@ -81,43 +89,21 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(resume.frame.height, 44)
         resume.tap()
 
-        let photoCount = app.staticTexts["capture.photo-count"]
+        let photoCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(photoCount.waitForExistence(timeout: 3))
-        XCTAssertEqual(photoCount.label, "1 of 4 photos")
+        XCTAssertEqual(photoCount.label, "1 of 5")
         XCTAssertFalse(app.staticTexts["sheet.capture.title"].exists)
         addScreenshot(named: "CAPTURE-RESTORED-DRAFT.png")
 
-        let continueButton = app.buttons["capture.continue"]
+        let reviewButton = app.buttons["scan.review"]
         let window = app.windows.firstMatch.frame
-        XCTAssertTrue(continueButton.exists)
-        XCTAssertGreaterThanOrEqual(continueButton.frame.minX, window.minX)
-        XCTAssertLessThanOrEqual(continueButton.frame.maxX, window.maxX)
-        XCTAssertGreaterThanOrEqual(continueButton.frame.height, 44)
-        continueButton.tap()
-        XCTAssertTrue(app.staticTexts["capture.handoff.title"].waitForExistence(timeout: 2))
-    }
-
-    func testReviewHandoffBackToCameraRestartsCaptureAndKeepsTheStagedPhoto() {
-        let app = XCUIApplication()
-        app.launchArguments = ["--restored-capture-fixture"]
-        app.launch()
-
-        app.buttons["button.primary.resume-captured-photo"].tap()
-        XCTAssertTrue(app.buttons["capture.continue"].waitForExistence(timeout: 3))
-        app.buttons["capture.continue"].tap()
-        let backToCamera = app.buttons["capture.handoff.back-to-camera"]
-        XCTAssertTrue(backToCamera.waitForExistence(timeout: 2))
-
-        backToCamera.tap()
-
-        XCTAssertTrue(app.buttons["camera.close"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["camera.staged-photo-boundary"].exists)
-        XCTAssertFalse(app.buttons["camera.shutter"].isEnabled)
-        XCTAssertFalse(app.buttons["camera.library"].isEnabled)
-        app.buttons["camera.close"].tap()
-        app.buttons["dock.capture"].tap()
-        XCTAssertTrue(app.staticTexts["1 of 4 photos saved"].waitForExistence(timeout: 2))
-        XCTAssertTrue(app.buttons["button.primary.resume-captured-photo"].exists)
+        XCTAssertTrue(reviewButton.exists)
+        XCTAssertGreaterThanOrEqual(reviewButton.frame.minX, window.minX)
+        XCTAssertLessThanOrEqual(reviewButton.frame.maxX, window.maxX)
+        XCTAssertGreaterThanOrEqual(reviewButton.frame.height, 44)
+        reviewButton.tap()
+        XCTAssertFalse(app.buttons["scan.review"].waitForExistence(timeout: 1))
+        XCTAssertTrue(app.staticTexts["Home"].exists)
     }
 
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
@@ -139,6 +125,85 @@ final class SnapListUITests: XCTestCase {
             )
             XCTAssertFalse(app.staticTexts["Review photos"].exists)
             app.terminate()
+        }
+    }
+
+    func testApprovedScanCameraZeroAndFivePhotoStatesExposeTheFrozenControls() {
+        let zero = launch(extraArguments: ["--visual-state=CAM-01"])
+
+        for identifier in [
+            "scan.flash", "scan.library", "scan.shutter", "scan.tab", "trophy-wall.tab"
+        ] {
+            XCTAssertTrue(zero.buttons[identifier].waitForExistence(timeout: 2), identifier)
+        }
+        XCTAssertFalse(zero.buttons["scan.review"].exists)
+        XCTAssertFalse(zero.staticTexts["scan.photo-count"].exists)
+        zero.terminate()
+
+        let capped = launch(extraArguments: ["--visual-state=CAM-04"])
+        XCTAssertTrue(capped.staticTexts["scan.photo-count"].waitForExistence(timeout: 2))
+        XCTAssertEqual(capped.staticTexts["scan.photo-count"].label, "5 of 5")
+        XCTAssertTrue(capped.buttons["scan.review"].exists)
+        XCTAssertFalse(capped.buttons["scan.shutter"].isEnabled)
+        XCTAssertTrue(capped.buttons["scan.library"].isEnabled)
+    }
+
+    func testApprovedScanCameraRecoveryStatesUseExactCopyAndHonestActions() {
+        let unavailable = launch(extraArguments: ["--visual-state=CAM-V1"])
+        XCTAssertTrue(unavailable.staticTexts["Camera is not available"].waitForExistence(timeout: 2))
+        XCTAssertTrue(unavailable.staticTexts["Add photos from your library instead."].exists)
+        XCTAssertTrue(unavailable.buttons["scan.choose-library"].exists)
+        XCTAssertFalse(unavailable.buttons["scan.open-settings"].exists)
+        XCTAssertFalse(unavailable.buttons["scan.flash"].exists)
+        XCTAssertTrue(unavailable.buttons["scan.tab"].exists)
+        XCTAssertTrue(unavailable.buttons["trophy-wall.tab"].exists)
+        unavailable.terminate()
+
+        let denied = launch(extraArguments: ["--visual-state=CAM-V2"])
+        XCTAssertTrue(denied.staticTexts["SnapList cannot use the camera"].waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            denied.staticTexts[
+                "Allow camera access in Settings, or add photos from your library."
+            ].exists
+        )
+        XCTAssertTrue(denied.buttons["scan.choose-library"].exists)
+        XCTAssertTrue(denied.buttons["scan.open-settings"].exists)
+        XCTAssertFalse(denied.buttons["scan.flash"].exists)
+    }
+
+    func testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion() {
+        let app = launch(extraArguments: [
+            "--visual-state=CAM-03",
+            "--dynamic-type=accessibility3",
+            "--reduced-motion"
+        ])
+        let window = app.windows.firstMatch.frame
+
+        XCTAssertTrue(app.otherElements["scan.motion-reduced"].waitForExistence(timeout: 2))
+
+        for control in [
+            app.buttons["scan.flash"],
+            app.buttons["scan.library"],
+            app.buttons["scan.shutter"],
+            app.buttons["scan.review"],
+            app.buttons["scan.tab"],
+            app.buttons["trophy-wall.tab"]
+        ] {
+            XCTAssertTrue(control.waitForExistence(timeout: 2))
+            XCTAssertGreaterThanOrEqual(
+                control.frame.width,
+                44,
+                "\(control.identifier) width"
+            )
+            XCTAssertGreaterThanOrEqual(
+                control.frame.height,
+                44,
+                "\(control.identifier) height"
+            )
+            XCTAssertGreaterThanOrEqual(control.frame.minX, window.minX)
+            XCTAssertLessThanOrEqual(control.frame.maxX, window.maxX)
+            XCTAssertGreaterThanOrEqual(control.frame.minY, window.minY)
+            XCTAssertLessThanOrEqual(control.frame.maxY, window.maxY)
         }
     }
 
@@ -274,8 +339,8 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["SnapList Pro"].exists)
 
         app.buttons["capture.take-one-item"].tap()
-        XCTAssertTrue(app.staticTexts["Camera isn’t available"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["camera.library-recovery"].exists)
+        XCTAssertTrue(app.staticTexts["Camera is not available"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["scan.choose-library"].exists)
     }
 
     func testCameraDeniedAndRestrictedUseLibraryRecovery() {

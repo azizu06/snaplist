@@ -5,6 +5,170 @@ import XCTest
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    func testManualShutterStaysAvailableAfterFirstCaptureWithoutAVisionVerdict() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let store = TestCaptureStore()
+        let model = makeModel(camera: camera, store: store)
+
+        await model.startCamera()
+
+        XCTAssertTrue(model.canTakePhoto)
+        await model.takePhoto()
+        XCTAssertEqual(model.phase, .camera)
+        XCTAssertNotNil(model.stagedPhoto)
+        XCTAssertEqual(camera.stopCount, 0)
+        XCTAssertTrue(model.canTakePhoto)
+    }
+
+    func testManualCaptureAppendsFivePhotosInOrderAndMakesTheSixthAttemptInert() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let store = TestCaptureStore()
+        let model = makeModel(camera: camera, store: store)
+
+        await model.startCamera()
+        for _ in 0..<5 {
+            XCTAssertTrue(model.canTakePhoto)
+            await model.takePhoto()
+        }
+
+        XCTAssertEqual(model.stagedPhotos.map(\.id), store.stagedPhotos.map(\.id))
+        XCTAssertEqual(model.stagedPhotos.count, 5)
+        XCTAssertFalse(model.canTakePhoto)
+
+        await model.takePhoto()
+
+        XCTAssertEqual(camera.captureCount, 5)
+        XCTAssertEqual(model.stagedPhotos.count, 5)
+    }
+
+    func testLibrarySelectionAppendsInOrderOnlyThroughRemainingCapacity() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let store = TestCaptureStore()
+        let model = makeModel(camera: camera, store: store)
+        let libraryPhotos = (1...5).map { Data([$0]) }
+
+        await model.startCamera()
+        await model.takePhoto()
+        let addedCount = await model.stageLibraryPhotos(libraryPhotos)
+
+        XCTAssertEqual(addedCount, 4)
+        XCTAssertEqual(Array(store.stagedImageData.dropFirst()), Array(libraryPhotos.prefix(4)))
+        XCTAssertEqual(model.stagedPhotos.count, 5)
+        XCTAssertFalse(model.canTakePhoto)
+    }
+
+    func testLibraryPickerStagesEachPayloadBeforeLoadingTheNextAndKeepsPartialProgress() async {
+        let tracker = LibraryPayloadLifetimeTracker()
+        let store = LifetimeTrackingCaptureStore(tracker: tracker)
+        let model = CaptureFlowModel(
+            camera: TestCaptureCamera(isAvailable: true, authorization: .authorized),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: store
+        )
+        var didReachLaterFailure = false
+        let selections = [
+            TestLibraryPhotoLoader { tracker.makePayload(byte: 0x01) },
+            TestLibraryPhotoLoader { tracker.makePayload(byte: 0x02) },
+            TestLibraryPhotoLoader {
+                didReachLaterFailure = true
+                XCTAssertEqual(store.stagedBytes, [0x01, 0x02])
+                throw TestCaptureError.failed
+            }
+        ]
+
+        let addedCount = await model.stageLibraryPhotos(selections)
+
+        XCTAssertEqual(addedCount, 2)
+        XCTAssertTrue(didReachLaterFailure)
+        XCTAssertEqual(store.stagedBytes, [0x01, 0x02])
+        XCTAssertEqual(model.stagedPhotos.count, 2)
+        XCTAssertEqual(tracker.maximumResidentPayloads, 1)
+        XCTAssertEqual(tracker.residentPayloads, 0)
+        XCTAssertEqual(
+            tracker.events,
+            [.loaded(0x01), .staged(0x01), .released(0x01),
+             .loaded(0x02), .staged(0x02), .released(0x02)]
+        )
+    }
+
+    func testFifthSuccessfulAdditionPublishesTheExactLimitAnnouncementOnce() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let model = makeModel(camera: camera)
+
+        await model.startCamera()
+        for _ in 0..<5 {
+            await model.takePhoto()
+        }
+
+        XCTAssertEqual(
+            model.consumePhotoLimitAnnouncement(),
+            "Five photo limit reached. Review your photos."
+        )
+        XCTAssertNil(model.consumePhotoLimitAnnouncement())
+
+        await model.takePhoto()
+
+        XCTAssertNil(model.consumePhotoLimitAnnouncement())
+    }
+
+    func testShutterAccessibleNameOnlyAnnouncesTheLimitAtFiveDurablePhotos() {
+        let states = [
+            (
+                name: "below-cap idle",
+                accessibility: ScanShutterAccessibility(
+                    isEnabled: true,
+                    durablePhotoCount: 0
+                ),
+                expectedLabel: "Take photo"
+            ),
+            (
+                name: "below-cap pending intake",
+                accessibility: ScanShutterAccessibility(
+                    isEnabled: false,
+                    durablePhotoCount: 2
+                ),
+                expectedLabel: "Take photo"
+            ),
+            (
+                name: "at cap",
+                accessibility: ScanShutterAccessibility(
+                    isEnabled: false,
+                    durablePhotoCount: 5
+                ),
+                expectedLabel: "Take photo, unavailable at five photo limit"
+            )
+        ]
+
+        for state in states {
+            XCTAssertEqual(
+                state.accessibility.label,
+                state.expectedLabel,
+                state.name
+            )
+        }
+    }
+
+    func testFlashControlOnlyTogglesWhenTheCaptureDeviceSupportsIt() async {
+        let supportedCamera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            isFlashAvailable: true
+        )
+        let supported = makeModel(camera: supportedCamera)
+        await supported.startCamera()
+
+        XCTAssertTrue(supported.isFlashAvailable)
+        XCTAssertEqual(supported.flashMode, .off)
+        supported.toggleFlash()
+        XCTAssertEqual(supported.flashMode, .on)
+        XCTAssertEqual(supportedCamera.requestedFlashModes, [.on])
+
+        let unsupported = makeModel()
+        await unsupported.startCamera()
+        unsupported.toggleFlash()
+        XCTAssertEqual(unsupported.flashMode, .off)
+    }
+
     func testUnavailableAndDeniedCameraStatesOfferHonestRecovery() async {
         let unavailableCamera = TestCaptureCamera(isAvailable: false, authorization: .authorized)
         let unavailable = makeModel(camera: unavailableCamera)
@@ -19,9 +183,129 @@ final class CaptureFlowTests: XCTestCase {
         await denied.startCamera()
         XCTAssertEqual(denied.phase, .denied)
         XCTAssertEqual(deniedCamera.startCount, 0)
+
+        let restrictedCamera = TestCaptureCamera(isAvailable: true, authorization: .restricted)
+        let restricted = makeModel(camera: restrictedCamera)
+
+        await restricted.startCamera()
+        XCTAssertEqual(restricted.phase, .unavailable)
+        XCTAssertEqual(restrictedCamera.startCount, 0)
     }
 
-    func testRealEvaluatorOutputControlsShutterAndStagesOnePhoto() async throws {
+    func testPendingCaptureRejectsConcurrentLibraryIntakeAndBoundarySnapshot() async {
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            suspendsCapture: true
+        )
+        let store = TestCaptureStore()
+        let model = makeModel(camera: camera, store: store)
+
+        await model.startCamera()
+        for _ in 0..<4 {
+            let capture = Task { await model.takePhoto() }
+            let isCapturePending = await camera.waitUntilCaptureIsPending()
+            XCTAssertTrue(
+                isCapturePending,
+                "Capture completion requires a registered pending continuation."
+            )
+            guard isCapturePending else { return }
+            camera.completePendingCaptures()
+            await capture.value
+        }
+
+        let fifthCapture = Task { await model.takePhoto() }
+        let isFifthCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(
+            isFifthCapturePending,
+            "Fifth-photo completion requires a registered pending continuation."
+        )
+        guard isFifthCapturePending else { return }
+
+        XCTAssertTrue(model.isAddingPhotos)
+        XCTAssertFalse(model.canOpenBoundary)
+        let concurrentLibraryCount = await model.stageLibraryPhotos([Data([0x01])])
+        XCTAssertEqual(concurrentLibraryCount, 0)
+
+        camera.completePendingCaptures()
+        await fifthCapture.value
+
+        XCTAssertEqual(model.stagedPhotos.count, 5)
+        XCTAssertEqual(store.stageCount, 5)
+        XCTAssertTrue(model.canOpenBoundary)
+    }
+
+    func testPendingCaptureReadinessTimesOutWithoutRegisteredContinuation() async {
+        let camera = TestCaptureCamera(
+            isAvailable: true,
+            authorization: .authorized,
+            suspendsCapture: true
+        )
+
+        let isCapturePending = await camera.waitUntilCaptureIsPending(
+            timeoutNanoseconds: 1_000_000
+        )
+
+        XCTAssertFalse(
+            isCapturePending,
+            "Readiness must fail within its bound when no capture continuation registers."
+        )
+    }
+
+    func testCommittedAppendUsesAtomicAuthoritativeSetWithoutASecondReload() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let store = TestCaptureStore(loadPhotosError: TestCaptureError.failed)
+        let model = makeModel(camera: camera, store: store)
+
+        await model.startCamera()
+        await model.takePhoto()
+
+        XCTAssertEqual(model.stagedPhotos, store.stagedPhotos)
+        XCTAssertEqual(model.stagedPhotos.count, 1)
+        XCTAssertTrue(model.canOpenBoundary)
+        XCTAssertEqual(store.loadPhotosCount, 0)
+    }
+
+    func testMixedFivePhotoSetCapsOnceRejectsSixthAndRoutesExactOrderThroughAppRouter() async {
+        let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
+        let model = makeModel(camera: camera)
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+
+        await model.startCamera()
+        await model.takePhoto()
+        await model.takePhoto()
+        let libraryCount = await model.stageLibraryPhotos([
+            Data([0x01]), Data([0x02]), Data([0x03])
+        ])
+        XCTAssertEqual(libraryCount, 3)
+        XCTAssertEqual(
+            model.consumePhotoLimitAnnouncement(),
+            "Five photo limit reached. Review your photos."
+        )
+        XCTAssertNil(model.consumePhotoLimitAnnouncement())
+
+        await model.takePhoto()
+
+        XCTAssertEqual(camera.captureCount, 2)
+        XCTAssertEqual(model.stagedPhotos.count, 5)
+        XCTAssertNil(model.consumePhotoLimitAnnouncement())
+
+        XCTAssertTrue(model.canOpenBoundary)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: model.stagedPhotos,
+            opener: .reviewButton
+        )
+
+        XCTAssertEqual(router.captureBoundaryRequest?.photos, model.stagedPhotos)
+        XCTAssertEqual(router.captureBoundaryRequest?.photos.count, 5)
+        XCTAssertEqual(
+            router.captureBoundaryRequest?.photos.map(\.id),
+            model.stagedPhotos.map(\.id)
+        )
+    }
+
+    func testRealEvaluatorOutputNeverGatesTheManualShutterAndOnePhotoStaysInCamera() async throws {
         let camera = TestCaptureCamera(isAvailable: true, authorization: .authorized)
         let evaluator = TestFramingEvaluator(
             observations: [
@@ -36,21 +320,21 @@ final class CaptureFlowTests: XCTestCase {
 
         await model.startCamera()
         XCTAssertEqual(model.phase, .camera)
-        XCTAssertFalse(model.canTakePhoto)
+        XCTAssertTrue(model.canTakePhoto)
 
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         XCTAssertEqual(model.guidance, .moveCloser)
-        XCTAssertFalse(model.canTakePhoto)
+        XCTAssertTrue(model.canTakePhoto)
 
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         XCTAssertEqual(model.guidance, .accepted)
         XCTAssertTrue(model.canTakePhoto)
 
         await model.takePhoto()
-        XCTAssertEqual(model.phase, .captured)
+        XCTAssertEqual(model.phase, .camera)
         XCTAssertEqual(store.stageCount, 1)
         XCTAssertNotNil(model.stagedPhoto)
-        XCTAssertEqual(camera.stopCount, 1)
+        XCTAssertEqual(camera.stopCount, 0)
     }
 
     func testRapidSecondShutterTapCannotStartAnotherCapture() async throws {
@@ -70,19 +354,21 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertTrue(model.canTakePhoto)
 
         let firstCapture = Task { await model.takePhoto() }
-        await Task.yield()
+        let isFirstCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(isFirstCapturePending)
+        guard isFirstCapturePending else { return }
         let secondCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        await secondCapture.value
 
         XCTAssertEqual(camera.captureCount, 1)
         XCTAssertFalse(model.canTakePhoto)
         XCTAssertTrue(model.isCapturingPhoto)
         camera.completePendingCaptures()
         await firstCapture.value
-        await secondCapture.value
         XCTAssertEqual(store.stageCount, 1)
-        XCTAssertEqual(model.phase, .captured)
+        XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
+        XCTAssertTrue(model.canTakePhoto)
     }
 
     func testCaptureLockResetsAfterAnErrorAndAllowsARealRetry() async throws {
@@ -103,23 +389,19 @@ final class CaptureFlowTests: XCTestCase {
         await model.startCamera()
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         await model.takePhoto()
-        XCTAssertEqual(model.phase, .failed)
+        XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
         XCTAssertEqual(store.stageCount, 0)
-        XCTAssertEqual(camera.stopCount, 1)
-        XCTAssertFalse(camera.isSessionActive)
-
-        await model.startCamera()
         XCTAssertTrue(camera.isSessionActive)
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         XCTAssertTrue(model.canTakePhoto)
         await model.takePhoto()
-        XCTAssertEqual(model.phase, .captured)
+        XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
         XCTAssertEqual(camera.captureCount, 2)
         XCTAssertEqual(store.stageCount, 1)
-        XCTAssertEqual(camera.stopCount, 2)
-        XCTAssertFalse(camera.isSessionActive)
+        XCTAssertEqual(camera.stopCount, 0)
+        XCTAssertTrue(camera.isSessionActive)
     }
 
     func testLocalStageFailureStopsCameraAndAllowsARealRetry() async throws {
@@ -137,24 +419,20 @@ final class CaptureFlowTests: XCTestCase {
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         await model.takePhoto()
 
-        XCTAssertEqual(model.phase, .failed)
+        XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
         XCTAssertEqual(camera.captureCount, 1)
         XCTAssertEqual(store.stageCount, 1)
-        XCTAssertEqual(camera.stopCount, 1)
-        XCTAssertFalse(camera.isSessionActive)
-
-        await model.startCamera()
         XCTAssertTrue(camera.isSessionActive)
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         await model.takePhoto()
 
-        XCTAssertEqual(model.phase, .captured)
+        XCTAssertEqual(model.phase, .camera)
         XCTAssertFalse(model.isCapturingPhoto)
         XCTAssertEqual(camera.captureCount, 2)
         XCTAssertEqual(store.stageCount, 2)
-        XCTAssertEqual(camera.stopCount, 2)
-        XCTAssertFalse(camera.isSessionActive)
+        XCTAssertEqual(camera.stopCount, 0)
+        XCTAssertTrue(camera.isSessionActive)
     }
 
     func testCancelInvalidatesAPendingCaptureAndReleasesTheShutterLock() async throws {
@@ -175,7 +453,9 @@ final class CaptureFlowTests: XCTestCase {
         await model.startCamera()
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         let pendingCapture = Task { await model.takePhoto() }
-        for _ in 0..<4 { await Task.yield() }
+        let isCapturePending = await camera.waitUntilCaptureIsPending()
+        XCTAssertTrue(isCapturePending)
+        guard isCapturePending else { return }
         XCTAssertTrue(model.isCapturingPhoto)
 
         model.cancelCamera()
@@ -237,14 +517,15 @@ final class CaptureFlowTests: XCTestCase {
 
         for _ in 0..<2 { await model.process(frame: try makeFrame()) }
         XCTAssertEqual(model.guidance, .accepted)
-        XCTAssertFalse(model.canTakePhoto)
+        XCTAssertTrue(model.canTakePhoto)
         await model.takePhoto()
-        let didStageLibraryReplacement = await model.stageLibraryPhoto(Data([0x01, 0x02]))
-        XCTAssertEqual(camera.captureCount, 0)
-        XCTAssertFalse(didStageLibraryReplacement)
-        XCTAssertEqual(store.stageCount, 0)
+        let didStageLibraryAppend = await model.stageLibraryPhoto(Data([0x01, 0x02]))
+        XCTAssertEqual(camera.captureCount, 1)
+        XCTAssertTrue(didStageLibraryAppend)
+        XCTAssertEqual(store.stageCount, 2)
         XCTAssertEqual(store.discardCount, 0)
         XCTAssertEqual(model.stagedPhoto, staged)
+        XCTAssertEqual(model.stagedPhotos.count, 3)
     }
 
     func testBackgroundStopsAndForegroundRestartsAnActiveCamera() async {
@@ -1188,23 +1469,29 @@ final class CaptureFlowTests: XCTestCase {
 private final class TestCaptureCamera: CaptureCamera {
     let session = AVCaptureSession()
     let isAvailable: Bool
+    let isFlashAvailable: Bool
     var authorization: CaptureCameraAuthorization
     var startCount = 0
     var stopCount = 0
     var captureCount = 0
+    var requestedFlashModes: [CaptureFlashMode] = []
     private(set) var isSessionActive = false
     var frameHandler: ((CaptureFrame) -> Void)?
     private let suspendsCapture: Bool
     private var captureError: Error?
+    private let pendingCaptureLock = NSLock()
     private var pendingCaptures: [CheckedContinuation<Data, Error>] = []
+    private var pendingCaptureWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
 
     init(
         isAvailable: Bool,
         authorization: CaptureCameraAuthorization,
+        isFlashAvailable: Bool = false,
         suspendsCapture: Bool = false,
         captureError: Error? = nil
     ) {
         self.isAvailable = isAvailable
+        self.isFlashAvailable = isFlashAvailable
         self.authorization = authorization
         self.suspendsCapture = suspendsCapture
         self.captureError = captureError
@@ -1224,6 +1511,10 @@ private final class TestCaptureCamera: CaptureCamera {
         isSessionActive = false
     }
 
+    func setFlashMode(_ mode: CaptureFlashMode) {
+        requestedFlashModes.append(mode)
+    }
+
     func capturePhoto() async throws -> Data {
         captureCount += 1
         if let captureError {
@@ -1232,13 +1523,45 @@ private final class TestCaptureCamera: CaptureCamera {
         }
         guard suspendsCapture else { return Self.photoData }
         return try await withCheckedThrowingContinuation { continuation in
+            pendingCaptureLock.lock()
             pendingCaptures.append(continuation)
+            let waiters = Array(pendingCaptureWaiters.values)
+            pendingCaptureWaiters.removeAll()
+            pendingCaptureLock.unlock()
+            for waiter in waiters {
+                waiter.resume(returning: true)
+            }
+        }
+    }
+
+    func waitUntilCaptureIsPending(
+        timeoutNanoseconds: UInt64 = 5_000_000_000
+    ) async -> Bool {
+        let waiterID = UUID()
+        return await withCheckedContinuation { continuation in
+            pendingCaptureLock.lock()
+            guard pendingCaptures.isEmpty else {
+                pendingCaptureLock.unlock()
+                continuation.resume(returning: true)
+                return
+            }
+            pendingCaptureWaiters[waiterID] = continuation
+            pendingCaptureLock.unlock()
+            Task<Void, Never> {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self.pendingCaptureLock.lock()
+                let waiter = self.pendingCaptureWaiters.removeValue(forKey: waiterID)
+                self.pendingCaptureLock.unlock()
+                waiter?.resume(returning: false)
+            }
         }
     }
 
     func completePendingCaptures() {
+        pendingCaptureLock.lock()
         let captures = pendingCaptures
         pendingCaptures.removeAll()
+        pendingCaptureLock.unlock()
         for capture in captures {
             capture.resume(returning: Self.photoData)
         }
@@ -1300,22 +1623,147 @@ private actor TestFramingEvaluator: FramingEvaluating {
     }
 }
 
+private struct TestLibraryPhotoLoader: CaptureLibraryPhotoLoading {
+    let load: @MainActor () async throws -> Data?
+
+    init(load: @escaping @MainActor () async throws -> Data?) {
+        self.load = load
+    }
+
+    func loadPhotoData() async throws -> Data? {
+        try await load()
+    }
+}
+
+private enum LibraryPayloadEvent: Equatable {
+    case loaded(UInt8)
+    case staged(UInt8)
+    case released(UInt8)
+}
+
+private final class LibraryPayloadLifetimeTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var residentCount = 0
+    private var maximumResidentCount = 0
+    private var recordedEvents: [LibraryPayloadEvent] = []
+
+    var residentPayloads: Int {
+        lock.withLock { residentCount }
+    }
+
+    var maximumResidentPayloads: Int {
+        lock.withLock { maximumResidentCount }
+    }
+
+    var events: [LibraryPayloadEvent] {
+        lock.withLock { recordedEvents }
+    }
+
+    func makePayload(byte: UInt8, size: Int = 2 * 1_024 * 1_024) -> Data {
+        let pointer = UnsafeMutableRawPointer.allocate(
+            byteCount: size,
+            alignment: MemoryLayout<UInt8>.alignment
+        )
+        pointer.initializeMemory(as: UInt8.self, repeating: byte, count: size)
+        lock.withLock {
+            residentCount += 1
+            maximumResidentCount = max(maximumResidentCount, residentCount)
+            recordedEvents.append(.loaded(byte))
+        }
+        return Data(
+            bytesNoCopy: pointer,
+            count: size,
+            deallocator: .custom { [self] pointer, _ in
+                pointer.deallocate()
+                lock.withLock {
+                    residentCount -= 1
+                    recordedEvents.append(.released(byte))
+                }
+            }
+        )
+    }
+
+    func recordStage(byte: UInt8) {
+        lock.withLock { recordedEvents.append(.staged(byte)) }
+    }
+}
+
+private final class LifetimeTrackingCaptureStore: CaptureDraftStoring {
+    private let tracker: LibraryPayloadLifetimeTracker
+    private(set) var stagedPhotos: [StagedCapturePhoto] = []
+    private(set) var stagedBytes: [UInt8] = []
+
+    init(tracker: LibraryPayloadLifetimeTracker) {
+        self.tracker = tracker
+    }
+
+    func load() async throws -> StagedCapturePhoto? { stagedPhotos.first }
+    func loadPhotos() async throws -> [StagedCapturePhoto] { stagedPhotos }
+
+    func stage(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> StagedCapturePhoto {
+        stagedPhotos = []
+        stagedBytes = []
+        return try await append(
+            imageData: imageData,
+            libraryTransferReceipt: libraryTransferReceipt
+        ).appendedPhoto
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        let byte = try XCTUnwrap(imageData.first)
+        tracker.recordStage(byte: byte)
+        stagedBytes.append(byte)
+        let index = stagedPhotos.count
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/lifetime-photo-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/lifetime-thumb-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos.append(photo)
+        return CaptureDraftAppendResult(appendedPhoto: photo, photos: stagedPhotos)
+    }
+
+    func discard() async throws {
+        stagedPhotos = []
+        stagedBytes = []
+    }
+}
+
 private final class TestCaptureStore: CaptureDraftStoring {
-    var staged: StagedCapturePhoto?
+    var stagedPhotos: [StagedCapturePhoto]
+    var staged: StagedCapturePhoto? { stagedPhotos.first }
     var stageCount = 0
     var discardCount = 0
     var lastStagedImageData: Data?
+    var stagedImageData: [Data] = []
+    var loadPhotosCount = 0
     private var stageError: Error?
+    private let loadPhotosError: Error?
 
     init(
         staged: StagedCapturePhoto? = nil,
-        stageError: Error? = nil
+        stageError: Error? = nil,
+        loadPhotosError: Error? = nil
     ) {
-        self.staged = staged
+        stagedPhotos = staged.map { [$0] } ?? []
         self.stageError = stageError
+        self.loadPhotosError = loadPhotosError
     }
 
     func load() async throws -> StagedCapturePhoto? { staged }
+    func loadPhotos() async throws -> [StagedCapturePhoto] {
+        loadPhotosCount += 1
+        if let loadPhotosError { throw loadPhotosError }
+        return stagedPhotos
+    }
 
     func stage(
         imageData: Data,
@@ -1323,6 +1771,7 @@ private final class TestCaptureStore: CaptureDraftStoring {
     ) async throws -> StagedCapturePhoto {
         stageCount += 1
         lastStagedImageData = imageData
+        stagedImageData = [imageData]
         if let stageError {
             self.stageError = nil
             throw stageError
@@ -1334,12 +1783,35 @@ private final class TestCaptureStore: CaptureDraftStoring {
             createdAt: Date(),
             libraryTransferReceipt: libraryTransferReceipt
         )
-        staged = photo
+        stagedPhotos = [photo]
         return photo
+    }
+
+    func append(
+        imageData: Data,
+        libraryTransferReceipt: LibraryPhotoTransferReceipt?
+    ) async throws -> CaptureDraftAppendResult {
+        stageCount += 1
+        lastStagedImageData = imageData
+        stagedImageData.append(imageData)
+        if let stageError {
+            self.stageError = nil
+            throw stageError
+        }
+        let index = stagedPhotos.count
+        let photo = StagedCapturePhoto(
+            id: UUID(),
+            photoURL: URL(fileURLWithPath: "/tmp/photo-\(index).jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/tmp/thumb-\(index).jpg"),
+            createdAt: Date(),
+            libraryTransferReceipt: libraryTransferReceipt
+        )
+        stagedPhotos.append(photo)
+        return CaptureDraftAppendResult(appendedPhoto: photo, photos: stagedPhotos)
     }
 
     func discard() async throws {
         discardCount += 1
-        staged = nil
+        stagedPhotos = []
     }
 }

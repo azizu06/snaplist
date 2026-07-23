@@ -18,6 +18,12 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
     case captureAccepted = "CAP-02b2"
     case captureOnePhoto = "CAP-02c"
     case captureReviewHandoff = "CAP-03-handoff"
+    case scanCameraFirstUse = "CAM-01"
+    case scanCameraReturning = "CAM-02"
+    case scanCameraPhotos = "CAM-03"
+    case scanCameraCapped = "CAM-04"
+    case scanCameraUnavailable = "CAM-V1"
+    case scanCameraDenied = "CAM-V2"
     case pricingStrong = "S1"
     case pricingAllComps = "S1b"
     case pricingSelectedComp = "S2"
@@ -56,6 +62,9 @@ enum ApprovedVisualStateID: String, CaseIterable, Codable, Identifiable {
         case .captureLauncher, .captureCoaching, .captureMoveCloser, .captureAccepted,
              .captureOnePhoto, .captureReviewHandoff:
             207
+        case .scanCameraFirstUse, .scanCameraReturning, .scanCameraPhotos,
+             .scanCameraCapped, .scanCameraUnavailable, .scanCameraDenied:
+            424
         case .homeActive, .homeEmpty, .homeAttention, .homeSearch:
             208
         case .pricingStrong, .pricingAllComps, .pricingSelectedComp, .pricingLimited:

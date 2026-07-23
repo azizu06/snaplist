@@ -3,6 +3,12 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+extension PhotosPickerItem: CaptureLibraryPhotoLoading {
+    func loadPhotoData() async throws -> Data? {
+        try await loadTransferable(type: Data.self)
+    }
+}
+
 struct CaptureLauncherSheet: View {
     @Bindable var flow: CaptureFlowModel
     let takeOneItem: () -> Void
@@ -84,7 +90,7 @@ struct CaptureLauncherSheet: View {
                 .clipShape(.rect(cornerRadius: 14))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("1 of 4 photos saved")
+                    Text("\(flow.stagedPhotos.count) of 5 photos saved")
                         .snapListTypography(.rowTitle)
                     Text("Your staged photo is ready to continue.")
                         .font(.caption)
@@ -252,486 +258,638 @@ private struct CaptureOptionRow: View {
     }
 }
 
-struct GuidedCameraView: View {
-    @Bindable var flow: CaptureFlowModel
-    let close: () -> Void
 
-    @Environment(\.scenePhase) private var scenePhase
+struct ScanCameraView: View {
+    @Bindable var flow: CaptureFlowModel
+    let openBoundary: (
+        CaptureBoundaryDestination,
+        [StagedCapturePhoto],
+        CaptureBoundaryOpener
+    ) -> Void
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var libraryItem: PhotosPickerItem?
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var libraryItems: [PhotosPickerItem] = []
 
     var body: some View {
-        ZStack {
+        Group {
             switch flow.phase {
-            case .camera:
-                cameraSurface
-            case .captured:
-                capturedSurface
-            case .reviewHandoff:
-                reviewHandoff
-            case .denied:
-                recoverySurface(
-                    title: "Camera access is off",
-                    message: "Turn on Camera in Settings, or choose a photo from your library instead.",
-                    showsSettings: true
-                )
+            case .camera, .captured, .reviewHandoff:
+                liveSurface
             case .unavailable:
-                recoverySurface(
-                    title: "Camera isn’t available",
-                    message: "You can still choose a photo from your library.",
-                    showsSettings: false
-                )
+                recoverySurface(mode: .unavailable)
+            case .denied:
+                recoverySurface(mode: .denied)
             case .failed:
-                recoverySurface(
-                    title: "That photo couldn’t be saved",
-                    message: "Try again, or choose a different photo from your library.",
-                    showsSettings: false
-                )
+                liveSurface
             case .idle, .requestingPermission:
-                ProgressView("Preparing camera…")
-                    .tint(.white)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
+                ZStack {
+                    Color(hex: "#0B0C0E").ignoresSafeArea()
+                    ProgressView()
+                        .tint(.white)
+                        .accessibilityLabel("Preparing camera")
+                }
             }
         }
-        .background(Color.black.ignoresSafeArea())
-        .statusBarHidden(flow.phase == .camera || flow.phase == .captured)
         .onChange(of: scenePhase) { _, next in
             flow.handleScenePhase(next)
             if next == .active {
                 Task { await flow.handleSceneBecameActive() }
             }
         }
-        .onChange(of: libraryItem) { _, item in
-            guard let item else { return }
+        .onChange(of: libraryItems) { _, items in
+            guard !items.isEmpty else { return }
+            guard let intakeID = flow.reserveLibraryIntake() else {
+                libraryItems = []
+                return
+            }
             Task {
-                guard let data = try? await item.loadTransferable(type: Data.self) else {
+                _ = await flow.stageLibraryPhotos(items, reservation: intakeID)
+                libraryItems = []
+            }
+        }
+        .onChange(of: flow.stagedPhotos.count) { _, _ in
+            guard let announcement = flow.consumePhotoLimitAnnouncement() else { return }
+            UIAccessibility.post(notification: .announcement, argument: announcement)
+        }
+    }
+
+    private var liveSurface: some View {
+        LiveScanCameraSurface(
+            thumbnailURLs: flow.stagedPhotos.map { Optional($0.thumbnailURL) },
+            isShutterEnabled: flow.canTakePhoto,
+            isLibraryEnabled: !flow.isAddingPhotos,
+            isFlashAvailable: flow.isFlashAvailable,
+            flashMode: flow.flashMode,
+            reduceMotion: reduceMotion,
+            motionStateIdentifier: nil,
+            preview: {
+                CameraPreviewView(
+                    session: flow.previewSession,
+                    device: flow.captureDevice
+                )
+            },
+            libraryControl: { libraryPicker(labelStyle: .icon) },
+            toggleFlash: flow.toggleFlash,
+            takePhoto: {
+                guard let captureID = flow.reservePhotoCapture() else { return }
+                Task { await flow.takePhoto(reservation: captureID) }
+            },
+            review: { open(.photoReview, opener: .reviewButton) },
+            openTrophyWall: { open(.trophyWall, opener: .trophyWallTab) }
+        )
+    }
+
+    private func recoverySurface(mode: ScanCameraRecoveryMode) -> some View {
+        RecoveryScanCameraSurface(
+            mode: mode,
+            thumbnailURLs: flow.stagedPhotos.map { Optional($0.thumbnailURL) },
+            reduceMotion: reduceMotion,
+            libraryControl: { libraryPicker(labelStyle: .recovery) },
+            review: { open(.photoReview, opener: .reviewButton) },
+            openSettings: {
+                guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
                     return
                 }
-                await flow.stageLibraryPhoto(data)
-            }
+                openURL(settingsURL)
+            },
+            openTrophyWall: { open(.trophyWall, opener: .trophyWallTab) }
+        )
+    }
+
+    private func libraryPicker(labelStyle: ScanLibraryLabelStyle) -> some View {
+        PhotosPicker(
+            selection: $libraryItems,
+            maxSelectionCount: max(1, 5 - flow.stagedPhotos.count),
+            selectionBehavior: .ordered,
+            matching: .images
+        ) {
+            ScanLibraryLabel(style: labelStyle)
+        }
+        .disabled(flow.isAddingPhotos)
+        .accessibilityLabel("Library")
+        .accessibilityIdentifier(
+            labelStyle == .icon ? "scan.library" : "scan.choose-library"
+        )
+        .accessibilitySortPriority(60)
+    }
+
+    private func open(
+        _ destination: CaptureBoundaryDestination,
+        opener: CaptureBoundaryOpener
+    ) {
+        guard flow.canOpenBoundary else { return }
+        let photos = flow.stagedPhotos
+        flow.cancelCamera()
+        openBoundary(destination, photos, opener)
+    }
+}
+
+private enum ScanCameraRecoveryMode: Equatable {
+    case unavailable
+    case denied
+
+    var title: String {
+        switch self {
+        case .unavailable: "Camera is not available"
+        case .denied: "SnapList cannot use the camera"
         }
     }
 
-    private var cameraSurface: some View {
+    var body: String {
+        switch self {
+        case .unavailable: "Add photos from your library instead."
+        case .denied: "Allow camera access in Settings, or add photos from your library."
+        }
+    }
+}
+
+private enum ScanLibraryLabelStyle {
+    case icon
+    case recovery
+}
+
+private struct ScanLibraryLabel: View {
+    let style: ScanLibraryLabelStyle
+
+    var body: some View {
+        Group {
+            switch style {
+            case .icon:
+                Image(systemName: "photo.on.rectangle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(Color(hex: "#14161A").opacity(0.66))
+                    .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
+                    .clipShape(.circle)
+            case .recovery:
+                Text("Choose from library")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+                    .frame(minWidth: 210, minHeight: 48)
+                    .background(Color(hex: "#3665F3"))
+                    .clipShape(.rect(cornerRadius: 14))
+            }
+        }
+        .accessibilityLabel(style == .icon ? "Library" : "Choose from library")
+        .accessibilityIdentifier(style == .icon ? "scan.library" : "scan.choose-library")
+    }
+}
+
+struct ScanShutterAccessibility {
+    let isEnabled: Bool
+    let durablePhotoCount: Int
+
+    var label: String {
+        durablePhotoCount >= 5
+            ? "Take photo, unavailable at five photo limit"
+            : "Take photo"
+    }
+}
+
+enum ScanReviewAccessibilityPriority: String, CaseIterable {
+    case live
+    case recovery
+
+    var value: Double {
+        switch self {
+        case .live, .recovery:
+            40
+        }
+    }
+}
+
+private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
+    let thumbnailURLs: [URL?]
+    let isShutterEnabled: Bool
+    let isLibraryEnabled: Bool
+    let isFlashAvailable: Bool
+    let flashMode: CaptureFlashMode
+    let reduceMotion: Bool
+    let motionStateIdentifier: String?
+    @ViewBuilder let preview: () -> Preview
+    @ViewBuilder let libraryControl: () -> LibraryControl
+    let toggleFlash: () -> Void
+    let takePhoto: () -> Void
+    let review: () -> Void
+    let openTrophyWall: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
         ZStack {
-            CameraPreviewView(
-                session: flow.previewSession,
-                device: flow.captureDevice
-            )
-            .accessibilityHidden(true)
-
-            LinearGradient(
-                colors: [.black.opacity(0.35), .clear, .black.opacity(0.58)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .accessibilityHidden(true)
-
-            ResponsiveFramingCorners()
+            preview()
+                .ignoresSafeArea()
                 .accessibilityHidden(true)
 
-            VStack {
-                cameraTopBar
-                Spacer()
-                cameraGuidance
-                Text("Tap the scene to update positioning")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.72))
-                    .accessibilityHidden(true)
+            if let motionStateIdentifier {
+                Rectangle()
+                    .fill(.clear)
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Reduced motion active")
+                    .accessibilityIdentifier(motionStateIdentifier)
+            }
+
+            ResponsiveFramingCorners()
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+
+            VStack(spacing: 0) {
+                HStack {
+                    flashButton
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                Spacer(minLength: 20)
+
+                if !thumbnailURLs.isEmpty {
+                    photoProgress
+                        .padding(.bottom, dynamicTypeSize.isAccessibilitySize ? 22 : 12)
+                        .transition(
+                            reduceMotion
+                                ? .identity
+                                : .opacity.combined(with: .offset(y: 10))
+                        )
+                }
+
                 cameraControls
-                    .padding(.top, 12)
-            }
-            .safeAreaPadding(.horizontal, 20)
-            .safeAreaPadding(.top, 10)
-            .safeAreaPadding(.bottom, 12)
-        }
-        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 1.01)))
-    }
+                    .frame(height: dynamicTypeSize.isAccessibilitySize ? 96 : 80)
 
-    private var cameraTopBar: some View {
-        HStack {
-            CameraCircleButton(
-                systemImage: "xmark",
-                accessibilityLabel: "Close camera",
-                identifier: "camera.close"
-            ) {
-                flow.cancelCamera()
-                close()
-            }
-            Spacer()
-            Label("Auto", systemImage: "bolt.slash.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                .background(.ultraThinMaterial)
-                .clipShape(.capsule)
-                .accessibilityLabel("Flash automatic")
-        }
-    }
-
-    @ViewBuilder
-    private var cameraGuidance: some View {
-        if flow.stagedPhoto != nil {
-            Label(
-                "1 photo is still saved. This frozen handoff won’t replace it; additional photos aren’t available yet.",
-                systemImage: "photo.stack"
-            )
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-            .background(SnapListColorToken.action.color.opacity(0.48))
-            .background(.ultraThinMaterial)
-            .clipShape(.capsule)
-            .accessibilityIdentifier("camera.staged-photo-boundary")
-        } else if flow.guidance == .coaching {
-            HStack(alignment: .bottom, spacing: 8) {
-                Image("ScoutCoaching")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 82, height: 82)
-                    .accessibilityLabel("Scout, the SnapList camera guide")
-
-                Text("Start with one clear photo. Add angles, labels, or damage for a stronger match.")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(14)
-                    .background(.white)
-                    .clipShape(.rect(cornerRadius: 16))
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("camera.guidance.coaching")
-        } else if let cue = flow.guidance.cue {
-            Label(cue, systemImage: flow.guidance.systemImage)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 16)
-                .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                .background(SnapListColorToken.action.color.opacity(0.48))
-                .background(.ultraThinMaterial)
-                .clipShape(.capsule)
-                .accessibilityLabel("Camera guidance: \(cue)")
-                .accessibilityIdentifier(
-                    flow.guidance == .accepted
-                        ? "camera.guidance.accepted"
-                        : "camera.guidance.move-closer"
+                ScanDestinationDock(
+                    selectedScan: true,
+                    openTrophyWall: openTrophyWall
                 )
+                .padding(.top, 5)
+                .padding(.bottom, 8)
+                .offset(y: 20)
+            }
+            .safeAreaPadding(.top, 2)
+            .safeAreaPadding(.bottom, 2)
         }
+        .background(Color(hex: "#0B0C0E").ignoresSafeArea())
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.18),
+            value: thumbnailURLs.count
+        )
+    }
+
+    private var flashButton: some View {
+        Button(action: toggleFlash) {
+            Image(systemName: flashMode == .on ? "bolt.fill" : "bolt.slash.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Color(hex: "#14161A").opacity(0.66))
+                .overlay { Circle().stroke(.white.opacity(0.12), lineWidth: 1) }
+                .clipShape(.circle)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(.circle)
+        .disabled(!isFlashAvailable)
+        .accessibilityLabel(flashMode == .on ? "Flash on" : "Flash off")
+        .accessibilityHint(isFlashAvailable ? "Toggles the camera flash" : "Flash is not available")
+        .accessibilityIdentifier("scan.flash")
+        .accessibilitySortPriority(80)
+    }
+
+    private var photoProgress: some View {
+        ScanPhotoProgressRow(thumbnailURLs: thumbnailURLs)
     }
 
     private var cameraControls: some View {
-        HStack {
-            PhotosPicker(selection: $libraryItem, matching: .images) {
-                Image(systemName: "photo")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(
-                        width: SnapListMetrics.minimumTouchTarget,
-                        height: SnapListMetrics.minimumTouchTarget
-                    )
-                    .background(.black.opacity(0.36))
-                    .clipShape(.rect(cornerRadius: 12))
+        ZStack {
+            HStack {
+                libraryControl()
+                    .disabled(!isLibraryEnabled)
+                Spacer()
+                if !thumbnailURLs.isEmpty {
+                    reviewButton
+                        .transition(reduceMotion ? .identity : .opacity)
+                } else {
+                    Color.clear
+                        .frame(width: 82, height: 48)
+                        .accessibilityHidden(true)
+                }
             }
-            .accessibilityLabel("Choose from photo library")
-            .accessibilityHint(
-                flow.stagedPhoto == nil
-                    ? "Selects one photo for this item"
-                    : "One photo is already staged; additional photos belong to a later capture slice"
-            )
-            .accessibilityIdentifier("camera.library")
-            .disabled(flow.stagedPhoto != nil)
-            .opacity(flow.stagedPhoto == nil ? 1 : 0.52)
+            .padding(.horizontal, 18)
 
-            Spacer()
-
-            Button {
-                Task { await flow.takePhoto() }
-            } label: {
-                Circle()
-                    .fill(.white)
-                    .frame(width: 68, height: 68)
-                    .overlay {
-                        Circle().stroke(.white.opacity(0.8), lineWidth: 4).padding(-5)
-                    }
+            Button(action: takePhoto) {
+                ZStack {
+                    Circle()
+                        .stroke(.white, lineWidth: 3)
+                        .frame(width: 72, height: 72)
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 56, height: 56)
+                }
+                .frame(width: 72, height: 72)
             }
             .buttonStyle(.plain)
-            .disabled(!flow.canTakePhoto)
-            .opacity(flow.canTakePhoto ? 1 : 0.52)
-            .accessibilityLabel("Take photo")
-            .accessibilityHint(
-                flow.stagedPhoto != nil
-                    ? "One photo is already staged; additional photos belong to a later capture slice"
-                    : flow.isCapturingPhoto
-                    ? "Capture in progress"
-                    : flow.canTakePhoto
-                        ? "Captures the item in frame"
-                        : "Available when the whole item is in frame"
+            .disabled(!isShutterEnabled)
+            .opacity(isShutterEnabled ? 1 : 0.38)
+            .accessibilityLabel(
+                ScanShutterAccessibility(
+                    isEnabled: isShutterEnabled,
+                    durablePhotoCount: thumbnailURLs.count
+                ).label
             )
-            .accessibilityIdentifier("camera.shutter")
-
-            Spacer()
-
-            Color.clear
-                .frame(
-                    width: SnapListMetrics.minimumTouchTarget,
-                    height: SnapListMetrics.minimumTouchTarget
-                )
-                .accessibilityHidden(true)
+            .accessibilityIdentifier("scan.shutter")
+            .accessibilitySortPriority(50)
         }
     }
 
-    private var capturedSurface: some View {
-        ZStack {
-            GeometryReader { proxy in
-                stagedImage(url: flow.stagedPhoto?.photoURL, maximumPixelSize: 1600)
-                    .scaledToFill()
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
-            }
-
-            LinearGradient(
-                colors: [.black.opacity(0.34), .clear, .black.opacity(0.58)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            VStack {
-                HStack {
-                    CameraCircleButton(
-                        systemImage: "xmark",
-                        accessibilityLabel: "Close camera",
-                        identifier: "camera.close"
-                    ) {
-                        flow.cancelCamera()
-                        close()
-                    }
-                    Spacer()
-                    Label("1 of 4 photos", systemImage: "photo.stack")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-                        .background(.ultraThinMaterial)
-                        .clipShape(.capsule)
-                        .accessibilityIdentifier("capture.photo-count")
-                    Spacer()
-                    Image(systemName: "bolt.slash.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial)
-                        .clipShape(.circle)
-                        .accessibilityLabel("Flash automatic")
-                }
-
-                Spacer()
-
-                capturedTray
-            }
-            .safeAreaPadding(.horizontal, 20)
-            .safeAreaPadding(.top, 10)
-            .safeAreaPadding(.bottom, 18)
-        }
-    }
-
-    private var capturedTray: some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        capturedThumbnail
-                        capturedDetails
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    capturedContinueButton
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            } else {
-                HStack(spacing: 10) {
-                    capturedThumbnail
-                    capturedDetails
-                        .frame(width: 140, alignment: .leading)
-                    Spacer(minLength: 0)
-                    capturedContinueButton
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(.white)
-        .clipShape(.rect(cornerRadius: 16))
-    }
-
-    private var capturedThumbnail: some View {
-        stagedImage(url: flow.stagedPhoto?.thumbnailURL, maximumPixelSize: 240)
-            .scaledToFill()
-            .frame(width: 48, height: 48)
-            .clipShape(.rect(cornerRadius: 10))
-    }
-
-    private var capturedDetails: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label("Photo added", systemImage: "checkmark.circle.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(SnapListColorToken.inkPrimary.color)
-            Text("Add angles, labels, or damage — or continue.")
-                .font(.caption)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-        }
-    }
-
-    private var capturedContinueButton: some View {
-        Button("Continue") {
-            flow.continueToReviewHandoff()
-        }
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(.white)
-        .padding(.horizontal, 17)
-        .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-        .background(SnapListColorToken.action.color)
-        .clipShape(.capsule)
-        .fixedSize(horizontal: true, vertical: false)
-        .accessibilityIdentifier("capture.continue")
-    }
-
-    private var reviewHandoff: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button {
-                    Task { await flow.reopenCameraFromReviewHandoff() }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("Back to camera")
-                SnapListChip("Handoff · CAP-03", variant: .info)
-                Spacer()
-            }
-            .safeAreaPadding(.horizontal, 12)
-
-            Spacer()
-
-            ZStack(alignment: .bottomTrailing) {
-                stagedImage(url: flow.stagedPhoto?.thumbnailURL, maximumPixelSize: 240)
-                    .scaledToFill()
-                    .frame(width: 82, height: 82)
-                    .clipShape(.rect(cornerRadius: 18))
-                    .shadow(color: .black.opacity(0.16), radius: 16, y: 8)
-                Text("1")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(SnapListColorToken.action.color)
-                    .clipShape(.circle)
-                    .offset(x: 7, y: 7)
-            }
-
-            Text(flow.handoffTitle)
-                .snapListTypography(.cardTitle)
-                .padding(.top, 24)
-                .accessibilityIdentifier("capture.handoff.title")
-            Text("Your 1 photo is saved. Next you’ll review it and add guidance before pricing — nothing has been analyzed yet.")
-                .font(.subheadline)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 42)
-                .padding(.top, 8)
-
-            Label("Open photo review", systemImage: "chevron.right")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20)
-                .frame(minHeight: 50)
-                .background(SnapListColorToken.action.color)
-                .clipShape(.capsule)
-                .padding(.top, 22)
-                .accessibilityLabel("Photo review is the next implementation boundary")
-
-            Button("Back to camera") {
-                Task { await flow.reopenCameraFromReviewHandoff() }
-            }
+    private var reviewButton: some View {
+        Button("Review", action: review)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(SnapListColorToken.action.color)
-            .frame(minHeight: 44)
-            .accessibilityIdentifier("capture.handoff.back-to-camera")
-
-            Label(
-                "Prototype bridge only — CAP-03 photo review remains outside this slice.",
-                systemImage: "info.circle"
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 48)
+            .background(Color(hex: "#3665F3"))
+            .clipShape(.capsule)
+            .accessibilityLabel(
+                thumbnailURLs.count == 1
+                    ? "Review 1 photo"
+                    : "Review \(thumbnailURLs.count) photos"
             )
-            .font(.caption)
-            .foregroundStyle(SnapListColorToken.textTertiary.color)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 36)
-            .padding(.top, 12)
-
-            Spacer()
-        }
-        .safeAreaPadding(.top, 12)
-        .safeAreaPadding(.bottom, 12)
-        .background(.white)
-        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-    }
-
-    private func recoverySurface(
-        title: String,
-        message: String,
-        showsSettings: Bool
-    ) -> some View {
-        VStack(spacing: 18) {
-            Image(systemName: "camera.fill")
-                .font(.system(size: 38))
-                .foregroundStyle(SnapListColorToken.textTertiary.color)
-                .accessibilityHidden(true)
-            Text(title)
-                .snapListTypography(.cardTitle)
-            Text(message)
-                .snapListTypography(.body)
-                .foregroundStyle(SnapListColorToken.textSecondary.color)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if showsSettings {
-                SnapListPrimaryButton(title: "Open Settings") {
-                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                    UIApplication.shared.open(url)
-                }
-            }
-
-            PhotosPicker(selection: $libraryItem, matching: .images) {
-                Text("Choose from library instead")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(SnapListColorToken.inkPrimary.color)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 50)
-                    .overlay {
-                        Capsule().stroke(SnapListColorToken.hairline.color)
-                    }
-            }
-            .accessibilityIdentifier("camera.library-recovery")
-
-            Button("Close") {
-                flow.cancelCamera()
-                close()
-            }
-            .frame(minHeight: SnapListMetrics.minimumTouchTarget)
-        }
-        .padding(.horizontal, 28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.white)
-        .foregroundStyle(SnapListColorToken.inkPrimary.color)
-    }
-
-    private func stagedImage(url: URL?, maximumPixelSize: Int) -> some View {
-        LocalCaptureImage(url: url, maximumPixelSize: maximumPixelSize)
+            .accessibilityIdentifier("scan.review")
+            .accessibilitySortPriority(ScanReviewAccessibilityPriority.live.value)
     }
 }
+
+private struct RecoveryScanCameraSurface<LibraryControl: View>: View {
+    let mode: ScanCameraRecoveryMode
+    let thumbnailURLs: [URL?]
+    let reduceMotion: Bool
+    @ViewBuilder let libraryControl: () -> LibraryControl
+    let review: () -> Void
+    let openSettings: () -> Void
+    let openTrophyWall: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color(hex: "#0B0C0E").ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Spacer()
+                VStack(spacing: 14) {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 39, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 52, height: 52)
+                        .overlay {
+                            Capsule()
+                                .fill(.white.opacity(0.85))
+                                .frame(width: 2, height: 62)
+                                .rotationEffect(.degrees(-45))
+                        }
+                        .accessibilityHidden(true)
+                    Text(mode.title)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("scan.recovery-title")
+                    Text(mode.body)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 6) {
+                        libraryControl()
+                        if mode == .denied {
+                            Button("Open Settings", action: openSettings)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color(hex: "#8FB2FF"))
+                                .padding(.horizontal, 16)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .accessibilityIdentifier("scan.open-settings")
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .padding(.horizontal, 32)
+                Spacer()
+                if !thumbnailURLs.isEmpty {
+                    VStack(spacing: 10) {
+                        ScanPhotoProgressRow(thumbnailURLs: thumbnailURLs)
+                        Button("Review", action: review)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 48)
+                            .background(Color(hex: "#3665F3"))
+                            .clipShape(.capsule)
+                            .accessibilityLabel(
+                                thumbnailURLs.count == 1
+                                    ? "Review 1 photo"
+                                    : "Review \(thumbnailURLs.count) photos"
+                            )
+                            .accessibilityIdentifier("scan.review")
+                            .accessibilitySortPriority(
+                                ScanReviewAccessibilityPriority.recovery.value
+                            )
+                    }
+                    .padding(.bottom, 10)
+                    .transition(
+                        reduceMotion
+                            ? .identity
+                            : .opacity.combined(with: .offset(y: 10))
+                    )
+                }
+                ScanDestinationDock(
+                    selectedScan: true,
+                    openTrophyWall: openTrophyWall
+                )
+                .padding(.bottom, 8)
+                .offset(y: 20)
+            }
+            .safeAreaPadding(.vertical, 2)
+        }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.18),
+            value: thumbnailURLs.count
+        )
+    }
+}
+
+private struct ScanPhotoProgressRow: View {
+    let thumbnailURLs: [URL?]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(Array(thumbnailURLs.enumerated()), id: \.offset) { index, url in
+                    ScanPhotoThumbnail(url: url, index: index, count: thumbnailURLs.count)
+                }
+            }
+            Spacer(minLength: 8)
+            Text("\(thumbnailURLs.count) of 5")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11)
+                .frame(minHeight: 34)
+                .background(Color(hex: "#14161A").opacity(0.66))
+                .clipShape(.capsule)
+                .accessibilityIdentifier("scan.photo-count")
+                .accessibilitySortPriority(69)
+        }
+        .padding(.horizontal, 15)
+    }
+}
+
+private struct ScanPhotoThumbnail: View {
+    let url: URL?
+    let index: Int
+    let count: Int
+
+    var body: some View {
+        Group {
+            if let url {
+                LocalCaptureImage(url: url, maximumPixelSize: 160)
+                    .scaledToFill()
+            } else {
+                LinearGradient(
+                    colors: fixtureColors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
+        .frame(width: 34, height: 43)
+        .clipShape(.rect(cornerRadius: 6))
+        .overlay { RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.9), lineWidth: 1) }
+        .accessibilityIdentifier("scan.photo-\(index + 1)")
+        .accessibilityLabel("Photo \(index + 1) of \(count)")
+        .accessibilitySortPriority(70)
+    }
+
+    private var fixtureColors: [Color] {
+        let palettes: [[Color]] = [
+            [.orange, .brown], [.blue, .cyan], [.purple, .pink], [.green, .mint], [.yellow, .orange]
+        ]
+        return palettes[index % palettes.count]
+    }
+}
+
+private struct ScanDestinationDock: View {
+    let selectedScan: Bool
+    let openTrophyWall: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: {}) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color(hex: "#3665F3"))
+                    .frame(width: 48, height: 48)
+                    .background(Color(hex: "#EEF3FF"))
+                    .clipShape(.rect(cornerRadius: 16))
+                    .accessibilityHidden(true)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 48, height: 48)
+            .contentShape(.rect)
+            .accessibilityLabel("Scan, tab, selected")
+            .accessibilityAddTraits(.isSelected)
+            .accessibilityIdentifier("scan.tab")
+            .accessibilitySortPriority(30)
+
+            Button(action: openTrophyWall) {
+                Image(systemName: "trophy")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color(hex: "#4A4D54"))
+                    .frame(width: 48, height: 48)
+                    .accessibilityHidden(true)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 48, height: 48)
+            .contentShape(.rect)
+            .accessibilityLabel("Trophy Wall, tab")
+            .accessibilityIdentifier("trophy-wall.tab")
+            .accessibilitySortPriority(20)
+        }
+        .padding(5)
+        .background(.white)
+        .overlay { Capsule().stroke(Color(hex: "#ECEDF0"), lineWidth: 1) }
+        .clipShape(.capsule)
+    }
+}
+
+#if DEBUG
+struct ScanCameraVisualStateView: View {
+    let state: ApprovedVisualStateID
+    let forceReducedMotion: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var reduceMotion: Bool { forceReducedMotion || systemReduceMotion }
+
+    var body: some View {
+        switch state {
+        case .scanCameraUnavailable:
+            RecoveryScanCameraSurface(
+                mode: .unavailable,
+                thumbnailURLs: [],
+                reduceMotion: reduceMotion,
+                libraryControl: {
+                    Button(action: {}) { ScanLibraryLabel(style: .recovery) }
+                        .buttonStyle(.plain)
+                },
+                review: {},
+                openSettings: {},
+                openTrophyWall: {}
+            )
+        case .scanCameraDenied:
+            RecoveryScanCameraSurface(
+                mode: .denied,
+                thumbnailURLs: [],
+                reduceMotion: reduceMotion,
+                libraryControl: {
+                    Button(action: {}) { ScanLibraryLabel(style: .recovery) }
+                        .buttonStyle(.plain)
+                },
+                review: {},
+                openSettings: {},
+                openTrophyWall: {}
+            )
+        default:
+            LiveScanCameraSurface(
+                thumbnailURLs: Array(repeating: nil, count: fixturePhotoCount),
+                isShutterEnabled: fixturePhotoCount < 5,
+                isLibraryEnabled: true,
+                isFlashAvailable: true,
+                flashMode: .off,
+                reduceMotion: reduceMotion,
+                motionStateIdentifier: reduceMotion ? "scan.motion-reduced" : nil,
+                preview: { FixtureItemScene(subjectScale: 1.15) },
+                libraryControl: {
+                    Button(action: {}) { ScanLibraryLabel(style: .icon) }
+                        .buttonStyle(.plain)
+                },
+                toggleFlash: {},
+                takePhoto: {},
+                review: {},
+                openTrophyWall: {}
+            )
+        }
+    }
+
+    private var fixturePhotoCount: Int {
+        switch state {
+        case .scanCameraPhotos: 3
+        case .scanCameraCapped: 5
+        default: 0
+        }
+    }
+}
+#endif
 
 private struct LocalCaptureImage: View {
     let url: URL?
@@ -804,34 +962,15 @@ private actor LocalCaptureImageLoader {
     }
 }
 
-private struct CameraCircleButton: View {
-    let systemImage: String
-    let accessibilityLabel: String
-    let identifier: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(
-                    width: SnapListMetrics.minimumTouchTarget,
-                    height: SnapListMetrics.minimumTouchTarget
-                )
-                .background(.black.opacity(0.38))
-                .clipShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier(identifier)
-    }
-}
-
 private struct FramingCorners: View {
+    let length: CGFloat
+
+    init(length: CGFloat = 24) {
+        self.length = length
+    }
+
     var body: some View {
         Canvas { context, size in
-            let length: CGFloat = min(24, size.width * 0.08)
             let lineWidth: CGFloat = 2
             let color = Color.white.opacity(0.86)
             var path = Path()
@@ -857,14 +996,18 @@ private struct FramingCorners: View {
 private struct ResponsiveFramingCorners: View {
     var body: some View {
         GeometryReader { proxy in
-            FramingCorners()
+            let isCompactHeight = proxy.size.height <= 700
+            let horizontalInset: CGFloat = proxy.size.width <= 375 ? 28 : 34
+            let topInset: CGFloat = isCompactHeight ? 112 : 132
+            let bottomInset: CGFloat = isCompactHeight ? 264 : 288
+            FramingCorners(length: isCompactHeight ? 24 : 30)
                 .frame(
-                    width: max(180, min(proxy.size.width - 112, 560)),
-                    height: min(320, proxy.size.height * 0.34)
+                    width: max(180, proxy.size.width - (horizontalInset * 2)),
+                    height: max(140, proxy.size.height - topInset - bottomInset)
                 )
                 .position(
                     x: proxy.size.width / 2,
-                    y: proxy.size.height * 0.385
+                    y: topInset + ((proxy.size.height - topInset - bottomInset) / 2)
                 )
         }
     }
