@@ -439,6 +439,17 @@ private struct ScanLibraryLabel: View {
     }
 }
 
+struct ScanShutterAccessibility {
+    let isEnabled: Bool
+    let durablePhotoCount: Int
+
+    var label: String {
+        isEnabled
+            ? "Take photo"
+            : "Take photo, unavailable at five photo limit"
+    }
+}
+
 private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View {
     let thumbnailURLs: [URL?]
     let isShutterEnabled: Bool
@@ -573,9 +584,10 @@ private struct LiveScanCameraSurface<Preview: View, LibraryControl: View>: View 
             .disabled(!isShutterEnabled)
             .opacity(isShutterEnabled ? 1 : 0.38)
             .accessibilityLabel(
-                isShutterEnabled
-                    ? "Take photo"
-                    : "Take photo, unavailable at five photo limit"
+                ScanShutterAccessibility(
+                    isEnabled: isShutterEnabled,
+                    durablePhotoCount: thumbnailURLs.count
+                ).label
             )
             .accessibilityIdentifier("scan.shutter")
             .accessibilitySortPriority(50)
