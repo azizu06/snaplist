@@ -444,7 +444,7 @@ struct ScanShutterAccessibility {
     let durablePhotoCount: Int
 
     var label: String {
-        durablePhotoCount == 5
+        durablePhotoCount >= 5
             ? "Take photo, unavailable at five photo limit"
             : "Take photo"
     }
