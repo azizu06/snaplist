@@ -23,6 +23,12 @@ struct AppShellView: View {
                     configuration: configuration,
                     continueToCapture: onboardingModel.continueToCaptureBoundary
                 )
+            } else if let photoReviewState = configuration.photoReviewState {
+#if DEBUG
+                PhotoReviewFixtureView(state: photoReviewState)
+#else
+                shell
+#endif
             } else if let visualState = configuration.visualState {
 #if DEBUG
                 if visualState.ownerIssue == 207 {

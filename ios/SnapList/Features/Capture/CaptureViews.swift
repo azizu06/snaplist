@@ -891,7 +891,7 @@ struct ScanCameraVisualStateView: View {
 }
 #endif
 
-private struct LocalCaptureImage: View {
+struct LocalCaptureImage: View {
     let url: URL?
     let maximumPixelSize: Int
 

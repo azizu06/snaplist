@@ -243,10 +243,21 @@ struct StagedCapturePhoto: Codable, Equatable, Identifiable {
 final class PhotoReviewStore {
     private(set) var photos: [StagedCapturePhoto]
     private(set) var selectedPhotoID: StagedCapturePhoto.ID?
+    private(set) var actionsPhotoID: StagedCapturePhoto.ID?
 
     init(photos: [StagedCapturePhoto]) {
         self.photos = photos
         selectedPhotoID = photos.first?.id
+    }
+
+    @discardableResult
+    func selectPhotoForActions(id: StagedCapturePhoto.ID) -> Bool {
+        guard photos.contains(where: { $0.id == id }) else {
+            return false
+        }
+        selectedPhotoID = id
+        actionsPhotoID = id
+        return true
     }
 
     @discardableResult

@@ -122,6 +122,10 @@ enum RunDetailFixture: String, Equatable {
     case reviewable
 }
 
+enum PhotoReviewVisualStateID: String, Equatable {
+    case resting = "REV-02"
+}
+
 struct LaunchConfiguration: Equatable {
     static let runDetailFixtureID = UUID(
         uuidString: "20800000-0000-4000-8000-000000000020"
@@ -129,6 +133,7 @@ struct LaunchConfiguration: Equatable {
 
     var fixture: FoundationFixture
     var visualState: ApprovedVisualStateID?
+    var photoReviewState: PhotoReviewVisualStateID?
     var forceReducedMotion: Bool
     var keyboardProbe: Bool
     var dynamicTypeSize: DynamicTypeSize?
@@ -142,6 +147,7 @@ struct LaunchConfiguration: Equatable {
     static let standard = LaunchConfiguration(
         fixture: .onboarding,
         visualState: nil,
+        photoReviewState: nil,
         forceReducedMotion: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
@@ -156,6 +162,7 @@ struct LaunchConfiguration: Equatable {
     static let preview = LaunchConfiguration(
         fixture: .home,
         visualState: nil,
+        photoReviewState: nil,
         forceReducedMotion: false,
         keyboardProbe: false,
         dynamicTypeSize: nil,
@@ -197,6 +204,10 @@ struct LaunchConfiguration: Equatable {
                 if configuration.visualState == .runDetail {
                     configuration.runDetailFixture = .loaded
                 }
+            } else if argument.hasPrefix("--photo-review-state=") {
+                let value = String(argument.dropFirst("--photo-review-state=".count))
+                configuration.photoReviewState = PhotoReviewVisualStateID(rawValue: value)
+                configuration.usesZeroNetworkFixtures = true
             } else if argument.hasPrefix("--camera-status=") {
                 let value = String(argument.dropFirst("--camera-status=".count))
                 configuration.cameraAuthorizationFixture = CameraAuthorizationStatus(rawValue: value)
@@ -212,6 +223,9 @@ struct LaunchConfiguration: Equatable {
     }
 
     var usesOnboarding: Bool {
+        if photoReviewState != nil {
+            return false
+        }
         if let visualState {
             return visualState.ownerIssue == 206
         }
