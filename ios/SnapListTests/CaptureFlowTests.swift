@@ -28,6 +28,76 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, returned)
     }
 
+    func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
+        let fingerprints = [
+            "direct-replace-photo-a-digest",
+            "direct-replace-photo-b-digest",
+            "direct-replace-photo-c-digest",
+            "direct-replace-photo-f-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000071",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000072",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000073",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+        let replacement = makePickerPhoto(
+            id: "45500000-0000-4000-8000-000000000076",
+            ordinal: 5,
+            fingerprints: fingerprints
+        )
+
+        let referencedStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(referencedStore.selectPhotoForActions(id: photos[1].id))
+
+        XCTAssertTrue(
+            referencedStore.replacePhoto(id: photos[1].id, with: replacement)
+        )
+        XCTAssertEqual(referencedStore.photos, [photos[0], replacement, photos[2]])
+        XCTAssertEqual(referencedStore.photos[0], photos[0])
+        XCTAssertEqual(referencedStore.photos[2], photos[2])
+        XCTAssertEqual(referencedStore.selectedPhotoID, replacement.id)
+        XCTAssertEqual(referencedStore.actionsPhotoID, replacement.id)
+
+        let referencedState = referencedStore.photos
+        XCTAssertFalse(
+            referencedStore.replacePhoto(id: photos[1].id, with: replacement)
+        )
+        XCTAssertEqual(referencedStore.photos, referencedState)
+        XCTAssertEqual(referencedStore.selectedPhotoID, replacement.id)
+        XCTAssertEqual(referencedStore.actionsPhotoID, replacement.id)
+
+        let unrelatedStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(unrelatedStore.selectPhotoForActions(id: photos[0].id))
+
+        XCTAssertTrue(
+            unrelatedStore.replacePhoto(id: photos[1].id, with: replacement)
+        )
+        XCTAssertEqual(unrelatedStore.photos, [photos[0], replacement, photos[2]])
+        XCTAssertEqual(unrelatedStore.photos[0], photos[0])
+        XCTAssertEqual(unrelatedStore.photos[2], photos[2])
+        XCTAssertEqual(unrelatedStore.selectedPhotoID, photos[0].id)
+        XCTAssertEqual(unrelatedStore.actionsPhotoID, photos[0].id)
+
+        let unrelatedState = unrelatedStore.photos
+        let unknownID = UUID(uuidString: "45500000-0000-4000-8000-000000000079")!
+        XCTAssertFalse(unrelatedStore.replacePhoto(id: unknownID, with: replacement))
+        XCTAssertEqual(unrelatedStore.photos, unrelatedState)
+        XCTAssertEqual(unrelatedStore.selectedPhotoID, photos[0].id)
+        XCTAssertEqual(unrelatedStore.actionsPhotoID, photos[0].id)
+    }
+
     func testDeletingFinalPhotoReturnsToZeroPhotoScanWithoutPhotoReviewShell() {
         let onlyPhoto = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000005")
         let store = PhotoReviewStore(photos: [onlyPhoto])
