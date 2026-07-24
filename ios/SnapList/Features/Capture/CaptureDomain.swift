@@ -429,6 +429,9 @@ final class PhotoReviewStore {
         if selectedPhotoID == id {
             selectedPhotoID = replacement.id
         }
+        if actionsPhotoID == id {
+            actionsPhotoID = replacement.id
+        }
         return true
     }
 
