@@ -22,6 +22,9 @@ struct UIProcessTerminationBoundary {
         _ process: any UIProcessLifecycle,
         timeout: TimeInterval = 3
     ) -> Bool {
+        if process.state == .runningForeground {
+            pressHome()
+        }
         process.terminate()
         return process.wait(for: .notRunning, timeout: timeout)
     }
@@ -72,6 +75,7 @@ final class HomeVisualRegressionTests: XCTestCase {
         let requiresCanonicalViewport = ProcessInfo.processInfo.environment[
             "SNAPLIST_REQUIRE_CANONICAL_VIEWPORT"
         ] == "1"
+        let processTermination = UIProcessTerminationBoundary()
 
         for state in ["HOME-01", "HOME-02", "HOME-03", "HOME-04"] {
             let app = XCUIApplication()
@@ -97,7 +101,10 @@ final class HomeVisualRegressionTests: XCTestCase {
             attachment.name = "\(state).png"
             attachment.lifetime = .keepAlways
             add(attachment)
-            app.terminate()
+            XCTAssertTrue(
+                processTermination.terminate(app),
+                "SnapList did not terminate after \(state)"
+            )
         }
     }
 }

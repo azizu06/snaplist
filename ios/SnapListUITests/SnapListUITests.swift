@@ -452,6 +452,7 @@ final class SnapListUITests: XCTestCase {
         let requiresCanonicalViewport = ProcessInfo.processInfo.environment[
             "SNAPLIST_REQUIRE_CANONICAL_VIEWPORT"
         ] == "1"
+        let processTermination = UIProcessTerminationBoundary()
         let states = [
             "ONB-00",
             "ONB-01",
@@ -467,6 +468,7 @@ final class SnapListUITests: XCTestCase {
         ]
 
         for state in states {
+            var settings: XCUIApplication?
             let status: String? = state == "native-camera-permission" ? nil : "denied"
             let app = launchOnboarding(
                 state: state,
@@ -485,14 +487,15 @@ final class SnapListUITests: XCTestCase {
             }
 
             if state == "settings-handoff" {
-                let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+                let settingsApp = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+                settings = settingsApp
                 XCTAssertTrue(
-                    settings.wait(for: .runningForeground, timeout: 3),
+                    settingsApp.wait(for: .runningForeground, timeout: 3),
                     "Settings handoff did not foreground the system Settings app"
                 )
                 if requiresCanonicalViewport {
-                    XCTAssertEqual(settings.windows.firstMatch.frame.size.width, 393)
-                    XCTAssertEqual(settings.windows.firstMatch.frame.size.height, 852)
+                    XCTAssertEqual(settingsApp.windows.firstMatch.frame.size.width, 393)
+                    XCTAssertEqual(settingsApp.windows.firstMatch.frame.size.height, 852)
                 }
             } else {
                 XCTAssertTrue(
@@ -516,9 +519,19 @@ final class SnapListUITests: XCTestCase {
                 XCTAssertTrue(deny.waitForExistence(timeout: 1))
                 deny.tap()
             } else if state == "settings-handoff" {
-                XCUIApplication(bundleIdentifier: "com.apple.Preferences").terminate()
+                if let settings {
+                    XCTAssertTrue(
+                        processTermination.terminate(settings),
+                        "Settings did not terminate after settings-handoff"
+                    )
+                } else {
+                    XCTFail("Settings lifecycle proxy was not retained")
+                }
             }
-            app.terminate()
+            XCTAssertTrue(
+                processTermination.terminate(app),
+                "SnapList did not terminate after \(state)"
+            )
         }
     }
 
