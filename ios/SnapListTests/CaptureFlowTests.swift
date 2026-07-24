@@ -251,6 +251,7 @@ final class CaptureFlowTests: XCTestCase {
                 root.appendingPathComponent("photo-review-thumb-\(ordinal).jpg")
             ]
         }
+        let retainedValidURL = urls[5]
         let invalidSize = CGSize(width: 640, height: 480)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -267,6 +268,14 @@ final class CaptureFlowTests: XCTestCase {
         let invalidPNG = renderer.pngData { context in
             UIColor.systemBlue.setFill()
             context.fill(CGRect(origin: .zero, size: invalidSize))
+        }
+        let fixtureSize = CGSize(width: 1_200, height: 900)
+        let retainedValidJPEG = UIGraphicsImageRenderer(
+            size: fixtureSize,
+            format: format
+        ).jpegData(withCompressionQuality: 0.75) { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(origin: .zero, size: fixtureSize))
         }
 
         func source(at url: URL) -> CGImageSource? {
@@ -308,7 +317,15 @@ final class CaptureFlowTests: XCTestCase {
         }
 
         for (offset, url) in urls.enumerated() {
-            try (offset == 0 ? invalidPNG : invalidJPEG).write(
+            let data: Data
+            if url == retainedValidURL {
+                data = retainedValidJPEG
+            } else if offset == 0 {
+                data = invalidPNG
+            } else {
+                data = invalidJPEG
+            }
+            try data.write(
                 to: url,
                 options: .atomic
             )
@@ -319,6 +336,11 @@ final class CaptureFlowTests: XCTestCase {
                 as String?,
             "public.png"
         )
+        XCTAssertTrue(satisfiesFixtureInvariant(at: retainedValidURL))
+        for url in urls where url != retainedValidURL {
+            XCTAssertFalse(satisfiesFixtureInvariant(at: url))
+        }
+        let retainedValidBytes = try Data(contentsOf: retainedValidURL)
 
         var constructionCount = 0
         var allFilesValidBeforeFirstConstruction = false
@@ -352,12 +374,17 @@ final class CaptureFlowTests: XCTestCase {
             allFilesValidBeforeFirstConstruction,
             "All retained fixture files must be repaired before the first photo is constructed."
         )
+        XCTAssertEqual(
+            try Data(contentsOf: retainedValidURL),
+            retainedValidBytes,
+            "An already-valid retained fixture must not be rewritten."
+        )
         for url in urls {
             let source = try XCTUnwrap(source(at: url))
             XCTAssertEqual(
                 CGImageSourceGetType(source) as String?,
                 "public.jpeg",
-                "\(url.lastPathComponent) must be rewritten as JPEG."
+                "\(url.lastPathComponent) must be JPEG."
             )
             let properties = try XCTUnwrap(
                 CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
@@ -367,13 +394,13 @@ final class CaptureFlowTests: XCTestCase {
                 (properties[kCGImagePropertyPixelWidth] as? NSNumber)?
                     .intValue,
                 1_200,
-                "\(url.lastPathComponent) must be rewritten to 1200 pixels wide."
+                "\(url.lastPathComponent) must be 1200 pixels wide."
             )
             XCTAssertEqual(
                 (properties[kCGImagePropertyPixelHeight] as? NSNumber)?
                     .intValue,
                 900,
-                "\(url.lastPathComponent) must be rewritten to 900 pixels tall."
+                "\(url.lastPathComponent) must be 900 pixels tall."
             )
             XCTAssertTrue(isLoaderDecodable(at: url))
         }
