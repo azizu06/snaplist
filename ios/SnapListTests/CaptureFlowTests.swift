@@ -478,7 +478,8 @@ final class CaptureFlowTests: XCTestCase {
         let router = AppRouter(initialFullScreen: .guidedCamera)
         let host = PhotoReviewLiveHost()
 
-        XCTAssertEqual(await captureFlow.restore(), .stagedPhoto)
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
         let restoredPhotos = captureFlow.stagedPhotos
         XCTAssertEqual(restoredPhotos.count, 1)
 
