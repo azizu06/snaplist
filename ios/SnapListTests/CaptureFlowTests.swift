@@ -465,6 +465,208 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
+    func testLivePhotoReviewScanReturnPersistsExactValuesOrderBeforeGuidedScan() async throws {
+        let fileManager = FileManager.default
+        let parent = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-return-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: parent) }
+
+        let nonemptyRoot = parent.appendingPathComponent(
+            "nonempty",
+            isDirectory: true
+        )
+        let nonemptyStore = LocalCaptureDraftStore(rootDirectory: nonemptyRoot)
+        let originalCover = try await nonemptyStore.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemRed,
+                rightColor: .systemOrange
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let second = try await nonemptyStore.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemGreen,
+                rightColor: .systemBlue
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let third = try await nonemptyStore.append(
+            imageData: makeLandscapeImageData(
+                leftColor: .systemPurple,
+                rightColor: .systemYellow
+            ),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let nonemptyModel = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: nonemptyStore
+        )
+        let nonemptyRestoration = await nonemptyModel.restore()
+        XCTAssertEqual(nonemptyRestoration, .stagedPhoto)
+
+        let nonemptyFocus = await nonemptyModel.applyPhotoReviewScanReturn(
+            PhotoReviewScanReturn(
+                photos: [third, originalCover],
+                focus: .reviewButton
+            )
+        )
+
+        XCTAssertEqual(nonemptyFocus, .reviewButton)
+        XCTAssertEqual(nonemptyModel.stagedPhotos, [third, originalCover])
+        let persistedNonemptyPhotos = try await nonemptyStore.loadPhotos()
+        XCTAssertEqual(persistedNonemptyPhotos, [third, originalCover])
+        XCTAssertEqual(nonemptyModel.phase, .captured)
+        for removedURL in [second.photoURL, second.thumbnailURL] {
+            XCTAssertFalse(
+                fileManager.fileExists(atPath: removedURL.path),
+                "Superseded artifacts must be removed only after the ordered manifest commits."
+            )
+        }
+
+        let emptyRoot = parent.appendingPathComponent("empty", isDirectory: true)
+        let emptyStore = LocalCaptureDraftStore(rootDirectory: emptyRoot)
+        let solePhoto = try await emptyStore.append(
+            imageData: makeLandscapeImageData(),
+            libraryTransferReceipt: nil
+        ).appendedPhoto
+        let emptyModel = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: emptyStore
+        )
+        let emptyRestoration = await emptyModel.restore()
+        XCTAssertEqual(emptyRestoration, .stagedPhoto)
+
+        let emptyFocus = await emptyModel.applyPhotoReviewScanReturn(
+            PhotoReviewScanReturn(photos: [], focus: .addPhotoButton)
+        )
+
+        XCTAssertEqual(emptyFocus, .addPhotoButton)
+        XCTAssertEqual(emptyModel.stagedPhotos, [])
+        let persistedEmptyPhotos = try await emptyStore.loadPhotos()
+        XCTAssertEqual(persistedEmptyPhotos, [])
+        XCTAssertEqual(emptyModel.phase, .idle)
+        for removedURL in [solePhoto.photoURL, solePhoto.thumbnailURL] {
+            XCTAssertFalse(
+                fileManager.fileExists(atPath: removedURL.path),
+                "Final-delete artifacts must be removed after the empty manifest commits."
+            )
+        }
+
+        let failingRoot = parent.appendingPathComponent(
+            "failing",
+            isDirectory: true
+        )
+        let originalFailingStore = LocalCaptureDraftStore(rootDirectory: failingRoot)
+        let failingImageData = try [
+            makeLandscapeImageData(leftColor: .systemRed, rightColor: .systemOrange),
+            makeLandscapeImageData(leftColor: .systemGreen, rightColor: .systemBlue),
+            makeLandscapeImageData(leftColor: .systemPurple, rightColor: .systemYellow)
+        ]
+        var failingPhotos: [StagedCapturePhoto] = []
+        for imageData in failingImageData {
+            let photo = try await originalFailingStore.append(
+                imageData: imageData,
+                libraryTransferReceipt: nil
+            ).appendedPhoto
+            failingPhotos.append(photo)
+        }
+        let failingWriter = PhotoReviewManifestWriteFailer()
+        let failingStore = LocalCaptureDraftStore(
+            rootDirectory: failingRoot,
+            writeData: failingWriter.write
+        )
+        let failingModel = CaptureFlowModel(
+            camera: TestCaptureCamera(
+                isAvailable: true,
+                authorization: .authorized
+            ),
+            evaluator: TestFramingEvaluator(observations: []),
+            store: failingStore
+        )
+        let failingRestoration = await failingModel.restore()
+        XCTAssertEqual(failingRestoration, .stagedPhoto)
+        let originalArtifacts = failingPhotos.flatMap {
+            [$0.photoURL, $0.thumbnailURL]
+        }
+
+        let failingFocus = await failingModel.applyPhotoReviewScanReturn(
+            PhotoReviewScanReturn(
+                photos: [failingPhotos[2], failingPhotos[0]],
+                focus: .reviewButton
+            )
+        )
+
+        XCTAssertNil(failingFocus)
+        XCTAssertEqual(failingWriter.writeCount, 1)
+        XCTAssertEqual(failingModel.stagedPhotos, failingPhotos)
+        let persistedFailingPhotos = try await failingStore.loadPhotos()
+        XCTAssertEqual(persistedFailingPhotos, failingPhotos)
+        XCTAssertEqual(failingModel.phase, .captured)
+        XCTAssertTrue(
+            originalArtifacts.allSatisfy {
+                fileManager.fileExists(atPath: $0.path)
+            },
+            "A failed ordered-manifest write must preserve every prior artifact."
+        )
+
+        let foreignPhoto = makeStagedPhoto(
+            id: "45800000-0000-4000-8000-000000000099"
+        )
+        let modifiedPhoto = StagedCapturePhoto(
+            id: failingPhotos[0].id,
+            photoURL: failingPhotos[0].photoURL,
+            thumbnailURL: failingPhotos[0].thumbnailURL,
+            createdAt: failingPhotos[0].createdAt.addingTimeInterval(1),
+            libraryTransferReceipt: failingPhotos[0].libraryTransferReceipt
+        )
+        let invalidReturns = [
+            PhotoReviewScanReturn(
+                photos: [failingPhotos[0], foreignPhoto],
+                focus: .reviewButton
+            ),
+            PhotoReviewScanReturn(
+                photos: [modifiedPhoto, failingPhotos[1]],
+                focus: .reviewButton
+            ),
+            PhotoReviewScanReturn(
+                photos: [failingPhotos[0], failingPhotos[0]],
+                focus: .reviewButton
+            ),
+            PhotoReviewScanReturn(
+                photos: [
+                    failingPhotos[0],
+                    failingPhotos[1],
+                    failingPhotos[2],
+                    foreignPhoto,
+                    modifiedPhoto,
+                    failingPhotos[0]
+                ],
+                focus: .reviewButton
+            )
+        ]
+        for invalidReturn in invalidReturns {
+            let invalidFocus = await failingModel.applyPhotoReviewScanReturn(
+                invalidReturn
+            )
+            XCTAssertNil(invalidFocus)
+            XCTAssertEqual(failingWriter.writeCount, 1)
+            XCTAssertEqual(failingModel.stagedPhotos, failingPhotos)
+            let persistedPhotos = try await failingStore.loadPhotos()
+            XCTAssertEqual(persistedPhotos, failingPhotos)
+            XCTAssertEqual(failingModel.phase, .captured)
+        }
+    }
+
     func testLivePhotoReviewHostConsumesExactRequestOnceAndPreservesEditingSession() {
         let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000011")
         let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000012")
@@ -3476,5 +3678,27 @@ private final class TestCaptureStore: CaptureDraftStoring {
     func discard() async throws {
         discardCount += 1
         stagedPhotos = []
+    }
+}
+
+private final class PhotoReviewManifestWriteFailer: @unchecked Sendable {
+    enum InjectedError: Error {
+        case writeFailed
+    }
+
+    private let lock = NSLock()
+    private var writes = 0
+
+    var writeCount: Int {
+        lock.withLock { writes }
+    }
+
+    func write(
+        data _: Data,
+        url _: URL,
+        options _: Data.WritingOptions
+    ) throws {
+        lock.withLock { writes += 1 }
+        throw InjectedError.writeFailed
     }
 }

@@ -960,6 +960,12 @@ final class CaptureFlowModel {
         }
     }
 
+    func applyPhotoReviewScanReturn(
+        _ request: PhotoReviewScanReturn
+    ) async -> PhotoReviewScanFocus? {
+        nil
+    }
+
     func startCamera() async {
         guard camera.isAvailable else {
             phase = .unavailable
