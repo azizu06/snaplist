@@ -31,27 +31,45 @@ struct UIProcessTerminationBoundary {
 }
 
 final class UIProcessTerminationBoundaryTests: XCTestCase {
-    func testForegroundProcessLeavesForegroundBeforeTerminationAndVerifiesExit() {
+    func testForegroundProcessWaitsForBackgroundBeforeTerminationAndVerifiesExit() {
         let process = FakeUIProcess()
         let boundary = UIProcessTerminationBoundary {
             process.pressHome()
         }
 
-        XCTAssertTrue(boundary.terminate(process))
+        XCTAssertTrue(boundary.terminate(process, timeout: 4))
         XCTAssertEqual(
             process.events,
-            ["press-home", "terminate", "wait-not-running"]
+            ["press-home", "wait-running-background", "terminate", "wait-not-running"]
         )
+        XCTAssertEqual(process.waitTimeouts, [2, 2])
+    }
+
+    func testForegroundProcessDoesNotTerminateWhenBackgroundTransitionTimesOut() {
+        let process = FakeUIProcess(backgroundTransitionSucceeds: false)
+        let boundary = UIProcessTerminationBoundary {
+            process.pressHome()
+        }
+
+        XCTAssertFalse(boundary.terminate(process, timeout: 4))
+        XCTAssertEqual(process.events, ["press-home", "wait-running-background"])
+        XCTAssertEqual(process.waitTimeouts, [2])
+        XCTAssertEqual(process.state, .runningForeground)
     }
 }
 
 private final class FakeUIProcess: UIProcessLifecycle {
     private(set) var state = XCUIApplication.State.runningForeground
     private(set) var events: [String] = []
+    private(set) var waitTimeouts: [TimeInterval] = []
+    private let backgroundTransitionSucceeds: Bool
+
+    init(backgroundTransitionSucceeds: Bool = true) {
+        self.backgroundTransitionSucceeds = backgroundTransitionSucceeds
+    }
 
     func pressHome() {
         events.append("press-home")
-        state = .runningBackground
     }
 
     func terminate() {
@@ -60,6 +78,16 @@ private final class FakeUIProcess: UIProcessLifecycle {
     }
 
     func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool {
+        waitTimeouts.append(timeout)
+        if state == .runningBackground {
+            events.append("wait-running-background")
+            guard backgroundTransitionSucceeds else {
+                return false
+            }
+            self.state = .runningBackground
+            return true
+        }
+
         events.append("wait-not-running")
         return self.state == state
     }
