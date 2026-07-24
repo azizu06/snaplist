@@ -126,6 +126,61 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         XCTAssertEqual(process.events, [])
         XCTAssertEqual(process.waitTimeouts, [])
     }
+
+    func testForegroundProcessUsesNativeWaitToObserveSuspensionBeforeTermination() {
+        let process = NativeWaitObservedUIProcess()
+        let boundary = UIProcessTerminationBoundary {
+            process.pressHome()
+        }
+
+        XCTAssertTrue(boundary.terminate(process, timeout: 4))
+        XCTAssertEqual(
+            process.events,
+            [
+                "press-home",
+                "wait-running-background",
+                "wait-running-background-suspended",
+                "terminate",
+                "wait-not-running"
+            ]
+        )
+        XCTAssertEqual(process.state, .notRunning)
+    }
+}
+
+private final class NativeWaitObservedUIProcess: UIProcessLifecycle {
+    private(set) var state = XCUIApplication.State.runningForeground
+    private(set) var events: [String] = []
+
+    func pressHome() {
+        events.append("press-home")
+    }
+
+    func terminate() {
+        events.append("terminate")
+        state = .notRunning
+    }
+
+    func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool {
+        switch state {
+        case .runningBackground:
+            events.append("wait-running-background")
+            return false
+        case .runningBackgroundSuspended:
+            events.append("wait-running-background-suspended")
+            self.state = .runningBackgroundSuspended
+            return true
+        case .notRunning:
+            events.append("wait-not-running")
+            return self.state == .notRunning
+        case .runningForeground, .unknown:
+            XCTFail("Unexpected native wait target \(state)")
+            return false
+        @unknown default:
+            XCTFail("Unexpected native wait target \(state)")
+            return false
+        }
+    }
 }
 
 private final class FakeUIProcess: UIProcessLifecycle {
