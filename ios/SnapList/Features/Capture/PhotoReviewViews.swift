@@ -298,12 +298,24 @@ final class PhotoReviewLiveSession {
 @Observable
 final class PhotoReviewLiveHost {
     private(set) var session: PhotoReviewLiveSession?
+    private var activeRequest: CaptureBoundaryRequest?
 
     @discardableResult
     func consume(
         _ request: CaptureBoundaryRequest?
     ) -> Bool {
-        false
+        guard let request else {
+            return false
+        }
+        if activeRequest == request, session != nil {
+            return false
+        }
+        guard let session = PhotoReviewLiveSession.start(from: request) else {
+            return false
+        }
+        activeRequest = request
+        self.session = session
+        return true
     }
 }
 
