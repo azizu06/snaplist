@@ -5,6 +5,13 @@ protocol UIProcessLifecycle: AnyObject {
 
     func terminate()
     func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool
+    func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool
+}
+
+extension UIProcessLifecycle {
+    func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
+        wait(for: .runningBackground, timeout: timeout)
+    }
 }
 
 extension XCUIApplication: UIProcessLifecycle {}
@@ -46,7 +53,7 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         XCTAssertTrue(boundary.terminate(process, timeout: 4))
         XCTAssertEqual(
             process.events,
-            ["press-home", "wait-running-background", "terminate", "wait-not-running"]
+            ["press-home", "wait-safe-to-terminate", "terminate", "wait-not-running"]
         )
         XCTAssertEqual(process.waitTimeouts, [2, 2])
     }
@@ -58,24 +65,66 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         }
 
         XCTAssertFalse(boundary.terminate(process, timeout: 4))
-        XCTAssertEqual(process.events, ["press-home", "wait-running-background"])
+        XCTAssertEqual(process.events, ["press-home", "wait-safe-to-terminate"])
         XCTAssertEqual(process.waitTimeouts, [2])
         XCTAssertEqual(process.state, .runningForeground)
+    }
+
+    func testForegroundProcessThatSuspendsAfterHomeStillTerminatesAndVerifiesExit() {
+        let process = FakeUIProcess(stateAfterPressHome: .runningBackgroundSuspended)
+        let boundary = UIProcessTerminationBoundary {
+            process.pressHome()
+        }
+
+        XCTAssertTrue(boundary.terminate(process, timeout: 4))
+        XCTAssertEqual(
+            process.events,
+            ["press-home", "wait-safe-to-terminate", "terminate", "wait-not-running"]
+        )
+        XCTAssertEqual(process.waitTimeouts, [2, 2])
+    }
+
+    func testAlreadyStoppedProcessSucceedsWithoutAnotherTerminateRequest() {
+        let process = FakeUIProcess(initialState: .notRunning)
+        let boundary = UIProcessTerminationBoundary()
+
+        XCTAssertTrue(boundary.terminate(process, timeout: 4))
+        XCTAssertEqual(process.events, [])
+        XCTAssertEqual(process.waitTimeouts, [])
+    }
+
+    func testUnknownProcessStateFailsClosedWithoutTerminateRequest() {
+        let process = FakeUIProcess(initialState: .unknown)
+        let boundary = UIProcessTerminationBoundary()
+
+        XCTAssertFalse(boundary.terminate(process, timeout: 4))
+        XCTAssertEqual(process.events, [])
+        XCTAssertEqual(process.waitTimeouts, [])
     }
 }
 
 private final class FakeUIProcess: UIProcessLifecycle {
-    private(set) var state = XCUIApplication.State.runningForeground
+    private(set) var state: XCUIApplication.State
     private(set) var events: [String] = []
     private(set) var waitTimeouts: [TimeInterval] = []
     private let backgroundTransitionSucceeds: Bool
+    private let stateAfterPressHome: XCUIApplication.State?
 
-    init(backgroundTransitionSucceeds: Bool = true) {
+    init(
+        initialState: XCUIApplication.State = .runningForeground,
+        backgroundTransitionSucceeds: Bool = true,
+        stateAfterPressHome: XCUIApplication.State? = nil
+    ) {
+        state = initialState
         self.backgroundTransitionSucceeds = backgroundTransitionSucceeds
+        self.stateAfterPressHome = stateAfterPressHome
     }
 
     func pressHome() {
         events.append("press-home")
+        if let stateAfterPressHome {
+            state = stateAfterPressHome
+        }
     }
 
     func terminate() {
@@ -87,6 +136,9 @@ private final class FakeUIProcess: UIProcessLifecycle {
         waitTimeouts.append(timeout)
         if state == .runningBackground {
             events.append("wait-running-background")
+            guard self.state == .runningForeground else {
+                return self.state == state
+            }
             guard backgroundTransitionSucceeds else {
                 return false
             }
@@ -96,6 +148,25 @@ private final class FakeUIProcess: UIProcessLifecycle {
 
         events.append("wait-not-running")
         return self.state == state
+    }
+
+    func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
+        events.append("wait-safe-to-terminate")
+        waitTimeouts.append(timeout)
+        switch state {
+        case .runningBackground, .runningBackgroundSuspended, .notRunning:
+            return true
+        case .runningForeground:
+            guard backgroundTransitionSucceeds else {
+                return false
+            }
+            state = .runningBackground
+            return true
+        case .unknown:
+            return false
+        @unknown default:
+            return false
+        }
     }
 }
 
