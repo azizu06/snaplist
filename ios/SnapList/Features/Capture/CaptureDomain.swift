@@ -526,6 +526,7 @@ protocol CaptureDraftStoring {
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
     ) async throws -> CaptureDraftAppendResult
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws
     func discard() async throws
 }
 
@@ -701,6 +702,34 @@ actor LocalCaptureDraftStore: CaptureDraftStoring {
             appendedPhoto: staged,
             photos: existingPhotos + [staged]
         )
+    }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        let existingPhotos = try await loadPhotos()
+        let existingIDs = Set(existingPhotos.map(\.id))
+        guard existingIDs.count == existingPhotos.count else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+        let existingByID = Dictionary(
+            uniqueKeysWithValues: existingPhotos.map { ($0.id, $0) }
+        )
+        let replacementIDs = Set(photos.map(\.id))
+        guard photos.count <= 5,
+              replacementIDs.count == photos.count,
+              photos.allSatisfy({ existingByID[$0.id] == $0 }) else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+
+        try writeData(
+            try encoder.encode(photos),
+            orderedManifestURL,
+            Self.writingOptions
+        )
+        try? fileManager.removeItem(at: manifestURL)
+        let retainedURLs = Set(
+            photos.flatMap { [$0.photoURL, $0.thumbnailURL] }
+        )
+        try? removeSupersededImages(keeping: retainedURLs)
     }
 
     private func persist(
@@ -963,7 +992,14 @@ final class CaptureFlowModel {
     func applyPhotoReviewScanReturn(
         _ request: PhotoReviewScanReturn
     ) async -> PhotoReviewScanFocus? {
-        nil
+        do {
+            try await store.replacePhotos(with: request.photos)
+            stagedPhotos = request.photos
+            phase = request.photos.isEmpty ? .idle : .captured
+            return request.focus
+        } catch {
+            return nil
+        }
     }
 
     func startCamera() async {

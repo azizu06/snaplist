@@ -3600,6 +3600,10 @@ private final class LifetimeTrackingCaptureStore: CaptureDraftStoring {
         stagedPhotos = []
         stagedBytes = []
     }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        stagedPhotos = photos
+    }
 }
 
 private final class TestCaptureStore: CaptureDraftStoring {
@@ -3678,6 +3682,10 @@ private final class TestCaptureStore: CaptureDraftStoring {
     func discard() async throws {
         discardCount += 1
         stagedPhotos = []
+    }
+
+    func replacePhotos(with photos: [StagedCapturePhoto]) async throws {
+        stagedPhotos = photos
     }
 }
 

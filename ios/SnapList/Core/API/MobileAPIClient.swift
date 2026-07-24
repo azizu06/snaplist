@@ -210,18 +210,39 @@ struct AppDependencies {
 
 #if DEBUG
 private actor RestoredCaptureFixtureStore: CaptureDraftStoring {
-    private let staged = StagedCapturePhoto(
-        id: UUID(uuidString: "20720720-7207-4207-8207-207207207207")!,
-        photoURL: URL(fileURLWithPath: "/fixture/capture-photo.jpg"),
-        thumbnailURL: URL(fileURLWithPath: "/fixture/capture-thumbnail.jpg"),
-        createdAt: Date()
-    )
+    private var photos = [
+        StagedCapturePhoto(
+            id: UUID(uuidString: "20720720-7207-4207-8207-207207207207")!,
+            photoURL: URL(fileURLWithPath: "/fixture/capture-photo.jpg"),
+            thumbnailURL: URL(fileURLWithPath: "/fixture/capture-thumbnail.jpg"),
+            createdAt: Date()
+        )
+    ]
 
-    func load() async throws -> StagedCapturePhoto? { staged }
+    func load() async throws -> StagedCapturePhoto? { photos.first }
+    func loadPhotos() async throws -> [StagedCapturePhoto] { photos }
     func stage(
         imageData: Data,
         libraryTransferReceipt: LibraryPhotoTransferReceipt?
-    ) async throws -> StagedCapturePhoto { staged }
-    func discard() async throws {}
+    ) async throws -> StagedCapturePhoto {
+        guard let photo = photos.first else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+        return photo
+    }
+
+    func replacePhotos(with replacement: [StagedCapturePhoto]) async throws {
+        let currentByID = Dictionary(
+            uniqueKeysWithValues: photos.map { ($0.id, $0) }
+        )
+        guard replacement.count <= 5,
+              Set(replacement.map(\.id)).count == replacement.count,
+              replacement.allSatisfy({ currentByID[$0.id] == $0 }) else {
+            throw CaptureDraftStoreError.invalidManifest
+        }
+        photos = replacement
+    }
+
+    func discard() async throws { photos = [] }
 }
 #endif
