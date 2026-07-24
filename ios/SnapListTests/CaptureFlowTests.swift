@@ -48,6 +48,71 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testPhotoReviewFixtureMaterializesAllImagesBeforeFirstPhotoConstruction() {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-sequencing-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let expectedURLs = (1...3).flatMap { ordinal in
+            [
+                root.appendingPathComponent("photo-review-\(ordinal).jpg"),
+                root.appendingPathComponent("photo-review-thumb-\(ordinal).jpg")
+            ]
+        }
+        var constructionCount = 0
+        var firstConstructionDecodeResults: [URL: Bool] = [:]
+
+        let photos = PhotoReviewFixtureView.photos(
+            for: .resting,
+            rootDirectory: root
+        ) {
+            constructionCount += 1
+            guard constructionCount == 1 else {
+                return
+            }
+            firstConstructionDecodeResults = Dictionary(
+                uniqueKeysWithValues: expectedURLs.map { url in
+                    guard
+                        fileManager.fileExists(atPath: url.path),
+                        let source = CGImageSourceCreateWithURL(url as CFURL, nil)
+                    else {
+                        return (url, false)
+                    }
+                    let image = CGImageSourceCreateThumbnailAtIndex(
+                        source,
+                        0,
+                        [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 1_200
+                        ] as CFDictionary
+                    )
+                    return (url, image != nil)
+                }
+            )
+        }
+
+        XCTAssertEqual(constructionCount, 3)
+        XCTAssertEqual(
+            photos.map(\.id.uuidString),
+            [
+                "45500000-0000-4000-8000-000000000001",
+                "45500000-0000-4000-8000-000000000002",
+                "45500000-0000-4000-8000-000000000003"
+            ]
+        )
+        for url in expectedURLs {
+            XCTAssertEqual(
+                firstConstructionDecodeResults[url],
+                true,
+                "\(url.lastPathComponent) must decode before the first fixture photo is constructed."
+            )
+        }
+    }
+
     func testPhotoReviewFixtureReplacesRecognizedButUndecodableImages() throws {
         let fileManager = FileManager.default
         let root = fileManager.temporaryDirectory.appendingPathComponent(

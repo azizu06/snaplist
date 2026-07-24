@@ -134,7 +134,8 @@ struct PhotoReviewFixtureView: View {
 
     static func photos(
         for state: PhotoReviewVisualStateID,
-        rootDirectory: URL = FileManager.default.temporaryDirectory
+        rootDirectory: URL = FileManager.default.temporaryDirectory,
+        beforePhotoConstruction: () -> Void = {}
     ) -> [StagedCapturePhoto] {
         do {
             try FileManager.default.createDirectory(
@@ -163,6 +164,7 @@ struct PhotoReviewFixtureView: View {
                     at: [photoURL, thumbnailURL],
                     ordinal: index
                 )
+                beforePhotoConstruction()
                 return StagedCapturePhoto(
                     id: id,
                     photoURL: photoURL,
