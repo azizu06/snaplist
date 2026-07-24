@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 @MainActor
@@ -9,14 +10,32 @@ final class PhotoReviewPickerPresentation {
     func present(
         _ request: PhotoReviewPickerRequest,
         store: PhotoReviewStore
-    ) {}
+    ) {
+        cancellationFocus = nil
+        store.beginPickerRequest(request)
+        isPresented = true
+    }
 
     @discardableResult
     func dismiss(
         hasConfirmedSelection: Bool,
         store: PhotoReviewStore
     ) -> PhotoReviewPickerOpener? {
-        nil
+        guard isPresented else {
+            return nil
+        }
+
+        isPresented = false
+        guard !hasConfirmedSelection else {
+            cancellationFocus = nil
+            return nil
+        }
+
+        guard let opener = store.cancelPickerRequest() else {
+            return nil
+        }
+        cancellationFocus = opener
+        return opener
     }
 }
 
@@ -35,7 +54,6 @@ struct PhotoReviewFixtureView: View {
     var body: some View {
         PhotoReviewView(
             store: store,
-            replace: {},
             delete: {}
         )
     }
@@ -63,8 +81,16 @@ struct PhotoReviewFixtureView: View {
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
-    let replace: () -> Void
     let delete: () -> Void
+
+    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var pickerPresentation = PhotoReviewPickerPresentation()
+    @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
+
+    private enum PickerFocusTarget: Hashable {
+        case addButton
+        case replaceButton(photoID: StagedCapturePhoto.ID)
+    }
 
     private var selectedPhoto: StagedCapturePhoto? {
         store.photos.first(where: { $0.id == store.selectedPhotoID })
@@ -88,6 +114,19 @@ struct PhotoReviewView: View {
         .background(SnapListColorToken.groupingFill.color)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("photo-review.screen")
+        .photosPicker(
+            isPresented: pickerIsPresented,
+            selection: $pickerItems,
+            maxSelectionCount: pickerSelectionLimit,
+            matching: .images
+        )
+        .onChange(of: pickerItems) { _, items in
+            guard !items.isEmpty else { return }
+            _ = pickerPresentation.dismiss(
+                hasConfirmedSelection: true,
+                store: store
+            )
+        }
     }
 
     private var topBar: some View {
@@ -127,6 +166,7 @@ struct PhotoReviewView: View {
                 ForEach(Array(store.photos.enumerated()), id: \.element.id) { index, photo in
                     thumbnail(photo, index: index)
                 }
+                addButton
             }
             .padding(.vertical, 3)
         }
@@ -190,19 +230,104 @@ struct PhotoReviewView: View {
         return truths.joined(separator: ", ")
     }
 
+    private var addButton: some View {
+        Button {
+            presentPicker(.add)
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .semibold))
+                Text("Add")
+                    .snapListTypography(.metadata)
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(SnapListColorToken.textSecondary.color)
+            .frame(
+                width: 76,
+                height: 76
+            )
+            .background(SnapListColorToken.canvas.color)
+            .clipShape(.rect(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        SnapListColorToken.textSecondary.color.opacity(0.55),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [5])
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add photos")
+        .accessibilityIdentifier("photo-review.add")
+        .accessibilityFocused(
+            $focusedPickerOpener,
+            equals: .addButton
+        )
+    }
+
+    @ViewBuilder
     private var actionRow: some View {
         HStack(spacing: 12) {
-            Button("Replace", action: replace)
+            if let photoID = store.actionsPhotoID {
+                Button("Replace") {
+                    presentPicker(.replace(photoID: photoID))
+                }
                 .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Replace this photo")
                 .accessibilityIdentifier("photo-review.replace")
+                .accessibilityFocused(
+                    $focusedPickerOpener,
+                    equals: .replaceButton(photoID: photoID)
+                )
+            }
 
             Button("Delete", role: .destructive, action: delete)
                 .frame(maxWidth: .infinity, minHeight: SnapListMetrics.minimumTouchTarget)
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Delete this photo")
                 .accessibilityIdentifier("photo-review.delete")
+        }
+    }
+
+    private var pickerIsPresented: Binding<Bool> {
+        Binding(
+            get: { pickerPresentation.isPresented },
+            set: { isPresented in
+                guard !isPresented else { return }
+                restorePickerCancellationFocus(
+                    pickerPresentation.dismiss(
+                        hasConfirmedSelection: !pickerItems.isEmpty,
+                        store: store
+                    )
+                )
+            }
+        )
+    }
+
+    private var pickerSelectionLimit: Int? {
+        guard case .replace = store.activePickerRequest else {
+            return nil
+        }
+        return 1
+    }
+
+    private func presentPicker(_ request: PhotoReviewPickerRequest) {
+        pickerItems = []
+        focusedPickerOpener = nil
+        pickerPresentation.present(request, store: store)
+    }
+
+    private func restorePickerCancellationFocus(
+        _ opener: PhotoReviewPickerOpener?
+    ) {
+        switch opener {
+        case .addButton:
+            focusedPickerOpener = .addButton
+        case .replaceButton(let photoID):
+            focusedPickerOpener = .replaceButton(photoID: photoID)
+        case nil:
+            break
         }
     }
 }
