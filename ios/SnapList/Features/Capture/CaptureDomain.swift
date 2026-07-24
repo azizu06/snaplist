@@ -402,6 +402,9 @@ final class PhotoReviewStore {
         guard movePhoto(id: photoID, to: destinationIndex) else {
             return nil
         }
+        if actionsPhotoID != photoID {
+            actionsPhotoID = nil
+        }
 
         let index = destinationIndex + 1
         let announcement = destinationIndex == 0
