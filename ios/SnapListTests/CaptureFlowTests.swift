@@ -3506,8 +3506,8 @@ private struct PhotoReviewConditionalPresentationHarness: View {
     @Bindable var router: AppRouter
     @Bindable var host: PhotoReviewLiveHost
     let coverPresented: () -> Void
-    let coverDismissed: () -> Void = {}
-    let reviewPresented: () -> Void = {}
+    let coverDismissed: () -> Void
+    let reviewPresented: () -> Void
 
     init(
         router: AppRouter,
