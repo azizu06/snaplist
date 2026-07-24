@@ -258,6 +258,19 @@ enum PhotoReviewDeleteFocus: Equatable {
     case addButton
 }
 
+enum PhotoReviewReorderAction: Equatable {
+    case moveEarlier
+    case moveLater
+    case makeCover
+}
+
+struct PhotoReviewReorderResult: Equatable {
+    let photoID: StagedCapturePhoto.ID
+    let index: Int
+    let count: Int
+    let announcement: String
+}
+
 @MainActor
 @Observable
 final class PhotoReviewStore {
@@ -355,6 +368,14 @@ final class PhotoReviewStore {
         photos.insert(photo, at: destinationIndex)
         selectedPhotoID = photo.id
         return true
+    }
+
+    @discardableResult
+    func performAccessibilityReorder(
+        photoID: StagedCapturePhoto.ID,
+        action: PhotoReviewReorderAction
+    ) -> PhotoReviewReorderResult? {
+        nil
     }
 
     @discardableResult
