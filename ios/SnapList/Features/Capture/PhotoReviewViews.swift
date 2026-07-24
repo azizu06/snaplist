@@ -338,6 +338,7 @@ final class PhotoReviewLiveSession {
 final class PhotoReviewLiveHost {
     private(set) var session: PhotoReviewLiveSession?
     private var activeRequest: CaptureBoundaryRequest?
+    private var pendingFinalDeleteAnnouncement: String?
 
     @discardableResult
     func consume(
@@ -362,11 +363,31 @@ final class PhotoReviewLiveHost {
         id: StagedCapturePhoto.ID,
         using router: AppRouter
     ) -> PhotoReviewLiveFinalDeleteResult? {
-        nil
+        guard let session,
+              session.store.photos.count == 1,
+              case .addButton? =
+                session.store.deletePhotoForReview(id: id) else {
+            return nil
+        }
+
+        let scanReturn = PhotoReviewScanReturn(
+            photos: [],
+            focus: .addPhotoButton
+        )
+        let announcement = "0 photos remaining. Returning to Scan."
+        router.returnFromPhotoReview(scanReturn)
+        self.session = nil
+        activeRequest = nil
+        pendingFinalDeleteAnnouncement = announcement
+        return PhotoReviewLiveFinalDeleteResult(
+            scanReturn: scanReturn,
+            announcement: announcement
+        )
     }
 
     func consumeFinalDeleteAnnouncement() -> String? {
-        nil
+        defer { pendingFinalDeleteAnnouncement = nil }
+        return pendingFinalDeleteAnnouncement
     }
 }
 
