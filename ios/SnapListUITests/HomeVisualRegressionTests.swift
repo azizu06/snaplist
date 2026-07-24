@@ -166,6 +166,27 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         XCTAssertEqual(process.state, .notRunning)
     }
 
+    func testPositiveForegroundExitWitnessAllowsStaleForegroundTargetTermination() {
+        let process = PositiveForegroundExitWitnessUIProcess()
+        let boundary = UIProcessTerminationBoundary {
+            process.pressHome()
+        }
+
+        XCTAssertTrue(boundary.terminate(process, timeout: 4))
+        XCTAssertEqual(
+            process.events,
+            [
+                "press-home",
+                "wait-foreground-exit-witness",
+                "terminate",
+                "wait-not-running"
+            ]
+        )
+        XCTAssertEqual(process.waitTimeouts, [4, 4])
+        XCTAssertEqual(process.terminateCount, 1)
+        XCTAssertEqual(process.state, .notRunning)
+    }
+
     func testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow() {
         let process = LateNativeWaitObservedUIProcess(
             safeStateAvailableAfter: 0.24
@@ -189,6 +210,39 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
             XCTFail("Exit verification did not receive its separate timeout")
         }
         XCTAssertEqual(process.state, .notRunning)
+    }
+}
+
+private final class PositiveForegroundExitWitnessUIProcess: UIProcessLifecycle {
+    private(set) var state = XCUIApplication.State.runningForeground
+    private(set) var events: [String] = []
+    private(set) var waitTimeouts: [TimeInterval] = []
+    private(set) var terminateCount = 0
+
+    func pressHome() {
+        events.append("press-home")
+    }
+
+    func terminate() {
+        events.append("terminate")
+        terminateCount += 1
+        state = .notRunning
+    }
+
+    func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool {
+        guard state == .notRunning else {
+            XCTFail("Unexpected post-termination wait target \(state)")
+            return false
+        }
+        events.append("wait-not-running")
+        waitTimeouts.append(timeout)
+        return self.state == .notRunning
+    }
+
+    func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
+        events.append("wait-foreground-exit-witness")
+        waitTimeouts.append(timeout)
+        return true
     }
 }
 
