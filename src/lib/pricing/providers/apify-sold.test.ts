@@ -747,9 +747,13 @@ describe("createApifySoldPricingProvider", () => {
       await vi.advanceTimersByTimeAsync(2_501);
       const result = await pending;
 
-      expect(events.indexOf("owner:owner-a")).toBeLessThan(
-        events.findIndex((event) => event.startsWith("claim:")),
+      const oldOwnerObservationIndex = events.indexOf("owner:owner-a");
+      const delayedClaimSettleIndex = events.findIndex((event) =>
+        event.startsWith("claim:"),
       );
+      expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
+      expect(delayedClaimSettleIndex).toBeGreaterThanOrEqual(0);
+      expect(oldOwnerObservationIndex).toBeLessThan(delayedClaimSettleIndex);
       expect({
         actorCalls: runActor.mock.calls.length,
         claimSettled,
