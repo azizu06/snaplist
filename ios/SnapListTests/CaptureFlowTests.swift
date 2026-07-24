@@ -1,5 +1,6 @@
 import AVFoundation
 import ImageIO
+import SwiftUI
 import UIKit
 import XCTest
 @testable import SnapList
@@ -514,6 +515,46 @@ final class CaptureFlowTests: XCTestCase {
         } else {
             XCTFail("The coordinator must return the exact restored Scan request.")
         }
+    }
+
+    func testPhotoReviewConditionalShellRemountPresentsPrepopulatedGuidedCamera() async {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000051")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The presentation contract requires an active Photo Review session.")
+            return
+        }
+
+        let coverPresented = expectation(
+            description: "The prepopulated guided-camera cover appears after shell remount."
+        )
+        let hostingController = UIHostingController(
+            rootView: PhotoReviewConditionalPresentationHarness(
+                router: router,
+                host: host,
+                coverPresented: coverPresented.fulfill
+            )
+        )
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        await Task.yield()
+        XCTAssertNil(hostingController.presentedViewController)
+
+        XCTAssertTrue(host.completeReturnToScan(from: session))
+        router.presentedFullScreen = .guidedCamera
+
+        await fulfillment(of: [coverPresented], timeout: 3)
+        XCTAssertNotNil(hostingController.presentedViewController)
+        window.isHidden = true
+        withExtendedLifetime(window) {}
     }
 
     func testLivePhotoReviewScanReturnPersistsExactValuesOrderBeforeGuidedScan() async throws {
@@ -3379,6 +3420,31 @@ final class CaptureFlowTests: XCTestCase {
             rightColor.setFill()
             context.fill(CGRect(x: 200, y: 0, width: 200, height: 200))
         })
+    }
+}
+
+@MainActor
+private struct PhotoReviewConditionalPresentationHarness: View {
+    @Bindable var router: AppRouter
+    @Bindable var host: PhotoReviewLiveHost
+    let coverPresented: () -> Void
+
+    var body: some View {
+        if host.session != nil {
+            Color.clear
+                .accessibilityIdentifier("photo-review.contract")
+        } else {
+            Color.clear
+                .accessibilityIdentifier("scan-shell.contract")
+                .fullScreenCover(item: $router.presentedFullScreen) { destination in
+                    switch destination {
+                    case .guidedCamera:
+                        Color.clear
+                            .accessibilityIdentifier("guided-camera.contract")
+                            .onAppear(perform: coverPresented)
+                    }
+                }
+        }
     }
 }
 
