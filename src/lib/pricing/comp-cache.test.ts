@@ -6,6 +6,7 @@ import {
   upstashConfigured,
   __resetTtlCaches,
 } from "./comp-cache";
+import { createScriptAwareAuthorityRedis } from "./pricing-authority-test-fixtures";
 
 beforeEach(() => __resetTtlCaches());
 
@@ -126,47 +127,12 @@ describe("createUpstashTtlCache (injected fake client)", () => {
   });
 
   it("round-trips exact-owner authority when Redis auto-deserializes JSON", async () => {
-    const store = new Map<string, string>();
-    const fake = {
-      async set(
-        key: string,
-        value: string,
-        opts: { ex: number; nx?: true },
-      ) {
-        if (opts.nx && store.has(key)) return null;
-        store.set(key, value);
-        return "OK";
-      },
-      async get(key: string) {
-        const value = store.get(key);
-        return value == null ? null : JSON.parse(value);
-      },
-      async eval(
-        _script: string,
-        keys: string[],
-        args: Array<string | number>,
-      ) {
-        const [claimKey, authorityKey] = keys;
-        const [ownerToken, nextState, nextRaw] = args;
-        const claim = JSON.parse(store.get(claimKey!)!) as {
-          ownerToken: string;
-        };
-        const current = JSON.parse(
-          store.get(authorityKey!) ?? store.get(claimKey!)!,
-        ) as { ownerToken: string; state: "live" | "terminal" };
-        if (
-          claim.ownerToken !== ownerToken ||
-          current.ownerToken !== ownerToken ||
-          (nextState === "live" && current.state !== "live") ||
-          (nextState !== "live" && nextState !== "terminal")
-        ) {
-          return 0;
-        }
-        store.set(authorityKey!, String(nextRaw));
-        return 1;
-      },
-    };
-    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+    const redis = createScriptAwareAuthorityRedis();
+    const cache = createUpstashTtlCache<string>(
+      "apify-sold",
+      60_000,
+      redis.client,
+    );
 
     await expect(
       cache.claim?.("identity", undefined, "owner-a"),
@@ -190,66 +156,20 @@ describe("createUpstashTtlCache (injected fake client)", () => {
   });
 
   it("cannot overwrite current authority when ownership changes during a transition", async () => {
-    const store = new Map<string, string>();
     let replacementOwner: string | null = null;
-    const authority = (ownerToken: string, state: "live" | "terminal") =>
-      JSON.stringify({ ownerToken, state, updatedAt: Date.now() });
-    const fake = {
-      async set(
-        key: string,
-        value: string,
-        opts: { ex: number; nx?: true },
-      ) {
-        if (opts.nx && store.has(key)) return null;
-        if (!opts.nx && replacementOwner != null) {
-          const claimKey = [...store.keys()].find((candidate) =>
-            candidate.endsWith(":paid-claim"),
-          );
-          if (claimKey) {
-            store.set(claimKey, authority(replacementOwner, "live"));
-          }
-          replacementOwner = null;
-        }
-        store.set(key, value);
-        return "OK";
-      },
-      async get(key: string) {
-        const value = store.get(key);
-        return value == null ? null : JSON.parse(value);
-      },
-      async eval(
-        _script: string,
-        keys: string[],
-        args: Array<string | number>,
-      ) {
-        const [claimKey, authorityKey] = keys;
-        const [ownerToken, nextState, nextRaw] = args;
+    const redis = createScriptAwareAuthorityRedis({
+      beforeTransition: ({ claimKey }) => {
         if (replacementOwner != null) {
-          store.set(
-            claimKey!,
-            authority(replacementOwner, "live"),
-          );
+          redis.writeAuthority(claimKey, replacementOwner, "live");
           replacementOwner = null;
         }
-        const claim = JSON.parse(store.get(claimKey!)!) as {
-          ownerToken: string;
-        };
-        const current = JSON.parse(
-          store.get(authorityKey!) ?? store.get(claimKey!)!,
-        ) as { ownerToken: string; state: "live" | "terminal" };
-        if (
-          claim.ownerToken !== ownerToken ||
-          current.ownerToken !== ownerToken ||
-          (nextState === "live" && current.state !== "live") ||
-          (nextState !== "live" && nextState !== "terminal")
-        ) {
-          return 0;
-        }
-        store.set(authorityKey!, String(nextRaw));
-        return 1;
       },
-    };
-    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+    });
+    const cache = createUpstashTtlCache<string>(
+      "apify-sold",
+      60_000,
+      redis.client,
+    );
 
     await cache.claim?.("identity", undefined, "owner-a");
     replacementOwner = "owner-b";
@@ -274,7 +194,6 @@ describe("createUpstashTtlCache (injected fake client)", () => {
   });
 
   it("keeps terminal authority irreversible when an issued same-owner refresh lands later", async () => {
-    const store = new Map<string, string>();
     let reportRefreshIssued!: () => void;
     const refreshIssued = new Promise<void>((resolve) => {
       reportRefreshIssued = resolve;
@@ -284,62 +203,22 @@ describe("createUpstashTtlCache (injected fake client)", () => {
       releaseRefresh = resolve;
     });
     let delayedLiveTransition = false;
-    const authority = (raw: string | undefined) =>
-      raw == null
-        ? null
-        : (JSON.parse(raw) as {
-            ownerToken: string;
-            state: "live" | "terminal";
-          });
     const delayIssuedLiveTransition = async (state: string) => {
       if (state !== "live" || delayedLiveTransition) return;
       delayedLiveTransition = true;
       reportRefreshIssued();
       await refreshRelease;
     };
-    const fake = {
-      async set(
-        key: string,
-        value: string,
-        opts: { ex: number; nx?: true },
-      ) {
-        if (opts.nx && store.has(key)) return null;
-        const next = authority(value);
-        if (!opts.nx && next != null) {
-          await delayIssuedLiveTransition(next.state);
-        }
-        store.set(key, value);
-        return "OK";
+    const redis = createScriptAwareAuthorityRedis({
+      beforeTransition: async ({ nextState }) => {
+        await delayIssuedLiveTransition(nextState);
       },
-      async get(key: string) {
-        const value = store.get(key);
-        return value == null ? null : JSON.parse(value);
-      },
-      async eval(
-        _script: string,
-        keys: string[],
-        args: Array<string | number>,
-      ) {
-        const [claimKey, authorityKey] = keys;
-        const [ownerToken, nextState, nextRaw] = args;
-        await delayIssuedLiveTransition(String(nextState));
-        const claim = authority(store.get(claimKey!));
-        const current = authority(
-          store.get(authorityKey!) ?? store.get(claimKey!),
-        );
-        if (
-          claim?.ownerToken !== ownerToken ||
-          current?.ownerToken !== ownerToken ||
-          (nextState === "live" && current.state !== "live") ||
-          (nextState !== "live" && nextState !== "terminal")
-        ) {
-          return 0;
-        }
-        store.set(authorityKey!, String(nextRaw));
-        return 1;
-      },
-    };
-    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+    });
+    const cache = createUpstashTtlCache<string>(
+      "apify-sold",
+      60_000,
+      redis.client,
+    );
 
     await cache.claim?.("identity", undefined, "owner-a");
     const refresh = cache.refreshClaimAuthority?.("identity", "owner-a");

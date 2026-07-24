@@ -14,6 +14,7 @@ import type {
   RunApifySoldActor,
 } from "./providers/apify-sold";
 import type { EbaySoldComp, FetchPage } from "./providers/ebay-sold";
+import { createAuthorityCacheFixture } from "./pricing-authority-test-fixtures";
 import type { ItemSignal } from "./types";
 
 const SIGNAL: ItemSignal = {
@@ -104,6 +105,34 @@ function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
       cache: options.ebaySold?.cache ?? sharedPublicSoldCache(),
     },
   });
+}
+
+type AuthorityRaceEvent =
+  | { type: "owner-observed"; ownerToken: string | null }
+  | { type: "claim-aborted"; ownerToken: string }
+  | { type: "claim-settled"; ownerToken: string; committed: boolean };
+
+function createAuthorityPricerFixture(
+  cache: TtlCache<ApifySoldComp[]>,
+  runActor: RunApifySoldActor,
+) {
+  const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+  const priceForRuntime = () =>
+    createDefaultPricer({
+      apifySold: {
+        enabled: true,
+        token: "secret",
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        cache,
+      },
+      ebaySold: {
+        fetchPage,
+        cache: sharedPublicSoldCache(),
+      },
+    });
+  return { fetchPage, priceForRuntime };
 }
 
 describe("createDefaultPricer Apify composition", () => {
@@ -503,8 +532,9 @@ describe("createDefaultPricer Apify composition", () => {
         Date.now,
         "shared",
       );
-      const events: string[] = [];
+      const events: AuthorityRaceEvent[] = [];
       let seededPreviousOwner = false;
+      let delayedClaimOwner: string | null = null;
       const cache: TtlCache<ApifySoldComp[]> = {
         ...backend,
         claim: async (key, signal, ownerToken) => {
@@ -514,16 +544,21 @@ describe("createDefaultPricer Apify composition", () => {
           }
           return new Promise<boolean>((resolve) => {
             setTimeout(async () => {
+              delayedClaimOwner = ownerToken ?? "legacy-owner";
               const claimed =
                 (await backend.claim?.(key, signal, ownerToken)) === true;
-              events.push(`claim:${ownerToken ?? "legacy-owner"}`);
+              events.push({
+                type: "claim-settled",
+                ownerToken: delayedClaimOwner,
+                committed: claimed,
+              });
               resolve(claimed);
             }, 1);
           });
         },
         getClaimOwner: async (key, signal) => {
           const owner = (await backend.getClaimOwner?.(key, signal)) ?? null;
-          events.push(`owner:${owner ?? "none"}`);
+          events.push({ type: "owner-observed", ownerToken: owner });
           return owner;
         },
       };
@@ -569,9 +604,15 @@ describe("createDefaultPricer Apify composition", () => {
       await vi.advanceTimersByTimeAsync(0);
       const winnerResult = await winner;
       const retryResult = await priceForRuntime()(SIGNAL);
-      const oldOwnerObservationIndex = events.indexOf("owner:owner-a");
-      const delayedClaimSettleIndex = events.findIndex((event) =>
-        event.startsWith("claim:"),
+      const oldOwnerObservationIndex = events.findIndex(
+        (event) =>
+          event.type === "owner-observed" && event.ownerToken === "owner-a",
+      );
+      const delayedClaimSettleIndex = events.findIndex(
+        (event) =>
+          event.type === "claim-settled" &&
+          event.ownerToken === delayedClaimOwner &&
+          event.committed,
       );
 
       expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
@@ -595,7 +636,7 @@ describe("createDefaultPricer Apify composition", () => {
         Date.now,
         "shared",
       );
-      const events: string[] = [];
+      const events: AuthorityRaceEvent[] = [];
       let cacheReads = 0;
       let seededPreviousOwner = false;
       let claimedOwner: string | null = null;
@@ -620,11 +661,18 @@ describe("createDefaultPricer Apify composition", () => {
             signal?.addEventListener(
               "abort",
               () => {
-                events.push("claim:aborted");
+                events.push({
+                  type: "claim-aborted",
+                  ownerToken: claimedOwner!,
+                });
                 setTimeout(async () => {
                   remoteClaimCommitted =
                     (await backend.claim?.(key, undefined, claimedOwner!)) === true;
-                  events.push(`claim:${claimedOwner}`);
+                  events.push({
+                    type: "claim-settled",
+                    ownerToken: claimedOwner!,
+                    committed: remoteClaimCommitted,
+                  });
                   resolve(remoteClaimCommitted);
                 }, 1);
               },
@@ -634,7 +682,7 @@ describe("createDefaultPricer Apify composition", () => {
         },
         getClaimOwner: async (key, signal) => {
           const owner = (await backend.getClaimOwner?.(key, signal)) ?? null;
-          events.push(`owner:${owner ?? "none"}`);
+          events.push({ type: "owner-observed", ownerToken: owner });
           return owner;
         },
         getClaimAuthority: async (key, signal) => {
@@ -647,21 +695,11 @@ describe("createDefaultPricer Apify composition", () => {
         },
       };
       const runActor = vi.fn<RunApifySoldActor>();
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const price = createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          timeoutSecs: 1,
-          waitSecs: 1,
-          cache,
-        },
-        ebaySold: {
-          fetchPage,
-          cache: sharedPublicSoldCache(),
-        },
-      });
+      const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+        cache,
+        runActor,
+      );
+      const price = priceForRuntime();
 
       let settled = false;
       const result = price(SIGNAL).then((value) => {
@@ -670,10 +708,19 @@ describe("createDefaultPricer Apify composition", () => {
       });
       await vi.advanceTimersByTimeAsync(700);
 
-      const oldOwnerObservationIndex = events.indexOf("owner:owner-a");
-      const claimAbortIndex = events.indexOf("claim:aborted");
+      const oldOwnerObservationIndex = events.findIndex(
+        (event) =>
+          event.type === "owner-observed" && event.ownerToken === "owner-a",
+      );
+      const claimAbortIndex = events.findIndex(
+        (event) =>
+          event.type === "claim-aborted" && event.ownerToken === claimedOwner,
+      );
       const delayedClaimCommitIndex = events.findIndex(
-        (event) => event.startsWith("claim:") && event !== "claim:aborted",
+        (event) =>
+          event.type === "claim-settled" &&
+          event.ownerToken === claimedOwner &&
+          event.committed,
       );
       expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
       expect(claimAbortIndex).toBeGreaterThanOrEqual(0);
@@ -716,21 +763,11 @@ describe("createDefaultPricer Apify composition", () => {
         terminateClaimAuthority: async () => false,
       };
       const runActor = vi.fn<RunApifySoldActor>();
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const price = createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          timeoutSecs: 1,
-          waitSecs: 1,
-          cache,
-        },
-        ebaySold: {
-          fetchPage,
-          cache: sharedPublicSoldCache(),
-        },
-      });
+      const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+        cache,
+        runActor,
+      );
+      const price = priceForRuntime();
 
       let settled = false;
       const result = price(SIGNAL).then((value) => {
@@ -778,21 +815,11 @@ describe("createDefaultPricer Apify composition", () => {
         status: "SUCCEEDED",
         items: apifyItems(),
       }));
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const price = createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          timeoutSecs: 1,
-          waitSecs: 1,
-          cache,
-        },
-        ebaySold: {
-          fetchPage,
-          cache: sharedPublicSoldCache(),
-        },
-      });
+      const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+        cache,
+        runActor,
+      );
+      const price = priceForRuntime();
 
       const result = price(SIGNAL);
       await vi.advanceTimersByTimeAsync(700);
@@ -810,76 +837,19 @@ describe("createDefaultPricer Apify composition", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
-      let claimOwner: string | null = null;
-      let claimAuthority: CacheClaimAuthority | null = null;
-      let terminalTransitionCompleted = false;
-      const cache: TtlCache<ApifySoldComp[]> = {
-        scope: "shared",
-        get: async () => null,
+      const authority = createAuthorityCacheFixture<ApifySoldComp[]>({
         set: () => new Promise<void>(() => undefined),
-        claim: async (_key, _signal, ownerToken) => {
-          claimOwner = ownerToken ?? "owner";
-          claimAuthority = {
-            ownerToken: claimOwner,
-            state: "live",
-            updatedAt: Date.now(),
-          };
-          return true;
-        },
-        getClaimOwner: async () => claimOwner,
-        getClaimAuthority: async () =>
-          claimAuthority == null ? null : { ...claimAuthority },
-        refreshClaimAuthority: async (_key, ownerToken) => {
-          if (
-            claimAuthority == null ||
-            claimAuthority.ownerToken !== ownerToken ||
-            claimAuthority.state !== "live"
-          ) {
-            return false;
-          }
-          claimAuthority = {
-            ownerToken,
-            state: "live",
-            updatedAt: Date.now(),
-          };
-          return true;
-        },
-        terminateClaimAuthority: async (_key, ownerToken) => {
-          await new Promise<void>((resolve) => setTimeout(resolve, 100));
-          if (
-            claimAuthority == null ||
-            claimAuthority.ownerToken !== ownerToken
-          ) {
-            return false;
-          }
-          claimAuthority = {
-            ownerToken,
-            state: "terminal",
-            updatedAt: Date.now(),
-          };
-          terminalTransitionCompleted = true;
-          return true;
-        },
-      };
+        terminateDelayMs: 100,
+      });
       const runActor = vi.fn<RunApifySoldActor>(async () => ({
         status: "SUCCEEDED",
         items: apifyItems(),
       }));
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const price = createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          timeoutSecs: 1,
-          waitSecs: 1,
-          cache,
-        },
-        ebaySold: {
-          fetchPage,
-          cache: sharedPublicSoldCache(),
-        },
-      });
+      const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+        authority.cache,
+        runActor,
+      );
+      const price = priceForRuntime();
 
       let settled = false;
       const result = price(SIGNAL).then((value) => {
@@ -889,7 +859,9 @@ describe("createDefaultPricer Apify composition", () => {
       await vi.advanceTimersByTimeAsync(2_400);
 
       expect(settled).toBe(true);
-      expect(terminalTransitionCompleted).toBe(true);
+      expect(authority.getAuthority()).toMatchObject({
+        state: "terminal",
+      });
       await expect(result).resolves.toMatchObject({ tier: "ebay-sold" });
       expect(runActor).toHaveBeenCalledTimes(1);
       expect(fetchPage).toHaveBeenCalledTimes(2);
@@ -902,77 +874,17 @@ describe("createDefaultPricer Apify composition", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
-      let claimOwner: string | null = null;
-      let claimAuthority: CacheClaimAuthority | null = null;
-      const cacheForRuntime = (): TtlCache<ApifySoldComp[]> => ({
-        scope: "shared",
-        get: async () => null,
+      const authority = createAuthorityCacheFixture<ApifySoldComp[]>({
         set: async () => {
           throw new Error("winner result was not committed");
-        },
-        claim: async (_key, _signal, ownerToken) => {
-          if (claimOwner != null) return false;
-          claimOwner = ownerToken ?? "owner";
-          claimAuthority = {
-            ownerToken: claimOwner,
-            state: "live",
-            updatedAt: Date.now(),
-          };
-          return true;
-        },
-        getClaimOwner: async () => claimOwner,
-        getClaimAuthority: async () =>
-          claimAuthority == null ? null : { ...claimAuthority },
-        refreshClaimAuthority: async (_key, ownerToken) => {
-          if (
-            claimAuthority == null ||
-            claimAuthority.ownerToken !== ownerToken ||
-            claimAuthority.state !== "live"
-          ) {
-            return false;
-          }
-          claimAuthority = {
-            ownerToken,
-            state: "live",
-            updatedAt: Date.now(),
-          };
-          return true;
-        },
-        terminateClaimAuthority: async (_key, ownerToken) => {
-          if (
-            claimAuthority == null ||
-            claimAuthority.ownerToken !== ownerToken
-          ) {
-            return false;
-          }
-          claimAuthority = {
-            ownerToken,
-            state: "terminal",
-            updatedAt: Date.now(),
-          };
-          return true;
         },
       });
       const runActor = vi.fn<RunApifySoldActor>(async () => ({
         status: "SUCCEEDED",
         items: apifyItems(),
       }));
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const priceForRuntime = () =>
-        createDefaultPricer({
-          apifySold: {
-            enabled: true,
-            token: "secret",
-            runActor,
-            timeoutSecs: 1,
-            waitSecs: 1,
-            cache: cacheForRuntime(),
-          },
-          ebaySold: {
-            fetchPage,
-            cache: sharedPublicSoldCache(),
-          },
-        });
+      const { fetchPage, priceForRuntime } =
+        createAuthorityPricerFixture(authority.cache, runActor);
 
       const terminalOwner = priceForRuntime()(SIGNAL);
       await vi.advanceTimersByTimeAsync(2_501);
@@ -1018,21 +930,11 @@ describe("createDefaultPricer Apify composition", () => {
         terminateClaimAuthority: async () => false,
       });
       const runActor = vi.fn<RunApifySoldActor>();
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const price = createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          timeoutSecs: 1,
-          waitSecs: 1,
-          cache: cacheForRuntime(),
-        },
-        ebaySold: {
-          fetchPage,
-          cache: sharedPublicSoldCache(),
-        },
-      });
+      const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+        cacheForRuntime(),
+        runActor,
+      );
+      const price = priceForRuntime();
 
       let settled = false;
       const result = price(SIGNAL).then((value) => {
@@ -1067,21 +969,11 @@ describe("createDefaultPricer Apify composition", () => {
         terminateClaimAuthority: async () => false,
       };
       const runActor = vi.fn<RunApifySoldActor>();
-      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-      const price = createDefaultPricer({
-        apifySold: {
-          enabled: true,
-          token: "secret",
-          runActor,
-          timeoutSecs: 1,
-          waitSecs: 1,
-          cache,
-        },
-        ebaySold: {
-          fetchPage,
-          cache: sharedPublicSoldCache(),
-        },
-      });
+      const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+        cache,
+        runActor,
+      );
+      const price = priceForRuntime();
 
       let settled = false;
       const result = price(SIGNAL).then((value) => {
@@ -1141,21 +1033,11 @@ describe("createDefaultPricer Apify composition", () => {
           terminateClaimAuthority: async () => false,
         };
         const runActor = vi.fn<RunApifySoldActor>();
-        const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
-        const price = createDefaultPricer({
-          apifySold: {
-            enabled: true,
-            token: "secret",
-            runActor,
-            timeoutSecs: 1,
-            waitSecs: 1,
-            cache,
-          },
-          ebaySold: {
-            fetchPage,
-            cache: sharedPublicSoldCache(),
-          },
-        });
+        const { fetchPage, priceForRuntime } = createAuthorityPricerFixture(
+          cache,
+          runActor,
+        );
+        const price = priceForRuntime();
 
         let settled = false;
         const result = price(SIGNAL).then((value) => {
