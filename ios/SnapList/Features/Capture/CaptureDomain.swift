@@ -375,7 +375,44 @@ final class PhotoReviewStore {
         photoID: StagedCapturePhoto.ID,
         action: PhotoReviewReorderAction
     ) -> PhotoReviewReorderResult? {
-        nil
+        guard let sourceIndex = photos.firstIndex(where: { $0.id == photoID }) else {
+            return nil
+        }
+
+        let destinationIndex: Int
+        switch action {
+        case .moveEarlier:
+            guard sourceIndex > 0 else {
+                return nil
+            }
+            destinationIndex = sourceIndex - 1
+        case .moveLater:
+            guard sourceIndex < photos.index(before: photos.endIndex) else {
+                return nil
+            }
+            destinationIndex = sourceIndex + 1
+        case .makeCover:
+            guard sourceIndex > 0 else {
+                return nil
+            }
+            destinationIndex = 0
+        }
+
+        let count = photos.count
+        guard movePhoto(id: photoID, to: destinationIndex) else {
+            return nil
+        }
+
+        let index = destinationIndex + 1
+        let announcement = destinationIndex == 0
+            ? "Moved to photo 1 of \(count). Cover."
+            : "Moved to photo \(index) of \(count)."
+        return PhotoReviewReorderResult(
+            photoID: photoID,
+            index: index,
+            count: count,
+            announcement: announcement
+        )
     }
 
     @discardableResult
