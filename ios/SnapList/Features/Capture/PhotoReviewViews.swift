@@ -196,7 +196,10 @@ struct PhotoReviewFixtureView: View {
             UIColor(red: 0.74, green: 0.66, blue: 0.78, alpha: 1)
         ]
         let size = CGSize(width: 1_200, height: 900)
-        let data = UIGraphicsImageRenderer(size: size).jpegData(
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard
+        let data = UIGraphicsImageRenderer(size: size, format: format).jpegData(
             withCompressionQuality: 0.92
         ) { context in
             colors[ordinal - 1].setFill()
