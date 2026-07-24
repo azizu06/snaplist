@@ -376,25 +376,31 @@ final class PhotoReviewStore {
 
     @discardableResult
     func deletePhoto(id: StagedCapturePhoto.ID) -> Bool {
-        guard let index = photos.firstIndex(where: { $0.id == id }) else {
-            return false
-        }
-
-        photos.remove(at: index)
-        if selectedPhotoID == id {
-            selectedPhotoID = photos.first?.id
-        }
-        return true
+        deletePhotoForReview(id: id) != nil
     }
 
     @discardableResult
     func deletePhotoForReview(
         id: StagedCapturePhoto.ID
     ) -> PhotoReviewDeleteFocus? {
-        guard deletePhoto(id: id) else {
+        guard let index = photos.firstIndex(where: { $0.id == id }) else {
             return nil
         }
-        return nil
+
+        photos.remove(at: index)
+        let focusPhotoID = photos[safe: index]?.id ?? photos.last?.id
+
+        if selectedPhotoID == id {
+            selectedPhotoID = focusPhotoID
+        }
+        if actionsPhotoID == id {
+            actionsPhotoID = nil
+        }
+
+        guard let focusPhotoID else {
+            return .addButton
+        }
+        return .photo(focusPhotoID)
     }
 }
 
