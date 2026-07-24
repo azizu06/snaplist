@@ -850,9 +850,7 @@ export function createApifySoldPricingProvider(
             cancellation.signal,
           ))
         ) {
-          return hasClaimAuthorityProtocol
-            ? false
-            : APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+          return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
         }
 
         let delayMs = APIFY_SOLD_WINNER_STORE_POLL_MS;
@@ -864,7 +862,7 @@ export function createApifySoldPricingProvider(
               cancellation.signal,
             );
             if (observedOwner === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
-              return hasClaimAuthorityProtocol ? false : observedOwner;
+              return observedOwner;
             }
             if (observedOwner === ownerToken) return true;
           } catch {
@@ -895,9 +893,7 @@ export function createApifySoldPricingProvider(
           }
           delayMs = Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
         }
-        return hasClaimAuthorityProtocol
-          ? false
-          : APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+        return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
       })();
 
       const first = await Promise.race([claimResponse, ownerObservation]);

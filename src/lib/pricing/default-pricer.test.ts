@@ -586,6 +586,119 @@ describe("createDefaultPricer Apify composition", () => {
     }
   });
 
+  it("falls back promptly when an exact Apify claim commits after reconciliation expires", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-24T12:00:00.000Z"));
+      const backend = createInMemoryTtlCache<ApifySoldComp[]>(
+        500,
+        Date.now,
+        "shared",
+      );
+      const events: string[] = [];
+      let cacheReads = 0;
+      let seededPreviousOwner = false;
+      let claimedOwner: string | null = null;
+      let remoteClaimCommitted = false;
+      let selfWinnerObserved = false;
+      const cache: TtlCache<ApifySoldComp[]> = {
+        ...backend,
+        get: async (key, signal) => {
+          cacheReads += 1;
+          if (cacheReads === 2) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 2));
+          }
+          return backend.get(key, signal);
+        },
+        claim: async (key, signal, ownerToken) => {
+          if (!seededPreviousOwner) {
+            seededPreviousOwner = true;
+            await backend.claim?.(key, signal, "owner-a");
+          }
+          claimedOwner = ownerToken ?? "legacy-owner";
+          return new Promise<boolean>((resolve) => {
+            signal?.addEventListener(
+              "abort",
+              () => {
+                events.push("claim:aborted");
+                setTimeout(async () => {
+                  remoteClaimCommitted =
+                    (await backend.claim?.(key, undefined, claimedOwner!)) === true;
+                  events.push(`claim:${claimedOwner}`);
+                  resolve(remoteClaimCommitted);
+                }, 1);
+              },
+              { once: true },
+            );
+          });
+        },
+        getClaimOwner: async (key, signal) => {
+          const owner = (await backend.getClaimOwner?.(key, signal)) ?? null;
+          events.push(`owner:${owner ?? "none"}`);
+          return owner;
+        },
+        getClaimAuthority: async (key, signal) => {
+          const authority =
+            (await backend.getClaimAuthority?.(key, signal)) ?? null;
+          if (authority?.ownerToken === claimedOwner) {
+            selfWinnerObserved = true;
+          }
+          return authority;
+        },
+      };
+      const runActor = vi.fn<RunApifySoldActor>();
+      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+      const price = createDefaultPricer({
+        apifySold: {
+          enabled: true,
+          token: "secret",
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          cache,
+        },
+        ebaySold: {
+          fetchPage,
+          cache: sharedPublicSoldCache(),
+        },
+      });
+
+      let settled = false;
+      const result = price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(700);
+
+      const oldOwnerObservationIndex = events.indexOf("owner:owner-a");
+      const claimAbortIndex = events.indexOf("claim:aborted");
+      const delayedClaimCommitIndex = events.findIndex(
+        (event) => event.startsWith("claim:") && event !== "claim:aborted",
+      );
+      expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
+      expect(claimAbortIndex).toBeGreaterThanOrEqual(0);
+      expect(delayedClaimCommitIndex).toBeGreaterThanOrEqual(0);
+      expect(oldOwnerObservationIndex).toBeLessThan(claimAbortIndex);
+      expect(claimAbortIndex).toBeLessThan(delayedClaimCommitIndex);
+      expect({
+        actorCalls: runActor.mock.calls.length,
+        publicCalls: fetchPage.mock.calls.length,
+        remoteClaimCommitted,
+        selfWinnerObserved,
+        settled,
+      }).toEqual({
+        actorCalls: 0,
+        publicCalls: 2,
+        remoteClaimCommitted: true,
+        selfWinnerObserved: false,
+        settled: true,
+      });
+      await expect(result).resolves.toMatchObject({ tier: "ebay-sold" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("bounds rejected uncommitted Apify claims before public fallback", async () => {
     vi.useFakeTimers();
     try {
