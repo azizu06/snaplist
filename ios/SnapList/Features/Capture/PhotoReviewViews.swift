@@ -20,6 +20,33 @@ final class PhotoReviewActionPresentation {
 
 @MainActor
 @Observable
+final class PhotoReviewAccessibilityActionPresentation {
+    private(set) var focusedPhotoID: StagedCapturePhoto.ID?
+    private(set) var pendingAnnouncement: String?
+
+    func availableActions(
+        for photoID: StagedCapturePhoto.ID,
+        in store: PhotoReviewStore
+    ) -> [PhotoReviewReorderAction] {
+        []
+    }
+
+    @discardableResult
+    func perform(
+        _ action: PhotoReviewReorderAction,
+        photoID: StagedCapturePhoto.ID,
+        store: PhotoReviewStore
+    ) -> PhotoReviewReorderResult? {
+        nil
+    }
+
+    func consumeAnnouncement() -> String? {
+        nil
+    }
+}
+
+@MainActor
+@Observable
 final class PhotoReviewPickerPresentation {
     private(set) var isPresented = false
     private(set) var cancellationFocus: PhotoReviewPickerOpener?

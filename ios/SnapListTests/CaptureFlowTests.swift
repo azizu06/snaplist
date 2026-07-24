@@ -606,6 +606,240 @@ final class CaptureFlowTests: XCTestCase {
         assertExactPhotoValues(invalidStore)
     }
 
+    func testPhotoReviewAccessibilityActionPresentationRestoresStableFocusAndConsumesOneAnnouncement() {
+        let fingerprints = [
+            "action-presentation-a-digest",
+            "action-presentation-b-digest",
+            "action-presentation-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000071",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000072",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000073",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+
+        func assertExactPhotoValues(_ store: PhotoReviewStore) {
+            XCTAssertEqual(store.photos.count, photos.count)
+            for photo in photos {
+                XCTAssertEqual(
+                    store.photos.first(where: { $0.id == photo.id }),
+                    photo
+                )
+            }
+        }
+
+        let availabilityStore = PhotoReviewStore(photos: photos)
+        let availability = PhotoReviewAccessibilityActionPresentation()
+        XCTAssertEqual(
+            availability.availableActions(
+                for: photos[0].id,
+                in: availabilityStore
+            ),
+            [.moveLater]
+        )
+        XCTAssertEqual(
+            availability.availableActions(
+                for: photos[1].id,
+                in: availabilityStore
+            ),
+            [.moveEarlier, .moveLater, .makeCover]
+        )
+        XCTAssertEqual(
+            availability.availableActions(
+                for: photos[2].id,
+                in: availabilityStore
+            ),
+            [.moveEarlier, .makeCover]
+        )
+        XCTAssertEqual(
+            availability.availableActions(
+                for: photos[0].id,
+                in: PhotoReviewStore(photos: [photos[0]])
+            ),
+            []
+        )
+
+        let moveEarlierStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(moveEarlierStore.selectPhotoForActions(id: photos[2].id))
+        let earlierPickerRequest = PhotoReviewPickerRequest.replace(
+            photoID: photos[0].id
+        )
+        moveEarlierStore.beginPickerRequest(earlierPickerRequest)
+        let moveEarlier = PhotoReviewAccessibilityActionPresentation()
+
+        XCTAssertEqual(
+            moveEarlier.perform(
+                .moveEarlier,
+                photoID: photos[1].id,
+                store: moveEarlierStore
+            ),
+            PhotoReviewReorderResult(
+                photoID: photos[1].id,
+                index: 1,
+                count: 3,
+                announcement: "Moved to photo 1 of 3. Cover."
+            )
+        )
+        XCTAssertEqual(moveEarlierStore.photos.map(\.id), [
+            photos[1].id,
+            photos[0].id,
+            photos[2].id
+        ])
+        XCTAssertEqual(moveEarlierStore.selectedPhotoID, photos[1].id)
+        XCTAssertEqual(moveEarlierStore.actionsPhotoID, photos[2].id)
+        XCTAssertEqual(moveEarlierStore.activePickerRequest, earlierPickerRequest)
+        assertExactPhotoValues(moveEarlierStore)
+        XCTAssertEqual(moveEarlier.focusedPhotoID, photos[1].id)
+        XCTAssertEqual(
+            moveEarlier.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        let earlierStateAfterConsumption = moveEarlierStore.photos
+        XCTAssertNil(moveEarlier.consumeAnnouncement())
+        XCTAssertEqual(moveEarlier.focusedPhotoID, photos[1].id)
+        XCTAssertEqual(moveEarlierStore.photos, earlierStateAfterConsumption)
+
+        let moveLaterStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(moveLaterStore.selectPhotoForActions(id: photos[0].id))
+        moveLaterStore.beginPickerRequest(.add)
+        let moveLater = PhotoReviewAccessibilityActionPresentation()
+
+        XCTAssertEqual(
+            moveLater.perform(
+                .moveLater,
+                photoID: photos[1].id,
+                store: moveLaterStore
+            ),
+            PhotoReviewReorderResult(
+                photoID: photos[1].id,
+                index: 3,
+                count: 3,
+                announcement: "Moved to photo 3 of 3."
+            )
+        )
+        XCTAssertEqual(moveLaterStore.photos.map(\.id), [
+            photos[0].id,
+            photos[2].id,
+            photos[1].id
+        ])
+        XCTAssertEqual(moveLaterStore.selectedPhotoID, photos[1].id)
+        XCTAssertEqual(moveLaterStore.actionsPhotoID, photos[0].id)
+        XCTAssertEqual(
+            moveLaterStore.activePickerRequest,
+            PhotoReviewPickerRequest.add
+        )
+        assertExactPhotoValues(moveLaterStore)
+        XCTAssertEqual(moveLater.focusedPhotoID, photos[1].id)
+        XCTAssertEqual(
+            moveLater.consumeAnnouncement(),
+            "Moved to photo 3 of 3."
+        )
+        let laterStateAfterConsumption = moveLaterStore.photos
+        XCTAssertNil(moveLater.consumeAnnouncement())
+        XCTAssertEqual(moveLater.focusedPhotoID, photos[1].id)
+        XCTAssertEqual(moveLaterStore.photos, laterStateAfterConsumption)
+
+        let makeCoverStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(makeCoverStore.selectPhotoForActions(id: photos[0].id))
+        let coverPickerRequest = PhotoReviewPickerRequest.replace(
+            photoID: photos[1].id
+        )
+        makeCoverStore.beginPickerRequest(coverPickerRequest)
+        let makeCover = PhotoReviewAccessibilityActionPresentation()
+
+        XCTAssertEqual(
+            makeCover.perform(
+                .makeCover,
+                photoID: photos[2].id,
+                store: makeCoverStore
+            ),
+            PhotoReviewReorderResult(
+                photoID: photos[2].id,
+                index: 1,
+                count: 3,
+                announcement: "Moved to photo 1 of 3. Cover."
+            )
+        )
+        XCTAssertEqual(makeCoverStore.photos.map(\.id), [
+            photos[2].id,
+            photos[0].id,
+            photos[1].id
+        ])
+        XCTAssertEqual(makeCoverStore.selectedPhotoID, photos[2].id)
+        XCTAssertEqual(makeCoverStore.actionsPhotoID, photos[0].id)
+        XCTAssertEqual(makeCoverStore.activePickerRequest, coverPickerRequest)
+        assertExactPhotoValues(makeCoverStore)
+        XCTAssertEqual(makeCover.focusedPhotoID, photos[2].id)
+        XCTAssertEqual(
+            makeCover.consumeAnnouncement(),
+            "Moved to photo 1 of 3. Cover."
+        )
+        let coverStateAfterConsumption = makeCoverStore.photos
+        XCTAssertNil(makeCover.consumeAnnouncement())
+        XCTAssertEqual(makeCover.focusedPhotoID, photos[2].id)
+        XCTAssertEqual(makeCoverStore.photos, coverStateAfterConsumption)
+
+        let invalidStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(invalidStore.selectPhotoForActions(id: photos[1].id))
+        invalidStore.beginPickerRequest(.add)
+        let invalidExpectedPhotos = invalidStore.photos
+        let invalid = PhotoReviewAccessibilityActionPresentation()
+
+        XCTAssertNil(
+            invalid.perform(
+                .moveEarlier,
+                photoID: photos[0].id,
+                store: invalidStore
+            )
+        )
+        XCTAssertNil(
+            invalid.perform(
+                .moveLater,
+                photoID: photos[2].id,
+                store: invalidStore
+            )
+        )
+        XCTAssertNil(
+            invalid.perform(
+                .makeCover,
+                photoID: photos[0].id,
+                store: invalidStore
+            )
+        )
+        XCTAssertNil(
+            invalid.perform(
+                .makeCover,
+                photoID: UUID(
+                    uuidString: "45500000-0000-4000-8000-000000000099"
+                )!,
+                store: invalidStore
+            )
+        )
+        XCTAssertNil(invalid.focusedPhotoID)
+        XCTAssertNil(invalid.pendingAnnouncement)
+        XCTAssertNil(invalid.consumeAnnouncement())
+        XCTAssertEqual(invalidStore.photos, invalidExpectedPhotos)
+        XCTAssertEqual(invalidStore.selectedPhotoID, photos[1].id)
+        XCTAssertEqual(invalidStore.actionsPhotoID, photos[1].id)
+        XCTAssertEqual(
+            invalidStore.activePickerRequest,
+            PhotoReviewPickerRequest.add
+        )
+        assertExactPhotoValues(invalidStore)
+    }
+
     func testPhotoReviewConfirmedPickerResultsPreserveExactValuesOrderAndRequestConsumption() {
         let fingerprints = [
             "picker-photo-a-digest",
