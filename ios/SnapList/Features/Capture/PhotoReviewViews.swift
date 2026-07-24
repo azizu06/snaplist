@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UIKit
 
 @MainActor
 @Observable
@@ -28,7 +29,22 @@ final class PhotoReviewAccessibilityActionPresentation {
         for photoID: StagedCapturePhoto.ID,
         in store: PhotoReviewStore
     ) -> [PhotoReviewReorderAction] {
-        []
+        guard let index = store.photos.firstIndex(where: { $0.id == photoID }),
+              store.photos.count > 1 else {
+            return []
+        }
+
+        var actions: [PhotoReviewReorderAction] = []
+        if index > 0 {
+            actions.append(.moveEarlier)
+        }
+        if index < store.photos.index(before: store.photos.endIndex) {
+            actions.append(.moveLater)
+        }
+        if index > 0 {
+            actions.append(.makeCover)
+        }
+        return actions
     }
 
     @discardableResult
@@ -37,11 +53,21 @@ final class PhotoReviewAccessibilityActionPresentation {
         photoID: StagedCapturePhoto.ID,
         store: PhotoReviewStore
     ) -> PhotoReviewReorderResult? {
-        nil
+        guard availableActions(for: photoID, in: store).contains(action),
+              let result = store.performAccessibilityReorder(
+                photoID: photoID,
+                action: action
+              ) else {
+            return nil
+        }
+        focusedPhotoID = result.photoID
+        pendingAnnouncement = result.announcement
+        return result
     }
 
     func consumeAnnouncement() -> String? {
-        nil
+        defer { pendingAnnouncement = nil }
+        return pendingAnnouncement
     }
 }
 
@@ -128,6 +154,8 @@ struct PhotoReviewView: View {
     let delete: () -> Void
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
+    @State private var accessibilityActionPresentation =
+        PhotoReviewAccessibilityActionPresentation()
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
     // Outside dismissal focus stays independent from picker cancellation focus.
@@ -270,6 +298,27 @@ struct PhotoReviewView: View {
                 $focusedThumbnailID,
                 equals: photo.id
             )
+            .accessibilityActions {
+                let actions = accessibilityActionPresentation.availableActions(
+                    for: photo.id,
+                    in: store
+                )
+                if actions.contains(.moveEarlier) {
+                    Button("Move earlier") {
+                        performAccessibilityAction(.moveEarlier, photoID: photo.id)
+                    }
+                }
+                if actions.contains(.moveLater) {
+                    Button("Move later") {
+                        performAccessibilityAction(.moveLater, photoID: photo.id)
+                    }
+                }
+                if actions.contains(.makeCover) {
+                    Button("Make cover") {
+                        performAccessibilityAction(.makeCover, photoID: photo.id)
+                    }
+                }
+            }
 
             if index == 0 {
                 Text("Cover")
@@ -388,6 +437,29 @@ struct PhotoReviewView: View {
             return
         }
         focusedThumbnailID = photoID
+    }
+
+    private func performAccessibilityAction(
+        _ action: PhotoReviewReorderAction,
+        photoID: StagedCapturePhoto.ID
+    ) {
+        guard let result = accessibilityActionPresentation.perform(
+            action,
+            photoID: photoID,
+            store: store
+        ) else {
+            return
+        }
+
+        focusedThumbnailID = result.photoID
+        guard let announcement =
+                accessibilityActionPresentation.consumeAnnouncement() else {
+            return
+        }
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: announcement
+        )
     }
 
     private func restorePickerCancellationFocus(
