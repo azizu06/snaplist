@@ -253,6 +253,11 @@ enum PhotoReviewPickerOpener: Equatable {
     case replaceButton(photoID: StagedCapturePhoto.ID)
 }
 
+enum PhotoReviewDeleteFocus: Equatable {
+    case photo(StagedCapturePhoto.ID)
+    case addButton
+}
+
 @MainActor
 @Observable
 final class PhotoReviewStore {
@@ -380,6 +385,16 @@ final class PhotoReviewStore {
             selectedPhotoID = photos.first?.id
         }
         return true
+    }
+
+    @discardableResult
+    func deletePhotoForReview(
+        id: StagedCapturePhoto.ID
+    ) -> PhotoReviewDeleteFocus? {
+        guard deletePhoto(id: id) else {
+            return nil
+        }
+        return nil
     }
 }
 

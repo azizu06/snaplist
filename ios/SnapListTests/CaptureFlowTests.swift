@@ -337,6 +337,113 @@ final class CaptureFlowTests: XCTestCase {
         assertUnrelatedStateIsExact()
     }
 
+    func testPhotoReviewDeletePreservesExactSurvivorsAndReturnsNextPreviousThenAddFocus() {
+        let fingerprints = [
+            "delete-focus-a-digest",
+            "delete-focus-b-digest",
+            "delete-focus-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000051",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000052",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000053",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+
+        func assertExactSurvivors(
+            _ store: PhotoReviewStore,
+            _ expected: [StagedCapturePhoto]
+        ) {
+            XCTAssertEqual(store.photos, expected)
+            XCTAssertEqual(store.photos.map(\.id), expected.map(\.id))
+            XCTAssertEqual(store.photos.map(\.photoURL), expected.map(\.photoURL))
+            XCTAssertEqual(
+                store.photos.map(\.thumbnailURL),
+                expected.map(\.thumbnailURL)
+            )
+            XCTAssertEqual(store.photos.map(\.createdAt), expected.map(\.createdAt))
+            XCTAssertEqual(
+                store.photos.map(\.libraryTransferReceipt),
+                expected.map(\.libraryTransferReceipt)
+            )
+        }
+
+        let middleStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(middleStore.selectPhotoForActions(id: photos[1].id))
+        middleStore.beginPickerRequest(.add)
+
+        XCTAssertEqual(
+            middleStore.deletePhotoForReview(id: photos[1].id),
+            PhotoReviewDeleteFocus.photo(photos[2].id)
+        )
+        assertExactSurvivors(middleStore, [photos[0], photos[2]])
+        XCTAssertEqual(middleStore.selectedPhotoID, photos[2].id)
+        XCTAssertNil(middleStore.actionsPhotoID)
+        XCTAssertEqual(middleStore.activePickerRequest, PhotoReviewPickerRequest.add)
+
+        let middleStateAfterDeletion = middleStore.photos
+        XCTAssertNil(middleStore.deletePhotoForReview(id: photos[1].id))
+        assertExactSurvivors(middleStore, middleStateAfterDeletion)
+        XCTAssertEqual(middleStore.selectedPhotoID, photos[2].id)
+        XCTAssertNil(middleStore.actionsPhotoID)
+        XCTAssertEqual(middleStore.activePickerRequest, PhotoReviewPickerRequest.add)
+
+        let trailingStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(trailingStore.selectPhotoForActions(id: photos[2].id))
+        let pickerRequest = PhotoReviewPickerRequest.replace(photoID: photos[0].id)
+        trailingStore.beginPickerRequest(pickerRequest)
+
+        XCTAssertEqual(
+            trailingStore.deletePhotoForReview(id: photos[2].id),
+            PhotoReviewDeleteFocus.photo(photos[1].id)
+        )
+        assertExactSurvivors(trailingStore, [photos[0], photos[1]])
+        XCTAssertEqual(trailingStore.selectedPhotoID, photos[1].id)
+        XCTAssertNil(trailingStore.actionsPhotoID)
+        XCTAssertEqual(trailingStore.activePickerRequest, pickerRequest)
+
+        let trailingStateAfterDeletion = trailingStore.photos
+        XCTAssertNil(
+            trailingStore.deletePhotoForReview(
+                id: UUID(uuidString: "45500000-0000-4000-8000-000000000099")!
+            )
+        )
+        assertExactSurvivors(trailingStore, trailingStateAfterDeletion)
+        XCTAssertEqual(trailingStore.selectedPhotoID, photos[1].id)
+        XCTAssertNil(trailingStore.actionsPhotoID)
+        XCTAssertEqual(trailingStore.activePickerRequest, pickerRequest)
+
+        let soleStore = PhotoReviewStore(photos: [photos[0]])
+        XCTAssertTrue(soleStore.selectPhotoForActions(id: photos[0].id))
+        soleStore.beginPickerRequest(.add)
+
+        XCTAssertEqual(
+            soleStore.deletePhotoForReview(id: photos[0].id),
+            PhotoReviewDeleteFocus.addButton
+        )
+        assertExactSurvivors(soleStore, [])
+        XCTAssertNil(soleStore.selectedPhotoID)
+        XCTAssertNil(soleStore.actionsPhotoID)
+        XCTAssertEqual(soleStore.activePickerRequest, PhotoReviewPickerRequest.add)
+
+        XCTAssertNil(soleStore.deletePhotoForReview(id: photos[0].id))
+        assertExactSurvivors(soleStore, [])
+        XCTAssertNil(soleStore.selectedPhotoID)
+        XCTAssertNil(soleStore.actionsPhotoID)
+        XCTAssertEqual(soleStore.activePickerRequest, PhotoReviewPickerRequest.add)
+    }
+
     func testPhotoReviewConfirmedPickerResultsPreserveExactValuesOrderAndRequestConsumption() {
         let fingerprints = [
             "picker-photo-a-digest",
