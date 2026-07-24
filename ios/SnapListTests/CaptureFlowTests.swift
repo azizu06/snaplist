@@ -564,9 +564,6 @@ final class CaptureFlowTests: XCTestCase {
         let firstCoverPresented = expectation(
             description: "The outgoing guided-camera cover presents."
         )
-        let firstCoverDismissed = expectation(
-            description: "The outgoing guided-camera cover dismisses."
-        )
         let reviewPresented = expectation(
             description: "Photo Review replaces the dismissed camera shell."
         )
@@ -574,7 +571,6 @@ final class CaptureFlowTests: XCTestCase {
             description: "A distinct guided-camera cover presents after Back."
         )
         var coverPresentationCount = 0
-        var didRecordFirstDismissal = false
         let hostingController = UIHostingController(
             rootView: PhotoReviewConditionalPresentationHarness(
                 router: router,
@@ -586,11 +582,6 @@ final class CaptureFlowTests: XCTestCase {
                     } else if coverPresentationCount == 2 {
                         secondCoverPresented.fulfill()
                     }
-                },
-                coverDismissed: {
-                    guard !didRecordFirstDismissal else { return }
-                    didRecordFirstDismissal = true
-                    firstCoverDismissed.fulfill()
                 },
                 reviewPresented: reviewPresented.fulfill
             )
@@ -615,10 +606,15 @@ final class CaptureFlowTests: XCTestCase {
             return
         }
 
-        await fulfillment(
-            of: [firstCoverDismissed, reviewPresented],
-            timeout: 3
+        await fulfillment(of: [reviewPresented], timeout: 3)
+        let firstControllerDismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                hostingController.presentedViewController == nil
+                    && firstPresentedController.presentingViewController == nil
+            },
+            object: hostingController
         )
+        await fulfillment(of: [firstControllerDismissed], timeout: 3)
         XCTAssertNil(hostingController.presentedViewController)
         XCTAssertNil(firstPresentedController.presentingViewController)
 
