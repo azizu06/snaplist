@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetTtlCaches,
   createInMemoryTtlCache,
+  type CacheClaimAuthority,
   type TtlCache,
 } from "./comp-cache";
 import {
@@ -390,36 +391,58 @@ describe("createDefaultPricer Apify composition", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      vi.stubEnv("APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS", "1");
+      const apifyCacheCalls = {
+        get: 0,
+        getClaimAuthority: 0,
+        refreshClaimAuthority: 0,
+        terminateClaimAuthority: 0,
+      };
       const cacheForRuntime = <T>(
-        values: Map<string, T>,
-        claims: Map<string, string>,
+        backend: TtlCache<T>,
         onLostClaim?: () => void,
+        calls?: typeof apifyCacheCalls,
       ): TtlCache<T> => ({
         scope: "shared",
-        get: async (key) => values.get(key) ?? null,
-        set: async (key, value) => {
-          values.set(key, value);
+        get: (key, signal) => {
+          if (calls) calls.get += 1;
+          return backend.get(key, signal);
         },
-        claim: async (key, _signal, ownerToken) => {
-          if (claims.has(key)) {
-            onLostClaim?.();
-            return false;
-          }
-          claims.set(key, ownerToken ?? "owner");
-          return true;
+        set: (key, value, signal) => backend.set(key, value, signal),
+        claim: async (key, signal, ownerToken) => {
+          const claimed = await backend.claim?.(key, signal, ownerToken);
+          if (claimed === false) onLostClaim?.();
+          return claimed === true;
         },
-        getClaimOwner: async (key) => claims.get(key) ?? null,
+        getClaimOwner: (key, signal) =>
+          backend.getClaimOwner?.(key, signal) ?? Promise.resolve(null),
+        getClaimAuthority: (key, signal) => {
+          if (calls) calls.getClaimAuthority += 1;
+          return backend.getClaimAuthority?.(key, signal) ?? Promise.resolve(null);
+        },
+        refreshClaimAuthority: (key, ownerToken, signal) => {
+          if (calls) calls.refreshClaimAuthority += 1;
+          return (
+            backend.refreshClaimAuthority?.(key, ownerToken, signal) ??
+            Promise.resolve(false)
+          );
+        },
+        terminateClaimAuthority: (key, ownerToken, signal) => {
+          if (calls) calls.terminateClaimAuthority += 1;
+          return (
+            backend.terminateClaimAuthority?.(key, ownerToken, signal) ??
+            Promise.resolve(false)
+          );
+        },
       });
-      const apifyValues = new Map<string, ApifySoldComp[]>();
-      const apifyClaims = new Map<string, string>();
-      const publicValues = new Map<string, EbaySoldComp[]>();
-      const publicClaims = new Map<string, string>();
+      const apifyBackend = sharedApifyCache();
+      const publicBackend = sharedPublicSoldCache();
       let reportLostApifyClaim!: () => void;
       const lostApifyClaim = new Promise<void>((resolve) => {
         reportLostApifyClaim = resolve;
       });
       const runActor = vi.fn<RunApifySoldActor>(async () => {
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        await new Promise<void>((resolve) => setTimeout(resolve, 800));
         return { status: "SUCCEEDED", items: apifyItems() };
       });
       const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
@@ -432,14 +455,14 @@ describe("createDefaultPricer Apify composition", () => {
             timeoutSecs: 1,
             waitSecs: 1,
             cache: cacheForRuntime(
-              apifyValues,
-              apifyClaims,
+              apifyBackend,
               reportLostApifyClaim,
+              apifyCacheCalls,
             ),
           },
           ebaySold: {
             fetchPage,
-            cache: cacheForRuntime(publicValues, publicClaims),
+            cache: cacheForRuntime(publicBackend),
           },
         });
 
@@ -447,12 +470,12 @@ describe("createDefaultPricer Apify composition", () => {
       await vi.advanceTimersByTimeAsync(0);
       const loser = priceForRuntime()(SIGNAL);
       await lostApifyClaim;
-      await vi.advanceTimersByTimeAsync(99);
+      await vi.advanceTimersByTimeAsync(799);
 
       expect(runActor).toHaveBeenCalledTimes(1);
       expect(fetchPage).not.toHaveBeenCalled();
 
-      await vi.advanceTimersByTimeAsync(401);
+      await vi.advanceTimersByTimeAsync(501);
       const [winnerResult, loserResult] = await Promise.all([winner, loser]);
       const retryResult = await priceForRuntime()(SIGNAL);
 
@@ -461,10 +484,291 @@ describe("createDefaultPricer Apify composition", () => {
       expect(winnerResult.evidence).toHaveLength(3);
       expect(loserResult.evidence).toEqual(winnerResult.evidence);
       expect(retryResult.evidence).toEqual(winnerResult.evidence);
+      expect(apifyCacheCalls.get).toBeLessThanOrEqual(12);
+      expect(apifyCacheCalls.getClaimAuthority).toBeLessThanOrEqual(8);
+      expect(apifyCacheCalls.refreshClaimAuthority).toBeGreaterThan(0);
+      expect(apifyCacheCalls.refreshClaimAuthority).toBeLessThanOrEqual(4);
+      expect(apifyCacheCalls.terminateClaimAuthority).toBe(1);
     } finally {
       vi.useRealTimers();
     }
   });
+
+  it("releases terminal Apify authority before a later caller's pricing deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      let claimOwner: string | null = null;
+      let claimAuthority: CacheClaimAuthority | null = null;
+      const cacheForRuntime = (): TtlCache<ApifySoldComp[]> => ({
+        scope: "shared",
+        get: async () => null,
+        set: async () => {
+          throw new Error("winner result was not committed");
+        },
+        claim: async (_key, _signal, ownerToken) => {
+          if (claimOwner != null) return false;
+          claimOwner = ownerToken ?? "owner";
+          claimAuthority = {
+            ownerToken: claimOwner,
+            state: "live",
+            updatedAt: Date.now(),
+          };
+          return true;
+        },
+        getClaimOwner: async () => claimOwner,
+        getClaimAuthority: async () =>
+          claimAuthority == null ? null : { ...claimAuthority },
+        refreshClaimAuthority: async (_key, ownerToken) => {
+          if (
+            claimAuthority == null ||
+            claimAuthority.ownerToken !== ownerToken ||
+            claimAuthority.state !== "live"
+          ) {
+            return false;
+          }
+          claimAuthority = {
+            ownerToken,
+            state: "live",
+            updatedAt: Date.now(),
+          };
+          return true;
+        },
+        terminateClaimAuthority: async (_key, ownerToken) => {
+          if (
+            claimAuthority == null ||
+            claimAuthority.ownerToken !== ownerToken
+          ) {
+            return false;
+          }
+          claimAuthority = {
+            ownerToken,
+            state: "terminal",
+            updatedAt: Date.now(),
+          };
+          return true;
+        },
+      });
+      const runActor = vi.fn<RunApifySoldActor>(async () => ({
+        status: "SUCCEEDED",
+        items: apifyItems(),
+      }));
+      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+      const priceForRuntime = () =>
+        createDefaultPricer({
+          apifySold: {
+            enabled: true,
+            token: "secret",
+            runActor,
+            timeoutSecs: 1,
+            waitSecs: 1,
+            cache: cacheForRuntime(),
+          },
+          ebaySold: {
+            fetchPage,
+            cache: sharedPublicSoldCache(),
+          },
+        });
+
+      const terminalOwner = priceForRuntime()(SIGNAL);
+      await vi.advanceTimersByTimeAsync(2_501);
+      await terminalOwner;
+      fetchPage.mockClear();
+
+      let laterSettled = false;
+      const later = priceForRuntime()(SIGNAL).then((result) => {
+        laterSettled = true;
+        return result;
+      });
+      await vi.advanceTimersByTimeAsync(700);
+
+      expect(runActor).toHaveBeenCalledTimes(1);
+      expect(laterSettled).toBe(true);
+      await expect(later).resolves.toMatchObject({
+        tier: "ebay-sold",
+        evidence: expect.any(Array),
+      });
+      expect(fetchPage).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails soft promptly when shared Apify authority is malformed", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      const cacheForRuntime = (): TtlCache<ApifySoldComp[]> => ({
+        scope: "shared",
+        get: async () => null,
+        set: async () => undefined,
+        claim: async () => false,
+        getClaimOwner: async () => "owner-a",
+        getClaimAuthority: async () =>
+          ({
+            ownerToken: "owner-a",
+            state: "unknown",
+            updatedAt: Date.now(),
+          }) as unknown as CacheClaimAuthority,
+        refreshClaimAuthority: async () => false,
+        terminateClaimAuthority: async () => false,
+      });
+      const runActor = vi.fn<RunApifySoldActor>();
+      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+      const price = createDefaultPricer({
+        apifySold: {
+          enabled: true,
+          token: "secret",
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          cache: cacheForRuntime(),
+        },
+        ebaySold: {
+          fetchPage,
+          cache: sharedPublicSoldCache(),
+        },
+      });
+
+      let settled = false;
+      const result = price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(700);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toMatchObject({ tier: "ebay-sold" });
+      expect(runActor).not.toHaveBeenCalled();
+      expect(fetchPage).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds an unavailable Apify authority read below the pricing deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+      vi.stubEnv("APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS", "60000");
+      const cache: TtlCache<ApifySoldComp[]> = {
+        scope: "shared",
+        get: async () => null,
+        set: async () => undefined,
+        claim: async () => false,
+        getClaimOwner: async () => "owner-a",
+        getClaimAuthority: () =>
+          new Promise<CacheClaimAuthority | null>(() => undefined),
+        refreshClaimAuthority: async () => false,
+        terminateClaimAuthority: async () => false,
+      };
+      const runActor = vi.fn<RunApifySoldActor>();
+      const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+      const price = createDefaultPricer({
+        apifySold: {
+          enabled: true,
+          token: "secret",
+          runActor,
+          timeoutSecs: 1,
+          waitSecs: 1,
+          cache,
+        },
+        ebaySold: {
+          fetchPage,
+          cache: sharedPublicSoldCache(),
+        },
+      });
+
+      let settled = false;
+      const result = price(SIGNAL).then((value) => {
+        settled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(700);
+
+      expect(settled).toBe(true);
+      await expect(result).resolves.toMatchObject({ tier: "ebay-sold" });
+      expect(runActor).not.toHaveBeenCalled();
+      expect(fetchPage).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    {
+      name: "stale",
+      authority: (): CacheClaimAuthority => ({
+        ownerToken: "owner-a",
+        state: "live",
+        updatedAt: Date.now() - 626,
+      }),
+    },
+    {
+      name: "mismatched",
+      authority: (): CacheClaimAuthority => ({
+        ownerToken: "owner-b",
+        state: "live",
+        updatedAt: Date.now(),
+      }),
+    },
+    {
+      name: "future-dated",
+      authority: (): CacheClaimAuthority => ({
+        ownerToken: "owner-a",
+        state: "live",
+        updatedAt: Date.now() + 10_000,
+      }),
+    },
+  ])(
+    "fails soft promptly when shared Apify authority is $name",
+    async ({ authority }) => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-07-22T12:00:00.000Z"));
+        const cache: TtlCache<ApifySoldComp[]> = {
+          scope: "shared",
+          get: async () => null,
+          set: async () => undefined,
+          claim: async () => false,
+          getClaimOwner: async () => "owner-a",
+          getClaimAuthority: async () => authority(),
+          refreshClaimAuthority: async () => false,
+          terminateClaimAuthority: async () => false,
+        };
+        const runActor = vi.fn<RunApifySoldActor>();
+        const fetchPage = vi.fn<FetchPage>(async () => PUBLIC_SOLD_HTML);
+        const price = createDefaultPricer({
+          apifySold: {
+            enabled: true,
+            token: "secret",
+            runActor,
+            timeoutSecs: 1,
+            waitSecs: 1,
+            cache,
+          },
+          ebaySold: {
+            fetchPage,
+            cache: sharedPublicSoldCache(),
+          },
+        });
+
+        let settled = false;
+        const result = price(SIGNAL).then((value) => {
+          settled = true;
+          return value;
+        });
+        await vi.advanceTimersByTimeAsync(700);
+
+        expect(settled).toBe(true);
+        await expect(result).resolves.toMatchObject({ tier: "ebay-sold" });
+        expect(runActor).not.toHaveBeenCalled();
+        expect(fetchPage).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("declines without a shared cost fence before starting paid retrieval", async () => {
     const runActor = vi.fn<RunApifySoldActor>(async () => {

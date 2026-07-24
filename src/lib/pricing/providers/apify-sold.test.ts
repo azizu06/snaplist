@@ -716,6 +716,39 @@ describe("createApifySoldPricingProvider", () => {
     }
   });
 
+  it("reconciles an exact owner when the committed claim response rejects", async () => {
+    const sharedCache = sharedTestCache<ApifySoldComp[]>();
+    const cache: TtlCache<ApifySoldComp[]> = {
+      ...sharedCache,
+      claim: async (key, signal, ownerToken) => {
+        await sharedCache.claim?.(key, signal, ownerToken);
+        throw new Error("claim response rejected after remote commit");
+      },
+    };
+    const runActor = successfulRun([
+      rawItem({ itemId: "a", url: "https://www.ebay.com/itm/a", soldPrice: "170" }),
+      rawItem({ itemId: "b", url: "https://www.ebay.com/itm/b", soldPrice: "190" }),
+      rawItem({ itemId: "c", url: "https://www.ebay.com/itm/c", soldPrice: "180" }),
+    ]);
+    const providerForRuntime = () =>
+      createApifySoldPricingProvider({
+        enabled: true,
+        token: "secret",
+        cache,
+        runActor,
+        timeoutSecs: 1,
+        waitSecs: 1,
+        emitDiagnostic: () => undefined,
+      });
+
+    const ownerResult = await providerForRuntime().price(SIGNAL);
+    const retryResult = await providerForRuntime().price(SIGNAL);
+
+    expect(runActor).toHaveBeenCalledTimes(1);
+    expect(ownerResult).not.toBeNull();
+    expect(retryResult).toEqual(ownerResult);
+  });
+
   it("observes an exact owner committed during the final backoff interval", async () => {
     vi.useFakeTimers();
     try {

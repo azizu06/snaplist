@@ -124,6 +124,99 @@ describe("createUpstashTtlCache (injected fake client)", () => {
       opts: { ex: 60, nx: true },
     });
   });
+
+  it("round-trips exact-owner authority when Redis auto-deserializes JSON", async () => {
+    const store = new Map<string, string>();
+    const fake = {
+      async set(
+        key: string,
+        value: string,
+        opts: { ex: number; nx?: true },
+      ) {
+        if (opts.nx && store.has(key)) return null;
+        store.set(key, value);
+        return "OK";
+      },
+      async get(key: string) {
+        const value = store.get(key);
+        return value == null ? null : JSON.parse(value);
+      },
+    };
+    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+
+    await expect(
+      cache.claim?.("identity", undefined, "owner-a"),
+    ).resolves.toBe(true);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBe("owner-a");
+    await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject({
+      ownerToken: "owner-a",
+      state: "live",
+      updatedAt: expect.any(Number),
+    });
+    await expect(
+      cache.refreshClaimAuthority?.("identity", "owner-b"),
+    ).resolves.toBe(false);
+    await expect(
+      cache.terminateClaimAuthority?.("identity", "owner-a"),
+    ).resolves.toBe(true);
+    await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject({
+      ownerToken: "owner-a",
+      state: "terminal",
+    });
+  });
+
+  it("cannot overwrite current authority when ownership changes during a transition", async () => {
+    const store = new Map<string, string>();
+    let replacementOwner: string | null = null;
+    const authority = (ownerToken: string, state: "live" | "terminal") =>
+      JSON.stringify({ ownerToken, state, updatedAt: Date.now() });
+    const fake = {
+      async set(
+        key: string,
+        value: string,
+        opts: { ex: number; nx?: true },
+      ) {
+        if (opts.nx && store.has(key)) return null;
+        if (!opts.nx && replacementOwner != null) {
+          const claimKey = [...store.keys()].find((candidate) =>
+            candidate.endsWith(":paid-claim"),
+          );
+          if (claimKey) {
+            store.set(claimKey, authority(replacementOwner, "live"));
+          }
+          replacementOwner = null;
+        }
+        store.set(key, value);
+        return "OK";
+      },
+      async get(key: string) {
+        const value = store.get(key);
+        return value == null ? null : JSON.parse(value);
+      },
+    };
+    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+
+    await cache.claim?.("identity", undefined, "owner-a");
+    replacementOwner = "owner-b";
+    await expect(
+      cache.refreshClaimAuthority?.("identity", "owner-a"),
+    ).resolves.toBe(false);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBe("owner-b");
+    await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject({
+      ownerToken: "owner-b",
+      state: "live",
+    });
+
+    replacementOwner = "owner-c";
+    await expect(
+      cache.terminateClaimAuthority?.("identity", "owner-b"),
+    ).resolves.toBe(false);
+    await expect(cache.getClaimOwner?.("identity")).resolves.toBe("owner-c");
+    await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject({
+      ownerToken: "owner-c",
+      state: "live",
+    });
+  });
 });
 
 describe("createUpstashTtlCache (production client shape)", () => {
@@ -210,18 +303,20 @@ describe("createUpstashTtlCache (production client shape)", () => {
     await expect(
       cache.getClaimOwner?.("identity", controller.signal),
     ).resolves.toBe("owner-a");
-    expect(commands).toEqual([
-      [
-        [
-          "set",
-          "snaplist:cache:sold:identity:paid-claim",
-          "owner-a",
-          "nx",
-          "ex",
-          60,
-        ],
-      ],
-      [["get", "snaplist:cache:sold:identity:paid-claim"]],
+    expect(commands).toHaveLength(2);
+    const setCommand = commands[0] as [[string, string, string, string, string, number]];
+    expect(setCommand[0].slice(0, 2)).toEqual([
+      "set",
+      "snaplist:cache:sold:identity:paid-claim",
+    ]);
+    expect(JSON.parse(setCommand[0][2])).toMatchObject({
+      ownerToken: "owner-a",
+      state: "live",
+      updatedAt: expect.any(Number),
+    });
+    expect(setCommand[0].slice(3)).toEqual(["nx", "ex", 60]);
+    expect(commands[1]).toEqual([
+      ["get", "snaplist:cache:sold:identity:paid-claim"],
     ]);
   });
 });
