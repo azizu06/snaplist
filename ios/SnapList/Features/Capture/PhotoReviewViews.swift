@@ -146,17 +146,27 @@ struct PhotoReviewView: View {
 
     @ViewBuilder
     private var hero: some View {
-        if let selectedPhoto {
-            LocalCaptureImage(
-                url: selectedPhoto.photoURL,
-                maximumPixelSize: 1_200
+        if let selectedPhoto,
+           let selectedIndex = store.photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
+            Button {
+                store.selectPhotoForActions(id: selectedPhoto.id)
+            } label: {
+                LocalCaptureImage(
+                    url: selectedPhoto.photoURL,
+                    maximumPixelSize: 1_200
+                )
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .frame(height: 300)
+                .clipped()
+                .clipShape(.rect(cornerRadius: 18))
+                .accessibilityHidden(true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                thumbnailAccessibilityLabel(index: selectedIndex, isSelected: true)
             )
-            .scaledToFill()
-            .frame(maxWidth: .infinity)
-            .frame(height: 300)
-            .clipped()
-            .clipShape(.rect(cornerRadius: 18))
-            .accessibilityHidden(true)
+            .accessibilityIdentifier("photo-review.hero")
         }
     }
 
