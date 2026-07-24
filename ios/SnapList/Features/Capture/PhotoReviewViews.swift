@@ -150,26 +150,33 @@ struct PhotoReviewFixtureView: View {
 
         switch state {
         case .resting:
-            return (1...3).map { index in
-                let id = UUID(
-                    uuidString: "45500000-0000-4000-8000-\(String(format: "%012d", index))"
-                )!
-                let photoURL = rootDirectory.appendingPathComponent(
-                    "photo-review-\(index).jpg"
+            let descriptors = (1...3).map { index in
+                (
+                    id: UUID(
+                        uuidString: "45500000-0000-4000-8000-\(String(format: "%012d", index))"
+                    )!,
+                    photoURL: rootDirectory.appendingPathComponent(
+                        "photo-review-\(index).jpg"
+                    ),
+                    thumbnailURL: rootDirectory.appendingPathComponent(
+                        "photo-review-thumb-\(index).jpg"
+                    ),
+                    createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
                 )
-                let thumbnailURL = rootDirectory.appendingPathComponent(
-                    "photo-review-thumb-\(index).jpg"
-                )
+            }
+            for (offset, descriptor) in descriptors.enumerated() {
                 materializeImages(
-                    at: [photoURL, thumbnailURL],
-                    ordinal: index
+                    at: [descriptor.photoURL, descriptor.thumbnailURL],
+                    ordinal: offset + 1
                 )
+            }
+            return descriptors.map { descriptor in
                 beforePhotoConstruction()
                 return StagedCapturePhoto(
-                    id: id,
-                    photoURL: photoURL,
-                    thumbnailURL: thumbnailURL,
-                    createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
+                    id: descriptor.id,
+                    photoURL: descriptor.photoURL,
+                    thumbnailURL: descriptor.thumbnailURL,
+                    createdAt: descriptor.createdAt
                 )
             }
         }
