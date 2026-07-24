@@ -674,15 +674,16 @@ describe("createApifySoldPricingProvider", () => {
           cached = value;
         },
         claim: (_key, _signal, ownerToken) => {
-          const requestedOwner = ownerToken ?? "legacy-owner";
-          claimedOwner = requestedOwner;
+          const requestedOwner = ownerToken ?? null;
+          const effectiveOwner = ownerToken ?? "legacy-owner";
+          claimedOwner = effectiveOwner;
           events.push({
             type: "claim-requested",
             ownerToken: requestedOwner,
           });
           return new Promise<boolean>((resolve) => {
             setTimeout(() => {
-              currentOwner = requestedOwner;
+              currentOwner = effectiveOwner;
               authority = {
                 ownerToken: currentOwner,
                 state: "live",
@@ -775,6 +776,7 @@ describe("createApifySoldPricingProvider", () => {
       );
       expect(oldOwnerObservationIndex).toBeGreaterThanOrEqual(0);
       expect(requestedClaimOwner).toEqual(expect.any(String));
+      expect(requestedClaimOwner).not.toHaveLength(0);
       expect(requestedClaimOwner).not.toBe("owner-a");
       expect(delayedClaimSettleIndex).toBeGreaterThanOrEqual(0);
       expect(oldOwnerObservationIndex).toBeLessThan(delayedClaimSettleIndex);
