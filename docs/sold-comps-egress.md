@@ -56,6 +56,9 @@ quarter of the caller pricing window. Operators may tighten
 `APIFY_SOLD_CLAIM_AUTHORITY_WINDOW_MS`, but the code clamps production
 configuration between 3 seconds and that 15-second/one-quarter ceiling; a
 shorter test pricing window proportionally lowers the minimum too.
+Redis applies each exact-owner authority transition atomically: refresh is valid
+only from `live`, while `terminal` is idempotent and can never transition back to
+`live`.
 Losers continue the existing bounded evidence handoff only while that exact
 authority is live. Terminal, stale, malformed, or owner-mismatched authority
 declines promptly to the existing provider-neutral fallback without releasing

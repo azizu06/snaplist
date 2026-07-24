@@ -141,6 +141,30 @@ describe("createUpstashTtlCache (injected fake client)", () => {
         const value = store.get(key);
         return value == null ? null : JSON.parse(value);
       },
+      async eval(
+        _script: string,
+        keys: string[],
+        args: Array<string | number>,
+      ) {
+        const [claimKey, authorityKey] = keys;
+        const [ownerToken, nextState, nextRaw] = args;
+        const claim = JSON.parse(store.get(claimKey!)!) as {
+          ownerToken: string;
+        };
+        const current = JSON.parse(
+          store.get(authorityKey!) ?? store.get(claimKey!)!,
+        ) as { ownerToken: string; state: "live" | "terminal" };
+        if (
+          claim.ownerToken !== ownerToken ||
+          current.ownerToken !== ownerToken ||
+          (nextState === "live" && current.state !== "live") ||
+          (nextState !== "live" && nextState !== "terminal")
+        ) {
+          return 0;
+        }
+        store.set(authorityKey!, String(nextRaw));
+        return 1;
+      },
     };
     const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
 
@@ -193,6 +217,37 @@ describe("createUpstashTtlCache (injected fake client)", () => {
         const value = store.get(key);
         return value == null ? null : JSON.parse(value);
       },
+      async eval(
+        _script: string,
+        keys: string[],
+        args: Array<string | number>,
+      ) {
+        const [claimKey, authorityKey] = keys;
+        const [ownerToken, nextState, nextRaw] = args;
+        if (replacementOwner != null) {
+          store.set(
+            claimKey!,
+            authority(replacementOwner, "live"),
+          );
+          replacementOwner = null;
+        }
+        const claim = JSON.parse(store.get(claimKey!)!) as {
+          ownerToken: string;
+        };
+        const current = JSON.parse(
+          store.get(authorityKey!) ?? store.get(claimKey!)!,
+        ) as { ownerToken: string; state: "live" | "terminal" };
+        if (
+          claim.ownerToken !== ownerToken ||
+          current.ownerToken !== ownerToken ||
+          (nextState === "live" && current.state !== "live") ||
+          (nextState !== "live" && nextState !== "terminal")
+        ) {
+          return 0;
+        }
+        store.set(authorityKey!, String(nextRaw));
+        return 1;
+      },
     };
     const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
 
@@ -215,6 +270,100 @@ describe("createUpstashTtlCache (injected fake client)", () => {
     await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject({
       ownerToken: "owner-c",
       state: "live",
+    });
+  });
+
+  it("keeps terminal authority irreversible when an issued same-owner refresh lands later", async () => {
+    const store = new Map<string, string>();
+    let reportRefreshIssued!: () => void;
+    const refreshIssued = new Promise<void>((resolve) => {
+      reportRefreshIssued = resolve;
+    });
+    let releaseRefresh!: () => void;
+    const refreshRelease = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let delayedLiveTransition = false;
+    const authority = (raw: string | undefined) =>
+      raw == null
+        ? null
+        : (JSON.parse(raw) as {
+            ownerToken: string;
+            state: "live" | "terminal";
+          });
+    const delayIssuedLiveTransition = async (state: string) => {
+      if (state !== "live" || delayedLiveTransition) return;
+      delayedLiveTransition = true;
+      reportRefreshIssued();
+      await refreshRelease;
+    };
+    const fake = {
+      async set(
+        key: string,
+        value: string,
+        opts: { ex: number; nx?: true },
+      ) {
+        if (opts.nx && store.has(key)) return null;
+        const next = authority(value);
+        if (!opts.nx && next != null) {
+          await delayIssuedLiveTransition(next.state);
+        }
+        store.set(key, value);
+        return "OK";
+      },
+      async get(key: string) {
+        const value = store.get(key);
+        return value == null ? null : JSON.parse(value);
+      },
+      async eval(
+        _script: string,
+        keys: string[],
+        args: Array<string | number>,
+      ) {
+        const [claimKey, authorityKey] = keys;
+        const [ownerToken, nextState, nextRaw] = args;
+        await delayIssuedLiveTransition(String(nextState));
+        const claim = authority(store.get(claimKey!));
+        const current = authority(
+          store.get(authorityKey!) ?? store.get(claimKey!),
+        );
+        if (
+          claim?.ownerToken !== ownerToken ||
+          current?.ownerToken !== ownerToken ||
+          (nextState === "live" && current.state !== "live") ||
+          (nextState !== "live" && nextState !== "terminal")
+        ) {
+          return 0;
+        }
+        store.set(authorityKey!, String(nextRaw));
+        return 1;
+      },
+    };
+    const cache = createUpstashTtlCache<string>("apify-sold", 60_000, fake);
+
+    await cache.claim?.("identity", undefined, "owner-a");
+    const refresh = cache.refreshClaimAuthority?.("identity", "owner-a");
+    await refreshIssued;
+
+    let terminalized = false;
+    try {
+      terminalized =
+        (await cache.terminateClaimAuthority?.("identity", "owner-a")) === true;
+      await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject(
+        {
+          ownerToken: "owner-a",
+          state: "terminal",
+        },
+      );
+    } finally {
+      releaseRefresh();
+    }
+
+    expect(terminalized).toBe(true);
+    await expect(refresh).resolves.toBe(false);
+    await expect(cache.getClaimAuthority?.("identity")).resolves.toMatchObject({
+      ownerToken: "owner-a",
+      state: "terminal",
     });
   });
 });
@@ -318,6 +467,68 @@ describe("createUpstashTtlCache (production client shape)", () => {
     expect(commands[1]).toEqual([
       ["get", "snaplist:cache:sold:identity:paid-claim"],
     ]);
+  });
+
+  it("sends authority transitions as one atomic Redis EVAL command", async () => {
+    const commands: unknown[] = [];
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://example.upstash.io");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "test-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const command = JSON.parse(String(init?.body)) as unknown;
+        commands.push(command);
+        const operation = (command as [[string]])[0][0];
+        return new Response(
+          JSON.stringify([{ result: operation === "eval" ? 1 : "OK" }]),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }),
+    );
+
+    const cache = createUpstashTtlCache<string>("sold", 60_000);
+    const controller = new AbortController();
+
+    await expect(
+      cache.claim?.("identity", controller.signal, "owner-a"),
+    ).resolves.toBe(true);
+    await expect(
+      cache.terminateClaimAuthority?.(
+        "identity",
+        "owner-a",
+        controller.signal,
+      ),
+    ).resolves.toBe(true);
+
+    const transition = commands[1] as [
+      [
+        string,
+        string,
+        number,
+        string,
+        string,
+        string,
+        string,
+        string,
+        number,
+      ],
+    ];
+    expect(transition[0][0]).toBe("eval");
+    expect(transition[0][2]).toBe(2);
+    expect(transition[0].slice(3, 5)).toEqual([
+      "snaplist:cache:sold:identity:paid-claim",
+      "snaplist:cache:sold:identity:paid-claim-authority:owner-a",
+    ]);
+    expect(transition[0].slice(5, 7)).toEqual(["owner-a", "terminal"]);
+    expect(JSON.parse(transition[0][7])).toMatchObject({
+      ownerToken: "owner-a",
+      state: "terminal",
+      updatedAt: expect.any(Number),
+    });
+    expect(transition[0][8]).toBe(60);
   });
 });
 
