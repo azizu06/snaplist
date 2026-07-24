@@ -149,6 +149,56 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Home"].exists)
     }
 
+    func testLivePhotoReviewBackReturnsExactRestoredPhotoAndFocusesScanReview() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let initialCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(initialCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(initialCount.label, "1 of 5")
+
+        let initialReview = app.buttons["scan.review"]
+        XCTAssertTrue(initialReview.exists)
+        XCTAssertEqual(initialReview.label, "Review 1 photo")
+        initialReview.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+
+        let back = app.buttons["photo-review.back"]
+        guard back.waitForExistence(timeout: 2) else {
+            XCTFail(
+                "Live Photo Review must expose the native Back to camera control."
+            )
+            return
+        }
+        XCTAssertEqual(back.label, "Back to camera")
+        back.tap()
+
+        XCTAssertFalse(screen.waitForExistence(timeout: 2))
+
+        let returnedCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(returnedCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(returnedCount.label, "1 of 5")
+
+        let returnedReview = app.buttons["scan.review"]
+        XCTAssertTrue(returnedReview.waitForExistence(timeout: 3))
+        XCTAssertEqual(returnedReview.label, "Review 1 photo")
+        let focusExpectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasFocus == true"),
+            object: returnedReview
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [focusExpectation], timeout: 3),
+            .completed
+        )
+    }
+
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
         let expectedTextByState = [
             ("CAP-01", "Add an item"),
