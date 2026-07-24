@@ -14,7 +14,10 @@ import type {
   RunApifySoldActor,
 } from "./providers/apify-sold";
 import type { EbaySoldComp, FetchPage } from "./providers/ebay-sold";
-import { createAuthorityCacheFixture } from "./pricing-authority-test-fixtures";
+import {
+  createAuthorityCacheFixture,
+  type AuthorityRaceEvent,
+} from "./pricing-authority-test-fixtures";
 import type { ItemSignal } from "./types";
 
 const SIGNAL: ItemSignal = {
@@ -106,12 +109,6 @@ function createDefaultPricer(options: CreateDefaultPricerOptions = {}) {
     },
   });
 }
-
-type AuthorityRaceEvent =
-  | { type: "owner-observed"; ownerToken: string | null }
-  | { type: "claim-requested"; ownerToken: string }
-  | { type: "claim-aborted"; ownerToken: string }
-  | { type: "claim-settled"; ownerToken: string; committed: boolean };
 
 function createAuthorityPricerFixture(
   cache: TtlCache<ApifySoldComp[]>,
