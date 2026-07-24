@@ -10,7 +10,11 @@ final class PhotoReviewActionPresentation {
     func dismissOutside(
         store: PhotoReviewStore
     ) -> StagedCapturePhoto.ID? {
-        nil
+        guard let photoID = store.dismissActions() else {
+            return nil
+        }
+        focusedPhotoID = photoID
+        return photoID
     }
 }
 
@@ -96,8 +100,11 @@ struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
     let delete: () -> Void
 
+    @State private var actionPresentation = PhotoReviewActionPresentation()
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickerPresentation = PhotoReviewPickerPresentation()
+    // Outside dismissal focus stays independent from picker cancellation focus.
+    @AccessibilityFocusState private var focusedThumbnailID: StagedCapturePhoto.ID?
     @AccessibilityFocusState private var focusedPickerOpener: PickerFocusTarget?
 
     private enum PickerFocusTarget: Hashable {
@@ -124,7 +131,11 @@ struct PhotoReviewView: View {
             .padding(.horizontal, SnapListMetrics.screenGutter)
             .padding(.vertical, 16)
         }
-        .background(SnapListColorToken.groupingFill.color)
+        .background {
+            SnapListColorToken.groupingFill.color
+                .contentShape(.rect)
+                .onTapGesture(perform: dismissActionsOutside)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("photo-review.screen")
         .photosPicker(
@@ -228,6 +239,10 @@ struct PhotoReviewView: View {
             )
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityIdentifier("photo-review.thumbnail.\(index + 1)")
+            .accessibilityFocused(
+                $focusedThumbnailID,
+                equals: photo.id
+            )
 
             if index == 0 {
                 Text("Cover")
@@ -339,6 +354,13 @@ struct PhotoReviewView: View {
         pickerItems = []
         focusedPickerOpener = nil
         pickerPresentation.present(request, store: store)
+    }
+
+    private func dismissActionsOutside() {
+        guard let photoID = actionPresentation.dismissOutside(store: store) else {
+            return
+        }
+        focusedThumbnailID = photoID
     }
 
     private func restorePickerCancellationFocus(

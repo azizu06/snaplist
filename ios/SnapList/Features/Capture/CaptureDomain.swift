@@ -276,6 +276,15 @@ final class PhotoReviewStore {
         return true
     }
 
+    @discardableResult
+    func dismissActions() -> StagedCapturePhoto.ID? {
+        guard let photoID = actionsPhotoID else {
+            return nil
+        }
+        actionsPhotoID = nil
+        return photoID
+    }
+
     func beginPickerRequest(_ request: PhotoReviewPickerRequest) {
         activePickerRequest = request
     }
