@@ -264,6 +264,11 @@ struct PhotoReviewLiveDeleteResult: Equatable {
     let announcement: String
 }
 
+struct PhotoReviewLiveFinalDeleteResult: Equatable {
+    let scanReturn: PhotoReviewScanReturn
+    let announcement: String
+}
+
 @MainActor
 final class PhotoReviewLiveSession {
     let store: PhotoReviewStore
@@ -350,6 +355,18 @@ final class PhotoReviewLiveHost {
         activeRequest = request
         self.session = session
         return true
+    }
+
+    @discardableResult
+    func deleteFinalPhoto(
+        id: StagedCapturePhoto.ID,
+        using router: AppRouter
+    ) -> PhotoReviewLiveFinalDeleteResult? {
+        nil
+    }
+
+    func consumeFinalDeleteAnnouncement() -> String? {
+        nil
     }
 }
 

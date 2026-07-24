@@ -580,6 +580,66 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testLivePhotoReviewFinalDeleteReturnsExactEmptyScanStateAndClearsSessionOnce() {
+        let onlyPhoto = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000031")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [onlyPhoto],
+            opener: .reviewButton
+        )
+        let request = router.captureBoundaryRequest
+        let host = PhotoReviewLiveHost()
+
+        XCTAssertTrue(host.consume(request))
+        guard let session = host.session else {
+            XCTFail("The exact one-photo request must expose one live session.")
+            return
+        }
+        XCTAssertTrue(session.store.selectPhotoForActions(id: onlyPhoto.id))
+
+        let result = host.deleteFinalPhoto(id: onlyPhoto.id, using: router)
+        let expectedReturn = PhotoReviewScanReturn(
+            photos: [],
+            focus: .addPhotoButton
+        )
+        XCTAssertEqual(
+            result,
+            PhotoReviewLiveFinalDeleteResult(
+                scanReturn: expectedReturn,
+                announcement: "0 photos remaining. Returning to Scan."
+            )
+        )
+
+        if result == nil {
+            XCTAssertEqual(session.store.photos, [onlyPhoto])
+            XCTAssertEqual(session.store.selectedPhotoID, onlyPhoto.id)
+            XCTAssertEqual(session.store.actionsPhotoID, onlyPhoto.id)
+            XCTAssertTrue(host.session === session)
+            XCTAssertEqual(router.captureBoundaryRequest, request)
+            XCTAssertNil(router.photoReviewScanReturn)
+            XCTAssertNil(host.consumeFinalDeleteAnnouncement())
+        } else {
+            XCTAssertTrue(session.store.photos.isEmpty)
+            XCTAssertNil(session.store.selectedPhotoID)
+            XCTAssertNil(session.store.actionsPhotoID)
+            XCTAssertNil(host.session)
+            XCTAssertNil(router.captureBoundaryRequest)
+            XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
+            XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+            XCTAssertEqual(
+                host.consumeFinalDeleteAnnouncement(),
+                "0 photos remaining. Returning to Scan."
+            )
+            XCTAssertNil(host.consumeFinalDeleteAnnouncement())
+
+            XCTAssertNil(host.deleteFinalPhoto(id: onlyPhoto.id, using: router))
+            XCTAssertNil(host.session)
+            XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
+            XCTAssertNil(host.consumeFinalDeleteAnnouncement())
+        }
+    }
+
     func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
         let fingerprints = [
             "direct-replace-photo-a-digest",
