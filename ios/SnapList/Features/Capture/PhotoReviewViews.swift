@@ -294,13 +294,18 @@ final class PhotoReviewLiveSession {
     }
 
     @discardableResult
-    func returnToScan(
-        using router: AppRouter
-    ) -> PhotoReviewScanReturn? {
-        let request = PhotoReviewScanReturn(
+    func scanReturn() -> PhotoReviewScanReturn {
+        PhotoReviewScanReturn(
             photos: store.photos,
             focus: .reviewButton
         )
+    }
+
+    @discardableResult
+    func returnToScan(
+        using router: AppRouter
+    ) -> PhotoReviewScanReturn? {
+        let request = scanReturn()
         router.returnFromPhotoReview(request)
         return request
     }
@@ -389,11 +394,24 @@ final class PhotoReviewLiveHost {
         defer { pendingFinalDeleteAnnouncement = nil }
         return pendingFinalDeleteAnnouncement
     }
+
+    @discardableResult
+    func completeReturnToScan(
+        from returningSession: PhotoReviewLiveSession
+    ) -> Bool {
+        guard session === returningSession else {
+            return false
+        }
+        session = nil
+        activeRequest = nil
+        return true
+    }
 }
 
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
+    var backToCamera: (() -> Void)? = nil
     let delete: () -> Void
 
     @State private var actionPresentation = PhotoReviewActionPresentation()
@@ -453,6 +471,11 @@ struct PhotoReviewView: View {
 
     private var topBar: some View {
         HStack(alignment: .firstTextBaseline) {
+            if let backToCamera {
+                Button("Back to camera", action: backToCamera)
+                    .accessibilityIdentifier("photo-review.back")
+            }
+
             Text("Review photos")
                 .snapListTypography(.sectionHeader)
                 .foregroundStyle(SnapListColorToken.inkPrimary.color)

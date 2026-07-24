@@ -14,6 +14,7 @@ struct AppShellView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
+    @State private var pendingScanReturnFocus: PhotoReviewScanFocus?
     @State private var photoReviewHost = PhotoReviewLiveHost()
 
     var body: some View {
@@ -50,6 +51,9 @@ struct AppShellView: View {
             } else if let session = photoReviewHost.session {
                 PhotoReviewView(
                     store: session.store,
+                    backToCamera: {
+                        returnFromPhotoReview(session)
+                    },
                     delete: {}
                 )
             } else {
@@ -150,7 +154,10 @@ struct AppShellView: View {
         .fullScreenCover(item: $router.presentedFullScreen) { destination in
             switch destination {
             case .guidedCamera:
-                ScanCameraView(flow: captureFlow) { destination, photos, opener in
+                ScanCameraView(
+                    flow: captureFlow,
+                    returnFocus: $pendingScanReturnFocus
+                ) { destination, photos, opener in
                     router.openCaptureBoundary(
                         destination: destination,
                         photos: photos,
@@ -231,6 +238,32 @@ struct AppShellView: View {
         self.pendingCapturePresentation = nil
         router.presentedFullScreen = .guidedCamera
         Task { await captureFlow.startCamera() }
+    }
+
+    private func returnFromPhotoReview(
+        _ session: PhotoReviewLiveSession
+    ) {
+        Task {
+            let request = session.scanReturn()
+            guard let focus = await captureFlow.applyPhotoReviewScanReturn(
+                request
+            ) else {
+                return
+            }
+
+            await captureFlow.startCamera()
+            guard photoReviewHost.completeReturnToScan(from: session) else {
+                return
+            }
+
+            pendingScanReturnFocus = focus
+            router.returnFromPhotoReview(
+                PhotoReviewScanReturn(
+                    photos: request.photos,
+                    focus: focus
+                )
+            )
+        }
     }
 }
 
