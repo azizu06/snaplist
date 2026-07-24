@@ -208,6 +208,11 @@ final class CaptureFlowTests: XCTestCase {
             let source = try XCTUnwrap(
                 CGImageSourceCreateWithURL(url as CFURL, nil)
             )
+            XCTAssertEqual(
+                CGImageSourceGetType(source) as String?,
+                "public.jpeg",
+                "\(url.lastPathComponent) must remain a JPEG."
+            )
             let properties = try XCTUnwrap(
                 CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
                     as? [CFString: Any]
