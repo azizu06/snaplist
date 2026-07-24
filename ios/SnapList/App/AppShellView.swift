@@ -14,6 +14,7 @@ struct AppShellView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isKeyboardVisible = false
     @State private var pendingCapturePresentation: PendingCapturePresentation?
+    @State private var photoReviewHost = PhotoReviewLiveHost()
 
     var body: some View {
         Group {
@@ -46,6 +47,11 @@ struct AppShellView: View {
 #else
                 VisualStateBoundaryPlaceholder(state: visualState)
 #endif
+            } else if let session = photoReviewHost.session {
+                PhotoReviewView(
+                    store: session.store,
+                    delete: {}
+                )
             } else {
                 shell
             }
@@ -53,6 +59,12 @@ struct AppShellView: View {
         .modifier(OptionalDynamicTypeModifier(size: configuration.dynamicTypeSize))
         .onOpenURL { url in
             router.open(url)
+        }
+        .onChange(
+            of: router.captureBoundaryRequest,
+            initial: true
+        ) { _, request in
+            photoReviewHost.consume(request)
         }
         .task(id: onboardingCaptureRouteID) {
             guard configuration.usesOnboarding,

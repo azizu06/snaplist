@@ -103,7 +103,7 @@ final class SnapListUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(reviewButton.frame.height, 44)
         reviewButton.tap()
         XCTAssertFalse(app.buttons["scan.review"].waitForExistence(timeout: 1))
-        XCTAssertTrue(app.staticTexts["Home"].exists)
+        XCTAssertTrue(app.scrollViews["photo-review.screen"].waitForExistence(timeout: 3))
     }
 
     func testLiveScanReviewOpensApprovedPhotoReviewShellWithExactRestoredPhoto() {
