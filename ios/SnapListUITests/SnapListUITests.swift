@@ -106,6 +106,49 @@ final class SnapListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Home"].exists)
     }
 
+    func testLiveScanReviewOpensApprovedPhotoReviewShellWithExactRestoredPhoto() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--restored-capture-fixture"]
+        app.launch()
+
+        let resume = app.buttons["button.primary.resume-captured-photo"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+
+        let scanCount = app.staticTexts["scan.photo-count"]
+        XCTAssertTrue(scanCount.waitForExistence(timeout: 3))
+        XCTAssertEqual(scanCount.label, "1 of 5")
+
+        let review = app.buttons["scan.review"]
+        XCTAssertTrue(review.exists)
+        XCTAssertEqual(review.label, "Review 1 photo")
+        review.tap()
+
+        let screen = app.scrollViews["photo-review.screen"]
+        guard screen.waitForExistence(timeout: 3) else {
+            XCTFail(
+                "The live Scan request must render the typed Photo Review screen."
+            )
+            return
+        }
+
+        XCTAssertEqual(app.staticTexts["photo-review.count"].label, "1 of 5")
+
+        let hero = app.buttons["photo-review.hero"]
+        let thumbnail = app.buttons["photo-review.thumbnail.1"]
+        XCTAssertTrue(hero.exists)
+        XCTAssertTrue(thumbnail.exists)
+        XCTAssertTrue(hero.label.contains("Photo 1 of 1"))
+        XCTAssertTrue(hero.label.contains("Cover"))
+        XCTAssertTrue(hero.label.contains("selected"))
+        XCTAssertTrue(thumbnail.label.contains("Photo 1 of 1"))
+        XCTAssertTrue(thumbnail.label.contains("Cover"))
+        XCTAssertTrue(thumbnail.isSelected)
+
+        XCTAssertFalse(app.buttons["scan.review"].exists)
+        XCTAssertFalse(app.staticTexts["Home"].exists)
+    }
+
     func testCaptureVisualStatesExposeTheApprovedNonCandidateBoundary() {
         let expectedTextByState = [
             ("CAP-01", "Add an item"),
