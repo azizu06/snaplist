@@ -48,6 +48,82 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testPhotoReviewFixtureReplacesRecognizedButUndecodableImages() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-corrupt-fixture-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+
+        func decodedThumbnail(from data: Data) -> CGImage? {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+                return nil
+            }
+            return CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 180
+                ] as CFDictionary
+            )
+        }
+
+        func decodedThumbnail(at url: URL) -> CGImage? {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                return nil
+            }
+            return CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 180
+                ] as CFDictionary
+            )
+        }
+
+        let validJPEG = try makeLandscapeImageData()
+        let corruptLength = try XCTUnwrap(
+            stride(from: validJPEG.count - 1, through: 1, by: -1).first { length in
+                let candidate = Data(validJPEG.prefix(length))
+                guard let source = CGImageSourceCreateWithData(
+                    candidate as CFData,
+                    nil
+                ) else {
+                    return false
+                }
+                return CGImageSourceGetCount(source) > 0
+                    && decodedThumbnail(from: candidate) == nil
+            }
+        )
+        let corruptPhotoURL = root.appendingPathComponent("photo-review-1.jpg")
+        try Data(validJPEG.prefix(corruptLength)).write(
+            to: corruptPhotoURL,
+            options: .atomic
+        )
+
+        let photos = PhotoReviewFixtureView.photos(
+            for: .resting,
+            rootDirectory: root
+        )
+
+        XCTAssertEqual(photos.map(\.id.uuidString), [
+            "45500000-0000-4000-8000-000000000001",
+            "45500000-0000-4000-8000-000000000002",
+            "45500000-0000-4000-8000-000000000003"
+        ])
+        for photo in photos {
+            XCTAssertNotNil(decodedThumbnail(at: photo.photoURL))
+            XCTAssertNotNil(decodedThumbnail(at: photo.thumbnailURL))
+        }
+    }
+
     func testPhotoReviewEditsPreserveIdentityOrderAndReturnTheExactScanPayload() {
         let originalCover = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000001")
         let second = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000002")
