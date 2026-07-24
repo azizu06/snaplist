@@ -48,6 +48,9 @@ const APIFY_SOLD_CLAIM_AUTHORITY_CLOCK_SKEW_MS = 1_000;
 const APIFY_SOLD_PRICING_DEADLINE_EXCEEDED = Symbol(
   "apify-sold-pricing-deadline-exceeded",
 );
+const APIFY_SOLD_CLAIM_RESPONSE_REJECTED = Symbol(
+  "apify-sold-claim-response-rejected",
+);
 
 async function settleBeforeApifyPricingDeadline<T>(
   startOperation: (signal: AbortSignal) => Promise<T>,
@@ -742,6 +745,39 @@ export function createApifySoldPricingProvider(
     };
   }
 
+  async function establishClaimAuthority(
+    key: string,
+    ownerToken: string,
+    pricingDeadline: number,
+  ): Promise<boolean> {
+    if (!hasClaimAuthorityProtocol) return true;
+    try {
+      const refreshed = await settleBeforeApifyPricingDeadline(
+        (abortSignal) =>
+          refreshClaimAuthority(key, ownerToken, abortSignal),
+        Math.min(
+          pricingDeadline,
+          Date.now() + APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
+        ),
+      );
+      if (
+        refreshed === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED ||
+        refreshed !== true
+      ) {
+        emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+          reason: "claim-authority-refresh-unconfirmed",
+        });
+        return false;
+      }
+      return true;
+    } catch {
+      emitDiagnostic("pricing.apify_sold.cost_fence_unavailable", {
+        reason: "claim-authority-refresh-unavailable",
+      });
+      return false;
+    }
+  }
+
   async function markClaimAuthorityTerminal(
     key: string,
     ownerToken: string,
@@ -786,22 +822,37 @@ export function createApifySoldPricingProvider(
 
     const cancellation = new AbortController();
     try {
-      const claimResponse = settleBeforeApifyPricingDeadline(
+      const ownerObservationDeadline = hasClaimAuthorityProtocol
+        ? Math.min(
+            pricingDeadline,
+            Date.now() + APIFY_SOLD_COORDINATION_ALLOWANCE_MS,
+          )
+        : pricingDeadline;
+      const claimAttempt = settleBeforeApifyPricingDeadline(
         (abortSignal) => claimCostFence(key, abortSignal, ownerToken),
-        pricingDeadline,
+        ownerObservationDeadline,
         cancellation.signal,
-      ).catch(() => new Promise<never>(() => undefined));
+      );
+      const claimResponse = hasClaimAuthorityProtocol
+        ? claimAttempt.catch(
+            (): typeof APIFY_SOLD_CLAIM_RESPONSE_REJECTED =>
+              APIFY_SOLD_CLAIM_RESPONSE_REJECTED,
+          )
+        : claimAttempt;
       const ownerObservation = (async (): Promise<
-        true | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
+        | boolean
+        | typeof APIFY_SOLD_PRICING_DEADLINE_EXCEEDED
       > => {
         if (
           !(await delayBeforeApifyPricingDeadline(
             0,
-            pricingDeadline,
+            ownerObservationDeadline,
             cancellation.signal,
           ))
         ) {
-          return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+          return hasClaimAuthorityProtocol
+            ? false
+            : APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
         }
 
         let delayMs = APIFY_SOLD_WINNER_STORE_POLL_MS;
@@ -809,18 +860,21 @@ export function createApifySoldPricingProvider(
           try {
             const observedOwner = await settleBeforeApifyPricingDeadline(
               (abortSignal) => getClaimOwner(key, abortSignal),
-              pricingDeadline,
+              ownerObservationDeadline,
               cancellation.signal,
             );
             if (observedOwner === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED) {
-              return observedOwner;
+              return hasClaimAuthorityProtocol ? false : observedOwner;
             }
             if (observedOwner === ownerToken) return true;
+            if (hasClaimAuthorityProtocol && observedOwner != null) {
+              return false;
+            }
           } catch {
             // A later bounded observation may still prove this exact owner.
           }
 
-          const remainingMs = pricingDeadline - Date.now();
+          const remainingMs = ownerObservationDeadline - Date.now();
           if (remainingMs <= 0) break;
           const finalReadAllowanceMs =
             APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS +
@@ -828,7 +882,7 @@ export function createApifySoldPricingProvider(
           if (remainingMs <= finalReadAllowanceMs) {
             await delayBeforeApifyPricingDeadline(
               Number.MAX_SAFE_INTEGER,
-              pricingDeadline,
+              ownerObservationDeadline,
               cancellation.signal,
             );
             break;
@@ -836,7 +890,7 @@ export function createApifySoldPricingProvider(
           if (
             !(await delayBeforeApifyPricingDeadline(
               Math.min(delayMs, remainingMs - finalReadAllowanceMs),
-              pricingDeadline,
+              ownerObservationDeadline,
               cancellation.signal,
             ))
           ) {
@@ -844,10 +898,16 @@ export function createApifySoldPricingProvider(
           }
           delayMs = Math.min(delayMs * 2, APIFY_SOLD_COORDINATION_ALLOWANCE_MS);
         }
-        return APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
+        return hasClaimAuthorityProtocol
+          ? false
+          : APIFY_SOLD_PRICING_DEADLINE_EXCEEDED;
       })();
 
-      return await Promise.race([claimResponse, ownerObservation]);
+      const first = await Promise.race([claimResponse, ownerObservation]);
+      if (first === APIFY_SOLD_CLAIM_RESPONSE_REJECTED) {
+        return await ownerObservation;
+      }
+      return first;
     } finally {
       cancellation.abort();
     }
@@ -1105,12 +1165,19 @@ export function createApifySoldPricingProvider(
       if (!claimed) {
         return waitForClaimWinner(key, pricingDeadline);
       }
-      const terminalWriteReserveMs =
-        APIFY_SOLD_WINNER_CACHE_READ_BUDGET_MS +
-        APIFY_SOLD_DEADLINE_MARGIN_MS;
+      const terminalWriteReserveMs = APIFY_SOLD_COORDINATION_ALLOWANCE_MS;
       const ownerWorkDeadline = hasClaimAuthorityProtocol
         ? pricingDeadline - terminalWriteReserveMs
         : pricingDeadline;
+      if (
+        !(await establishClaimAuthority(
+          key,
+          claimOwnerToken,
+          ownerWorkDeadline,
+        ))
+      ) {
+        return null;
+      }
       const stopMaintainingAuthority = maintainClaimAuthority(
         key,
         claimOwnerToken,
