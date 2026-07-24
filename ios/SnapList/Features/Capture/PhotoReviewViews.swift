@@ -128,8 +128,9 @@ struct PhotoReviewFixtureView: View {
         )
     }
 
-    private static func photos(
-        for state: PhotoReviewVisualStateID
+    static func photos(
+        for state: PhotoReviewVisualStateID,
+        rootDirectory: URL = FileManager.default.temporaryDirectory
     ) -> [StagedCapturePhoto] {
         switch state {
         case .resting:
@@ -139,8 +140,12 @@ struct PhotoReviewFixtureView: View {
                 )!
                 return StagedCapturePhoto(
                     id: id,
-                    photoURL: URL(fileURLWithPath: "/tmp/photo-review-\(index).jpg"),
-                    thumbnailURL: URL(fileURLWithPath: "/tmp/photo-review-thumb-\(index).jpg"),
+                    photoURL: rootDirectory.appendingPathComponent(
+                        "photo-review-\(index).jpg"
+                    ),
+                    thumbnailURL: rootDirectory.appendingPathComponent(
+                        "photo-review-thumb-\(index).jpg"
+                    ),
                     createdAt: Date(timeIntervalSinceReferenceDate: Double(index))
                 )
             }

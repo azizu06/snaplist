@@ -1,10 +1,53 @@
 import AVFoundation
+import ImageIO
 import UIKit
 import XCTest
 @testable import SnapList
 
 @MainActor
 final class CaptureFlowTests: XCTestCase {
+    func testPhotoReviewFixtureMaterializesDecodableImagesBeforeConstruction() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-fixture-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+
+        let photos = PhotoReviewFixtureView.photos(
+            for: .resting,
+            rootDirectory: root
+        )
+
+        XCTAssertEqual(
+            photos.map(\.id.uuidString),
+            [
+                "45500000-0000-4000-8000-000000000001",
+                "45500000-0000-4000-8000-000000000002",
+                "45500000-0000-4000-8000-000000000003"
+            ]
+        )
+
+        for (offset, photo) in photos.enumerated() {
+            let ordinal = offset + 1
+            let expectedPhotoURL = root.appendingPathComponent(
+                "photo-review-\(ordinal).jpg"
+            )
+            let expectedThumbnailURL = root.appendingPathComponent(
+                "photo-review-thumb-\(ordinal).jpg"
+            )
+
+            XCTAssertEqual(photo.photoURL, expectedPhotoURL)
+            XCTAssertEqual(photo.thumbnailURL, expectedThumbnailURL)
+            XCTAssertTrue(fileManager.fileExists(atPath: photo.photoURL.path))
+            XCTAssertTrue(fileManager.fileExists(atPath: photo.thumbnailURL.path))
+            XCTAssertNotNil(CGImageSourceCreateWithURL(photo.photoURL as CFURL, nil))
+            XCTAssertNotNil(
+                CGImageSourceCreateWithURL(photo.thumbnailURL as CFURL, nil)
+            )
+        }
+    }
+
     func testPhotoReviewEditsPreserveIdentityOrderAndReturnTheExactScanPayload() {
         let originalCover = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000001")
         let second = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000002")
