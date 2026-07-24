@@ -867,9 +867,6 @@ export function createApifySoldPricingProvider(
               return hasClaimAuthorityProtocol ? false : observedOwner;
             }
             if (observedOwner === ownerToken) return true;
-            if (hasClaimAuthorityProtocol && observedOwner != null) {
-              return false;
-            }
           } catch {
             // A later bounded observation may still prove this exact owner.
           }
@@ -904,7 +901,11 @@ export function createApifySoldPricingProvider(
       })();
 
       const first = await Promise.race([claimResponse, ownerObservation]);
-      if (first === APIFY_SOLD_CLAIM_RESPONSE_REJECTED) {
+      if (
+        first === APIFY_SOLD_CLAIM_RESPONSE_REJECTED ||
+        (hasClaimAuthorityProtocol &&
+          first === APIFY_SOLD_PRICING_DEADLINE_EXCEEDED)
+      ) {
         return await ownerObservation;
       }
       return first;
