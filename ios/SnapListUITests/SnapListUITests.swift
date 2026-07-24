@@ -180,14 +180,14 @@ final class SnapListUITests: XCTestCase {
         XCTAssertEqual(back.label, "Back to camera")
         back.tap()
 
+        let returnedReview = app.buttons["scan.review"]
+        XCTAssertTrue(returnedReview.waitForExistence(timeout: 3))
         XCTAssertFalse(screen.waitForExistence(timeout: 2))
 
         let returnedCount = app.staticTexts["scan.photo-count"]
         XCTAssertTrue(returnedCount.waitForExistence(timeout: 3))
         XCTAssertEqual(returnedCount.label, "1 of 5")
 
-        let returnedReview = app.buttons["scan.review"]
-        XCTAssertTrue(returnedReview.waitForExistence(timeout: 3))
         XCTAssertEqual(returnedReview.label, "Review 1 photo")
         let focusExpectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "hasFocus == true"),
