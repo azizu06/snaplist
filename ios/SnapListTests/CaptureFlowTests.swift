@@ -573,7 +573,7 @@ final class CaptureFlowTests: XCTestCase {
             photos[2].id
         ])
         XCTAssertEqual(moveEarlierStore.selectedPhotoID, photos[1].id)
-        XCTAssertEqual(moveEarlierStore.actionsPhotoID, photos[2].id)
+        XCTAssertNil(moveEarlierStore.actionsPhotoID)
         XCTAssertEqual(moveEarlierStore.activePickerRequest, earlierPickerRequest)
         assertExactPhotoValues(moveEarlierStore)
 
@@ -599,7 +599,7 @@ final class CaptureFlowTests: XCTestCase {
             photos[1].id
         ])
         XCTAssertEqual(moveLaterStore.selectedPhotoID, photos[1].id)
-        XCTAssertEqual(moveLaterStore.actionsPhotoID, photos[0].id)
+        XCTAssertNil(moveLaterStore.actionsPhotoID)
         XCTAssertEqual(
             moveLaterStore.activePickerRequest,
             PhotoReviewPickerRequest.add
@@ -607,7 +607,7 @@ final class CaptureFlowTests: XCTestCase {
         assertExactPhotoValues(moveLaterStore)
 
         let makeCoverStore = PhotoReviewStore(photos: photos)
-        XCTAssertTrue(makeCoverStore.selectPhotoForActions(id: photos[0].id))
+        XCTAssertTrue(makeCoverStore.selectPhotoForActions(id: photos[2].id))
         let coverPickerRequest = PhotoReviewPickerRequest.replace(
             photoID: photos[1].id
         )
@@ -631,7 +631,7 @@ final class CaptureFlowTests: XCTestCase {
             photos[1].id
         ])
         XCTAssertEqual(makeCoverStore.selectedPhotoID, photos[2].id)
-        XCTAssertEqual(makeCoverStore.actionsPhotoID, photos[0].id)
+        XCTAssertEqual(makeCoverStore.actionsPhotoID, photos[2].id)
         XCTAssertEqual(makeCoverStore.activePickerRequest, coverPickerRequest)
         assertExactPhotoValues(makeCoverStore)
 
@@ -768,7 +768,7 @@ final class CaptureFlowTests: XCTestCase {
             photos[2].id
         ])
         XCTAssertEqual(moveEarlierStore.selectedPhotoID, photos[1].id)
-        XCTAssertEqual(moveEarlierStore.actionsPhotoID, photos[2].id)
+        XCTAssertNil(moveEarlierStore.actionsPhotoID)
         XCTAssertEqual(moveEarlierStore.activePickerRequest, earlierPickerRequest)
         assertExactPhotoValues(moveEarlierStore)
         XCTAssertEqual(moveEarlier.focusedPhotoID, photos[1].id)
@@ -805,7 +805,7 @@ final class CaptureFlowTests: XCTestCase {
             photos[1].id
         ])
         XCTAssertEqual(moveLaterStore.selectedPhotoID, photos[1].id)
-        XCTAssertEqual(moveLaterStore.actionsPhotoID, photos[0].id)
+        XCTAssertNil(moveLaterStore.actionsPhotoID)
         XCTAssertEqual(
             moveLaterStore.activePickerRequest,
             PhotoReviewPickerRequest.add
@@ -822,7 +822,7 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(moveLaterStore.photos, laterStateAfterConsumption)
 
         let makeCoverStore = PhotoReviewStore(photos: photos)
-        XCTAssertTrue(makeCoverStore.selectPhotoForActions(id: photos[0].id))
+        XCTAssertTrue(makeCoverStore.selectPhotoForActions(id: photos[2].id))
         let coverPickerRequest = PhotoReviewPickerRequest.replace(
             photoID: photos[1].id
         )
@@ -848,7 +848,7 @@ final class CaptureFlowTests: XCTestCase {
             photos[1].id
         ])
         XCTAssertEqual(makeCoverStore.selectedPhotoID, photos[2].id)
-        XCTAssertEqual(makeCoverStore.actionsPhotoID, photos[0].id)
+        XCTAssertEqual(makeCoverStore.actionsPhotoID, photos[2].id)
         XCTAssertEqual(makeCoverStore.activePickerRequest, coverPickerRequest)
         assertExactPhotoValues(makeCoverStore)
         XCTAssertEqual(makeCover.focusedPhotoID, photos[2].id)
