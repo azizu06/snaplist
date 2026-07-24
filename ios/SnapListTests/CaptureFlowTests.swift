@@ -277,6 +277,66 @@ final class CaptureFlowTests: XCTestCase {
         )
     }
 
+    func testPhotoReviewOutsideDismissalPreservesExactStateAndRestoresSelectedThumbnailFocus() {
+        let fingerprints = [
+            "outside-dismiss-a-digest",
+            "outside-dismiss-b-digest",
+            "outside-dismiss-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000041",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000042",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000043",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+        let store = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(store.selectPhotoForActions(id: photos[1].id))
+        let presentation = PhotoReviewActionPresentation()
+
+        let expectedPhotos = store.photos
+        let expectedIDs = expectedPhotos.map(\.id)
+        let expectedPhotoURLs = expectedPhotos.map(\.photoURL)
+        let expectedThumbnailURLs = expectedPhotos.map(\.thumbnailURL)
+        let expectedCreatedAt = expectedPhotos.map(\.createdAt)
+        let expectedReceipts = expectedPhotos.map(\.libraryTransferReceipt)
+        let expectedSelectedID = store.selectedPhotoID
+        let expectedPickerRequest = store.activePickerRequest
+
+        func assertUnrelatedStateIsExact() {
+            XCTAssertEqual(store.photos, expectedPhotos)
+            XCTAssertEqual(store.photos.map(\.id), expectedIDs)
+            XCTAssertEqual(store.photos.map(\.photoURL), expectedPhotoURLs)
+            XCTAssertEqual(store.photos.map(\.thumbnailURL), expectedThumbnailURLs)
+            XCTAssertEqual(store.photos.map(\.createdAt), expectedCreatedAt)
+            XCTAssertEqual(store.photos.map(\.libraryTransferReceipt), expectedReceipts)
+            XCTAssertEqual(store.selectedPhotoID, expectedSelectedID)
+            XCTAssertEqual(store.activePickerRequest, expectedPickerRequest)
+        }
+
+        let focusedPhotoID = presentation.dismissOutside(store: store)
+
+        XCTAssertNil(store.actionsPhotoID)
+        XCTAssertEqual(focusedPhotoID, photos[1].id)
+        XCTAssertEqual(presentation.focusedPhotoID, photos[1].id)
+        assertUnrelatedStateIsExact()
+
+        let focusAfterDismissal = presentation.focusedPhotoID
+        XCTAssertNil(presentation.dismissOutside(store: store))
+        XCTAssertEqual(presentation.focusedPhotoID, focusAfterDismissal)
+        assertUnrelatedStateIsExact()
+    }
+
     func testPhotoReviewConfirmedPickerResultsPreserveExactValuesOrderAndRequestConsumption() {
         let fingerprints = [
             "picker-photo-a-digest",

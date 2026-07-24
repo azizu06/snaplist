@@ -3,6 +3,19 @@ import SwiftUI
 
 @MainActor
 @Observable
+final class PhotoReviewActionPresentation {
+    private(set) var focusedPhotoID: StagedCapturePhoto.ID?
+
+    @discardableResult
+    func dismissOutside(
+        store: PhotoReviewStore
+    ) -> StagedCapturePhoto.ID? {
+        nil
+    }
+}
+
+@MainActor
+@Observable
 final class PhotoReviewPickerPresentation {
     private(set) var isPresented = false
     private(set) var cancellationFocus: PhotoReviewPickerOpener?
