@@ -1,5 +1,18 @@
 import XCTest
 
+private extension XCUIApplication.State {
+    var isSafeToTerminate: Bool {
+        switch self {
+        case .runningBackground, .runningBackgroundSuspended, .notRunning:
+            return true
+        case .runningForeground, .unknown:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+}
+
 protocol UIProcessLifecycle: AnyObject {
     var state: XCUIApplication.State { get }
 
@@ -10,7 +23,13 @@ protocol UIProcessLifecycle: AnyObject {
 
 extension UIProcessLifecycle {
     func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
-        wait(for: .runningBackground, timeout: timeout)
+        let safeState = NSPredicate { _, _ in
+            self.state.isSafeToTerminate
+        }
+        return XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: safeState, object: nil)],
+            timeout: timeout
+        ) == .completed
     }
 }
 
@@ -33,10 +52,16 @@ struct UIProcessTerminationBoundary {
         if process.state == .runningForeground {
             let backgroundTimeout = timeout / 2
             pressHome()
-            guard process.wait(for: .runningBackground, timeout: backgroundTimeout) else {
+            guard process.waitUntilSafeToTerminate(timeout: backgroundTimeout) else {
                 return false
             }
             terminationTimeout -= backgroundTimeout
+        }
+        guard process.state.isSafeToTerminate else {
+            return false
+        }
+        guard process.state != .notRunning else {
+            return true
         }
         process.terminate()
         return process.wait(for: .notRunning, timeout: terminationTimeout)
