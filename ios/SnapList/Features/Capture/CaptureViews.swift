@@ -887,6 +887,7 @@ struct ScanCameraVisualStateView: View {
                     Button(action: {}) { ScanLibraryLabel(style: .recovery) }
                         .buttonStyle(.plain)
                 },
+                returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
                 openTrophyWall: {}
@@ -900,6 +901,7 @@ struct ScanCameraVisualStateView: View {
                     Button(action: {}) { ScanLibraryLabel(style: .recovery) }
                         .buttonStyle(.plain)
                 },
+                returnFocus: .constant(nil),
                 review: {},
                 openSettings: {},
                 openTrophyWall: {}
@@ -920,6 +922,7 @@ struct ScanCameraVisualStateView: View {
                 },
                 toggleFlash: {},
                 takePhoto: {},
+                returnFocus: .constant(nil),
                 review: {},
                 openTrophyWall: {}
             )
