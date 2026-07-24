@@ -1,5 +1,67 @@
 import XCTest
 
+protocol UIProcessLifecycle: AnyObject {
+    var state: XCUIApplication.State { get }
+
+    func terminate()
+    func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool
+}
+
+extension XCUIApplication: UIProcessLifecycle {}
+
+struct UIProcessTerminationBoundary {
+    private let pressHome: () -> Void
+
+    init(pressHome: @escaping () -> Void = {
+        XCUIDevice.shared.press(.home)
+    }) {
+        self.pressHome = pressHome
+    }
+
+    func terminate(
+        _ process: any UIProcessLifecycle,
+        timeout: TimeInterval = 3
+    ) -> Bool {
+        process.terminate()
+        return process.wait(for: .notRunning, timeout: timeout)
+    }
+}
+
+final class UIProcessTerminationBoundaryTests: XCTestCase {
+    func testForegroundProcessLeavesForegroundBeforeTerminationAndVerifiesExit() {
+        let process = FakeUIProcess()
+        let boundary = UIProcessTerminationBoundary {
+            process.pressHome()
+        }
+
+        XCTAssertTrue(boundary.terminate(process))
+        XCTAssertEqual(
+            process.events,
+            ["press-home", "terminate", "wait-not-running"]
+        )
+    }
+}
+
+private final class FakeUIProcess: UIProcessLifecycle {
+    private(set) var state = XCUIApplication.State.runningForeground
+    private(set) var events: [String] = []
+
+    func pressHome() {
+        events.append("press-home")
+        state = .runningBackground
+    }
+
+    func terminate() {
+        events.append("terminate")
+        state = .notRunning
+    }
+
+    func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool {
+        events.append("wait-not-running")
+        return self.state == state
+    }
+}
+
 final class HomeVisualRegressionTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
