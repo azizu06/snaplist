@@ -1,6 +1,26 @@
 import SwiftUI
 
 @MainActor
+@Observable
+final class PhotoReviewPickerPresentation {
+    private(set) var isPresented = false
+    private(set) var cancellationFocus: PhotoReviewPickerOpener?
+
+    func present(
+        _ request: PhotoReviewPickerRequest,
+        store: PhotoReviewStore
+    ) {}
+
+    @discardableResult
+    func dismiss(
+        hasConfirmedSelection: Bool,
+        store: PhotoReviewStore
+    ) -> PhotoReviewPickerOpener? {
+        nil
+    }
+}
+
+@MainActor
 struct PhotoReviewFixtureView: View {
     @State private var store: PhotoReviewStore
 

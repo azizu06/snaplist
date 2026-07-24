@@ -115,6 +115,168 @@ final class CaptureFlowTests: XCTestCase {
         assertExactValueState()
     }
 
+    func testPhotoReviewSystemPickerCancellationPreservesExactStateAndRestoresTypedOpener() {
+        let fingerprints = [
+            "picker-presentation-a-digest",
+            "picker-presentation-b-digest",
+            "picker-presentation-c-digest"
+        ]
+        let photos = [
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000031",
+                ordinal: 0,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000032",
+                ordinal: 1,
+                fingerprints: fingerprints
+            ),
+            makePickerPhoto(
+                id: "45500000-0000-4000-8000-000000000033",
+                ordinal: 2,
+                fingerprints: fingerprints
+            )
+        ]
+
+        func assertExactState(
+            _ store: PhotoReviewStore,
+            selectedPhotoID: StagedCapturePhoto.ID,
+            actionsPhotoID: StagedCapturePhoto.ID
+        ) {
+            XCTAssertEqual(store.photos, photos)
+            XCTAssertEqual(store.photos.map(\.id), photos.map(\.id))
+            XCTAssertEqual(store.photos.map(\.photoURL), photos.map(\.photoURL))
+            XCTAssertEqual(
+                store.photos.map(\.thumbnailURL),
+                photos.map(\.thumbnailURL)
+            )
+            XCTAssertEqual(store.photos.map(\.createdAt), photos.map(\.createdAt))
+            XCTAssertEqual(
+                store.photos.map(\.libraryTransferReceipt),
+                photos.map(\.libraryTransferReceipt)
+            )
+            XCTAssertEqual(store.selectedPhotoID, selectedPhotoID)
+            XCTAssertEqual(store.actionsPhotoID, actionsPhotoID)
+        }
+
+        let addStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(addStore.selectPhotoForActions(id: photos[1].id))
+        let addPresentation = PhotoReviewPickerPresentation()
+
+        addPresentation.present(.add, store: addStore)
+
+        XCTAssertTrue(addPresentation.isPresented)
+        XCTAssertEqual(addStore.activePickerRequest, PhotoReviewPickerRequest.add)
+        XCTAssertNil(addPresentation.cancellationFocus)
+        XCTAssertEqual(
+            addPresentation.dismiss(
+                hasConfirmedSelection: false,
+                store: addStore
+            ),
+            PhotoReviewPickerOpener.addButton
+        )
+        XCTAssertFalse(addPresentation.isPresented)
+        XCTAssertEqual(
+            addPresentation.cancellationFocus,
+            PhotoReviewPickerOpener.addButton
+        )
+        XCTAssertNil(addStore.activePickerRequest)
+        assertExactState(
+            addStore,
+            selectedPhotoID: photos[1].id,
+            actionsPhotoID: photos[1].id
+        )
+
+        let addFocusAfterCancellation = addPresentation.cancellationFocus
+        XCTAssertNil(
+            addPresentation.dismiss(
+                hasConfirmedSelection: false,
+                store: addStore
+            )
+        )
+        XCTAssertEqual(addPresentation.cancellationFocus, addFocusAfterCancellation)
+        assertExactState(
+            addStore,
+            selectedPhotoID: photos[1].id,
+            actionsPhotoID: photos[1].id
+        )
+
+        let replaceStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(replaceStore.selectPhotoForActions(id: photos[1].id))
+        let replacePresentation = PhotoReviewPickerPresentation()
+        let replaceRequest = PhotoReviewPickerRequest.replace(photoID: photos[1].id)
+
+        replacePresentation.present(replaceRequest, store: replaceStore)
+
+        XCTAssertTrue(replacePresentation.isPresented)
+        XCTAssertEqual(replaceStore.activePickerRequest, replaceRequest)
+        XCTAssertNil(replacePresentation.cancellationFocus)
+        XCTAssertEqual(
+            replacePresentation.dismiss(
+                hasConfirmedSelection: false,
+                store: replaceStore
+            ),
+            PhotoReviewPickerOpener.replaceButton(photoID: photos[1].id)
+        )
+        XCTAssertFalse(replacePresentation.isPresented)
+        XCTAssertEqual(
+            replacePresentation.cancellationFocus,
+            PhotoReviewPickerOpener.replaceButton(photoID: photos[1].id)
+        )
+        XCTAssertNil(replaceStore.activePickerRequest)
+        assertExactState(
+            replaceStore,
+            selectedPhotoID: photos[1].id,
+            actionsPhotoID: photos[1].id
+        )
+
+        let replaceFocusAfterCancellation = replacePresentation.cancellationFocus
+        XCTAssertNil(
+            replacePresentation.dismiss(
+                hasConfirmedSelection: false,
+                store: replaceStore
+            )
+        )
+        XCTAssertEqual(
+            replacePresentation.cancellationFocus,
+            replaceFocusAfterCancellation
+        )
+        assertExactState(
+            replaceStore,
+            selectedPhotoID: photos[1].id,
+            actionsPhotoID: photos[1].id
+        )
+
+        let confirmedStore = PhotoReviewStore(photos: photos)
+        XCTAssertTrue(confirmedStore.selectPhotoForActions(id: photos[1].id))
+        let confirmedPresentation = PhotoReviewPickerPresentation()
+
+        confirmedPresentation.present(.add, store: confirmedStore)
+        XCTAssertTrue(confirmedPresentation.isPresented)
+        XCTAssertEqual(
+            confirmedStore.activePickerRequest,
+            PhotoReviewPickerRequest.add
+        )
+        XCTAssertNil(
+            confirmedPresentation.dismiss(
+                hasConfirmedSelection: true,
+                store: confirmedStore
+            )
+        )
+        XCTAssertFalse(confirmedPresentation.isPresented)
+        XCTAssertNil(confirmedPresentation.cancellationFocus)
+        XCTAssertEqual(
+            confirmedStore.activePickerRequest,
+            PhotoReviewPickerRequest.add
+        )
+        assertExactState(
+            confirmedStore,
+            selectedPhotoID: photos[1].id,
+            actionsPhotoID: photos[1].id
+        )
+    }
+
     func testPhotoReviewConfirmedPickerResultsPreserveExactValuesOrderAndRequestConsumption() {
         let fingerprints = [
             "picker-photo-a-digest",
