@@ -15,6 +15,7 @@ private extension XCUIApplication.State {
 
 protocol UIProcessLifecycle: AnyObject {
     var state: XCUIApplication.State { get }
+    var monotonicUptime: TimeInterval { get }
 
     func terminate()
     func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool
@@ -22,13 +23,17 @@ protocol UIProcessLifecycle: AnyObject {
 }
 
 extension UIProcessLifecycle {
+    var monotonicUptime: TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
+
     func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
         let safeStates: [XCUIApplication.State] = [
             .runningBackground,
             .runningBackgroundSuspended,
             .notRunning
         ]
-        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        let deadline = monotonicUptime + timeout
         let probeDuration = min(0.1, timeout / 12)
         var safeStateIndex = 0
 
@@ -37,7 +42,7 @@ extension UIProcessLifecycle {
                 return true
             }
 
-            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            let remaining = deadline - monotonicUptime
             guard remaining > 0 else {
                 return state.isSafeToTerminate
             }
@@ -190,10 +195,16 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
 private final class LateNativeWaitObservedUIProcess: UIProcessLifecycle {
     private(set) var state = XCUIApplication.State.runningForeground
     private(set) var events: [String] = []
-    private(set) var safeWaitElapsed: TimeInterval = 0
+    private(set) var monotonicUptime: TimeInterval = 0
     private(set) var terminateCount = 0
     private(set) var exitWaitTimeouts: [TimeInterval] = []
     private let safeStateAvailableAfter: TimeInterval
+    private let safeObservationDeadline: TimeInterval = 0.3
+    private let callOverhead: TimeInterval = 0.005
+
+    var safeWaitElapsed: TimeInterval {
+        monotonicUptime
+    }
 
     init(safeStateAvailableAfter: TimeInterval) {
         self.safeStateAvailableAfter = safeStateAvailableAfter
@@ -233,15 +244,19 @@ private final class LateNativeWaitObservedUIProcess: UIProcessLifecycle {
         }
 
         events.append(event)
-        Thread.sleep(forTimeInterval: timeout)
-        safeWaitElapsed += timeout
-        guard state == .runningBackgroundSuspended,
-              safeWaitElapsed >= safeStateAvailableAfter else {
-            return false
+        let waitEnd = monotonicUptime + timeout
+        if state == .runningBackgroundSuspended,
+           safeStateAvailableAfter <= waitEnd {
+            events.append("witness-suspended")
+            monotonicUptime = max(monotonicUptime, safeStateAvailableAfter)
+            self.state = .runningBackgroundSuspended
+            return true
         }
-        events.append("witness-suspended")
-        self.state = .runningBackgroundSuspended
-        return true
+        monotonicUptime = min(
+            waitEnd + callOverhead,
+            safeObservationDeadline
+        )
+        return false
     }
 }
 
