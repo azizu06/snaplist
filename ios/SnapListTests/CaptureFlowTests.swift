@@ -517,6 +517,58 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testAppShellPhotoReviewBackTransactionAppliesCompletedRestoredCaptureReturn() async {
+        let configuration = LaunchConfiguration.parse(
+            arguments: ["--restored-capture-fixture"]
+        )
+        let dependencies = AppDependencies.make(configuration: configuration)
+        let captureFlow = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+
+        let restoration = await captureFlow.restore()
+        XCTAssertEqual(restoration, .stagedPhoto)
+        let restoredPhotos = captureFlow.stagedPhotos
+        XCTAssertEqual(restoredPhotos.count, 1)
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: restoredPhotos,
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The restored Photo Review request must create a live session.")
+            return
+        }
+
+        var receivedFocuses: [PhotoReviewScanFocus] = []
+        let outcome = await AppShellPhotoReviewBackTransaction.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host,
+            router: router,
+            setReturnFocus: { receivedFocuses.append($0) }
+        )
+        let expectedReturn = PhotoReviewScanReturn(
+            photos: restoredPhotos,
+            focus: .reviewButton
+        )
+
+        XCTAssertEqual(outcome, .completed(expectedReturn))
+        XCTAssertEqual(captureFlow.phase, .camera)
+        XCTAssertEqual(captureFlow.stagedPhotos, restoredPhotos)
+        XCTAssertNil(host.session)
+        XCTAssertEqual(receivedFocuses, [.reviewButton])
+        XCTAssertEqual(router.photoReviewScanReturn, expectedReturn)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+    }
+
     func testPhotoReviewConditionalShellRemountPresentsPrepopulatedGuidedCamera() async {
         let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000051")
         let router = AppRouter(initialFullScreen: .guidedCamera)

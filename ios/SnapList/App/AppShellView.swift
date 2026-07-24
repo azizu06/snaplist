@@ -244,18 +244,41 @@ struct AppShellView: View {
         _ session: PhotoReviewLiveSession
     ) {
         Task {
-            switch await PhotoReviewBackCoordinator.perform(
+            _ = await AppShellPhotoReviewBackTransaction.perform(
                 session: session,
                 captureFlow: captureFlow,
-                host: photoReviewHost
-            ) {
-            case .persistenceRejected, .sessionChanged:
-                return
-            case .completed(let request):
-                pendingScanReturnFocus = request.focus
-                router.returnFromPhotoReview(request)
-            }
+                host: photoReviewHost,
+                router: router,
+                setReturnFocus: { pendingScanReturnFocus = $0 }
+            )
         }
+    }
+}
+
+@MainActor
+enum AppShellPhotoReviewBackTransaction {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost,
+        router: AppRouter,
+        setReturnFocus: (PhotoReviewScanFocus) -> Void
+    ) async -> PhotoReviewBackOutcome {
+        let outcome = await PhotoReviewBackCoordinator.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host
+        )
+
+        switch outcome {
+        case .persistenceRejected, .sessionChanged:
+            break
+        case .completed(let request):
+            setReturnFocus(request.focus)
+            router.returnFromPhotoReview(request)
+        }
+
+        return outcome
     }
 }
 
