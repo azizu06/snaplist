@@ -55,7 +55,12 @@ extension UIProcessLifecycle {
     }
 }
 
-extension XCUIApplication: UIProcessLifecycle {}
+extension XCUIApplication: UIProcessLifecycle {
+    func waitUntilSafeToTerminate(timeout: TimeInterval) -> Bool {
+        XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            .wait(for: .runningForeground, timeout: timeout)
+    }
+}
 
 struct UIProcessTerminationBoundary {
     private let pressHome: () -> Void
@@ -70,18 +75,27 @@ struct UIProcessTerminationBoundary {
         _ process: any UIProcessLifecycle,
         timeout: TimeInterval = 3
     ) -> Bool {
+        var foregroundExitWitnessed = false
         if process.state == .runningForeground {
             pressHome()
-            guard process.waitUntilSafeToTerminate(timeout: timeout) else {
+            foregroundExitWitnessed = process.waitUntilSafeToTerminate(timeout: timeout)
+        }
+
+        switch process.state {
+        case .runningBackground, .runningBackgroundSuspended:
+            break
+        case .runningForeground:
+            guard foregroundExitWitnessed else {
                 return false
             }
-        }
-        guard process.state.isSafeToTerminate else {
+        case .notRunning:
+            return true
+        case .unknown:
+            return false
+        @unknown default:
             return false
         }
-        guard process.state != .notRunning else {
-            return true
-        }
+
         process.terminate()
         return process.wait(for: .notRunning, timeout: timeout)
     }
