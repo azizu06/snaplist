@@ -260,6 +260,28 @@ struct PhotoReviewFixtureView: View {
 #endif
 
 @MainActor
+final class PhotoReviewLiveSession {
+    let store: PhotoReviewStore
+
+    private init(store: PhotoReviewStore) {
+        self.store = store
+    }
+
+    static func start(
+        from request: CaptureBoundaryRequest?
+    ) -> PhotoReviewLiveSession? {
+        nil
+    }
+
+    @discardableResult
+    func returnToScan(
+        using router: AppRouter
+    ) -> PhotoReviewScanReturn? {
+        nil
+    }
+}
+
+@MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
     let delete: () -> Void

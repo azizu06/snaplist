@@ -429,6 +429,42 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.photoReviewScanReturn, returned)
     }
 
+    func testLivePhotoReviewBackReturnsExactScanValuesOrderAndReviewFocus() {
+        let originalCover = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000001")
+        let second = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000002")
+        let third = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000003")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [originalCover, second, third],
+            opener: .reviewButton
+        )
+
+        guard let session = PhotoReviewLiveSession.start(
+            from: router.captureBoundaryRequest
+        ) else {
+            XCTFail(
+                "A live Photo Review request must create one feature-local editing session."
+            )
+            return
+        }
+
+        XCTAssertEqual(session.store.photos, [originalCover, second, third])
+        XCTAssertEqual(session.store.selectedPhotoID, originalCover.id)
+        XCTAssertTrue(session.store.movePhoto(id: third.id, to: 0))
+
+        let returned = session.returnToScan(using: router)
+        let expected = PhotoReviewScanReturn(
+            photos: [third, originalCover, second],
+            focus: .reviewButton
+        )
+
+        XCTAssertEqual(returned, expected)
+        XCTAssertEqual(router.photoReviewScanReturn, expected)
+        XCTAssertNil(router.captureBoundaryRequest)
+        XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
+    }
+
     func testPhotoReviewDirectReplacementRetargetsOnlyMatchingStableIdentities() {
         let fingerprints = [
             "direct-replace-photo-a-digest",
