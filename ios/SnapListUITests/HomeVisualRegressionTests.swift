@@ -162,6 +162,89 @@ final class UIProcessTerminationBoundaryTests: XCTestCase {
         )
         XCTAssertEqual(process.state, .notRunning)
     }
+
+    func testLateSafeTransitionPreservesTheCompleteSeparateExitVerificationWindow() {
+        let process = LateNativeWaitObservedUIProcess(
+            safeStateAvailableAfter: 0.24
+        )
+        let boundary = UIProcessTerminationBoundary {
+            process.pressHome()
+        }
+
+        XCTAssertTrue(boundary.terminate(process, timeout: 0.3))
+        XCTAssertGreaterThanOrEqual(process.safeWaitElapsed, 0.24)
+        XCTAssertLessThanOrEqual(process.safeWaitElapsed, 0.3)
+        XCTAssertEqual(
+            Array(process.events.suffix(3)),
+            ["witness-suspended", "terminate", "wait-not-running-after-terminate"]
+        )
+        XCTAssertEqual(process.terminateCount, 1)
+        XCTAssertEqual(process.exitWaitTimeouts.count, 1)
+        if let exitWaitTimeout = process.exitWaitTimeouts.first {
+            XCTAssertEqual(exitWaitTimeout, 0.3, accuracy: 0.001)
+        } else {
+            XCTFail("Exit verification did not receive its separate timeout")
+        }
+        XCTAssertEqual(process.state, .notRunning)
+    }
+}
+
+private final class LateNativeWaitObservedUIProcess: UIProcessLifecycle {
+    private(set) var state = XCUIApplication.State.runningForeground
+    private(set) var events: [String] = []
+    private(set) var safeWaitElapsed: TimeInterval = 0
+    private(set) var terminateCount = 0
+    private(set) var exitWaitTimeouts: [TimeInterval] = []
+    private let safeStateAvailableAfter: TimeInterval
+
+    init(safeStateAvailableAfter: TimeInterval) {
+        self.safeStateAvailableAfter = safeStateAvailableAfter
+    }
+
+    func pressHome() {
+        events.append("press-home")
+    }
+
+    func terminate() {
+        events.append("terminate")
+        terminateCount += 1
+    }
+
+    func wait(for state: XCUIApplication.State, timeout: TimeInterval) -> Bool {
+        if state == .notRunning, terminateCount == 1 {
+            events.append("wait-not-running-after-terminate")
+            exitWaitTimeouts.append(timeout)
+            self.state = .notRunning
+            return true
+        }
+
+        let event: String
+        switch state {
+        case .runningBackground:
+            event = "probe-running-background"
+        case .runningBackgroundSuspended:
+            event = "probe-running-background-suspended"
+        case .notRunning:
+            event = "probe-not-running"
+        case .runningForeground, .unknown:
+            XCTFail("Unexpected native wait target \(state)")
+            return false
+        @unknown default:
+            XCTFail("Unexpected native wait target \(state)")
+            return false
+        }
+
+        events.append(event)
+        Thread.sleep(forTimeInterval: timeout)
+        safeWaitElapsed += timeout
+        guard state == .runningBackgroundSuspended,
+              safeWaitElapsed >= safeStateAvailableAfter else {
+            return false
+        }
+        events.append("witness-suspended")
+        self.state = .runningBackgroundSuspended
+        return true
+    }
 }
 
 private final class NativeWaitObservedUIProcess: UIProcessLifecycle {
