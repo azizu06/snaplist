@@ -557,6 +557,84 @@ final class CaptureFlowTests: XCTestCase {
         withExtendedLifetime(window) {}
     }
 
+    func testPhotoReviewOutgoingCameraDismissalAllowsDistinctReturnPresentation() async throws {
+        let photo = makeStagedPhoto(id: "45800000-0000-4000-8000-000000000052")
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+        let firstCoverPresented = expectation(
+            description: "The outgoing guided-camera cover presents."
+        )
+        let firstCoverDismissed = expectation(
+            description: "The outgoing guided-camera cover dismisses."
+        )
+        let reviewPresented = expectation(
+            description: "Photo Review replaces the dismissed camera shell."
+        )
+        let secondCoverPresented = expectation(
+            description: "A distinct guided-camera cover presents after Back."
+        )
+        var coverPresentationCount = 0
+        var didRecordFirstDismissal = false
+        let hostingController = UIHostingController(
+            rootView: PhotoReviewConditionalPresentationHarness(
+                router: router,
+                host: host,
+                coverPresented: {
+                    coverPresentationCount += 1
+                    if coverPresentationCount == 1 {
+                        firstCoverPresented.fulfill()
+                    } else if coverPresentationCount == 2 {
+                        secondCoverPresented.fulfill()
+                    }
+                },
+                coverDismissed: {
+                    guard !didRecordFirstDismissal else { return }
+                    didRecordFirstDismissal = true
+                    firstCoverDismissed.fulfill()
+                },
+                reviewPresented: reviewPresented.fulfill
+            )
+        )
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+
+        await fulfillment(of: [firstCoverPresented], timeout: 3)
+        let firstPresentedController = try XCTUnwrap(
+            hostingController.presentedViewController
+        )
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: [photo],
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The outgoing-cover contract requires an exact live session.")
+            return
+        }
+
+        await fulfillment(
+            of: [firstCoverDismissed, reviewPresented],
+            timeout: 3
+        )
+        XCTAssertNil(hostingController.presentedViewController)
+        XCTAssertNil(firstPresentedController.presentingViewController)
+
+        XCTAssertTrue(host.completeReturnToScan(from: session))
+        router.presentedFullScreen = .guidedCamera
+
+        await fulfillment(of: [secondCoverPresented], timeout: 3)
+        let secondPresentedController = try XCTUnwrap(
+            hostingController.presentedViewController
+        )
+        XCTAssertFalse(firstPresentedController === secondPresentedController)
+        XCTAssertEqual(coverPresentationCount, 2)
+        window.isHidden = true
+        withExtendedLifetime(window) {}
+    }
+
     func testLivePhotoReviewScanReturnPersistsExactValuesOrderBeforeGuidedScan() async throws {
         let fileManager = FileManager.default
         let parent = fileManager.temporaryDirectory.appendingPathComponent(
@@ -3428,15 +3506,21 @@ private struct PhotoReviewConditionalPresentationHarness: View {
     @Bindable var router: AppRouter
     @Bindable var host: PhotoReviewLiveHost
     let coverPresented: () -> Void
+    let coverDismissed: () -> Void = {}
+    let reviewPresented: () -> Void = {}
 
     var body: some View {
         if host.session != nil {
             Color.clear
                 .accessibilityIdentifier("photo-review.contract")
+                .onAppear(perform: reviewPresented)
         } else {
             Color.clear
                 .accessibilityIdentifier("scan-shell.contract")
-                .fullScreenCover(item: $router.presentedFullScreen) { destination in
+                .fullScreenCover(
+                    item: $router.presentedFullScreen,
+                    onDismiss: coverDismissed
+                ) { destination in
                     switch destination {
                     case .guidedCamera:
                         Color.clear
