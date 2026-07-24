@@ -34,7 +34,7 @@ extension UIProcessLifecycle {
             .notRunning
         ]
         let deadline = monotonicUptime + timeout
-        let probeDuration = min(0.1, timeout / 12)
+        let probeDuration = min(0.1, timeout / 6)
         var safeStateIndex = 0
 
         while true {
