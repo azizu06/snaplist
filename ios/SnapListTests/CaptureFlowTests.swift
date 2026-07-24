@@ -3509,6 +3509,20 @@ private struct PhotoReviewConditionalPresentationHarness: View {
     let coverDismissed: () -> Void = {}
     let reviewPresented: () -> Void = {}
 
+    init(
+        router: AppRouter,
+        host: PhotoReviewLiveHost,
+        coverPresented: @escaping () -> Void,
+        coverDismissed: @escaping () -> Void = {},
+        reviewPresented: @escaping () -> Void = {}
+    ) {
+        self.router = router
+        self.host = host
+        self.coverPresented = coverPresented
+        self.coverDismissed = coverDismissed
+        self.reviewPresented = reviewPresented
+    }
+
     var body: some View {
         if host.session != nil {
             Color.clear
