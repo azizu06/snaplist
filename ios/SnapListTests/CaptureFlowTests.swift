@@ -465,6 +465,56 @@ final class CaptureFlowTests: XCTestCase {
         XCTAssertEqual(router.presentedFullScreen, .guidedCamera)
     }
 
+    func testPhotoReviewBackCoordinatorCompletesWithRestoredCaptureFixture() async {
+        let configuration = LaunchConfiguration.parse(
+            arguments: ["--restored-capture-fixture"]
+        )
+        let dependencies = AppDependencies.make(configuration: configuration)
+        let captureFlow = CaptureFlowModel(
+            camera: dependencies.captureCamera,
+            evaluator: dependencies.framingEvaluator,
+            store: dependencies.captureDraftStore
+        )
+        let router = AppRouter(initialFullScreen: .guidedCamera)
+        let host = PhotoReviewLiveHost()
+
+        XCTAssertEqual(await captureFlow.restore(), .stagedPhoto)
+        let restoredPhotos = captureFlow.stagedPhotos
+        XCTAssertEqual(restoredPhotos.count, 1)
+
+        router.openCaptureBoundary(
+            destination: .photoReview,
+            photos: restoredPhotos,
+            opener: .reviewButton
+        )
+        XCTAssertTrue(host.consume(router.captureBoundaryRequest))
+        guard let session = host.session else {
+            XCTFail("The restored Photo Review request must create a live session.")
+            return
+        }
+
+        let outcome = await PhotoReviewBackCoordinator.perform(
+            session: session,
+            captureFlow: captureFlow,
+            host: host
+        )
+        let expectedReturn = PhotoReviewScanReturn(
+            photos: restoredPhotos,
+            focus: .reviewButton
+        )
+
+        XCTAssertEqual(outcome, .completed(expectedReturn))
+        XCTAssertEqual(captureFlow.phase, .camera)
+        XCTAssertEqual(captureFlow.stagedPhotos, restoredPhotos)
+        XCTAssertNil(host.session)
+        if case .completed(let returnedRequest) = outcome {
+            XCTAssertEqual(returnedRequest, expectedReturn)
+            XCTAssertEqual(returnedRequest.focus, .reviewButton)
+        } else {
+            XCTFail("The coordinator must return the exact restored Scan request.")
+        }
+    }
+
     func testLivePhotoReviewScanReturnPersistsExactValuesOrderBeforeGuidedScan() async throws {
         let fileManager = FileManager.default
         let parent = fileManager.temporaryDirectory.appendingPathComponent(

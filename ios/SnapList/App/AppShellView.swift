@@ -244,25 +244,17 @@ struct AppShellView: View {
         _ session: PhotoReviewLiveSession
     ) {
         Task {
-            let request = session.scanReturn()
-            guard let focus = await captureFlow.applyPhotoReviewScanReturn(
-                request
-            ) else {
+            switch await PhotoReviewBackCoordinator.perform(
+                session: session,
+                captureFlow: captureFlow,
+                host: photoReviewHost
+            ) {
+            case .persistenceRejected, .sessionChanged:
                 return
+            case .completed(let request):
+                pendingScanReturnFocus = request.focus
+                router.returnFromPhotoReview(request)
             }
-
-            await captureFlow.startCamera()
-            guard photoReviewHost.completeReturnToScan(from: session) else {
-                return
-            }
-
-            pendingScanReturnFocus = focus
-            router.returnFromPhotoReview(
-                PhotoReviewScanReturn(
-                    photos: request.photos,
-                    focus: focus
-                )
-            )
         }
     }
 }

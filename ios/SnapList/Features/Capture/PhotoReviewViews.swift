@@ -408,6 +408,40 @@ final class PhotoReviewLiveHost {
     }
 }
 
+enum PhotoReviewBackOutcome: Equatable {
+    case persistenceRejected
+    case sessionChanged
+    case completed(PhotoReviewScanReturn)
+}
+
+@MainActor
+enum PhotoReviewBackCoordinator {
+    static func perform(
+        session: PhotoReviewLiveSession,
+        captureFlow: CaptureFlowModel,
+        host: PhotoReviewLiveHost
+    ) async -> PhotoReviewBackOutcome {
+        let request = session.scanReturn()
+        guard let focus = await captureFlow.applyPhotoReviewScanReturn(
+            request
+        ) else {
+            return .persistenceRejected
+        }
+
+        await captureFlow.startCamera()
+        guard host.completeReturnToScan(from: session) else {
+            return .sessionChanged
+        }
+
+        return .completed(
+            PhotoReviewScanReturn(
+                photos: request.photos,
+                focus: focus
+            )
+        )
+    }
+}
+
 @MainActor
 struct PhotoReviewView: View {
     @Bindable var store: PhotoReviewStore
