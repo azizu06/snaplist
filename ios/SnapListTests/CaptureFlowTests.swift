@@ -233,6 +233,152 @@ final class CaptureFlowTests: XCTestCase {
         }
     }
 
+    func testPhotoReviewFixtureReplacesDecodableFilesThatViolateJPEGPixelContract() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "snaplist-photo-review-retained-invalid-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+
+        let urls = (1...3).flatMap { ordinal in
+            [
+                root.appendingPathComponent("photo-review-\(ordinal).jpg"),
+                root.appendingPathComponent("photo-review-thumb-\(ordinal).jpg")
+            ]
+        }
+        let invalidSize = CGSize(width: 640, height: 480)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.preferredRange = .standard
+        let renderer = UIGraphicsImageRenderer(
+            size: invalidSize,
+            format: format
+        )
+        let invalidJPEG = renderer.jpegData(withCompressionQuality: 0.9) {
+            context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(origin: .zero, size: invalidSize))
+        }
+        let invalidPNG = renderer.pngData { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(origin: .zero, size: invalidSize))
+        }
+
+        func source(at url: URL) -> CGImageSource? {
+            CGImageSourceCreateWithURL(url as CFURL, nil)
+        }
+
+        func isLoaderDecodable(at url: URL) -> Bool {
+            guard let source = source(at: url) else {
+                return false
+            }
+            return CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 1_200
+                ] as CFDictionary
+            ) != nil
+        }
+
+        func satisfiesFixtureInvariant(at url: URL) -> Bool {
+            guard
+                let source = source(at: url),
+                CGImageSourceGetType(source) as String? == "public.jpeg",
+                let properties = CGImageSourceCopyPropertiesAtIndex(
+                    source,
+                    0,
+                    nil
+                ) as? [CFString: Any],
+                (properties[kCGImagePropertyPixelWidth] as? NSNumber)?
+                    .intValue == 1_200,
+                (properties[kCGImagePropertyPixelHeight] as? NSNumber)?
+                    .intValue == 900
+            else {
+                return false
+            }
+            return isLoaderDecodable(at: url)
+        }
+
+        for (offset, url) in urls.enumerated() {
+            try (offset == 0 ? invalidPNG : invalidJPEG).write(
+                to: url,
+                options: .atomic
+            )
+            XCTAssertTrue(isLoaderDecodable(at: url))
+        }
+        XCTAssertEqual(
+            CGImageSourceGetType(try XCTUnwrap(source(at: urls[0])))
+                as String?,
+            "public.png"
+        )
+
+        var constructionCount = 0
+        var allFilesValidBeforeFirstConstruction = false
+        let photos = PhotoReviewFixtureView.photos(
+            for: .resting,
+            rootDirectory: root
+        ) {
+            constructionCount += 1
+            guard constructionCount == 1 else {
+                return
+            }
+            allFilesValidBeforeFirstConstruction = urls.allSatisfy(
+                satisfiesFixtureInvariant
+            )
+        }
+
+        XCTAssertEqual(
+            photos.map(\.id.uuidString),
+            [
+                "45500000-0000-4000-8000-000000000001",
+                "45500000-0000-4000-8000-000000000002",
+                "45500000-0000-4000-8000-000000000003"
+            ]
+        )
+        XCTAssertEqual(
+            photos.flatMap { [$0.photoURL, $0.thumbnailURL] },
+            urls
+        )
+        XCTAssertEqual(constructionCount, 3)
+        XCTAssertTrue(
+            allFilesValidBeforeFirstConstruction,
+            "All retained fixture files must be repaired before the first photo is constructed."
+        )
+        for url in urls {
+            let source = try XCTUnwrap(source(at: url))
+            XCTAssertEqual(
+                CGImageSourceGetType(source) as String?,
+                "public.jpeg",
+                "\(url.lastPathComponent) must be rewritten as JPEG."
+            )
+            let properties = try XCTUnwrap(
+                CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                    as? [CFString: Any]
+            )
+            XCTAssertEqual(
+                (properties[kCGImagePropertyPixelWidth] as? NSNumber)?
+                    .intValue,
+                1_200,
+                "\(url.lastPathComponent) must be rewritten to 1200 pixels wide."
+            )
+            XCTAssertEqual(
+                (properties[kCGImagePropertyPixelHeight] as? NSNumber)?
+                    .intValue,
+                900,
+                "\(url.lastPathComponent) must be rewritten to 900 pixels tall."
+            )
+            XCTAssertTrue(isLoaderDecodable(at: url))
+        }
+    }
+
     func testPhotoReviewEditsPreserveIdentityOrderAndReturnTheExactScanPayload() {
         let originalCover = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000001")
         let second = makeStagedPhoto(id: "45500000-0000-4000-8000-000000000002")
