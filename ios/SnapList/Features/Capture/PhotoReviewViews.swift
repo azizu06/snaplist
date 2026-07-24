@@ -222,7 +222,15 @@ struct PhotoReviewFixtureView: View {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             return false
         }
-        return CGImageSourceGetCount(source) > 0
+        return CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 1_200
+            ] as CFDictionary
+        ) != nil
     }
 }
 #endif
