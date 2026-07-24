@@ -268,6 +268,7 @@ struct PhotoReviewLiveDeleteResult: Equatable {
 final class PhotoReviewLiveSession {
     let store: PhotoReviewStore
     private(set) var focusedPhotoID: StagedCapturePhoto.ID?
+    private var pendingDeleteAnnouncement: String?
 
     private init(store: PhotoReviewStore) {
         self.store = store
@@ -303,11 +304,27 @@ final class PhotoReviewLiveSession {
     func deleteNonFinalPhoto(
         id: StagedCapturePhoto.ID
     ) -> PhotoReviewLiveDeleteResult? {
-        nil
+        guard store.photos.count > 1,
+              case .photo(let focusedPhotoID)? =
+                store.deletePhotoForReview(id: id) else {
+            return nil
+        }
+
+        let count = store.photos.count
+        let announcement = count == 1
+            ? "1 photo remaining."
+            : "\(count) photos remaining."
+        self.focusedPhotoID = focusedPhotoID
+        pendingDeleteAnnouncement = announcement
+        return PhotoReviewLiveDeleteResult(
+            focus: .photo(focusedPhotoID),
+            announcement: announcement
+        )
     }
 
     func consumeDeleteAnnouncement() -> String? {
-        nil
+        defer { pendingDeleteAnnouncement = nil }
+        return pendingDeleteAnnouncement
     }
 }
 
