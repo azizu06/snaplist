@@ -60,9 +60,14 @@ Losers continue the existing bounded evidence handoff only while that exact
 authority is live. Terminal, stale, malformed, or owner-mismatched authority
 declines promptly to the existing provider-neutral fallback without releasing
 the durable paid claim. Evidence polling retains exponential backoff, authority
-heartbeats run at one-third of the effective window, observation backoff tops
-out at the smaller of that heartbeat cadence and five seconds, and every cache
-operation remains bounded by the caller deadline.
+heartbeats run at one-third of the effective window, and settled observation
+backoff has a 500-millisecond anti-polling floor before topping out at the
+smaller of that heartbeat cadence and five seconds. Ambiguous claim responses
+receive at most the same 500-millisecond owner-observation allowance, and an
+exact owner must refresh live authority before Actor work begins. The final
+500 milliseconds of the caller pricing window remain reserved for terminal
+authority and observation; every Actor and cache wait respects the reduced
+owner-work deadline.
 
 Production activation is not part of Issue #200. Leave the flag off until the
 owner approves a separate budget and validates current Actor schema/build/pricing
