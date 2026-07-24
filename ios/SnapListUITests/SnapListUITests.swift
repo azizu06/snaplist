@@ -216,6 +216,57 @@ final class SnapListUITests: XCTestCase {
         XCTAssertFalse(firstPhoto.isSelected)
     }
 
+    func testPhotoReviewHeroActivationRevealsActionsForExactSelectedIdentity() {
+        let app = launch(extraArguments: ["--photo-review-state=REV-02"])
+        let screen = app.scrollViews["photo-review.screen"]
+
+        XCTAssertTrue(
+            screen.waitForExistence(timeout: 3),
+            "The approved Photo Review fixture must render the public screen."
+        )
+
+        let count = app.staticTexts["photo-review.count"]
+        let firstPhoto = app.buttons["photo-review.thumbnail.1"]
+        let secondPhoto = app.buttons["photo-review.thumbnail.2"]
+        let thirdPhoto = app.buttons["photo-review.thumbnail.3"]
+
+        XCTAssertEqual(count.label, "3 of 5")
+        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+        XCTAssertTrue(secondPhoto.label.contains("Photo 2 of 3"))
+        XCTAssertFalse(secondPhoto.label.contains("Cover"))
+        XCTAssertFalse(secondPhoto.isSelected)
+        XCTAssertTrue(thirdPhoto.label.contains("Photo 3 of 3"))
+        XCTAssertFalse(thirdPhoto.label.contains("Cover"))
+        XCTAssertFalse(thirdPhoto.isSelected)
+        XCTAssertFalse(app.buttons["photo-review.replace"].exists)
+        XCTAssertFalse(app.buttons["photo-review.delete"].exists)
+
+        let hero = app.buttons["photo-review.hero"]
+        guard hero.waitForExistence(timeout: 2) else {
+            XCTFail(
+                "The selected hero must be a native Button that activates its exact photo identity."
+            )
+            return
+        }
+
+        hero.tap()
+
+        XCTAssertTrue(app.buttons["photo-review.replace"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["photo-review.delete"].exists)
+        XCTAssertEqual(count.label, "3 of 5")
+        XCTAssertTrue(firstPhoto.label.contains("Photo 1 of 3"))
+        XCTAssertTrue(firstPhoto.label.contains("Cover"))
+        XCTAssertTrue(firstPhoto.isSelected)
+        XCTAssertTrue(secondPhoto.label.contains("Photo 2 of 3"))
+        XCTAssertFalse(secondPhoto.label.contains("Cover"))
+        XCTAssertFalse(secondPhoto.isSelected)
+        XCTAssertTrue(thirdPhoto.label.contains("Photo 3 of 3"))
+        XCTAssertFalse(thirdPhoto.label.contains("Cover"))
+        XCTAssertFalse(thirdPhoto.isSelected)
+    }
+
     func testScanCameraKeepsNamedControlsReachableAtAccessibilityTypeAndReducedMotion() {
         let app = launch(extraArguments: [
             "--visual-state=CAM-03",
