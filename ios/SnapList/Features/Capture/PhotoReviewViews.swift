@@ -270,14 +270,27 @@ final class PhotoReviewLiveSession {
     static func start(
         from request: CaptureBoundaryRequest?
     ) -> PhotoReviewLiveSession? {
-        nil
+        guard let request,
+              request.destination == .photoReview,
+              request.opener == .reviewButton,
+              (1...5).contains(request.photos.count) else {
+            return nil
+        }
+        return PhotoReviewLiveSession(
+            store: PhotoReviewStore(photos: request.photos)
+        )
     }
 
     @discardableResult
     func returnToScan(
         using router: AppRouter
     ) -> PhotoReviewScanReturn? {
-        nil
+        let request = PhotoReviewScanReturn(
+            photos: store.photos,
+            focus: .reviewButton
+        )
+        router.returnFromPhotoReview(request)
+        return request
     }
 }
 
